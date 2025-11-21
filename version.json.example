@@ -1,0 +1,7 @@
+{
+  "version": "0.1.0",
+  "download_url": "https://yourcompany.com/techdeck/TechDeck-Setup-0.1.0.exe",
+  "mandatory": false,
+  "release_notes": "Initial release with 5 default plugins:\n- System Information\n- Clipboard Manager\n- File Organizer\n- Bulk Rename\n- Screenshot Tool",
+  "min_version": "0.1.0"
+}
