@@ -2,18 +2,15 @@
 TechDeck Main Window (Shell) - Claude.ai Style
 Clean layout with proper dividers and no internal rounded corners.
 FIXED: Inline button styling for Run Selected button
-UPDATED: Integrated UpdateChecker for automatic updates
 """
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
-    QStackedWidget, QSplitter, QPushButton
+    QStackedWidget, QSplitter, QPushButton, QMessageBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from techdeck.core.settings import SettingsManager
-from techdeck.core.admin_config import AdminConfigManager
-from techdeck.core.update_checker import UpdateChecker
 from techdeck.core.constants import WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION
 from techdeck.ui.theme import generate_stylesheet, get_current_palette
 from techdeck.ui.widgets.sidebar import Sidebar
@@ -21,8 +18,11 @@ from techdeck.ui.pages.home_page import HomePage
 from techdeck.ui.pages.library_page import LibraryPage
 from techdeck.ui.pages.account_page import AccountPage
 from techdeck.ui.pages.settings_page import SettingsPage
+from techdeck.ui.pages.forgeai_page import ForgeAIPage
 from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
+from techdeck.core.update_checker import UpdateChecker
+from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
 
 class MainWindow(QMainWindow):
@@ -31,28 +31,15 @@ class MainWindow(QMainWindow):
     Console only appears on Home page.
     """
     
+    # Signal for showing update dialog on main thread
+    show_update_signal = Signal(object, bool)  # (update_info, mandatory)
+    
     def __init__(self, settings: SettingsManager):
         super().__init__()
         self.settings = settings
         
-        # Initialize admin config and update checker
-        self.admin_config = AdminConfigManager()
-        self.update_checker = None
-        
-        # Start update checker if configured
-        update_url = self.admin_config.get_update_url()
-        if update_url:
-            self.update_checker = UpdateChecker(
-                current_version=APP_VERSION,
-                update_url=update_url,
-                check_interval_hours=24
-            )
-            
-            # Connect update available signal
-            self.update_checker.update_available.connect(self._on_update_available)
-            
-            # Start checking
-            self.update_checker.start()
+        # Connect signal for thread-safe update dialog
+        self.show_update_signal.connect(self._show_update_dialog_slot)
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -62,8 +49,20 @@ class MainWindow(QMainWindow):
         theme_name = self.settings.get_theme()
         self.setStyleSheet(generate_stylesheet(theme_name))
         
+        # Initialize update checker
+        self.update_checker = UpdateChecker(
+            current_version=APP_VERSION,
+            update_url="https://ozymandiasone.github.io/TechDeck-updates/manifest.json",
+            check_interval_hours=24
+        )
+        self.update_checker.set_update_callback(self._on_update_available)
+        self.update_checker.set_mandatory_update_callback(self._on_mandatory_update)
+        
         # Create main layout
         self._setup_ui()
+        
+        # Start update checker after UI is ready (delayed by 3 seconds)
+        QTimer.singleShot(3000, self.update_checker.start)
     
     def _setup_ui(self):
         """Set up the main UI layout."""
@@ -172,6 +171,9 @@ class MainWindow(QMainWindow):
         self.library_page.saved.connect(self._on_library_saved)
         self.library_page.return_home.connect(self._return_to_home)
         
+        # ForgeAI page
+        self.forgeai_page = ForgeAIPage(self.settings)
+        
         # Settings page
         self.settings_page = SettingsPage(self.settings)
         self.settings_page.theme_changed.connect(self._on_theme_changed)
@@ -182,8 +184,9 @@ class MainWindow(QMainWindow):
         # Add all pages to stack
         self.page_stack.addWidget(home_container)  # 0: Home (with console)
         self.page_stack.addWidget(self.library_page)  # 1: Library
-        self.page_stack.addWidget(self.settings_page)  # 2: Settings
-        self.page_stack.addWidget(self.account_page)  # 3: Account
+        self.page_stack.addWidget(self.forgeai_page)  # 2: ForgeAI
+        self.page_stack.addWidget(self.settings_page)  # 3: Settings
+        self.page_stack.addWidget(self.account_page)  # 4: Account
         
         main_layout.addWidget(self.page_stack, 1)
     
@@ -192,8 +195,9 @@ class MainWindow(QMainWindow):
         page_map = {
             "home": 0,
             "library": 1,
-            "settings": 2,
-            "account": 3
+            "forgeai": 2,
+            "settings": 3,
+            "account": 4
         }
         
         index = page_map.get(page_id, 0)
@@ -240,11 +244,11 @@ class MainWindow(QMainWindow):
         
         if result:
             if result.status.value == "success":
-                self.console.append_system(f"✓ {plugin_name} completed successfully")
+                self.console.append_system(f"Ã¢Å“â€œ {plugin_name} completed successfully")
             elif result.status.value == "cancelled":
-                self.console.append_system(f"✗ {plugin_name} was cancelled")
+                self.console.append_system(f"Ã¢Å“â€” {plugin_name} was cancelled")
             elif result.status.value == "error":
-                self.console.append_error(f"✗ {plugin_name} failed: {result.error}")
+                self.console.append_error(f"Ã¢Å“â€” {plugin_name} failed: {result.error}")
         
         # Check if all plugins are done
         active = self.home_page.plugin_executor.get_active_plugins()
@@ -263,40 +267,47 @@ class MainWindow(QMainWindow):
     def _return_to_home(self):
         """Navigate back to home page."""
         self.sidebar.set_current_page("home")
-        self._on_page_changed("home")  # Actually switch to home page
     
     def _on_theme_changed(self, theme_name: str):
         """Handle theme change from settings."""
         # Theme will apply on next restart
         pass
     
-    def _on_update_available(self, version: str, is_mandatory: bool, download_url: str):
-        """Handle update available notification."""
-        from PySide6.QtWidgets import QMessageBox
+    def _on_update_available(self, update_info):
+        """Handle optional update notification (called from background thread)."""
+        print(f"[SHELL] _on_update_available called! Version: {update_info.version}", flush=True)
+        # Emit signal to show dialog on main thread
+        print("[SHELL] Emitting show_update_signal", flush=True)
+        self.show_update_signal.emit(update_info, False)
+    
+    def _on_mandatory_update(self, update_info):
+        """Handle mandatory update notification (called from background thread)."""
+        print(f"[SHELL] _on_mandatory_update called! Version: {update_info.version}", flush=True)
+        # Emit signal to show dialog on main thread
+        print("[SHELL] Emitting show_update_signal (mandatory)", flush=True)
+        self.show_update_signal.emit(update_info, True)
+    
+    def _show_update_dialog_slot(self, update_info, mandatory):
+        """Show update dialog (Qt slot - always runs on main GUI thread)."""
+        print(f"[SHELL] _show_update_dialog_slot called! Mandatory: {mandatory}", flush=True)
+        dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
+        print("[SHELL] Calling dialog.exec()", flush=True)
+        dialog.exec()
+        print("[SHELL] Dialog closed", flush=True)
+    
+    def check_for_updates_manual(self):
+        """Manually check for updates (called from Settings page)."""
+        update_info = self.update_checker.check_now()
         
-        if is_mandatory:
-            # Mandatory update - must install
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setWindowTitle("Update Required")
-            msg.setText(f"TechDeck {version} is now available.")
-            msg.setInformativeText("This is a mandatory update. The application will close after you click OK.\n\n"
-                                  f"Download the update from:\n{download_url}")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg.exec()
-            
-            # Close application
-            self.close()
-        else:
-            # Optional update - notify but allow continue
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("Update Available")
-            msg.setText(f"TechDeck {version} is now available.")
-            msg.setInformativeText(f"You can download the update from:\n{download_url}\n\n"
-                                  "Or continue using the current version.")
-            msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-            msg.exec()
+        if update_info is None:
+            # No update available
+            QMessageBox.information(
+                self,
+                "No Updates",
+                f"You're running the latest version of TechDeck ({APP_VERSION}).",
+                QMessageBox.StandardButton.Ok
+            )
+        # If update found, callbacks will handle showing the dialog
     
     def closeEvent(self, event):
         """Save settings before closing."""
@@ -305,11 +316,10 @@ class MainWindow(QMainWindow):
         if len(sizes) >= 2:
             self.settings.set_console_height(sizes[1])
         
+        # Stop update checker
+        self.update_checker.stop()
+        
         # Cancel any running plugins
         self.home_page.plugin_executor.cancel_all()
-        
-        # Stop update checker
-        if self.update_checker:
-            self.update_checker.stop()
         
         event.accept()
