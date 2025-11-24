@@ -2,13 +2,12 @@
 TechDeck Update Checker
 Handles automatic update detection and notification.
 
-Checks for updates from a company server, supports mandatory updates,
+Checks for updates from GitHub Pages manifest, supports mandatory updates,
 and provides version comparison.
 """
 
 import requests
 import threading
-import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
@@ -19,11 +18,16 @@ class UpdateInfo:
     """Information about an available update."""
     
     def __init__(self, data: Dict[str, Any]):
-        self.version: str = data.get("version", "0.0.0")
+        # Support both old and new manifest formats
+        self.version: str = data.get("latest_version") or data.get("version", "0.0.0")
         self.download_url: str = data.get("download_url", "")
-        self.mandatory: bool = data.get("mandatory", False)
+        self.critical: bool = data.get("critical", False)
         self.release_notes: str = data.get("release_notes", "")
-        self.min_version: str = data.get("min_version", "0.0.0")
+        self.min_version: str = data.get("min_supported_version") or data.get("min_version", "0.0.0")
+        
+        # Legacy support for 'mandatory' field
+        if data.get("mandatory", False):
+            self.critical = True
     
     def is_newer_than(self, current_version: str) -> bool:
         """Check if this update is newer than current version."""
@@ -32,22 +36,30 @@ class UpdateInfo:
         except Exception:
             return False
     
-    def requires_update(self, current_version: str) -> bool:
-        """Check if current version is below minimum required version."""
+    def requires_mandatory_update(self, current_version: str) -> bool:
+        """
+        Check if update is mandatory.
+        
+        An update is mandatory if:
+        - The 'critical' flag is set, OR
+        - The current version is below min_supported_version
+        """
         try:
-            return version.parse(current_version) < version.parse(self.min_version)
+            is_critical = self.critical
+            is_below_min = version.parse(current_version) < version.parse(self.min_version)
+            return is_critical or is_below_min
         except Exception:
             return False
 
 
 class UpdateChecker:
     """
-    Checks for application updates from a company server.
+    Checks for application updates from GitHub Pages.
     
     Usage:
         checker = UpdateChecker(
-            current_version="0.1.0",
-            update_url="https://company.com/techdeck/version.json",
+            current_version="0.7.0",
+            update_url="https://ozymandiasone.github.io/TechDeck-updates/manifest.json",
             check_interval_hours=24
         )
         
@@ -66,8 +78,8 @@ class UpdateChecker:
         Initialize update checker.
         
         Args:
-            current_version: Current app version (e.g., "0.1.0")
-            update_url: URL to version.json manifest
+            current_version: Current app version (e.g., "0.7.0")
+            update_url: URL to manifest.json on GitHub Pages
             check_interval_hours: Hours between update checks
             timeout: HTTP request timeout in seconds
         """
@@ -86,7 +98,7 @@ class UpdateChecker:
         self.check_thread: Optional[threading.Thread] = None
         self.stop_event = threading.Event()
         
-        # Last check time (load from disk if available)
+        # Last check time
         self.last_check_time: Optional[datetime] = None
         self.latest_update_info: Optional[UpdateInfo] = None
     
@@ -155,7 +167,7 @@ class UpdateChecker:
             # Check if update is available
             if update_info.is_newer_than(self.current_version):
                 # Check if it's mandatory
-                if update_info.mandatory or update_info.requires_update(self.current_version):
+                if update_info.requires_mandatory_update(self.current_version):
                     self._handle_mandatory_update(update_info)
                 else:
                     self._handle_update_available(update_info)
@@ -224,25 +236,3 @@ class UpdateChecker:
             return True
         
         return time_since.total_seconds() >= self.check_interval
-
-
-def parse_version_manifest(manifest_data: Dict[str, Any]) -> UpdateInfo:
-    """
-    Parse version.json manifest into UpdateInfo.
-    
-    Example manifest:
-    {
-        "version": "0.2.0",
-        "download_url": "https://company.com/techdeck/TechDeck-Setup-0.2.0.exe",
-        "mandatory": false,
-        "release_notes": "Bug fixes and performance improvements",
-        "min_version": "0.1.5"
-    }
-    
-    Args:
-        manifest_data: Parsed JSON data from version.json
-        
-    Returns:
-        UpdateInfo object
-    """
-    return UpdateInfo(manifest_data)

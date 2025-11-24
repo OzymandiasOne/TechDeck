@@ -1,12 +1,6 @@
 """
-TechDeck Sidebar Navigation - With Theme-Aware Icon Loading
-Loads white icons for dark theme, black icons for light theme.
-
-✅ FIXES APPLIED:
-- Theme-aware icon folder selection (dark/ or light/)
-- 3x super-sampling for crisp high-DPI rendering
-- Antialiasing for smooth edges
-- No color manipulation (uses pre-colored SVGs)
+TechDeck Sidebar Navigation - With SVG Icon Support and Theme Integration
+Collapsible sidebar with SVG icons, tooltips, proper layout resizing, and dynamic theming.
 """
 
 from PySide6.QtWidgets import (
@@ -21,11 +15,12 @@ from pathlib import Path
 class NavButton(QPushButton):
     """Custom navigation button with icon and text."""
     
-    def __init__(self, icon_path: str, text: str, page_id: str, parent=None):
+    def __init__(self, icon_path: str, text: str, page_id: str, icon_color: str = "#ECECEC", parent=None):
         super().__init__(parent)
         self.icon_path = icon_path
         self.text = text
         self.page_id = page_id
+        self.icon_color = icon_color
         self.collapsed = False
         
         self.setCheckable(True)
@@ -41,7 +36,7 @@ class NavButton(QPushButton):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(20, 20)
         self.icon_label.setStyleSheet("background: transparent; border: none;")
-        self._load_icon(icon_path)
+        self._load_icon(icon_path, icon_color)
         
         # Text label
         self.text_label = QLabel(text)
@@ -53,49 +48,46 @@ class NavButton(QPushButton):
         
         self.update_style()
     
-    def _load_icon(self, icon_path: str):
-        """Load icon from SVG with 3x super-sampling for crisp display."""
+    def _load_icon(self, icon_path: str, color: str):
+        """Load icon from SVG with custom color or use emoji/text."""
         if icon_path.endswith('.svg'):
+            # Load SVG icon with custom color
             path = Path(icon_path)
             if path.exists():
                 try:
-                    # Read SVG content (no color manipulation needed)
+                    # Read SVG content
                     with open(path, 'r', encoding='utf-8') as f:
                         svg_content = f.read()
+                    
+                    # Replace 'currentColor' with actual color
+                    svg_content = svg_content.replace('currentColor', color)
                     
                     # Create SVG renderer
                     renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
                     
-                    # ✅ Create pixmap at 3x size for crisp rendering on high-DPI displays
-                    pixmap = QPixmap(60, 60)  # 3x the 20x20 display size
+                    # Create pixmap and render SVG onto it
+                    pixmap = QPixmap(20, 20)
                     pixmap.fill(Qt.GlobalColor.transparent)
                     
-                    # Enable smooth rendering
                     painter = QPainter(pixmap)
-                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                     renderer.render(painter)
                     painter.end()
-                    
-                    # Scale down to display size with smooth transformation
-                    pixmap = pixmap.scaled(
-                        20, 20,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
                     
                     self.icon_label.setPixmap(pixmap)
                 except Exception as e:
                     print(f"Error loading icon {icon_path}: {e}")
                     # Fallback to bullet
-                    self.icon_label.setText("•")
+                    self.icon_label.setText("â€¢")
+                    self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")
             else:
                 # Fallback to text if file doesn't exist
                 print(f"Icon file not found: {icon_path}")
-                self.icon_label.setText("•")
+                self.icon_label.setText("â€¢")
+                self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")
         else:
             # Use emoji or text
             self.icon_label.setText(icon_path)
+            self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")
     
     def set_collapsed(self, collapsed: bool):
         """Toggle between icon-only and full display."""
@@ -130,11 +122,7 @@ class NavButton(QPushButton):
 
 class Sidebar(QWidget):
     """
-    Collapsible sidebar with theme-aware icon loading.
-    
-    Loads icons from:
-    - assets/icons/dark/ for dark theme (white icons)
-    - assets/icons/light/ for light theme (black icons)
+    Collapsible sidebar with SVG icon support and theme integration.
     
     Signals:
         page_changed(str): Emitted when page selection changes
@@ -169,15 +157,14 @@ class Sidebar(QWidget):
         from techdeck.ui.theme import get_current_palette
         theme = get_current_palette(self.settings.get_theme())
         
-        # Apply theme colors to sidebar
+        # Apply theme colors to sidebar - style widget directly for border to show
         self.setStyleSheet(f"""
             background-color: {theme.surface};
             border-right: 1px solid {theme.background};
         """)
         
-        # Store theme for icon folder selection
+        # Store theme for icon colors
         self.theme = theme
-        self.theme_name = self.settings.get_theme()
         
         # Main layout
         layout = QVBoxLayout(self)
@@ -192,62 +179,43 @@ class Sidebar(QWidget):
         header_layout.setContentsMargins(8, 0, 8, 0)
         header_layout.setSpacing(8)
         
-        # Get path to icon folder based on theme
+        # Get path to collapse/expand SVG icons
         project_root = Path(__file__).parent.parent.parent.parent
         
-        # ✅ Select icon folder based on theme
-        # Dark/Blue themes use white icons (in "light" folder)
-        # Light/Salmon themes use black icons (in "dark" folder)
-        if self.theme_name in ["dark", "blue"]:
-            icon_folder = "light"  # White icons for dark/blue themes
-        else:
-            icon_folder = "dark"  # Black icons for light/salmon themes
-        
+        # Select icon folder based on theme (light icons for dark/blue, dark icons for light)
+        theme_name = settings_manager.get_theme()
+        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir = project_root / "assets" / "icons" / icon_folder
         
-        print(f"Loading icons from: {icons_dir}")
+        print(f"Looking for icons in: {icons_dir}")
         print(f"Icons directory exists: {icons_dir.exists()}")
         if icons_dir.exists():
             print(f"Contents: {list(icons_dir.glob('*.svg'))}")
         
-        # Toggle button - collapse icon
-        collapse_icon_path = icons_dir / "collapse.svg"
-        self.collapse_icon_path = collapse_icon_path
-        self.expand_icon_path = icons_dir / "expand.svg"
-        
-        if collapse_icon_path.exists():
+        # Toggle button - try to use SVG, fallback to unicode
+        collapse_icon = icons_dir / "collapse.svg"
+        if collapse_icon.exists():
             try:
                 # Load collapse SVG
-                with open(collapse_icon_path, 'r', encoding='utf-8') as f:
-                    svg_content = f.read()
+                with open(collapse_icon, 'r', encoding='utf-8') as f:
+                    svg_content = f.read().replace('currentColor', theme.text)
                 
                 renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
-                
-                # ✅ Render at 3x size for crisp display
-                pixmap = QPixmap(48, 48)  # 3x the 16x16 display size
+                pixmap = QPixmap(16, 16)
                 pixmap.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 renderer.render(painter)
                 painter.end()
-                
-                # Scale down smoothly
-                pixmap = pixmap.scaled(
-                    16, 16,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
                 
                 self.toggle_btn = QPushButton()
                 self.toggle_btn.setIcon(QIcon(pixmap))
                 self.toggle_btn.setIconSize(QSize(16, 16))
             except Exception as e:
                 print(f"Error loading collapse icon: {e}")
-                self.toggle_btn = QPushButton("◄")
+                self.toggle_btn = QPushButton("â—„")
         else:
             # Fallback to unicode
-            self.toggle_btn = QPushButton("◄")
+            self.toggle_btn = QPushButton("â—„")
         
         self.toggle_btn.setFixedSize(34, 34)
         self.toggle_btn.setToolTip("Collapse sidebar")
@@ -266,7 +234,11 @@ class Sidebar(QWidget):
             }}
         """)
         
-        # App name
+        # Store icon paths for toggle button
+        self.collapse_icon_path = collapse_icon
+        self.expand_icon_path = icons_dir / "expand.svg"
+        
+        # App name - FIXED: Added explicit border, padding, and margin properties
         self.app_name = QLabel("TechDeck")
         self.app_name.setStyleSheet(f"""
             font-size: 15px;
@@ -277,6 +249,7 @@ class Sidebar(QWidget):
             padding: 0px;
             margin: 0px;
         """)
+        # Ensure label doesn't accept focus
         self.app_name.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
         header_layout.addWidget(self.toggle_btn)
@@ -285,6 +258,12 @@ class Sidebar(QWidget):
         
         layout.addWidget(header)
         
+        # Separator line (uses theme color)
+        # separator = QWidget()
+        # separator.setFixedHeight(1)
+        # separator.setStyleSheet(f"background-color: {theme.console_bg};")
+        # layout.addWidget(separator)
+        
         # ===== Navigation Buttons =====
         nav_container = QWidget()
         nav_container.setStyleSheet(f"background-color: {theme.surface};")
@@ -292,17 +271,21 @@ class Sidebar(QWidget):
         nav_layout.setContentsMargins(4, 8, 4, 8)
         nav_layout.setSpacing(2)
         
-        # Create navigation buttons with theme-appropriate icons
+        # Create navigation buttons with SVG icons
         self.nav_buttons = []
         pages = [
             (str(icons_dir / "home.svg"), "Home", "home"),
             (str(icons_dir / "library.svg"), "Library", "library"),
+            (str(icons_dir / "forgeai.svg"), "ForgeAI", "forgeai"),
             (str(icons_dir / "settings.svg"), "Settings", "settings"),
             (str(icons_dir / "account.svg"), "My Account", "account"),
         ]
         
+        # Use theme text color for icons
+        icon_color = theme.text
+        
         for icon_path, text, page_id in pages:
-            btn = NavButton(icon_path, text, page_id)
+            btn = NavButton(icon_path, text, page_id, icon_color)
             btn.clicked.connect(lambda checked, pid=page_id: self._on_nav_clicked(pid))
             self.nav_buttons.append(btn)
             nav_layout.addWidget(btn)
@@ -340,32 +323,21 @@ class Sidebar(QWidget):
         if self.expand_icon_path.exists():
             try:
                 with open(self.expand_icon_path, 'r', encoding='utf-8') as f:
-                    svg_content = f.read()
+                    svg_content = f.read().replace('currentColor', self.theme.text)
                 
                 renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
-                
-                # ✅ Render at 3x size for crisp display
-                pixmap = QPixmap(48, 48)
+                pixmap = QPixmap(16, 16)
                 pixmap.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 renderer.render(painter)
                 painter.end()
-                
-                # Scale down smoothly
-                pixmap = pixmap.scaled(
-                    16, 16,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
                 
                 self.toggle_btn.setIcon(QIcon(pixmap))
             except Exception as e:
                 print(f"Error loading expand icon: {e}")
-                self.toggle_btn.setText("►")
+                self.toggle_btn.setText("â–º")
         else:
-            self.toggle_btn.setText("►")
+            self.toggle_btn.setText("â–º")
         
         self.toggle_btn.setToolTip("Expand sidebar")
         
@@ -396,32 +368,21 @@ class Sidebar(QWidget):
         if self.collapse_icon_path.exists():
             try:
                 with open(self.collapse_icon_path, 'r', encoding='utf-8') as f:
-                    svg_content = f.read()
+                    svg_content = f.read().replace('currentColor', self.theme.text)
                 
                 renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
-                
-                # ✅ Render at 3x size for crisp display
-                pixmap = QPixmap(48, 48)
+                pixmap = QPixmap(16, 16)
                 pixmap.fill(Qt.GlobalColor.transparent)
                 painter = QPainter(pixmap)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
                 renderer.render(painter)
                 painter.end()
-                
-                # Scale down smoothly
-                pixmap = pixmap.scaled(
-                    16, 16,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
                 
                 self.toggle_btn.setIcon(QIcon(pixmap))
             except Exception as e:
                 print(f"Error loading collapse icon: {e}")
-                self.toggle_btn.setText("◄")
+                self.toggle_btn.setText("â—„")
         else:
-            self.toggle_btn.setText("◄")
+            self.toggle_btn.setText("â—„")
         
         self.toggle_btn.setToolTip("Collapse sidebar")
         

@@ -117,7 +117,7 @@ class SettingsPage(QWidget):
         self.theme_combo.setMaximumWidth(200)
         
         theme = get_current_palette(self.settings.get_theme())
-        # ✅ Select icon folder based on theme
+        # ✅ FIXED: Select icon folder based on theme
         theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
@@ -219,64 +219,70 @@ class SettingsPage(QWidget):
                          "Leave blank to use company-provided key.")
         api_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
         
-        # Show/Hide API key button
-        api_btn_layout = QHBoxLayout()
+        api_button_layout = QHBoxLayout()
         self.show_api_btn = QPushButton("Show")
-        self.show_api_btn.setMaximumWidth(80)
         self.show_api_btn.setMinimumHeight(34)
+        self.show_api_btn.setMaximumWidth(80)
         self.show_api_btn.clicked.connect(self._toggle_api_visibility)
         
-        api_btn_layout.addWidget(self.api_key_input)
-        api_btn_layout.addWidget(self.show_api_btn)
-        api_btn_layout.addStretch()
+        api_button_layout.addWidget(self.api_key_input)
+        api_button_layout.addWidget(self.show_api_btn)
+        api_button_layout.addStretch()
         
         api_section.addWidget(api_label)
-        api_section.addLayout(api_btn_layout)
+        api_section.addLayout(api_button_layout)
         api_section.addWidget(api_note)
         
         layout.addLayout(api_section)
         
-        # ===== Save Button =====
-        save_layout = QHBoxLayout()
-        save_layout.setSpacing(12)
-        
-        self.save_general_btn = QPushButton("Save Settings")
-        self.save_general_btn.setProperty("class", "primary")
-        self.save_general_btn.setMinimumWidth(150)
-        self.save_general_btn.setMinimumHeight(34)
-        self.save_general_btn.clicked.connect(self._save_general_settings)
-        
-        self.reset_btn = QPushButton("Reset to Defaults")
-        self.reset_btn.setMinimumHeight(34)
-        self.reset_btn.clicked.connect(self._reset_defaults)
-        
-        save_layout.addWidget(self.save_general_btn)
-        save_layout.addWidget(self.reset_btn)
-        save_layout.addStretch()
-        
-        layout.addLayout(save_layout)
-        
-        # Add stretch at bottom
+        # ===== Action Buttons =====
         layout.addStretch()
         
-        scroll.setWidget(content)
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
         
-        # Main layout for tab
-        tab_layout = QVBoxLayout(widget)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.addWidget(scroll)
+        save_btn = QPushButton("Save Settings")
+        save_btn.setMinimumHeight(36)
+        save_btn.setMaximumWidth(150)
+        save_btn.clicked.connect(self._save_general_settings)
+        
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.setMinimumHeight(36)
+        reset_btn.setMaximumWidth(150)
+        reset_btn.clicked.connect(self._reset_defaults)
+        
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(reset_btn)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
         
         # Load current settings
         self._load_general_settings()
         
-        return widget
+        scroll.setWidget(content)
+        
+        # Wrap in container
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.addWidget(scroll)
+        
+        return container
     
     # ========== PLUGIN TAB ==========
     
     def _create_plugin_tab(self) -> QWidget:
-        """Create App Settings (Plugin) tab."""
+        """Create App Settings (Plugin Configuration) tab."""
         widget = QWidget()
-        layout = QVBoxLayout(widget)
+        
+        # Create scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
         
@@ -285,110 +291,70 @@ class SettingsPage(QWidget):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
         
-        # ===== Plugin Selector =====
-        selector_layout = QHBoxLayout()
-        selector_label = QLabel("Select App:")
-        selector_label.setStyleSheet("font-weight: 600; font-size: 14px;")
+        subtitle = QLabel("Configure settings for each installed app")
+        subtitle.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
+        layout.addWidget(subtitle)
+        
+        # ===== Plugin Selection =====
+        selection_section = self._create_section("Select App")
+        
+        select_label = QLabel("Choose an app to configure:")
+        select_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
         
         self.plugin_combo = QComboBox()
         self.plugin_combo.setMinimumHeight(34)
-        self.plugin_combo.setMinimumWidth(300)
+        self.plugin_combo.setMaximumWidth(300)
         self.plugin_combo.currentTextChanged.connect(self._on_plugin_selected)
         
-        theme = get_current_palette(self.settings.get_theme())
-        # ✅ Select icon folder based on theme
-        theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
-        icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
-        src_arrow = icons_dir / "chevron-down.svg"
-        arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
+        selection_section.addWidget(select_label)
+        selection_section.addWidget(self.plugin_combo)
+        layout.addLayout(selection_section)
         
-        self.plugin_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 8px;
-                padding: 6px 10px;
-                padding-right: 28px;
-            }}
-            QComboBox:hover {{
-                border-color: {theme.border_strong};
-            }}
-            QComboBox::drop-down {{
-                width: 24px;
-                border: none;
-                background: transparent;
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-            }}
-            QComboBox::down-arrow {{
-                image: url("{arrow_path}");
-                width: 12px;
-                height: 12px;
-                background: transparent;
-                border: none;
-                margin-right: 6px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 4px;
-                selection-background-color: {theme.tile_selected};
-                outline: none;
-            }}
-        """)
+        # ===== Plugin Settings Area =====
+        settings_section = self._create_section("Configuration")
         
-        selector_layout.addWidget(selector_label)
-        selector_layout.addWidget(self.plugin_combo)
-        selector_layout.addStretch()
+        # Container for plugin-specific settings widget
+        self.plugin_layout = QVBoxLayout()
+        self.plugin_layout.setSpacing(12)
         
-        layout.addLayout(selector_layout)
-        
-        # ===== Divider =====
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("background: #2A2A2A; max-height: 1px;")
-        layout.addWidget(divider)
-        
-        # ===== Plugin Settings Container (Scrollable) =====
-        self.plugin_scroll = QScrollArea()
-        self.plugin_scroll.setWidgetResizable(True)
-        self.plugin_scroll.setStyleSheet("QScrollArea { border: none; }")
-        
-        # Create container for plugin settings widget
-        self.plugin_container = QWidget()
-        self.plugin_layout = QVBoxLayout(self.plugin_container)
-        self.plugin_layout.setContentsMargins(0, 10, 0, 10)
-        
-        # Placeholder message
-        self.no_plugin_label = QLabel("Select an app from the dropdown above to view its settings.")
-        self.no_plugin_label.setStyleSheet("color: #888; font-size: 14px; padding: 40px;")
+        # Placeholder when no plugin selected
+        self.no_plugin_label = QLabel("Select an app to view its settings.")
+        self.no_plugin_label.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
         self.no_plugin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.plugin_layout.addWidget(self.no_plugin_label)
         
-        self.plugin_scroll.setWidget(self.plugin_container)
-        layout.addWidget(self.plugin_scroll, 1)
+        settings_section.addLayout(self.plugin_layout)
+        layout.addLayout(settings_section)
         
-        # ===== Save Button =====
-        save_plugin_layout = QHBoxLayout()
+        # ===== Action Buttons =====
+        layout.addStretch()
+        
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
+        
         self.save_plugin_btn = QPushButton("Save App Settings")
-        self.save_plugin_btn.setProperty("class", "primary")
-        self.save_plugin_btn.setMinimumWidth(150)
-        self.save_plugin_btn.setMinimumHeight(34)
-        self.save_plugin_btn.clicked.connect(self._save_plugin_settings)
+        self.save_plugin_btn.setMinimumHeight(36)
+        self.save_plugin_btn.setMaximumWidth(150)
         self.save_plugin_btn.setEnabled(False)
+        self.save_plugin_btn.clicked.connect(self._save_plugin_settings)
         
-        save_plugin_layout.addWidget(self.save_plugin_btn)
-        save_plugin_layout.addStretch()
+        button_layout.addWidget(self.save_plugin_btn)
+        button_layout.addStretch()
         
-        layout.addLayout(save_plugin_layout)
+        layout.addLayout(button_layout)
         
-        # Load plugins into dropdown
+        # Load plugins
         self._load_plugin_list()
         
-        return widget
+        scroll.setWidget(content)
+        
+        # Wrap in container
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.addWidget(scroll)
+        
+        return container
     
     # ========== PERSONALIZATION TAB ==========
     
@@ -411,14 +377,18 @@ class SettingsPage(QWidget):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
         
-        # ===== User Profile Section =====
-        profile_section = self._create_section("User Profile")
+        subtitle = QLabel("Customize your profile information")
+        subtitle.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
+        layout.addWidget(subtitle)
+        
+        # ===== Profile Section =====
+        profile_section = self._create_section("Profile Information")
         
         # Name
-        name_label = QLabel("Display Name:")
+        name_label = QLabel("Full Name:")
         name_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Enter your name")
+        self.name_input.setPlaceholderText("John Smith")
         self.name_input.setMinimumHeight(34)
         self.name_input.setMaximumWidth(400)
         
@@ -427,20 +397,20 @@ class SettingsPage(QWidget):
         
         # Email
         email_label = QLabel("Email:")
-        email_label.setStyleSheet("font-weight: 600; margin-top: 16px;")
+        email_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("your.email@company.com")
+        self.email_input.setPlaceholderText("john.smith@company.com")
         self.email_input.setMinimumHeight(34)
         self.email_input.setMaximumWidth(400)
         
         profile_section.addWidget(email_label)
         profile_section.addWidget(self.email_input)
         
-        # Job Title
+        # Title
         title_label = QLabel("Job Title:")
-        title_label.setStyleSheet("font-weight: 600; margin-top: 16px;")
+        title_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
         self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("e.g., Automation Engineer")
+        self.title_input.setPlaceholderText("Production Manager")
         self.title_input.setMinimumHeight(34)
         self.title_input.setMaximumWidth(400)
         
@@ -449,51 +419,39 @@ class SettingsPage(QWidget):
         
         layout.addLayout(profile_section)
         
-        # ===== Appearance Preferences Section =====
-        appearance_section = self._create_section("Appearance Preferences")
-        
-        appearance_note = QLabel("Additional appearance options coming soon:\n"
-                                "• Custom accent colors\n"
-                                "• Font size preferences\n"
-                                "• Sidebar width\n"
-                                "• Tile sizes")
-        appearance_note.setStyleSheet("color: #888; font-size: 13px; margin-top: 8px;")
-        appearance_section.addWidget(appearance_note)
-        
-        layout.addLayout(appearance_section)
-        
-        # ===== Save Button =====
-        save_layout = QHBoxLayout()
-        self.save_personalization_btn = QPushButton("Save Profile")
-        self.save_personalization_btn.setProperty("class", "primary")
-        self.save_personalization_btn.setMinimumWidth(150)
-        self.save_personalization_btn.setMinimumHeight(34)
-        self.save_personalization_btn.clicked.connect(self._save_personalization_settings)
-        
-        save_layout.addWidget(self.save_personalization_btn)
-        save_layout.addStretch()
-        
-        layout.addLayout(save_layout)
-        
-        # Add stretch at bottom
+        # ===== Action Buttons =====
         layout.addStretch()
         
-        scroll.setWidget(content)
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
         
-        # Main layout for tab
-        tab_layout = QVBoxLayout(widget)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.addWidget(scroll)
+        save_btn = QPushButton("Save Profile")
+        save_btn.setMinimumHeight(36)
+        save_btn.setMaximumWidth(150)
+        save_btn.clicked.connect(self._save_personalization_settings)
+        
+        button_layout.addWidget(save_btn)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
         
         # Load current settings
         self._load_personalization_settings()
         
-        return widget
+        scroll.setWidget(content)
+        
+        # Wrap in container
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.addWidget(scroll)
+        
+        return container
     
     # ========== HELPER METHODS ==========
     
     def _create_section(self, title: str) -> QVBoxLayout:
-        """Create a styled section with title and frame."""
+        """Create a settings section with title and divider."""
         section = QVBoxLayout()
         section.setSpacing(12)
         
@@ -529,7 +487,8 @@ class SettingsPage(QWidget):
     
     def _on_theme_changed(self, theme_name: str):
         """Handle theme selection change."""
-        pass  # Actual save happens on Save button click
+        # Just update combo selection, actual save happens on Save button
+        pass
     
     def _toggle_api_visibility(self):
         """Toggle API key visibility."""
@@ -652,6 +611,28 @@ class SettingsPage(QWidget):
             self._show_no_settings(f"Error reading plugin configuration: {e}")
             return
         
+        # ✅ FIXED: Clear old widgets FIRST (before adding new ones)
+        if self.current_plugin_widget:
+            self.plugin_layout.removeWidget(self.current_plugin_widget)
+            self.current_plugin_widget.deleteLater()
+            self.current_plugin_widget = None
+        
+        # Clear old version label if it exists
+        old_version_label = self.findChild(QLabel, "plugin_version_label")
+        if old_version_label:
+            self.plugin_layout.removeWidget(old_version_label)
+            old_version_label.deleteLater()
+        
+        # Hide placeholder
+        self.no_plugin_label.hide()
+        
+        # ✅ NOW add the new version label
+        plugin_version = plugin_data.get('version', '1.0.0')
+        version_label = QLabel(f"Version: {plugin_version}")
+        version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
+        version_label.setObjectName("plugin_version_label")
+        self.plugin_layout.addWidget(version_label)
+        
         # Check if plugin has settings schema
         if 'settings' not in plugin_data or not plugin_data['settings'].get('fields'):
             self._show_no_settings("This app has no configurable settings.")
@@ -659,15 +640,6 @@ class SettingsPage(QWidget):
         
         # Get current saved values
         current_values = self.settings.get_plugin_settings(plugin_id)
-        
-        # Clear old widget
-        if self.current_plugin_widget:
-            self.plugin_layout.removeWidget(self.current_plugin_widget)
-            self.current_plugin_widget.deleteLater()
-            self.current_plugin_widget = None
-        
-        # Hide placeholder
-        self.no_plugin_label.hide()
         
         # Create new plugin settings widget
         self.current_plugin_widget = PluginSettingsWidget(
@@ -687,6 +659,12 @@ class SettingsPage(QWidget):
             self.current_plugin_widget.deleteLater()
             self.current_plugin_widget = None
         
+        # ✅ ADDED: Clear version label if it exists
+        version_label = self.findChild(QLabel, "plugin_version_label")
+        if version_label:
+            self.plugin_layout.removeWidget(version_label)
+            version_label.deleteLater()
+        
         # Show message
         self.no_plugin_label.setText(message)
         self.no_plugin_label.show()
@@ -700,8 +678,8 @@ class SettingsPage(QWidget):
         # Get values from widget
         values = self.current_plugin_widget.get_values()
         
-        # Validate
-        if not self.current_plugin_widget.validate():
+        # Validate using the correct method name
+        if not self.current_plugin_widget.validate_all():
             QMessageBox.warning(
                 self,
                 "Validation Error",
