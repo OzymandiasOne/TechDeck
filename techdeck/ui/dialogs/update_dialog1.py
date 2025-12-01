@@ -169,18 +169,25 @@ class UpdateDialog(QDialog):
     
     def _start_download(self):
         """Start downloading installer."""
-        self.is_downloading = True
+        import sys
+        print("=" * 50, flush=True)
+        print("[UPDATE_DIALOG] _start_download called!", flush=True)
+        print("=" * 50, flush=True)
+        
+        self.is_downloading = True  # Mark as downloading
         
         # Disconnect old downloader if it exists
         if self.downloader is not None:
+            print("[UPDATE_DIALOG] Disconnecting old downloader", flush=True)
             try:
                 self.downloader.progress_updated.disconnect()
                 self.downloader.download_complete.disconnect()
                 self.downloader.download_failed.disconnect()
             except:
-                pass
+                pass  # Ignore if already disconnected
             self.downloader = None
         
+        # Import here to avoid circular imports
         from techdeck.core.update_downloader import UpdateDownloader
         
         self.update_btn.setEnabled(False)
@@ -192,16 +199,21 @@ class UpdateDialog(QDialog):
         self.progress_bar.setVisible(True)
         self.status_label.setVisible(True)
         self.status_label.setText("Downloading update...")
-        self.status_label.setStyleSheet("")
+        self.status_label.setStyleSheet("")  # Reset style
         
+        print("[UPDATE_DIALOG] Creating downloader thread...", flush=True)
+        # Start download in background thread (NO PARENT - QThreads should not have parents)
         self.downloader = UpdateDownloader(
             self.update_info.download_url,
             self.update_info.version
         )
+        print("[UPDATE_DIALOG] Connecting signals...", flush=True)
         self.downloader.progress_updated.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
         self.downloader.download_complete.connect(self._on_complete, Qt.ConnectionType.QueuedConnection)
         self.downloader.download_failed.connect(self._on_error, Qt.ConnectionType.QueuedConnection)
+        print("[UPDATE_DIALOG] Starting thread...", flush=True)
         self.downloader.start()
+        print("[UPDATE_DIALOG] Thread started", flush=True)
     
     def _on_progress(self, downloaded, total):
         """Update progress bar."""
@@ -218,27 +230,39 @@ class UpdateDialog(QDialog):
     
     def _on_complete(self, installer_path):
         """Download complete - launch installer."""
+        print(f"[UPDATE_DIALOG] Download complete: {installer_path}")
         from techdeck.core.update_downloader import run_installer_and_exit
         
         self.status_label.setText("Download complete! Launching installer...")
         self.progress_bar.setValue(100)
         
+        print("[UPDATE_DIALOG] Scheduling installer launch in 1 second...")
         # Give user a moment to see completion, then launch installer
         QTimer.singleShot(1000, lambda: run_installer_and_exit(installer_path))
     
     def _on_error(self, error_msg):
         """Download failed (called from background thread)."""
-        self.is_downloading = False
+        print(f"[UPDATE_DIALOG] Error occurred: {error_msg}", flush=True)
+        self.is_downloading = False  # Download finished (with error)
+        
+        # Schedule UI update on main thread
         QTimer.singleShot(0, lambda: self._update_error_ui(error_msg))
     
     def _update_error_ui(self, error_msg):
         """Update UI to show error (must be called on main thread)."""
+        print("[UPDATE_DIALOG] Updating error UI on main thread", flush=True)
+        print(f"[UPDATE_DIALOG] has later_btn: {hasattr(self, 'later_btn')}", flush=True)
+        print(f"[UPDATE_DIALOG] has quit_btn: {hasattr(self, 'quit_btn')}", flush=True)
+        
+        # Update status label text only (don't change stylesheet to avoid repaint issues)
         self.status_label.setText(f"Download failed: {error_msg}")
         self.progress_bar.setVisible(False)
         
+        # Keep "Update Now" disabled, but MUST re-enable dismiss button
         self.update_btn.setEnabled(False)
         
         if hasattr(self, 'later_btn') and self.later_btn is not None:
+            print("[UPDATE_DIALOG] Re-enabling Later button", flush=True)
             self.later_btn.setEnabled(True)
             self.later_btn.setStyleSheet("""
                 QPushButton {
@@ -255,17 +279,21 @@ class UpdateDialog(QDialog):
             """)
         
         if hasattr(self, 'quit_btn') and self.quit_btn is not None:
+            print("[UPDATE_DIALOG] Re-enabling Quit button", flush=True)
             self.quit_btn.setEnabled(True)
+        
+        print("[UPDATE_DIALOG] Error displayed in UI - dismiss button should be enabled", flush=True)
     
     def _quit_app(self):
         """Quit the application."""
-        import sys
-        sys.exit(0)
+        from PySide6.QtWidgets import QApplication
+        QApplication.quit()
     
     
     def closeEvent(self, event):
         """Handle dialog close."""
         if self.is_downloading:
+            print("[UPDATE_DIALOG] Close blocked - download in progress", flush=True)
             # Don't allow closing while downloading
             event.ignore()
         elif self.mandatory and not self.progress_bar.isVisible():
