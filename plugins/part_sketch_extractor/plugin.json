@@ -1,0 +1,57 @@
+{
+  "id": "part_sketch_extractor",
+  "name": "Part Sketch Extractor",
+  "description": "Extract PART SKETCH data from PDF packets into Excel with automatic weight calculation",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "📐",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "pdf_folder",
+        "type": "directory",
+        "label": "PDF Folder",
+        "description": "Folder containing PDF packets with PART SKETCH pages",
+        "placeholder": "C:\\Users\\YourName\\Documents\\PDF PACKETS",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "output_file",
+        "type": "file",
+        "label": "Output Excel File (Optional)",
+        "description": "Path for output Excel file. Leave empty to auto-create 'part_sketches.xlsx' in PDF folder.",
+        "placeholder": "C:\\Path\\To\\output.xlsx",
+        "required": false,
+        "default": "",
+        "filters": "Excel Files (*.xlsx)"
+      },
+      {
+        "key": "extract_drawings",
+        "type": "boolean",
+        "label": "Extract Drawing Pages to PDF",
+        "description": "Create extracted_drawings.pdf with all PART SKETCH pages",
+        "default": false
+      },
+      {
+        "key": "resume_mode",
+        "type": "boolean",
+        "label": "Resume Mode (Skip Already Processed)",
+        "description": "Use checkpointing to resume interrupted runs",
+        "default": false
+      },
+      {
+        "key": "verbose_mode",
+        "type": "boolean",
+        "label": "Verbose Mode (Debug Output)",
+        "description": "Enable detailed extraction trace showing decisions",
+        "default": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "id": "po_packet_extractor",
+  "name": "PO Packet Extractor",
+  "description": "Extract purchase order data from PDF packets into Excel spreadsheet",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "📄",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "pdf_folder",
+        "type": "directory",
+        "label": "PDF Folder",
+        "description": "Folder containing PO packet PDFs to process",
+        "placeholder": "C:\\Users\\YourName\\Documents\\PO PACKETS",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "output_file",
+        "type": "file",
+        "label": "Output Excel File (Optional)",
+        "description": "Path for output Excel file. Leave empty to auto-create 'po_data.xlsx' in PDF folder.",
+        "placeholder": "C:\\Path\\To\\output.xlsx",
+        "required": false,
+        "default": "",
+        "filters": "Excel Files (*.xlsx)"
+      },
+      {
+        "key": "verbose_mode",
+        "type": "boolean",
+        "label": "Verbose Mode (Debug Output)",
+        "description": "Enable detailed extraction trace showing decisions and matches",
+        "default": false
+      },
+      {
+        "key": "append_mode",
+        "type": "boolean",
+        "label": "Append to Existing Excel",
+        "description": "Add records to existing Excel file instead of overwriting",
+        "default": true
+      }
+    ]
+  }
+}
