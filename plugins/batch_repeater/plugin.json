@@ -1,0 +1,81 @@
+{
+  "id": "batch_repeater",
+  "name": "Batch Repeater",
+  "description": "Copy repeat orders from previous batches into new batch REPEAT BATCHES folder",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "🔄",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to '922 QTDR Production Packages' folder",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "spreadsheet_name",
+        "type": "string",
+        "label": "Master Spreadsheet Filename",
+        "description": "Name of the Excel file containing PO columns",
+        "placeholder": "922 MPL.xlsx",
+        "required": true,
+        "default": "922 MPL.xlsx",
+        "validation": {
+          "pattern": "^.*\\.xlsx?$",
+          "message": "Must be an Excel file (.xls or .xlsx)"
+        }
+      },
+      {
+        "key": "sheet_name",
+        "type": "string",
+        "label": "Sheet Name",
+        "description": "Name of the sheet containing PO columns",
+        "placeholder": "PO 321+",
+        "required": true,
+        "default": "PO 321+",
+        "validation": {
+          "pattern": "^.+$",
+          "message": "Sheet name cannot be empty"
+        }
+      },
+      {
+        "key": "new_po_number",
+        "type": "string",
+        "label": "New PO/Batch Number",
+        "description": "The PO number for the new batch to create",
+        "placeholder": "401",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": "^[0-9]+$",
+          "message": "PO number must contain only digits"
+        }
+      },
+      {
+        "key": "completed_folder_name",
+        "type": "string",
+        "label": "Completed Folder Name",
+        "description": "Name of the folder containing completed batches",
+        "placeholder": "1 - Completed",
+        "required": false,
+        "default": "1 - Completed"
+      },
+      {
+        "key": "search_recursively",
+        "type": "boolean",
+        "label": "Search Recursively in Completed Folder",
+        "description": "Enable to search nested folders within completed directory",
+        "default": true
+      }
+    ]
+  }
+}
