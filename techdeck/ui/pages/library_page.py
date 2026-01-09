@@ -6,15 +6,17 @@ Inline styling for reliable button appearance, rounded corners, and Open Plugin 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QScrollArea, QGridLayout,
-    QMessageBox, QDialog, QLineEdit, QDialogButtonBox
+    QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QFrame, QCheckBox
 )
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QFont
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import DEFAULT_PROFILE_NAME
 from techdeck.ui.utils import make_tinted_svg_copy
 from pathlib import Path
 from techdeck.ui.theme import get_current_palette
+from techdeck.ui.theme_aware import ThemeAware
 
 
 class ProfileDialog(QDialog):
@@ -120,6 +122,133 @@ class ProfileDialog(QDialog):
         return self.name_input.text().strip()
 
 
+class LibraryPluginCard(QFrame, ThemeAware):
+    """
+    PHASE 3: Professional plugin card for library page.
+    Similar to home page cards but for selection/browsing.
+    """
+    
+    toggled = Signal(bool)
+    
+    def __init__(self, plugin_name: str, plugin_desc: str, tile_id: str, theme, is_selected: bool = False, parent=None):
+        super().__init__(parent)
+        self.tile_id = tile_id
+        self.theme = theme
+        self._is_checked = is_selected
+        
+        self.setFixedSize(220, 140)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Main layout
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        
+        # Top row: checkbox + plugin name
+        top_row = QHBoxLayout()
+        top_row.setSpacing(8)
+        
+        self.checkbox = QCheckBox()
+        self.checkbox.setChecked(is_selected)
+        self.checkbox.setFixedSize(20, 20)
+        self.checkbox.setStyleSheet("QCheckBox { background-color: transparent; }")
+        self.checkbox.toggled.connect(self._on_checkbox_toggled)
+        
+        # Plugin name
+        self.name_label = QLabel(plugin_name)
+        self.name_label.setWordWrap(True)
+        self.name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        name_font = QFont()
+        name_font.setPointSize(11)
+        name_font.setWeight(QFont.Weight.DemiBold)
+        self.name_label.setFont(name_font)
+        self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
+        
+        top_row.addWidget(self.checkbox)
+        top_row.addWidget(self.name_label, 1)
+        
+        layout.addLayout(top_row)
+        
+        # Plugin description shown as tooltip on hover with custom styling
+        if plugin_desc:
+            # Wrap text at approximately 400px for better readability
+            wrapped_desc = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
+            self.setToolTip(wrapped_desc)
+            self.setToolTipDuration(5000)  # Show for 5 seconds
+        
+        layout.addStretch()
+        
+        # Apply base styling
+        self._update_card_style()
+        
+        # PROFESSIONAL: Setup theme awareness for live updates
+        self.setup_theme_awareness()
+    
+    def apply_theme(self):
+        """PROFESSIONAL: Called automatically when theme changes."""
+        # Update theme reference
+        self.theme = self.get_current_palette()
+        
+        # Rebuild all styles with new theme colors
+        self._update_card_style()
+        
+        # Update label colors
+        self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
+    
+    def _on_checkbox_toggled(self, checked: bool):
+        """Handle checkbox toggle."""
+        self._is_checked = checked
+        self._update_card_style()
+        self.toggled.emit(checked)
+    
+    def is_checked(self) -> bool:
+        """Get checked state."""
+        return self._is_checked
+    
+    def set_checked(self, checked: bool):
+        """Set checked state programmatically."""
+        self.checkbox.blockSignals(True)
+        self.checkbox.setChecked(checked)
+        self._is_checked = checked
+        self._update_card_style()
+        self.checkbox.blockSignals(False)
+    
+    def _update_card_style(self):
+        """Update card visual style based on state."""
+        if self._is_checked:
+            # Selected state
+            self.setStyleSheet(f"""
+                LibraryPluginCard {{
+                    background-color: {self.theme.surface};
+                    border: 2px solid {self.theme.accent};
+                    border-radius: 12px;
+                }}
+                LibraryPluginCard:hover {{
+                    background-color: {self.theme.surface_hover};
+                    border: 2px solid {self.theme.accent_hover};
+                }}
+            """)
+        else:
+            # Default state
+            self.setStyleSheet(f"""
+                LibraryPluginCard {{
+                    background-color: {self.theme.surface};
+                    border: 1px solid {self.theme.border};
+                    border-radius: 12px;
+                }}
+                LibraryPluginCard:hover {{
+                    background-color: {self.theme.surface_hover};
+                    border: 1px solid {self.theme.border_strong};
+                }}
+            """)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press - toggle checkbox."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.checkbox.setChecked(not self.checkbox.isChecked())
+        super().mousePressEvent(event)
+
+
 class LibraryPage(QWidget):
     """
     Library page for browsing and selecting tiles.
@@ -153,10 +282,16 @@ class LibraryPage(QWidget):
         
         # Get theme colors
         from techdeck.ui.theme import get_current_palette
-        theme = get_current_palette(self.settings.get_theme())
+        # PROFESSIONAL: Get theme from ThemeManager
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
         
         # Set explicit background color for this page
-        self.setStyleSheet(f"LibraryPage {{ background-color: {theme.background}; }}")
+        # PHASE 3: Add transparent backgrounds for all labels
+        self.setStyleSheet(f"""
+            LibraryPage {{ background-color: {theme.background}; }}
+            LibraryPage QLabel {{ background-color: transparent; }}
+        """)
         
         # ===== Header with Profile Controls =====
         header_container = QWidget()
@@ -182,8 +317,10 @@ class LibraryPage(QWidget):
         self.profile_combo.setMinimumHeight(36)  # Match button height
         self.profile_combo.currentTextChanged.connect(self._on_profile_changed)
         
-        theme = get_current_palette(self.settings.get_theme())
-        # ✅ Select icon folder based on theme
+        # PROFESSIONAL: Get theme from ThemeManager
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+        # Ã¢Å“â€¦ Select icon folder based on theme
         theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir  = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
@@ -323,8 +460,8 @@ class LibraryPage(QWidget):
         # Set explicit background for tile container
         tile_container.setStyleSheet(f"QWidget {{ background-color: {theme.background}; }}")
         self.tile_grid = QGridLayout(tile_container)
-        self.tile_grid.setSpacing(12)
-        self.tile_grid.setContentsMargins(20, 20, 20, 20)
+        self.tile_grid.setSpacing(20)  # PHASE 3: Match home page spacing
+        self.tile_grid.setContentsMargins(24, 24, 24, 24)  # PHASE 3: More generous margins
         
         scroll.setWidget(tile_container)
         layout.addWidget(scroll, 1)
@@ -409,7 +546,9 @@ class LibraryPage(QWidget):
         
         # Get current theme for tile styling
         from techdeck.ui.theme import get_current_palette
-        theme = get_current_palette(self.settings.get_theme())
+        # PROFESSIONAL: Get theme from ThemeManager
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
         current_theme = self.settings.get_theme()
         
         # Import theme helper for missing tiles
@@ -423,82 +562,55 @@ class LibraryPage(QWidget):
         for tile_id in sorted(all_tile_ids):
             plugin = self.plugin_loader.get_plugin(tile_id)
             
+            # Check if this tile is selected in current profile
+            is_selected = tile_id in current_profile_tiles
+            
             if plugin:
-                # Normal plugin - available with full styling
-                tile_btn = QPushButton(plugin.name)
-                tile_btn.setToolTip(plugin.description)
-                tile_btn.setProperty("tile", True)
-                # Apply explicit inline styling (like home_page.py does)
-                tile_btn.setStyleSheet(f"""
-                    QPushButton {{
+                # PHASE 3: Use LibraryPluginCard instead of QPushButton
+                desc = plugin.description[:60] + "..." if len(plugin.description) > 60 else plugin.description
+                
+                card = LibraryPluginCard(
+                    plugin_name=plugin.name,
+                    plugin_desc=desc,
+                    tile_id=tile_id,
+                    theme=theme,
+                    is_selected=is_selected,
+                    parent=self
+                )
+                card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
+                
+                self.tile_grid.addWidget(card, row, col)
+            else:
+                # Missing plugin - show disabled card
+                card = QFrame()
+                card.setFixedSize(220, 140)
+                card_layout = QVBoxLayout(card)
+                card_layout.setContentsMargins(16, 16, 16, 16)
+                
+                missing_label = QLabel(f"{tile_id}\n(Missing)")
+                missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                missing_label.setWordWrap(True)
+                missing_label.setStyleSheet("color: #888; font-size: 11px; background-color: transparent;")
+                
+                card_layout.addWidget(missing_label)
+                
+                card.setStyleSheet(f"""
+                    QFrame {{
                         background-color: {theme.surface};
-                        color: {theme.text};
-                        border: 1px solid {theme.border};
+                        border: 1px dashed {theme.border};
                         border-radius: 12px;
-                        padding: 8px 16px;
-                        outline: none;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {theme.surface_hover};
-                        border: 1px solid {theme.border};
-                    }}
-                    QPushButton:pressed {{
-                        background-color: {theme.surface_hover};
-                        border: 1px solid {theme.border_strong};
-                    }}
-                    QPushButton:checked {{
-                        background-color: {theme.tile_selected};
-                        border: 2px solid {theme.accent};
-                        outline: none;
-                    }}
-                    QPushButton:checked:hover {{
-                        background-color: {theme.tile_selected};
-                        border: 2px solid {theme.accent_hover};
-                    }}
-                    QPushButton:checked:pressed {{
-                        background-color: {theme.tile_selected};
-                        border: 2px solid {theme.accent_pressed};
-                    }}
-                    QPushButton:focus {{
-                        outline: none;
-                        border: 1px solid {theme.border};
-                    }}
-                    QPushButton:checked:focus {{
-                        outline: none;
-                        border: 2px solid {theme.accent};
-                    }}
-                    QPushButton:checked,
-                    QPushButton:checked:hover,
-                    QPushButton:checked:pressed,
-                    QPushButton:checked:focus {{
-                        border: 1px solid transparent;
+                        opacity: 0.5;
                     }}
                 """)
-            else:
-                # Missing plugin - use themed colors
-                tile_btn = QPushButton(f"{tile_id}\n(Missing)")
-                tile_btn.setToolTip("This plugin is not installed or was removed.\nYou can deselect it to remove from profile.")
-                tile_btn.setProperty("tile", True)
-                # Apply themed missing tile style
-                tile_btn.setStyleSheet(get_missing_tile_style(current_theme))
-            
-            tile_btn.setMinimumSize(150, 120)
-            tile_btn.setCheckable(True)
-            tile_btn.setProperty("tile_id", tile_id)
-            tile_btn.toggled.connect(self._on_tile_toggled)
-            
-            # Disable focus rectangle to prevent default blue border
-            tile_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            
-            self.tile_grid.addWidget(tile_btn, row, col)
+                
+                self.tile_grid.addWidget(card, row, col)
             
             col += 1
             if col >= 3:
                 col = 0
                 row += 1
         
-        # Load and apply selection state
-        self._load_profile_selection()
+        # No need for _load_profile_selection anymore - selection is set during card creation
     
     def _load_profile_selection(self):
         """Load and display current profile's tile selection."""
@@ -519,8 +631,15 @@ class LibraryPage(QWidget):
                 widget.setChecked(tile_id in profile_tiles)
                 widget.blockSignals(False)
     
+    def _on_tile_toggled_card(self, tile_id: str, checked: bool):
+        """PHASE 3: Handle card selection toggle."""
+        if checked:
+            self.selected_tile_ids.add(tile_id)
+        else:
+            self.selected_tile_ids.discard(tile_id)
+    
     def _on_tile_toggled(self, checked: bool):
-        """Handle tile selection toggle."""
+        """Handle tile selection toggle (legacy method for backward compatibility)."""
         sender = self.sender()
         tile_id = sender.property("tile_id")
         

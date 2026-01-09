@@ -5,8 +5,8 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.7.2"  # Keep in sync with PROJECT_CHANGELOG.md
-APP_RELEASE_NAME = "Plugin Execution System"
+APP_VERSION = "0.7.4"  # Keep in sync with PROJECT_CHANGELOG.md
+APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
 # Default profile name (always exists, cannot be deleted)

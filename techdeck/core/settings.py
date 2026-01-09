@@ -2,13 +2,19 @@
 TechDeck Settings Manager
 Handles loading, saving, and validating application settings.
 Manages profiles, user data, app configuration, and plugin settings.
+
+PHASE 2 FIX: Added atomic writes (temp file + rename) to prevent corruption on crashes
+PHASE 2 FIX: Added basic API key encryption for secure storage at rest
 """
 
 import json
 import os
+import base64
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+import tempfile
+import shutil
 
 from techdeck.core.constants import (
     DEFAULT_PROFILE_NAME,
@@ -23,12 +29,17 @@ class SettingsManager:
     Manages application settings and profiles.
     
     Responsibilities:
-    - Load/save settings.json
+    - Load/save settings.json with atomic writes (PHASE 2)
     - Profile CRUD operations
     - Plugin settings management
+    - API key encryption/decryption (PHASE 2)
     - Data validation and migrations
     - Ensure Default profile always exists
     """
+    
+    # PHASE 2: Simple XOR encryption key (obfuscation, not cryptographic security)
+    # For true security, use Windows DPAPI or keyring library
+    _ENCRYPTION_KEY = b"TechDeck_v1_Local_Storage_Key_2024"
     
     def __init__(self, settings_dir: Optional[Path] = None):
         """
@@ -71,10 +82,51 @@ class SettingsManager:
             self._create_default_settings()
     
     def save(self) -> None:
-        """Save current settings to disk."""
+        """
+        PHASE 2 FIX: Save current settings to disk using atomic write.
+        
+        Uses temporary file + rename pattern to ensure settings are never
+        left in a corrupted state if the process crashes during write.
+        """
         try:
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, indent=2)
+            # Create a temporary file in the same directory
+            temp_fd, temp_path = tempfile.mkstemp(
+                suffix='.tmp',
+                prefix='settings_',
+                dir=self.settings_dir,
+                text=True
+            )
+            
+            try:
+                # Write to temp file
+                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                    json.dump(self.data, f, indent=2)
+                
+                # Atomic rename (on Windows, need to handle existing file)
+                temp_path_obj = Path(temp_path)
+                
+                if os.name == 'nt':
+                    # Windows: remove target first if it exists
+                    if self.settings_file.exists():
+                        # Create backup before replacing
+                        backup_path = self.settings_file.with_suffix('.bak')
+                        if backup_path.exists():
+                            backup_path.unlink()
+                        shutil.copy2(self.settings_file, backup_path)
+                        self.settings_file.unlink()
+                    
+                    # Now rename temp to target
+                    temp_path_obj.rename(self.settings_file)
+                else:
+                    # Unix: atomic rename (overwrites target)
+                    temp_path_obj.rename(self.settings_file)
+                
+            except Exception as e:
+                # Clean up temp file on error
+                if Path(temp_path).exists():
+                    Path(temp_path).unlink()
+                raise
+                
         except IOError as e:
             print(f"Error saving settings: {e}")
             raise
@@ -102,7 +154,7 @@ class SettingsManager:
             },
             "settings": {
                 "theme": "dark",
-                "console_height": 250,
+                # PHASE 2: Removed console_height - users drag to preferred height
                 "api_key": "",
                 "api_usage": {
                     "tokens_used": 0,
@@ -138,7 +190,6 @@ class SettingsManager:
             now = self._utc_iso()
             self.data["settings"] = {
                 "theme": "dark",
-                "console_height": 250,
                 "api_key": "",
                 "api_usage": {
                     "tokens_used": 0,
@@ -146,7 +197,11 @@ class SettingsManager:
                 }
             }
         
-        # Ensure plugin_settings exists (NEW)
+        # PHASE 2: Remove console_height if it exists (migration)
+        if "console_height" in self.data.get("settings", {}):
+            del self.data["settings"]["console_height"]
+        
+        # Ensure plugin_settings exists
         if "plugin_settings" not in self.data:
             self.data["plugin_settings"] = {}
         
@@ -188,6 +243,65 @@ class SettingsManager:
             # If current_profile was "", update to Default
             if self.data.get("current_profile") == "":
                 self.data["current_profile"] = DEFAULT_PROFILE_NAME
+    
+    # ========== PHASE 2: API Key Encryption/Decryption ==========
+    
+    @classmethod
+    def _encrypt_api_key(cls, api_key: str) -> str:
+        """
+        PHASE 2: Encrypt API key using simple XOR cipher with base64 encoding.
+        
+        Note: This is obfuscation, not cryptographic security. For production,
+        consider using Windows DPAPI (via pywin32) or the keyring library.
+        
+        Args:
+            api_key: Plain text API key
+            
+        Returns:
+            Base64-encoded encrypted string
+        """
+        if not api_key:
+            return ""
+        
+        # XOR encryption
+        key_bytes = cls._ENCRYPTION_KEY
+        encrypted = bytearray()
+        
+        for i, char in enumerate(api_key.encode('utf-8')):
+            encrypted.append(char ^ key_bytes[i % len(key_bytes)])
+        
+        # Base64 encode for storage
+        return base64.b64encode(bytes(encrypted)).decode('utf-8')
+    
+    @classmethod
+    def _decrypt_api_key(cls, encrypted_key: str) -> str:
+        """
+        PHASE 2: Decrypt API key.
+        
+        Args:
+            encrypted_key: Base64-encoded encrypted string
+            
+        Returns:
+            Plain text API key
+        """
+        if not encrypted_key:
+            return ""
+        
+        try:
+            # Base64 decode
+            encrypted_bytes = base64.b64decode(encrypted_key.encode('utf-8'))
+            
+            # XOR decryption (same as encryption)
+            key_bytes = cls._ENCRYPTION_KEY
+            decrypted = bytearray()
+            
+            for i, byte in enumerate(encrypted_bytes):
+                decrypted.append(byte ^ key_bytes[i % len(key_bytes)])
+            
+            return decrypted.decode('utf-8')
+        except Exception as e:
+            print(f"Warning: Could not decrypt API key: {e}")
+            return ""
     
     # ========== Profile Management ==========
     
@@ -234,11 +348,11 @@ class SettingsManager:
     
     def set_profile_tiles(self, tiles: List[str], profile_name: Optional[str] = None) -> None:
         """
-        Set tiles for a profile.
+        Set tile IDs for a profile.
         
         Args:
             tiles: List of tile IDs
-            profile_name: Profile to update. If None, uses current profile.
+            profile_name: Profile to modify. If None, uses current profile.
         """
         if profile_name is None:
             profile_name = self.data["current_profile"]
@@ -361,26 +475,37 @@ class SettingsManager:
         self.data["settings"]["theme"] = theme_name
         self.save()
     
-    def get_console_height(self) -> int:
-        """Get saved console height."""
-        return self.data.get("settings", {}).get("console_height", 250)
-    
-    def set_console_height(self, height: int) -> None:
-        """Save console height."""
-        if "settings" not in self.data:
-            self.data["settings"] = {}
-        self.data["settings"]["console_height"] = height
-        self.save()
-    
     def get_api_key(self) -> str:
-        """Get OpenAI API key."""
-        return self.data.get("settings", {}).get("api_key", "")
+        """
+        PHASE 2: Get OpenAI API key (decrypted).
+        
+        Returns:
+            Plain text API key
+        """
+        encrypted = self.data.get("settings", {}).get("api_key", "")
+        
+        # Check if it looks like an encrypted key (base64)
+        if encrypted and not encrypted.startswith("sk-"):
+            # Decrypt it
+            return self._decrypt_api_key(encrypted)
+        
+        # If it starts with "sk-", it's already plain text (legacy)
+        # Return as-is and re-save encrypted on next set
+        return encrypted
     
     def set_api_key(self, key: str) -> None:
-        """Set OpenAI API key."""
+        """
+        PHASE 2: Set OpenAI API key (encrypted before storage).
+        
+        Args:
+            key: Plain text API key
+        """
         if "settings" not in self.data:
             self.data["settings"] = {}
-        self.data["settings"]["api_key"] = key
+        
+        # Encrypt the key before storing
+        encrypted = self._encrypt_api_key(key)
+        self.data["settings"]["api_key"] = encrypted
         self.save()
     
     # ========== Plugin Settings ==========

@@ -1,6 +1,7 @@
 """
 TechDeck Entry Point
 Launches the application when run as: python -m techdeck
+PROFESSIONAL: Initializes ThemeManager for live theme switching
 """
 
 import sys
@@ -19,6 +20,14 @@ def main():
     
     # Load settings
     settings = SettingsManager()
+    
+    # Initialize ThemeManager with current theme
+    from techdeck.ui.theme_manager import get_theme_manager
+    theme_manager = get_theme_manager()
+    theme_manager.set_theme(settings.get_theme())
+    
+    # Apply global stylesheet to entire application
+    app.setStyleSheet(theme_manager.get_stylesheet())
     
     # Create and show main window
     window = MainWindow(settings)
