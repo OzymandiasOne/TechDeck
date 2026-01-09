@@ -388,6 +388,7 @@ QComboBox:hover {{
 
 QComboBox::drop-down {{
     border: none;
+    background: transparent;
     width: 20px;
 }}
 

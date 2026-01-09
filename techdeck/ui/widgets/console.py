@@ -3,6 +3,7 @@ TechDeck Console/Chat Widget
 Hybrid terminal and chat interface with command handling.
 NOW: Uses theme colors instead of hardcoded colors!
 FIXED: Added add_header_button method for shell.py
+PHASE 3: Added scroll limiting to prevent unbounded console growth
 """
 
 from PySide6.QtWidgets import (
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QLabel
 )
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QTextCursor, QFont
+from PySide6.QtGui import QTextCursor, QFont, QTextDocument
 from datetime import datetime
 
 
@@ -22,6 +23,10 @@ class ConsoleWidget(QWidget):
     - Commands (starting with /)
     - Natural language (for ChatGPT later)
     
+    Features (PHASE 3):
+    - Automatic scroll limiting (max 1000 lines)
+    - Line count display in header
+    
     Signals:
         command_entered(str): Emitted when user enters a command
         message_entered(str): Emitted when user enters natural language
@@ -29,6 +34,10 @@ class ConsoleWidget(QWidget):
     
     command_entered = Signal(str)
     message_entered = Signal(str)
+    
+    # PHASE 3: Maximum lines before auto-cleanup
+    MAX_LINES = 1000
+    CLEANUP_TO_LINES = 800  # Remove oldest 200 lines when limit reached
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,11 +56,16 @@ class ConsoleWidget(QWidget):
         title = QLabel("Console / Chat")
         title.setStyleSheet("font-size: 14px; font-weight: bold;")
         
+        # PHASE 3: Line count indicator
+        self.line_count_label = QLabel("0 lines")
+        self.line_count_label.setStyleSheet("font-size: 11px; color: #888;")
+        
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setMaximumWidth(80)
         self.clear_btn.clicked.connect(self.clear)
         
         header.addWidget(title)
+        header.addWidget(self.line_count_label)
         header.addStretch()
         header.addWidget(self.clear_btn)
         
@@ -62,6 +76,9 @@ class ConsoleWidget(QWidget):
         # Remove inline styles - let theme handle it!
         self.output = QTextEdit()
         self.output.setReadOnly(True)
+        
+        # PHASE 3: Set maximum block count (lines) for performance
+        self.output.document().setMaximumBlockCount(self.MAX_LINES + 100)  # Small buffer
         
         # Set font explicitly for better monospace rendering
         font = QFont("Consolas", 10)
@@ -100,7 +117,7 @@ class ConsoleWidget(QWidget):
             button: QPushButton to add to header
         """
         # Insert before the Clear button (which is the last widget)
-        # Header layout structure: [title, stretch, *new buttons*, clear_btn]
+        # Header layout structure: [title, line_count, stretch, *new buttons*, clear_btn]
         count = self.header.count()
         # Insert before the last item (Clear button)
         self.header.insertWidget(count - 1, button)
@@ -133,6 +150,7 @@ class ConsoleWidget(QWidget):
                           f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
                           f'{self._escape_html(text)}')
         self._scroll_to_bottom()
+        self._update_line_count()
     
     def append_system(self, text: str):
         """Append system message to output."""
@@ -141,6 +159,7 @@ class ConsoleWidget(QWidget):
                           f'<span style="color: #10B981; font-weight: bold;">System:</span> '
                           f'{self._escape_html(text)}')
         self._scroll_to_bottom()
+        self._update_line_count()
     
     def append_assistant(self, text: str):
         """Append assistant (ChatGPT) message to output."""
@@ -149,6 +168,7 @@ class ConsoleWidget(QWidget):
                           f'<span style="color: #A78BFA; font-weight: bold;">Assistant:</span> '
                           f'{self._escape_html(text)}')
         self._scroll_to_bottom()
+        self._update_line_count()
     
     def append_error(self, text: str):
         """Append error message to output."""
@@ -157,6 +177,7 @@ class ConsoleWidget(QWidget):
                           f'<span style="color: #EF4444; font-weight: bold;">Error:</span> '
                           f'{self._escape_html(text)}')
         self._scroll_to_bottom()
+        self._update_line_count()
     
     def append_plugin_output(self, plugin_name: str, text: str):
         """Append plugin output message."""
@@ -165,6 +186,7 @@ class ConsoleWidget(QWidget):
                           f'<span style="color: #F59E0B; font-weight: bold;">[{plugin_name}]:</span> '
                           f'{self._escape_html(text)}')
         self._scroll_to_bottom()
+        self._update_line_count()
     
     def clear(self):
         """Clear console output."""
@@ -176,6 +198,20 @@ class ConsoleWidget(QWidget):
         cursor = self.output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.output.setTextCursor(cursor)
+    
+    def _update_line_count(self):
+        """PHASE 3: Update line count indicator in header."""
+        doc = self.output.document()
+        line_count = doc.blockCount()
+        self.line_count_label.setText(f"{line_count} lines")
+        
+        # Visual warning if approaching limit
+        if line_count > self.MAX_LINES * 0.9:  # 90% of limit
+            self.line_count_label.setStyleSheet("font-size: 11px; color: #F59E0B; font-weight: bold;")
+        elif line_count > self.MAX_LINES * 0.75:  # 75% of limit
+            self.line_count_label.setStyleSheet("font-size: 11px; color: #F59E0B;")
+        else:
+            self.line_count_label.setStyleSheet("font-size: 11px; color: #888;")
     
     def _escape_html(self, text: str) -> str:
         """Escape HTML characters in text."""

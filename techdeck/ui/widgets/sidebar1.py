@@ -77,12 +77,12 @@ class NavButton(QPushButton):
                 except Exception as e:
                     print(f"Error loading icon {icon_path}: {e}")
                     # Fallback to bullet
-                    self.icon_label.setText("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢")
+                    self.icon_label.setText("â€¢")
                     self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")
             else:
                 # Fallback to text if file doesn't exist
                 print(f"Icon file not found: {icon_path}")
-                self.icon_label.setText("ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢")
+                self.icon_label.setText("â€¢")
                 self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")
         else:
             # Use emoji or text
@@ -153,10 +153,9 @@ class Sidebar(QWidget):
         # Set fixed width
         self.setFixedWidth(self.expanded_width)
         
-        # Get theme colors from ThemeManager (centralized source of truth)
-        from techdeck.ui.theme_manager import get_theme_manager
-        theme_manager = get_theme_manager()
-        theme = theme_manager.get_current_palette()
+        # Get theme colors
+        from techdeck.ui.theme import get_current_palette
+        theme = get_current_palette(self.settings.get_theme())
         
         # Apply theme colors to sidebar - style widget directly for border to show
         self.setStyleSheet(f"""
@@ -183,13 +182,15 @@ class Sidebar(QWidget):
         # Get path to collapse/expand SVG icons
         project_root = Path(__file__).parent.parent.parent.parent
         
-        # Select icon folder based on theme (light icons for dark backgrounds, dark icons for light backgrounds)
-        from techdeck.ui.theme_manager import get_theme_manager
-        theme_name = get_theme_manager().get_current_theme()
-        # Dark/Blue themes have dark backgrounds â†’ use light icons
-        # Light/Salmon themes have light backgrounds â†’ use dark icons
+        # Select icon folder based on theme (light icons for dark/blue, dark icons for light)
+        theme_name = settings_manager.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir = project_root / "assets" / "icons" / icon_folder
+        
+        print(f"Looking for icons in: {icons_dir}")
+        print(f"Icons directory exists: {icons_dir.exists()}")
+        if icons_dir.exists():
+            print(f"Contents: {list(icons_dir.glob('*.svg'))}")
         
         # Toggle button - try to use SVG, fallback to unicode
         collapse_icon = icons_dir / "collapse.svg"
@@ -211,10 +212,10 @@ class Sidebar(QWidget):
                 self.toggle_btn.setIconSize(QSize(16, 16))
             except Exception as e:
                 print(f"Error loading collapse icon: {e}")
-                self.toggle_btn = QPushButton("ÃƒÂ¢Ã¢â‚¬â€Ã¢â‚¬Å¾")
+                self.toggle_btn = QPushButton("â—„")
         else:
             # Fallback to unicode
-            self.toggle_btn = QPushButton("ÃƒÂ¢Ã¢â‚¬â€Ã¢â‚¬Å¾")
+            self.toggle_btn = QPushButton("â—„")
         
         self.toggle_btn.setFixedSize(34, 34)
         self.toggle_btn.setToolTip("Collapse sidebar")
@@ -334,9 +335,9 @@ class Sidebar(QWidget):
                 self.toggle_btn.setIcon(QIcon(pixmap))
             except Exception as e:
                 print(f"Error loading expand icon: {e}")
-                self.toggle_btn.setText("ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº")
+                self.toggle_btn.setText("â–º")
         else:
-            self.toggle_btn.setText("ÃƒÂ¢Ã¢â‚¬â€œÃ‚Âº")
+            self.toggle_btn.setText("â–º")
         
         self.toggle_btn.setToolTip("Expand sidebar")
         
@@ -379,9 +380,9 @@ class Sidebar(QWidget):
                 self.toggle_btn.setIcon(QIcon(pixmap))
             except Exception as e:
                 print(f"Error loading collapse icon: {e}")
-                self.toggle_btn.setText("ÃƒÂ¢Ã¢â‚¬â€Ã¢â‚¬Å¾")
+                self.toggle_btn.setText("â—„")
         else:
-            self.toggle_btn.setText("ÃƒÂ¢Ã¢â‚¬â€Ã¢â‚¬Å¾")
+            self.toggle_btn.setText("â—„")
         
         self.toggle_btn.setToolTip("Collapse sidebar")
         

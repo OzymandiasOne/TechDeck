@@ -2,6 +2,7 @@
 TechDeck Main Window (Shell) - Claude.ai Style
 Clean layout with proper dividers and no internal rounded corners.
 FIXED: Inline button styling for Run Selected button
+PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
 from PySide6.QtWidgets import (
@@ -45,9 +46,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TechDeck")
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
         
-        # Apply theme
-        theme_name = self.settings.get_theme()
-        self.setStyleSheet(generate_stylesheet(theme_name))
+        # Theme is already applied by __main__.py via app.setStyleSheet()
+        # DO NOT call setStyleSheet() here - it overrides the app stylesheet!
         
         # Initialize update checker
         self.update_checker = UpdateChecker(
@@ -81,9 +81,10 @@ class MainWindow(QMainWindow):
         # ===== Right side: Page Stack (console integrated into home page) =====
         self.page_stack = QStackedWidget()
         
-        # Get theme colors
-        from techdeck.ui.theme import get_current_palette
-        theme = get_current_palette(self.settings.get_theme())
+        # Get theme colors from ThemeManager (centralized source of truth)
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme_manager = get_theme_manager()
+        theme = theme_manager.get_current_palette()
         
         # --- Create Console Widget (shared, but only shown in home page) ---
         self.console = ConsoleWidget()
@@ -159,9 +160,9 @@ class MainWindow(QMainWindow):
         self.home_splitter.addWidget(self.home_page)
         self.home_splitter.addWidget(self.console)
         
-        # Set initial splitter sizes
-        saved_height = self.settings.get_console_height()
-        self.home_splitter.setSizes([600, saved_height])
+        # PHASE 2: Set default splitter sizes (no persistence)
+        # Users can drag to preferred height each session
+        self.home_splitter.setSizes([600, 250])  # Default: 600px home, 250px console
         
         home_layout.addWidget(self.home_splitter)
         
@@ -244,11 +245,13 @@ class MainWindow(QMainWindow):
         
         if result:
             if result.status.value == "success":
-                self.console.append_system(f"Ã¢Å“â€œ {plugin_name} completed successfully")
+                self.console.append_system(f"âœ… {plugin_name} completed successfully")
             elif result.status.value == "cancelled":
-                self.console.append_system(f"Ã¢Å“â€” {plugin_name} was cancelled")
+                self.console.append_system(f"âš ï¸ {plugin_name} was cancelled")
+            elif result.status.value == "timeout":  # PHASE 2: Handle timeout status
+                self.console.append_error(f"â±ï¸ {plugin_name} timed out: {result.message}")
             elif result.status.value == "error":
-                self.console.append_error(f"Ã¢Å“â€” {plugin_name} failed: {result.error}")
+                self.console.append_error(f"âŒ {plugin_name} failed: {result.error}")
         
         # Check if all plugins are done
         active = self.home_page.plugin_executor.get_active_plugins()
@@ -267,11 +270,39 @@ class MainWindow(QMainWindow):
     def _return_to_home(self):
         """Navigate back to home page."""
         self.sidebar.set_current_page("home")
+        self._on_page_changed("home")  # Actually switch to home page
     
     def _on_theme_changed(self, theme_name: str):
-        """Handle theme change from settings."""
-        # Theme will apply on next restart
-        pass
+        """Handle theme change from settings - restart required for full effect."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        from PySide6.QtWidgets import QApplication
+        import sys
+        import os
+        
+        # Update theme manager
+        theme_manager = get_theme_manager()
+        theme_manager.set_theme(theme_name)
+        
+        # Show restart dialog
+        reply = QMessageBox.question(
+            self,
+            "Restart Required",
+            f"Theme changed to '{theme_name.capitalize()}'.\n\n"
+            "TechDeck needs to restart to fully apply the theme.\n\n"
+            "Restart now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Get the Python executable and script path
+            python = sys.executable
+            
+            # Close current window
+            self.close()
+            
+            # Restart the application
+            os.execl(python, python, "-m", "techdeck")
     
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
@@ -310,12 +341,7 @@ class MainWindow(QMainWindow):
         # If update found, callbacks will handle showing the dialog
     
     def closeEvent(self, event):
-        """Save settings before closing."""
-        # Save console height from home splitter
-        sizes = self.home_splitter.sizes()
-        if len(sizes) >= 2:
-            self.settings.set_console_height(sizes[1])
-        
+        """PHASE 2: Cleanup before closing (console height no longer saved)."""
         # Stop update checker
         self.update_checker.stop()
         

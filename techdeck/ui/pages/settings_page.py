@@ -1,6 +1,7 @@
 """
 TechDeck Settings Page - Tabbed Interface
 Three tabs: General, App Settings (Plugins), Personalization
+PHASE 2 FIX: Removed console height setting - users drag console to preferred height
 """
 
 from PySide6.QtWidgets import (
@@ -117,7 +118,7 @@ class SettingsPage(QWidget):
         self.theme_combo.setMaximumWidth(200)
         
         theme = get_current_palette(self.settings.get_theme())
-        # âœ… FIXED: Select icon folder based on theme
+        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ FIXED: Select icon folder based on theme
         theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
@@ -176,33 +177,6 @@ class SettingsPage(QWidget):
         layout.addLayout(theme_section)
         
         # ===== Console Settings Section =====
-        console_section = self._create_section("Console")
-        
-        console_height_label = QLabel("Default Console Height (pixels):")
-        console_height_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        
-        console_height_layout = QHBoxLayout()
-        self.console_height_spin = QSpinBox()
-        self.console_height_spin.setMinimum(150)
-        self.console_height_spin.setMaximum(600)
-        self.console_height_spin.setValue(self.settings.get_console_height())
-        self.console_height_spin.setSuffix(" px")
-        self.console_height_spin.setMinimumHeight(34)
-        self.console_height_spin.setMaximumWidth(150)
-        
-        console_height_layout.addWidget(self.console_height_spin)
-        console_height_layout.addStretch()
-        
-        console_section.addWidget(console_height_label)
-        console_section.addLayout(console_height_layout)
-        
-        console_note = QLabel("This sets the default height when TechDeck starts.\n"
-                              "You can still resize it manually with the splitter.")
-        console_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
-        console_section.addWidget(console_note)
-        
-        layout.addLayout(console_section)
-        
         # ===== API Configuration Section =====
         api_section = self._create_section("API Configuration")
         
@@ -352,7 +326,7 @@ class SettingsPage(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)
         
-        self.save_plugin_btn = QPushButton("Save App Settings")
+        self.save_plugin_btn = QPushButton("Save")
         self.save_plugin_btn.setMinimumHeight(36)
         self.save_plugin_btn.setMaximumWidth(150)
         self.save_plugin_btn.setEnabled(False)
@@ -499,7 +473,6 @@ class SettingsPage(QWidget):
             self.theme_combo.setCurrentIndex(index)
         
         # Console height
-        self.console_height_spin.setValue(self.settings.get_console_height())
         
         # API key
         api_key = self.settings.get_api_key()
@@ -528,8 +501,6 @@ class SettingsPage(QWidget):
         self.settings.set_theme(theme_name)
         
         # Save console height
-        console_height = self.console_height_spin.value()
-        self.settings.set_console_height(console_height)
         
         # Save API key
         api_key = self.api_key_input.text().strip()
@@ -537,13 +508,9 @@ class SettingsPage(QWidget):
         
         # Show confirmation
         if theme_changed:
-            QMessageBox.information(
-                self,
-                "Settings Saved",
-                "Settings saved successfully!\n\n"
-                "Please restart TechDeck for the theme change to take effect."
-            )
+            # Theme will be applied immediately by shell's handler
             self.theme_changed.emit(theme_name)
+            # Don't show message here - shell will show it after applying
         else:
             QMessageBox.information(
                 self,
@@ -558,9 +525,9 @@ class SettingsPage(QWidget):
             "Reset to Defaults",
             "Reset all general settings to default values?\n\n"
             "This will:\n"
-            "â€¢ Set theme to Dark\n"
-            "â€¢ Reset console height to 250px\n"
-            "â€¢ Clear API key\n\n"
+            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Set theme to Dark\n"
+            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Reset console height to 250px\n"
+            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Clear API key\n\n"
             "Your profiles and user data will not be affected.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -569,18 +536,13 @@ class SettingsPage(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             # Reset to defaults
             self.settings.set_theme("dark")
-            self.settings.set_console_height(250)
             self.settings.set_api_key("")
             
             # Reload UI
             self._load_general_settings()
             
-            QMessageBox.information(
-                self,
-                "Settings Reset",
-                "Settings have been reset to defaults.\n\n"
-                "Please restart TechDeck for the theme change to take effect."
-            )
+            # Emit theme change to apply immediately
+            self.theme_changed.emit("dark")
     
     # ========== PLUGIN TAB METHODS ==========
     
@@ -631,7 +593,7 @@ class SettingsPage(QWidget):
             self._show_no_settings(f"Error reading plugin configuration: {e}")
             return
         
-        # âœ… FIXED: Clear old widgets FIRST (before adding new ones)
+        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ FIXED: Clear old widgets FIRST (before adding new ones)
         if self.current_plugin_widget:
             self.plugin_layout.removeWidget(self.current_plugin_widget)
             self.current_plugin_widget.deleteLater()
@@ -646,7 +608,7 @@ class SettingsPage(QWidget):
         # Hide placeholder
         self.no_plugin_label.hide()
         
-        # âœ… NOW add the new version label
+        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ NOW add the new version label
         plugin_version = plugin_data.get('version', '1.0.0')
         version_label = QLabel(f"Version: {plugin_version}")
         version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
@@ -679,7 +641,7 @@ class SettingsPage(QWidget):
             self.current_plugin_widget.deleteLater()
             self.current_plugin_widget = None
         
-        # âœ… ADDED: Clear version label if it exists
+        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ ADDED: Clear version label if it exists
         version_label = self.findChild(QLabel, "plugin_version_label")
         if version_label:
             self.plugin_layout.removeWidget(version_label)
