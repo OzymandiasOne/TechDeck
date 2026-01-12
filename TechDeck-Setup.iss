@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.7.6 - Production Beta Release
+; Version 0.7.8 - Production Beta Release
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.7.6"
+#define MyAppVersion "0.7.8"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

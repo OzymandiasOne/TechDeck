@@ -5,7 +5,10 @@ a = Analysis(
     ['techdeck\\__main__.py'],
     pathex=[],
     binaries=[],
-    datas=[('plugins', 'plugins'), ('assets', 'assets')],
+    datas=[
+        ('plugins', 'plugins'),
+        ('assets', 'assets'),
+    ],
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'openpyxl', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests'],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +35,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets\\TechDeck.ico'],
 )
 coll = COLLECT(
     exe,

@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.7.6"  # Changed from 0.7.6 to test live updates
+APP_VERSION = "0.7.8"  # Changed from 0.7.6 to test live updates
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
