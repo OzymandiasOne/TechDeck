@@ -118,7 +118,7 @@ class SettingsPage(QWidget):
         self.theme_combo.setMaximumWidth(200)
         
         theme = get_current_palette(self.settings.get_theme())
-        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ FIXED: Select icon folder based on theme
+        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ FIXED: Select icon folder based on theme
         theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
@@ -295,9 +295,52 @@ class SettingsPage(QWidget):
         select_label = QLabel("Choose an app to configure:")
         select_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
         
+        theme = get_current_palette(self.settings.get_theme())
+        theme_name = self.settings.get_theme()
+        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
+        icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
+        src_arrow = icons_dir / "chevron-down.svg"
+        arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
+        
         self.plugin_combo = QComboBox()
         self.plugin_combo.setMinimumHeight(34)
         self.plugin_combo.setMaximumWidth(300)
+        self.plugin_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {theme.surface};
+                color: {theme.text};
+                border: 1px solid {theme.border};
+                border-radius: 8px;
+                padding: 6px 10px;
+                padding-right: 28px;
+            }}
+            QComboBox:hover {{
+                border-color: {theme.border_strong};
+            }}
+            QComboBox::drop-down {{
+                width: 24px;
+                border: none;
+                background: transparent;
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{arrow_path}");
+                width: 12px;
+                height: 12px;
+                background: transparent;
+                border: none;
+                margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {theme.surface};
+                color: {theme.text};
+                border: 1px solid {theme.border};
+                border-radius: 4px;
+                selection-background-color: {theme.tile_selected};
+                outline: none;
+            }}
+        """)
         self.plugin_combo.currentTextChanged.connect(self._on_plugin_selected)
         
         selection_section.addWidget(select_label)
@@ -326,7 +369,7 @@ class SettingsPage(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)
         
-        self.save_plugin_btn = QPushButton("Save")
+        self.save_plugin_btn = QPushButton("Save App Settings")
         self.save_plugin_btn.setMinimumHeight(36)
         self.save_plugin_btn.setMaximumWidth(150)
         self.save_plugin_btn.setEnabled(False)
@@ -525,9 +568,9 @@ class SettingsPage(QWidget):
             "Reset to Defaults",
             "Reset all general settings to default values?\n\n"
             "This will:\n"
-            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Set theme to Dark\n"
-            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Reset console height to 250px\n"
-            "ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Clear API key\n\n"
+            "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Set theme to Dark\n"
+            "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Reset console height to 250px\n"
+            "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Clear API key\n\n"
             "Your profiles and user data will not be affected.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -593,7 +636,7 @@ class SettingsPage(QWidget):
             self._show_no_settings(f"Error reading plugin configuration: {e}")
             return
         
-        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ FIXED: Clear old widgets FIRST (before adding new ones)
+        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ FIXED: Clear old widgets FIRST (before adding new ones)
         if self.current_plugin_widget:
             self.plugin_layout.removeWidget(self.current_plugin_widget)
             self.current_plugin_widget.deleteLater()
@@ -608,7 +651,7 @@ class SettingsPage(QWidget):
         # Hide placeholder
         self.no_plugin_label.hide()
         
-        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ NOW add the new version label
+        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ NOW add the new version label
         plugin_version = plugin_data.get('version', '1.0.0')
         version_label = QLabel(f"Version: {plugin_version}")
         version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
@@ -641,7 +684,7 @@ class SettingsPage(QWidget):
             self.current_plugin_widget.deleteLater()
             self.current_plugin_widget = None
         
-        # ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ ADDED: Clear version label if it exists
+        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ ADDED: Clear version label if it exists
         version_label = self.findChild(QLabel, "plugin_version_label")
         if version_label:
             self.plugin_layout.removeWidget(version_label)

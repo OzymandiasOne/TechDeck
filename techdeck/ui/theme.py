@@ -94,9 +94,9 @@ THEMES: Dict[str, ColorPalette] = {
     "light": ColorPalette(
         text="#3D3D3A", #1F2937
         text_secondary="#6B7280",
-        background="#F5F4ED",
-        surface="#FAF9F5",
-        surface_hover="#F3F4F6",
+        background="#D6CDC1",
+        surface="#DDD6CC",
+        surface_hover="#DAD2C7",
         
         accent="#C6613F", 
         accent_hover="#CB7152", 
@@ -108,7 +108,7 @@ THEMES: Dict[str, ColorPalette] = {
         accent_two_pressed="#1F1F1E", #15528e
         
         border="#E5E7EB",
-        border_strong="#D1D5DB",
+        border_strong="#EBE9E4",
         divider="#7A8190",
         
         console_bg="#F9FAFB",
@@ -119,7 +119,7 @@ THEMES: Dict[str, ColorPalette] = {
         error="#EF4444",
         info="#3B82F6",
         
-        tile_selected="#E0E7FF",
+        tile_selected="#DAD2C7",
         shadow="rgba(0, 0, 0, 0.1)",
         
         tile_missing_bg="#F3F4F6",
