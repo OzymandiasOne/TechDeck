@@ -1,0 +1,72 @@
+{
+  "id": "pallet_stamper",
+  "name": "Pallet Stamper",
+  "description": "Stamp work-packet PDFs with PO batch number and pallet assignments",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "📦",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to '922 QTDR Production Packages' folder",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "batch_number",
+        "type": "string",
+        "label": "Batch Number",
+        "description": "Enter the batch number to process (e.g., 401)",
+        "placeholder": "401",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": "^[0-9]+$",
+          "message": "Batch number must contain only digits"
+        }
+      },
+      {
+        "key": "font_size",
+        "type": "number",
+        "label": "Font Size (pt)",
+        "description": "Size of stamp text in points",
+        "default": 18,
+        "min": 10,
+        "max": 30,
+        "step": 1,
+        "suffix": " pt"
+      },
+      {
+        "key": "h_offset_inches",
+        "type": "number",
+        "label": "Horizontal Offset (inches)",
+        "description": "Distance left from right edge",
+        "default": 4.0,
+        "min": 0.5,
+        "max": 10.0,
+        "step": 0.5,
+        "suffix": " in"
+      },
+      {
+        "key": "v_offset_inches",
+        "type": "number",
+        "label": "Vertical Offset (inches)",
+        "description": "Distance up from bottom edge",
+        "default": 7.0,
+        "min": 0.5,
+        "max": 10.0,
+        "step": 0.5,
+        "suffix": " in"
+      }
+    ]
+  }
+}

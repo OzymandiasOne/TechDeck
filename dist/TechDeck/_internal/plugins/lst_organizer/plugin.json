@@ -1,0 +1,63 @@
+{
+  "id": "lst_organizer",
+  "name": "LST Organizer",
+  "description": "Gather, organize, and track .lst files with tube material analysis from production packages",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "📋",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to '922 QTDR Production Packages' folder",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "batch_number",
+        "type": "string",
+        "label": "Batch Number",
+        "description": "Enter the batch number to process (e.g., 403)",
+        "placeholder": "403",
+        "required": true,
+        "default": "",
+        "validation": {
+          "pattern": "^[0-9]+$",
+          "message": "Batch number must contain only digits"
+        }
+      },
+      {
+        "key": "master_po_path",
+        "type": "file",
+        "label": "Master PO File (Optional)",
+        "description": "Path to Master PO Excel file. Leave empty for auto-discovery.",
+        "placeholder": "C:\\Path\\To\\Master_PO.xlsx",
+        "required": false,
+        "default": "",
+        "filters": "Excel Files (*.xlsx *.xls)"
+      },
+      {
+        "key": "dry_run",
+        "type": "boolean",
+        "label": "Dry Run (Plan Only)",
+        "description": "Preview what would happen without actually copying files",
+        "default": false
+      },
+      {
+        "key": "organize_by_material",
+        "type": "boolean",
+        "label": "Organize Files by Material",
+        "description": "Automatically sort .lst files into material-specific folders",
+        "default": true
+      }
+    ]
+  }
+}
