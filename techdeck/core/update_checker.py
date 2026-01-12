@@ -147,40 +147,72 @@ class UpdateChecker:
         Returns:
             UpdateInfo if update available, None otherwise
         """
+        print("=" * 60)
+        print("UPDATE CHECK STARTED")
+        print(f"Current version: {self.current_version}")
+        print(f"Manifest URL: {self.update_url}")
+        print("-" * 60)
+        
         try:
+            print(f"Fetching manifest...")
             response = requests.get(
                 self.update_url,
                 timeout=self.timeout,
                 headers={'User-Agent': f'TechDeck/{self.current_version}'}
             )
             
+            print(f"Response status: {response.status_code}")
+            
             if response.status_code != 200:
-                self._handle_error(f"Update check failed: HTTP {response.status_code}")
+                error_msg = f"Update check failed: HTTP {response.status_code}"
+                print(f"ERROR: {error_msg}")
+                self._handle_error(error_msg)
                 return None
             
+            print("Parsing manifest JSON...")
             data = response.json()
+            print(f"Manifest data: {data}")
+            
             update_info = UpdateInfo(data)
+            print(f"Latest version from manifest: {update_info.version}")
+            print(f"Download URL: {update_info.download_url}")
             
             self.last_check_time = datetime.now()
             self.latest_update_info = update_info
             
             # Check if update is available
+            print(f"Comparing versions: {update_info.version} vs {self.current_version}")
             if update_info.is_newer_than(self.current_version):
+                print(f"✓ Update available: {update_info.version}")
+                
                 # Check if it's mandatory
-                if update_info.requires_mandatory_update(self.current_version):
+                is_mandatory = update_info.requires_mandatory_update(self.current_version)
+                print(f"Mandatory: {is_mandatory}")
+                
+                if is_mandatory:
                     self._handle_mandatory_update(update_info)
                 else:
                     self._handle_update_available(update_info)
                 
+                print("=" * 60)
                 return update_info
+            else:
+                print(f"✓ No update needed - already on latest version")
+                print("=" * 60)
             
             return None
             
         except requests.RequestException as e:
-            self._handle_error(f"Update check failed: {str(e)}")
+            error_msg = f"Update check failed: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            self._handle_error(error_msg)
+            print("=" * 60)
             return None
         except Exception as e:
-            self._handle_error(f"Update check error: {str(e)}")
+            error_msg = f"Update check error: {str(e)}"
+            print(f"ERROR: {error_msg}")
+            self._handle_error(error_msg)
+            print("=" * 60)
             return None
     
     def _check_loop(self) -> None:

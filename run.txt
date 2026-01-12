@@ -1,0 +1,19 @@
+Get-ChildItem -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+python -m techdeck
+
+
+thickness
+material
+quantity in part name
+
+# Replace YOUR_USERNAME with your GitHub username
+git remote add origin https://github.com/OzymandiasOne/TechDeck.git
+
+
+To generate new build for uploading to GitHub (To launch an update)
+
+# Allow scripts for this PowerShell session only
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# Now run the build
+.\build.ps1
