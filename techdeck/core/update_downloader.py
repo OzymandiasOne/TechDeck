@@ -54,7 +54,7 @@ class UpdateDownloader(QObject):
             response = requests.get(
                 self.download_url,
                 stream=True,
-                headers={'User-Agent': f'TechDeck/{self.version}'},
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'},
                 timeout=30
             )
             
@@ -104,19 +104,18 @@ def run_installer_and_exit(installer_path: str) -> None:
     Args:
         installer_path: Path to downloaded installer .exe
     """
-    print(f"[INSTALLER] Would launch: {installer_path}", flush=True)
-    print("[INSTALLER] sys.exit() is DISABLED for testing", flush=True)
-    # TEMPORARILY DISABLED FOR TESTING
-    # try:
-    #     # Launch installer
-    #     subprocess.Popen(
-    #         [installer_path, '/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'],
-    #         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    #     )
-    #     import sys
-    #     sys.exit(0)
-    # except Exception as e:
-    #     print(f"Failed to launch installer: {e}")
-    #     subprocess.Popen([installer_path])
-    #     import sys
-    #     sys.exit(0)
+    import sys
+    print(f"[INSTALLER] Launching installer: {installer_path}", flush=True)
+    try:
+        # Launch installer with silent mode
+        subprocess.Popen(
+            [installer_path, '/SILENT', '/CLOSEAPPLICATIONS', '/RESTARTAPPLICATIONS'],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+        print("[INSTALLER] Installer launched successfully, exiting TechDeck...", flush=True)
+        sys.exit(0)
+    except Exception as e:
+        print(f"[INSTALLER] Failed to launch with flags, trying without: {e}", flush=True)
+        # Fallback: launch without flags
+        subprocess.Popen([installer_path])
+        sys.exit(0)
