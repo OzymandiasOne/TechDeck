@@ -32,9 +32,10 @@ def get_console_input(params: Dict[str, Any], prompt: str) -> str:
     console = params.get('console')
     if console and hasattr(console, 'request_input'):
         return console.request_input(prompt)
-    else:
-        # Fallback for testing without console
-        return input(f"{prompt}: ")
+    raise RuntimeError(
+        "Batch Repeater requires user input but no TechDeck console is available. "
+        "Run this plugin from within TechDeck."
+    )
 
 
 def find_batch_root(source_po: int, base_path: Path, completed_root: Path) -> Optional[Path]:
