@@ -75,7 +75,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     settings = params.get('settings', {})
     log = params.get('log', print)  # Get log callback
     
-    log("🚀 Starting Batch Repeater v2.0.0...")
+    log("🚀 Starting 922 Batch Repeater v2.0.0...")
     progress_callback(0)
     
     # FIXED: Get settings with correct keys matching plugin.json
@@ -118,14 +118,18 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     log("📝 Input required from user...")
     batch_name_input = get_console_input(
         params,
-        "Enter BATCH FOLDER NAME (e.g., 'Batch 429' or 'Test Batch 429')"
+        "Enter batch number or full folder name (e.g., '429' or 'Batch 429')"
     )
-    
+
     actual_batch_name = batch_name_input.strip()
     if not actual_batch_name:
         log("❌ Batch name cannot be empty!")
         raise ValueError("Batch name cannot be empty")
     
+    # Accept bare number input (e.g. "429" → "Batch 429")
+    if actual_batch_name.isdigit():
+        actual_batch_name = f"Batch {actual_batch_name}"
+
     log(f"✅ Using batch name: {actual_batch_name}")
     
     # === EXTRACT PO NUMBER FROM BATCH NAME ===

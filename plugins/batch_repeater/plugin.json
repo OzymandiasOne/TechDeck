@@ -1,7 +1,7 @@
 {
   "id": "batch_repeater",
-  "name": "Batch Repeater",
-  "description": "Copy repeat orders from previous batches - prompts for PO number when run",
+  "name": "922 Batch Repeater",
+  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run",
   "version": "2.0.0",
   "author": "Anthony Sieben",
   "icon": "🔄",
