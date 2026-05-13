@@ -4,11 +4,15 @@ PHASE 3: Enhanced tiles with elevation, hover effects, status indicators, and mo
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QComboBox, QPushButton, QScrollArea, QGridLayout, QMessageBox, QCheckBox, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox, QPushButton, QScrollArea, QGridLayout, QMessageBox, QCheckBox, QFrame,
+    QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
 )
-from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, Property
-from PySide6.QtGui import QFont
+from PySide6.QtCore import (
+    Signal, Qt, QPropertyAnimation, QEasingCurve, Property,
+    QVariantAnimation, QSequentialAnimationGroup, QTimer,
+)
+from PySide6.QtGui import QFont, QColor
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.plugin_loader import PluginLoader
@@ -21,19 +25,10 @@ from techdeck.ui.theme_aware import ThemeAware
 
 
 class PluginCard(QFrame, ThemeAware):
-    """
-    PHASE 3: Professional plugin card with elevation, hover effects, and status indicator.
-    
-    Features:
-    - Shadow/elevation on hover
-    - Status indicator (idle/running/complete/error)
-    - Selection checkbox
-    - Smooth animations
-    """
-    
+    """Professional plugin card with shadow elevation, hover lift, pulse, and flash animations."""
+
     toggled = Signal(bool)
 
-    # Status values: "idle", "running", "success", "error", "cancelled", "timeout"
     STATUS_IDLE = "idle"
     STATUS_RUNNING = "running"
     STATUS_SUCCESS = "success"
@@ -47,25 +42,24 @@ class PluginCard(QFrame, ThemeAware):
         self.theme = theme
         self._is_checked = False
         self._status = self.STATUS_IDLE
-        
-        self.setFixedSize(220, 140)  # Slightly larger for better visual weight
+        self._flash_anim = None
+        self._entrance_anim = None
+
+        self.setFixedSize(220, 140)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Main layout
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
-        
-        # Top row: checkbox + plugin name
+
         top_row = QHBoxLayout()
         top_row.setSpacing(8)
-        
+
         self.checkbox = QCheckBox()
         self.checkbox.setFixedSize(20, 20)
-        self.checkbox.setStyleSheet(self._make_checkbox_style(theme))
+        self.checkbox.setStyleSheet("QCheckBox { background-color: transparent; }")
         self.checkbox.toggled.connect(self._on_checkbox_toggled)
-        
-        # Plugin name
+
         self.name_label = QLabel(plugin_name)
         self.name_label.setWordWrap(True)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -74,78 +68,164 @@ class PluginCard(QFrame, ThemeAware):
         name_font.setWeight(QFont.Weight.DemiBold)
         self.name_label.setFont(name_font)
         self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
-        
+
         top_row.addWidget(self.checkbox)
         top_row.addWidget(self.name_label, 1)
-        
         layout.addLayout(top_row)
-        
-        # Plugin description shown as tooltip on hover with custom styling
+
         if plugin_desc:
-            # Wrap text at approximately 400px for better readability
-            wrapped_desc = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
-            self.setToolTip(wrapped_desc)
-            self.setToolTipDuration(5000)  # Show for 5 seconds
-        
+            wrapped = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
+            self.setToolTip(wrapped)
+            self.setToolTipDuration(5000)
+
         layout.addStretch()
-        
-        # Apply base styling
         self._update_card_style()
-        
-        # PROFESSIONAL: Setup theme awareness for live updates
+
+        # --- Shadow effect (activated after entrance) ---
+        self._shadow = QGraphicsDropShadowEffect(self)
+        self._shadow.setBlurRadius(8)
+        self._shadow.setOffset(0, 3)
+        self._shadow_base_color = self._parse_shadow_color(theme.shadow)
+        self._shadow.setColor(self._shadow_base_color)
+
+        # Hover lift animations
+        self._hover_in = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        self._hover_in.setDuration(150)
+        self._hover_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_in.setEndValue(20.0)
+
+        self._hover_out = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        self._hover_out.setDuration(200)
+        self._hover_out.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_out.setEndValue(8.0)
+
+        # Running pulse (shadow breathes)
+        pulse_up = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        pulse_up.setDuration(700)
+        pulse_up.setStartValue(10.0)
+        pulse_up.setEndValue(22.0)
+        pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
+
+        pulse_dn = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        pulse_dn.setDuration(700)
+        pulse_dn.setStartValue(22.0)
+        pulse_dn.setEndValue(10.0)
+        pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
+
+        self._pulse_group = QSequentialAnimationGroup(self)
+        self._pulse_group.addAnimation(pulse_up)
+        self._pulse_group.addAnimation(pulse_dn)
+        self._pulse_group.setLoopCount(-1)
+
+        # Entrance: start with opacity effect; swap to shadow when done
+        self._opacity_effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect.setOpacity(0.0)
+        self.setGraphicsEffect(self._opacity_effect)
+
         self.setup_theme_awareness()
-    
+
     @staticmethod
-    def _make_checkbox_style(theme) -> str:
-        return f"""
-            QCheckBox {{ background-color: transparent; }}
-            QCheckBox::indicator {{
-                width: 16px; height: 16px;
-                border: 2px solid {theme.text_secondary};
-                border-radius: 3px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator:hover {{ border-color: {theme.accent}; }}
-            QCheckBox::indicator:checked {{
-                background-color: {theme.accent};
-                border-color: {theme.accent};
-            }}
-        """
+    def _parse_shadow_color(shadow_str: str) -> QColor:
+        import re
+        m = re.match(r'rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)', shadow_str)
+        if m:
+            a = int(float(m.group(4)) * 255)
+            return QColor(int(m.group(1)), int(m.group(2)), int(m.group(3)), a)
+        return QColor(0, 0, 0, 60)
+
+    def start_entrance(self, delay_ms: int):
+        """Trigger staggered fade-in entrance."""
+        self._entrance_anim = QPropertyAnimation(self._opacity_effect, b"opacity", self)
+        self._entrance_anim.setStartValue(0.0)
+        self._entrance_anim.setEndValue(1.0)
+        self._entrance_anim.setDuration(280)
+        self._entrance_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._entrance_anim.finished.connect(self._on_entrance_done)
+        QTimer.singleShot(delay_ms, self._entrance_anim.start)
+
+    def _on_entrance_done(self):
+        """Swap opacity effect for shadow effect after entrance."""
+        self._entrance_anim = None
+        self.setGraphicsEffect(self._shadow)
+        if self._status == self.STATUS_RUNNING:
+            self._start_pulse()
 
     def apply_theme(self):
-        """PROFESSIONAL: Called automatically when theme changes."""
-        # Update theme reference
         self.theme = self.get_current_palette()
-
-        # Rebuild all styles with new theme colors
         self._update_card_style()
-        self.checkbox.setStyleSheet(self._make_checkbox_style(self.theme))
-
-        # Update label colors
+        self._shadow_base_color = self._parse_shadow_color(self.theme.shadow)
+        if self._status != self.STATUS_RUNNING:
+            self._shadow.setColor(self._shadow_base_color)
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
 
     def _on_checkbox_toggled(self, checked: bool):
-        """Handle checkbox toggle."""
         self._is_checked = checked
         self._update_card_style()
         self.toggled.emit(checked)
 
     def is_checked(self) -> bool:
-        """Get checked state."""
         return self._is_checked
 
     def set_checked(self, checked: bool):
-        """Set checked state programmatically."""
         self.checkbox.setChecked(checked)
 
     def set_status(self, status: str):
-        """Set the execution status and update visual style."""
+        prev = self._status
         self._status = status
+
+        if status == self.STATUS_RUNNING:
+            self._start_pulse()
+        elif prev == self.STATUS_RUNNING:
+            self._stop_pulse()
+
+        if status == self.STATUS_SUCCESS:
+            self._flash_success()
+        else:
+            self._update_card_style()
+
+    def _start_pulse(self):
+        if self.graphicsEffect() is self._shadow:
+            c = QColor(self.theme.accent)
+            c.setAlpha(160)
+            self._shadow.setColor(c)
+            self._pulse_group.start()
+
+    def _stop_pulse(self):
+        self._pulse_group.stop()
+        if self.graphicsEffect() is self._shadow:
+            self._shadow.setBlurRadius(8)
+            self._shadow.setColor(self._shadow_base_color)
+
+    def _flash_success(self):
+        """Flash green background then fade to normal."""
+        self._flash_anim = QVariantAnimation(self)
+        self._flash_anim.setStartValue(QColor(self.theme.success))
+        self._flash_anim.setEndValue(QColor(self.theme.surface))
+        self._flash_anim.setDuration(700)
+        self._flash_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._flash_anim.valueChanged.connect(self._on_flash_color)
+        self._flash_anim.finished.connect(self._on_flash_done)
+        self._flash_anim.start()
+
+    def _on_flash_color(self, color: QColor):
+        hex_color = color.name()
+        self.setStyleSheet(f"""
+            PluginCard {{
+                background-color: {hex_color};
+                border: 2px solid {self.theme.success};
+                border-radius: 12px;
+            }}
+            PluginCard:hover {{
+                background-color: {hex_color};
+                border: 2px solid {self.theme.success};
+            }}
+        """)
+
+    def _on_flash_done(self):
+        self._flash_anim = None
         self._update_card_style()
 
     def _update_card_style(self):
-        """Update card visual style based on selection and execution status."""
-        # Status overrides selection styling when execution state is notable
         if self._status == self.STATUS_RUNNING:
             border_color = self.theme.accent
             border_hover = self.theme.accent_hover
@@ -173,9 +253,22 @@ class PluginCard(QFrame, ThemeAware):
                 border: 2px solid {border_hover};
             }}
         """)
-    
+
+    def enterEvent(self, event):
+        if self.graphicsEffect() is self._shadow and self._status != self.STATUS_RUNNING:
+            self._hover_out.stop()
+            self._hover_in.setStartValue(self._shadow.blurRadius())
+            self._hover_in.start()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        if self.graphicsEffect() is self._shadow and self._status != self.STATUS_RUNNING:
+            self._hover_in.stop()
+            self._hover_out.setStartValue(self._shadow.blurRadius())
+            self._hover_out.start()
+        super().leaveEvent(event)
+
     def mousePressEvent(self, event):
-        """Handle mouse press - toggle checkbox."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.checkbox.setChecked(not self.checkbox.isChecked())
         super().mousePressEvent(event)
@@ -442,28 +535,39 @@ class HomePage(QWidget):
                 if col >= 3:
                     col = 0
                     row += 1
+
+        # Staggered entrance for all PluginCards
+        for i, card in enumerate(self.tile_cards.values()):
+            card.start_entrance(i * 50)
     
     def _on_tile_toggled(self, tile_id: str, checked: bool):
-        """PHASE 3: Handle tile selection."""
         if checked:
             self.selected_tiles.add(tile_id)
         else:
             self.selected_tiles.discard(tile_id)
-        
-        # Enable/disable run button based on selection
+
+        has_selection = len(self.selected_tiles) > 0
         if hasattr(self, 'run_btn') and self.run_btn:
-            self.run_btn.setEnabled(len(self.selected_tiles) > 0)
+            self.run_btn.setEnabled(has_selection)
+        if hasattr(self, '_btn_pulse') and self._btn_pulse:
+            self._btn_pulse.stop()
+            self._btn_glow.setBlurRadius(0)
+            if has_selection:
+                self._btn_pulse.start()
     
     def _on_profile_selected(self, profile_name: str):
         if not profile_name:
             return
-        
+
         self.settings.set_current_profile(profile_name)
         self.selected_tiles.clear()
-        
+
         if hasattr(self, 'run_btn') and self.run_btn:
             self.run_btn.setEnabled(False)
-        
+        if hasattr(self, '_btn_pulse') and self._btn_pulse:
+            self._btn_pulse.stop()
+            self._btn_glow.setBlurRadius(0)
+
         self._refresh_tiles()
         self.profile_changed.emit(profile_name)
     
@@ -471,10 +575,38 @@ class HomePage(QWidget):
         self.open_library.emit()
     
     def set_run_button(self, btn: QPushButton):
-        """Store reference to Run Selected button."""
+        """Store reference to Run Selected button and wire up glow animation."""
         self.run_btn = btn
         self.run_btn.setEnabled(False)
         self.run_btn.clicked.connect(self._run_selected_plugins)
+
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+
+        self._btn_glow = QGraphicsDropShadowEffect(self.run_btn)
+        self._btn_glow.setBlurRadius(0)
+        self._btn_glow.setOffset(0, 0)
+        glow_color = QColor(theme.accent)
+        glow_color.setAlpha(200)
+        self._btn_glow.setColor(glow_color)
+        self.run_btn.setGraphicsEffect(self._btn_glow)
+
+        pulse_up = QPropertyAnimation(self._btn_glow, b"blurRadius", self)
+        pulse_up.setDuration(600)
+        pulse_up.setStartValue(0.0)
+        pulse_up.setEndValue(14.0)
+        pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
+
+        pulse_dn = QPropertyAnimation(self._btn_glow, b"blurRadius", self)
+        pulse_dn.setDuration(600)
+        pulse_dn.setStartValue(14.0)
+        pulse_dn.setEndValue(0.0)
+        pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
+
+        self._btn_pulse = QSequentialAnimationGroup(self)
+        self._btn_pulse.addAnimation(pulse_up)
+        self._btn_pulse.addAnimation(pulse_dn)
+        self._btn_pulse.setLoopCount(-1)
     
     def _run_selected_plugins(self):
         """Build a queue from selected plugins and run them one at a time."""

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
     QStackedWidget, QSplitter, QPushButton, QMessageBox
 )
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION
@@ -62,6 +62,15 @@ class MainWindow(QMainWindow):
         
         # Start update checker after UI is ready (delayed by 3 seconds)
         QTimer.singleShot(3000, self.update_checker.start)
+
+        # Startup fade-in
+        self.setWindowOpacity(0.0)
+        self._fadein = QPropertyAnimation(self, b"windowOpacity")
+        self._fadein.setDuration(400)
+        self._fadein.setStartValue(0.0)
+        self._fadein.setEndValue(1.0)
+        self._fadein.setEasingCurve(QEasingCurve.Type.OutCubic)
+        QTimer.singleShot(50, self._fadein.start)
     
     def _setup_ui(self):
         """Set up the main UI layout."""

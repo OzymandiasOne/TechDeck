@@ -151,7 +151,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(is_selected)
         self.checkbox.setFixedSize(20, 20)
-        self.checkbox.setStyleSheet(self._make_checkbox_style(theme))
+        self.checkbox.setStyleSheet("QCheckBox { background-color: transparent; }")
         self.checkbox.toggled.connect(self._on_checkbox_toggled)
         
         # Plugin name
@@ -184,33 +184,10 @@ class LibraryPluginCard(QFrame, ThemeAware):
         # PROFESSIONAL: Setup theme awareness for live updates
         self.setup_theme_awareness()
     
-    @staticmethod
-    def _make_checkbox_style(theme) -> str:
-        return f"""
-            QCheckBox {{ background-color: transparent; }}
-            QCheckBox::indicator {{
-                width: 16px; height: 16px;
-                border: 2px solid {theme.text_secondary};
-                border-radius: 3px;
-                background-color: transparent;
-            }}
-            QCheckBox::indicator:hover {{ border-color: {theme.accent}; }}
-            QCheckBox::indicator:checked {{
-                background-color: {theme.accent};
-                border-color: {theme.accent};
-            }}
-        """
-
     def apply_theme(self):
-        """PROFESSIONAL: Called automatically when theme changes."""
-        # Update theme reference
+        """Called automatically when theme changes."""
         self.theme = self.get_current_palette()
-
-        # Rebuild all styles with new theme colors
         self._update_card_style()
-        self.checkbox.setStyleSheet(self._make_checkbox_style(self.theme))
-
-        # Update label colors
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
 
     def _on_checkbox_toggled(self, checked: bool):
