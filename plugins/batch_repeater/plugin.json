@@ -1,0 +1,36 @@
+{
+  "id": "batch_repeater",
+  "name": "Batch Repeater",
+  "description": "Copy repeat orders from previous batches - prompts for PO number when run",
+  "version": "2.0.0",
+  "author": "Anthony Sieben",
+  "icon": "🔄",
+  "requires_admin": false,
+  "timeout": 3600,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_directory",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to '922 QTDR Production Packages' folder",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\922 QTDR Production Packages",
+        "required": true,
+        "default": ""
+      },
+      {
+        "key": "spreadsheet_filename",
+        "type": "string",
+        "label": "Spreadsheet Filename",
+        "description": "Name of the Excel file (e.g., 922 MPL.xlsx)",
+        "placeholder": "922 MPL.xlsx",
+        "required": true,
+        "default": "922 MPL.xlsx",
+        "validation": {
+          "pattern": "^.*\\.xlsx?$",
+          "message": "Must be an Excel file (.xls or .xlsx)"
+        }
+      }
+    ]
+  }
+}

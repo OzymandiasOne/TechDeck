@@ -1,0 +1,23 @@
+{
+  "id": "qr_code_generator",
+  "name": "QR Code Generator",
+  "description": "Generate QR codes for URLs, text, and contact info with library management",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "icon": "🔲",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "settings": {
+    "fields": [
+      {
+        "key": "default_output_folder",
+        "type": "directory",
+        "label": "Default Output Folder",
+        "description": "Default folder for saving generated QR codes",
+        "placeholder": "C:\\Users\\YourName\\Documents\\QR Codes",
+        "required": false,
+        "default": ""
+      }
+    ]
+  }
+}

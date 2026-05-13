@@ -1,0 +1,49 @@
+{
+  "id": "911_setup",
+  "name": "911 Setup",
+  "description": "Automates the full 911 QTDR batch setup: creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, and generates inspection sheets. Nest numbers are sourced from the Quote File NEST column.",
+  "version": "1.2.0",
+  "author": "Anthony Sieben",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "qtdr_base_path",
+        "type": "directory",
+        "label": "911 QTDR Base Directory",
+        "description": "Path to the '911 QTDR' folder. Leave blank to use the default OneDrive path under your home directory.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\911 QTDR",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "forecast_dir",
+        "type": "directory",
+        "label": "Forecast and Inventory Reports Directory",
+        "description": "Path to the 'Forecast and Inventory Reports' folder containing 'Working Forecast List.xlsx'. Leave blank to use the default OneDrive path.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\Forecast and Inventory Reports",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "template_subdir",
+        "type": "string",
+        "label": "Template Subfolder",
+        "description": "Subfolder under 911 QTDR where the '911 BATCH _.xlsx' template lives. Change only if the template was relocated.",
+        "placeholder": "03 - Processing Forms & Templates\\00 - SACO",
+        "required": false,
+        "default": "03 - Processing Forms & Templates\\00 - SACO"
+      },
+      {
+        "key": "forecast_filename",
+        "type": "string",
+        "label": "Working Forecast Filename",
+        "description": "Name of the forecast workbook inside the Forecast and Inventory Reports folder.",
+        "placeholder": "Working Forecast List.xlsx",
+        "required": false,
+        "default": "Working Forecast List.xlsx"
+      }
+    ]
+  }
+}
