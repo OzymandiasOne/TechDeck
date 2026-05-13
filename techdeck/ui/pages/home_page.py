@@ -170,6 +170,7 @@ class HomePage(QWidget):
     plugin_log = Signal(str, str)
     plugin_progress = Signal(str, int)
     plugin_completed = Signal(str)
+    plugin_status_updated = Signal(str, str)  # tile_id, status — safe to emit from any thread
     
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
@@ -180,6 +181,9 @@ class HomePage(QWidget):
         self.plugin_loader = PluginLoader()
         self.plugin_loader.discover_plugins()
         self.plugin_executor = PluginExecutor(self.plugin_loader)
+        self._plugin_queue: list = []
+        self._plugin_params: dict = {}
+        self.plugin_status_updated.connect(self._apply_plugin_status)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -455,47 +459,55 @@ class HomePage(QWidget):
         self.run_btn.clicked.connect(self._run_selected_plugins)
     
     def _run_selected_plugins(self):
-        """Execute all selected plugins."""
+        """Build a queue from selected plugins and run them one at a time."""
         if not self.selected_tiles:
             return
-        
-        # Emit signal
+
         self.run_selected.emit(list(self.selected_tiles))
-        
+
         console = None
         parent = self.parent()
         while parent:
             if hasattr(parent, 'console'):
                 console = parent.console
                 break
-            parent = parent.parent()    
+            parent = parent.parent()
 
-        plugin_params = {'console': console}
+        self._plugin_queue = list(self.selected_tiles)
+        self._plugin_params = {'console': console}
+        self._start_next_plugin()
 
-        # Execute each selected plugin
-        for tile_id in list(self.selected_tiles):
-            if tile_id in self.tile_cards:
-                self.tile_cards[tile_id].set_status(PluginCard.STATUS_RUNNING)
-            plugin = self.plugin_executor.plugin_loader.get_plugin(tile_id)
-            plugin_timeout = getattr(plugin, "timeout", None) if plugin else None
-            self.plugin_executor.execute_plugin(
-                tile_id,
-                params=plugin_params,
-                log_callback=lambda msg, tid=tile_id: self.plugin_log.emit(tid, msg),
-                progress_callback=lambda prog, tid=tile_id: self.plugin_progress.emit(tid, prog),
-                completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
-                timeout=plugin_timeout
-            )
-    
-    def _on_plugin_complete(self, tile_id: str, result: PluginResult):
-        """Handle plugin completion."""
+    def _start_next_plugin(self):
+        """Start the next queued plugin. Safe to call from any thread."""
+        if not self._plugin_queue:
+            return
+
+        tile_id = self._plugin_queue.pop(0)
+        plugin = self.plugin_executor.plugin_loader.get_plugin(tile_id)
+        plugin_timeout = getattr(plugin, "timeout", None) if plugin else None
+
+        self.plugin_status_updated.emit(tile_id, PluginCard.STATUS_RUNNING)
+
+        self.plugin_executor.execute_plugin(
+            tile_id,
+            params=self._plugin_params,
+            log_callback=lambda msg, tid=tile_id: self.plugin_log.emit(tid, msg),
+            progress_callback=lambda prog, tid=tile_id: self.plugin_progress.emit(tid, prog),
+            completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
+            timeout=plugin_timeout
+        )
+
+    def _apply_plugin_status(self, tile_id: str, status: str):
+        """Update a card's status indicator. Always runs on main thread via signal."""
         if tile_id in self.tile_cards:
-            card = self.tile_cards[tile_id]
-            status = result.status.value if result else PluginCard.STATUS_ERROR
-            # Success returns the card to idle; failures persist visually
-            if status == "success":
-                card.set_status(PluginCard.STATUS_IDLE)
-            else:
-                card.set_status(status)
+            self.tile_cards[tile_id].set_status(status)
 
+    def _on_plugin_complete(self, tile_id: str, result: PluginResult):
+        """Handle plugin completion. Called from background thread."""
+        status = result.status.value if result else PluginCard.STATUS_ERROR
+        # Success: return card to idle. Failures persist visually until next run.
+        final_status = PluginCard.STATUS_IDLE if status == "success" else status
+        self.plugin_status_updated.emit(tile_id, final_status)
         self.plugin_completed.emit(tile_id)
+        # Kick off the next plugin in the queue, if any
+        self._start_next_plugin()
