@@ -121,16 +121,37 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         "Enter batch number or full folder name (e.g., '429' or 'Batch 429')"
     )
 
-    actual_batch_name = batch_name_input.strip()
-    if not actual_batch_name:
+    raw_input = batch_name_input.strip()
+    if not raw_input:
         log("❌ Batch name cannot be empty!")
         raise ValueError("Batch name cannot be empty")
-    
-    # Accept bare number input (e.g. "429" → "Batch 429")
-    if actual_batch_name.isdigit():
-        actual_batch_name = f"Batch {actual_batch_name}"
 
-    log(f"✅ Using batch name: {actual_batch_name}")
+    # Extract a number from whatever the user typed
+    num_match = re.search(r'\d+', raw_input)
+    if num_match:
+        extracted_num = num_match.group()
+        # Search base_path for any folder whose name contains that exact number
+        # (not preceded or followed by another digit, so "467" won't match "14670")
+        number_pattern = re.compile(r'(?<!\d)' + re.escape(extracted_num) + r'(?!\d)')
+        matched_folder = None
+        try:
+            for entry in os.listdir(base_path):
+                if (base_path / entry).is_dir() and number_pattern.search(entry):
+                    matched_folder = entry
+                    break
+        except (FileNotFoundError, PermissionError) as e:
+            log(f"⚠️ Could not scan base directory: {e}")
+
+        if matched_folder:
+            actual_batch_name = matched_folder
+            log(f"✅ Matched existing folder: {actual_batch_name}")
+        else:
+            actual_batch_name = f"Batch {extracted_num}"
+            log(f"✅ No existing folder found — will create: {actual_batch_name}")
+    else:
+        # No number in input — use raw input as folder name (will create new)
+        actual_batch_name = raw_input
+        log(f"✅ Using batch name: {actual_batch_name}")
     
     # === EXTRACT PO NUMBER FROM BATCH NAME ===
     # Look for numbers in the batch name
