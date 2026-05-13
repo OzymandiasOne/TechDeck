@@ -289,14 +289,14 @@ class MainWindow(QMainWindow):
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            # Get the Python executable and script path
-            python = sys.executable
-            
-            # Close current window
             self.close()
-            
-            # Restart the application
-            os.execl(python, python, "-m", "techdeck")
+
+            if getattr(sys, 'frozen', False):
+                # Frozen PyInstaller build — restart the exe directly
+                os.execl(sys.executable, sys.executable)
+            else:
+                # Dev mode — relaunch as a module
+                os.execl(sys.executable, sys.executable, "-m", "techdeck")
     
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
