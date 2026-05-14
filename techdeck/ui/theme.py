@@ -128,11 +128,11 @@ THEMES: Dict[str, ColorPalette] = {
     ),
 
     "salmon": ColorPalette(
-        text="#3A1F1A",
-        text_secondary="#7A4A42",
-        background="#FAE0D5",
-        surface="#FDEEE7",
-        surface_hover="#F5D5C5",
+        text="#2A1008",
+        text_secondary="#6A3828",
+        background="#F0C4B2",
+        surface="#D08878",
+        surface_hover="#C07868",
 
         accent="#C0392B",
         accent_hover="#D44333",
@@ -142,24 +142,24 @@ THEMES: Dict[str, ColorPalette] = {
         accent_two_hover="#E8846A",
         accent_two_pressed="#C05C3A",
 
-        border="#EAC0B0",
-        border_strong="#D9A898",
-        divider="#E0B8A8",
+        border="#B87870",
+        border_strong="#A06858",
+        divider="#B87870",
 
-        console_bg="#FBE8DF",
-        console_text="#3A1F1A",
+        console_bg="#E8B4A4",
+        console_text="#2A1008",
 
         success="#10B981",
         warning="#F59E0B",
         error="#C0392B",
         info="#3B82F6",
 
-        tile_selected="#F5D0C0",
-        shadow="rgba(80, 20, 10, 0.12)",
+        tile_selected="#B86856",
+        shadow="rgba(80, 20, 10, 0.18)",
 
-        tile_missing_bg="#FDEEE7",
-        tile_missing_text="#B07868",
-        tile_missing_border="#EAC0B0",
+        tile_missing_bg="#D08878",
+        tile_missing_text="#7A4040",
+        tile_missing_border="#B87870",
     ),
     
     "blue": ColorPalette(

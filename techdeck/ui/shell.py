@@ -139,6 +139,10 @@ class MainWindow(QMainWindow):
         self._spinner_quote_end_tick = 0
         self._spinner_current_quote = ""
         self._spinner_next_quote_tick = 0
+        self._spinner_phase = "start"    # "start" | "running"
+        self._spinner_locked_text = ""   # frozen during "start" phase
+        self._spinner_text_idx = 0       # current text index (running phase)
+        self._spinner_text_ticks = 0     # ticks elapsed in running phase
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -202,6 +206,7 @@ class MainWindow(QMainWindow):
         self.command_handler = CommandHandler(self.settings, self.console, main_window=self)
         self.console.command_entered.connect(self.command_handler.handle_command)
         self.console.message_entered.connect(self._on_message_entered)
+        self.console.input_provided.connect(self._on_console_input_provided)
         
         # Create Run Selected button and add to console header
         self.btn_run = QPushButton("Run Selected")
@@ -326,8 +331,12 @@ class MainWindow(QMainWindow):
         if not self._plugin_spinner_timer.isActive():
             self._plugin_run_start = time.time()
             self._plugin_spinner_tick = 0
+            self._spinner_phase = "start"
+            self._spinner_locked_text = self._SPINNER_TEXTS[0]
+            self._spinner_text_idx = 0
+            self._spinner_text_ticks = 0
             self._spinner_in_quote = False
-            self._spinner_next_quote_tick = random.randint(80, 120)  # first quote after 8-12s
+            self._spinner_next_quote_tick = random.randint(200, 280)  # first quote ~20-28s in
             self.console.show_spinner(
                 self._plugin_spinner_html(self._SPINNER_FRAMES[0], self._SPINNER_TEXTS[0])
             )
@@ -375,10 +384,13 @@ class MainWindow(QMainWindow):
         active = self.home_page.plugin_executor.get_active_plugins()
         if not active:
             self._plugin_spinner_timer.stop()
-            self.console.hide_spinner()
             elapsed = time.time() - self._plugin_run_start
             done_text = random.choice(self._DONE_TEXTS)
-            self.console.append_game(f"{done_text} {self._format_elapsed(elapsed)}.")
+            done_html = self._plugin_spinner_html(
+                "✓", f"{done_text} {self._format_elapsed(elapsed)}."
+            )
+            self.console.show_spinner(done_html)
+            QTimer.singleShot(4000, self.console.hide_spinner)
     
     def _plugin_spinner_html(self, frame: str, text: str) -> str:
         return (
@@ -392,21 +404,44 @@ class MainWindow(QMainWindow):
         self._plugin_spinner_tick += 1
         frame = self._SPINNER_FRAMES[tick % len(self._SPINNER_FRAMES)]
 
-        # Trigger a quote interruption?
-        if not self._spinner_in_quote and tick >= self._spinner_next_quote_tick:
-            self._spinner_in_quote = True
-            self._spinner_current_quote = random.choice(self._SPINNER_QUOTES)
-            self._spinner_quote_end_tick = tick + 35  # show for ~3.5s
-            self._spinner_next_quote_tick = tick + 35 + random.randint(80, 150)
-
-        if self._spinner_in_quote:
-            if tick >= self._spinner_quote_end_tick:
+        if self._spinner_phase == "start":
+            # Freeze on initial text; auto-transition once the plugin is clearly running
+            if not self.console.waiting_for_input and tick >= 15:
+                self._spinner_phase = "running"
+                self._spinner_text_idx = 0
+                self._spinner_text_ticks = 0
                 self._spinner_in_quote = False
-            text = self._spinner_current_quote
+            text = self._spinner_locked_text
         else:
-            text = self._SPINNER_TEXTS[(tick // 20) % len(self._SPINNER_TEXTS)]
+            # Running phase — slow, free-flowing transitions
+            ttick = self._spinner_text_ticks
+            self._spinner_text_ticks += 1
+
+            if not self._spinner_in_quote and ttick >= self._spinner_next_quote_tick:
+                self._spinner_in_quote = True
+                self._spinner_current_quote = random.choice(self._SPINNER_QUOTES)
+                self._spinner_quote_end_tick = ttick + 50  # ~5s
+                self._spinner_next_quote_tick = ttick + 50 + random.randint(200, 300)
+
+            if self._spinner_in_quote:
+                if ttick >= self._spinner_quote_end_tick:
+                    self._spinner_in_quote = False
+                text = self._spinner_current_quote
+            else:
+                # Advance text every 40 ticks (4s)
+                if ttick > 0 and ttick % 40 == 0:
+                    self._spinner_text_idx = (self._spinner_text_idx + 1) % len(self._SPINNER_TEXTS)
+                text = self._SPINNER_TEXTS[self._spinner_text_idx]
 
         self.console.update_spinner(self._plugin_spinner_html(frame, text))
+
+    def _on_console_input_provided(self, _text: str):
+        """When user provides input to a plugin, advance spinner to running phase."""
+        if self._plugin_spinner_timer.isActive() and self._spinner_phase == "start":
+            self._spinner_phase = "running"
+            self._spinner_text_idx = random.randint(1, len(self._SPINNER_TEXTS) - 1)
+            self._spinner_text_ticks = 0
+            self._spinner_in_quote = False
 
     @staticmethod
     def _format_elapsed(seconds: float) -> str:
