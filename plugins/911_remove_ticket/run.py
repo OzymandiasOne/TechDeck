@@ -2,9 +2,11 @@
 911 Remove Ticket Plugin
 ========================
 Scans a directory for PDF files, lists them numbered for selection, removes
-any pages containing "PART SKETCH" text from selected files, and saves the
-result as "{stem} Move Ticket Omit.pdf" inside a "Move Ticket Omit" subfolder.
-Original PDFs are never modified.
+pages containing "MOVE TICKET" text from selected files, and saves the result
+as "{stem} Move Ticket Omit.pdf" inside a "Move Ticket Omit" subfolder.
+
+Pages containing "MIL-SPEC" or "HULL" are always kept, even if they also
+contain "MOVE TICKET". Original PDFs are never modified.
 """
 
 import tempfile
@@ -25,8 +27,13 @@ except ImportError:
     PYPDF_AVAILABLE = False
 
 
-def _find_part_sketch_pages(pdf_path: Path) -> set:
-    """Return a set of 0-based page indices that contain 'PART SKETCH' text."""
+def _find_move_ticket_pages(pdf_path: Path) -> set:
+    """
+    Return a set of 0-based page indices to remove.
+
+    A page is removed if it contains 'MOVE TICKET' text AND does NOT contain
+    'MIL-SPEC' or 'HULL'. Pages with MIL-SPEC or HULL are always kept.
+    """
     indices = set()
     try:
         doc = fitz.open(str(pdf_path))
@@ -34,8 +41,8 @@ def _find_part_sketch_pages(pdf_path: Path) -> set:
         return indices
 
     for i, page in enumerate(doc):
-        text = page.get_text("text") or ""
-        if "PART SKETCH" in text:
+        text = (page.get_text("text") or "").upper()
+        if "MOVE TICKET" in text and "MIL-SPEC" not in text and "HULL" not in text:
             indices.add(i)
 
     doc.close()
@@ -44,22 +51,23 @@ def _find_part_sketch_pages(pdf_path: Path) -> set:
 
 def _process_pdf(pdf_path: Path, output_path: Path, log) -> bool:
     """
-    Remove PART SKETCH pages from pdf_path and write to output_path.
+    Remove MOVE TICKET pages from pdf_path and write to output_path.
+    Pages with MIL-SPEC or HULL content are always kept.
     Returns True on success, False if skipped or failed.
     """
-    sketch_pages = _find_part_sketch_pages(pdf_path)
+    remove_pages = _find_move_ticket_pages(pdf_path)
 
-    if not sketch_pages:
-        log(f"  Skipped (no PART SKETCH pages): {pdf_path.name}")
+    if not remove_pages:
+        log(f"  Skipped (no MOVE TICKET pages found): {pdf_path.name}")
         return False
 
     try:
         reader = PdfReader(str(pdf_path))
         total = len(reader.pages)
-        keep = [i for i in range(total) if i not in sketch_pages]
+        keep = [i for i in range(total) if i not in remove_pages]
 
         if not keep:
-            log(f"  WARNING: All {total} pages are PART SKETCH — nothing to write for {pdf_path.name}")
+            log(f"  WARNING: All {total} pages would be removed — nothing to write for {pdf_path.name}")
             return False
 
         writer = PdfWriter()
@@ -74,9 +82,9 @@ def _process_pdf(pdf_path: Path, output_path: Path, log) -> bool:
 
         shutil.move(tmp_path, str(output_path))
 
-        removed = len(sketch_pages)
+        removed = len(remove_pages)
         kept = len(keep)
-        log(f"  {pdf_path.name}: removed {removed} page(s), kept {kept} -> {output_path.name}")
+        log(f"  {pdf_path.name}: removed {removed} MOVE TICKET page(s), kept {kept} -> {output_path.name}")
         return True
 
     except Exception as e:
@@ -126,7 +134,7 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
         return input(msg + " ")
 
     if not PYMUPDF_AVAILABLE:
-        log("ERROR: PyMuPDF (fitz) is not available. Cannot detect PART SKETCH pages.")
+        log("ERROR: PyMuPDF (fitz) is not available. Cannot detect MOVE TICKET pages.")
         return
 
     if not PYPDF_AVAILABLE:

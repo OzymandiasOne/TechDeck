@@ -15,7 +15,7 @@ Automates the full 911 QTDR batch setup workflow:
   8. Read DYPN values from NEST col G → copy INSPECTION SHEET tab for each
      suffix, write full DYPN into A16 (merged A16:C17), update BB14 formula
   9. Save every nest excel, repeat for all nests in the batch
- 10. Extract PART SKETCH pages for each nest into {nest} MOVE TICKET OMIT.pdf
+ 10. Build MOVE TICKET OMIT PDF for each nest (removes MOVE TICKET pages, keeps MIL-SPEC/HULL)
 
 v1.2.0 changes
   - Filesystem roots are configurable via plugin settings:
@@ -388,41 +388,18 @@ def _get_pdf_data_for_nest(nest_packages_folder: Path, log) -> tuple:
 # Step 7b: Part Sketch extraction -> MOVE TICKET OMIT PDF
 # ---------------------------------------------------------------------------
 
-def _extract_from_pdf(pdf_path: Path) -> list:
-    # Extract PART SKETCH pages from a single PDF.
-    # Returns list of (dypn, page_index) tuples (page_index is 0-based).
-    results = []
-    try:
-        doc = fitz.open(str(pdf_path))
-    except Exception:
-        return results
-
-    for i, page in enumerate(doc):
-        text = page.get_text("text") or ""
-        if "PART SKETCH" not in text:
-            continue
-        dypn = None
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("PART") and "SKETCH" not in line.upper():
-                parts = line.split(":", 1)
-                if len(parts) > 1 and parts[1].strip():
-                    value = parts[1].strip()
-                    if " REV" in value.upper():
-                        value = value.split(" REV")[0].strip()
-                    dypn = value
-                    break
-        results.append((dypn, i))
-
-    doc.close()
-    return results
-
 
 def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
-                            nest_dypns: list, dest_path: Path, log) -> bool:
-    # Find the PDF in NEST PACKAGES whose filename contains nest_number.
-    # Extract only PART SKETCH pages whose DYPN matches one of nest_dypns.
-    # Write result to dest_path. Returns True if PDF was created.
+                            dest_path: Path, log) -> bool:
+    """
+    Build the MOVE TICKET OMIT PDF for a nest.
+
+    Starts with every page in the nest's source PDF and removes pages that
+    contain "MOVE TICKET" text.  Pages that contain "MIL-SPEC" or "HULL"
+    are always kept, even if they also contain "MOVE TICKET".
+
+    Returns True if the output PDF was written successfully.
+    """
     if not PYPDF_AVAILABLE:
         log("  WARNING: pypdf not available -- cannot extract drawings PDF.")
         return False
@@ -445,52 +422,35 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
 
     log(f"  Found nest PDF: {matching_pdf.name}")
 
-    dypn_set = {d.upper() for d in nest_dypns if d}
-    sketch_pages = _extract_from_pdf(matching_pdf)
-    matching_indices = [
-        idx for dypn, idx in sketch_pages
-        if dypn and dypn.upper() in dypn_set
-    ]
-
-    if not matching_indices:
-        log(f"  WARNING: No matching PART SKETCH pages found for {nest_number} DYPNs.")
-        return False
-
     try:
-        reader = PdfReader(str(matching_pdf))
-        writer = PdfWriter()
-        total_pages = len(reader.pages)
-
-        # Always include page 1 (index 0)
-        writer.add_page(reader.pages[0])
-
-        # Include page 2 onward while "SUMMARY OF NEST" is present (consecutive run)
-        # Use fitz for text extraction since we already depend on it
         doc = fitz.open(str(matching_pdf))
-        summary_end = 1  # tracks last 0-based index that was a summary page
-        for idx in range(1, total_pages):
-            text = doc[idx].get_text("text") or ""
-            if "SUMMARY OF NEST" in text.upper():
-                summary_end = idx
+        total_pages = len(doc)
+
+        keep_indices = []
+        removed = 0
+        for i in range(total_pages):
+            text = (doc[i].get_text("text") or "").upper()
+            if "MOVE TICKET" in text and "MIL-SPEC" not in text and "HULL" not in text:
+                removed += 1
             else:
-                break  # consecutive run ended
+                keep_indices.append(i)
         doc.close()
 
-        # Add all summary pages (indices 1..summary_end)
-        for idx in range(1, summary_end + 1):
-            writer.add_page(reader.pages[idx])
+        if not keep_indices:
+            log(f"  WARNING: All {total_pages} pages are MOVE TICKET pages — nothing to write for {nest_number}.")
+            return False
 
-        # Add matching PART SKETCH pages, skipping any already included above
-        included = set(range(summary_end + 1))
-        for idx in matching_indices:
-            if idx not in included:
-                writer.add_page(reader.pages[idx])
-                included.add(idx)
+        reader = PdfReader(str(matching_pdf))
+        writer = PdfWriter()
+        for idx in keep_indices:
+            writer.add_page(reader.pages[idx])
 
         with open(dest_path, "wb") as f:
             writer.write(f)
-        log(f"  Drawings PDF: {dest_path.name} ({len(writer.pages)} page(s))")
+
+        log(f"  Drawings PDF: {dest_path.name} ({len(keep_indices)} page(s), removed {removed} MOVE TICKET page(s))")
         return True
+
     except Exception as e:
         log(f"  WARNING: Could not write drawings PDF: {e}")
         return False
@@ -807,11 +767,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         wb.close()
         log(f"  Done: {nest_excel.name}")
 
-        # -- Step 9: Extract PART SKETCH pages -> MOVE TICKET OMIT PDF --
+        # -- Step 9: Build MOVE TICKET OMIT PDF (remove MOVE TICKET pages, keep MIL-SPEC/HULL) --
         log(f"  [Step 9] Extracting drawings for {nest}...")
-        nest_dypns = [row[1] for row in batch_rows]  # DYPN is index 1 in batch tuple
         drawings_dest = batch_folder / nest / f"{nest} MOVE TICKET OMIT.pdf"
-        _extract_nest_drawings(nest_packages_folder, nest, nest_dypns, drawings_dest, log)
+        _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log)
 
         pct = 30 + int(65 * (nest_idx + 1) / total_nests)
         progress_callback(pct)
