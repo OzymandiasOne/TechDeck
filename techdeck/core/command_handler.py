@@ -47,6 +47,8 @@ class CommandHandler:
         # Runtime state
         self._rave_timer = None
         self._rave_step = 0
+        self._rave_spinner_block = -1
+        self._crab = None
         self._moth = None
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
@@ -248,10 +250,20 @@ class CommandHandler:
         "#00CFFF", "#5050FF", "#CC00FF", "#FF2080",
     ]
 
+    _FLOWER_FRAMES = ["✿", "❀", "✾", "✼", "❁", "✻", "✺", "✹", "✸", "✷"]
+
+    def _rave_spinner_html(self, flower: str, color: str) -> str:
+        return (
+            f'<span style="color: {color}; font-weight: bold; '
+            f'font-family: Consolas, monospace; font-size: 10pt;">'
+            f'{flower}&nbsp;&nbsp;Crab Dancing...</span>'
+        )
+
     def _cmd_rave(self, args: str):
         from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import QTimer
         from techdeck.ui.theme import THEMES, generate_stylesheet
+        from techdeck.ui.widgets.crab_widget import CrabWidget
 
         if self._rave_timer is not None:
             self.console.append_system("Already raving.")
@@ -273,30 +285,59 @@ class CommandHandler:
         elapsed = [0]
         step = [0]
 
+        # Spawn crab
+        self._crab = CrabWidget()
+        self._crab.start()
+
+        # Seed spinner line in console
+        initial_color = self._RAVE_COLORS[0]
+        initial_flower = self._FLOWER_FRAMES[0]
+        self.console.append_game("Let's rave.")
+        self._rave_spinner_block = self.console.start_spinner(
+            self._rave_spinner_html(initial_flower, initial_color)
+        )
+
         def tick():
             elapsed[0] += 150
             if elapsed[0] >= 10_000:
+                # Restore theme
                 THEMES[theme_name].accent = orig_accent
                 THEMES[theme_name].accent_hover = orig_hover
                 THEMES[theme_name].accent_pressed = orig_pressed
                 app.setStyleSheet(generate_stylesheet(theme_name))
                 self._rave_timer.stop()
                 self._rave_timer = None
+                # Stop crab
+                if self._crab:
+                    self._crab.stop()
+                    self._crab = None
+                # Finalize spinner
+                self.console.update_spinner_block(
+                    self._rave_spinner_block,
+                    '<span style="color: #888; font-family: Consolas, monospace;">'
+                    '🦀&nbsp;&nbsp;Crab has left the building.</span>',
+                )
+                self._rave_spinner_block = -1
                 self.console.append_system("Rave over. Back to work.")
                 return
 
             color = self._RAVE_COLORS[step[0] % len(self._RAVE_COLORS)]
+            flower = self._FLOWER_FRAMES[step[0] % len(self._FLOWER_FRAMES)]
             step[0] += 1
             THEMES[theme_name].accent = color
             THEMES[theme_name].accent_hover = color
             THEMES[theme_name].accent_pressed = color
             app.setStyleSheet(generate_stylesheet(theme_name))
+            # Update spinner in-place
+            self.console.update_spinner_block(
+                self._rave_spinner_block,
+                self._rave_spinner_html(flower, color),
+            )
 
         self._rave_timer = QTimer()
         self._rave_timer.setInterval(150)
         self._rave_timer.timeout.connect(tick)
         self._rave_timer.start()
-        self.console.append_game("Let's rave.")
 
     # ------------------------------------------------------------------ #
     #  /jack  — Blackjack

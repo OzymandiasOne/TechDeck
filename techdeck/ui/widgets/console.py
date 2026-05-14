@@ -282,6 +282,35 @@ class ConsoleWidget(QWidget):
             Qt.ConnectionType.QueuedConnection,
             Q_ARG(str, text),
         )
+
+    def start_spinner(self, html: str) -> int:
+        """
+        Append a spinner line and return its block number.
+        Call update_spinner_block() each tick to animate it in-place.
+        Must be called from the GUI thread.
+        """
+        self.output.append(html)
+        self._scroll_to_bottom()
+        self._update_line_count()
+        return self.output.document().blockCount() - 1
+
+    def update_spinner_block(self, block_num: int, html: str):
+        """
+        Replace the content of a previously appended spinner line in-place.
+        Must be called from the GUI thread. Silently no-ops if block is gone.
+        """
+        doc = self.output.document()
+        block = doc.findBlockByNumber(block_num)
+        if not block.isValid():
+            return
+        cursor = QTextCursor(block)
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        cursor.insertHtml(html)
+        self._scroll_to_bottom()
     
     def clear(self):
         """Clear console output."""
