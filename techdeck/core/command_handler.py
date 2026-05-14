@@ -562,7 +562,10 @@ class CommandHandler:
         self._moth_target_idx += 1
 
         if self._moth is None or not self._moth.isVisible():
-            self._moth = MothWidget()
+            from PySide6.QtGui import QColor
+            theme = self.settings.get_theme()
+            moth_color = QColor(240, 240, 240, 230) if theme == "dark" else QColor(20, 20, 20, 230)
+            self._moth = MothWidget(color=moth_color)
             self._moth.spawn_from_edge(target)
             self.console.append_system("Something has arrived.")
         else:

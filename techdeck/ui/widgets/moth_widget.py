@@ -17,13 +17,14 @@ class MothWidget(QWidget):
     Translucent, frameless moth drawn with QPainter — outlines only, no fill.
     Animates toward a target QWidget. Flaps wings in flight.
     Half the original size (28x28 window, drawn at 56x56 then scaled 0.5).
+    Pass a QColor to override the outline color (default near-black).
     """
 
     SIZE = 28
-    _OUTLINE = QColor(160, 160, 160, 210)
 
-    def __init__(self, parent=None):
+    def __init__(self, color: QColor | None = None, parent=None):
         super().__init__(parent)
+        self._OUTLINE = color if color is not None else QColor(30, 30, 30, 220)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
