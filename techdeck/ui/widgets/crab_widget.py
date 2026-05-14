@@ -47,6 +47,8 @@ class CrabWidget(QWidget):
         self._direction = 1  # 1 = right, -1 = left
         self._tick_count = 0
         self._drag_pos = None
+        self._patrol_left = 0   # left boundary of patrol range
+        self._patrol_right = 0  # right boundary of patrol range
 
         # Label for ASCII art
         self._label = QLabel(self)
@@ -72,18 +74,20 @@ class CrabWidget(QWidget):
         self._timer.timeout.connect(self._tick)
 
     def start(self):
-        """Place at a random screen edge and begin walking."""
+        """Place at a random screen position with a local patrol range."""
         screen = QApplication.primaryScreen().geometry()
-        y = int(screen.height() * random.uniform(0.65, 0.82))
 
-        if random.choice([True, False]):
-            x = -self.width()
-            self._direction = 1
-        else:
-            x = screen.right() + 4
-            self._direction = -1
+        patrol_width = random.randint(150, 350)
+        center_x = random.randint(screen.left() + patrol_width // 2,
+                                  screen.right() - patrol_width // 2)
+        y = random.randint(int(screen.height() * 0.15),
+                           int(screen.height() * 0.85))
 
-        self.move(x, y)
+        self._patrol_left = center_x - patrol_width // 2
+        self._patrol_right = center_x + patrol_width // 2
+        self._direction = random.choice([-1, 1])
+
+        self.move(center_x, y)
         self.show()
         self.raise_()
         self._timer.start()
@@ -105,13 +109,12 @@ class CrabWidget(QWidget):
             self._color_idx = (self._color_idx + 1) % len(self._COLORS)
             self._apply_color()
 
-        # Move
-        screen = QApplication.primaryScreen().geometry()
+        # Move within patrol range
         new_x = self.x() + self.SPEED * self._direction
 
-        if new_x + self.width() > screen.right() + 4:
+        if new_x + self.width() > self._patrol_right:
             self._direction = -1
-        elif new_x < screen.left() - 4:
+        elif new_x < self._patrol_left:
             self._direction = 1
 
         self.move(new_x, self.y())
