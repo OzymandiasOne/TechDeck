@@ -99,13 +99,13 @@ class CommandHandler:
   /guides         - List documentation guides
   /guide <name>   - Show a specific guide
 
-  /fidget         - Open fidget spinner
-  /rave           - 10-second color party
-  /jack           - Play blackjack (bankroll persists)
-  /compliment     - You deserve this
-  /roast          - You asked for this
-  /haiku          - Manufacturing poetry
-  /moth           - You'll see"""
+  /fidget
+  /rave
+  /jack
+  /compliment
+  /roast
+  /haiku
+  /moth"""
         self.console.append_system(help_text)
 
     def _cmd_clear(self, args: str):
