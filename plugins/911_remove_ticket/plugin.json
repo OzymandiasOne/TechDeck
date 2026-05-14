@@ -1,0 +1,23 @@
+{
+  "id": "911_remove_ticket",
+  "name": "911 Remove Ticket",
+  "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Originals are untouched.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 300,
+  "settings": {
+    "fields": [
+      {
+        "key": "pdf_directory",
+        "type": "directory",
+        "label": "PDF Directory",
+        "description": "Folder containing the nest package PDFs to process.",
+        "placeholder": "C:\\...",
+        "required": false,
+        "default": ""
+      }
+    ]
+  }
+}
