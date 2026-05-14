@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.3.2"  # Changed from 0.8.3.1 to fix 911 Setup bug. Now pulls forecast data correctly. 
+APP_VERSION = "0.8.4.1"  # Patch: bug fixes for kit save, input prompt ordering, 911 page logic, update checker, spinner timing
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

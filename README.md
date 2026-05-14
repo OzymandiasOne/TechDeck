@@ -1,4 +1,4 @@
-# TechDeck v0.8.3.2
+# TechDeck v0.8.4.1
 
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows (911 and 922 QTDR production packages)
@@ -7,15 +7,61 @@ the `.exe`.
 
 ---
 
+## What's New in v0.8.4.1
+
+### Bug Fixes
+
+**Kit save** — Adding a new app to a kit no longer wipes the apps that were already
+in it. Previously, opening the Library page, checking a new app, and clicking Save
+would replace the entire kit with just that one app. Fixed.
+
+**Input prompt ordering** — When a plugin asks for user input (e.g. batch number,
+directory), the prompt is now always the last line visible before the input bar
+becomes active. Previously, buffered log messages could appear after the prompt,
+making it unclear what you were responding to.
+
+**Missing app — Remove from Kit** — Plugin cards marked `(Missing)` on the Home
+page now have a **Remove from Kit** button. Previously, clearing a missing app
+required switching to the Library page and saving. You can now do it directly.
+
+**911 Remove Ticket — wrong pages removed** — The plugin was removing pages
+containing `"PART SKETCH"` text instead of `"MOVE TICKET"` text. It now correctly
+removes Move Ticket pages while keeping everything else — and pages containing
+`"MIL-SPEC"` or `"HULL"` are always kept even if they also contain Move Ticket text.
+
+**911 Setup — same page logic** — The Move Ticket Omit PDF produced during batch
+setup now uses the same rule: remove Move Ticket pages, always keep MIL-SPEC and
+HULL pages.
+
+**Update checker** — The manifest fetch now bypasses CDN caching (cache-busting
+query parameter + no-cache headers). Previously, a stale cached manifest could tell
+TechDeck about an older intermediate release instead of the current latest version,
+requiring two update cycles to fully catch up.
+
+**Spinner flavor text** — Running-phase flavor text now holds for **8 seconds** per
+phrase (previously 4 seconds). A secondary fix ensures that after a movie-quote
+interruption ends, the next phrase always gets a full 8-second window rather than
+resuming mid-cycle.
+
+**Console /help** — Removed stale commands (`/profiles`, `/profile`, `/tiles`,
+`/guides`, `/guide`) from the help output. The commands still work; they were just
+cluttering the list.
+
+**Rave crabs** — Crabs from `/rave` now spawn on whichever monitor TechDeck is
+currently displayed on instead of always targeting the primary monitor.
+
+---
+
 ## What's New Since v0.8.1
 
 ### New Plugin: 911 Remove Ticket
 
-A dedicated tool for stripping **PART SKETCH** pages out of nest package PDFs before
+A dedicated tool for stripping **Move Ticket** pages out of nest package PDFs before
 routing move tickets.
 
 - Scans a configured directory and lists all PDFs by number
 - Select individual files or process the entire batch at once
+- MIL-SPEC and HULL pages are always preserved
 - Output saved alongside the originals as `{original name} Move Ticket Omit.pdf`
   inside a `Move Ticket Omit/` subfolder — originals are never touched
 
@@ -25,34 +71,10 @@ routing move tickets.
 
 TechDeck now has opinions about the tools it runs.
 
-- **Nicknames** — after a plugin has been run 10+ times it earns a nickname that
-  appears in the console start message (e.g. "911 Setup, a.k.a. The Beast, is warming up...")
-- **TechDeck Talks Back** — after a successful run there's roughly a 1-in-5 chance
-  of a dry one-liner appearing in the console. Lines cycle through a pool of 30 before
-  repeating and will never print back-to-back.
-- **Problem Child** — a plugin that fails 3+ times in a row gets a temporary label
-  noting its track record.
-
----
-
 ### Processing Spinner
 
-When a plugin is running, a **Claude Code-style spinner** now appears between the
+When a plugin is running, a spinning icon now appears between the
 console output area and the input bar.
-
-- One glowing color, smooth braille animation running at a fixed 100 ms tick —
-  completely independent of how fast the plugin logs output
-- Flavor text changes every ~4 seconds with whimsical readouts like
-  *"Discombobulating..."*, *"Kerfuffling the data..."*, *"Grinched through..."*
-- Intermittent movie quote interruptions appear roughly every 20–28 seconds and
-  hold for ~5 seconds before returning to flavor text
-- **Phase-aware**: the spinner stays locked on its initial text while a plugin is
-  waiting for your input. The moment you hit Enter, it immediately jumps to a new
-  flavor text to signal that work has actually started
-- When all plugins finish, the spinner shows a summary for 4 seconds
-  (*"Cogitated for 2m 14s."*) before disappearing — no redundant line in the console
-
----
 
 ### UI Animations
 
@@ -106,7 +128,7 @@ The salmon theme has been re-tuned:
 
 ---
 
-### Bug Fixes & Performance
+### Bug Fixes & Performance (v0.8.x)
 
 - **Spinner lag fixed** — plugin log messages are now buffered in a Python queue
   and drained in batches every 50 ms. This keeps the Qt event queue lean so the
@@ -129,7 +151,7 @@ The salmon theme has been re-tuned:
 |---|---|
 | 911 Setup | Full 911 QTDR batch setup — nest folders, templates, forecast data, PDFs |
 | 911 Repeater | Finds and copies repeat parts (NC files + inspection PDFs) for 911 batches |
-| 911 Remove Ticket | Removes PART SKETCH pages from nest package PDFs |
+| 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs; keeps MIL-SPEC and HULL pages |
 | 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info |
 | Batch Repeater | Copies repeat orders from prior 922 batches |
 | LST Organizer | Organizes .lst files by material type |
@@ -141,7 +163,7 @@ The salmon theme has been re-tuned:
 
 ## Installation
 
-Download `TechDeck-0.8.3.2-Setup.exe` from the [Releases](https://github.com/OzymandiasOne/TechDeck/releases) page and run it.
+Download `TechDeck-0.8.4.1-Setup.exe` from the [Releases](https://github.com/OzymandiasOne/TechDeck/releases) page and run it.
 No Python, no admin rights, no PATH changes required.
 
 TechDeck will notify you automatically when a new version is available.
