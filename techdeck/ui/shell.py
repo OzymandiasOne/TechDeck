@@ -42,48 +42,66 @@ class MainWindow(QMainWindow):
     _SPINNER_COLOR = "#93C5FD"
     _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     _SPINNER_TEXTS = [
-        "Discombobulating...",
-        "Kerfuffling the data...",
-        "Bamboozling bytes...",
+        "Combobulating...",
+        "Moonwalking...",
+        "Bamboozling...",
         "Flibbertigibbeting...",
-        "Lollygagging through files...",
-        "Razzle-dazzling the spreadsheets...",
+        "Spelunking...",
+        "Caramelizing...",
         "Skedaddling through folders...",
         "Faffing about with PDFs...",
-        "Hullaballooing...",
+        "Enchanting...",
         "Cattywampusing...",
-        "Going ham on this...",
-        "Full send...",
+        "Concoting...",
+        "Determining...",
         "Negotiating with Excel...",
         "Herding the data...",
         "Convincing the files...",
-        "Crunching the nests...",
+        "Gallivanting...",
         "Rustling the paperwork...",
         "Bothering the PDFs...",
-        "Making it happen...",
-        "Widdershins processing...",
+        "Vibing...",
+        "Warping...",
+        "Transfiguring...",
+        "Sprouting...",
+        "Simmering...",
+        "Pollinating...",
+        "Mulling...",
+        "Inferring...",
+        "Hashing...",
     ]
     _DONE_TEXTS = [
-        "Cogitated for",
-        "Discombobulated for",
+        "Combobulated for",
+        "Moonwalked for",
+        "Bamboozled in",
         "Flibbertigibbeted through that in",
-        "Kerfuffled it in",
-        "Bamboozled Excel in",
-        "Skedaddled through in",
-        "Faffed productively for",
-        "Razzle-dazzled that in",
-        "Herded all the data in",
-        "Negotiated with Excel for",
-        "Rustled that paperwork in",
-        "Convinced the files in",
-        "Went ham for",
-        "Full sent that in",
+        "Spelunked for",
+        "Caramelized for",
+        "Skedaddling for",
+        "Waffled about for",
+        "Enchanted for",
         "Cattywampused through in",
+        "Cattywampused for",
+        "Concoted and loaded in",
+        "Negotiated with Excel for",
+        "Herded all the data in",
+        "Convinced the files in",
+        "Rustled that paperwork in",
+        "PDF bothered and quit their jobs in"
         "Hullaballooed for",
         "Did the thing in",
         "Knocked that out in",
-        "Widdershins'd through that in",
-        "Grinched through in",
+        "Jim Carrey Grinch'd through it in",
+        "Vibed in",
+        "Warped with minor casualties in...",
+        "Transfigured faces in",
+        "Bloomed in",
+        "Simmered in",
+        "Pollinated in",
+        "Dan Mullin'd it in",
+        "Inferred in",
+        "Hashbrowned in",
+
     ]
     _SPINNER_QUOTES = [
         "They're eating her! And then they're gonna eat me! Oh my GOD!",
@@ -91,31 +109,25 @@ class MainWindow(QMainWindow):
         "Just keep swimming... just keep swimming...",
         "It's a trap!",
         "WITNESS ME!",
-        "I'll be back.",
-        "To infinity and beyond!",
-        "This is fine.",
-        "Houston, we have a... actually we're good.",
-        "You can't handle the truth!",
-        "I feel the need — the need for speed!",
-        "NOBODY PUTS BABY IN A CORNER.",
+        "You can't handle the truth.",
+        "I feel the need, the need for speed!",
         "My name is Inigo Montoya. You processed my files. Prepare to be compiled.",
         "Get to the chopper!",
-        "I am Groot.",
+        "Definitely not sentient.",
         "Do or do not. There is no try.",
-        "LEEROY JENKINS!",
         "We're gonna need a bigger boat.",
         "Roads? Where we're going, we don't need roads.",
-        "There's no crying in baseball!",
-        "I volunteer as tribute.",
+        "If you can dodge a wrench you can dodge a ball",
         "The files are IN the computer.",
-        "RELEASE THE KRAKEN!",
-        "Shake and bake!",
-        "They may take our lives, but they'll never take our spreadsheets!",
+        "But why male models?",
+        "What is this? A document for ants?",
         "With great power comes great electricity bills.",
         "I'm kind of a big deal.",
         "Bees? Not the bees!",
-        "You is kind, you is smart, you is important.",
         "Why so serious?",
+        "Making them an offer they can't refuse.",
+        "When the world crashes down around you, the only airbag you have is family. ~Vin Diesel",
+        "The suspense is terrible, I hope it will last.",
     ]
     
     def __init__(self, settings: SettingsManager):
@@ -207,6 +219,7 @@ class MainWindow(QMainWindow):
         self.console.command_entered.connect(self.command_handler.handle_command)
         self.console.message_entered.connect(self._on_message_entered)
         self.console.input_provided.connect(self._on_console_input_provided)
+        self.console.before_input_request.connect(self._flush_plugin_logs)
         
         # Create Run Selected button and add to console header
         self.btn_run = QPushButton("Run Selected")
@@ -434,6 +447,10 @@ class MainWindow(QMainWindow):
                 text = self._SPINNER_TEXTS[self._spinner_text_idx]
 
         self.console.update_spinner(self._plugin_spinner_html(frame, text))
+
+    def _flush_plugin_logs(self):
+        """Drain all buffered plugin logs before showing an input prompt."""
+        self.home_page._drain_log_buffer_all()
 
     def _on_console_input_provided(self, _text: str):
         """When user provides input to a plugin, advance spinner to running phase."""

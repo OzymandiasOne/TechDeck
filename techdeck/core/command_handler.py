@@ -93,12 +93,7 @@ class CommandHandler:
   /help           - Show this help message
   /clear          - Clear console output
   /version        - Show TechDeck version
-  /profiles       - List all profiles
-  /profile <name> - Switch to a profile
-  /tiles          - List tiles in current profile
   /theme <name>   - Switch theme (dark, light, blue, salmon)
-  /guides         - List documentation guides
-  /guide <name>   - Show a specific guide
 
   /fidget
   /rave
@@ -284,11 +279,21 @@ class CommandHandler:
         elapsed = [0]
         step = [0]
 
-        # Spawn 5 crabs at staggered Y positions
+        # Determine which screen TechDeck is currently on
+        target_screen = None
+        if self.main_window is not None:
+            from PySide6.QtGui import QGuiApplication
+            target_screen = QGuiApplication.screenAt(
+                self.main_window.geometry().center()
+            )
+        if target_screen is None:
+            target_screen = QApplication.primaryScreen()
+
+        # Spawn 5 crabs on the same screen as TechDeck
         self._crabs = []
         for _ in range(5):
             crab = CrabWidget()
-            crab.start()
+            crab.start(target_screen)
             self._crabs.append(crab)
 
         # Show spinner label and kick off rave

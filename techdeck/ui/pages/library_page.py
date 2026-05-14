@@ -535,9 +535,10 @@ class LibraryPage(QWidget):
             item = self.tile_grid.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        # Get currently selected profile's tiles
+
+        # Get currently selected profile's tiles and sync selected_tile_ids to match
         current_profile_tiles = set(self.settings.get_profile_tiles())
+        self.selected_tile_ids = current_profile_tiles.copy()
         
         # Get current theme for tile styling
         from techdeck.ui.theme import get_current_palette

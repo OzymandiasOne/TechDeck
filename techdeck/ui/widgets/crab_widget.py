@@ -73,9 +73,12 @@ class CrabWidget(QWidget):
         self._timer.setInterval(16)  # ~60fps
         self._timer.timeout.connect(self._tick)
 
-    def start(self):
-        """Place at a random screen position with a local patrol range."""
-        screen = QApplication.primaryScreen().geometry()
+    def start(self, screen=None):
+        """Place at a random position on the given screen (defaults to primary)."""
+        if screen is not None:
+            screen = screen.geometry()
+        else:
+            screen = QApplication.primaryScreen().geometry()
 
         patrol_width = random.randint(150, 350)
         center_x = random.randint(screen.left() + patrol_width // 2,

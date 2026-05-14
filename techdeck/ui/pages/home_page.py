@@ -517,28 +517,48 @@ class HomePage(QWidget):
                     self.tile_cards[tile_id] = card
                     self.tile_grid.addWidget(card, row, col)
                 else:
-                    # Missing plugin - show disabled card
+                    # Missing plugin - show disabled card with remove button
                     card = QFrame()
                     card.setFixedSize(220, 140)
                     card_layout = QVBoxLayout(card)
-                    card_layout.setContentsMargins(16, 16, 16, 16)
-                    
+                    card_layout.setContentsMargins(16, 12, 16, 12)
+                    card_layout.setSpacing(6)
+
                     missing_label = QLabel(f"{tile_id}\n(Missing)")
                     missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     missing_label.setWordWrap(True)
                     missing_label.setStyleSheet("color: #888; font-size: 11px;")
-                    
+
+                    remove_btn = QPushButton("Remove from Kit")
+                    remove_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: transparent;
+                            color: #EF4444;
+                            border: 1px solid #EF4444;
+                            border-radius: 4px;
+                            font-size: 10px;
+                            padding: 4px 8px;
+                        }
+                        QPushButton:hover {
+                            background-color: #EF4444;
+                            color: white;
+                        }
+                    """)
+                    remove_btn.clicked.connect(
+                        lambda checked=False, tid=tile_id: self._remove_missing_plugin(tid)
+                    )
+
                     card_layout.addWidget(missing_label)
-                    
+                    card_layout.addWidget(remove_btn)
+
                     card.setStyleSheet(f"""
                         QFrame {{
                             background-color: {theme.surface};
                             border: 1px dashed {theme.border};
                             border-radius: 12px;
-                            opacity: 0.5;
                         }}
                     """)
-                    
+
                     self.tile_grid.addWidget(card, row, col)
                 
                 col += 1
@@ -657,6 +677,14 @@ class HomePage(QWidget):
             timeout=plugin_timeout
         )
 
+    def _remove_missing_plugin(self, tile_id: str):
+        """Remove a missing plugin from the current kit and refresh the grid."""
+        current_tiles = list(self.settings.get_profile_tiles())
+        if tile_id in current_tiles:
+            current_tiles.remove(tile_id)
+            self.settings.set_profile_tiles(current_tiles)
+        self._refresh_tiles()
+
     def _drain_log_buffer(self):
         """Drain buffered log messages in batches to avoid flooding the Qt event queue."""
         count = 0
@@ -667,6 +695,15 @@ class HomePage(QWidget):
                 break
             self.plugin_log.emit(tid, msg)
             count += 1
+
+    def _drain_log_buffer_all(self):
+        """Drain all buffered log messages immediately (called before showing an input prompt)."""
+        while True:
+            try:
+                tid, msg = self._log_buffer.get_nowait()
+            except _queue.Empty:
+                break
+            self.plugin_log.emit(tid, msg)
 
     def _apply_plugin_status(self, tile_id: str, status: str):
         """Update a card's status indicator. Always runs on main thread via signal."""

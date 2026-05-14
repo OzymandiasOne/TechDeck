@@ -30,6 +30,7 @@ class ConsoleWidget(QWidget):
     command_entered = Signal(str)
     message_entered = Signal(str)
     input_provided = Signal(str)  # NEW: For plugin input requests
+    before_input_request = Signal()  # Emitted just before showing a plugin input prompt
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
@@ -210,6 +211,8 @@ class ConsoleWidget(QWidget):
         Called via QMetaObject.invokeMethod from request_input().
         An empty prompt string activates input mode silently (no system messages).
         """
+        # Flush any buffered plugin log messages so they appear before the prompt
+        self.before_input_request.emit()
         self.waiting_for_input = True
         self.input_prompt = prompt
 
