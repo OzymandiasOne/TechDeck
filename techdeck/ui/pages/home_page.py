@@ -14,6 +14,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QFont, QColor
 
+import queue as _queue
+
 from techdeck.core.settings import SettingsManager
 from techdeck.core.plugin_loader import PluginLoader
 from techdeck.core.plugin_executor import PluginExecutor, PluginResult
@@ -295,6 +297,14 @@ class HomePage(QWidget):
         self._plugin_queue: list = []
         self._plugin_params: dict = {}
         self.plugin_status_updated.connect(self._apply_plugin_status)
+
+        # Log buffer: worker threads put messages here; drain timer delivers them
+        # to the main thread in batches so the Qt event queue never floods.
+        self._log_buffer: _queue.Queue = _queue.Queue()
+        self._log_drain_timer = QTimer(self)
+        self._log_drain_timer.setInterval(50)
+        self._log_drain_timer.timeout.connect(self._drain_log_buffer)
+        self._log_drain_timer.start()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -641,11 +651,22 @@ class HomePage(QWidget):
         self.plugin_executor.execute_plugin(
             tile_id,
             params=self._plugin_params,
-            log_callback=lambda msg, tid=tile_id: self.plugin_log.emit(tid, msg),
+            log_callback=lambda msg, tid=tile_id: self._log_buffer.put((tid, msg)),
             progress_callback=lambda prog, tid=tile_id: self.plugin_progress.emit(tid, prog),
             completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
             timeout=plugin_timeout
         )
+
+    def _drain_log_buffer(self):
+        """Drain buffered log messages in batches to avoid flooding the Qt event queue."""
+        count = 0
+        while count < 15:
+            try:
+                tid, msg = self._log_buffer.get_nowait()
+            except _queue.Empty:
+                break
+            self.plugin_log.emit(tid, msg)
+            count += 1
 
     def _apply_plugin_status(self, tile_id: str, status: str):
         """Update a card's status indicator. Always runs on main thread via signal."""

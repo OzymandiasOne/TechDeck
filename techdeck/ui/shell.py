@@ -42,30 +42,80 @@ class MainWindow(QMainWindow):
     _SPINNER_COLOR = "#93C5FD"
     _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     _SPINNER_TEXTS = [
-        "Working on it...",
-        "Crunching numbers...",
-        "Processing...",
-        "Running the math...",
-        "On the case...",
-        "Computing...",
-        "Doing the thing...",
-        "Still at it...",
-        "Almost there...",
-        "Grinding through it...",
+        "Discombobulating...",
+        "Kerfuffling the data...",
+        "Bamboozling bytes...",
+        "Flibbertigibbeting...",
+        "Lollygagging through files...",
+        "Razzle-dazzling the spreadsheets...",
+        "Skedaddling through folders...",
+        "Faffing about with PDFs...",
+        "Hullaballooing...",
+        "Cattywampusing...",
+        "Going ham on this...",
+        "Full send...",
+        "Negotiating with Excel...",
+        "Herding the data...",
+        "Convincing the files...",
+        "Crunching the nests...",
+        "Rustling the paperwork...",
+        "Bothering the PDFs...",
         "Making it happen...",
-        "Hang tight...",
+        "Widdershins processing...",
     ]
     _DONE_TEXTS = [
         "Cogitated for",
-        "Deliberated for",
-        "Chewed on that for",
-        "Ground that out in",
-        "Processed in",
-        "Finished in",
-        "Wrapped up in",
-        "Done thinking —",
-        "That took",
-        "Clocked in at",
+        "Discombobulated for",
+        "Flibbertigibbeted through that in",
+        "Kerfuffled it in",
+        "Bamboozled Excel in",
+        "Skedaddled through in",
+        "Faffed productively for",
+        "Razzle-dazzled that in",
+        "Herded all the data in",
+        "Negotiated with Excel for",
+        "Rustled that paperwork in",
+        "Convinced the files in",
+        "Went ham for",
+        "Full sent that in",
+        "Cattywampused through in",
+        "Hullaballooed for",
+        "Did the thing in",
+        "Knocked that out in",
+        "Widdershins'd through that in",
+        "Grinched through in",
+    ]
+    _SPINNER_QUOTES = [
+        "They're eating her! And then they're gonna eat me! Oh my GOD!",
+        "I am inevitable.",
+        "Just keep swimming... just keep swimming...",
+        "It's a trap!",
+        "WITNESS ME!",
+        "I'll be back.",
+        "To infinity and beyond!",
+        "This is fine.",
+        "Houston, we have a... actually we're good.",
+        "You can't handle the truth!",
+        "I feel the need — the need for speed!",
+        "NOBODY PUTS BABY IN A CORNER.",
+        "My name is Inigo Montoya. You processed my files. Prepare to be compiled.",
+        "Get to the chopper!",
+        "I am Groot.",
+        "Do or do not. There is no try.",
+        "LEEROY JENKINS!",
+        "We're gonna need a bigger boat.",
+        "Roads? Where we're going, we don't need roads.",
+        "There's no crying in baseball!",
+        "I volunteer as tribute.",
+        "The files are IN the computer.",
+        "RELEASE THE KRAKEN!",
+        "Shake and bake!",
+        "They may take our lives, but they'll never take our spreadsheets!",
+        "With great power comes great electricity bills.",
+        "I'm kind of a big deal.",
+        "Bees? Not the bees!",
+        "You is kind, you is smart, you is important.",
+        "Why so serious?",
     ]
     
     def __init__(self, settings: SettingsManager):
@@ -85,6 +135,10 @@ class MainWindow(QMainWindow):
         self._plugin_spinner_timer.timeout.connect(self._on_plugin_spinner_tick)
         self._plugin_spinner_tick = 0
         self._plugin_run_start = 0.0
+        self._spinner_in_quote = False
+        self._spinner_quote_end_tick = 0
+        self._spinner_current_quote = ""
+        self._spinner_next_quote_tick = 0
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -272,6 +326,8 @@ class MainWindow(QMainWindow):
         if not self._plugin_spinner_timer.isActive():
             self._plugin_run_start = time.time()
             self._plugin_spinner_tick = 0
+            self._spinner_in_quote = False
+            self._spinner_next_quote_tick = random.randint(80, 120)  # first quote after 8-12s
             self.console.show_spinner(
                 self._plugin_spinner_html(self._SPINNER_FRAMES[0], self._SPINNER_TEXTS[0])
             )
@@ -335,7 +391,21 @@ class MainWindow(QMainWindow):
         tick = self._plugin_spinner_tick
         self._plugin_spinner_tick += 1
         frame = self._SPINNER_FRAMES[tick % len(self._SPINNER_FRAMES)]
-        text = self._SPINNER_TEXTS[(tick // 20) % len(self._SPINNER_TEXTS)]
+
+        # Trigger a quote interruption?
+        if not self._spinner_in_quote and tick >= self._spinner_next_quote_tick:
+            self._spinner_in_quote = True
+            self._spinner_current_quote = random.choice(self._SPINNER_QUOTES)
+            self._spinner_quote_end_tick = tick + 35  # show for ~3.5s
+            self._spinner_next_quote_tick = tick + 35 + random.randint(80, 150)
+
+        if self._spinner_in_quote:
+            if tick >= self._spinner_quote_end_tick:
+                self._spinner_in_quote = False
+            text = self._spinner_current_quote
+        else:
+            text = self._SPINNER_TEXTS[(tick // 20) % len(self._SPINNER_TEXTS)]
+
         self.console.update_spinner(self._plugin_spinner_html(frame, text))
 
     @staticmethod
