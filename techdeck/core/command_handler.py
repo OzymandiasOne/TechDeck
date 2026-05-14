@@ -47,7 +47,6 @@ class CommandHandler:
         # Runtime state
         self._rave_timer = None
         self._rave_step = 0
-        self._rave_spinner_block = -1
         self._crabs = []
         self._moth = None
         self._moth_targets = []  # cycled through on repeat /moth calls
@@ -292,12 +291,10 @@ class CommandHandler:
             crab.start()
             self._crabs.append(crab)
 
-        # Seed spinner line in console
-        initial_color = self._RAVE_COLORS[0]
-        initial_flower = self._FLOWER_FRAMES[0]
+        # Show spinner label and kick off rave
         self.console.append_game("Let's rave.")
-        self._rave_spinner_block = self.console.start_spinner(
-            self._rave_spinner_html(initial_flower, initial_color)
+        self.console.show_spinner(
+            self._rave_spinner_html(self._FLOWER_FRAMES[0], self._RAVE_COLORS[0])
         )
 
         def tick():
@@ -314,13 +311,8 @@ class CommandHandler:
                 for crab in self._crabs:
                     crab.stop()
                 self._crabs = []
-                # Finalize spinner
-                self.console.update_spinner_block(
-                    self._rave_spinner_block,
-                    '<span style="color: #888; font-family: Consolas, monospace;">'
-                    '🦀&nbsp;&nbsp;Crab has left the building.</span>',
-                )
-                self._rave_spinner_block = -1
+                # Hide spinner and log finale
+                self.console.hide_spinner()
                 self.console.append_system("Rave over. Back to work.")
                 return
 
@@ -331,11 +323,8 @@ class CommandHandler:
             THEMES[theme_name].accent_hover = color
             THEMES[theme_name].accent_pressed = color
             app.setStyleSheet(generate_stylesheet(theme_name))
-            # Update spinner in-place
-            self.console.update_spinner_block(
-                self._rave_spinner_block,
-                self._rave_spinner_html(flower, color),
-            )
+            # Update spinner label
+            self.console.update_spinner(self._rave_spinner_html(flower, color))
 
         self._rave_timer = QTimer()
         self._rave_timer.setInterval(150)

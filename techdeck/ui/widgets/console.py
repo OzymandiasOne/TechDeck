@@ -81,7 +81,18 @@ class ConsoleWidget(QWidget):
         self.output.setFont(font)
         
         layout.addWidget(self.output, 1)
-        
+
+        # ===== Spinner Label (hidden until an animation is active) =====
+        self._spinner_label = QLabel()
+        self._spinner_label.setTextFormat(Qt.TextFormat.RichText)
+        self._spinner_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._spinner_label.setMinimumHeight(24)
+        self._spinner_label.setStyleSheet("QLabel { padding: 1px 4px; background: transparent; }")
+        self._spinner_label.hide()
+        layout.addWidget(self._spinner_label)
+
         # ===== Input Area =====
         input_layout = QHBoxLayout()
         input_layout.setSpacing(8)
@@ -283,34 +294,19 @@ class ConsoleWidget(QWidget):
             Q_ARG(str, text),
         )
 
-    def start_spinner(self, html: str) -> int:
-        """
-        Append a spinner line and return its block number.
-        Call update_spinner_block() each tick to animate it in-place.
-        Must be called from the GUI thread.
-        """
-        self.output.append(html)
-        self._scroll_to_bottom()
-        self._update_line_count()
-        return self.output.document().blockCount() - 1
+    def show_spinner(self, html: str):
+        """Show the spinner label with the given HTML content."""
+        self._spinner_label.setText(html)
+        self._spinner_label.show()
 
-    def update_spinner_block(self, block_num: int, html: str):
-        """
-        Replace the content of a previously appended spinner line in-place.
-        Must be called from the GUI thread. Silently no-ops if block is gone.
-        """
-        doc = self.output.document()
-        block = doc.findBlockByNumber(block_num)
-        if not block.isValid():
-            return
-        cursor = QTextCursor(block)
-        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-        cursor.movePosition(
-            QTextCursor.MoveOperation.EndOfBlock,
-            QTextCursor.MoveMode.KeepAnchor,
-        )
-        cursor.insertHtml(html)
-        self._scroll_to_bottom()
+    def update_spinner(self, html: str):
+        """Update the spinner label content in-place (called each animation tick)."""
+        self._spinner_label.setText(html)
+
+    def hide_spinner(self):
+        """Hide the spinner label."""
+        self._spinner_label.hide()
+        self._spinner_label.setText("")
     
     def clear(self):
         """Clear console output."""
