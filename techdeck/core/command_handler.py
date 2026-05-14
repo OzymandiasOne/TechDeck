@@ -4,6 +4,8 @@ Processes console commands and returns responses.
 """
 
 import random
+import re
+import socket
 import threading
 from typing import Callable
 from pathlib import Path
@@ -51,6 +53,8 @@ class CommandHandler:
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
         self._jack_running = False
+        self._mud_connected = False
+        self._mud_session = None
 
         # Command registry
         self.commands = {
@@ -63,6 +67,7 @@ class CommandHandler:
             '/theme': self._cmd_theme,
             '/guides': self._cmd_guides,
             '/guide': self._cmd_show_guide,
+            '/darkerrealms': self._cmd_darkerrealms,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/jack': self._cmd_jack,
@@ -99,6 +104,7 @@ class CommandHandler:
   /guides         - List documentation guides
   /guide <name>   - Show a specific guide
 
+  /darkerrealms
   /fidget
   /rave
   /jack
@@ -219,6 +225,117 @@ class CommandHandler:
                 self.console.append_system(f"Full guide at: {guide_file}")
         except Exception as e:
             self.console.append_error(f"Error reading guide: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  /darkerrealms  — MUD client
+    # ------------------------------------------------------------------ #
+
+    _MUD_HOST = "darkerrealms.org"
+    _MUD_PORT = 2000
+    _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mGKHFABCDJst]|\x1b[=>]|\x1b\([A-Z]|\x1b[A-Z]')
+
+    def _cmd_darkerrealms(self, args: str):
+        if self._mud_connected:
+            self.console.append_system("Already connected. Type 'quit' in-game to disconnect.")
+            return
+        t = threading.Thread(
+            target=self._mud_session_loop, daemon=True, name="MudSession"
+        )
+        t.start()
+        self._mud_session = t
+
+    def _mud_session_loop(self):
+        log = self.console.safe_game_log
+        ask = self.console.request_input
+
+        log(f"Connecting to {self._MUD_HOST}:{self._MUD_PORT}...")
+        try:
+            sock = socket.create_connection((self._MUD_HOST, self._MUD_PORT), timeout=15)
+        except Exception as e:
+            log(f"Connection failed: {e}")
+            return
+
+        self._mud_connected = True
+        log("Connected. Your commands are echoed above each reply.")
+        log("Type 'quit' in-game to disconnect from the MUD.")
+
+        # Reader thread — receives server output and pushes to console
+        reader = threading.Thread(
+            target=self._mud_reader, args=(sock, log), daemon=True, name="MudReader"
+        )
+        reader.start()
+
+        try:
+            while self._mud_connected:
+                # Silent input (empty prompt) — no "Type your response below" noise
+                cmd = ask("")
+                if not self._mud_connected:
+                    break
+                try:
+                    sock.sendall((cmd + "\r\n").encode("utf-8", errors="replace"))
+                except OSError:
+                    break
+        finally:
+            self._mud_connected = False
+            try:
+                sock.close()
+            except OSError:
+                pass
+            log("Disconnected from Darker Realms.")
+
+    def _mud_reader(self, sock: socket.socket, log):
+        buf = ""
+        while self._mud_connected:
+            try:
+                raw = sock.recv(4096)
+                if not raw:
+                    break
+                cleaned = self._strip_telnet(raw)
+                text = cleaned.decode("utf-8", errors="replace")
+                text = self._ANSI_RE.sub("", text)
+                buf += text
+                # Flush complete lines; also flush partial lines that look like prompts
+                lines = buf.split("\n")
+                buf = lines[-1]
+                for line in lines[:-1]:
+                    line = line.rstrip("\r")
+                    if line:
+                        log(line)
+                # If the remainder has no pending newline coming (prompt-style output),
+                # flush it so prompts like "Enter name:" appear immediately
+                if buf.rstrip("\r"):
+                    log(buf.rstrip("\r"))
+                    buf = ""
+            except OSError:
+                break
+
+        if self._mud_connected:
+            log("Connection closed by server. Press Enter to exit.")
+            self._mud_connected = False
+
+    @staticmethod
+    def _strip_telnet(data: bytes) -> bytes:
+        """Remove Telnet IAC negotiation sequences from raw bytes."""
+        result = bytearray()
+        i = 0
+        while i < len(data):
+            b = data[i]
+            if b == 0xFF:  # IAC
+                if i + 1 < len(data):
+                    cmd = data[i + 1]
+                    if cmd in (0xFB, 0xFC, 0xFD, 0xFE):  # WILL/WONT/DO/DONT + option byte
+                        i += 3
+                    elif cmd == 0xFF:  # Escaped 0xFF
+                        result.append(0xFF)
+                        i += 2
+                    else:
+                        i += 2
+                else:
+                    i += 1
+            else:
+                result.append(b)
+                i += 1
+        return bytes(result)
 
     # ------------------------------------------------------------------ #
     #  /fidget

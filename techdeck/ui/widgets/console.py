@@ -197,22 +197,21 @@ class ConsoleWidget(QWidget):
         """
         Internal method that runs on GUI thread to set up input request.
         Called via QMetaObject.invokeMethod from request_input().
-        
-        Args:
-            prompt: The prompt text to display to user
+        An empty prompt string activates input mode silently (no system messages).
         """
         self.waiting_for_input = True
         self.input_prompt = prompt
-        
-        # Show the prompt in console
-        self.append_system(f"🔹 {prompt}")
-        self.append_system("   (Type your response below)")
-        
-        # Update input field to show we're waiting for response
-        self.input_field.setPlaceholderText(f"Your response to: {prompt[:50]}...")
-        self.input_field.setStyleSheet("border: 2px solid #F59E0B;")  # Orange border
+
+        if prompt:
+            self.append_system(f"🔹 {prompt}")
+            self.append_system("   (Type your response below)")
+            self.input_field.setPlaceholderText(f"Your response to: {prompt[:50]}...")
+        else:
+            # Silent mode — just show the orange border, no noise
+            self.input_field.setPlaceholderText("Type command...")
+
+        self.input_field.setStyleSheet("border: 2px solid #F59E0B;")
         self.input_field.setFocus()
-        
         self._scroll_to_bottom()
     
     @Slot(str)
