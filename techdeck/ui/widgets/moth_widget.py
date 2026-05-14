@@ -2,22 +2,25 @@
 TechDeck Moth Widget
 A small moth that flies from a random screen edge toward a target UI element.
 /moth sends it somewhere new. Double-click to shoo it away entirely.
+Outline-only style, no fill.
 """
 
 import math
 import random
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, QPointF, QPoint, QRect
-from PySide6.QtGui import QPainter, QColor, QBrush, QPen, QPainterPath
+from PySide6.QtCore import Qt, QTimer, QPointF, QPoint
+from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 
 
 class MothWidget(QWidget):
     """
-    Translucent, frameless moth drawn with QPainter.
+    Translucent, frameless moth drawn with QPainter — outlines only, no fill.
     Animates toward a target QWidget. Flaps wings in flight.
+    Half the original size (28x28 window, drawn at 56x56 then scaled 0.5).
     """
 
-    SIZE = 56
+    SIZE = 28
+    _OUTLINE = QColor(160, 160, 160, 210)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,8 +72,7 @@ class MothWidget(QWidget):
     def _target_global_pos(self) -> QPoint | None:
         if self._target is None or not self._target.isVisible():
             return None
-        rect = self._target.rect()
-        center = rect.center()
+        center = self._target.rect().center()
         return self._target.mapToGlobal(center) - QPoint(self.SIZE // 2, self.SIZE // 2)
 
     def _tick(self):
@@ -88,7 +90,6 @@ class MothWidget(QWidget):
         if dist < 3:
             self.move(target)
             self._flying = False
-            # Don't stop timer — keep wing phase updating for idle animation
         else:
             speed = min(dist * 0.08, 12)
             nx = self.x() + dx / dist * speed + random.uniform(-1, 1)
@@ -106,17 +107,19 @@ class MothWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        cx = self.SIZE / 2
-        cy = self.SIZE / 2 + 4
+        # Draw in 56x56 space, scaled down to 28x28
+        painter.scale(0.5, 0.5)
 
-        # Wing flap — oscillates between -0.15 and +0.15 radians
+        pen = QPen(self._OUTLINE, 1.4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        cx = 28.0   # center of 56x56 space
+        cy = 32.0
+
         flap = math.sin(self._wing_phase) * 0.15 if self._flying else 0.0
-
-        # Body color — dark warm brown
-        body_col = QColor(55, 35, 15, 230)
-        wing_col = QColor(100, 65, 25, 200)
-        wing_edge = QColor(60, 38, 10, 220)
-        spot_col = QColor(200, 160, 80, 160)
 
         # Left upper wing
         path = QPainterPath()
@@ -128,11 +131,9 @@ class MothWidget(QWidget):
         )
         path.cubicTo(cx - 9, cy + 4, cx - 3, cy - 2, cx, cy - 4)
         path.closeSubpath()
-        painter.setBrush(QBrush(wing_col))
-        painter.setPen(QPen(wing_edge, 0.8))
         painter.drawPath(path)
 
-        # Right upper wing (mirrored)
+        # Right upper wing
         path = QPainterPath()
         path.moveTo(cx, cy - 8)
         path.cubicTo(
@@ -144,7 +145,7 @@ class MothWidget(QWidget):
         path.closeSubpath()
         painter.drawPath(path)
 
-        # Left lower wing (smaller)
+        # Left lower wing
         path = QPainterPath()
         path.moveTo(cx - 2, cy - 2)
         path.cubicTo(
@@ -154,8 +155,6 @@ class MothWidget(QWidget):
         )
         path.cubicTo(cx - 3, cy + 12, cx - 1, cy + 6, cx - 1, cy + 2)
         path.closeSubpath()
-        lighter_wing = QColor(115, 78, 32, 180)
-        painter.setBrush(QBrush(lighter_wing))
         painter.drawPath(path)
 
         # Right lower wing
@@ -170,27 +169,21 @@ class MothWidget(QWidget):
         path.closeSubpath()
         painter.drawPath(path)
 
-        # Wing spots
-        painter.setBrush(QBrush(spot_col))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(cx - 12, cy - 10), 3.5, 3.5)
-        painter.drawEllipse(QPointF(cx + 12, cy - 10), 3.5, 3.5)
-
         # Body
-        painter.setBrush(QBrush(body_col))
-        painter.setPen(QPen(QColor(30, 18, 5), 0.8))
         painter.drawEllipse(QPointF(cx, cy + 2), 4, 12)
 
         # Head
         painter.drawEllipse(QPointF(cx, cy - 10), 4, 4)
 
         # Antennae
-        painter.setPen(QPen(body_col, 1.2))
+        thin_pen = QPen(self._OUTLINE, 1.0)
+        thin_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(thin_pen)
         painter.drawLine(QPointF(cx - 1.5, cy - 13), QPointF(cx - 10, cy - 24))
         painter.drawLine(QPointF(cx + 1.5, cy - 13), QPointF(cx + 10, cy - 24))
-        # Tips
-        painter.setBrush(QBrush(body_col))
-        painter.setPen(Qt.PenStyle.NoPen)
+
+        # Antennae tips
+        painter.setPen(pen)
         painter.drawEllipse(QPointF(cx - 10.5, cy - 25), 2.2, 2.2)
         painter.drawEllipse(QPointF(cx + 10.5, cy - 25), 2.2, 2.2)
 
