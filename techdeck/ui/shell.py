@@ -5,8 +5,11 @@ FIXED: Inline button styling for Run Selected button
 PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
+import time
+import random
+
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
+    QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QSplitter, QPushButton, QMessageBox
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
@@ -34,6 +37,36 @@ class MainWindow(QMainWindow):
     
     # Signal for showing update dialog on main thread
     show_update_signal = Signal(object, bool)  # (update_info, mandatory)
+
+    # Plugin spinner
+    _SPINNER_COLOR = "#93C5FD"
+    _SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    _SPINNER_TEXTS = [
+        "Working on it...",
+        "Crunching numbers...",
+        "Processing...",
+        "Running the math...",
+        "On the case...",
+        "Computing...",
+        "Doing the thing...",
+        "Still at it...",
+        "Almost there...",
+        "Grinding through it...",
+        "Making it happen...",
+        "Hang tight...",
+    ]
+    _DONE_TEXTS = [
+        "Cogitated for",
+        "Deliberated for",
+        "Chewed on that for",
+        "Ground that out in",
+        "Processed in",
+        "Finished in",
+        "Wrapped up in",
+        "Done thinking —",
+        "That took",
+        "Clocked in at",
+    ]
     
     def __init__(self, settings: SettingsManager):
         super().__init__()
@@ -45,6 +78,13 @@ class MainWindow(QMainWindow):
         # Personality: talkback pool
         self._talkback = TalkbackState()
         self._last_talkback_plugin: str | None = None
+
+        # Plugin spinner state
+        self._plugin_spinner_timer = QTimer(self)
+        self._plugin_spinner_timer.setInterval(100)
+        self._plugin_spinner_timer.timeout.connect(self._on_plugin_spinner_tick)
+        self._plugin_spinner_tick = 0
+        self._plugin_run_start = 0.0
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -222,12 +262,20 @@ class MainWindow(QMainWindow):
         self._on_page_changed("library")  # ensure the stack switches + refresh
     
     def _on_run_selected(self, tile_ids: list):
-        """Handle run selected tiles - Log to console."""
+        """Handle run selected tiles - Log to console and start spinner."""
         self.console.append_system(f"Starting execution of {len(tile_ids)} plugin(s)...")
         for tile_id in tile_ids:
             plugin = self.home_page.plugin_loader.get_plugin(tile_id)
             plugin_name = plugin.name if plugin else tile_id
             self.console.append_system(f"Queued: {plugin_name}")
+
+        if not self._plugin_spinner_timer.isActive():
+            self._plugin_run_start = time.time()
+            self._plugin_spinner_tick = 0
+            self.console.show_spinner(
+                self._plugin_spinner_html(self._SPINNER_FRAMES[0], self._SPINNER_TEXTS[0])
+            )
+            self._plugin_spinner_timer.start()
     
     def _on_plugin_log(self, plugin_id: str, message: str):
         """Handle plugin log message."""
@@ -255,7 +303,6 @@ class MainWindow(QMainWindow):
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
                 # Talkback: ~1 in 5 runs, never the same plugin twice in a row
-                import random
                 if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
                     self.console.append_game(self._talkback.get_line())
                     self._last_talkback_plugin = plugin_id
@@ -271,8 +318,34 @@ class MainWindow(QMainWindow):
         # Check if all plugins are done
         active = self.home_page.plugin_executor.get_active_plugins()
         if not active:
-            self.console.append_system("All plugins completed.")
+            self._plugin_spinner_timer.stop()
+            self.console.hide_spinner()
+            elapsed = time.time() - self._plugin_run_start
+            done_text = random.choice(self._DONE_TEXTS)
+            self.console.append_game(f"{done_text} {self._format_elapsed(elapsed)}.")
     
+    def _plugin_spinner_html(self, frame: str, text: str) -> str:
+        return (
+            f'<span style="color: {self._SPINNER_COLOR}; font-weight: bold; '
+            f'font-family: Consolas, monospace; font-size: 10pt;">'
+            f'{frame}&nbsp;&nbsp;{text}</span>'
+        )
+
+    def _on_plugin_spinner_tick(self):
+        tick = self._plugin_spinner_tick
+        self._plugin_spinner_tick += 1
+        frame = self._SPINNER_FRAMES[tick % len(self._SPINNER_FRAMES)]
+        text = self._SPINNER_TEXTS[(tick // 20) % len(self._SPINNER_TEXTS)]
+        self.console.update_spinner(self._plugin_spinner_html(frame, text))
+
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        m, s = divmod(s, 60)
+        return f"{m}m {s:02d}s"
+
     def _on_message_entered(self, message: str):
         """Handle natural language message (for ChatGPT later)."""
         self.console.append_assistant("ChatGPT integration coming soon!")

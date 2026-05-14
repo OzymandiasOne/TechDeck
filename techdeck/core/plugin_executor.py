@@ -331,7 +331,6 @@ class PluginExecutor:
                     result.progress = 100
                     result.execution_time = execution_time
                 settings_manager.increment_plugin_runs(plugin_id)
-                safe_log(f"Done. ({execution_time:.1f}s)")
                 safe_progress(100)
 
         except Exception as e:
@@ -445,7 +444,6 @@ class PluginExecutor:
                 result.progress = 100
                 result.execution_time = execution_time
             settings_manager.increment_plugin_runs(plugin_id)
-            safe_log(f"Done. ({execution_time:.1f}s)")
             safe_progress(100)
 
         except Exception as e:
@@ -464,14 +462,14 @@ class PluginExecutor:
                 result.execution_time = execution_time
             safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
-        
+
         finally:
             if completion_callback:
                 try:
                     completion_callback(result)
                 except Exception as e:
                     print(f"Error in completion callback: {e}")
-            
+
             with self._lock:
                 if plugin_id in self.cancel_events:
                     del self.cancel_events[plugin_id]
