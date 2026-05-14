@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         "Herding the data...",
         "Convincing the files...",
         "Gallivanting...",
+        "Galvanizing..."
         "Rustling the paperwork...",
         "Bothering the PDFs...",
         "Vibing...",
@@ -438,11 +439,14 @@ class MainWindow(QMainWindow):
 
             if self._spinner_in_quote:
                 if ttick >= self._spinner_quote_end_tick:
+                    # Quote finished — reset per-text counter so the next text
+                    # always gets a full 8 s display window, not a partial one.
                     self._spinner_in_quote = False
+                    self._spinner_text_ticks = 0
                 text = self._spinner_current_quote
             else:
-                # Advance text every 40 ticks (4s)
-                if ttick > 0 and ttick % 40 == 0:
+                # Advance text every 80 ticks (8s)
+                if ttick > 0 and ttick % 80 == 0:
                     self._spinner_text_idx = (self._spinner_text_idx + 1) % len(self._SPINNER_TEXTS)
                 text = self._SPINNER_TEXTS[self._spinner_text_idx]
 
