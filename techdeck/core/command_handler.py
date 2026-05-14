@@ -48,7 +48,7 @@ class CommandHandler:
         self._rave_timer = None
         self._rave_step = 0
         self._rave_spinner_block = -1
-        self._crab = None
+        self._crabs = []
         self._moth = None
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
@@ -285,9 +285,12 @@ class CommandHandler:
         elapsed = [0]
         step = [0]
 
-        # Spawn crab
-        self._crab = CrabWidget()
-        self._crab.start()
+        # Spawn 5 crabs at staggered Y positions
+        self._crabs = []
+        for _ in range(5):
+            crab = CrabWidget()
+            crab.start()
+            self._crabs.append(crab)
 
         # Seed spinner line in console
         initial_color = self._RAVE_COLORS[0]
@@ -307,10 +310,10 @@ class CommandHandler:
                 app.setStyleSheet(generate_stylesheet(theme_name))
                 self._rave_timer.stop()
                 self._rave_timer = None
-                # Stop crab
-                if self._crab:
-                    self._crab.stop()
-                    self._crab = None
+                # Stop all crabs
+                for crab in self._crabs:
+                    crab.stop()
+                self._crabs = []
                 # Finalize spinner
                 self.console.update_spinner_block(
                     self._rave_spinner_block,
