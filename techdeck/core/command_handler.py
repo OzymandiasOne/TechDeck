@@ -290,19 +290,23 @@ class CommandHandler:
                 raw = sock.recv(4096)
                 if not raw:
                     break
-                cleaned = self._strip_telnet(raw)
+                # Process Telnet negotiation and get cleaned text + responses to send back
+                cleaned, responses = self._process_telnet(raw)
+                if responses:
+                    try:
+                        sock.sendall(responses)
+                    except OSError:
+                        break
                 text = cleaned.decode("utf-8", errors="replace")
                 text = self._ANSI_RE.sub("", text)
                 buf += text
-                # Flush complete lines; also flush partial lines that look like prompts
                 lines = buf.split("\n")
                 buf = lines[-1]
                 for line in lines[:-1]:
                     line = line.rstrip("\r")
                     if line:
                         log(line)
-                # If the remainder has no pending newline coming (prompt-style output),
-                # flush it so prompts like "Enter name:" appear immediately
+                # Flush promptlike output that won't end in a newline
                 if buf.rstrip("\r"):
                     log(buf.rstrip("\r"))
                     buf = ""
@@ -314,19 +318,38 @@ class CommandHandler:
             self._mud_connected = False
 
     @staticmethod
-    def _strip_telnet(data: bytes) -> bytes:
-        """Remove Telnet IAC negotiation sequences from raw bytes."""
-        result = bytearray()
+    def _process_telnet(data: bytes) -> tuple[bytes, bytes]:
+        """
+        Parse raw Telnet data. Strip IAC sequences from display output and
+        build polite DONT/WONT negotiation responses so the server doesn't
+        time us out waiting for a handshake reply.
+        """
+        IAC  = 0xFF
+        WILL = 0xFB
+        WONT = 0xFC
+        DO   = 0xFD
+        DONT = 0xFE
+
+        result    = bytearray()
+        responses = bytearray()
         i = 0
         while i < len(data):
             b = data[i]
-            if b == 0xFF:  # IAC
+            if b == IAC:
                 if i + 1 < len(data):
                     cmd = data[i + 1]
-                    if cmd in (0xFB, 0xFC, 0xFD, 0xFE):  # WILL/WONT/DO/DONT + option byte
+                    if cmd == WILL and i + 2 < len(data):
+                        # Server says it WILL do X → reply DONT X
+                        responses += bytes([IAC, DONT, data[i + 2]])
                         i += 3
-                    elif cmd == 0xFF:  # Escaped 0xFF
-                        result.append(0xFF)
+                    elif cmd == DO and i + 2 < len(data):
+                        # Server asks us to DO X → reply WONT X
+                        responses += bytes([IAC, WONT, data[i + 2]])
+                        i += 3
+                    elif cmd in (WONT, DONT) and i + 2 < len(data):
+                        i += 3  # acknowledgement only, no reply needed
+                    elif cmd == IAC:
+                        result.append(IAC)  # escaped 0xFF literal
                         i += 2
                     else:
                         i += 2
@@ -335,7 +358,7 @@ class CommandHandler:
             else:
                 result.append(b)
                 i += 1
-        return bytes(result)
+        return bytes(result), bytes(responses)
 
     # ------------------------------------------------------------------ #
     #  /fidget
