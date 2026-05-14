@@ -178,6 +178,10 @@ class SettingsManager:
         # Ensure plugin_settings exists
         if "plugin_settings" not in self.data:
             self.data["plugin_settings"] = {}
+
+        # Ensure plugin_stats exists (run counts + consecutive error tracking)
+        if "plugin_stats" not in self.data:
+            self.data["plugin_stats"] = {}
         
         # Ensure Default profile exists
         if DEFAULT_PROFILE_NAME not in self.data["profiles"]:
@@ -479,8 +483,44 @@ class SettingsManager:
             del self.data["plugin_settings"][plugin_id]
             self.save()
     
+    # ========== Plugin Stats ==========
+
+    def get_plugin_stats(self, plugin_id: str) -> Dict[str, Any]:
+        """Get run stats for a plugin (run_count, consecutive_errors)."""
+        return self.data.get("plugin_stats", {}).get(plugin_id, {})
+
+    def increment_plugin_runs(self, plugin_id: str) -> None:
+        """Record a successful run: bump run_count, reset consecutive_errors."""
+        if "plugin_stats" not in self.data:
+            self.data["plugin_stats"] = {}
+        stats = self.data["plugin_stats"].setdefault(plugin_id, {})
+        stats["run_count"] = stats.get("run_count", 0) + 1
+        stats["consecutive_errors"] = 0
+        self.save()
+
+    def record_plugin_error(self, plugin_id: str) -> None:
+        """Record a failed run: bump consecutive_errors."""
+        if "plugin_stats" not in self.data:
+            self.data["plugin_stats"] = {}
+        stats = self.data["plugin_stats"].setdefault(plugin_id, {})
+        stats["consecutive_errors"] = stats.get("consecutive_errors", 0) + 1
+        self.save()
+
+    # ========== Blackjack Bankroll ==========
+
+    def get_blackjack_bankroll(self) -> int:
+        """Get persisted blackjack bankroll (default $500)."""
+        return self.data.get("settings", {}).get("blackjack_bankroll", 500)
+
+    def set_blackjack_bankroll(self, amount: int) -> None:
+        """Persist blackjack bankroll."""
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["blackjack_bankroll"] = max(0, amount)
+        self.save()
+
     # ========== Helpers ==========
-    
+
     @staticmethod
     def _utc_iso() -> str:
         """Get current UTC timestamp in ISO 8601 format."""

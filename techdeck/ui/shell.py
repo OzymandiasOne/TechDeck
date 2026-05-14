@@ -22,6 +22,7 @@ from techdeck.ui.pages.settings_page import SettingsPage
 from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
 from techdeck.core.update_checker import UpdateChecker
+from techdeck.core.flavor import TalkbackState
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
 
@@ -40,6 +41,10 @@ class MainWindow(QMainWindow):
         
         # Connect signal for thread-safe update dialog
         self.show_update_signal.connect(self._show_update_dialog_slot)
+
+        # Personality: talkback pool
+        self._talkback = TalkbackState()
+        self._last_talkback_plugin: str | None = None
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -99,8 +104,8 @@ class MainWindow(QMainWindow):
         self.console.setMinimumHeight(150)
         self.console.setMaximumHeight(400)
         
-        # Setup command handler
-        self.command_handler = CommandHandler(self.settings, self.console)
+        # Setup command handler (pass self so commands can reach the window + app)
+        self.command_handler = CommandHandler(self.settings, self.console, main_window=self)
         self.console.command_entered.connect(self.command_handler.handle_command)
         self.console.message_entered.connect(self._on_message_entered)
         
@@ -249,9 +254,16 @@ class MainWindow(QMainWindow):
         if result:
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
+                # Talkback: ~1 in 5 runs, never the same plugin twice in a row
+                import random
+                if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
+                    self.console.append_game(self._talkback.get_line())
+                    self._last_talkback_plugin = plugin_id
+                else:
+                    self._last_talkback_plugin = None
             elif result.status.value == "cancelled":
                 self.console.append_system(f"⚠️ {plugin_name} was cancelled")
-            elif result.status.value == "timeout":  # PHASE 2: Handle timeout status
+            elif result.status.value == "timeout":
                 self.console.append_error(f"⏰ {plugin_name} timed out: {result.message}")
             elif result.status.value == "error":
                 self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
