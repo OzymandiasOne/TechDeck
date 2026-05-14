@@ -4,8 +4,6 @@ Processes console commands and returns responses.
 """
 
 import random
-import re
-import socket
 import threading
 from typing import Callable
 from pathlib import Path
@@ -53,8 +51,6 @@ class CommandHandler:
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
         self._jack_running = False
-        self._mud_connected = False
-        self._mud_session = None
 
         # Command registry
         self.commands = {
@@ -67,7 +63,6 @@ class CommandHandler:
             '/theme': self._cmd_theme,
             '/guides': self._cmd_guides,
             '/guide': self._cmd_show_guide,
-            '/darkerrealms': self._cmd_darkerrealms,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/jack': self._cmd_jack,
@@ -104,7 +99,6 @@ class CommandHandler:
   /guides         - List documentation guides
   /guide <name>   - Show a specific guide
 
-  /darkerrealms
   /fidget
   /rave
   /jack
@@ -225,140 +219,6 @@ class CommandHandler:
                 self.console.append_system(f"Full guide at: {guide_file}")
         except Exception as e:
             self.console.append_error(f"Error reading guide: {e}")
-
-    # ------------------------------------------------------------------ #
-    #  /darkerrealms  — MUD client
-    # ------------------------------------------------------------------ #
-
-    _MUD_HOST = "darkerrealms.org"
-    _MUD_PORT = 2000
-    _ANSI_RE = re.compile(r'\x1b\[[0-9;]*[mGKHFABCDJst]|\x1b[=>]|\x1b\([A-Z]|\x1b[A-Z]')
-
-    def _cmd_darkerrealms(self, args: str):
-        if self._mud_connected:
-            self.console.append_system("Already connected. Type 'quit' in-game to disconnect.")
-            return
-        t = threading.Thread(
-            target=self._mud_session_loop, daemon=True, name="MudSession"
-        )
-        t.start()
-        self._mud_session = t
-
-    def _mud_session_loop(self):
-        log = self.console.safe_game_log
-        ask = self.console.request_input
-
-        log(f"Connecting to {self._MUD_HOST}:{self._MUD_PORT}...")
-        try:
-            sock = socket.create_connection((self._MUD_HOST, self._MUD_PORT), timeout=15)
-        except Exception as e:
-            log(f"Connection failed: {e}")
-            return
-
-        self._mud_connected = True
-        log("Connected. Your commands are echoed above each reply.")
-        log("Type 'quit' in-game to disconnect from the MUD.")
-
-        # Reader thread — receives server output and pushes to console
-        reader = threading.Thread(
-            target=self._mud_reader, args=(sock, log), daemon=True, name="MudReader"
-        )
-        reader.start()
-
-        try:
-            while self._mud_connected:
-                # Silent input (empty prompt) — no "Type your response below" noise
-                cmd = ask("")
-                if not self._mud_connected:
-                    break
-                try:
-                    sock.sendall((cmd + "\r\n").encode("utf-8", errors="replace"))
-                except OSError:
-                    break
-        finally:
-            self._mud_connected = False
-            try:
-                sock.close()
-            except OSError:
-                pass
-            log("Disconnected from Darker Realms.")
-
-    def _mud_reader(self, sock: socket.socket, log):
-        buf = ""
-        while self._mud_connected:
-            try:
-                raw = sock.recv(4096)
-                if not raw:
-                    break
-                # Process Telnet negotiation and get cleaned text + responses to send back
-                cleaned, responses = self._process_telnet(raw)
-                if responses:
-                    try:
-                        sock.sendall(responses)
-                    except OSError:
-                        break
-                text = cleaned.decode("utf-8", errors="replace")
-                text = self._ANSI_RE.sub("", text)
-                buf += text
-                lines = buf.split("\n")
-                buf = lines[-1]
-                for line in lines[:-1]:
-                    line = line.rstrip("\r")
-                    if line:
-                        log(line)
-                # Flush promptlike output that won't end in a newline
-                if buf.rstrip("\r"):
-                    log(buf.rstrip("\r"))
-                    buf = ""
-            except OSError:
-                break
-
-        if self._mud_connected:
-            log("Connection closed by server. Press Enter to exit.")
-            self._mud_connected = False
-
-    @staticmethod
-    def _process_telnet(data: bytes) -> tuple[bytes, bytes]:
-        """
-        Parse raw Telnet data. Strip IAC sequences from display output and
-        build polite DONT/WONT negotiation responses so the server doesn't
-        time us out waiting for a handshake reply.
-        """
-        IAC  = 0xFF
-        WILL = 0xFB
-        WONT = 0xFC
-        DO   = 0xFD
-        DONT = 0xFE
-
-        result    = bytearray()
-        responses = bytearray()
-        i = 0
-        while i < len(data):
-            b = data[i]
-            if b == IAC:
-                if i + 1 < len(data):
-                    cmd = data[i + 1]
-                    if cmd == WILL and i + 2 < len(data):
-                        # Server says it WILL do X → reply DONT X
-                        responses += bytes([IAC, DONT, data[i + 2]])
-                        i += 3
-                    elif cmd == DO and i + 2 < len(data):
-                        # Server asks us to DO X → reply WONT X
-                        responses += bytes([IAC, WONT, data[i + 2]])
-                        i += 3
-                    elif cmd in (WONT, DONT) and i + 2 < len(data):
-                        i += 3  # acknowledgement only, no reply needed
-                    elif cmd == IAC:
-                        result.append(IAC)  # escaped 0xFF literal
-                        i += 2
-                    else:
-                        i += 2
-                else:
-                    i += 1
-            else:
-                result.append(b)
-                i += 1
-        return bytes(result), bytes(responses)
 
     # ------------------------------------------------------------------ #
     #  /fidget
