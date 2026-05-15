@@ -5,9 +5,10 @@ PHASE 2 FIX: Removed console height setting - users drag console to preferred he
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QComboBox, QPushButton, QFrame, QScrollArea, 
-    QLineEdit, QMessageBox, QSpinBox, QTabWidget
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox, QPushButton, QFrame, QScrollArea,
+    QLineEdit, QMessageBox, QSpinBox, QTabWidget,
+    QCheckBox, QSlider
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -175,7 +176,42 @@ class SettingsPage(QWidget):
         theme_section.addWidget(theme_note)
         
         layout.addLayout(theme_section)
-        
+
+        # ===== Audio Section =====
+        audio_section = self._create_section("Sound Effects")
+
+        self.audio_enabled_check = QCheckBox("Enable sound effects")
+        self.audio_enabled_check.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        self.audio_enabled_check.toggled.connect(self._on_audio_enabled_toggled)
+
+        volume_row = QHBoxLayout()
+        volume_row.setSpacing(12)
+
+        volume_label = QLabel("Volume:")
+        volume_label.setStyleSheet("font-weight: 600;")
+        volume_label.setFixedWidth(60)
+
+        self.audio_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.audio_volume_slider.setRange(0, 100)
+        self.audio_volume_slider.setMaximumWidth(200)
+        self.audio_volume_slider.setMinimumHeight(24)
+
+        self.audio_volume_pct = QLabel("80%")
+        self.audio_volume_pct.setFixedWidth(36)
+        self.audio_volume_slider.valueChanged.connect(
+            lambda v: self.audio_volume_pct.setText(f"{v}%")
+        )
+
+        volume_row.addWidget(volume_label)
+        volume_row.addWidget(self.audio_volume_slider)
+        volume_row.addWidget(self.audio_volume_pct)
+        volume_row.addStretch()
+
+        audio_section.addWidget(self.audio_enabled_check)
+        audio_section.addLayout(volume_row)
+
+        layout.addLayout(audio_section)
+
         # ===== About TechDeck Section =====
         from techdeck.core.constants import APP_VERSION, APP_RELEASE_NAME
         
@@ -480,6 +516,16 @@ class SettingsPage(QWidget):
         index = self.theme_combo.findText(current_theme.capitalize())
         if index >= 0:
             self.theme_combo.setCurrentIndex(index)
+
+        audio = self.settings.get_audio_settings()
+        self.audio_enabled_check.setChecked(audio.get("enabled", True))
+        self.audio_volume_slider.setValue(audio.get("volume", 80))
+        self._on_audio_enabled_toggled(audio.get("enabled", True))
+
+    def _on_audio_enabled_toggled(self, enabled: bool) -> None:
+        """Gray out volume controls when audio is disabled."""
+        self.audio_volume_slider.setEnabled(enabled)
+        self.audio_volume_pct.setEnabled(enabled)
     
     def _on_theme_changed(self, theme_name: str):
         """Handle theme selection change."""
@@ -493,12 +539,18 @@ class SettingsPage(QWidget):
         old_theme = self.settings.get_theme()
         theme_changed = (theme_name != old_theme)
         self.settings.set_theme(theme_name)
-        
+
+        # Save audio settings and apply live
+        audio_enabled = self.audio_enabled_check.isChecked()
+        audio_volume = self.audio_volume_slider.value()
+        self.settings.set_audio_settings(audio_enabled, audio_volume)
+
+        from techdeck.core.audio_manager import get_audio_manager
+        get_audio_manager().configure(enabled=audio_enabled, volume=audio_volume)
+
         # Show confirmation
         if theme_changed:
-            # Theme will be applied immediately by shell's handler
             self.theme_changed.emit(theme_name)
-            # Don't show message here - shell will show it after applying
         else:
             QMessageBox.information(
                 self,
@@ -520,10 +572,14 @@ class SettingsPage(QWidget):
         
         if reply == QMessageBox.StandardButton.Yes:
             self.settings.set_theme("dark")
+            self.settings.set_audio_settings(True, 80)
+
+            from techdeck.core.audio_manager import get_audio_manager
+            get_audio_manager().configure(enabled=True, volume=80)
 
             # Reload UI
             self._load_general_settings()
-            
+
             # Emit theme change to apply immediately
             self.theme_changed.emit("dark")
     

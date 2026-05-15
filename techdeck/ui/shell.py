@@ -26,6 +26,7 @@ from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
 from techdeck.core.update_checker import UpdateChecker
 from techdeck.core.flavor import TalkbackState
+from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
 
@@ -58,7 +59,7 @@ class MainWindow(QMainWindow):
         "Herding the data...",
         "Convincing the files...",
         "Gallivanting...",
-        "Galvanizing..."
+        "Galvanizing...",
         "Rustling the paperwork...",
         "Bothering the PDFs...",
         "Vibing...",
@@ -70,6 +71,10 @@ class MainWindow(QMainWindow):
         "Mulling...",
         "Inferring...",
         "Hashing...",
+        "Simmering...",
+        "Levitating...",
+        "Slithering...",
+        "Spaghettifying the data...",
     ]
     _DONE_TEXTS = [
         "Combobulated for",
@@ -102,6 +107,7 @@ class MainWindow(QMainWindow):
         "Dan Mullin'd it in",
         "Inferred in",
         "Hashbrowned in",
+        "Levitated for",
 
     ]
     _SPINNER_QUOTES = [
@@ -141,6 +147,10 @@ class MainWindow(QMainWindow):
         # Personality: talkback pool
         self._talkback = TalkbackState()
         self._last_talkback_plugin: str | None = None
+
+        # Audio: configure singleton from saved settings
+        audio = settings.get_audio_settings()
+        get_audio_manager().configure(enabled=audio.get("enabled", True), volume=audio.get("volume", 80))
 
         # Plugin spinner state
         self._plugin_spinner_timer = QTimer(self)
@@ -381,6 +391,7 @@ class MainWindow(QMainWindow):
         if result:
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
+                get_audio_manager().play(SOUND_SUCCESS)
                 # Talkback: ~1 in 5 runs, never the same plugin twice in a row
                 if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
                     self.console.append_game(self._talkback.get_line())

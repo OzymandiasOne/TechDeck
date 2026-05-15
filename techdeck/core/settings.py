@@ -174,6 +174,10 @@ class SettingsManager:
         # PHASE 2: Remove console_height if it exists (migration)
         if "console_height" in self.data.get("settings", {}):
             del self.data["settings"]["console_height"]
+
+        # Ensure audio settings exist with defaults
+        if "audio" not in self.data.get("settings", {}):
+            self.data["settings"]["audio"] = {"enabled": True, "volume": 80}
         
         # Ensure plugin_settings exists
         if "plugin_settings" not in self.data:
@@ -504,6 +508,20 @@ class SettingsManager:
             self.data["plugin_stats"] = {}
         stats = self.data["plugin_stats"].setdefault(plugin_id, {})
         stats["consecutive_errors"] = stats.get("consecutive_errors", 0) + 1
+        self.save()
+
+    # ========== Audio Settings ==========
+
+    def get_audio_settings(self) -> dict:
+        """Get audio settings dict with keys 'enabled' (bool) and 'volume' (int 0-100)."""
+        defaults = {"enabled": True, "volume": 80}
+        return self.data.get("settings", {}).get("audio", defaults)
+
+    def set_audio_settings(self, enabled: bool, volume: int) -> None:
+        """Persist audio settings."""
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["audio"] = {"enabled": enabled, "volume": max(0, min(100, volume))}
         self.save()
 
     # ========== Blackjack Bankroll ==========
