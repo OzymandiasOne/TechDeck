@@ -319,6 +319,7 @@ class Sidebar(QWidget):
 
         # Select Home by default
         self.nav_buttons[0].setChecked(True)
+        self._current_page_id = "home"
 
         # Push the feedback button to the bottom
         nav_layout.addStretch()
@@ -454,12 +455,15 @@ class Sidebar(QWidget):
 
     def _on_nav_clicked(self, page_id: str):
         """Handle navigation button click."""
-        # Uncheck all other buttons
         for btn in self.nav_buttons:
             if btn.page_id != page_id:
                 btn.setChecked(False)
 
-        # Emit signal
+        if page_id != self._current_page_id:
+            from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+            get_audio_manager().play(SOUND_CLICK)
+            self._current_page_id = page_id
+
         self.page_changed.emit(page_id)
 
     def _open_feedback_dialog(self):
@@ -469,6 +473,7 @@ class Sidebar(QWidget):
         dlg.exec()
 
     def set_current_page(self, page_id: str):
-        """Programmatically set current page."""
+        """Programmatically set current page (no click sound — not user-initiated)."""
         for btn in self.nav_buttons:
             btn.setChecked(btn.page_id == page_id)
+        self._current_page_id = page_id

@@ -15,6 +15,7 @@ from PySide6.QtMultimedia import QSoundEffect
 SOUND_SUCCESS = "success"
 SOUND_ERROR = "error"
 SOUND_CLICK = "click"
+SOUND_CLEAR = "clear"
 SOUND_EASTER_EGG = "easter_egg"
 
 # Map sound IDs to filenames in assets/sounds/
@@ -22,6 +23,7 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_SUCCESS: "success.wav",
     SOUND_ERROR: "error.wav",
     SOUND_CLICK: "click.wav",
+    SOUND_CLEAR: "clear.wav",
     SOUND_EASTER_EGG: "easter_egg.wav",
 }
 

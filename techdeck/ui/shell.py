@@ -26,7 +26,7 @@ from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
 from techdeck.core.update_checker import UpdateChecker
 from techdeck.core.flavor import TalkbackState
-from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
+from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS, SOUND_ERROR
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
 
@@ -408,8 +408,10 @@ class MainWindow(QMainWindow):
                 self.console.append_system(f"⚠️ {plugin_name} was cancelled")
             elif result.status.value == "timeout":
                 self.console.append_error(f"⏰ {plugin_name} timed out: {result.message}")
+                get_audio_manager().play(SOUND_ERROR)
             elif result.status.value == "error":
                 self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
+                get_audio_manager().play(SOUND_ERROR)
     
     def _on_all_plugins_done(self):
         """Handle the end of a full run (all queued plugins finished or cancelled)."""

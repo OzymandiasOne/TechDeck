@@ -580,6 +580,9 @@ class HomePage(QWidget):
         else:
             self.selected_tiles.discard(tile_id)
 
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+        get_audio_manager().play(SOUND_CLICK)
+
         if self._is_running:
             return  # don't disturb button state while plugins are running
 
@@ -595,6 +598,9 @@ class HomePage(QWidget):
     def _on_profile_selected(self, profile_name: str):
         if not profile_name:
             return
+
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+        get_audio_manager().play(SOUND_CLICK)
 
         self.settings.set_current_profile(profile_name)
         self.selected_tiles.clear()

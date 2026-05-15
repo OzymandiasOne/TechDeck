@@ -313,8 +313,10 @@ class ConsoleWidget(QWidget):
     
     def clear(self):
         """Clear console output."""
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLEAR
         self.output.clear()
         self.append_system("Console cleared.")
+        get_audio_manager().play(SOUND_CLEAR)
     
     def _scroll_to_bottom(self):
         """Scroll output to bottom."""
