@@ -60,11 +60,16 @@ class AudioManager:
     # ── Public API ──────────────────────────────────────────────────────────
 
     def configure(self, *, enabled: bool, volume: int) -> None:
-        """Apply settings. volume is 0–100 (int from SettingsManager)."""
+        """Apply settings and pre-load all registered sounds. volume is 0–100."""
         self._enabled = enabled
         self._volume = max(0, min(100, volume)) / 100.0
         for effect in self._effects.values():
             effect.setVolume(self._volume)
+        # Pre-load all registered sounds so they're ready before the first play() call.
+        # QSoundEffect loads asynchronously; doing this at startup gives plenty of lead time.
+        for sound_id in _SOUND_FILES:
+            if sound_id not in self._effects:
+                self._load(sound_id)
 
     def play(self, sound_id: str) -> None:
         """Play a named sound. Silent no-op if disabled, missing, or unregistered."""
@@ -73,7 +78,7 @@ class AudioManager:
         if sound_id not in self._effects:
             self._load(sound_id)
         effect = self._effects.get(sound_id)
-        if effect and effect.isLoaded():
+        if effect is not None:
             effect.play()
 
     def set_enabled(self, enabled: bool) -> None:
