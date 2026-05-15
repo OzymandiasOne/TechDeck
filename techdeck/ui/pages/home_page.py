@@ -284,6 +284,7 @@ class HomePage(QWidget):
     plugin_progress = Signal(str, int)
     plugin_completed = Signal(str)
     plugin_status_updated = Signal(str, str)  # tile_id, status — safe to emit from any thread
+    all_plugins_done = Signal()               # emitted on main thread after every plugin in a run finishes
     _plugins_all_done = Signal()              # internal — emitted from worker thread, handled on main thread
 
     def __init__(self, settings: SettingsManager, parent=None):
@@ -740,6 +741,7 @@ class HomePage(QWidget):
     def _check_run_complete(self):
         """Called on the main thread via queued signal when no more plugins remain."""
         self._set_button_run_mode()
+        self.all_plugins_done.emit()
 
     def _set_button_cancel_mode(self):
         """Switch the Run Selected button to Cancel (red) while plugins run."""

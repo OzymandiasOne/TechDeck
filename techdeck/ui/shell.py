@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self.home_page.plugin_log.connect(self._on_plugin_log)
         self.home_page.plugin_progress.connect(self._on_plugin_progress)
         self.home_page.plugin_completed.connect(self._on_plugin_completed)
+        self.home_page.all_plugins_done.connect(self._on_all_plugins_done)
         
         # Connect run button to home page
         self.home_page.set_run_button(self.btn_run)
@@ -404,19 +405,18 @@ class MainWindow(QMainWindow):
                 self.console.append_error(f"⏰ {plugin_name} timed out: {result.message}")
             elif result.status.value == "error":
                 self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
-
-        # Check if all plugins are done
-        active = self.home_page.plugin_executor.get_active_plugins()
-        if not active:
-            self._plugin_spinner_timer.stop()
-            elapsed = time.time() - self._plugin_run_start
-            done_text = random.choice(self._DONE_TEXTS)
-            done_html = self._plugin_spinner_html(
-                "✓", f"{done_text} {self._format_elapsed(elapsed)}."
-            )
-            self.console.show_spinner(done_html)
-            QTimer.singleShot(4000, self.console.hide_spinner)
     
+    def _on_all_plugins_done(self):
+        """Handle the end of a full run (all queued plugins finished or cancelled)."""
+        self._plugin_spinner_timer.stop()
+        elapsed = time.time() - self._plugin_run_start
+        done_text = random.choice(self._DONE_TEXTS)
+        done_html = self._plugin_spinner_html(
+            "✓", f"{done_text} {self._format_elapsed(elapsed)}."
+        )
+        self.console.show_spinner(done_html)
+        QTimer.singleShot(4000, self.console.hide_spinner)
+
     def _plugin_spinner_html(self, frame: str, text: str) -> str:
         return (
             f'<span style="color: {self._SPINNER_COLOR}; font-weight: bold; '

@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QUrl, QTimer
 from PySide6.QtMultimedia import QSoundEffect
 
 # ── Sound ID constants ──────────────────────────────────────────────────────
@@ -38,6 +38,9 @@ class AudioManager:
     """
     Singleton audio manager. Call configure() once at startup with saved settings,
     then play(sound_id) anywhere to fire a sound.
+
+    A fresh QSoundEffect is created on every play() call so that audio device
+    changes (headphone plug/unplug, mute/unmute) are always picked up.
     """
 
     _instance: Optional["AudioManager"] = None
@@ -55,54 +58,65 @@ class AudioManager:
         self._initialized = True
         self._enabled: bool = True
         self._volume: float = 0.8          # 0.0–1.0 internally
-        self._effects: Dict[str, QSoundEffect] = {}
+        self._active: List[QSoundEffect] = []  # keeps refs alive until playback ends
 
     # ── Public API ──────────────────────────────────────────────────────────
 
     def configure(self, *, enabled: bool, volume: int) -> None:
-        """Apply settings and pre-load all registered sounds. volume is 0–100."""
+        """Apply settings. volume is 0–100 (int from SettingsManager)."""
         self._enabled = enabled
         self._volume = max(0, min(100, volume)) / 100.0
-        for effect in self._effects.values():
-            effect.setVolume(self._volume)
-        # Pre-load all registered sounds so they're ready before the first play() call.
-        # QSoundEffect loads asynchronously; doing this at startup gives plenty of lead time.
-        for sound_id in _SOUND_FILES:
-            if sound_id not in self._effects:
-                self._load(sound_id)
 
     def play(self, sound_id: str) -> None:
-        """Play a named sound. Silent no-op if disabled, missing, or unregistered."""
+        """
+        Play a named sound. A fresh QSoundEffect is created each call so that
+        audio device changes are always reflected. Silent no-op if disabled or
+        file missing.
+        """
         if not self._enabled:
             return
-        if sound_id not in self._effects:
-            self._load(sound_id)
-        effect = self._effects.get(sound_id)
-        if effect is not None:
-            effect.play()
-
-    def set_enabled(self, enabled: bool) -> None:
-        self._enabled = enabled
-
-    def set_volume(self, volume: int) -> None:
-        """volume is 0–100."""
-        self._volume = max(0, min(100, volume)) / 100.0
-        for effect in self._effects.values():
-            effect.setVolume(self._volume)
-
-    # ── Internal ────────────────────────────────────────────────────────────
-
-    def _load(self, sound_id: str) -> None:
         filename = _SOUND_FILES.get(sound_id)
         if not filename:
             return
         path = _sounds_dir() / filename
         if not path.exists():
             return
+
         effect = QSoundEffect()
-        effect.setSource(QUrl.fromLocalFile(str(path)))
         effect.setVolume(self._volume)
-        self._effects[sound_id] = effect
+        effect.setSource(QUrl.fromLocalFile(str(path)))
+        self._active.append(effect)
+
+        def _on_status():
+            if effect.status() == QSoundEffect.Status.Ready:
+                effect.play()
+                # Release our reference a few seconds after playback starts
+                QTimer.singleShot(4000, lambda: self._release(effect))
+            elif effect.status() not in (
+                QSoundEffect.Status.Null, QSoundEffect.Status.Loading
+            ):
+                self._release(effect)
+
+        if effect.status() == QSoundEffect.Status.Ready:
+            effect.play()
+            QTimer.singleShot(4000, lambda: self._release(effect))
+        else:
+            effect.statusChanged.connect(_on_status)
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+
+    def set_volume(self, volume: int) -> None:
+        """volume is 0–100. Affects future play() calls only."""
+        self._volume = max(0, min(100, volume)) / 100.0
+
+    # ── Internal ────────────────────────────────────────────────────────────
+
+    def _release(self, effect: QSoundEffect) -> None:
+        try:
+            self._active.remove(effect)
+        except ValueError:
+            pass
 
 
 def get_audio_manager() -> AudioManager:
