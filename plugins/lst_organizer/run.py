@@ -83,6 +83,21 @@ def _ensure_dir(p: Path) -> None:
 
 
 ORDER_PREFIX = re.compile(r"^(X|BJ|BK|XY)[0-9]+$", re.IGNORECASE)
+_BATCH_INPUT_RE = re.compile(r'^(?:batch|po)\s+([0-9]+)$', re.IGNORECASE)
+
+
+def _parse_batch_input(raw: str) -> Optional[str]:
+    """
+    Accept 'Batch 403', 'PO 403', or bare '403' (all case-insensitive).
+    Returns the numeric batch string, or None if unrecognisable.
+    """
+    raw = raw.strip()
+    m = _BATCH_INPUT_RE.match(raw)
+    if m:
+        return m.group(1)
+    if re.match(r'^[0-9]+$', raw):
+        return raw
+    return None
 
 # ── LST discovery ──────────────────────────────────────────────────────────────
 
@@ -537,8 +552,16 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     dry_run = settings.get('dry_run', False)
     do_organize = settings.get('organize_by_material', True)
 
+    # Prompt for batch number when not pre-configured in settings
     if not batch_no:
-        raise ValueError("Batch number not configured. Go to Settings > Plugin Settings > LST Organizer.")
+        console = params.get('console')
+        if console and hasattr(console, 'request_input'):
+            raw = console.request_input('Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
+        else:
+            raw = input('Enter batch number: ')
+        batch_no = _parse_batch_input(raw or '')
+        if not batch_no:
+            raise ValueError(f"Unrecognised batch number input: {raw!r}")
 
     # Resolve base path — auto-discover if not set
     if base_path_str:

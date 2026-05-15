@@ -284,12 +284,14 @@ class HomePage(QWidget):
     plugin_progress = Signal(str, int)
     plugin_completed = Signal(str)
     plugin_status_updated = Signal(str, str)  # tile_id, status — safe to emit from any thread
-    
+    _plugins_all_done = Signal()              # internal — emitted from worker thread, handled on main thread
+
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
         self.selected_tiles = set()
         self.tile_cards = {}  # PHASE 3: Track card widgets by tile_id
+        self._is_running = False  # True while any plugin is executing
         
         self.plugin_loader = PluginLoader()
         self.plugin_loader.discover_plugins()
@@ -297,6 +299,7 @@ class HomePage(QWidget):
         self._plugin_queue: list = []
         self._plugin_params: dict = {}
         self.plugin_status_updated.connect(self._apply_plugin_status)
+        self._plugins_all_done.connect(self._check_run_complete)
 
         # Log buffer: worker threads put messages here; drain timer delivers them
         # to the main thread in batches so the Qt event queue never floods.
@@ -576,6 +579,9 @@ class HomePage(QWidget):
         else:
             self.selected_tiles.discard(tile_id)
 
+        if self._is_running:
+            return  # don't disturb button state while plugins are running
+
         has_selection = len(self.selected_tiles) > 0
         if hasattr(self, 'run_btn') and self.run_btn:
             self.run_btn.setEnabled(has_selection)
@@ -592,11 +598,12 @@ class HomePage(QWidget):
         self.settings.set_current_profile(profile_name)
         self.selected_tiles.clear()
 
-        if hasattr(self, 'run_btn') and self.run_btn:
-            self.run_btn.setEnabled(False)
-        if hasattr(self, '_btn_pulse') and self._btn_pulse:
-            self._btn_pulse.stop()
-            self._btn_glow.setBlurRadius(0)
+        if not self._is_running:
+            if hasattr(self, 'run_btn') and self.run_btn:
+                self.run_btn.setEnabled(False)
+            if hasattr(self, '_btn_pulse') and self._btn_pulse:
+                self._btn_pulse.stop()
+                self._btn_glow.setBlurRadius(0)
 
         self._refresh_tiles()
         self.profile_changed.emit(profile_name)
@@ -639,7 +646,13 @@ class HomePage(QWidget):
         self._btn_pulse.setLoopCount(-1)
     
     def _run_selected_plugins(self):
-        """Build a queue from selected plugins and run them one at a time."""
+        """Run selected plugins, or cancel all if already running."""
+        if self._is_running:
+            # User clicked Cancel — clear queue and signal all active plugins to stop
+            self._plugin_queue.clear()
+            self.plugin_executor.cancel_all()
+            return  # button resets when the last plugin reports completion
+
         if not self.selected_tiles:
             return
 
@@ -655,6 +668,7 @@ class HomePage(QWidget):
 
         self._plugin_queue = list(self.selected_tiles)
         self._plugin_params = {'console': console}
+        self._set_button_cancel_mode()
         self._start_next_plugin()
 
     def _start_next_plugin(self):
@@ -719,3 +733,75 @@ class HomePage(QWidget):
         self.plugin_completed.emit(tile_id)
         # Kick off the next plugin in the queue, if any
         self._start_next_plugin()
+        # If nothing left to run, notify the main thread to reset the button
+        if not self._plugin_queue:
+            self._plugins_all_done.emit()
+
+    def _check_run_complete(self):
+        """Called on the main thread via signal when the queue is empty."""
+        if not self.plugin_executor.get_active_plugins():
+            self._set_button_run_mode()
+
+    def _set_button_cancel_mode(self):
+        """Switch the Run Selected button to Cancel (red) while plugins run."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+        self._is_running = True
+        if not hasattr(self, 'run_btn') or not self.run_btn:
+            return
+        self.run_btn.setText("Cancel")
+        self.run_btn.setEnabled(True)
+        self.run_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme.error};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.error};
+                color: #FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background-color: {theme.error};
+                color: #FFFFFF;
+            }}
+        """)
+        if hasattr(self, '_btn_pulse') and self._btn_pulse:
+            self._btn_pulse.stop()
+        if hasattr(self, '_btn_glow') and self._btn_glow:
+            self._btn_glow.setBlurRadius(0)
+
+    def _set_button_run_mode(self):
+        """Restore the button to Run Selected (accent) after all plugins finish."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+        self._is_running = False
+        if not hasattr(self, 'run_btn') or not self.run_btn:
+            return
+        self.run_btn.setText("Run Selected")
+        has_selection = len(self.selected_tiles) > 0
+        self.run_btn.setEnabled(has_selection)
+        self.run_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme.accent};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.accent_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {theme.accent_pressed};
+            }}
+            QPushButton:disabled {{
+                opacity: 0.5;
+            }}
+        """)
+        if has_selection and hasattr(self, '_btn_pulse') and self._btn_pulse:
+            self._btn_pulse.start()

@@ -24,13 +24,13 @@
       {
         "key": "batch_number",
         "type": "string",
-        "label": "Batch Number",
-        "description": "Enter the batch number to process (e.g., 403)",
+        "label": "Batch Number (Optional)",
+        "description": "Leave blank to be prompted at run time. Or pre-fill to skip the prompt.",
         "placeholder": "403",
-        "required": true,
+        "required": false,
         "default": "",
         "validation": {
-          "pattern": "^[0-9]+$",
+          "pattern": "^[0-9]*$",
           "message": "Batch number must contain only digits"
         }
       },
