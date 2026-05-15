@@ -427,6 +427,9 @@ def _gather_and_copy(
         name = child.name
         if name == f"Batch {batch_num} - Documentation":
             continue
+        if name.strip().lower() == "repeat batches":
+            debug_fp.write(json.dumps({"event": "skip_repeat_batches", "dir": str(child)}) + "\n")
+            continue
         if len(name.split("-")) >= 3:
             orders.add(name)
 
