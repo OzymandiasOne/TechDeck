@@ -667,8 +667,14 @@ class HomePage(QWidget):
                 break
             parent = parent.parent()
 
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
         self._plugin_queue = list(self.selected_tiles)
-        self._plugin_params = {'console': console}
+        self._plugin_params = {
+            'console': console,
+            # GUI plugins (requires_main_thread) suppress the auto success sound and call
+            # this instead at a meaningful action point (e.g. file saved, code generated).
+            'on_success': lambda: get_audio_manager().play(SOUND_SUCCESS),
+        }
         self._set_button_cancel_mode()
         self._start_next_plugin()
 

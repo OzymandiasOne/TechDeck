@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
         "Faffing about with PDFs...",
         "Enchanting...",
         "Cattywampusing...",
-        "Concoting...",
+        "Concocting...",
         "Determining...",
         "Negotiating with Excel...",
         "Herding the data...",
@@ -75,6 +75,9 @@ class MainWindow(QMainWindow):
         "Levitating...",
         "Slithering...",
         "Spaghettifying the data...",
+        "Making weekend plans...",
+        "Shaking fist angrily at the Old Gods...",
+        "typing /rave into the console..."
     ]
     _DONE_TEXTS = [
         "Combobulated for",
@@ -86,9 +89,8 @@ class MainWindow(QMainWindow):
         "Skedaddling for",
         "Waffled about for",
         "Enchanted for",
-        "Cattywampused through in",
         "Cattywampused for",
-        "Concoted and loaded in",
+        "Concocted and loaded in",
         "Negotiated with Excel for",
         "Herded all the data in",
         "Convinced the files in",
@@ -392,7 +394,10 @@ class MainWindow(QMainWindow):
         if result:
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
-                get_audio_manager().play(SOUND_SUCCESS)
+                # GUI plugins (requires_main_thread) call params['on_success'] themselves
+                # at a meaningful moment. Suppress the auto sound for them.
+                if not getattr(plugin, 'requires_main_thread', False):
+                    get_audio_manager().play(SOUND_SUCCESS)
                 # Talkback: ~1 in 5 runs, never the same plugin twice in a row
                 if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
                     self.console.append_game(self._talkback.get_line())

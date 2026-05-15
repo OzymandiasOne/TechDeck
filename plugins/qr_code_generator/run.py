@@ -42,6 +42,7 @@ def run(params: dict, progress_callback, cancel_event):
     """
     log = params.get("log", print)
     settings = params.get("settings", {})
+    on_success = params.get("on_success")  # called when a QR code is actually generated
 
     try:
         DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +51,7 @@ def run(params: dict, progress_callback, cancel_event):
         progress_callback(10)
 
         global _window
-        _window = QRGeneratorWindow(settings, DATA_FILE)
+        _window = QRGeneratorWindow(settings, DATA_FILE, on_success=on_success)
         _window.show()
 
         progress_callback(100)
@@ -64,12 +65,13 @@ def run(params: dict, progress_callback, cancel_event):
 class QRGeneratorWindow(QWidget):
     """Main window for QR Code Generator"""
 
-    def __init__(self, config: dict, data_file: Path):
+    def __init__(self, config: dict, data_file: Path, on_success=None):
         super().__init__()
         self.config = config
         self.data_file = data_file
         self.entrypoints = self.load_entrypoints()
         self.current_qr_pixmap = None
+        self._on_success = on_success  # callable; fired after each successful QR generation
 
         self.setWindowTitle("QR Code Generator")
         self.setMinimumSize(800, 600)
@@ -468,6 +470,10 @@ class QRGeneratorWindow(QWidget):
             # Save to library if URL and checkbox is checked
             if qr_type == "URL" and self.save_to_library_check.isChecked():
                 self.add_to_library(name, content, str(output_path), qr_type)
+
+            # Fire the success sound — this is the meaningful completion point for a GUI plugin
+            if callable(self._on_success):
+                self._on_success()
 
             QMessageBox.information(
                 self,
