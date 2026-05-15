@@ -11,6 +11,26 @@ from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore import Qt, QTimer, QPointF, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath
 
+# ── Moth sound pool ────────────────────────────────────────────────────────────
+# Module-level so the pool persists across /moth invocations (new MothWidget
+# instances). Exhausts all 11 voices before cycling; never repeats back-to-back.
+
+_MOTH_SOUND_IDS = [f"moth_voice_{i}" for i in range(1, 12)]
+_moth_pool: list = []
+_moth_last: str | None = None
+
+
+def _next_moth_sound() -> str:
+    global _moth_pool, _moth_last
+    if not _moth_pool:
+        _moth_pool = [s for s in _MOTH_SOUND_IDS if s != _moth_last]
+        if not _moth_pool:           # safety: only 1 sound registered
+            _moth_pool = list(_MOTH_SOUND_IDS)
+        random.shuffle(_moth_pool)
+    sound = _moth_pool.pop()
+    _moth_last = sound
+    return sound
+
 
 class MothWidget(QWidget):
     """
@@ -98,6 +118,12 @@ class MothWidget(QWidget):
             self.move(int(nx), int(ny))
 
         self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            from techdeck.core.audio_manager import get_audio_manager
+            get_audio_manager().play(_next_moth_sound())
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         self._timer.stop()

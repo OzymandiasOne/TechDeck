@@ -25,6 +25,7 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_CLICK: "click.wav",
     SOUND_CLEAR: "clear.wav",
     SOUND_EASTER_EGG: "easter_egg.wav",
+    **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 
 
