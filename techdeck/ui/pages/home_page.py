@@ -671,10 +671,10 @@ class HomePage(QWidget):
         self._set_button_cancel_mode()
         self._start_next_plugin()
 
-    def _start_next_plugin(self):
-        """Start the next queued plugin. Safe to call from any thread."""
+    def _start_next_plugin(self) -> bool:
+        """Start the next queued plugin. Returns True if a plugin was started."""
         if not self._plugin_queue:
-            return
+            return False
 
         tile_id = self._plugin_queue.pop(0)
         plugin = self.plugin_executor.plugin_loader.get_plugin(tile_id)
@@ -690,6 +690,7 @@ class HomePage(QWidget):
             completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
             timeout=plugin_timeout
         )
+        return True
 
     def _remove_missing_plugin(self, tile_id: str):
         """Remove a missing plugin from the current kit and refresh the grid."""
@@ -731,16 +732,14 @@ class HomePage(QWidget):
         final_status = PluginCard.STATUS_IDLE if status == "success" else status
         self.plugin_status_updated.emit(tile_id, final_status)
         self.plugin_completed.emit(tile_id)
-        # Kick off the next plugin in the queue, if any
-        self._start_next_plugin()
-        # If nothing left to run, notify the main thread to reset the button
-        if not self._plugin_queue:
+        # Kick off the next plugin; if nothing started, the whole run is done
+        started_another = self._start_next_plugin()
+        if not started_another:
             self._plugins_all_done.emit()
 
     def _check_run_complete(self):
-        """Called on the main thread via signal when the queue is empty."""
-        if not self.plugin_executor.get_active_plugins():
-            self._set_button_run_mode()
+        """Called on the main thread via queued signal when no more plugins remain."""
+        self._set_button_run_mode()
 
     def _set_button_cancel_mode(self):
         """Switch the Run Selected button to Cancel (red) while plugins run."""

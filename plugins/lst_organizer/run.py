@@ -546,22 +546,19 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     log("Starting LST Organizer...")
     progress_callback(0)
 
-    batch_no = settings.get('batch_number', '').strip()
     base_path_str = settings.get('base_path', '').strip()
-    master_po_str = settings.get('master_po_path', '').strip()
     dry_run = settings.get('dry_run', False)
     do_organize = settings.get('organize_by_material', True)
 
-    # Prompt for batch number when not pre-configured in settings
+    # Always prompt for batch number at run time
+    console = params.get('console')
+    if console and hasattr(console, 'request_input'):
+        raw = console.request_input('Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
+    else:
+        raw = input('Enter batch number: ')
+    batch_no = _parse_batch_input(raw or '')
     if not batch_no:
-        console = params.get('console')
-        if console and hasattr(console, 'request_input'):
-            raw = console.request_input('Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
-        else:
-            raw = input('Enter batch number: ')
-        batch_no = _parse_batch_input(raw or '')
-        if not batch_no:
-            raise ValueError(f"Unrecognised batch number input: {raw!r}")
+        raise ValueError(f"Unrecognised batch number input: {raw!r}")
 
     # Resolve base path — auto-discover if not set
     if base_path_str:
@@ -632,14 +629,8 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             log("Cancelled."); return
 
         # ── Phase 3: Locate Master PO ──────────────────────────────────────────
-        if master_po_str:
-            master_po: Optional[Path] = Path(master_po_str)
-            if not master_po.exists():
-                raise RuntimeError(f"Master PO file not found: {master_po_str}")
-            log(f"Using Master PO: {master_po.name}")
-        else:
-            log("Auto-discovering Master PO workbook...")
-            master_po = _autodiscover_master_po(batch_path, debug_fp)
+        log("Auto-discovering Master PO workbook...")
+        master_po = _autodiscover_master_po(batch_path, debug_fp)
 
         if not master_po or not master_po.exists():
             log("WARNING: Master PO not found — writing seed file (filenames only).")
@@ -652,7 +643,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             )
             raise RuntimeError(
                 f"Master PO not found. Seed report written to:\n  {txt_path}\n"
-                "Re-run after setting Master PO File in plugin settings."
+                "Ensure the Master PO workbook is present in the batch folder and re-run."
             )
 
         debug_fp.write(json.dumps({"event": "master_po", "path": str(master_po)}) + "\n")
