@@ -633,6 +633,8 @@ class LibraryPage(QWidget):
             self.selected_tile_ids.add(tile_id)
         else:
             self.selected_tile_ids.discard(tile_id)
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+        get_audio_manager().play(SOUND_CLICK)
     
     def _on_tile_toggled(self, checked: bool):
         """Handle tile selection toggle (legacy method for backward compatibility)."""

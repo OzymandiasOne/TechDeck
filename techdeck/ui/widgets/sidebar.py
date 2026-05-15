@@ -460,8 +460,8 @@ class Sidebar(QWidget):
                 btn.setChecked(False)
 
         if page_id != self._current_page_id:
-            from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
-            get_audio_manager().play(SOUND_CLICK)
+            from techdeck.core.audio_manager import get_audio_manager, SOUND_NAV
+            get_audio_manager().play(SOUND_NAV)
             self._current_page_id = page_id
 
         self.page_changed.emit(page_id)

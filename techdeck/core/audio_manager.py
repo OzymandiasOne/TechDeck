@@ -15,6 +15,7 @@ from PySide6.QtMultimedia import QSoundEffect
 SOUND_SUCCESS = "success"
 SOUND_ERROR = "error"
 SOUND_CLICK = "click"
+SOUND_NAV = "nav"
 SOUND_CLEAR = "clear"
 SOUND_EASTER_EGG = "easter_egg"
 
@@ -23,6 +24,7 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_SUCCESS: "success.wav",
     SOUND_ERROR: "error.wav",
     SOUND_CLICK: "click.wav",
+    SOUND_NAV: "nav.wav",
     SOUND_CLEAR: "clear.wav",
     SOUND_EASTER_EGG: "easter_egg.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
