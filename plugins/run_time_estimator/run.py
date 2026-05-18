@@ -247,9 +247,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         f.write(f"Run Time Estimate — Batch {batch_no}\n")
         f.write("=" * 30 + "\n")
         f.write(f"Parts matched : {matched_count}\n")
-        f.write(f"Total (seconds): {total_seconds:.1f}\n")
-        f.write(f"Total (hours)  : {total_hours:.2f}\n")
-        f.write(f"Final (hours)  : {final_hours:.2f}\n")
+        f.write(f"Total (seconds): {total_seconds:.1f} seconds\n")
+        f.write(f"Total (hours)  : {total_hours:.2f} hours\n")
+        f.write(f"Final (hours)  : {final_hours:.2f} hours\n")
 
     progress_callback(100)
 
