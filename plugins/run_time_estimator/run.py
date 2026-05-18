@@ -93,18 +93,18 @@ def _collect_lst_stems(lst_dir: Path) -> Set[str]:
 
 # ── PDF extraction ─────────────────────────────────────────────────────────────
 
-def _extract_machine_time(pdf_path: Path) -> Optional[float]:
-    """Return the 'Machine time decimal' value (minutes) from a PDF, or None."""
+def _extract_machine_time(pdf_path: Path) -> tuple[Optional[float], Optional[str]]:
+    """Return (value_in_minutes, error_message). Value is None on failure."""
     try:
         reader = PdfReader(str(pdf_path))
         for page in reader.pages:
             text = page.extract_text() or ""
             m = _MACHINE_TIME_RE.search(text)
             if m:
-                return float(m.group(1))
-    except Exception:
-        pass
-    return None
+                return float(m.group(1)), None
+        return None, "Machine time decimal line not found in PDF text"
+    except Exception as exc:
+        return None, str(exc)
 
 # ── 7000 folder discovery ──────────────────────────────────────────────────────
 
@@ -209,16 +209,20 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             if not pdfs:
                 continue
 
-            pdf = pdfs[0]
+            if len(pdfs) > 1:
+                names = ", ".join(p.name for p in pdfs)
+                log(f"  WARNING: {len(pdfs)} PDFs in {folder_7000} — using first alphabetically: {pdfs[0].name} (others: {names})")
+
+            pdf = sorted(pdfs)[0]
 
             if pdf.stem.casefold() not in lst_stems:
                 skipped_no_match += 1
                 continue
 
-            minutes = _extract_machine_time(pdf)
+            minutes, err = _extract_machine_time(pdf)
             if minutes is None:
                 skipped_no_time += 1
-                log(f"  WARNING: No machine time found in {pdf.name}")
+                log(f"  WARNING: Could not extract machine time from {pdf.name} — {err}")
                 continue
 
             log(f"  {pdf.stem}: {minutes} min")
