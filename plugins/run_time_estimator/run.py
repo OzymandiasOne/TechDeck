@@ -1,0 +1,276 @@
+"""
+Run Time Estimator Plugin
+=========================
+Scans 7000 folders in a 922 batch for CNC machine time data, matches each PDF
+against the LST reference file list, sums machine times, and writes a run time
+estimate (with 40% buffer) to the batch LST folder.
+
+PDF text extraction uses pypdf (simple text-layer PDFs only).
+"""
+from __future__ import annotations
+
+import os
+import re
+import threading
+from pathlib import Path
+from typing import Optional, Set
+
+from pypdf import PdfReader
+
+# ── Regex patterns ─────────────────────────────────────────────────────────────
+
+# Accept: "Batch 403", "Batch #403", "PO 403", "PO #403", "403", "#403"
+_BATCH_INPUT_RE = re.compile(
+    r'^(?:(?:batch|po)\s+#?\s*|#\s*)([0-9]+)$', re.IGNORECASE
+)
+
+# Match "Machine time decimal ... <number> min" with flexible spacing/punctuation
+_MACHINE_TIME_RE = re.compile(
+    r'machine\s+time\s+decimal[^0-9]*([0-9]+\.?[0-9]*)\s*min',
+    re.IGNORECASE,
+)
+
+SKIP_FOLDER_NAMES = frozenset({"repeat batches"})
+
+# ── Path helpers ───────────────────────────────────────────────────────────────
+
+def _candidate_roots() -> list[Path]:
+    home = Path.home()
+    rel = "Communication site - Electric Boat ASA Docs/Pilot Program/922 QTDR Production Packages"
+    candidates = [
+        home / "American Steel & Alum" / rel,
+        home / "OneDrive - American Steel & Alum" / rel,
+    ]
+    od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
+    if od:
+        candidates.append(Path(od) / rel)
+    seen: set = set()
+    out = []
+    for c in candidates:
+        s = str(c)
+        if s not in seen:
+            out.append(c)
+            seen.add(s)
+    return out
+
+
+def _locate_root() -> Optional[Path]:
+    for r in _candidate_roots():
+        if r.exists():
+            return r
+    return None
+
+
+def _find_batch_path(root: Path, batch: str) -> Optional[Path]:
+    live = root / f"Batch {batch}"
+    if live.exists():
+        return live
+    archived = root / "1 - Completed" / f"Batch {batch}"
+    if archived.exists():
+        return archived
+    return None
+
+
+def _parse_batch_input(raw: str) -> Optional[str]:
+    raw = raw.strip()
+    m = _BATCH_INPUT_RE.match(raw)
+    if m:
+        return m.group(1)
+    if re.match(r'^[0-9]+$', raw):
+        return raw
+    return None
+
+# ── LST reference collection ───────────────────────────────────────────────────
+
+def _collect_lst_stems(lst_dir: Path) -> Set[str]:
+    """Return case-folded stems of all .lst files found recursively in lst_dir."""
+    stems: Set[str] = set()
+    if not lst_dir.exists():
+        return stems
+    for p in lst_dir.rglob("*.lst"):
+        stems.add(p.stem.casefold())
+    return stems
+
+# ── PDF extraction ─────────────────────────────────────────────────────────────
+
+def _extract_machine_time(pdf_path: Path) -> Optional[float]:
+    """Return the 'Machine time decimal' value (minutes) from a PDF, or None."""
+    try:
+        reader = PdfReader(str(pdf_path))
+        for page in reader.pages:
+            text = page.extract_text() or ""
+            m = _MACHINE_TIME_RE.search(text)
+            if m:
+                return float(m.group(1))
+    except Exception:
+        pass
+    return None
+
+# ── 7000 folder discovery ──────────────────────────────────────────────────────
+
+def _find_7000_folders(order_dir: Path) -> list[Path]:
+    """Find all 7000 folders that live under a CAD-AND-SHOP-PRINTS subtree."""
+    results = []
+    for p in order_dir.rglob("7000"):
+        if not p.is_dir():
+            continue
+        parts_lower = [seg.lower() for seg in p.parts]
+        if "cad-and-shop-prints" in parts_lower:
+            results.append(p)
+    return results
+
+# ── Plugin entry point ─────────────────────────────────────────────────────────
+
+def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
+    log = params.get('log', print)
+    console = params.get('console')
+
+    log("Starting Run Time Estimator...")
+    progress_callback(0)
+
+    # ── Batch number ───────────────────────────────────────────────────────────
+    if console and hasattr(console, 'request_input'):
+        raw = console.request_input(
+            'Enter batch number (e.g. "403", "Batch 403", "PO #403"):'
+        )
+    else:
+        raw = input('Enter batch number: ')
+
+    batch_no = _parse_batch_input(raw or '')
+    if not batch_no:
+        raise ValueError(f"Unrecognised batch input: {raw!r}")
+    log(f"Batch: {batch_no}")
+
+    # ── Locate batch root ──────────────────────────────────────────────────────
+    root = _locate_root()
+    if not root:
+        raise RuntimeError(
+            "Could not locate '922 QTDR Production Packages'. "
+            "Verify OneDrive is synced."
+        )
+
+    batch_path = _find_batch_path(root, batch_no)
+    if not batch_path:
+        raise RuntimeError(
+            f"Batch {batch_no} not found under {root} "
+            "(also checked '1 - Completed'). Verify OneDrive is synced."
+        )
+    log(f"Batch path: {batch_path}")
+    progress_callback(5)
+
+    # ── LST reference stems ────────────────────────────────────────────────────
+    lst_dir = batch_path / f"Batch {batch_no} - Documentation" / "LST"
+    log(f"LST reference folder: {lst_dir}")
+    lst_stems = _collect_lst_stems(lst_dir)
+    log(f"LST reference files: {len(lst_stems)}")
+    if not lst_stems:
+        log("WARNING: No .lst files found in LST folder — all PDFs will be skipped.")
+    progress_callback(10)
+
+    # ── Order folders ──────────────────────────────────────────────────────────
+    doc_folder_name = f"Batch {batch_no} - Documentation"
+    order_dirs = []
+    for child in sorted(d for d in batch_path.iterdir() if d.is_dir()):
+        if child.name == doc_folder_name:
+            continue
+        if child.name.strip().casefold() in SKIP_FOLDER_NAMES:
+            continue
+        order_dirs.append(child)
+
+    log(f"Order folders to scan: {len(order_dirs)}")
+    progress_callback(15)
+
+    if not order_dirs:
+        raise RuntimeError(f"No order folders found in {batch_path}")
+
+    # ── Scan each order folder ─────────────────────────────────────────────────
+    total_minutes = 0.0
+    matched_count = 0
+    skipped_no_match = 0
+    skipped_no_time = 0
+
+    for i, order_dir in enumerate(order_dirs):
+        if cancel_event.is_set():
+            log("Cancelled.")
+            return
+
+        progress_callback(15 + int(i / len(order_dirs) * 70))
+
+        folders_7000 = _find_7000_folders(order_dir)
+        if not folders_7000:
+            continue
+
+        for folder_7000 in folders_7000:
+            if cancel_event.is_set():
+                log("Cancelled.")
+                return
+
+            pdfs = list(folder_7000.glob("*.pdf"))
+            if not pdfs:
+                continue
+
+            pdf = pdfs[0]
+
+            if pdf.stem.casefold() not in lst_stems:
+                skipped_no_match += 1
+                continue
+
+            minutes = _extract_machine_time(pdf)
+            if minutes is None:
+                skipped_no_time += 1
+                log(f"  WARNING: No machine time found in {pdf.name}")
+                continue
+
+            log(f"  {pdf.stem}: {minutes} min")
+            total_minutes += minutes
+            matched_count += 1
+
+    progress_callback(85)
+
+    if cancel_event.is_set():
+        log("Cancelled.")
+        return
+
+    # ── Calculations ───────────────────────────────────────────────────────────
+    total_seconds = total_minutes * 60.0
+    total_hours = total_minutes / 60.0
+    final_hours = total_hours * 1.4
+
+    # ── Write output file ──────────────────────────────────────────────────────
+    lst_dir.mkdir(parents=True, exist_ok=True)
+    out_path = lst_dir / f"Run Time Estimate - Batch {batch_no}.txt"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(f"Run Time Estimate — Batch {batch_no}\n")
+        f.write("=" * 30 + "\n")
+        f.write(f"Parts matched : {matched_count}\n")
+        f.write(f"Total (seconds): {total_seconds:.1f}\n")
+        f.write(f"Total (hours)  : {total_hours:.2f}\n")
+        f.write(f"Final (hours)  : {final_hours:.2f}\n")
+
+    progress_callback(100)
+
+    # ── Console summary ────────────────────────────────────────────────────────
+    log("=" * 50)
+    log(f"Run Time Estimate — Batch {batch_no}")
+    log("=" * 50)
+    log(f"Parts matched    : {matched_count}")
+    log(f"Total (seconds)  : {total_seconds:.1f}")
+    log(f"Total (hours)    : {total_hours:.2f}")
+    log(f"Final (hours)    : {final_hours:.2f}  (40% buffer applied)")
+    if skipped_no_match:
+        log(f"Skipped (no LST match)   : {skipped_no_match}")
+    if skipped_no_time:
+        log(f"Skipped (no time in PDF) : {skipped_no_time}")
+    log(f"\nOutput: {out_path}")
+    log("=" * 50)
+
+
+# ── Standalone test harness ────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import threading
+    cancel = threading.Event()
+    run(
+        params={'log': print, 'settings': {}, 'console': None},
+        progress_callback=lambda p: print(f"[{p}%]"),
+        cancel_event=cancel,
+    )

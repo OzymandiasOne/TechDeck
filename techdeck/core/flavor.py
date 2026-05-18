@@ -18,6 +18,7 @@ PLUGIN_NICKNAMES = {
     "po_packet_extractor": "The Accountant",
     "part_sketch_extractor": "The Architect",
     "qr_code_generator": "The Printer",
+    "run_time_estimator": "The Timekeeper",
 }
 
 NICKNAME_THRESHOLD = 10       # runs before nickname kicks in
@@ -28,11 +29,11 @@ _NICKNAME_VERBS = [
     "Deploying", "Summoning", "Unleashing", "Activating", "Waking up",
     "Calling upon", "Dispatching", "Briefing", "Engaging", "Mobilizing",
     "Conjuring", "Razzmatazzing", "Concocting", "Orchestrating",
-    "Manifesting", "Channeling", "Calibrating", "Igniting",
+    "Manifesting", "Channeling", "Calibrating", "Igniting", "Spontaneous Self-Combusting"
 ]
 
 _PLAIN_VERBS = [
-    "Starting", "Launching", "Running", "Spinning up", "Executing",
+    "Starting", "Launching", "Running", "Fidget Spinning", "Executing",
     "Initializing", "Discombobulating", "Cogitating", "Percolating",
     "Alchemizing", "Transmuting", "Distilling", "Assembling",
 ]
@@ -64,7 +65,7 @@ TALKBACK_LINES = [
     "Somewhere out there, someone is doing this in Excel. By hand.",
     "A nest with no parts is thinking about what it wants to be when it grows up.",
     "A nest with no parts is, technically, perfect. Nothing in it has gone wrong.",
-    "Running.",
+    "Running. Still Running. Always running.",
     "Still here.",
     "The files were there the whole time.",
     "It went fine.",
@@ -89,6 +90,7 @@ TALKBACK_LINES = [
     "Steel does not care what you name the folder. But you should name it correctly anyway.",
     "That file has been waiting in that directory for six months. It is ready.",
     "Nothing failed. Make of that what you will.",
+    "Here I am, brain the size of a planet, and they ask me to process spreadsheets."
 ]
 
 
