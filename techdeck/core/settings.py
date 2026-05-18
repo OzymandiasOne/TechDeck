@@ -537,6 +537,46 @@ class SettingsManager:
         self.data["settings"]["blackjack_bankroll"] = max(0, amount)
         self.save()
 
+    # ========== Custom Themes ==========
+
+    def get_custom_themes_dir(self) -> Path:
+        """Directory where user-created theme JSON files are stored."""
+        d = self.settings_dir / "themes"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    # ========== Rogue Mode ==========
+
+    def get_roguemode_audio_dir(self) -> Path:
+        """Directory where Rogue Mode audio files are stored."""
+        d = self.settings_dir / "roguemode"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def get_roguemode_settings(self) -> dict:
+        """Return Rogue Mode settings dict (playlists, current_playlist, volume, loop_mode)."""
+        defaults = {
+            "playlists": {},
+            "current_playlist": "",
+            "volume": 75,
+            "loop_mode": "loop_all",
+        }
+        stored = self.data.get("settings", {}).get("roguemode", {})
+        return {**defaults, **stored}
+
+    def set_roguemode_settings(self, data: dict) -> None:
+        """Persist Rogue Mode settings dict."""
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["roguemode"] = data
+        self.save()
+
+    def update_roguemode_setting(self, key: str, value) -> None:
+        """Update a single key in Rogue Mode settings."""
+        rm = self.get_roguemode_settings()
+        rm[key] = value
+        self.set_roguemode_settings(rm)
+
     # ========== Helpers ==========
 
     @staticmethod

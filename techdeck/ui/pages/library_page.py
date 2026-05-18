@@ -317,7 +317,7 @@ class LibraryPage(QWidget):
         theme = get_theme_manager().get_current_palette()
         # Ã¢Å“â€¦ Select icon folder based on theme
         theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
+        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
         icons_dir  = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         src_arrow  = icons_dir / "chevron-down.svg"
         arrow_path = make_tinted_svg_copy(src_arrow, theme.text)  # themed copy -> file path

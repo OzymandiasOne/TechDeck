@@ -224,7 +224,7 @@ class Sidebar(QWidget):
         theme_name = theme_manager.get_current_theme()
         # Dark/Blue themes have dark backgrounds -> use light icons
         # Light/Salmon themes have light backgrounds -> use dark icons
-        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
+        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
         icons_dir = project_root / "assets" / "icons" / icon_folder
 
         # Toggle button - try to use SVG, fallback to unicode

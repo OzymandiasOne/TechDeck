@@ -1,59 +1,66 @@
 """
 TechDeck Theme System
 Centralized color palettes and dynamic stylesheet generation.
-UPDATED: Added orange accent colors for CTA buttons (Claude-style orange for dark theme)
+Supports built-in and user-defined custom themes.
 """
 
-from dataclasses import dataclass
-from typing import Dict
+import json
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Dict, Optional
 
 
 @dataclass
 class ColorPalette:
-    """Color palette for a theme."""
+    """Color palette for a theme. font_family and extra_stylesheet are optional overrides."""
     # Primary colors
     text: str              # Main text color
     text_secondary: str    # Secondary/dimmed text
     background: str        # Main app background
     surface: str           # Card/panel backgrounds
     surface_hover: str     # Hover state for interactive surfaces
-    
+
     # Accent colors
     accent: str            # Primary accent (buttons, highlights)
     accent_hover: str      # Accent hover state
     accent_pressed: str    # Accent pressed state
-    
+
     # Secondary accent (orange for CTAs)
-    accent_two: str         # Orange accent for primary actions
-    accent_two_hover: str   # Orange hover state
-    accent_two_pressed: str # Orange pressed state
-    
+    accent_two: str         # CTA accent
+    accent_two_hover: str
+    accent_two_pressed: str
+
     # Borders and dividers
-    border: str            # Subtle borders
-    border_strong: str     # Emphasized borders
-    divider: str           # Horizontal rules, separators
-    
+    border: str
+    border_strong: str
+    divider: str
+
     # Console/Terminal
-    console_bg: str        # Console background
-    console_text: str      # Console text
-    
+    console_bg: str
+    console_text: str
+
     # Status colors
     success: str
     warning: str
     error: str
     info: str
-    
+
     # Special
-    tile_selected: str     # Highlighted tile background
-    shadow: str            # Drop shadows (rgba)
-    
+    tile_selected: str
+    shadow: str
+
     # Missing tiles
-    tile_missing_bg: str   # Missing tile background
-    tile_missing_text: str # Missing tile text color
-    tile_missing_border: str # Missing tile border
+    tile_missing_bg: str
+    tile_missing_text: str
+    tile_missing_border: str
+
+    # Optional overrides — these have defaults so existing themes don't need to set them
+    font_family: str = '"Segoe UI", Arial, sans-serif'
+    extra_stylesheet: str = ""
 
 
-# Theme definitions
+# ── Built-in theme definitions ────────────────────────────────────────────────
+
 THEMES: Dict[str, ColorPalette] = {
     "dark": ColorPalette(
         text="#ECECEC",
@@ -61,67 +68,65 @@ THEMES: Dict[str, ColorPalette] = {
         background="#212121",
         surface="#2A2A2A",
         surface_hover="#343434",
-        
+
         accent="#2878A8",
         accent_hover="#3189BA",
         accent_pressed="#1F6790",
-        
-        # Claude.ai style orange accent
-        accent_two="#C6613F",      # Claude's orange
+
+        accent_two="#C6613F",
         accent_two_hover="#cb7152",
         accent_two_pressed="#AD5234",
-        
+
         border="#3A3A3A",
         border_strong="#4A4A4A",
         divider="#1E1E1E",
-        
+
         console_bg="#171717",
         console_text="#ECECEC",
-        
+
         success="#10B981",
         warning="#F59E0B",
         error="#EF4444",
         info="#3B82F6",
-        
+
         tile_selected="#3A3A3A",
         shadow="rgba(0, 0, 0, 0.3)",
-        
+
         tile_missing_bg="#1A1A1A",
         tile_missing_text="#666",
         tile_missing_border="#2A2A2A",
     ),
-    
+
     "light": ColorPalette(
-        text="#3D3D3A", #1F2937
+        text="#3D3D3A",
         text_secondary="#6B7280",
         background="#D6CDC1",
         surface="#DDD6CC",
         surface_hover="#DAD2C7",
-        
-        accent="#C6613F", 
-        accent_hover="#CB7152", 
-        accent_pressed="#AD5234", 
-        
-        # Light theme
-        accent_two="#30302e",      #1b67b2"
-        accent_two_hover="#3E3E3C", #1d70c3
-        accent_two_pressed="#1F1F1E", #15528e
-        
+
+        accent="#C6613F",
+        accent_hover="#CB7152",
+        accent_pressed="#AD5234",
+
+        accent_two="#30302e",
+        accent_two_hover="#3E3E3C",
+        accent_two_pressed="#1F1F1E",
+
         border="#E5E7EB",
         border_strong="#EBE9E4",
         divider="#7A8190",
-        
+
         console_bg="#F9FAFB",
         console_text="#1F2937",
-        
+
         success="#10B981",
         warning="#F59E0B",
         error="#EF4444",
         info="#3B82F6",
-        
+
         tile_selected="#DAD2C7",
         shadow="rgba(0, 0, 0, 0.1)",
-        
+
         tile_missing_bg="#F3F4F6",
         tile_missing_text="#9CA3AF",
         tile_missing_border="#D1D5DB",
@@ -161,66 +166,208 @@ THEMES: Dict[str, ColorPalette] = {
         tile_missing_text="#7A4040",
         tile_missing_border="#B87870",
     ),
-    
+
     "blue": ColorPalette(
         text="#E0E7FF",
         text_secondary="#A5B4FC",
         background="#1E1B4B",
         surface="#312E81",
         surface_hover="#3730A3",
-        
+
         accent="#3B82F6",
         accent_hover="#60A5FA",
         accent_pressed="#2563EB",
-        
-        # Blue theme: vibrant purple
-        accent_two="#6D28D9",      #6D28D9 #712FDA
+
+        accent_two="#6D28D9",
         accent_two_hover="#7c40dd",
         accent_two_pressed="#5E22BF",
-        
+
         border="#4338CA",
         border_strong="#4F46E5",
         divider="#2E2870",
-        
+
         console_bg="#1E1B4B",
         console_text="#E0E7FF",
-        
+
         success="#10B981",
         warning="#F59E0B",
         error="#EF4444",
         info="#60A5FA",
-        
+
         tile_selected="#4338CA",
         shadow="rgba(30, 27, 75, 0.5)",
-        
+
         tile_missing_bg="#2E2870",
         tile_missing_text="#6366F1",
         tile_missing_border="#4338CA",
     ),
+
+    "cyberpunk": ColorPalette(
+        text="#FFE100",
+        text_secondary="#B89E00",
+        background="#0A0012",
+        surface="#150020",
+        surface_hover="#1E0030",
+
+        accent="#FFE100",
+        accent_hover="#FFE833",
+        accent_pressed="#CDB300",
+
+        accent_two="#FF006E",
+        accent_two_hover="#FF3399",
+        accent_two_pressed="#CC0058",
+
+        border="#2A0045",
+        border_strong="#500080",
+        divider="#1A0030",
+
+        console_bg="#050010",
+        console_text="#00E5FF",
+
+        success="#00FF9F",
+        warning="#FFE100",
+        error="#FF0040",
+        info="#00E5FF",
+
+        tile_selected="#2A0045",
+        shadow="rgba(255, 0, 110, 0.25)",
+
+        tile_missing_bg="#0D0020",
+        tile_missing_text="#500080",
+        tile_missing_border="#2A0045",
+
+        font_family='"Consolas", "Courier New", monospace',
+        extra_stylesheet="""
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #FFE100;
+}
+QPushButton:hover {
+    border-color: #FFE100;
+}
+QPushButton[class="primary"] {
+    color: #0A0012;
+    border: 1px solid #FFE100;
+}
+QPushButton[class="cta"] {
+    border: 1px solid #FF006E;
+}
+""",
+    ),
+
+    "matrix": ColorPalette(
+        text="#00FF41",
+        text_secondary="#00C034",
+        background="#000000",
+        surface="#001200",
+        surface_hover="#001800",
+
+        accent="#00FF41",
+        accent_hover="#33FF66",
+        accent_pressed="#00CC33",
+
+        accent_two="#39FF14",
+        accent_two_hover="#5CFF3A",
+        accent_two_pressed="#2ECC10",
+
+        border="#002800",
+        border_strong="#004000",
+        divider="#001200",
+
+        console_bg="#000000",
+        console_text="#00FF41",
+
+        success="#00FF41",
+        warning="#ADFF2F",
+        error="#FF0000",
+        info="#00FFCC",
+
+        tile_selected="#002800",
+        shadow="rgba(0, 255, 65, 0.15)",
+
+        tile_missing_bg="#000800",
+        tile_missing_text="#005000",
+        tile_missing_border="#002800",
+
+        font_family='"Courier New", Consolas, monospace',
+        extra_stylesheet="""
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #00FF41;
+}
+QPushButton:hover {
+    border-color: #00FF41;
+}
+QPushButton[class="primary"] {
+    color: #000000;
+}
+QPushButton[class="cta"] {
+    color: #000000;
+}
+""",
+    ),
 }
 
 
+# ── Custom theme helpers ───────────────────────────────────────────────────────
+
+def palette_to_dict(p: ColorPalette) -> dict:
+    return asdict(p)
+
+
+def palette_from_dict(d: dict) -> ColorPalette:
+    # Only pass fields that ColorPalette actually accepts, with safe defaults
+    fields = {f.name for f in ColorPalette.__dataclass_fields__.values()}
+    filtered = {k: v for k, v in d.items() if k in fields}
+    return ColorPalette(**filtered)
+
+
+def load_custom_themes(custom_dir: Path) -> None:
+    """Load all JSON theme files from custom_dir into the THEMES dict."""
+    if not custom_dir.exists():
+        return
+    for path in custom_dir.glob("*.json"):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            name = path.stem.lower()
+            THEMES[name] = palette_from_dict(data)
+        except Exception as e:
+            print(f"[theme] Could not load custom theme {path.name}: {e}")
+
+
+def save_custom_theme(name: str, palette: ColorPalette, custom_dir: Path) -> None:
+    """Save a palette as a JSON file in custom_dir."""
+    custom_dir.mkdir(parents=True, exist_ok=True)
+    path = custom_dir / f"{name.lower()}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(palette_to_dict(palette), f, indent=2)
+    THEMES[name.lower()] = palette
+
+
+def delete_custom_theme(name: str, custom_dir: Path) -> None:
+    """Delete a custom theme file and remove it from THEMES."""
+    path = custom_dir / f"{name.lower()}.json"
+    if path.exists():
+        path.unlink()
+    THEMES.pop(name.lower(), None)
+
+
+def is_builtin_theme(name: str) -> bool:
+    return name.lower() in ("dark", "light", "salmon", "blue", "cyberpunk", "matrix")
+
+
+# ── Stylesheet generator ───────────────────────────────────────────────────────
+
 def generate_stylesheet(theme_name: str = "dark") -> str:
-    """
-    Generate complete Qt stylesheet for the given theme.
-    
-    Args:
-        theme_name: Name of theme from THEMES dict
-        
-    Returns:
-        Complete Qt stylesheet as string
-    """
     if theme_name not in THEMES:
         theme_name = "dark"
-    
     theme = THEMES[theme_name]
-    
-    return f"""
+
+    base = f"""
 /* ===== Global Application Styles ===== */
 QWidget {{
     background-color: {theme.background};
     color: {theme.text};
-    font-family: "Segoe UI", Arial, sans-serif;
+    font-family: {theme.font_family};
     font-size: 13px;
 }}
 
@@ -229,12 +376,10 @@ QMainWindow {{
     background-color: {theme.background};
 }}
 
-/* Central widget and all children */
 QMainWindow > QWidget {{
     background-color: {theme.background};
 }}
 
-/* Pages */
 QStackedWidget {{
     background-color: {theme.background};
 }}
@@ -243,7 +388,6 @@ QStackedWidget > QWidget {{
     background-color: {theme.background};
 }}
 
-/* Scroll areas */
 QScrollArea {{
     background-color: {theme.background};
     border: none;
@@ -282,7 +426,6 @@ QPushButton:disabled {{
     opacity: 0.5;
 }}
 
-/* Checkable buttons (tiles) */
 QPushButton:checked {{
     background-color: {theme.tile_selected};
     border: 1px solid {theme.accent};
@@ -293,7 +436,6 @@ QPushButton:checked:hover {{
     border: 1px solid {theme.accent_hover};
 }}
 
-/* Primary/Accent buttons */
 QPushButton[class="primary"] {{
     background-color: {theme.accent};
     color: #FFFFFF;
@@ -309,7 +451,6 @@ QPushButton[class="primary"]:pressed {{
     background-color: {theme.accent_pressed};
 }}
 
-/* Second accent color  buttons for CTAs */
 QPushButton[class="cta"] {{
     background-color: {theme.accent_two};
     color: #FFFFFF;
@@ -332,17 +473,14 @@ Sidebar {{
     border-right: 1px solid {theme.console_bg};
 }}
 
-/* Force sidebar to use background color */
 QWidget[objectName="sidebar"] {{
     background-color: {theme.background};
 }}
 
-/* Console Widget - match page background */
 ConsoleWidget {{
     background-color: {theme.background};
 }}
 
-/* Sidebar separator line */
 Sidebar > QWidget[class="separator"] {{
     background-color: {theme.console_bg};
 }}
@@ -486,7 +624,7 @@ QLabel {{
     color: {theme.text};
 }}
 
-/* ===== Splitter (for resizable console) ===== */
+/* ===== Splitter ===== */
 QSplitter::handle {{
     background-color: {theme.divider};
 }}
@@ -498,31 +636,59 @@ QSplitter::handle:hover {{
 QSplitter::handle:vertical {{
     height: 2px;
 }}
+
+/* ===== Sliders ===== */
+QSlider::groove:horizontal {{
+    background-color: {theme.border};
+    height: 4px;
+    border-radius: 2px;
+}}
+
+QSlider::handle:horizontal {{
+    background-color: {theme.accent};
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}}
+
+QSlider::sub-page:horizontal {{
+    background-color: {theme.accent};
+    border-radius: 2px;
+}}
+
+QSlider::groove:vertical {{
+    background-color: {theme.border};
+    width: 4px;
+    border-radius: 2px;
+}}
+
+QSlider::handle:vertical {{
+    background-color: {theme.accent};
+    width: 14px;
+    height: 14px;
+    margin: 0 -5px;
+    border-radius: 7px;
+}}
+
+QSlider::sub-page:vertical {{
+    background-color: {theme.accent};
+    border-radius: 2px;
+}}
 """
+    return base + "\n" + theme.extra_stylesheet
 
 
-def get_theme_names() -> list[str]:
-    """Get list of available theme names."""
+def get_theme_names() -> list:
     return list(THEMES.keys())
 
 
 def get_current_palette(theme_name: str = "dark") -> ColorPalette:
-    """Get color palette for theme."""
     return THEMES.get(theme_name, THEMES["dark"])
 
 
 def get_missing_tile_style(theme_name: str = "dark") -> str:
-    """
-    Get inline stylesheet for missing tiles.
-    
-    Args:
-        theme_name: Theme to get colors from
-        
-    Returns:
-        Inline stylesheet string for missing tiles
-    """
     theme = THEMES.get(theme_name, THEMES["dark"])
-    
     return f"""
         QPushButton {{
             background-color: {theme.tile_missing_bg};

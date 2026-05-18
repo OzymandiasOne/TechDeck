@@ -4,12 +4,23 @@ Processes console commands and returns responses.
 """
 
 import random
+import sys
 import threading
 from typing import Callable
 from pathlib import Path
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import APP_VERSION
-from techdeck.core.flavor import CompendiumState, COMPLIMENTS, ROASTS, generate_haiku
+from techdeck.core.flavor import generate_haiku
+from techdeck.core.audio_manager import (
+    get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
+)
+# _rave_player and _rave_audio_out are stored as instance attrs to prevent GC during playback
+
+
+def _images_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets" / "images"
+    return Path(__file__).resolve().parents[2] / "assets" / "images"
 
 
 class CommandHandler:
@@ -27,12 +38,10 @@ class CommandHandler:
         /guides         - List available documentation guides
         /guide <name>   - Show a specific guide
         /fidget         - Open fidget spinner window
-        /rave           - Pulse accent colors for 10 seconds
         /jack           - Play blackjack in the console
-        /compliment     - Receive a compliment
-        /roast          - Receive a roast
         /haiku          - Print a manufacturing haiku
         /moth           - Summon a moth toward the Run button
+        /steelbeams     - Open the Steel Tube Operation game
     """
 
     def __init__(self, settings: SettingsManager, console_widget, main_window=None):
@@ -40,18 +49,21 @@ class CommandHandler:
         self.console = console_widget
         self.main_window = main_window
 
-        # Personality pools
-        self._compliments = CompendiumState(COMPLIMENTS)
-        self._roasts = CompendiumState(ROASTS)
-
         # Runtime state
+        self._steelbeams_window = None
         self._rave_timer = None
         self._rave_step = 0
+        self._rave_gifs = []     # list of QWidget overlay windows
+        self._rave_movie = None  # single shared QMovie — decoded once, drives all labels
+        self._rave_player = None
+        self._rave_audio_out = None
         self._crabs = []
         self._moth = None
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
         self._jack_running = False
+
+        self._rogue_player = None  # kept alive here to prevent GC
 
         # Command registry
         self.commands = {
@@ -66,9 +78,9 @@ class CommandHandler:
             '/guide': self._cmd_show_guide,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
+            '/steelbeams': self._cmd_steelbeams,
             '/jack': self._cmd_jack,
-            '/compliment': self._cmd_compliment,
-            '/roast': self._cmd_roast,
+            '/roguemode': self._cmd_roguemode,
             '/haiku': self._cmd_haiku,
             '/moth': self._cmd_moth,
         }
@@ -93,13 +105,12 @@ class CommandHandler:
   /help           - Show this help message
   /clear          - Clear console output
   /version        - Show TechDeck version
-  /theme <name>   - Switch theme (dark, light, blue, salmon)
+  /theme <name>   - Switch theme (dark, light, blue, salmon, cyberpunk, matrix)
+  /roguemode      - Open Rogue Mode focus music player
 
   /fidget
-  /rave
+  /steelbeams
   /jack
-  /compliment
-  /roast
   /haiku
   /moth"""
         self.console.append_system(help_text)
@@ -145,17 +156,18 @@ class CommandHandler:
         self.console.append_system(output)
 
     def _cmd_theme(self, args: str):
+        from techdeck.ui.theme import get_theme_names
+        available = get_theme_names()
         if not args:
             current = self.settings.get_theme()
             self.console.append_system(f"Current theme: {current}")
-            self.console.append_system("Available themes: dark, light, blue, salmon")
+            self.console.append_system(f"Available themes: {', '.join(available)}")
             self.console.append_system("Usage: /theme <name>")
             return
         theme_name = args.strip().lower()
-        valid_themes = ["dark", "light", "blue", "salmon"]
-        if theme_name not in valid_themes:
+        if theme_name not in available:
             self.console.append_error(f"Invalid theme: {theme_name}")
-            self.console.append_system(f"Available themes: {', '.join(valid_themes)}")
+            self.console.append_system(f"Available themes: {', '.join(available)}")
             return
         self.settings.set_theme(theme_name)
         self.console.append_system(f"Theme changed to: {theme_name}")
@@ -253,9 +265,23 @@ class CommandHandler:
             f'{flower}&nbsp;&nbsp;Crab Dancing...</span>'
         )
 
+    # ------------------------------------------------------------------ #
+    #  /steelbeams
+    # ------------------------------------------------------------------ #
+
+    def _cmd_steelbeams(self, args: str):
+        from techdeck.ui.widgets.steelbeams_game import SteelBeamsGame
+        if self._steelbeams_window is not None and self._steelbeams_window.isVisible():
+            self._steelbeams_window.raise_()
+            self._steelbeams_window.activateWindow()
+            return
+        self._steelbeams_window = SteelBeamsGame()
+        self._steelbeams_window.show()
+
     def _cmd_rave(self, args: str):
-        from PySide6.QtWidgets import QApplication
-        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication, QLabel, QWidget
+        from PySide6.QtCore import QTimer, Qt
+        from PySide6.QtGui import QMovie
         from techdeck.ui.theme import THEMES, generate_stylesheet
         from techdeck.ui.widgets.crab_widget import CrabWidget
 
@@ -296,6 +322,60 @@ class CommandHandler:
             crab.start(target_screen)
             self._crabs.append(crab)
 
+        # Spawn 4 cat GIF overlays sharing one QMovie — decoded once, all labels update together
+        self._rave_gifs = []
+        self._rave_movie = None
+        gif_path = _images_dir() / "cat.gif"
+        if gif_path.exists():
+            screen_geo = target_screen.geometry()
+            from PySide6.QtGui import QImageReader
+            from PySide6.QtCore import QSize, QRect
+            reader = QImageReader(str(gif_path))
+            natural = reader.size()
+            fw = int(natural.width() * 0.75) if natural.width() > 0 else 100
+            fh = int(natural.height() * 0.75) if natural.height() > 0 else 100
+            movie = QMovie(str(gif_path))
+            movie.setScaledSize(QSize(fw, fh))
+            movie.setCacheMode(QMovie.CacheMode.CacheAll)
+            movie.start()
+            self._rave_movie = movie
+            x_min = screen_geo.left()
+            x_max = max(screen_geo.left(), screen_geo.right() - fw)
+            y_min = screen_geo.top()
+            y_max = max(screen_geo.top(), screen_geo.bottom() - fh)
+            placed = []
+            for _ in range(4):
+                # Try up to 100 random positions; take the first non-overlapping one
+                x, y = random.randint(x_min, x_max), random.randint(y_min, y_max)
+                for _ in range(100):
+                    cx, cy = random.randint(x_min, x_max), random.randint(y_min, y_max)
+                    candidate = QRect(cx, cy, fw, fh)
+                    if not any(candidate.intersects(r) for r in placed):
+                        x, y = cx, cy
+                        break
+                placed.append(QRect(x, y, fw, fh))
+                gif_w = QWidget(
+                    None,
+                    Qt.WindowType.FramelessWindowHint
+                    | Qt.WindowType.Tool
+                    | Qt.WindowType.WindowStaysOnTopHint,
+                )
+                gif_w.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+                lbl = QLabel(gif_w)
+                lbl.setMovie(movie)  # all labels share the same movie instance
+                lbl.resize(fw, fh)
+                gif_w.resize(fw, fh)
+                gif_w.move(x, y)
+                gif_w.show()
+                self._rave_gifs.append(gif_w)
+
+        # Start rave music via QMediaPlayer (buffered — no skipping on longer files)
+        result = get_audio_manager().play_music_stoppable(SOUND_RAVE_MUSIC)
+        if result:
+            self._rave_player, self._rave_audio_out = result
+        else:
+            self._rave_player = self._rave_audio_out = None
+
         # Show spinner label and kick off rave
         self.console.append_game("Let's rave.")
         self.console.show_spinner(
@@ -303,7 +383,7 @@ class CommandHandler:
         )
 
         def tick():
-            elapsed[0] += 150
+            elapsed[0] += 400
             if elapsed[0] >= 10_000:
                 # Restore theme
                 THEMES[theme_name].accent = orig_accent
@@ -316,9 +396,21 @@ class CommandHandler:
                 for crab in self._crabs:
                     crab.stop()
                 self._crabs = []
+                # Stop music
+                if self._rave_player is not None:
+                    self._rave_player.stop()
+                    self._rave_player = None
+                    self._rave_audio_out = None
+                # Stop shared movie and close all GIF overlays
+                if self._rave_movie is not None:
+                    self._rave_movie.stop()
+                    self._rave_movie = None
+                for gif_w in self._rave_gifs:
+                    gif_w.close()
+                self._rave_gifs = []
                 # Hide spinner and log finale
                 self.console.hide_spinner()
-                self.console.append_system("Rave over. Back to work.")
+                self.console.append_system("Rave over. Productivity +10.")
                 return
 
             color = self._RAVE_COLORS[step[0] % len(self._RAVE_COLORS)]
@@ -332,7 +424,7 @@ class CommandHandler:
             self.console.update_spinner(self._rave_spinner_html(flower, color))
 
         self._rave_timer = QTimer()
-        self._rave_timer.setInterval(150)
+        self._rave_timer.setInterval(400)
         self._rave_timer.timeout.connect(tick)
         self._rave_timer.start()
 
@@ -379,6 +471,7 @@ class CommandHandler:
                 deck = self._new_deck()
                 player = [deck.pop(), deck.pop()]
                 dealer = [deck.pop(), deck.pop()]
+                get_audio_manager().safe_play(SOUND_CARD_DEAL)
 
                 player_total = self._hand_total(player)
                 dealer_total = self._hand_total(dealer)
@@ -458,6 +551,7 @@ class CommandHandler:
                     dealer.append(deck.pop())
                     dealer_total = self._hand_total(dealer)
                     log(f"  {self.DEALER_NAME}:  {self._hand_str(dealer)}  --  {dealer_total}")
+                get_audio_manager().safe_play(SOUND_CARD_DEALER_FINAL)
 
                 effective_bet = bet * 2 if doubled else bet
 
@@ -548,18 +642,20 @@ class CommandHandler:
         return "  ".join(parts)
 
     # ------------------------------------------------------------------ #
-    #  /compliment
+    #  /roguemode
     # ------------------------------------------------------------------ #
 
-    def _cmd_compliment(self, args: str):
-        self.console.append_game(self._compliments.get_line())
-
-    # ------------------------------------------------------------------ #
-    #  /roast
-    # ------------------------------------------------------------------ #
-
-    def _cmd_roast(self, args: str):
-        self.console.append_game(self._roasts.get_line())
+    def _cmd_roguemode(self, args: str):
+        from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
+        if self._rogue_player is not None and self._rogue_player.isVisible():
+            self._rogue_player.raise_()
+            self._rogue_player.activateWindow()
+            self.console.append_system("Rogue Mode player is already open.")
+            return
+        parent = self.main_window if self.main_window is not None else None
+        self._rogue_player = RogueModePlayer(self.settings, parent=parent)
+        self._rogue_player.show()
+        self.console.append_game("Rogue Mode activated. Lock in.")
 
     # ------------------------------------------------------------------ #
     #  /haiku

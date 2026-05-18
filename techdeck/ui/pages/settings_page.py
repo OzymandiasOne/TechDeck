@@ -1,57 +1,54 @@
 """
 TechDeck Settings Page - Tabbed Interface
 Three tabs: General, App Settings (Plugins), Personalization
-PHASE 2 FIX: Removed console height setting - users drag console to preferred height
+Personalization tab hosts theme selection, theme builder, and Rogue Mode management.
 """
+
+import json
+import shutil
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QPushButton, QFrame, QScrollArea,
-    QLineEdit, QMessageBox, QSpinBox, QTabWidget,
-    QCheckBox, QSlider
+    QLineEdit, QMessageBox, QTabWidget,
+    QCheckBox, QSlider, QListWidget, QListWidgetItem,
+    QFileDialog, QInputDialog, QSizePolicy,
 )
 from PySide6.QtCore import Signal, Qt
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.plugin_loader import PluginLoader
-from techdeck.ui.theme import get_theme_names, get_current_palette
+from techdeck.ui.theme import get_theme_names, get_current_palette, THEMES, is_builtin_theme, delete_custom_theme
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.widgets.plugin_settings_widget import PluginSettingsWidget
-from pathlib import Path
 
 
 class SettingsPage(QWidget):
     """
     Settings page with three horizontal tabs:
-    1. General - App-wide settings (theme, console, API)
-    2. App Settings - Per-plugin configuration
-    3. Personalization - User profile and appearance
-    
-    Signals:
-        theme_changed(str): Emitted when theme is changed (requires restart)
+    1. General     – Sound effects + About
+    2. App Settings – Per-plugin configuration
+    3. Personalization – Profile, Theme (+ builder), Rogue Mode
     """
-    
+
     theme_changed = Signal(str)
-    
+
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
         self.plugin_loader = PluginLoader()
         self.plugin_loader.discover_plugins()
-        
-        # Track current plugin settings widget
         self.current_plugin_widget = None
-        
-        # Main layout
+        self._rogue_player = None  # keep alive
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # Create tab widget
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)  # Cleaner look
 
-        # Apply theme-aware tab styling
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+
         theme = get_current_palette(self.settings.get_theme())
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -77,107 +74,32 @@ class SettingsPage(QWidget):
                 font-weight: 600;
             }}
         """)
-        
-        # Add tabs
-        self.tabs.addTab(self._create_general_tab(), "General")
-        self.tabs.addTab(self._create_plugin_tab(), "App Settings")
+
+        self.tabs.addTab(self._create_general_tab(),         "General")
+        self.tabs.addTab(self._create_plugin_tab(),          "App Settings")
         self.tabs.addTab(self._create_personalization_tab(), "Personalization")
-        
+
         layout.addWidget(self.tabs)
-    
-    # ========== GENERAL TAB ==========
-    
+
+    # ──────────────────────────────────────────────────────────────────────
+    # GENERAL TAB
+    # ──────────────────────────────────────────────────────────────────────
+
     def _create_general_tab(self) -> QWidget:
-        """Create General settings tab."""
-        widget = QWidget()
-        
-        # Create scroll area for content
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
-        
+
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
-        
-        # ===== Page Title =====
+
         title = QLabel("General Settings")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
-        
-        # ===== Theme Section =====
-        theme_section = self._create_section("Theme")
-        
-        theme_label = QLabel("Application Theme:")
-        theme_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        
-        theme_layout = QHBoxLayout()
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems([t.capitalize() for t in get_theme_names()])
-        self.theme_combo.setMinimumHeight(34)
-        self.theme_combo.setMaximumWidth(200)
-        
-        theme = get_current_palette(self.settings.get_theme())
-        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ FIXED: Select icon folder based on theme
-        theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
-        icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
-        src_arrow = icons_dir / "chevron-down.svg"
-        arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
-        
-        self.theme_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 8px;
-                padding: 6px 10px;
-                padding-right: 28px;
-            }}
-            QComboBox:hover {{
-                border-color: {theme.border_strong};
-            }}
-            QComboBox::drop-down {{
-                width: 24px;
-                border: none;
-                background: transparent;
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
-            }}
-            QComboBox::down-arrow {{
-                image: url("{arrow_path}");
-                width: 12px;
-                height: 12px;
-                background: transparent;
-                border: none;
-                margin-right: 6px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 4px;
-                selection-background-color: {theme.tile_selected};
-                outline: none;
-            }}
-        """)
-        
-        self.theme_combo.currentTextChanged.connect(self._on_theme_changed)
-        
-        theme_layout.addWidget(self.theme_combo)
-        theme_layout.addStretch()
-        
-        theme_section.addWidget(theme_label)
-        theme_section.addLayout(theme_layout)
-        
-        theme_note = QLabel("Note: Changing theme requires restarting TechDeck.")
-        theme_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
-        theme_section.addWidget(theme_note)
-        
-        layout.addLayout(theme_section)
 
-        # ===== Audio Section =====
+        # ── Sound Effects ──
         audio_section = self._create_section("Sound Effects")
 
         self.audio_enabled_check = QCheckBox("Enable sound effects")
@@ -186,22 +108,18 @@ class SettingsPage(QWidget):
 
         volume_row = QHBoxLayout()
         volume_row.setSpacing(12)
-
         volume_label = QLabel("Volume:")
         volume_label.setStyleSheet("font-weight: 600;")
         volume_label.setFixedWidth(60)
-
         self.audio_volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.audio_volume_slider.setRange(0, 100)
         self.audio_volume_slider.setMaximumWidth(200)
         self.audio_volume_slider.setMinimumHeight(24)
-
         self.audio_volume_pct = QLabel("80%")
         self.audio_volume_pct.setFixedWidth(36)
         self.audio_volume_slider.valueChanged.connect(
             lambda v: self.audio_volume_pct.setText(f"{v}%")
         )
-
         volume_row.addWidget(volume_label)
         volume_row.addWidget(self.audio_volume_slider)
         volume_row.addWidget(self.audio_volume_pct)
@@ -209,106 +127,693 @@ class SettingsPage(QWidget):
 
         audio_section.addWidget(self.audio_enabled_check)
         audio_section.addLayout(volume_row)
-
         layout.addLayout(audio_section)
 
-        # ===== About TechDeck Section =====
+        # ── About ──
         from techdeck.core.constants import APP_VERSION, APP_RELEASE_NAME
-        
         about_section = self._create_section("About TechDeck")
-        
-        # Version info
-        version_label = QLabel(f"Version {APP_VERSION} - {APP_RELEASE_NAME}")
+        version_label = QLabel(f"Version {APP_VERSION} — {APP_RELEASE_NAME}")
         version_label.setStyleSheet("font-weight: 600; margin-top: 8px; font-size: 14px;")
-        
-        # Check for updates button
         check_updates_btn = QPushButton("Check for Updates")
         check_updates_btn.setMinimumHeight(36)
         check_updates_btn.setMaximumWidth(180)
         check_updates_btn.clicked.connect(self._check_for_updates)
-        
         about_section.addWidget(version_label)
         about_section.addWidget(check_updates_btn)
-        
         layout.addLayout(about_section)
-        
-        # ===== Action Buttons =====
+
         layout.addStretch()
-        
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)
-        
+
+        btn_row = QHBoxLayout()
         save_btn = QPushButton("Save Settings")
         save_btn.setMinimumHeight(36)
         save_btn.setMaximumWidth(150)
         save_btn.clicked.connect(self._save_general_settings)
-        
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.setMinimumHeight(36)
         reset_btn.setMaximumWidth(150)
         reset_btn.clicked.connect(self._reset_defaults)
-        
-        button_layout.addWidget(save_btn)
-        button_layout.addWidget(reset_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        # Load current settings
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
         self._load_general_settings()
-        
+
         scroll.setWidget(content)
-        
-        # Wrap in container
         container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.addWidget(scroll)
-        
+        QVBoxLayout(container).addWidget(scroll)
+        container.layout().setContentsMargins(0, 0, 0, 0)
         return container
-    
-    # ========== PLUGIN TAB ==========
-    
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PLUGIN TAB (unchanged logic, just reformatted)
+    # ──────────────────────────────────────────────────────────────────────
+
     def _create_plugin_tab(self) -> QWidget:
-        """Create App Settings (Plugin Configuration) tab."""
-        widget = QWidget()
-        
-        # Create scroll area for content
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
-        
+
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
-        
-        # ===== Page Title =====
+
         title = QLabel("App Settings")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
-        
-        subtitle = QLabel("Configure settings for each installed app")
-        subtitle.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
-        layout.addWidget(subtitle)
-        
-        # ===== Plugin Selection =====
+        sub = QLabel("Configure settings for each installed app")
+        sub.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
+        layout.addWidget(sub)
+
         selection_section = self._create_section("Select App")
-        
         select_label = QLabel("Choose an app to configure:")
         select_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        
+
         theme = get_current_palette(self.settings.get_theme())
         theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue"] else "dark"
+        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         src_arrow = icons_dir / "chevron-down.svg"
         arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
-        
+
         self.plugin_combo = QComboBox()
         self.plugin_combo.setMinimumHeight(34)
         self.plugin_combo.setMaximumWidth(300)
-        self.plugin_combo.setStyleSheet(f"""
+        self.plugin_combo.setStyleSheet(self._combo_style(theme, arrow_path))
+        self.plugin_combo.currentTextChanged.connect(self._on_plugin_selected)
+
+        selection_section.addWidget(select_label)
+        selection_section.addWidget(self.plugin_combo)
+        layout.addLayout(selection_section)
+
+        settings_section = self._create_section("Configuration")
+        self.plugin_layout = QVBoxLayout()
+        self.plugin_layout.setSpacing(12)
+        self.no_plugin_label = QLabel("Select an app to view its settings.")
+        self.no_plugin_label.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
+        self.no_plugin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.plugin_layout.addWidget(self.no_plugin_label)
+        settings_section.addLayout(self.plugin_layout)
+        layout.addLayout(settings_section)
+
+        layout.addStretch()
+
+        btn_row = QHBoxLayout()
+        self.save_plugin_btn = QPushButton("Save App Settings")
+        self.save_plugin_btn.setMinimumHeight(36)
+        self.save_plugin_btn.setMaximumWidth(150)
+        self.save_plugin_btn.setEnabled(False)
+        self.save_plugin_btn.clicked.connect(self._save_plugin_settings)
+        btn_row.addWidget(self.save_plugin_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self._load_plugin_list()
+
+        scroll.setWidget(content)
+        container = QWidget()
+        QVBoxLayout(container).addWidget(scroll)
+        container.layout().setContentsMargins(0, 0, 0, 0)
+        return container
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PERSONALIZATION TAB
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _create_personalization_tab(self) -> QWidget:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(28)
+
+        title = QLabel("Personalization")
+        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+
+        # ── Profile Information ──
+        profile_section = self._create_section("Profile Information")
+
+        name_label = QLabel("Full Name:")
+        name_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("John Smith")
+        self.name_input.setMinimumHeight(34)
+        self.name_input.setMaximumWidth(400)
+        profile_section.addWidget(name_label)
+        profile_section.addWidget(self.name_input)
+
+        email_label = QLabel("Email:")
+        email_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        self.email_input = QLineEdit()
+        self.email_input.setPlaceholderText("john.smith@company.com")
+        self.email_input.setMinimumHeight(34)
+        self.email_input.setMaximumWidth(400)
+        profile_section.addWidget(email_label)
+        profile_section.addWidget(self.email_input)
+
+        title_label = QLabel("Job Title:")
+        title_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        self.title_input = QLineEdit()
+        self.title_input.setPlaceholderText("Production Manager")
+        self.title_input.setMinimumHeight(34)
+        self.title_input.setMaximumWidth(400)
+        profile_section.addWidget(title_label)
+        profile_section.addWidget(self.title_input)
+
+        save_profile_btn = QPushButton("Save Profile")
+        save_profile_btn.setMinimumHeight(36)
+        save_profile_btn.setMaximumWidth(150)
+        save_profile_btn.clicked.connect(self._save_personalization_settings)
+        profile_section.addWidget(save_profile_btn)
+
+        layout.addLayout(profile_section)
+
+        # ── Theme ──
+        theme_section = self._create_section("Theme")
+
+        theme_lbl = QLabel("Application Theme:")
+        theme_lbl.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        theme_section.addWidget(theme_lbl)
+
+        theme_row = QHBoxLayout()
+        self.theme_combo = QComboBox()
+        self.theme_combo.setMinimumHeight(34)
+        self.theme_combo.setMinimumWidth(200)
+        self._refresh_theme_combo()
+
+        apply_theme_btn = QPushButton("Apply Theme")
+        apply_theme_btn.setMinimumHeight(34)
+        apply_theme_btn.setMaximumWidth(120)
+        apply_theme_btn.setProperty("class", "primary")
+        apply_theme_btn.clicked.connect(self._apply_theme)
+
+        theme_row.addWidget(self.theme_combo)
+        theme_row.addWidget(apply_theme_btn)
+        theme_row.addStretch()
+        theme_section.addLayout(theme_row)
+
+        theme_note = QLabel("Changing theme requires restarting TechDeck.")
+        theme_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
+        theme_section.addWidget(theme_note)
+
+        # Custom theme management
+        builder_row = QHBoxLayout()
+        build_btn = QPushButton("+ Build Custom Theme")
+        build_btn.setMinimumHeight(34)
+        build_btn.setMaximumWidth(180)
+        build_btn.clicked.connect(self._open_theme_builder)
+        builder_row.addWidget(build_btn)
+        builder_row.addStretch()
+        theme_section.addLayout(builder_row)
+
+        # Custom themes list
+        custom_lbl = QLabel("Custom Themes:")
+        custom_lbl.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        theme_section.addWidget(custom_lbl)
+
+        self._custom_theme_list = QListWidget()
+        self._custom_theme_list.setMaximumHeight(110)
+        self._custom_theme_list.setMaximumWidth(400)
+        theme_section.addWidget(self._custom_theme_list)
+
+        custom_btn_row = QHBoxLayout()
+        edit_theme_btn = QPushButton("Edit Selected")
+        edit_theme_btn.setMinimumHeight(30)
+        edit_theme_btn.setMaximumWidth(120)
+        edit_theme_btn.clicked.connect(self._edit_custom_theme)
+        del_theme_btn = QPushButton("Delete Selected")
+        del_theme_btn.setMinimumHeight(30)
+        del_theme_btn.setMaximumWidth(130)
+        del_theme_btn.clicked.connect(self._delete_custom_theme)
+        custom_btn_row.addWidget(edit_theme_btn)
+        custom_btn_row.addWidget(del_theme_btn)
+        custom_btn_row.addStretch()
+        theme_section.addLayout(custom_btn_row)
+
+        layout.addLayout(theme_section)
+        self._refresh_custom_theme_list()
+
+        # ── Rogue Mode ──
+        rogue_section = self._create_section("Rogue Mode")
+
+        rogue_desc = QLabel(
+            "Upload audio files and build focus playlists. "
+            "Launch the player with /roguemode in the console."
+        )
+        rogue_desc.setStyleSheet("color: #888; font-size: 12px;")
+        rogue_desc.setWordWrap(True)
+        rogue_section.addWidget(rogue_desc)
+
+        # Launch player button
+        launch_row = QHBoxLayout()
+        launch_btn = QPushButton("Launch Player")
+        launch_btn.setMinimumHeight(34)
+        launch_btn.setMaximumWidth(140)
+        launch_btn.setProperty("class", "primary")
+        launch_btn.clicked.connect(self._launch_rogue_player)
+        launch_row.addWidget(launch_btn)
+        launch_row.addStretch()
+        rogue_section.addLayout(launch_row)
+
+        # Playlist management
+        pl_lbl = QLabel("Playlists:")
+        pl_lbl.setStyleSheet("font-weight: 600; margin-top: 12px;")
+        rogue_section.addWidget(pl_lbl)
+
+        pl_row = QHBoxLayout()
+        self._rm_pl_combo = QComboBox()
+        self._rm_pl_combo.setMinimumHeight(30)
+        self._rm_pl_combo.setMinimumWidth(200)
+        self._rm_pl_combo.currentIndexChanged.connect(self._on_rm_playlist_selected)
+
+        new_pl_btn = QPushButton("+ New")
+        new_pl_btn.setMinimumHeight(30)
+        new_pl_btn.setMaximumWidth(70)
+        new_pl_btn.clicked.connect(self._rm_new_playlist)
+
+        del_pl_btn = QPushButton("Delete")
+        del_pl_btn.setMinimumHeight(30)
+        del_pl_btn.setMaximumWidth(70)
+        del_pl_btn.clicked.connect(self._rm_delete_playlist)
+
+        pl_row.addWidget(self._rm_pl_combo)
+        pl_row.addWidget(new_pl_btn)
+        pl_row.addWidget(del_pl_btn)
+        pl_row.addStretch()
+        rogue_section.addLayout(pl_row)
+
+        # Song list
+        songs_lbl = QLabel("Songs in playlist:")
+        songs_lbl.setStyleSheet("font-weight: 600; margin-top: 10px;")
+        rogue_section.addWidget(songs_lbl)
+
+        self._rm_song_list = QListWidget()
+        self._rm_song_list.setMaximumHeight(140)
+        self._rm_song_list.setMaximumWidth(500)
+        rogue_section.addWidget(self._rm_song_list)
+
+        song_btn_row = QHBoxLayout()
+        upload_btn = QPushButton("+ Upload Audio")
+        upload_btn.setMinimumHeight(30)
+        upload_btn.setMaximumWidth(140)
+        upload_btn.clicked.connect(self._rm_upload_audio)
+        remove_btn = QPushButton("Remove Selected")
+        remove_btn.setMinimumHeight(30)
+        remove_btn.setMaximumWidth(140)
+        remove_btn.clicked.connect(self._rm_remove_song)
+        song_btn_row.addWidget(upload_btn)
+        song_btn_row.addWidget(remove_btn)
+        song_btn_row.addStretch()
+        rogue_section.addLayout(song_btn_row)
+
+        layout.addLayout(rogue_section)
+
+        layout.addStretch()
+
+        self._load_personalization_settings()
+        self._refresh_rm_playlists()
+
+        scroll.setWidget(content)
+        container = QWidget()
+        QVBoxLayout(container).addWidget(scroll)
+        container.layout().setContentsMargins(0, 0, 0, 0)
+        return container
+
+    # ──────────────────────────────────────────────────────────────────────
+    # GENERAL TAB METHODS
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _load_general_settings(self):
+        audio = self.settings.get_audio_settings()
+        self.audio_enabled_check.setChecked(audio.get("enabled", True))
+        self.audio_volume_slider.setValue(audio.get("volume", 80))
+        self._on_audio_enabled_toggled(audio.get("enabled", True))
+
+    def _on_audio_enabled_toggled(self, enabled: bool):
+        self.audio_volume_slider.setEnabled(enabled)
+        self.audio_volume_pct.setEnabled(enabled)
+
+    def _save_general_settings(self):
+        audio_enabled = self.audio_enabled_check.isChecked()
+        audio_volume = self.audio_volume_slider.value()
+        self.settings.set_audio_settings(audio_enabled, audio_volume)
+        from techdeck.core.audio_manager import get_audio_manager
+        get_audio_manager().configure(enabled=audio_enabled, volume=audio_volume)
+        QMessageBox.information(self, "Settings Saved", "Settings saved successfully!")
+
+    def _reset_defaults(self):
+        reply = QMessageBox.question(
+            self, "Reset to Defaults",
+            "Reset sound settings to defaults?\n\nYour profiles and theme will not be affected.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.settings.set_audio_settings(True, 80)
+            from techdeck.core.audio_manager import get_audio_manager
+            get_audio_manager().configure(enabled=True, volume=80)
+            self._load_general_settings()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PLUGIN TAB METHODS
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _load_plugin_list(self):
+        self.plugin_combo.clear()
+        plugins = self.plugin_loader.get_all_plugins()
+        if not plugins:
+            self.plugin_combo.addItem("No plugins installed")
+            self.plugin_combo.setEnabled(False)
+            return
+        for plugin in sorted(plugins, key=lambda p: p.name):
+            self.plugin_combo.addItem(plugin.name, plugin.id)
+        self.plugin_combo.setEnabled(True)
+
+    def _on_plugin_selected(self, plugin_name: str):
+        if not plugin_name or plugin_name == "No plugins installed":
+            return
+        plugin_id = self.plugin_combo.currentData()
+        if not plugin_id:
+            return
+        plugin = self.plugin_loader.get_plugin(plugin_id)
+        if not plugin:
+            return
+        plugin_json_path = plugin.path / "plugin.json"
+        if not plugin_json_path.exists():
+            self._show_no_settings("Plugin configuration file not found.")
+            return
+        try:
+            with open(plugin_json_path, "r", encoding="utf-8") as f:
+                plugin_data = json.load(f)
+        except Exception as e:
+            self._show_no_settings(f"Error reading plugin configuration: {e}")
+            return
+
+        if self.current_plugin_widget:
+            self.plugin_layout.removeWidget(self.current_plugin_widget)
+            self.current_plugin_widget.deleteLater()
+            self.current_plugin_widget = None
+        old_version_label = self.findChild(QLabel, "plugin_version_label")
+        if old_version_label:
+            self.plugin_layout.removeWidget(old_version_label)
+            old_version_label.deleteLater()
+
+        self.no_plugin_label.hide()
+        version_label = QLabel(f"Version: {plugin_data.get('version', '1.0.0')}")
+        version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
+        version_label.setObjectName("plugin_version_label")
+        self.plugin_layout.addWidget(version_label)
+
+        if "settings" not in plugin_data or not plugin_data["settings"].get("fields"):
+            self._show_no_settings("This app has no configurable settings.")
+            return
+
+        current_values = self.settings.get_plugin_settings(plugin_id)
+        self.current_plugin_widget = PluginSettingsWidget(
+            plugin_id=plugin_id,
+            schema=plugin_data["settings"],
+            current_values=current_values,
+        )
+        self.plugin_layout.addWidget(self.current_plugin_widget)
+        self.save_plugin_btn.setEnabled(True)
+
+    def _show_no_settings(self, message: str):
+        if self.current_plugin_widget:
+            self.plugin_layout.removeWidget(self.current_plugin_widget)
+            self.current_plugin_widget.deleteLater()
+            self.current_plugin_widget = None
+        version_label = self.findChild(QLabel, "plugin_version_label")
+        if version_label:
+            self.plugin_layout.removeWidget(version_label)
+            version_label.deleteLater()
+        self.no_plugin_label.setText(message)
+        self.no_plugin_label.show()
+        self.save_plugin_btn.setEnabled(False)
+
+    def _save_plugin_settings(self):
+        if not self.current_plugin_widget:
+            return
+        values = self.current_plugin_widget.get_values()
+        if not self.current_plugin_widget.validate_all():
+            QMessageBox.warning(self, "Validation Error", "Please fix the validation errors before saving.")
+            return
+        plugin_id = self.current_plugin_widget.plugin_id
+        self.settings.set_plugin_settings(plugin_id, values)
+        QMessageBox.information(
+            self, "Settings Saved",
+            f"Settings for '{self.plugin_combo.currentText()}' have been saved."
+        )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PERSONALIZATION TAB METHODS — PROFILE
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _load_personalization_settings(self):
+        user_data = self.settings.get_user_data()
+        self.name_input.setText(user_data.get("name", ""))
+        self.email_input.setText(user_data.get("email", ""))
+        self.title_input.setText(user_data.get("title", ""))
+        current_theme = self.settings.get_theme()
+        idx = self.theme_combo.findData(current_theme)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
+    def _save_personalization_settings(self):
+        self.settings.update_user_data(
+            name=self.name_input.text().strip(),
+            email=self.email_input.text().strip(),
+            title=self.title_input.text().strip(),
+        )
+        QMessageBox.information(self, "Profile Saved", "Your profile information has been saved.")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PERSONALIZATION TAB METHODS — THEME
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _refresh_theme_combo(self):
+        current = self.settings.get_theme()
+        self.theme_combo.clear()
+        for name in get_theme_names():
+            self.theme_combo.addItem(name.replace("_", " ").title(), name)
+        idx = self.theme_combo.findData(current)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
+    def _apply_theme(self):
+        theme_name = self.theme_combo.currentData()
+        if not theme_name:
+            return
+        self.settings.set_theme(theme_name)
+        self.theme_changed.emit(theme_name)
+
+    def _open_theme_builder(self, edit_name: str = ""):
+        from techdeck.ui.dialogs.theme_builder_dialog import ThemeBuilderDialog
+        dlg = ThemeBuilderDialog(self.settings, parent=self, edit_name=edit_name)
+        dlg.theme_saved.connect(self._on_custom_theme_saved)
+        dlg.exec()
+
+    def _on_custom_theme_saved(self, name: str):
+        self._refresh_theme_combo()
+        self._refresh_custom_theme_list()
+        # Select the newly saved theme in the combo
+        idx = self.theme_combo.findData(name)
+        if idx >= 0:
+            self.theme_combo.setCurrentIndex(idx)
+
+    def _refresh_custom_theme_list(self):
+        self._custom_theme_list.clear()
+        for name in get_theme_names():
+            if not is_builtin_theme(name):
+                item = QListWidgetItem(name.replace("_", " ").title())
+                item.setData(Qt.ItemDataRole.UserRole, name)
+                self._custom_theme_list.addItem(item)
+
+    def _edit_custom_theme(self):
+        item = self._custom_theme_list.currentItem()
+        if not item:
+            QMessageBox.information(self, "Edit Theme", "Select a custom theme to edit.")
+            return
+        name = item.data(Qt.ItemDataRole.UserRole)
+        self._open_theme_builder(edit_name=name)
+
+    def _delete_custom_theme(self):
+        item = self._custom_theme_list.currentItem()
+        if not item:
+            QMessageBox.information(self, "Delete Theme", "Select a custom theme to delete.")
+            return
+        name = item.data(Qt.ItemDataRole.UserRole)
+        reply = QMessageBox.question(
+            self, "Delete Theme",
+            f"Delete custom theme '{name}'? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            delete_custom_theme(name, self.settings.get_custom_themes_dir())
+            self._refresh_theme_combo()
+            self._refresh_custom_theme_list()
+            if self.settings.get_theme() == name:
+                self.settings.set_theme("dark")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # PERSONALIZATION TAB METHODS — ROGUE MODE
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _launch_rogue_player(self):
+        from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
+        if self._rogue_player is not None and self._rogue_player.isVisible():
+            self._rogue_player.raise_()
+            self._rogue_player.activateWindow()
+            return
+        self._rogue_player = RogueModePlayer(self.settings, parent=self)
+        self._rogue_player.show()
+
+    def _refresh_rm_playlists(self):
+        rm = self.settings.get_roguemode_settings()
+        playlists = rm.get("playlists", {})
+        current_pl = rm.get("current_playlist", "")
+        self._rm_pl_combo.blockSignals(True)
+        self._rm_pl_combo.clear()
+        for name in playlists:
+            self._rm_pl_combo.addItem(name, name)
+        self._rm_pl_combo.blockSignals(False)
+        idx = self._rm_pl_combo.findData(current_pl)
+        self._rm_pl_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._refresh_rm_songs()
+
+    def _refresh_rm_songs(self):
+        self._rm_song_list.clear()
+        if self._rm_pl_combo.count() == 0:
+            return
+        pl_name = self._rm_pl_combo.currentData()
+        if not pl_name:
+            return
+        rm = self.settings.get_roguemode_settings()
+        files = rm.get("playlists", {}).get(pl_name, [])
+        for fn in files:
+            item = QListWidgetItem(Path(fn).stem)
+            item.setData(Qt.ItemDataRole.UserRole, fn)
+            self._rm_song_list.addItem(item)
+
+    def _on_rm_playlist_selected(self, idx: int):
+        if idx < 0:
+            return
+        name = self._rm_pl_combo.currentData()
+        self.settings.update_roguemode_setting("current_playlist", name)
+        self._refresh_rm_songs()
+
+    def _rm_new_playlist(self):
+        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        rm = self.settings.get_roguemode_settings()
+        if name in rm.get("playlists", {}):
+            QMessageBox.warning(self, "Rogue Mode", f"Playlist '{name}' already exists.")
+            return
+        rm.setdefault("playlists", {})[name] = []
+        rm["current_playlist"] = name
+        self.settings.set_roguemode_settings(rm)
+        self._refresh_rm_playlists()
+        idx = self._rm_pl_combo.findData(name)
+        if idx >= 0:
+            self._rm_pl_combo.setCurrentIndex(idx)
+
+    def _rm_delete_playlist(self):
+        if self._rm_pl_combo.count() == 0:
+            return
+        pl_name = self._rm_pl_combo.currentData()
+        if not pl_name:
+            return
+        reply = QMessageBox.question(
+            self, "Delete Playlist",
+            f"Delete playlist '{pl_name}'? (Audio files will not be deleted.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            rm = self.settings.get_roguemode_settings()
+            rm.get("playlists", {}).pop(pl_name, None)
+            if rm.get("current_playlist") == pl_name:
+                remaining = list(rm.get("playlists", {}).keys())
+                rm["current_playlist"] = remaining[0] if remaining else ""
+            self.settings.set_roguemode_settings(rm)
+            self._refresh_rm_playlists()
+
+    def _rm_upload_audio(self):
+        if self._rm_pl_combo.count() == 0:
+            QMessageBox.information(
+                self, "Upload Audio", "Create a playlist first, then upload audio."
+            )
+            return
+        pl_name = self._rm_pl_combo.currentData()
+        if not pl_name:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select Audio Files", "",
+            "Audio Files (*.mp3 *.wav *.ogg *.flac *.m4a *.aac);;All Files (*.*)"
+        )
+        if not paths:
+            return
+        audio_dir = self.settings.get_roguemode_audio_dir()
+        rm = self.settings.get_roguemode_settings()
+        playlist = rm.setdefault("playlists", {}).setdefault(pl_name, [])
+        added = 0
+        for src in paths:
+            src_path = Path(src)
+            dest = audio_dir / src_path.name
+            if dest.name in playlist:
+                continue  # already in playlist
+            try:
+                if not dest.exists():
+                    shutil.copy2(str(src_path), str(dest))
+                playlist.append(dest.name)
+                added += 1
+            except Exception as e:
+                QMessageBox.warning(self, "Upload Error", f"Could not copy {src_path.name}:\n{e}")
+        if added:
+            self.settings.set_roguemode_settings(rm)
+            self._refresh_rm_songs()
+            if self._rogue_player and self._rogue_player.isVisible():
+                self._rogue_player.refresh_playlists()
+
+    def _rm_remove_song(self):
+        item = self._rm_song_list.currentItem()
+        if not item:
+            return
+        pl_name = self._rm_pl_combo.currentData()
+        fn = item.data(Qt.ItemDataRole.UserRole)
+        rm = self.settings.get_roguemode_settings()
+        playlist = rm.get("playlists", {}).get(pl_name, [])
+        if fn in playlist:
+            playlist.remove(fn)
+            self.settings.set_roguemode_settings(rm)
+            self._refresh_rm_songs()
+            if self._rogue_player and self._rogue_player.isVisible():
+                self._rogue_player.refresh_playlists()
+
+    # ──────────────────────────────────────────────────────────────────────
+    # HELPERS
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _create_section(self, title: str) -> QVBoxLayout:
+        section = QVBoxLayout()
+        section.setSpacing(10)
+        section_title = QLabel(title)
+        section_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        section.addWidget(section_title)
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet("background: #2A2A2A; max-height: 1px;")
+        section.addWidget(divider)
+        return section
+
+    def _combo_style(self, theme, arrow_path: str) -> str:
+        return f"""
             QComboBox {{
                 background-color: {theme.surface};
                 color: {theme.text};
@@ -317,447 +822,30 @@ class SettingsPage(QWidget):
                 padding: 6px 10px;
                 padding-right: 28px;
             }}
-            QComboBox:hover {{
-                border-color: {theme.border_strong};
-            }}
+            QComboBox:hover {{ border-color: {theme.border_strong}; }}
             QComboBox::drop-down {{
-                width: 24px;
-                border: none;
-                background: transparent;
-                subcontrol-origin: padding;
-                subcontrol-position: center right;
+                width: 24px; border: none; background: transparent;
+                subcontrol-origin: padding; subcontrol-position: center right;
             }}
             QComboBox::down-arrow {{
-                image: url("{arrow_path}");
-                width: 12px;
-                height: 12px;
-                background: transparent;
-                border: none;
-                margin-right: 6px;
+                image: url("{arrow_path}"); width: 12px; height: 12px;
+                background: transparent; border: none; margin-right: 6px;
             }}
             QComboBox QAbstractItemView {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 4px;
-                selection-background-color: {theme.tile_selected};
-                outline: none;
+                background-color: {theme.surface}; color: {theme.text};
+                border: 1px solid {theme.border}; border-radius: 4px;
+                selection-background-color: {theme.tile_selected}; outline: none;
             }}
-        """)
-        self.plugin_combo.currentTextChanged.connect(self._on_plugin_selected)
-        
-        selection_section.addWidget(select_label)
-        selection_section.addWidget(self.plugin_combo)
-        layout.addLayout(selection_section)
-        
-        # ===== Plugin Settings Area =====
-        settings_section = self._create_section("Configuration")
-        
-        # Container for plugin-specific settings widget
-        self.plugin_layout = QVBoxLayout()
-        self.plugin_layout.setSpacing(12)
-        
-        # Placeholder when no plugin selected
-        self.no_plugin_label = QLabel("Select an app to view its settings.")
-        self.no_plugin_label.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
-        self.no_plugin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.plugin_layout.addWidget(self.no_plugin_label)
-        
-        settings_section.addLayout(self.plugin_layout)
-        layout.addLayout(settings_section)
-        
-        # ===== Action Buttons =====
-        layout.addStretch()
-        
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)
-        
-        self.save_plugin_btn = QPushButton("Save App Settings")
-        self.save_plugin_btn.setMinimumHeight(36)
-        self.save_plugin_btn.setMaximumWidth(150)
-        self.save_plugin_btn.setEnabled(False)
-        self.save_plugin_btn.clicked.connect(self._save_plugin_settings)
-        
-        button_layout.addWidget(self.save_plugin_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        # Load plugins
-        self._load_plugin_list()
-        
-        scroll.setWidget(content)
-        
-        # Wrap in container
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.addWidget(scroll)
-        
-        return container
-    
-    # ========== PERSONALIZATION TAB ==========
-    
-    def _create_personalization_tab(self) -> QWidget:
-        """Create Personalization tab."""
-        widget = QWidget()
-        
-        # Create scroll area for content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
-        
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(24)
-        
-        # ===== Page Title =====
-        title = QLabel("Personalization")
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Customize your profile information")
-        subtitle.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
-        layout.addWidget(subtitle)
-        
-        # ===== Profile Section =====
-        profile_section = self._create_section("Profile Information")
-        
-        # Name
-        name_label = QLabel("Full Name:")
-        name_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("John Smith")
-        self.name_input.setMinimumHeight(34)
-        self.name_input.setMaximumWidth(400)
-        
-        profile_section.addWidget(name_label)
-        profile_section.addWidget(self.name_input)
-        
-        # Email
-        email_label = QLabel("Email:")
-        email_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("john.smith@company.com")
-        self.email_input.setMinimumHeight(34)
-        self.email_input.setMaximumWidth(400)
-        
-        profile_section.addWidget(email_label)
-        profile_section.addWidget(self.email_input)
-        
-        # Title
-        title_label = QLabel("Job Title:")
-        title_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("Production Manager")
-        self.title_input.setMinimumHeight(34)
-        self.title_input.setMaximumWidth(400)
-        
-        profile_section.addWidget(title_label)
-        profile_section.addWidget(self.title_input)
-        
-        layout.addLayout(profile_section)
-        
-        # ===== Action Buttons =====
-        layout.addStretch()
-        
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)
-        
-        save_btn = QPushButton("Save Profile")
-        save_btn.setMinimumHeight(36)
-        save_btn.setMaximumWidth(150)
-        save_btn.clicked.connect(self._save_personalization_settings)
-        
-        button_layout.addWidget(save_btn)
-        button_layout.addStretch()
-        
-        layout.addLayout(button_layout)
-        
-        # Load current settings
-        self._load_personalization_settings()
-        
-        scroll.setWidget(content)
-        
-        # Wrap in container
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.addWidget(scroll)
-        
-        return container
-    
-    # ========== HELPER METHODS ==========
-    
-    def _create_section(self, title: str) -> QVBoxLayout:
-        """Create a settings section with title and divider."""
-        section = QVBoxLayout()
-        section.setSpacing(12)
-        
-        # Section title
-        section_title = QLabel(title)
-        section_title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        section.addWidget(section_title)
-        
-        # Divider line
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("background: #2A2A2A; max-height: 1px;")
-        section.addWidget(divider)
-        
-        return section
-    
-    # ========== GENERAL TAB METHODS ==========
-    
-    def _load_general_settings(self):
-        """Load general settings into UI."""
-        current_theme = self.settings.get_theme()
-        index = self.theme_combo.findText(current_theme.capitalize())
-        if index >= 0:
-            self.theme_combo.setCurrentIndex(index)
+        """
 
-        audio = self.settings.get_audio_settings()
-        self.audio_enabled_check.setChecked(audio.get("enabled", True))
-        self.audio_volume_slider.setValue(audio.get("volume", 80))
-        self._on_audio_enabled_toggled(audio.get("enabled", True))
-
-    def _on_audio_enabled_toggled(self, enabled: bool) -> None:
-        """Gray out volume controls when audio is disabled."""
-        self.audio_volume_slider.setEnabled(enabled)
-        self.audio_volume_pct.setEnabled(enabled)
-    
-    def _on_theme_changed(self, theme_name: str):
-        """Handle theme selection change."""
-        # Just update combo selection, actual save happens on Save button
-        pass
-    
-    def _save_general_settings(self):
-        """Save general settings."""
-        # Save theme
-        theme_name = self.theme_combo.currentText().lower()
-        old_theme = self.settings.get_theme()
-        theme_changed = (theme_name != old_theme)
-        self.settings.set_theme(theme_name)
-
-        # Save audio settings and apply live
-        audio_enabled = self.audio_enabled_check.isChecked()
-        audio_volume = self.audio_volume_slider.value()
-        self.settings.set_audio_settings(audio_enabled, audio_volume)
-
-        from techdeck.core.audio_manager import get_audio_manager
-        get_audio_manager().configure(enabled=audio_enabled, volume=audio_volume)
-
-        # Show confirmation
-        if theme_changed:
-            self.theme_changed.emit(theme_name)
-        else:
-            QMessageBox.information(
-                self,
-                "Settings Saved",
-                "Settings saved successfully!"
-            )
-    
-    def _reset_defaults(self):
-        """Reset all general settings to defaults."""
-        reply = QMessageBox.question(
-            self,
-            "Reset to Defaults",
-            "Reset all general settings to default values?\n\n"
-            "This will set the theme to Dark.\n\n"
-            "Your profiles and user data will not be affected.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.settings.set_theme("dark")
-            self.settings.set_audio_settings(True, 80)
-
-            from techdeck.core.audio_manager import get_audio_manager
-            get_audio_manager().configure(enabled=True, volume=80)
-
-            # Reload UI
-            self._load_general_settings()
-
-            # Emit theme change to apply immediately
-            self.theme_changed.emit("dark")
-    
-    # ========== PLUGIN TAB METHODS ==========
-    
-    def _load_plugin_list(self):
-        """Load plugins into dropdown."""
-        self.plugin_combo.clear()
-        
-        # Get all plugins
-        plugins = self.plugin_loader.get_all_plugins()
-        
-        if not plugins:
-            self.plugin_combo.addItem("No plugins installed")
-            self.plugin_combo.setEnabled(False)
-            return
-        
-        # Add plugin names
-        for plugin in sorted(plugins, key=lambda p: p.name):
-            self.plugin_combo.addItem(plugin.name, plugin.id)
-        
-        self.plugin_combo.setEnabled(True)
-    
-    def _on_plugin_selected(self, plugin_name: str):
-        """Handle plugin selection from dropdown."""
-        if not plugin_name or plugin_name == "No plugins installed":
-            return
-        
-        # Get plugin ID from combo box data
-        plugin_id = self.plugin_combo.currentData()
-        if not plugin_id:
-            return
-        
-        # Get plugin object
-        plugin = self.plugin_loader.get_plugin(plugin_id)
-        if not plugin:
-            return
-        
-        # Load plugin.json to get settings schema
-        plugin_json_path = plugin.path / "plugin.json"
-        if not plugin_json_path.exists():
-            self._show_no_settings("Plugin configuration file not found.")
-            return
-        
-        try:
-            import json
-            with open(plugin_json_path, 'r', encoding='utf-8') as f:
-                plugin_data = json.load(f)
-        except Exception as e:
-            self._show_no_settings(f"Error reading plugin configuration: {e}")
-            return
-        
-        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ FIXED: Clear old widgets FIRST (before adding new ones)
-        if self.current_plugin_widget:
-            self.plugin_layout.removeWidget(self.current_plugin_widget)
-            self.current_plugin_widget.deleteLater()
-            self.current_plugin_widget = None
-        
-        # Clear old version label if it exists
-        old_version_label = self.findChild(QLabel, "plugin_version_label")
-        if old_version_label:
-            self.plugin_layout.removeWidget(old_version_label)
-            old_version_label.deleteLater()
-        
-        # Hide placeholder
-        self.no_plugin_label.hide()
-        
-        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ NOW add the new version label
-        plugin_version = plugin_data.get('version', '1.0.0')
-        version_label = QLabel(f"Version: {plugin_version}")
-        version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
-        version_label.setObjectName("plugin_version_label")
-        self.plugin_layout.addWidget(version_label)
-        
-        # Check if plugin has settings schema
-        if 'settings' not in plugin_data or not plugin_data['settings'].get('fields'):
-            self._show_no_settings("This app has no configurable settings.")
-            return
-        
-        # Get current saved values
-        current_values = self.settings.get_plugin_settings(plugin_id)
-        
-        # Create new plugin settings widget
-        self.current_plugin_widget = PluginSettingsWidget(
-            plugin_id=plugin_id,
-            schema=plugin_data['settings'],
-            current_values=current_values
-        )
-        
-        self.plugin_layout.addWidget(self.current_plugin_widget)
-        self.save_plugin_btn.setEnabled(True)
-    
-    def _show_no_settings(self, message: str):
-        """Show message when plugin has no settings."""
-        # Clear old widget
-        if self.current_plugin_widget:
-            self.plugin_layout.removeWidget(self.current_plugin_widget)
-            self.current_plugin_widget.deleteLater()
-            self.current_plugin_widget = None
-        
-        # ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ ADDED: Clear version label if it exists
-        version_label = self.findChild(QLabel, "plugin_version_label")
-        if version_label:
-            self.plugin_layout.removeWidget(version_label)
-            version_label.deleteLater()
-        
-        # Show message
-        self.no_plugin_label.setText(message)
-        self.no_plugin_label.show()
-        self.save_plugin_btn.setEnabled(False)
-    
-    def _save_plugin_settings(self):
-        """Save current plugin settings."""
-        if not self.current_plugin_widget:
-            return
-        
-        # Get values from widget
-        values = self.current_plugin_widget.get_values()
-        
-        # Validate using the correct method name
-        if not self.current_plugin_widget.validate_all():
-            QMessageBox.warning(
-                self,
-                "Validation Error",
-                "Please fix the validation errors before saving."
-            )
-            return
-        
-        # Save to settings
-        plugin_id = self.current_plugin_widget.plugin_id
-        self.settings.set_plugin_settings(plugin_id, values)
-        
-        QMessageBox.information(
-            self,
-            "Settings Saved",
-            f"Settings for '{self.plugin_combo.currentText()}' have been saved."
-        )
-    
-    # ========== PERSONALIZATION TAB METHODS ==========
-    
-    def _load_personalization_settings(self):
-        """Load personalization settings into UI."""
-        user_data = self.settings.get_user_data()
-        
-        self.name_input.setText(user_data.get('name', ''))
-        self.email_input.setText(user_data.get('email', ''))
-        self.title_input.setText(user_data.get('title', ''))
-    
-    def _save_personalization_settings(self):
-        """Save personalization settings."""
-        name = self.name_input.text().strip()
-        email = self.email_input.text().strip()
-        title = self.title_input.text().strip()
-        
-        # Update settings
-        self.settings.update_user_data(
-            name=name,
-            email=email,
-            title=title
-        )
-        
-        QMessageBox.information(
-            self,
-            "Profile Saved",
-            "Your profile information has been saved."
-        )
-    
-    # ========== PUBLIC METHODS ==========
-    
     def _check_for_updates(self):
-        """Check for updates manually."""
-        # Get reference to main window
         main_window = self.window()
-        if hasattr(main_window, 'check_for_updates_manual'):
+        if hasattr(main_window, "check_for_updates_manual"):
             main_window.check_for_updates_manual()
-    
+
     def refresh(self):
-        """Refresh the settings page data."""
         self._load_general_settings()
         self._load_plugin_list()
         self._load_personalization_settings()
+        self._refresh_custom_theme_list()
+        self._refresh_rm_playlists()
