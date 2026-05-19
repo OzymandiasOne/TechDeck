@@ -23,3 +23,12 @@ desktop.ini
 settings.json
 metrics.jsonl
 *.log
+
+# Build artifacts
+build/
+dist/
+installer_output/
+*.spec.bak
+
+# Claude Code local state
+.claude/

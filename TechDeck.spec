@@ -15,7 +15,8 @@ a = Analysis(
         'qrcode', 'qrcode.image', 'qrcode.image.base', 'qrcode.image.pure', 
         'qrcode.image.styledpil', 'qrcode.image.svg', 'qrcode.image.styles',
         'qrcode.image.styles.moduledrawers', 'qrcode.image.styles.colormasks',
-        'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont'
+        'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+        'win32com', 'win32com.client', 'pythoncom', 'pywintypes'
     ],
     hookspath=[],
     hooksconfig={},
@@ -42,6 +43,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets\\TechDeck.ico',
 )
 coll = COLLECT(
     exe,

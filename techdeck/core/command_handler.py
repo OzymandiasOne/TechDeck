@@ -647,15 +647,14 @@ class CommandHandler:
 
     def _cmd_roguemode(self, args: str):
         from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
-        if self._rogue_player is not None and self._rogue_player.isVisible():
-            self._rogue_player.raise_()
-            self._rogue_player.activateWindow()
-            self.console.append_system("Rogue Mode player is already open.")
-            return
+        is_first_open = RogueModePlayer._instance is None
         parent = self.main_window if self.main_window is not None else None
-        self._rogue_player = RogueModePlayer(self.settings, parent=parent)
-        self._rogue_player.show()
-        self.console.append_game("Rogue Mode activated. Lock in.")
+        self._rogue_player = RogueModePlayer.get_or_create(self.settings, parent=parent)
+        if is_first_open:
+            self.console.append_game("Rogue Mode activated. Lock in.")
+            self.console.append_system("Tech Tip: Add music and build playlists in the settings tab!")
+        else:
+            self.console.append_system("Rogue Mode player open.")
 
     # ------------------------------------------------------------------ #
     #  /haiku

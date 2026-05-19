@@ -4,16 +4,21 @@ Popup audio player for focus/work sessions.
 Uses QMediaPlayer for playlist playback with loop options.
 """
 
+import sys
 from pathlib import Path
+from typing import ClassVar
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QSlider, QListWidget, QListWidgetItem, QComboBox, QWidget,
     QSizePolicy, QFrame,
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QUrl
+from PySide6.QtCore import Qt, QTimer, Signal, QUrl, QSize
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
+
+from techdeck.ui.theme import get_current_palette
+from techdeck.ui.utils import make_tinted_svg_copy
 
 LOOP_ALL  = "loop_all"
 LOOP_ONE  = "loop_one"
@@ -29,8 +34,25 @@ _LOOP_LABELS = {
 class RogueModePlayer(QDialog):
     """
     Popup audio player.  Persists its playlist/loop/volume state via SettingsManager.
-    The caller must keep a reference to this window alive to prevent GC.
+    Use RogueModePlayer.get_or_create() to ensure only one instance exists at a time.
     """
+
+    _instance: ClassVar['RogueModePlayer | None'] = None
+
+    @classmethod
+    def get_or_create(cls, settings, parent=None) -> 'RogueModePlayer':
+        """Return existing player (show/raise it) or create a fresh one."""
+        if cls._instance is not None:
+            try:
+                cls._instance.show()
+                cls._instance.raise_()
+                cls._instance.activateWindow()
+                return cls._instance
+            except RuntimeError:
+                cls._instance = None
+        cls._instance = cls(settings, parent)
+        cls._instance.show()
+        return cls._instance
 
     def __init__(self, settings, parent=None):
         super().__init__(
@@ -68,6 +90,23 @@ class RogueModePlayer(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
+
+        # ── Resolve theme + icon paths once for the whole UI ──
+        _tn = self._settings.get_theme()
+        _tp = get_current_palette(_tn)
+        _idir = (
+            Path(sys._MEIPASS) / "assets" / "icons"
+            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+            else Path(__file__).resolve().parents[3] / "assets" / "icons"
+        )
+        _ifolder = "light" if _tn in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+
+        def _media_icon(name: str) -> QIcon:
+            tinted = make_tinted_svg_copy(_idir / "light" / name, _tp.text)
+            return QIcon(tinted)
+
+        self._icon_play  = _media_icon("play.svg")
+        self._icon_pause = _media_icon("pause.svg")
 
         # ── Header ──
         hdr = QHBoxLayout()
@@ -118,9 +157,10 @@ class RogueModePlayer(QDialog):
         transport = QHBoxLayout()
         transport.setSpacing(6)
 
-        self._prev_btn  = self._mk_btn("⏮", self._prev_track,  tip="Previous")
-        self._play_btn  = self._mk_btn("▶",  self._toggle_play, tip="Play / Pause", w=48)
-        self._next_btn  = self._mk_btn("⏭", self._next_track,  tip="Next")
+        self._prev_btn  = self._mk_icon_btn(_media_icon("back.svg"), self._prev_track,  tip="Previous", w=46)
+        self._play_btn  = self._mk_icon_btn(self._icon_play, self._toggle_play, tip="Play / Pause", w=56)
+        self._next_btn  = self._mk_icon_btn(_media_icon("next.svg"), self._next_track, tip="Next", w=46)
+        self._play_btn.setIconSize(QSize(26, 26))
         transport.addStretch()
         transport.addWidget(self._prev_btn)
         transport.addWidget(self._play_btn)
@@ -155,7 +195,7 @@ class RogueModePlayer(QDialog):
         for mode, label in _LOOP_LABELS.items():
             btn = QPushButton(label)
             btn.setCheckable(True)
-            btn.setFixedHeight(28)
+            btn.setMinimumHeight(34)
             btn.clicked.connect(lambda checked, m=mode: self._set_loop_mode(m))
             self._loop_btns[mode] = btn
             loop_row.addWidget(btn)
@@ -168,12 +208,39 @@ class RogueModePlayer(QDialog):
         root.addWidget(sep2)
 
         # ── Playlist selector ──
+        _arrow = make_tinted_svg_copy(_idir / _ifolder / "chevron-down.svg", _tp.text)
+        _pl_css = f"""
+            QComboBox {{
+                background-color: {_tp.surface};
+                color: {_tp.text};
+                border: 1px solid {_tp.border};
+                border-radius: 6px;
+                padding: 4px 8px;
+                padding-right: 26px;
+            }}
+            QComboBox:hover {{ border-color: {_tp.border_strong}; }}
+            QComboBox::drop-down {{
+                width: 22px; border: none; background: transparent;
+                subcontrol-origin: padding; subcontrol-position: center right;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{_arrow}"); width: 12px; height: 12px;
+                background: transparent; border: none; margin-right: 4px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {_tp.surface}; color: {_tp.text};
+                border: 1px solid {_tp.border}; border-radius: 4px;
+                selection-background-color: {_tp.tile_selected}; outline: none;
+            }}
+        """
+
         pl_row = QHBoxLayout()
         pl_lbl = QLabel("Playlist:")
         pl_lbl.setStyleSheet("background: transparent; font-size: 12px;")
         pl_lbl.setFixedWidth(60)
         self._pl_combo = QComboBox()
         self._pl_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._pl_combo.setStyleSheet(_pl_css)
         self._pl_combo.currentIndexChanged.connect(self._on_playlist_selected)
         pl_row.addWidget(pl_lbl)
         pl_row.addWidget(self._pl_combo)
@@ -185,9 +252,11 @@ class RogueModePlayer(QDialog):
         self._track_list.itemDoubleClicked.connect(self._on_track_double_clicked)
         root.addWidget(self._track_list)
 
-    def _mk_btn(self, text: str, slot, tip: str = "", w: int = 36) -> QPushButton:
-        btn = QPushButton(text)
-        btn.setFixedSize(w, 36)
+    def _mk_icon_btn(self, icon: QIcon, slot, tip: str = "", w: int = 36) -> QPushButton:
+        btn = QPushButton()
+        btn.setIcon(icon)
+        btn.setIconSize(QSize(22, 22))
+        btn.setFixedSize(w, 42)
         btn.setToolTip(tip)
         btn.clicked.connect(slot)
         return btn
@@ -206,6 +275,10 @@ class RogueModePlayer(QDialog):
         self._update_loop_buttons(loop)
 
         self._refresh_playlist_combo(rm)
+
+        # Autoplay: start playing if enabled and playlist has tracks
+        if rm.get("autoplay", True) and self._playlist:
+            self._play_index(0)
 
     def _refresh_playlist_combo(self, rm: dict = None):
         if rm is None:
@@ -298,7 +371,7 @@ class RogueModePlayer(QDialog):
 
     def _on_playback_state(self, state):
         playing = state == QMediaPlayer.PlaybackState.PlayingState
-        self._play_btn.setText("⏸" if playing else "▶")
+        self._play_btn.setIcon(self._icon_pause if playing else self._icon_play)
 
     def _on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
@@ -371,4 +444,5 @@ class RogueModePlayer(QDialog):
 
     def closeEvent(self, event):
         self._player.stop()
-        event.accept()
+        self.hide()
+        event.ignore()  # prevent Qt from destroying the window; singleton stays valid

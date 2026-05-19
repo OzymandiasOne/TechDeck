@@ -3,6 +3,8 @@ TechDeck Theme Builder Dialog
 Lets users create and save custom color themes.
 """
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QComboBox, QScrollArea, QWidget, QFrame,
@@ -13,8 +15,9 @@ from PySide6.QtGui import QColor, QFont
 
 from techdeck.ui.theme import (
     THEMES, ColorPalette, palette_to_dict, palette_from_dict,
-    save_custom_theme, is_builtin_theme,
+    save_custom_theme, is_builtin_theme, get_current_palette,
 )
+from techdeck.ui.utils import make_tinted_svg_copy
 
 
 # Field groups: (group_label, [(palette_field_name, display_label), ...])
@@ -83,17 +86,12 @@ class _ColorButton(QPushButton):
         self.clicked.connect(self._pick_color)
 
     def _refresh(self):
-        c = QColor(self._color) if not self._color.startswith("rgba") else QColor(128, 128, 128)
-        luma = 0.299 * c.redF() + 0.587 * c.greenF() + 0.114 * c.blueF()
-        text_color = "#000000" if luma > 0.5 else "#FFFFFF"
         self.setStyleSheet(
-            f"QPushButton {{ background-color: {self._color}; color: {text_color}; "
-            f"border: 1px solid #555; border-radius: 4px; font-size: 10px; }}"
+            f"QPushButton {{ background-color: {self._color}; "
+            f"border: 1px solid #555; border-radius: 4px; }}"
             f"QPushButton:hover {{ border: 2px solid #FFF; }}"
         )
-        # Show abbreviated hex in button if it fits
-        short = self._color if len(self._color) <= 7 else ""
-        self.setText(short)
+        self.setText("")
 
     def _pick_color(self):
         from PySide6.QtWidgets import QColorDialog
@@ -211,8 +209,40 @@ class ThemeBuilderDialog(QDialog):
 
         base_lbl = QLabel("Start from:")
         base_lbl.setStyleSheet("background: transparent; font-size: 12px;")
+
+        _dlg_theme_name = self._settings.get_theme()
+        _dlg_theme = get_current_palette(_dlg_theme_name)
+        _dlg_icon_folder = "light" if _dlg_theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _dlg_icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / _dlg_icon_folder
+        _dlg_arrow = make_tinted_svg_copy(_dlg_icons_dir / "chevron-down.svg", _dlg_theme.text)
+        _dlg_combo_css = f"""
+            QComboBox {{
+                background-color: {_dlg_theme.surface};
+                color: {_dlg_theme.text};
+                border: 1px solid {_dlg_theme.border};
+                border-radius: 8px;
+                padding: 6px 10px;
+                padding-right: 28px;
+            }}
+            QComboBox:hover {{ border-color: {_dlg_theme.border_strong}; }}
+            QComboBox::drop-down {{
+                width: 24px; border: none; background: transparent;
+                subcontrol-origin: padding; subcontrol-position: center right;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{_dlg_arrow}"); width: 12px; height: 12px;
+                background: transparent; border: none; margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {_dlg_theme.surface}; color: {_dlg_theme.text};
+                border: 1px solid {_dlg_theme.border}; border-radius: 4px;
+                selection-background-color: {_dlg_theme.tile_selected}; outline: none;
+            }}
+        """
+
         self._base_combo = QComboBox()
         self._base_combo.setFixedWidth(150)
+        self._base_combo.setStyleSheet(_dlg_combo_css)
         for name in THEMES:
             self._base_combo.addItem(name.capitalize(), name)
         self._base_combo.currentIndexChanged.connect(
@@ -236,9 +266,16 @@ class ThemeBuilderDialog(QDialog):
         inner_layout.setSpacing(14)
 
         for group_label, fields in _FIELD_GROUPS:
+            grp_hdr = QHBoxLayout()
             grp_title = QLabel(group_label)
             grp_title.setStyleSheet("font-weight: bold; font-size: 12px; background: transparent; color: #aaa;")
-            inner_layout.addWidget(grp_title)
+            grp_hdr.addWidget(grp_title)
+            if group_label == "Background & Surface":
+                hint_lbl = QLabel("  ·  Select the color boxes below to adjust colors")
+                hint_lbl.setStyleSheet("font-size: 11px; color: #666; background: transparent;")
+                grp_hdr.addWidget(hint_lbl)
+            grp_hdr.addStretch()
+            inner_layout.addLayout(grp_hdr)
 
             grid = QGridLayout()
             grid.setHorizontalSpacing(8)
@@ -283,6 +320,7 @@ class ThemeBuilderDialog(QDialog):
         font_lbl.setStyleSheet("background: transparent; font-size: 12px;")
         self._font_combo = QComboBox()
         self._font_combo.setFixedWidth(260)
+        self._font_combo.setStyleSheet(_dlg_combo_css)
         for val, label in _FONT_OPTIONS:
             self._font_combo.addItem(label, val)
         font_row.addWidget(font_lbl)

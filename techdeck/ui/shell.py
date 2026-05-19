@@ -25,7 +25,7 @@ from techdeck.ui.pages.settings_page import SettingsPage
 from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
 from techdeck.core.update_checker import UpdateChecker
-from techdeck.core.flavor import TalkbackState
+from techdeck.core.flavor import TalkbackState, TechTipState
 from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS, SOUND_ERROR
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
@@ -77,7 +77,8 @@ class MainWindow(QMainWindow):
         "Spaghettifying the data...",
         "Making weekend plans...",
         "Shaking fist angrily at the Old Gods...",
-        "typing /rave into the console..."
+        "Typing /rave into the console...",
+        "Honking..."
     ]
     _DONE_TEXTS = [
         "Combobulated for",
@@ -146,8 +147,9 @@ class MainWindow(QMainWindow):
         # Connect signal for thread-safe update dialog
         self.show_update_signal.connect(self._show_update_dialog_slot)
 
-        # Personality: talkback pool
+        # Personality: talkback + tech tip pools
         self._talkback = TalkbackState()
+        self._techtip = TechTipState()
         self._last_talkback_plugin: str | None = None
 
         # Audio: configure singleton from saved settings
@@ -398,10 +400,13 @@ class MainWindow(QMainWindow):
                 # at a meaningful moment. Suppress the auto sound for them.
                 if not getattr(plugin, 'requires_main_thread', False):
                     get_audio_manager().play(SOUND_SUCCESS)
-                # Talkback: ~1 in 5 runs, never the same plugin twice in a row
+                # Talkback ~1 in 5; tech tip ~1 in 12 if talkback didn't fire
                 if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
                     self.console.append_game(self._talkback.get_line())
                     self._last_talkback_plugin = plugin_id
+                elif random.random() < 0.08:
+                    self.console.append_system(self._techtip.get_line())
+                    self._last_talkback_plugin = None
                 else:
                     self._last_talkback_plugin = None
             elif result.status.value == "cancelled":

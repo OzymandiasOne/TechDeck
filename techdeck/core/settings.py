@@ -556,13 +556,19 @@ class SettingsManager:
     def get_roguemode_settings(self) -> dict:
         """Return Rogue Mode settings dict (playlists, current_playlist, volume, loop_mode)."""
         defaults = {
-            "playlists": {},
-            "current_playlist": "",
+            "playlists": {"Default": []},
+            "current_playlist": "Default",
             "volume": 75,
             "loop_mode": "loop_all",
+            "autoplay": True,
         }
         stored = self.data.get("settings", {}).get("roguemode", {})
-        return {**defaults, **stored}
+        merged = {**defaults, **stored}
+        # Ensure Default playlist always exists when playlists is empty
+        if not merged.get("playlists"):
+            merged["playlists"] = {"Default": []}
+            merged["current_playlist"] = "Default"
+        return merged
 
     def set_roguemode_settings(self, data: dict) -> None:
         """Persist Rogue Mode settings dict."""

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
+import re
 from pathlib import Path
 
 
@@ -78,8 +79,13 @@ class NavButton(QPushButton):
                     with open(path, 'r', encoding='utf-8') as f:
                         svg_content = f.read()
 
-                    # Replace 'currentColor' with actual color
+                    # Replace 'currentColor' and explicit hex stroke/fill with icon color
                     svg_content = svg_content.replace('currentColor', color)
+                    svg_content = re.sub(
+                        r'(stroke|fill)="#[0-9A-Fa-f]{3,6}"',
+                        rf'\1="{color}"',
+                        svg_content,
+                    )
 
                     # Create SVG renderer
                     renderer = QSvgRenderer(QByteArray(svg_content.encode('utf-8')))
@@ -118,8 +124,8 @@ class NavButton(QPushButton):
             self.setFixedWidth(50)
         else:
             self.setToolTip("")
-            self.setMinimumWidth(200)
-            self.setMaximumWidth(200)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)  # let layout fill the container
 
     def update_style(self):
         """Update button styling."""
@@ -305,7 +311,6 @@ class Sidebar(QWidget):
             (str(icons_dir / "home.svg"), "Home", "home"),
             (str(icons_dir / "library.svg"), "Library", "library"),
             (str(icons_dir / "settings.svg"), "Settings", "settings"),
-            (str(icons_dir / "account.svg"), "My Account", "account"),
         ]
 
         # Use theme text color for icons
@@ -321,8 +326,14 @@ class Sidebar(QWidget):
         self.nav_buttons[0].setChecked(True)
         self._current_page_id = "home"
 
-        # Push the feedback button to the bottom
+        # Push account + feedback to the bottom
         nav_layout.addStretch()
+
+        # ===== My Account — pinned just above feedback =====
+        account_btn = NavButton(str(icons_dir / "account.svg"), "My Account", "account", icon_color)
+        account_btn.clicked.connect(lambda checked: self._on_nav_clicked("account"))
+        self.nav_buttons.append(account_btn)
+        nav_layout.addWidget(account_btn)
 
         # ===== Report Feedback (accent-styled action button) =====
         feedback_icon_path = icons_dir / "feedback.svg"
@@ -345,14 +356,13 @@ class Sidebar(QWidget):
 
         layout.addWidget(nav_container)
 
-        # Create animation
+        # Single animation drives minimumWidth; maximumWidth is kept in sync via
+        # valueChanged so both constraints always match (equivalent to setFixedWidth
+        # each frame, which prevents the page stack from clipping over the sidebar edge).
         self.animation = QPropertyAnimation(self, b"minimumWidth")
         self.animation.setDuration(200)
         self.animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
-
-        self.size_animation = QPropertyAnimation(self, b"maximumWidth")
-        self.size_animation.setDuration(200)
-        self.size_animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self.animation.valueChanged.connect(self.setMaximumWidth)
 
     def toggle_collapse(self):
         """Toggle sidebar collapse state."""
@@ -398,14 +408,10 @@ class Sidebar(QWidget):
             btn.set_collapsed(True)
         self.feedback_btn.set_collapsed(True)
 
-        # Animate width
+        # Animate width (maximumWidth kept in sync via valueChanged)
         self.animation.setStartValue(self.expanded_width)
         self.animation.setEndValue(self.collapsed_width)
-        self.size_animation.setStartValue(self.expanded_width)
-        self.size_animation.setEndValue(self.collapsed_width)
-
         self.animation.start()
-        self.size_animation.start()
 
     def expand(self):
         """Expand sidebar to full mode."""
@@ -444,14 +450,13 @@ class Sidebar(QWidget):
             btn.set_collapsed(False)
         self.feedback_btn.set_collapsed(False)
 
-        # Animate width
+        # Raise sidebar above page stack during expansion to prevent edge clipping
+        self.raise_()
+
+        # Animate width (maximumWidth kept in sync via valueChanged)
         self.animation.setStartValue(self.collapsed_width)
         self.animation.setEndValue(self.expanded_width)
-        self.size_animation.setStartValue(self.collapsed_width)
-        self.size_animation.setEndValue(self.expanded_width)
-
         self.animation.start()
-        self.size_animation.start()
 
     def _on_nav_clicked(self, page_id: str):
         """Handle navigation button click."""

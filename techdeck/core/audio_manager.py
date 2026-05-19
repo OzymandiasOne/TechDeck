@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QUrl, QTimer
+from PySide6.QtCore import QUrl, QTimer, QObject, Slot, QMetaObject, Qt, Q_ARG
 from PySide6.QtMultimedia import QSoundEffect
 
 # ── Sound ID constants ──────────────────────────────────────────────────────
@@ -18,6 +18,9 @@ SOUND_CLICK = "click"
 SOUND_NAV = "nav"
 SOUND_CLEAR = "clear"
 SOUND_EASTER_EGG = "easter_egg"
+SOUND_CARD_DEAL = "card_deal"
+SOUND_CARD_DEALER_FINAL = "card_dealer_final"
+SOUND_RAVE_MUSIC = "rave_music"
 
 # Map sound IDs to filenames in assets/sounds/
 _SOUND_FILES: Dict[str, str] = {
@@ -27,8 +30,28 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_NAV: "nav.wav",
     SOUND_CLEAR: "clear.wav",
     SOUND_EASTER_EGG: "easter_egg.wav",
+    SOUND_CARD_DEAL: "UI_HighAndLow_Card_1.wav",
+    SOUND_CARD_DEALER_FINAL: "UI_HighAndLow_Card_2.wav",
+    SOUND_RAVE_MUSIC: "DaftPunkAlive2007.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
+
+
+class _AudioRelay(QObject):
+    """QObject relay so worker threads can marshal play() to the main thread."""
+    @Slot(str)
+    def play_sound(self, sound_id: str) -> None:
+        AudioManager().play(sound_id)
+
+
+_relay: Optional[_AudioRelay] = None
+
+
+def _get_relay() -> _AudioRelay:
+    global _relay
+    if _relay is None:
+        _relay = _AudioRelay()
+    return _relay
 
 
 def _sounds_dir() -> Path:
@@ -64,6 +87,7 @@ class AudioManager:
         self._enabled: bool = True
         self._volume: float = 0.8          # 0.0–1.0 internally
         self._active: List[QSoundEffect] = []  # keeps refs alive until playback ends
+        _get_relay()  # create relay now, on the main thread, so invokeMethod works from worker threads
 
     # ── Public API ──────────────────────────────────────────────────────────
 
@@ -107,6 +131,37 @@ class AudioManager:
             QTimer.singleShot(4000, lambda: self._release(effect))
         else:
             effect.statusChanged.connect(_on_status)
+
+    def safe_play(self, sound_id: str) -> None:
+        """Thread-safe play: marshals the call to the main Qt thread via queued connection."""
+        QMetaObject.invokeMethod(
+            _get_relay(),
+            "play_sound",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, sound_id),
+        )
+
+    def play_music_stoppable(self, sound_id: str) -> Optional[tuple]:
+        """Play a longer audio file via QMediaPlayer (buffered, no skipping).
+        Returns (QMediaPlayer, QAudioOutput) so the caller can call player.stop().
+        Caller must keep both objects alive for the duration of playback."""
+        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+        if not self._enabled:
+            return None
+        filename = _SOUND_FILES.get(sound_id)
+        if not filename:
+            return None
+        path = _sounds_dir() / filename
+        if not path.exists():
+            return None
+
+        player = QMediaPlayer()
+        audio_out = QAudioOutput()
+        player.setAudioOutput(audio_out)
+        audio_out.setVolume(self._volume)
+        player.setSource(QUrl.fromLocalFile(str(path)))
+        player.play()
+        return (player, audio_out)
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled

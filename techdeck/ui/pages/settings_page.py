@@ -256,43 +256,12 @@ class SettingsPage(QWidget):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
-        # ── Profile Information ──
-        profile_section = self._create_section("Profile Information")
-
-        name_label = QLabel("Full Name:")
-        name_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("John Smith")
-        self.name_input.setMinimumHeight(34)
-        self.name_input.setMaximumWidth(400)
-        profile_section.addWidget(name_label)
-        profile_section.addWidget(self.name_input)
-
-        email_label = QLabel("Email:")
-        email_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("john.smith@company.com")
-        self.email_input.setMinimumHeight(34)
-        self.email_input.setMaximumWidth(400)
-        profile_section.addWidget(email_label)
-        profile_section.addWidget(self.email_input)
-
-        title_label = QLabel("Job Title:")
-        title_label.setStyleSheet("font-weight: 600; margin-top: 12px;")
-        self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("Production Manager")
-        self.title_input.setMinimumHeight(34)
-        self.title_input.setMaximumWidth(400)
-        profile_section.addWidget(title_label)
-        profile_section.addWidget(self.title_input)
-
-        save_profile_btn = QPushButton("Save Profile")
-        save_profile_btn.setMinimumHeight(36)
-        save_profile_btn.setMaximumWidth(150)
-        save_profile_btn.clicked.connect(self._save_personalization_settings)
-        profile_section.addWidget(save_profile_btn)
-
-        layout.addLayout(profile_section)
+        # Compute combo arrow style once; reused for theme_combo and rm_combo
+        _p_theme = get_current_palette(self.settings.get_theme())
+        _p_theme_name = self.settings.get_theme()
+        _p_icon_folder = "light" if _p_theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _p_icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / _p_icon_folder
+        _p_arrow_path = make_tinted_svg_copy(_p_icons_dir / "chevron-down.svg", _p_theme.text)
 
         # ── Theme ──
         theme_section = self._create_section("Theme")
@@ -305,6 +274,7 @@ class SettingsPage(QWidget):
         self.theme_combo = QComboBox()
         self.theme_combo.setMinimumHeight(34)
         self.theme_combo.setMinimumWidth(200)
+        self.theme_combo.setStyleSheet(self._combo_style(_p_theme, _p_arrow_path))
         self._refresh_theme_combo()
 
         apply_theme_btn = QPushButton("Apply Theme")
@@ -326,7 +296,6 @@ class SettingsPage(QWidget):
         builder_row = QHBoxLayout()
         build_btn = QPushButton("+ Build Custom Theme")
         build_btn.setMinimumHeight(34)
-        build_btn.setMaximumWidth(180)
         build_btn.clicked.connect(self._open_theme_builder)
         builder_row.addWidget(build_btn)
         builder_row.addStretch()
@@ -345,11 +314,9 @@ class SettingsPage(QWidget):
         custom_btn_row = QHBoxLayout()
         edit_theme_btn = QPushButton("Edit Selected")
         edit_theme_btn.setMinimumHeight(30)
-        edit_theme_btn.setMaximumWidth(120)
         edit_theme_btn.clicked.connect(self._edit_custom_theme)
         del_theme_btn = QPushButton("Delete Selected")
         del_theme_btn.setMinimumHeight(30)
-        del_theme_btn.setMaximumWidth(130)
         del_theme_btn.clicked.connect(self._delete_custom_theme)
         custom_btn_row.addWidget(edit_theme_btn)
         custom_btn_row.addWidget(del_theme_btn)
@@ -381,6 +348,12 @@ class SettingsPage(QWidget):
         launch_row.addStretch()
         rogue_section.addLayout(launch_row)
 
+        autoplay_row = QHBoxLayout()
+        self._rm_autoplay_check = QCheckBox("Autoplay on open")
+        autoplay_row.addWidget(self._rm_autoplay_check)
+        autoplay_row.addStretch()
+        rogue_section.addLayout(autoplay_row)
+
         # Playlist management
         pl_lbl = QLabel("Playlists:")
         pl_lbl.setStyleSheet("font-weight: 600; margin-top: 12px;")
@@ -390,16 +363,16 @@ class SettingsPage(QWidget):
         self._rm_pl_combo = QComboBox()
         self._rm_pl_combo.setMinimumHeight(30)
         self._rm_pl_combo.setMinimumWidth(200)
+        self._rm_pl_combo.setStyleSheet(self._combo_style(_p_theme, _p_arrow_path))
         self._rm_pl_combo.currentIndexChanged.connect(self._on_rm_playlist_selected)
 
         new_pl_btn = QPushButton("+ New")
         new_pl_btn.setMinimumHeight(30)
-        new_pl_btn.setMaximumWidth(70)
+        new_pl_btn.setMinimumWidth(72)
         new_pl_btn.clicked.connect(self._rm_new_playlist)
 
         del_pl_btn = QPushButton("Delete")
         del_pl_btn.setMinimumHeight(30)
-        del_pl_btn.setMaximumWidth(70)
         del_pl_btn.clicked.connect(self._rm_delete_playlist)
 
         pl_row.addWidget(self._rm_pl_combo)
@@ -421,16 +394,23 @@ class SettingsPage(QWidget):
         song_btn_row = QHBoxLayout()
         upload_btn = QPushButton("+ Upload Audio")
         upload_btn.setMinimumHeight(30)
-        upload_btn.setMaximumWidth(140)
         upload_btn.clicked.connect(self._rm_upload_audio)
         remove_btn = QPushButton("Remove Selected")
         remove_btn.setMinimumHeight(30)
-        remove_btn.setMaximumWidth(140)
         remove_btn.clicked.connect(self._rm_remove_song)
         song_btn_row.addWidget(upload_btn)
         song_btn_row.addWidget(remove_btn)
         song_btn_row.addStretch()
         rogue_section.addLayout(song_btn_row)
+
+        save_rm_row = QHBoxLayout()
+        save_rm_btn = QPushButton("Save Playlist")
+        save_rm_btn.setMinimumHeight(34)
+        save_rm_btn.setMaximumWidth(160)
+        save_rm_btn.clicked.connect(self._save_roguemode_settings)
+        save_rm_row.addWidget(save_rm_btn)
+        save_rm_row.addStretch()
+        rogue_section.addLayout(save_rm_row)
 
         layout.addLayout(rogue_section)
 
@@ -575,22 +555,10 @@ class SettingsPage(QWidget):
     # ──────────────────────────────────────────────────────────────────────
 
     def _load_personalization_settings(self):
-        user_data = self.settings.get_user_data()
-        self.name_input.setText(user_data.get("name", ""))
-        self.email_input.setText(user_data.get("email", ""))
-        self.title_input.setText(user_data.get("title", ""))
         current_theme = self.settings.get_theme()
         idx = self.theme_combo.findData(current_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
-
-    def _save_personalization_settings(self):
-        self.settings.update_user_data(
-            name=self.name_input.text().strip(),
-            email=self.email_input.text().strip(),
-            title=self.title_input.text().strip(),
-        )
-        QMessageBox.information(self, "Profile Saved", "Your profile information has been saved.")
 
     # ──────────────────────────────────────────────────────────────────────
     # PERSONALIZATION TAB METHODS — THEME
@@ -666,12 +634,7 @@ class SettingsPage(QWidget):
 
     def _launch_rogue_player(self):
         from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
-        if self._rogue_player is not None and self._rogue_player.isVisible():
-            self._rogue_player.raise_()
-            self._rogue_player.activateWindow()
-            return
-        self._rogue_player = RogueModePlayer(self.settings, parent=self)
-        self._rogue_player.show()
+        self._rogue_player = RogueModePlayer.get_or_create(self.settings, parent=self)
 
     def _refresh_rm_playlists(self):
         rm = self.settings.get_roguemode_settings()
@@ -684,6 +647,7 @@ class SettingsPage(QWidget):
         self._rm_pl_combo.blockSignals(False)
         idx = self._rm_pl_combo.findData(current_pl)
         self._rm_pl_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._rm_autoplay_check.setChecked(rm.get("autoplay", True))
         self._refresh_rm_songs()
 
     def _refresh_rm_songs(self):
@@ -753,13 +717,13 @@ class SettingsPage(QWidget):
         pl_name = self._rm_pl_combo.currentData()
         if not pl_name:
             return
+        audio_dir = self.settings.get_roguemode_audio_dir()
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Audio Files", "",
+            self, "Select Audio Files", str(audio_dir),
             "Audio Files (*.mp3 *.wav *.ogg *.flac *.m4a *.aac);;All Files (*.*)"
         )
         if not paths:
             return
-        audio_dir = self.settings.get_roguemode_audio_dir()
         rm = self.settings.get_roguemode_settings()
         playlist = rm.setdefault("playlists", {}).setdefault(pl_name, [])
         added = 0
@@ -778,8 +742,13 @@ class SettingsPage(QWidget):
         if added:
             self.settings.set_roguemode_settings(rm)
             self._refresh_rm_songs()
-            if self._rogue_player and self._rogue_player.isVisible():
-                self._rogue_player.refresh_playlists()
+            from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
+            player = RogueModePlayer._instance
+            if player is not None:
+                try:
+                    player.refresh_playlists()
+                except RuntimeError:
+                    pass
 
     def _rm_remove_song(self):
         item = self._rm_song_list.currentItem()
@@ -793,8 +762,26 @@ class SettingsPage(QWidget):
             playlist.remove(fn)
             self.settings.set_roguemode_settings(rm)
             self._refresh_rm_songs()
-            if self._rogue_player and self._rogue_player.isVisible():
-                self._rogue_player.refresh_playlists()
+            from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
+            player = RogueModePlayer._instance
+            if player is not None:
+                try:
+                    player.refresh_playlists()
+                except RuntimeError:
+                    pass
+
+    def _save_roguemode_settings(self):
+        rm = self.settings.get_roguemode_settings()
+        rm["autoplay"] = self._rm_autoplay_check.isChecked()
+        self.settings.set_roguemode_settings(rm)
+        from techdeck.ui.widgets.rogue_mode_player import RogueModePlayer
+        player = RogueModePlayer._instance
+        if player is not None:
+            try:
+                player.refresh_playlists()
+            except RuntimeError:
+                pass
+        QMessageBox.information(self, "Rogue Mode", "Playlist saved.")
 
     # ──────────────────────────────────────────────────────────────────────
     # HELPERS

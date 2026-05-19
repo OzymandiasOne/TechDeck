@@ -118,6 +118,38 @@ class TalkbackState:
 
 
 # ---------------------------------------------------------------------------
+# Tech Tips (occasionally printed in console after successful plugin runs)
+# ---------------------------------------------------------------------------
+
+TECH_TIPS = [
+    "Tech Tip: Configure app folder paths in Settings > App Settings.",
+    "Tech Tip: Build a custom color theme in Settings > Personalization.",
+    "Tech Tip: Type /roguemode to launch the focus music player.",
+    "Tech Tip: Try /theme cyberpunk or /theme matrix for a different vibe.",
+    "Tech Tip: Type /help to see all available console commands.",
+    "Tech Tip: Double-click a track in the Rogue Mode playlist to jump to it.",
+]
+
+
+class TechTipState:
+    """Shuffled pool of tech tips — exhausts before cycling."""
+
+    def __init__(self):
+        self._pool: list[int] = []
+        self._refill()
+
+    def _refill(self):
+        indices = list(range(len(TECH_TIPS)))
+        random.shuffle(indices)
+        self._pool = indices
+
+    def get_line(self) -> str:
+        if not self._pool:
+            self._refill()
+        return TECH_TIPS[self._pool.pop(0)]
+
+
+# ---------------------------------------------------------------------------
 # /compliment  — 50 dry, specific compliments
 # ---------------------------------------------------------------------------
 

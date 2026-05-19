@@ -13,6 +13,9 @@ column is left blank for the maintainer.
 """
 
 import logging
+import sys
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QComboBox, QPushButton, QMessageBox, QFrame
@@ -20,6 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from techdeck.core.feedback_writer import submit_feedback
+from techdeck.ui.utils import make_tinted_svg_copy
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +54,18 @@ class FeedbackDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(480)
 
-        # Pull theme for accent styling on the submit button
+        # Pull theme for styling
         from techdeck.ui.theme_manager import get_theme_manager
-        self.theme = get_theme_manager().get_current_palette()
+        _tm = get_theme_manager()
+        self.theme = _tm.get_current_palette()
+        _theme_name = _tm.get_current_theme()
+        _icon_folder = "light" if _theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _icons_dir = (
+            Path(sys._MEIPASS) / "assets" / "icons" / _icon_folder
+            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+            else Path(__file__).resolve().parents[3] / "assets" / "icons" / _icon_folder
+        )
+        self._arrow_path = make_tinted_svg_copy(_icons_dir / "chevron-down.svg", self.theme.text)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -82,6 +95,7 @@ class FeedbackDialog(QDialog):
         self.feature_combo = QComboBox()
         self.feature_combo.addItems(self.FEATURE_OPTIONS)
         self.feature_combo.setMinimumHeight(32)
+        self.feature_combo.setStyleSheet(self._combo_qss())
         layout.addWidget(self.feature_combo)
 
         # Suggestion
@@ -115,6 +129,33 @@ class FeedbackDialog(QDialog):
         layout.addLayout(button_row)
 
     # --- styling helpers ----------------------------------------------------
+
+    def _combo_qss(self) -> str:
+        t = self.theme
+        return f"""
+            QComboBox {{
+                background-color: {t.surface};
+                color: {t.text};
+                border: 1px solid {t.border};
+                border-radius: 8px;
+                padding: 6px 10px;
+                padding-right: 28px;
+            }}
+            QComboBox:hover {{ border-color: {t.border_strong}; }}
+            QComboBox::drop-down {{
+                width: 24px; border: none; background: transparent;
+                subcontrol-origin: padding; subcontrol-position: center right;
+            }}
+            QComboBox::down-arrow {{
+                image: url("{self._arrow_path}"); width: 12px; height: 12px;
+                background: transparent; border: none; margin-right: 6px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {t.surface}; color: {t.text};
+                border: 1px solid {t.border}; border-radius: 4px;
+                selection-background-color: {t.tile_selected}; outline: none;
+            }}
+        """
 
     def _field_label(self, text: str) -> QLabel:
         lbl = QLabel(text)

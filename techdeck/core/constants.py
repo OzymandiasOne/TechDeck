@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.4.1"  # Patch: bug fixes for kit save, input prompt ordering, 911 page logic, update checker, spinner timing
+APP_VERSION = "0.8.4.2"  # Patch: 911 Setup inspection sheet formatting via Excel COM; audio and UI polishing
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

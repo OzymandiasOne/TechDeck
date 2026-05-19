@@ -5,10 +5,19 @@ PROFESSIONAL: Initializes ThemeManager for live theme switching
 """
 
 import sys
+from pathlib import Path
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QIcon
 from techdeck.core.settings import SettingsManager
 from techdeck.ui.shell import MainWindow
 from techdeck.core.constants import APP_NAME, APP_VERSION
+
+
+def _icon_path() -> Path:
+    """Locate TechDeck.ico in both dev mode and frozen PyInstaller builds."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets" / "TechDeck.ico"
+    return Path(__file__).resolve().parents[1] / "assets" / "TechDeck.ico"
 
 
 def main():
@@ -17,6 +26,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
+
+    # Window icon (title bar + taskbar). Setting it on the QApplication
+    # makes it the default for every window the app creates.
+    ico = _icon_path()
+    if ico.exists():
+        app.setWindowIcon(QIcon(str(ico)))
     
     # Load settings
     settings = SettingsManager()

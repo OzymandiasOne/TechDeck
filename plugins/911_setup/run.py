@@ -13,7 +13,11 @@ Automates the full 911 QTDR batch setup workflow:
   7. Read BATCH LIST → filter rows by nest number → paste into NEST cols F-K
      starting row 4
   8. Read DYPN values from NEST col G → copy INSPECTION SHEET tab for each
-     suffix, write full DYPN into A16 (merged A16:C17), update BB14 formula
+     part, write full DYPN into A16 (merged A16:C17). Nothing else on the
+     copied sheet is modified -- the template's formulas/CF drive the rest
+     off A16. Sheet name = suffix (e.g. "-80"); on collisions, both
+     colliding sheets are renamed using the last 2 chars of the preceding
+     segment (e.g. H4533321-80 -> "21-80", H4533322-80 -> "22-80").
   9. Save every nest excel, repeat for all nests in the batch
  10. Build MOVE TICKET OMIT PDF for each nest (removes MOVE TICKET pages, keeps MIL-SPEC/HULL)
 
@@ -457,64 +461,264 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
 
 
 # ---------------------------------------------------------------------------
-# Step 8: DYPN -> Inspection Sheet copies
+# Step 8: Inspection sheet naming helpers
 # ---------------------------------------------------------------------------
+
+def _basic_suffix(dypn: str) -> str:
+    """Sheet name = part after the last '-' (e.g. 'H4533321-80' -> '-80')."""
+    parts = dypn.rsplit('-', 1)
+    return f"-{parts[-1]}" if len(parts) == 2 else dypn
+
+
+def _disambiguated_name(dypn: str) -> str:
+    """
+    Used when two DYPNs share a suffix.
+    H4533321-80 -> '21-80', H4533322-80 -> '22-80'
+    (last 2 chars of the head + '-' + suffix tail)
+    """
+    segments = dypn.rsplit('-', 1)
+    if len(segments) == 2:
+        head, tail = segments
+        return f"{head[-2:]}-{tail}"
+    return dypn
+
+
+def _plan_sheet_names(dypns: list, existing_sheet_names: set = None) -> list:
+    """
+    Build the list of (full_dypn, sheet_name) pairs for the inspection
+    sheet copy step. If two DYPNs share a suffix, *both* get the
+    disambiguated name. Falls back to '<name> (n)' for any remaining
+    collision (e.g. identical DYPNs).
+    """
+    if existing_sheet_names is None:
+        existing_sheet_names = set()
+
+    suffix_counts = {}
+    for dypn in dypns:
+        s = _basic_suffix(dypn)
+        suffix_counts[s] = suffix_counts.get(s, 0) + 1
+
+    used = set()
+    plan = []
+    for full_dypn in dypns:
+        suffix = _basic_suffix(full_dypn)
+        name = _disambiguated_name(full_dypn) if suffix_counts.get(suffix, 0) > 1 else suffix
+        name = name[:31]
+
+        base = name
+        counter = 2
+        while name in used or name in existing_sheet_names:
+            name = f"{base} ({counter})"[:31]
+            counter += 1
+        used.add(name)
+        plan.append((full_dypn, name))
+    return plan
+
 
 def _get_dypn_rows(nest_ws) -> list:
     """
     Read NEST col G (col 7, DYPN) from row 4 downward.
-    Return list of (nest_row, full_dypn) for every non-empty cell.
+    Return list of full DYPN strings for every non-empty cell.
     """
     result = []
     for row in range(4, nest_ws.max_row + 1):
         val = nest_ws.cell(row, 7).value  # Column G = DYPN
         if val and str(val).strip():
-            result.append((row, str(val).strip()))
+            result.append(str(val).strip())
     return result
 
 
-def _copy_sheet(wb, source_name: str, new_name: str):
-    source_ws = wb[source_name]
-    new_ws = wb.copy_worksheet(source_ws)
-    new_ws.title = new_name
-    return new_ws
+# ---------------------------------------------------------------------------
+# Inspection sheet copy step uses Excel COM, not openpyxl.
+#
+# openpyxl's copy_worksheet does not propagate conditional formatting rules
+# to the new sheet (verified empirically: 350 CF rules on the template ->
+# 0 CF rules on every copy). The template's grey->white field-fill logic
+# is driven entirely by those CF rules, so the copies look "completely
+# white". Excel's native Sheet.Copy preserves the CF perfectly.
+#
+# openpyxl is still used for the NEST data writes -- those don't go through
+# copy_worksheet, and the CF on the source INSPECTION SHEET tab survives
+# the openpyxl load/save round-trip intact.
+# ---------------------------------------------------------------------------
 
-
-def _build_inspection_sheets(wb, dypn_rows: list, log):
+def _build_inspection_sheets_via_excel(workbook_path: Path, dypns: list, log):
     """
-    For each (nest_row, full_dypn) in dypn_rows:
-      1. Copy 'INSPECTION SHEET' tab, rename to suffix after last '-'.
-         Handle duplicates by backing up one more segment.
-      2. Write full_dypn into A16 (merged A16:C17).
-      3. Update BB14 formula to reference the correct NEST row.
+    Copy the INSPECTION SHEET tab once per DYPN, writing the full DYPN
+    into A16 on each copy. Excel COM is used so conditional formatting
+    on the copies is preserved (openpyxl's copy_worksheet drops it).
+
+    Implementation note: Excel SaveAs writing back to a OneDrive-synced
+    path fails with "Cannot access" because OneDrive is tracking the
+    file. So we do all COM work on a local temp copy outside OneDrive,
+    then atomically replace the original via os.replace.
+
+    Nothing else on copies is modified -- template formulas/CF drive
+    the rest off A16. The original INSPECTION SHEET tab stays visible.
+
+    Sheet name = suffix after the last '-' (e.g. '-80'). When two DYPNs
+    share a suffix, both names are disambiguated (e.g. H4533321-80 ->
+    '21-80', H4533322-80 -> '22-80').
     """
-    used_suffixes = set()
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        raise RuntimeError(
+            "Excel COM bindings (pywin32) are required by 911 Setup."
+        )
 
-    for nest_row, full_dypn in dypn_rows:
-        parts = full_dypn.rsplit('-', 1)
-        suffix = f"-{parts[-1]}" if len(parts) == 2 else full_dypn
+    import os
+    import tempfile
 
-        if suffix not in used_suffixes:
-            used_suffixes.add(suffix)
-            sheet_name = suffix
-        else:
-            segments = full_dypn.rsplit('-', 2)
-            if len(segments) >= 2:
-                prev_seg = segments[-2]
-                sheet_name = f"-{prev_seg[-2:]}{suffix}"
-            else:
-                sheet_name = full_dypn
-            log(f"  Duplicate suffix '{suffix}', using sheet name '{sheet_name}'")
+    plan = _plan_sheet_names(dypns)
 
-        sheet_name = sheet_name[:31]
-        log(f"  Creating inspection sheet '{sheet_name}' for {full_dypn}")
+    xlCalculationManual = -4135
+    xlCalculationAutomatic = -4105
+    msoAutomationSecurityForceDisable = 3
 
-        new_ws = _copy_sheet(wb, "INSPECTION SHEET", sheet_name)
-        new_ws.cell(16, 1).value = full_dypn
-        new_ws.cell(14, 54).value = f"=NEST!B{nest_row}"
+    def _silence(app):
+        """Disable every dialog category Excel can throw at us."""
+        app.Visible = False
+        app.DisplayAlerts = False
+        app.ScreenUpdating = False
+        app.EnableEvents = False
+        app.AskToUpdateLinks = False
+        for prop, val in (
+            ("AlertBeforeOverwriting", False),
+            ("FeatureInstall", 0),
+            ("AutomationSecurity", msoAutomationSecurityForceDisable),
+            ("Calculation", xlCalculationManual),
+        ):
+            try:
+                setattr(app, prop, val)
+            except Exception:
+                pass
 
-    # Hide the original template sheet now that all copies have been made
-    wb["INSPECTION SHEET"].sheet_state = "hidden"
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    tmp_dir = None
+    try:
+        # Stage the file outside OneDrive so Excel never sees a synced path
+        tmp_dir = tempfile.mkdtemp(prefix="techdeck_911_")
+        local_copy = Path(tmp_dir) / workbook_path.name
+        shutil.copy2(workbook_path, local_copy)
+        log(f"  Staging via local temp: {local_copy}")
+
+        excel = win32com.client.DispatchEx("Excel.Application")
+        _silence(excel)
+
+        wb = excel.Workbooks.Open(
+            Filename=str(local_copy),
+            UpdateLinks=0,
+            ReadOnly=False,
+            IgnoreReadOnlyRecommended=True,
+            Notify=False,
+            AddToMru=False,
+        )
+        try:
+            wb.CheckCompatibility = False
+        except Exception:
+            pass
+
+        template = wb.Sheets("INSPECTION SHEET")
+
+        for full_dypn, sheet_name in plan:
+            count_before = wb.Sheets.Count
+            last_sheet = wb.Sheets(count_before)
+
+            # Excel COM signature is Worksheet.Copy(Before, After).
+            # Passing After= as a kwarg via pywin32 late binding has been
+            # observed to silently fall through to Copy() with no args
+            # (which spawns a new orphan workbook). Use positional args.
+            template.Copy(None, last_sheet)
+
+            try:
+                excel.CutCopyMode = False
+            except Exception:
+                pass
+
+            count_after = wb.Sheets.Count
+            if count_after != count_before + 1:
+                # Fallback: Copy()-with-no-args creates a new workbook;
+                # move that sheet back into our workbook.
+                log(f"  WARNING: in-place Copy did not grow sheet count "
+                    f"({count_before} -> {count_after}); trying Copy()+Move fallback")
+                try:
+                    template.Copy()
+                    new_wb = excel.ActiveWorkbook
+                    if new_wb is not None and new_wb.Name != wb.Name:
+                        new_wb.Sheets(1).Move(None, wb.Sheets(wb.Sheets.Count))
+                        try:
+                            new_wb.Close(SaveChanges=False)
+                        except Exception:
+                            pass
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Copy+Move fallback failed for {full_dypn}: {e}"
+                    )
+                if wb.Sheets.Count != count_before + 1:
+                    raise RuntimeError(
+                        f"Sheet.Copy did not create a new sheet for {full_dypn}. "
+                        f"Workbook still has {wb.Sheets.Count} sheets."
+                    )
+
+            # After Copy/Move the new sheet is the active sheet. Don't
+            # index by position -- the new copy isn't necessarily at the
+            # end of the tab order, so wb.Sheets(wb.Sheets.Count) can
+            # return the wrong sheet and we'd rename SOURCE MATERIAL INFO
+            # 22 times instead of the actual copies.
+            new_sheet = excel.ActiveSheet
+            new_sheet.Name = sheet_name
+            new_sheet.Range("A16").Value = full_dypn
+            log(f"  Creating inspection sheet '{sheet_name}' for {full_dypn}")
+
+        try:
+            excel.Calculation = xlCalculationAutomatic
+        except Exception:
+            pass
+
+        wb.Save()
+        wb.Close(SaveChanges=False)
+        wb = None
+
+        # Tear Excel down before moving the file back -- ensures all
+        # handles are released so os.replace can overwrite cleanly.
+        try:
+            excel.Quit()
+        except Exception:
+            pass
+        excel = None
+
+        # Atomic replace back into OneDrive. os.replace is atomic on
+        # Windows when source and target are on the same volume.
+        os.replace(str(local_copy), str(workbook_path))
+        log(f"  Wrote final workbook -> {workbook_path}")
+    finally:
+        if wb is not None:
+            try:
+                wb.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if excel is not None:
+            try:
+                excel.EnableEvents = True
+                excel.DisplayAlerts = True
+                excel.ScreenUpdating = True
+            except Exception:
+                pass
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+        excel = None
+        if tmp_dir is not None:
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
 
 
 # ---------------------------------------------------------------------------
@@ -752,19 +956,31 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             log(f"  Found {len(batch_rows)} batch rows.")
             _paste_batch_rows_into_nest(nest_ws, batch_rows)
 
-        # -- Step 8: DYPN -> Inspection sheets (col G, row 4+) -----------
-        log(f"  [Step 8] Building inspection sheets from DYPN column G...")
-        dypn_rows = _get_dypn_rows(nest_ws)
-        if not dypn_rows:
+        # -- Step 8a: Collect DYPN values from NEST col G ----------------
+        log(f"  [Step 8] Reading DYPN values from NEST col G...")
+        dypns = _get_dypn_rows(nest_ws)
+        if not dypns:
             log(f"  WARNING: No DYPN values found in NEST col G.")
         else:
-            log(f"  Found {len(dypn_rows)} DYPN rows.")
-            _build_inspection_sheets(wb, dypn_rows, log)
+            log(f"  Found {len(dypns)} DYPN rows.")
 
-        # -- Save nest excel ---------------------------------------------
+        # -- Save and close openpyxl workbook before Excel COM opens it --
         log(f"  Saving {nest_excel.name}...")
         wb.save(nest_excel)
         wb.close()
+
+        # -- Step 8b: Copy inspection sheets via Excel COM ---------------
+        # openpyxl's copy_worksheet drops conditional formatting rules
+        # on copy (verified: 350 CF rules on template -> 0 on copy).
+        # Excel's native Sheet.Copy preserves them.
+        if dypns:
+            log(f"  Building {len(dypns)} inspection sheet(s) via Excel...")
+            try:
+                _build_inspection_sheets_via_excel(nest_excel, dypns, log)
+            except Exception as e:
+                log(f"  ERROR: Excel COM inspection sheet build failed: {e}")
+                raise
+
         log(f"  Done: {nest_excel.name}")
 
         # -- Step 9: Build MOVE TICKET OMIT PDF (remove MOVE TICKET pages, keep MIL-SPEC/HULL) --
