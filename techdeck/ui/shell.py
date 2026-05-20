@@ -268,20 +268,10 @@ class MainWindow(QMainWindow):
         home_layout.setContentsMargins(0, 0, 0, 0)
         home_layout.setSpacing(0)
         
-        # Create splitter for home page + console
+        # Create splitter for home page + console. Style is applied via
+        # _restyle_home_splitter() so it can be refreshed on theme change.
         self.home_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.home_splitter.setStyleSheet(f"""
-            QSplitter {{
-                background-color: {theme.background};
-            }}
-            QSplitter::handle {{
-                background-color: {theme.divider};
-                height: 2px;
-            }}
-            QSplitter::handle:hover {{
-                background-color: {theme.border_strong};
-            }}
-        """)
+        self._restyle_home_splitter()
         
         # Create home page
         self.home_page = HomePage(self.settings)
@@ -521,6 +511,27 @@ class MainWindow(QMainWindow):
         from techdeck.ui.theme_manager import get_theme_manager
         theme_manager = get_theme_manager()
         theme_manager.set_theme(theme_name)
+        # The home splitter handle uses inline styling, so refresh it
+        # explicitly — it's the visible bar between the apps area and
+        # the console.
+        self._restyle_home_splitter()
+
+    def _restyle_home_splitter(self):
+        """Re-apply the splitter handle/background colors for the active theme."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+        self.home_splitter.setStyleSheet(f"""
+            QSplitter {{
+                background-color: {theme.background};
+            }}
+            QSplitter::handle {{
+                background-color: {theme.divider};
+                height: 2px;
+            }}
+            QSplitter::handle:hover {{
+                background-color: {theme.border_strong};
+            }}
+        """)
     
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""

@@ -62,7 +62,7 @@ class SettingsPage(QWidget, ThemeAware):
         self.setup_theme_awareness()
 
     def apply_theme(self):
-        """Re-style the tab bar whenever the theme changes."""
+        """Re-style theme-sensitive surfaces whenever the theme changes."""
         theme = self.get_current_palette()
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{
@@ -88,6 +88,18 @@ class SettingsPage(QWidget, ThemeAware):
                 font-weight: 600;
             }}
         """)
+
+        # Combos baked into the tabs use inline styling, so re-apply
+        # the combo stylesheet (with a freshly tinted chevron) for each.
+        theme_name = self.settings.get_theme()
+        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
+        arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
+        combo_style = self._combo_style(theme, arrow_path)
+        for attr in ("theme_combo", "plugin_combo", "_rm_pl_combo"):
+            combo = getattr(self, attr, None)
+            if combo is not None:
+                combo.setStyleSheet(combo_style)
 
     # ──────────────────────────────────────────────────────────────────────
     # HELP & FEEDBACK TAB
