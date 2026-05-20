@@ -269,17 +269,10 @@ class PluginExecutor:
                     print(f"Error in progress callback: {e}")
         
         try:
-            # Flavor start message with nickname if earned
             from techdeck.core.settings import SettingsManager
-            from techdeck.core.flavor import get_nickname, get_start_message
+            from techdeck.core.flavor import get_start_message
             settings_manager = SettingsManager()
-            stats = settings_manager.get_plugin_stats(plugin_id)
-            nickname = get_nickname(
-                plugin_id,
-                stats.get("run_count", 0),
-                stats.get("consecutive_errors", 0),
-            )
-            start_msg = get_start_message(plugin.name, nickname)
+            start_msg = get_start_message(plugin.name)
             if timeout > 0:
                 safe_log(f"{start_msg} (timeout: {timeout}s)")
             else:
@@ -337,7 +330,7 @@ class PluginExecutor:
             # PHASE 2: Calculate execution time even on error
             execution_time = time.time() - start_time
 
-            # Record error for nickname tracking
+            # Record consecutive errors (kept for future heuristics).
             try:
                 from techdeck.core.settings import SettingsManager
                 SettingsManager().record_plugin_error(plugin_id)
@@ -408,15 +401,9 @@ class PluginExecutor:
         
         try:
             from techdeck.core.settings import SettingsManager
-            from techdeck.core.flavor import get_nickname, get_start_message
+            from techdeck.core.flavor import get_start_message
             settings_manager = SettingsManager()
-            stats = settings_manager.get_plugin_stats(plugin_id)
-            nickname = get_nickname(
-                plugin_id,
-                stats.get("run_count", 0),
-                stats.get("consecutive_errors", 0),
-            )
-            safe_log(get_start_message(plugin.name, nickname))
+            safe_log(get_start_message(plugin.name))
             safe_progress(0)
 
             module = self.plugin_loader.load_plugin_module(plugin_id)

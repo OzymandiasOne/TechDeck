@@ -1,36 +1,13 @@
 """
 TechDeck Flavor Module
-All personality data: plugin nicknames, talkback lines, compliments, roasts, haiku.
+All personality data: talkback lines, compliments, roasts, haiku.
 """
 
 import random
 
 # ---------------------------------------------------------------------------
-# Plugin nicknames
+# Plugin start messages
 # ---------------------------------------------------------------------------
-
-PLUGIN_NICKNAMES = {
-    "911_setup": "The Beast",
-    "922_pallet_stamper": "Old Reliable",
-    "911_batch_repeater": "The Surgeon",
-    "lst_organizer": "The Librarian",
-    "batch_repeater": "The Courier",
-    "po_packet_extractor": "The Accountant",
-    "part_sketch_extractor": "The Architect",
-    "qr_code_generator": "The Printer",
-    "run_time_estimator": "The Timekeeper",
-}
-
-NICKNAME_THRESHOLD = 10       # runs before nickname kicks in
-PROBLEM_CHILD_THRESHOLD = 3   # consecutive errors before "The Problem Child"
-
-# Verbs used before the nickname (Claude Code-style loading flavor)
-_NICKNAME_VERBS = [
-    "Deploying", "Summoning", "Unleashing", "Activating", "Waking up",
-    "Calling upon", "Dispatching", "Briefing", "Engaging", "Mobilizing",
-    "Conjuring", "Razzmatazzing", "Concocting", "Orchestrating",
-    "Manifesting", "Channeling", "Calibrating", "Igniting", "Spontaneous Self-Combusting"
-]
 
 _PLAIN_VERBS = [
     "Starting", "Launching", "Running", "Fidget Spinning", "Executing",
@@ -39,19 +16,8 @@ _PLAIN_VERBS = [
 ]
 
 
-def get_nickname(plugin_id: str, run_count: int, consecutive_errors: int) -> str | None:
-    """Return the active nickname for this plugin, or None."""
-    if consecutive_errors >= PROBLEM_CHILD_THRESHOLD:
-        return "The Problem Child"
-    if run_count >= NICKNAME_THRESHOLD and plugin_id in PLUGIN_NICKNAMES:
-        return PLUGIN_NICKNAMES[plugin_id]
-    return None
-
-
-def get_start_message(plugin_name: str, nickname: str | None) -> str:
+def get_start_message(plugin_name: str) -> str:
     """Return a flavor start line for the executor."""
-    if nickname:
-        return f"{random.choice(_NICKNAME_VERBS)} {nickname}..."
     return f"{random.choice(_PLAIN_VERBS)} {plugin_name}..."
 
 
