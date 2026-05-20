@@ -1,7 +1,9 @@
 """
 TechDeck Settings Page - Tabbed Interface
-Three tabs: General, App Settings (Plugins), Personalization
-Personalization tab hosts theme selection, theme builder, and Rogue Mode management.
+Three tabs: Personalization, Apps, Help & Feedback.
+Personalization hosts sound effects, theme selection, theme builder,
+and Rogue Mode. Apps hosts per-plugin configuration. Help & Feedback
+hosts the Report Feedback action plus version + check-for-updates.
 """
 
 import json
@@ -20,16 +22,17 @@ from PySide6.QtCore import Signal, Qt
 from techdeck.core.settings import SettingsManager
 from techdeck.core.plugin_loader import PluginLoader
 from techdeck.ui.theme import get_theme_names, get_current_palette, THEMES, is_builtin_theme, delete_custom_theme
+from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.widgets.plugin_settings_widget import PluginSettingsWidget
 
 
-class SettingsPage(QWidget):
+class SettingsPage(QWidget, ThemeAware):
     """
     Settings page with three horizontal tabs:
-    1. General     – Sound effects + About
-    2. App Settings – Per-plugin configuration
-    3. Personalization – Profile, Theme (+ builder), Rogue Mode
+    1. Personalization  – Sound effects, Theme (+ builder), Rogue Mode
+    2. Apps             – Per-plugin configuration
+    3. Help & Feedback  – Report Feedback + version + check-for-updates
     """
 
     theme_changed = Signal(str)
@@ -49,7 +52,18 @@ class SettingsPage(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
 
-        theme = get_current_palette(self.settings.get_theme())
+        self.tabs.addTab(self._create_personalization_tab(), "Personalization")
+        self.tabs.addTab(self._create_plugin_tab(),          "Apps")
+        self.tabs.addTab(self._create_helpfeedback_tab(),    "Help & Feedback")
+
+        layout.addWidget(self.tabs)
+
+        # Subscribe to theme_changed; also applies the tab styling now.
+        self.setup_theme_awareness()
+
+    def apply_theme(self):
+        """Re-style the tab bar whenever the theme changes."""
+        theme = self.get_current_palette()
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{
                 border: none;
@@ -75,17 +89,12 @@ class SettingsPage(QWidget):
             }}
         """)
 
-        self.tabs.addTab(self._create_general_tab(),         "General")
-        self.tabs.addTab(self._create_plugin_tab(),          "App Settings")
-        self.tabs.addTab(self._create_personalization_tab(), "Personalization")
-
-        layout.addWidget(self.tabs)
-
     # ──────────────────────────────────────────────────────────────────────
-    # GENERAL TAB
+    # HELP & FEEDBACK TAB
     # ──────────────────────────────────────────────────────────────────────
 
-    def _create_general_tab(self) -> QWidget:
+    def _create_helpfeedback_tab(self) -> QWidget:
+        """Help & Feedback: Report Feedback + version + check for updates."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -95,39 +104,40 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
 
-        title = QLabel("General Settings")
+        title = QLabel("Help & Feedback")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
-        # ── Sound Effects ──
-        audio_section = self._create_section("Sound Effects")
-
-        self.audio_enabled_check = QCheckBox("Enable sound effects")
-        self.audio_enabled_check.setStyleSheet("font-weight: 600; margin-top: 8px;")
-        self.audio_enabled_check.toggled.connect(self._on_audio_enabled_toggled)
-
-        volume_row = QHBoxLayout()
-        volume_row.setSpacing(12)
-        volume_label = QLabel("Volume:")
-        volume_label.setStyleSheet("font-weight: 600;")
-        volume_label.setFixedWidth(60)
-        self.audio_volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.audio_volume_slider.setRange(0, 100)
-        self.audio_volume_slider.setMaximumWidth(200)
-        self.audio_volume_slider.setMinimumHeight(24)
-        self.audio_volume_pct = QLabel("80%")
-        self.audio_volume_pct.setFixedWidth(36)
-        self.audio_volume_slider.valueChanged.connect(
-            lambda v: self.audio_volume_pct.setText(f"{v}%")
+        # ── Report Feedback ──
+        theme = get_current_palette(self.settings.get_theme())
+        fb_section = self._create_section("Report Feedback")
+        fb_desc = QLabel(
+            "Send a note, bug report, or feature request to the TechDeck "
+            "maintainer. Replies come from anthony.siebenmorgen@americansteelalum.com."
         )
-        volume_row.addWidget(volume_label)
-        volume_row.addWidget(self.audio_volume_slider)
-        volume_row.addWidget(self.audio_volume_pct)
-        volume_row.addStretch()
+        fb_desc.setStyleSheet("color: #888; font-size: 12px;")
+        fb_desc.setWordWrap(True)
+        fb_section.addWidget(fb_desc)
 
-        audio_section.addWidget(self.audio_enabled_check)
-        audio_section.addLayout(volume_row)
-        layout.addLayout(audio_section)
+        fb_btn = QPushButton("Open Report Feedback…")
+        fb_btn.setMinimumHeight(36)
+        fb_btn.setMaximumWidth(220)
+        fb_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {theme.accent_two};
+                color: #FFFFFF;
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.accent_two_hover};
+            }}
+        """)
+        fb_btn.clicked.connect(self._open_feedback_dialog)
+        fb_section.addWidget(fb_btn)
+        layout.addLayout(fb_section)
 
         # ── About ──
         from techdeck.core.constants import APP_VERSION, APP_RELEASE_NAME
@@ -144,27 +154,17 @@ class SettingsPage(QWidget):
 
         layout.addStretch()
 
-        btn_row = QHBoxLayout()
-        save_btn = QPushButton("Save Settings")
-        save_btn.setMinimumHeight(36)
-        save_btn.setMaximumWidth(150)
-        save_btn.clicked.connect(self._save_general_settings)
-        reset_btn = QPushButton("Reset to Defaults")
-        reset_btn.setMinimumHeight(36)
-        reset_btn.setMaximumWidth(150)
-        reset_btn.clicked.connect(self._reset_defaults)
-        btn_row.addWidget(save_btn)
-        btn_row.addWidget(reset_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        self._load_general_settings()
-
         scroll.setWidget(content)
         container = QWidget()
         QVBoxLayout(container).addWidget(scroll)
         container.layout().setContentsMargins(0, 0, 0, 0)
         return container
+
+    def _open_feedback_dialog(self):
+        """Open the Report Feedback modal from inside Settings."""
+        from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
+        dlg = FeedbackDialog(parent=self.window())
+        dlg.exec()
 
     # ──────────────────────────────────────────────────────────────────────
     # PLUGIN TAB (unchanged logic, just reformatted)
@@ -180,7 +180,7 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
 
-        title = QLabel("App Settings")
+        title = QLabel("Apps")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
         sub = QLabel("Configure settings for each installed app")
@@ -256,6 +256,36 @@ class SettingsPage(QWidget):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
+        # ── Sound Effects ──
+        # Lives under Personalization since enable/disable + volume are
+        # personal preferences. Auto-saves on change so there's no
+        # separate Save button on this tab.
+        audio_section = self._create_section("Sound Effects")
+        self.audio_enabled_check = QCheckBox("Enable sound effects")
+        self.audio_enabled_check.setStyleSheet("font-weight: 600; margin-top: 8px;")
+        self.audio_enabled_check.toggled.connect(self._on_audio_enabled_toggled)
+
+        volume_row = QHBoxLayout()
+        volume_row.setSpacing(12)
+        volume_label = QLabel("Volume:")
+        volume_label.setStyleSheet("font-weight: 600;")
+        volume_label.setFixedWidth(60)
+        self.audio_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.audio_volume_slider.setRange(0, 100)
+        self.audio_volume_slider.setMaximumWidth(200)
+        self.audio_volume_slider.setMinimumHeight(24)
+        self.audio_volume_pct = QLabel("80%")
+        self.audio_volume_pct.setFixedWidth(36)
+        self.audio_volume_slider.valueChanged.connect(self._on_audio_volume_changed)
+        volume_row.addWidget(volume_label)
+        volume_row.addWidget(self.audio_volume_slider)
+        volume_row.addWidget(self.audio_volume_pct)
+        volume_row.addStretch()
+
+        audio_section.addWidget(self.audio_enabled_check)
+        audio_section.addLayout(volume_row)
+        layout.addLayout(audio_section)
+
         # Compute combo arrow style once; reused for theme_combo and rm_combo
         _p_theme = get_current_palette(self.settings.get_theme())
         _p_theme_name = self.settings.get_theme()
@@ -288,7 +318,7 @@ class SettingsPage(QWidget):
         theme_row.addStretch()
         theme_section.addLayout(theme_row)
 
-        theme_note = QLabel("Changing theme requires restarting TechDeck.")
+        theme_note = QLabel("Theme changes apply immediately — no restart required.")
         theme_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
         theme_section.addWidget(theme_note)
 
@@ -426,39 +456,36 @@ class SettingsPage(QWidget):
         return container
 
     # ──────────────────────────────────────────────────────────────────────
-    # GENERAL TAB METHODS
+    # SOUND EFFECTS HELPERS (live on Personalization tab; auto-save)
     # ──────────────────────────────────────────────────────────────────────
 
-    def _load_general_settings(self):
+    def _load_audio_settings(self):
+        """Load audio settings into the Personalization tab widgets."""
         audio = self.settings.get_audio_settings()
         self.audio_enabled_check.setChecked(audio.get("enabled", True))
         self.audio_volume_slider.setValue(audio.get("volume", 80))
-        self._on_audio_enabled_toggled(audio.get("enabled", True))
+        self.audio_volume_pct.setText(f"{audio.get('volume', 80)}%")
+        self._sync_audio_widgets_enabled(audio.get("enabled", True))
 
-    def _on_audio_enabled_toggled(self, enabled: bool):
+    def _sync_audio_widgets_enabled(self, enabled: bool):
         self.audio_volume_slider.setEnabled(enabled)
         self.audio_volume_pct.setEnabled(enabled)
 
-    def _save_general_settings(self):
-        audio_enabled = self.audio_enabled_check.isChecked()
-        audio_volume = self.audio_volume_slider.value()
-        self.settings.set_audio_settings(audio_enabled, audio_volume)
+    def _on_audio_enabled_toggled(self, enabled: bool):
+        """Auto-save the enabled toggle; no separate Save button needed."""
+        self._sync_audio_widgets_enabled(enabled)
+        volume = self.audio_volume_slider.value()
+        self.settings.set_audio_settings(enabled, volume)
         from techdeck.core.audio_manager import get_audio_manager
-        get_audio_manager().configure(enabled=audio_enabled, volume=audio_volume)
-        QMessageBox.information(self, "Settings Saved", "Settings saved successfully!")
+        get_audio_manager().configure(enabled=enabled, volume=volume)
 
-    def _reset_defaults(self):
-        reply = QMessageBox.question(
-            self, "Reset to Defaults",
-            "Reset sound settings to defaults?\n\nYour profiles and theme will not be affected.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            self.settings.set_audio_settings(True, 80)
-            from techdeck.core.audio_manager import get_audio_manager
-            get_audio_manager().configure(enabled=True, volume=80)
-            self._load_general_settings()
+    def _on_audio_volume_changed(self, value: int):
+        """Auto-save volume on slider change."""
+        self.audio_volume_pct.setText(f"{value}%")
+        enabled = self.audio_enabled_check.isChecked()
+        self.settings.set_audio_settings(enabled, value)
+        from techdeck.core.audio_manager import get_audio_manager
+        get_audio_manager().configure(enabled=enabled, volume=value)
 
     # ──────────────────────────────────────────────────────────────────────
     # PLUGIN TAB METHODS
@@ -559,6 +586,9 @@ class SettingsPage(QWidget):
         idx = self.theme_combo.findData(current_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
+        # Sound effects widgets live on this tab too
+        if hasattr(self, "audio_enabled_check"):
+            self._load_audio_settings()
 
     # ──────────────────────────────────────────────────────────────────────
     # PERSONALIZATION TAB METHODS — THEME
@@ -831,7 +861,7 @@ class SettingsPage(QWidget):
             main_window.check_for_updates_manual()
 
     def refresh(self):
-        self._load_general_settings()
+        self._load_audio_settings()
         self._load_plugin_list()
         self._load_personalization_settings()
         self._refresh_custom_theme_list()
