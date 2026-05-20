@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot
 from PySide6.QtGui import QTextCursor, QFont
-from datetime import datetime
 import threading
 
 
@@ -231,50 +230,50 @@ class ConsoleWidget(QWidget):
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.output.append(f'<span style="color: #888;">[{timestamp}]</span> '
-                          f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
-                          f'{self._escape_html(text)}')
+        self.output.append(
+            f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
+            f'{self._escape_html(text)}'
+        )
         self._scroll_to_bottom()
         self._update_line_count()
 
     @Slot(str)
     def append_system(self, text: str):
         """Append system message to output."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.output.append(f'<span style="color: #888;">[{timestamp}]</span> '
-                          f'<span style="color: #10B981; font-weight: bold;">System:</span> '
-                          f'{self._escape_html(text)}')
+        self.output.append(
+            f'<span style="color: #10B981; font-weight: bold;">System:</span> '
+            f'{self._escape_html(text)}'
+        )
         self._scroll_to_bottom()
         self._update_line_count()
 
     @Slot(str)
     def append_assistant(self, text: str):
         """Append assistant message to output."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.output.append(f'<span style="color: #888;">[{timestamp}]</span> '
-                          f'<span style="color: #A78BFA; font-weight: bold;">Assistant:</span> '
-                          f'{self._escape_html(text)}')
+        self.output.append(
+            f'<span style="color: #A78BFA; font-weight: bold;">Assistant:</span> '
+            f'{self._escape_html(text)}'
+        )
         self._scroll_to_bottom()
         self._update_line_count()
 
     @Slot(str)
     def append_error(self, text: str):
         """Append error message to output."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.output.append(f'<span style="color: #888;">[{timestamp}]</span> '
-                          f'<span style="color: #EF4444; font-weight: bold;">Error:</span> '
-                          f'{self._escape_html(text)}')
+        self.output.append(
+            f'<span style="color: #EF4444; font-weight: bold;">Error:</span> '
+            f'{self._escape_html(text)}'
+        )
         self._scroll_to_bottom()
         self._update_line_count()
 
     @Slot(str, str)
     def append_plugin_output(self, plugin_name: str, text: str):
         """Append plugin output message."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.output.append(f'<span style="color: #888;">[{timestamp}]</span> '
-                          f'<span style="color: #F59E0B; font-weight: bold;">[{plugin_name}]:</span> '
-                          f'{self._escape_html(text)}')
+        self.output.append(
+            f'<span style="color: #F59E0B; font-weight: bold;">[{plugin_name}]:</span> '
+            f'{self._escape_html(text)}'
+        )
         self._scroll_to_bottom()
         self._update_line_count()
 
