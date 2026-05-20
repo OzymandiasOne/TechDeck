@@ -44,9 +44,15 @@ def main():
     from techdeck.ui.theme_manager import get_theme_manager
     theme_manager = get_theme_manager()
     theme_manager.set_theme(settings.get_theme())
-    
-    # Apply global stylesheet to entire application
+
+    # Apply global stylesheet now, and re-apply on every subsequent
+    # theme change so live switching doesn't require a restart.
+    # ThemeAware widgets subscribe to theme_changed individually to
+    # refresh their own inline styles.
+    def _reapply_stylesheet(_theme_name: str):
+        app.setStyleSheet(theme_manager.get_stylesheet())
     app.setStyleSheet(theme_manager.get_stylesheet())
+    theme_manager.theme_changed.connect(_reapply_stylesheet)
     
     # Create and show main window
     window = MainWindow(settings)

@@ -276,7 +276,7 @@ class PluginCard(QFrame, ThemeAware):
         super().mousePressEvent(event)
 
 
-class HomePage(QWidget):
+class HomePage(QWidget, ThemeAware):
     profile_changed = Signal(str)
     open_library = Signal()
     run_selected = Signal(list)
@@ -313,18 +313,67 @@ class HomePage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        from techdeck.ui.theme import get_current_palette
-        # PROFESSIONAL: Get theme from ThemeManager
+
+        # Profile Controls Container
+        self._profile_container = QWidget()
+        self._profile_container.setFixedHeight(50)
+        profile_layout = QHBoxLayout(self._profile_container)
+        profile_layout.setContentsMargins(20, 8, 20, 8)
+        profile_layout.setSpacing(12)
+
+        self._profile_label = QLabel("Active Kit   /")
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(200)
+        self.profile_combo.setMinimumHeight(36)
+        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
+
+        self.btn_add = QPushButton("+ Apps")
+        self.btn_add.setMinimumHeight(36)
+        self.btn_add.clicked.connect(self._on_add_tiles)
+
+        profile_layout.addWidget(self._profile_label)
+        profile_layout.addWidget(self.profile_combo)
+        profile_layout.addStretch()
+        profile_layout.addWidget(self.btn_add)
+
+        layout.addWidget(self._profile_container)
+
+        # Tile Grid Container (scrollable)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self._grid_widget = QWidget()
+        self.tile_grid = QGridLayout(self._grid_widget)
+        self.tile_grid.setContentsMargins(24, 24, 24, 24)
+        self.tile_grid.setSpacing(20)
+        self.tile_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self._scroll.setWidget(self._grid_widget)
+        layout.addWidget(self._scroll, 1)
+
+        # Subscribes to theme_changed and applies immediately.
+        self.setup_theme_awareness()
+
+        self.refresh_profiles()
+
+    # ========== Theme handling =====================================
+
+    def apply_theme(self):
+        """Re-style every theme-sensitive surface owned by HomePage.
+
+        Tile cards subscribe individually (PluginCard mixes in
+        ThemeAware). This method covers the profile bar, scroll area,
+        and the run button.
+        """
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        
+        theme_name = get_theme_manager().get_current_theme()
+
         self.setStyleSheet(f"HomePage {{ background-color: {theme.background}; }}")
-        
-        # Profile Controls Container
-        profile_container = QWidget()
-        profile_container.setFixedHeight(50)
-        profile_container.setStyleSheet(f"""
+
+        self._profile_container.setStyleSheet(f"""
             QWidget {{
                 background-color: {theme.background};
                 border-radius: 0px;
@@ -333,29 +382,14 @@ class HomePage(QWidget):
                 background-color: transparent;
             }}
         """)
-        profile_layout = QHBoxLayout(profile_container)
-        profile_layout.setContentsMargins(20, 8, 20, 8)
-        profile_layout.setSpacing(12)
-        
-        profile_label = QLabel("Active Kit   /")
-        profile_label.setStyleSheet("font-size: 14px;")
-        
-        self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(200)
-        self.profile_combo.setMinimumHeight(36)
-        self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
-        
-        # PROFESSIONAL: Get theme from ThemeManager
-        from techdeck.ui.theme_manager import get_theme_manager
-        theme = get_theme_manager().get_current_palette()
+        self._profile_label.setStyleSheet(
+            f"font-size: 14px; color: {theme.text}; background: transparent;"
+        )
 
-        # Select icon folder based on theme (dark/blue use light icons, others use dark icons)
-        theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
-        src_arrow = icons_dir / "chevron-down.svg"
-        arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
-        
+        arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
+
         self.profile_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {theme.surface};
@@ -400,11 +434,7 @@ class HomePage(QWidget):
                 background-color: {theme.surface_hover};
             }}
         """)
-        
-        self.btn_add = QPushButton("+ Apps")
-        self.btn_add.setMinimumHeight(36)
-        self.btn_add.clicked.connect(self._on_add_tiles)
-        
+
         self.btn_add.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent};
@@ -421,19 +451,8 @@ class HomePage(QWidget):
                 background-color: {theme.accent_pressed};
             }}
         """)
-        
-        profile_layout.addWidget(profile_label)
-        profile_layout.addWidget(self.profile_combo)
-        profile_layout.addStretch()
-        profile_layout.addWidget(self.btn_add)
-        
-        layout.addWidget(profile_container)
-        
-        # Tile Grid Container (scrollable)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"""
+
+        self._scroll.setStyleSheet(f"""
             QScrollArea {{
                 background-color: {theme.background};
                 border: none;
@@ -452,20 +471,15 @@ class HomePage(QWidget):
                 background-color: {theme.text_secondary};
             }}
         """)
-        
-        grid_widget = QWidget()
-        grid_widget.setStyleSheet(f"background-color: {theme.background};")
-        
-        # PHASE 3: Increase spacing for better card layout
-        self.tile_grid = QGridLayout(grid_widget)
-        self.tile_grid.setContentsMargins(24, 24, 24, 24)
-        self.tile_grid.setSpacing(20)  # More generous spacing
-        self.tile_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        
-        scroll.setWidget(grid_widget)
-        layout.addWidget(scroll, 1)
-        
-        self.refresh_profiles()
+        self._grid_widget.setStyleSheet(f"background-color: {theme.background};")
+
+        # Run button (shell hands this off to us via set_run_button).
+        # Re-style based on its current mode (Run vs Cancel).
+        if hasattr(self, "run_btn") and self.run_btn:
+            if self._is_running:
+                self._set_button_cancel_mode()
+            else:
+                self._set_button_run_mode()
     
     def refresh_profiles(self):
         profiles = self.settings.get_profile_names()
@@ -500,7 +514,10 @@ class HomePage(QWidget):
         if not tile_ids:
             label = QLabel("No apps in this kit.\n\nClick '+ Apps' to add some!")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("color: #888; font-size: 14px; padding: 40px;")
+            label.setStyleSheet(
+                f"color: {theme.text_secondary}; font-size: 14px; padding: 40px; "
+                f"background: transparent;"
+            )
             self.tile_grid.addWidget(label, 0, 0)
         else:
             row, col = 0, 0
@@ -531,7 +548,10 @@ class HomePage(QWidget):
                     missing_label = QLabel(f"{tile_id}\n(Missing)")
                     missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     missing_label.setWordWrap(True)
-                    missing_label.setStyleSheet("color: #888; font-size: 11px;")
+                    missing_label.setStyleSheet(
+                        f"color: {theme.tile_missing_text}; font-size: 11px; "
+                        f"background: transparent;"
+                    )
 
                     remove_btn = QPushButton("Remove from Kit")
                     remove_btn.setStyleSheet("""

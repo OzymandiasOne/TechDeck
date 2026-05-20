@@ -244,54 +244,124 @@ class LibraryPluginCard(QFrame, ThemeAware):
         super().mousePressEvent(event)
 
 
-class LibraryPage(QWidget):
+class LibraryPage(QWidget, ThemeAware):
     """
     Library page for browsing and selecting tiles.
     NOW: Shows missing plugins as selected with (Missing) label, allows deselecting them!
     UPDATED: Save button in header bar for better UX, with Open Plugin Folder button in footer.
-    
+
     Signals:
         saved(): Emitted when user saves tile selection
         return_home(): Emitted when user wants to go back to home
     """
-    
+
     saved = Signal()
     return_home = Signal()
-    
+
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
         self.selected_tile_ids = set()
-        
+
         # Import plugin loader
         from techdeck.core.plugin_loader import PluginLoader
         self.plugin_loader = PluginLoader()
-        
+
         # Discover available plugins
         self.available_plugins = self.plugin_loader.discover_plugins()
         self.available_tiles = [p.id for p in self.available_plugins]
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Get theme colors
-        from techdeck.ui.theme import get_current_palette
-        # PROFESSIONAL: Get theme from ThemeManager
+        # ===== Header with Profile Controls =====
+        self._header_container = QWidget()
+        self._header_container.setFixedHeight(50)
+        header_layout = QHBoxLayout(self._header_container)
+        header_layout.setContentsMargins(20, 8, 20, 8)
+        header_layout.setSpacing(12)
+
+        self._profile_label = QLabel("My Kits")
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(200)
+        self.profile_combo.setMinimumHeight(36)
+        self.profile_combo.currentTextChanged.connect(self._on_profile_changed)
+
+        self.btn_create = QPushButton("Create")
+        self.btn_create.setMinimumHeight(36)
+        self.btn_create.setMinimumWidth(90)
+        self.btn_create.clicked.connect(self._on_create_profile)
+
+        self.btn_edit = QPushButton("Edit")
+        self.btn_edit.setMinimumHeight(36)
+        self.btn_edit.setMinimumWidth(90)
+        self.btn_edit.clicked.connect(self._on_edit_profile)
+
+        self.btn_save = QPushButton("Save")
+        self.btn_save.setMinimumHeight(36)
+        self.btn_save.setMinimumWidth(110)
+        self.btn_save.clicked.connect(self._on_save)
+
+        header_layout.addWidget(self._profile_label)
+        header_layout.addWidget(self.profile_combo)
+        header_layout.addWidget(self.btn_create)
+        header_layout.addWidget(self.btn_edit)
+        header_layout.addStretch()
+        header_layout.addWidget(self.btn_save)
+
+        layout.addWidget(self._header_container)
+
+        # ===== Tile Grid (scrollable) =====
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+
+        self._tile_container = QWidget()
+        self.tile_grid = QGridLayout(self._tile_container)
+        self.tile_grid.setSpacing(20)
+        self.tile_grid.setContentsMargins(24, 24, 24, 24)
+
+        self._scroll.setWidget(self._tile_container)
+        layout.addWidget(self._scroll, 1)
+
+        # ===== Footer with Open Plugin Folder button =====
+        self._footer_container = QWidget()
+        self._footer_container.setFixedHeight(60)
+        footer_layout = QHBoxLayout(self._footer_container)
+        footer_layout.setContentsMargins(20, 10, 20, 10)
+        footer_layout.setSpacing(12)
+
+        footer_layout.addStretch()
+
+        self.btn_open_plugins = QPushButton("Open Plugin Folder")
+        self.btn_open_plugins.setMinimumHeight(36)
+        self.btn_open_plugins.setMinimumWidth(170)
+        self.btn_open_plugins.clicked.connect(self._open_plugin_folder)
+
+        footer_layout.addWidget(self.btn_open_plugins)
+        layout.addWidget(self._footer_container)
+
+        # Subscribes to theme_changed and applies immediately.
+        self.setup_theme_awareness()
+
+        # Load initial data
+        self.refresh()
+
+    # ========== Theme handling =====================================
+
+    def apply_theme(self):
+        """Re-style every theme-sensitive surface owned by LibraryPage."""
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        
-        # Set explicit background color for this page
-        # PHASE 3: Add transparent backgrounds for all labels
+        theme_name = get_theme_manager().get_current_theme()
+
         self.setStyleSheet(f"""
             LibraryPage {{ background-color: {theme.background}; }}
             LibraryPage QLabel {{ background-color: transparent; }}
         """)
-        
-        # ===== Header with Profile Controls =====
-        header_container = QWidget()
-        header_container.setFixedHeight(50)  # Slightly taller for better spacing
-        header_container.setStyleSheet(f"""
+
+        self._header_container.setStyleSheet(f"""
             QWidget {{
                 background-color: {theme.background};
                 border-radius: 0px;
@@ -300,28 +370,14 @@ class LibraryPage(QWidget):
                 background-color: transparent;
             }}
         """)
-        header_layout = QHBoxLayout(header_container)
-        header_layout.setContentsMargins(20, 8, 20, 8)
-        header_layout.setSpacing(12)
-        
-        profile_label = QLabel("My Kits")
-        profile_label.setStyleSheet("font-size: 14px;")
-        
-        self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(200)
-        self.profile_combo.setMinimumHeight(36)  # Match button height
-        self.profile_combo.currentTextChanged.connect(self._on_profile_changed)
-        
-        # PROFESSIONAL: Get theme from ThemeManager
-        from techdeck.ui.theme_manager import get_theme_manager
-        theme = get_theme_manager().get_current_palette()
-        # Ã¢Å“â€¦ Select icon folder based on theme
-        theme_name = self.settings.get_theme()
+        self._profile_label.setStyleSheet(
+            f"font-size: 14px; color: {theme.text}; background: transparent;"
+        )
+
         icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
-        icons_dir  = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
-        src_arrow  = icons_dir / "chevron-down.svg"
-        arrow_path = make_tinted_svg_copy(src_arrow, theme.text)  # themed copy -> file path
-        
+        icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
+        arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
+
         self.profile_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {theme.surface};
@@ -336,7 +392,7 @@ class LibraryPage(QWidget):
             QComboBox::drop-down {{
                 width: 24px;
                 border: none;
-                background: transparent;   /* kills faint white rectangle */
+                background: transparent;
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
             }}
@@ -357,12 +413,8 @@ class LibraryPage(QWidget):
                 outline: none;
             }}
         """)
-        
-        self.btn_create = QPushButton("Create")
-        self.btn_create.setMinimumHeight(36)
-        self.btn_create.setMinimumWidth(90)
-        # Apply surface color styling - INLINE
-        self.btn_create.setStyleSheet(f"""
+
+        surface_btn_style = f"""
             QPushButton {{
                 background-color: {theme.surface};
                 color: {theme.text};
@@ -378,37 +430,11 @@ class LibraryPage(QWidget):
             QPushButton:pressed {{
                 background-color: {theme.border_strong};
             }}
-        """)
-        self.btn_create.clicked.connect(self._on_create_profile)
-        
-        self.btn_edit = QPushButton("Edit")
-        self.btn_edit.setMinimumHeight(36)
-        self.btn_edit.setMinimumWidth(90)
-        # Apply surface color styling - INLINE
-        self.btn_edit.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 8px;
-                font-weight: 500;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme.surface_hover};
-                border-color: {theme.border_strong};
-            }}
-            QPushButton:pressed {{
-                background-color: {theme.border_strong};
-            }}
-        """)
-        self.btn_edit.clicked.connect(self._on_edit_profile)
-        
-        # Save button - Orange CTA styling INLINE
-        self.btn_save = QPushButton("Save")
-        self.btn_save.setMinimumHeight(36)
-        self.btn_save.setMinimumWidth(110)
-        # Apply orange CTA styling INLINE
+        """
+        self.btn_create.setStyleSheet(surface_btn_style)
+        self.btn_edit.setStyleSheet(surface_btn_style)
+        self.btn_open_plugins.setStyleSheet(surface_btn_style)
+
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent_two};
@@ -425,23 +451,8 @@ class LibraryPage(QWidget):
                 background-color: {theme.accent_two_pressed};
             }}
         """)
-        self.btn_save.clicked.connect(self._on_save)
-        
-        header_layout.addWidget(profile_label)
-        header_layout.addWidget(self.profile_combo)
-        header_layout.addWidget(self.btn_create)
-        header_layout.addWidget(self.btn_edit)
-        header_layout.addStretch()
-        header_layout.addWidget(self.btn_save)
-        
-        layout.addWidget(header_container)
-        
-        # ===== Tile Grid (scrollable) =====
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        
-        # Set scroll area and viewport backgrounds to match theme
-        scroll.setStyleSheet(f"""
+
+        self._scroll.setStyleSheet(f"""
             QScrollArea {{
                 border: none;
                 background-color: {theme.background};
@@ -450,61 +461,16 @@ class LibraryPage(QWidget):
                 background-color: {theme.background};
             }}
         """)
-        
-        tile_container = QWidget()
-        # Set explicit background for tile container
-        tile_container.setStyleSheet(f"QWidget {{ background-color: {theme.background}; }}")
-        self.tile_grid = QGridLayout(tile_container)
-        self.tile_grid.setSpacing(20)  # PHASE 3: Match home page spacing
-        self.tile_grid.setContentsMargins(24, 24, 24, 24)  # PHASE 3: More generous margins
-        
-        scroll.setWidget(tile_container)
-        layout.addWidget(scroll, 1)
-        
-        # ===== Footer with Open Plugin Folder button =====
-        footer_container = QWidget()
-        footer_container.setFixedHeight(60)
-        footer_container.setStyleSheet(f"""
+        self._tile_container.setStyleSheet(
+            f"QWidget {{ background-color: {theme.background}; }}"
+        )
+
+        self._footer_container.setStyleSheet(f"""
             QWidget {{
                 background-color: {theme.background};
                 border-radius: 0px;
             }}
         """)
-        footer_layout = QHBoxLayout(footer_container)
-        footer_layout.setContentsMargins(20, 10, 20, 10)
-        footer_layout.setSpacing(12)
-        
-        footer_layout.addStretch()
-        
-        # Open Plugin Folder button - styled with surface color
-        self.btn_open_plugins = QPushButton("Open Plugin Folder")
-        self.btn_open_plugins.setMinimumHeight(36)
-        self.btn_open_plugins.setMinimumWidth(170)
-        self.btn_open_plugins.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme.surface};
-                color: {theme.text};
-                border: 1px solid {theme.border};
-                border-radius: 8px;
-                font-weight: 500;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme.surface_hover};
-                border-color: {theme.border_strong};
-            }}
-            QPushButton:pressed {{
-                background-color: {theme.border_strong};
-            }}
-        """)
-        self.btn_open_plugins.clicked.connect(self._open_plugin_folder)
-        
-        footer_layout.addWidget(self.btn_open_plugins)
-        
-        layout.addWidget(footer_container)
-        
-        # Load initial data
-        self.refresh()
     
     def refresh(self):
         """Reload profiles and current selection."""
@@ -586,7 +552,10 @@ class LibraryPage(QWidget):
                 missing_label = QLabel(f"{tile_id}\n(Missing)")
                 missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 missing_label.setWordWrap(True)
-                missing_label.setStyleSheet("color: #888; font-size: 11px; background-color: transparent;")
+                missing_label.setStyleSheet(
+                    f"color: {theme.tile_missing_text}; font-size: 11px; "
+                    f"background-color: transparent;"
+                )
                 
                 card_layout.addWidget(missing_label)
                 

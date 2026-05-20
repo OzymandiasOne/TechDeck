@@ -510,36 +510,17 @@ class MainWindow(QMainWindow):
         self._on_page_changed("home")  # Actually switch to home page
     
     def _on_theme_changed(self, theme_name: str):
-        """Handle theme change from settings - restart required for full effect."""
+        """Apply theme live — no restart required.
+
+        ThemeManager.set_theme emits theme_changed; __main__.py reapplies
+        the QApplication stylesheet on that signal, and any widget that
+        mixes in ThemeAware repaints its own inline styles via the same
+        signal. Widgets that haven't been migrated still display
+        correctly until the next full repaint.
+        """
         from techdeck.ui.theme_manager import get_theme_manager
-        from PySide6.QtWidgets import QApplication
-        import sys
-        import os
-        
-        # Update theme manager
         theme_manager = get_theme_manager()
         theme_manager.set_theme(theme_name)
-        
-        # Show restart dialog
-        reply = QMessageBox.question(
-            self,
-            "Restart Required",
-            f"Theme changed to '{theme_name.capitalize()}'.\n\n"
-            "TechDeck needs to restart to fully apply the theme.\n\n"
-            "Restart now?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.close()
-
-            if getattr(sys, 'frozen', False):
-                # Frozen PyInstaller build — restart the exe directly
-                os.execl(sys.executable, sys.executable)
-            else:
-                # Dev mode — relaunch as a module
-                os.execl(sys.executable, sys.executable, "-m", "techdeck")
     
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
