@@ -31,17 +31,18 @@ class CommandHandler:
         /help           - Show available commands
         /clear          - Clear console
         /version        - Show TechDeck version
-        /profiles       - List all profiles
-        /profile <name> - Switch to a profile
-        /tiles          - List tiles in current profile
-        /theme <name>   - Switch theme
-        /guides         - List available documentation guides
-        /guide <name>   - Show a specific guide
         /fidget         - Open fidget spinner window
+        /rave           - Pulse accent colors through a rainbow
         /jack           - Play blackjack in the console
+        /roguemode      - Open Rogue Mode focus music player
         /haiku          - Print a manufacturing haiku
         /moth           - Summon a moth toward the Run button
         /steelbeams     - Open the Steel Tube Operation game
+
+    Theme switching is handled via Settings → Personalization → Theme,
+    not the console. Kit/tile/guide commands have been retired in
+    favor of the visual surfaces (Home, Library, and the Help &
+    Feedback tab).
     """
 
     def __init__(self, settings: SettingsManager, console_widget, main_window=None):
@@ -65,17 +66,16 @@ class CommandHandler:
 
         self._rogue_player = None  # kept alive here to prevent GC
 
-        # Command registry
+        # Command registry. Theme switching deliberately is NOT here —
+        # the only way to change theme is via Settings → Personalization
+        # so the console doesn't compete with the live preview path.
+        # Kit/tile/guide listing has been retired too; those surfaces
+        # belong to Home, Library, and the Help & Feedback tab.
         self.commands = {
             '/help': self._cmd_help,
             '/clear': self._cmd_clear,
             '/version': self._cmd_version,
-            '/profiles': self._cmd_profiles,
-            '/profile': self._cmd_switch_profile,
-            '/tiles': self._cmd_tiles,
-            '/theme': self._cmd_theme,
-            '/guides': self._cmd_guides,
-            '/guide': self._cmd_show_guide,
+            '/info': self._cmd_info,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/steelbeams': self._cmd_steelbeams,
@@ -101,18 +101,25 @@ class CommandHandler:
     # ------------------------------------------------------------------ #
 
     def _cmd_help(self, args: str):
-        help_text = """Available commands:
-  /help           - Show this help message
-  /clear          - Clear console output
-  /version        - Show TechDeck version
-  /theme <name>   - Switch theme (dark, light, blue, salmon, cyberpunk, matrix)
-  /roguemode      - Open Rogue Mode focus music player
-
-  /fidget
-  /steelbeams
-  /jack
-  /haiku
-  /moth"""
+        help_text = (
+            "Available commands:\n"
+            "\n"
+            "  /help            - Show this help message\n"
+            "  /clear           - Clear console output\n"
+            "  /version         - Show TechDeck version\n"
+            "  /info            - Describe the selected tile(s)\n"
+            "  /roguemode       - Open Rogue Mode focus music player\n"
+            "\n"
+            "  /fidget          - Pop out a fidget spinner\n"
+            "  /rave            - Pulse accent colors through a rainbow\n"
+            "  /steelbeams      - Launch Steel Tube Operation\n"
+            "  /jack            - Play blackjack against Sal\n"
+            "  /haiku           - Print a manufacturing haiku\n"
+            "  /moth            - Summon a moth toward the Run button\n"
+            "\n"
+            "  Theme switching lives in Settings → Personalization → Theme.\n"
+            "  Kits, apps, and docs live in the Home and Library pages."
+        )
         self.console.append_system(help_text)
 
     def _cmd_clear(self, args: str):
@@ -121,112 +128,38 @@ class CommandHandler:
     def _cmd_version(self, args: str):
         self.console.append_system(f"TechDeck v{APP_VERSION}")
 
-    def _cmd_profiles(self, args: str):
-        profiles = self.settings.get_profile_names()
-        current = self.settings.get_current_profile_name()
-        output = "Available profiles:"
-        for profile in profiles:
-            marker = " (current)" if profile == current else ""
-            output += f"\n  • {profile}{marker}"
-        self.console.append_system(output)
+    def _cmd_info(self, args: str):
+        """Print descriptions for every currently selected tile on Home.
 
-    def _cmd_switch_profile(self, args: str):
-        if not args:
-            self.console.append_error("Usage: /profile <name>")
+        Replaces the previous tile-tooltip workflow — tooltips would
+        get cut off for long descriptions. Select the apps you want
+        details on, then run /info.
+        """
+        mw = self.main_window
+        if mw is None or not hasattr(mw, "home_page"):
+            self.console.append_error("Home page not available.")
             return
-        profile_name = args.strip()
-        if profile_name not in self.settings.get_profile_names():
-            self.console.append_error(f"Profile '{profile_name}' not found.")
-            self.console.append_system("Use /profiles to see available profiles.")
+        home = mw.home_page
+        selected = sorted(home.selected_tiles)
+        if not selected:
+            self.console.append_system(
+                "No apps selected. Click one or more tiles on Home, then run /info."
+            )
             return
-        if self.settings.set_current_profile(profile_name):
-            self.console.append_system(f"Switched to profile: {profile_name}")
-        else:
-            self.console.append_error("Failed to switch profile.")
-
-    def _cmd_tiles(self, args: str):
-        current = self.settings.get_current_profile_name()
-        tiles = self.settings.get_profile_tiles()
-        if not tiles:
-            self.console.append_system(f"Profile '{current}' has no tiles.")
-            return
-        output = f"Tiles in '{current}':"
-        for tile in tiles:
-            output += f"\n  • {tile}"
-        self.console.append_system(output)
-
-    def _cmd_theme(self, args: str):
-        from techdeck.ui.theme import get_theme_names
-        available = get_theme_names()
-        if not args:
-            current = self.settings.get_theme()
-            self.console.append_system(f"Current theme: {current}")
-            self.console.append_system(f"Available themes: {', '.join(available)}")
-            self.console.append_system("Usage: /theme <name>")
-            return
-        theme_name = args.strip().lower()
-        if theme_name not in available:
-            self.console.append_error(f"Invalid theme: {theme_name}")
-            self.console.append_system(f"Available themes: {', '.join(available)}")
-            return
-        self.settings.set_theme(theme_name)
-        self.console.append_system(f"Theme changed to: {theme_name}")
-        self.console.append_system("Restart TechDeck to apply the new theme.")
-
-    def _cmd_guides(self, args: str):
-        project_root = Path(__file__).parent.parent.parent
-        guide_files = {
-            "PLUGIN_DEVELOPER_GUIDE.md": "Plugin Developer Guide",
-            "PLUGIN_SYSTEM_IMPLEMENTATION.md": "Plugin System Implementation",
-            "TESTING_QUICK_START.md": "Testing Quick Start",
-            "README.md": "README",
-        }
-        output = "Available documentation guides:"
-        guides = []
-        for filename, description in guide_files.items():
-            filepath = project_root / filename
-            if filepath.exists():
-                guide_name = filename.replace(".md", "").lower()
-                output += f"\n  • {guide_name} - {description}"
-                guides.append(guide_name)
-        if guides:
-            output += "\n\nUsage: /guide <name>"
-            self.console.append_system(output)
-        else:
-            self.console.append_system("No documentation guides found.")
-
-    def _cmd_show_guide(self, args: str):
-        if not args:
-            self.console.append_error("Usage: /guide <name>")
-            return
-        guide_name = args.strip().lower()
-        guide_map = {
-            "plugin_developer_guide": "PLUGIN_DEVELOPER_GUIDE.md",
-            "plugin_system_implementation": "PLUGIN_SYSTEM_IMPLEMENTATION.md",
-            "testing_quick_start": "TESTING_QUICK_START.md",
-            "readme": "README.md",
-        }
-        if guide_name not in guide_map:
-            self.console.append_error(f"Guide '{guide_name}' not found.")
-            return
-        project_root = Path(__file__).parent.parent.parent
-        guide_file = project_root / guide_map[guide_name]
-        if not guide_file.exists():
-            self.console.append_error(f"Guide file not found: {guide_map[guide_name]}")
-            return
-        try:
-            with open(guide_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            lines = content.split('\n')
-            preview = min(50, len(lines))
-            self.console.append_system(f"=== {guide_map[guide_name]} ===")
-            for line in lines[:preview]:
-                self.console.append_system(line)
-            if len(lines) > preview:
-                self.console.append_system(f"\n... ({len(lines) - preview} more lines)")
-                self.console.append_system(f"Full guide at: {guide_file}")
-        except Exception as e:
-            self.console.append_error(f"Error reading guide: {e}")
+        lines = []
+        for tile_id in selected:
+            plugin = home.plugin_loader.get_plugin(tile_id)
+            if plugin is None:
+                lines.append(f"{tile_id} — (plugin not installed)")
+                continue
+            description = (plugin.description or "(no description)").strip()
+            lines.append(f"{plugin.name}")
+            lines.append(f"  {description}")
+            lines.append("")
+        # Drop trailing blank line for cleanliness
+        while lines and lines[-1] == "":
+            lines.pop()
+        self.console.append_system("\n".join(lines))
 
     # ------------------------------------------------------------------ #
     #  /fidget

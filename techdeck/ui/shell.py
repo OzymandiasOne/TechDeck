@@ -174,6 +174,12 @@ class MainWindow(QMainWindow):
         # Window properties
         self.setWindowTitle("TechDeck")
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
+        # Center on the primary screen's *available* geometry (which
+        # excludes the taskbar) so the title bar is always reachable on
+        # boot. Without this, Qt sometimes positions the window with
+        # part of the frame above the desktop on multi-monitor or
+        # high-DPI setups.
+        self._center_on_primary_screen()
         
         # Theme is already applied by __main__.py via app.setStyleSheet()
         # DO NOT call setStyleSheet() here - it overrides the app stylesheet!
@@ -520,7 +526,7 @@ class MainWindow(QMainWindow):
         """Re-apply the splitter handle/background colors for the active theme."""
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        self.home_splitter.setStyleSheet(f"""
+        sheet = f"""
             QSplitter {{
                 background-color: {theme.background};
             }}
@@ -531,7 +537,22 @@ class MainWindow(QMainWindow):
             QSplitter::handle:hover {{
                 background-color: {theme.border_strong};
             }}
-        """)
+        """
+        # Clear first + force polish so Qt actually repaints the handle.
+        self.home_splitter.setStyleSheet("")
+        self.home_splitter.setStyleSheet(sheet)
+        style = self.home_splitter.style()
+        style.unpolish(self.home_splitter)
+        style.polish(self.home_splitter)
+        # The handle is a child widget of the splitter; repolish it too,
+        # otherwise the bar's pixel color stays stale.
+        if self.home_splitter.count() > 0:
+            handle = self.home_splitter.handle(1)
+            if handle is not None:
+                style.unpolish(handle)
+                style.polish(handle)
+                handle.update()
+        self.home_splitter.update()
     
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
@@ -569,12 +590,63 @@ class MainWindow(QMainWindow):
             )
         # If update found, callbacks will handle showing the dialog
     
+    def _center_on_primary_screen(self):
+        """Position the window centered within the primary screen's
+        available geometry. Used at startup and as a safety clamp if
+        the window ever ends up with its title bar off-screen.
+        """
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        # Cap the window to the available area so it can't be larger
+        # than the desktop (which would still push the title bar off).
+        w = min(self.width(), avail.width())
+        h = min(self.height(), avail.height())
+        if w != self.width() or h != self.height():
+            self.resize(w, h)
+        x = avail.left() + (avail.width() - w) // 2
+        y = avail.top() + (avail.height() - h) // 2
+        self.move(x, y)
+
+    def _ensure_title_bar_visible(self):
+        """Safety net: if our top edge is above the primary screen's
+        available area, snap the window back inside. Called from
+        changeEvent so a bad maximize/restore never traps the title bar.
+        """
+        from PySide6.QtGui import QGuiApplication
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        frame = self.frameGeometry()
+        if frame.top() < avail.top() or frame.left() < avail.left() \
+                or frame.right() > avail.right() or frame.bottom() > avail.bottom():
+            # Re-center on the screen we're actually on
+            w = min(self.width(), avail.width())
+            h = min(self.height(), avail.height())
+            if w != self.width() or h != self.height():
+                self.resize(w, h)
+            x = avail.left() + (avail.width() - w) // 2
+            y = avail.top() + (avail.height() - h) // 2
+            self.move(x, y)
+
+    def changeEvent(self, event):
+        """Watch for window-state changes so a maximize/restore that
+        leaves the title bar off-screen gets corrected on the next tick.
+        """
+        if event.type() == event.Type.WindowStateChange:
+            # Defer so Qt finishes applying the state change first.
+            QTimer.singleShot(0, self._ensure_title_bar_visible)
+        super().changeEvent(event)
+
     def closeEvent(self, event):
         """PHASE 2: Cleanup before closing (console height no longer saved)."""
         # Stop update checker
         self.update_checker.stop()
-        
+
         # Cancel any running plugins
         self.home_page.plugin_executor.cancel_all()
-        
+
         event.accept()

@@ -337,9 +337,16 @@ class ConsoleWidget(QWidget):
             self.line_count_label.setStyleSheet("font-size: 11px; color: #888;")
     
     def _escape_html(self, text: str) -> str:
-        """Escape HTML characters in text."""
+        """Escape HTML characters in text, preserving newlines.
+
+        QTextEdit.append() renders the payload as HTML, so embedded
+        `\\n` characters collapse to spaces unless we convert them to
+        `<br>` ourselves. This is what lets /help, /profiles, /tiles,
+        and /guides render their multi-line output across lines.
+        """
         return (text.replace('&', '&amp;')
                    .replace('<', '&lt;')
                    .replace('>', '&gt;')
                    .replace('"', '&quot;')
-                   .replace("'", '&#39;'))
+                   .replace("'", '&#39;')
+                   .replace('\n', '<br>'))

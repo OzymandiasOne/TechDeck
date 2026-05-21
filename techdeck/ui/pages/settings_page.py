@@ -91,6 +91,10 @@ class SettingsPage(QWidget, ThemeAware):
 
         # Combos baked into the tabs use inline styling, so re-apply
         # the combo stylesheet (with a freshly tinted chevron) for each.
+        # Qt's QSS engine sometimes refuses to repaint when only the
+        # url() target changes, so we clear the stylesheet first and
+        # force an unpolish/polish/update so the background, text, and
+        # chevron all pick up the new theme.
         theme_name = self.settings.get_theme()
         icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
@@ -98,8 +102,14 @@ class SettingsPage(QWidget, ThemeAware):
         combo_style = self._combo_style(theme, arrow_path)
         for attr in ("theme_combo", "plugin_combo", "_rm_pl_combo"):
             combo = getattr(self, attr, None)
-            if combo is not None:
-                combo.setStyleSheet(combo_style)
+            if combo is None:
+                continue
+            combo.setStyleSheet("")
+            combo.setStyleSheet(combo_style)
+            style = combo.style()
+            style.unpolish(combo)
+            style.polish(combo)
+            combo.update()
 
     # ──────────────────────────────────────────────────────────────────────
     # HELP & FEEDBACK TAB
