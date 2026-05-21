@@ -1,0 +1,12 @@
+{
+  "id": "922_form_seeker",
+  "name": "922 FormSeeker",
+  "description": "Discovers formed plate PDFs in a 922 batch via filename, PO NOTES, and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet in the Pallet & Rod Organizer.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "requires_admin": false,
+  "timeout": 900,
+  "settings": {
+    "fields": []
+  }
+}
