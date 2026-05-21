@@ -95,11 +95,11 @@ def _dypn_from_filename(filename: str) -> str:
 
 
 def _bent_suffix(dypn: str) -> str:
-    """E.g. 'E6492162-H22-3' -> 'H22-3 BENT' (suffix is everything from first -H)."""
+    """E.g. 'E6492162-H22-3' -> 'H22-3 BEND' (suffix is everything from first -H)."""
     idx = dypn.find("-H")
     if idx == -1:
-        return f"{dypn} BENT"
-    return f"{dypn[idx + 1:]} BENT"
+        return f"{dypn} BEND"
+    return f"{dypn[idx + 1:]} BEND"
 
 
 def _is_skipped(pdf: Path, batch_path: Path, batch_no: str) -> bool:
@@ -503,6 +503,19 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     progress_callback(5)
 
+    # Existing-forming check: prompt before doing any work.
+    forming_dir = doc_folder / f"Forming {batch_no}"
+    if forming_dir.exists() and any(forming_dir.iterdir()):
+        prompt = "Looks like this batch already has forming. Overwrite existing? Y/N"
+        if console and hasattr(console, 'request_input'):
+            ans = console.request_input(prompt)
+        else:
+            ans = input(prompt + ": ")
+        if (ans or "").strip().lower() not in {"y", "yes"}:
+            log("Aborted -- existing forming preserved.")
+            return
+        log("Overwriting existing forming.")
+
     # PO workbook lookup (drives Method 2 and Bent Plates metadata)
     po_path = _find_po_workbook(doc_folder, batch_no)
     if po_path:
@@ -574,7 +587,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log(f"Total unique formed plates: {len(combined)}")
 
     # Phase 2: copy PDFs into Forming subfolder
-    forming_dir = doc_folder / f"Forming {batch_no}"
     forming_dir.mkdir(parents=True, exist_ok=True)
     log(f"Output folder: {forming_dir}")
 
