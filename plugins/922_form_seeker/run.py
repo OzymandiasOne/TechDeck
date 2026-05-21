@@ -642,9 +642,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log("=" * 50)
     log(f"922 FormSeeker -- Batch {batch_no}")
     log(f"  Total formed plates : {len(rows_data)}")
-    log(f"  Output folder       : {forming_dir}")
-    log(f"  Merged PDF          : {merged_path.name}")
-    log(f"  Bent Plates updated : {organizer_path.name}")
     log("=" * 50)
 
 
