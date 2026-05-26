@@ -191,7 +191,7 @@ class UpdateChecker:
             # Check if update is available
             print(f"Comparing versions: {update_info.version} vs {self.current_version}")
             if update_info.is_newer_than(self.current_version):
-                print(f"✓ Update available: {update_info.version}")
+                print(f"OK - Update available: {update_info.version}")
                 
                 # Check if it's mandatory
                 is_mandatory = update_info.requires_mandatory_update(self.current_version)
@@ -205,7 +205,7 @@ class UpdateChecker:
                 print("=" * 60)
                 return update_info
             else:
-                print(f"✓ No update needed - already on latest version")
+                print(f"OK - No update needed - already on latest version")
                 print("=" * 60)
             
             return None
