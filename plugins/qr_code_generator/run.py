@@ -199,7 +199,7 @@ class QRGeneratorWindow(QWidget):
             _p = _get_tm().get_current_palette()
             _theme_name = _get_tm().get_current_theme()
             _icon_folder = "light" if _theme_name in ["dark", "blue"] else "dark"
-            # utils.py lives at <root>/techdeck/ui/utils.py — go up 3 levels to reach root
+            # utils.py lives at <root>/techdeck/ui/utils.py - go up 3 levels to reach root
             _td_root = Path(_td_utils.__file__).resolve().parents[2]
             _icons_dir = _td_root / "assets" / "icons" / _icon_folder
             _arrow_path = make_tinted_svg_copy(_icons_dir / "chevron-down.svg", _p.text)
@@ -471,7 +471,7 @@ class QRGeneratorWindow(QWidget):
             if qr_type == "URL" and self.save_to_library_check.isChecked():
                 self.add_to_library(name, content, str(output_path), qr_type)
 
-            # Fire the success sound — this is the meaningful completion point for a GUI plugin
+            # Fire the success sound - this is the meaningful completion point for a GUI plugin
             if callable(self._on_success):
                 self._on_success()
 

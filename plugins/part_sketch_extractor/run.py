@@ -7,7 +7,7 @@ NEW in v2.3.0:
 - Combined PART_WT and CALC_WT into single WEIGHT column (I)
 - Applied 2-decimal rounding to LENGTH (H) and WEIGHT (I) columns
 - Added blank placeholder columns: WIDTH (G), CATALOG (M), CATEGORY (N), CUSTOMER/SUPPLIER (O), DIVISION 1 (P), DIVISION 2 (Q)
-- Renamed columns: PART → DYPN, SRCE → SOURCE, FAB_DIM → LENGTH, MIL_S → MIL SPEC, PacketName → NEST
+- Renamed columns: PART -> DYPN, SRCE -> SOURCE, FAB_DIM -> LENGTH, MIL_S -> MIL SPEC, PacketName -> NEST
 - Organized output folder structure (creates folder named after Excel file)
 - Moved ORDER column from J to A
 
@@ -112,9 +112,9 @@ def extract_numeric_from_fab_dim(fab_dim_text: str) -> Optional[str]:
     Extract numeric value from FAB DIM field.
     
     Examples:
-    - "130 CUT NEAT AND STAMP PER WORK PACKAGE PART NOMECLATURE." → "130"
-    - "24.5" → "24.5"
-    - "19.13 INCHES" → "19.13"
+    - "130 CUT NEAT AND STAMP PER WORK PACKAGE PART NOMECLATURE." -> "130"
+    - "24.5" -> "24.5"
+    - "19.13 INCHES" -> "19.13"
     
     Returns the numeric value as a string, or None if no number found.
     """
@@ -215,7 +215,7 @@ def parse_part_sketch_page(text: str, packet_name: str, page_number: int) -> Tup
                         part_wt = weight_match.group(1)
         elif line_upper.startswith("FAB DIM") or line_upper.startswith("FABDIM") or line_upper.startswith("FAB-DIM"):
             raw_fab_dim = extract_field_value(line, idx, lines, "FAB DIM")
-            # Extract numeric value from FAB DIM (handles "130 CUT NEAT AND STAMP..." → "130")
+            # Extract numeric value from FAB DIM (handles "130 CUT NEAT AND STAMP..." -> "130")
             if raw_fab_dim:
                 fab_dim = extract_numeric_from_fab_dim(raw_fab_dim) or raw_fab_dim
         elif line.startswith("MIL-SPEC") or line.startswith("MIL-S"):
@@ -355,12 +355,12 @@ def validate_and_create_reports(output_folder: Path, output_name: str, ws: Works
     # Log summary
     total_missing = sum(missing_counts.values())
     if total_missing > 0:
-        log(f"⚠️  Found {total_missing} missing cells across {len(missing_data)} locations")
-        log(f"📊 Validation reports created:")
+        log(f"WARNING: Found {total_missing} missing cells across {len(missing_data)} locations")
+        log(f"Validation reports created:")
         log(f"   - {missing_xlsx_path.name}")
         log(f"   - {analysis_txt_path.name}")
     else:
-        log("✅ No missing data found - all required fields populated!")
+        log("No missing data found - all required fields populated!")
 
 
 def create_missing_items_excel(xlsx_path: Path, missing_data: List[Tuple], log) -> None:
@@ -554,7 +554,7 @@ def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path], all_rows: Lis
                 pdf_writer.write(f)
             return pdf_output
     except Exception as e:
-        log(f"⚠️  Could not create drawings PDF: {e}")
+        log(f"WARNING: Could not create drawings PDF: {e}")
     
     return None
 
@@ -564,32 +564,32 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     """Main plugin execution."""
     log = params.get('log', print)
     
-    log("📐 Starting Part Sketch Extractor v2.3.0...")
+    log("Starting Part Sketch Extractor v2.3.0...")
     progress_callback(0)
     
     # === PROMPT 1: FOLDER PATH ===
-    log("📝 Input required from user...")
+    log("Input required from user...")
     folder_input = get_console_input(params, "Enter folder path containing PDFs")
     
     folder = Path(folder_input.strip()).expanduser().resolve()
     if not folder.exists() or not folder.is_dir():
-        log(f"❌ Folder not found: {folder}")
+        log(f"ERROR: Folder not found: {folder}")
         raise ValueError(f"Folder not found: {folder}")
     
-    log(f"✅ Folder: {folder}")
+    log(f"Folder: {folder}")
     progress_callback(5)
     
     # === PROMPT 2: EXTRACT DRAWINGS ===
     extract_input = get_console_input(params, "Extract drawings to PDF? (yes/no)")
     extract_drawings = extract_input.strip().lower() in ('yes', 'y')
-    log(f"✅ Extract drawings: {'Yes' if extract_drawings else 'No'}")
+    log(f"Extract drawings: {'Yes' if extract_drawings else 'No'}")
     progress_callback(10)
     
     # === PROMPT 3: OUTPUT FILENAME ===
     output_input = get_console_input(params, "Enter output Excel filename (e.g., 'part_sketches')")
     
     if not output_input.strip():
-        log("❌ Output filename cannot be empty!")
+        log("ERROR: Output filename cannot be empty!")
         raise ValueError("Output filename is required")
     
     # Auto-append .xlsx if not present
@@ -603,8 +603,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     output_folder.mkdir(exist_ok=True)
     
     xlsx_path = output_folder / output_filename
-    log(f"✅ Output folder: {output_folder.name}/")
-    log(f"✅ Output file: {output_filename}")
+    log(f"Output folder: {output_folder.name}/")
+    log(f"Output file: {output_filename}")
     log("")
     progress_callback(15)
     
@@ -613,18 +613,18 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
         return
     
     # === FIND PDFs ===
-    log("🔍 Finding PDFs...")
+    log("Finding PDFs...")
     pdfs = sorted([p for p in folder.iterdir() if p.suffix.lower() == ".pdf"])
     
     if not pdfs:
-        log("❌ No PDFs found in folder")
+        log("ERROR: No PDFs found in folder")
         raise ValueError("No PDFs found")
     
-    log(f"✅ Found {len(pdfs)} PDF(s)")
+    log(f"Found {len(pdfs)} PDF(s)")
     progress_callback(20)
     
     # === EXTRACT DATA ===
-    log("📊 Extracting PART SKETCH data...")
+    log("Extracting PART SKETCH data...")
     log("   This may take a few minutes...")
     log("")
     
@@ -633,7 +633,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     for idx, pdf in enumerate(pdfs):
         if cancel_event.is_set():
-            log("⚠️  Cancelled by user")
+            log("WARNING: Cancelled by user")
             return
         
         try:
@@ -642,61 +642,61 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
             all_rows.extend(rows)
             log(f"   Found {len(rows)} PART SKETCH page(s)")
         except Exception as e:
-            log(f"   ⚠️  Error: {e}")
+            log(f"   WARNING: Error: {e}")
         
         progress = 20 + int((idx + 1) / total * 60)
         progress_callback(progress)
     
     log("")
-    log(f"📊 Total rows extracted: {len(all_rows)}")
+    log(f"Total rows extracted: {len(all_rows)}")
     progress_callback(80)
     
     # === APPEND TO EXCEL ===
-    log("💾 Writing to Excel...")
+    log("Writing to Excel...")
     try:
         added, ws = append_rows(xlsx_path, all_rows, log)
-        log(f"✅ Added {added} new rows to {output_filename}")
+        log(f"Added {added} new rows to {output_filename}")
     except Exception as e:
-        log(f"❌ Failed to write Excel: {e}")
+        log(f"ERROR: Failed to write Excel: {e}")
         raise
     
     progress_callback(85)
     
     # === CREATE VALIDATION REPORTS ===
-    log("📊 Creating validation reports...")
+    log("Creating validation reports...")
     try:
         validate_and_create_reports(output_folder, output_name, ws, log)
     except Exception as e:
-        log(f"⚠️  Warning: Could not create validation reports: {e}")
+        log(f"WARNING: Warning: Could not create validation reports: {e}")
     
     progress_callback(90)
     
     # === EXTRACT DRAWINGS ===
     if extract_drawings:
-        log("📄 Extracting drawings to PDF...")
+        log("Extracting drawings to PDF...")
         pdf_output = extract_drawings_to_pdf(output_folder, pdfs, all_rows, log)
         if pdf_output:
-            log(f"✅ Drawings saved: {pdf_output.name}")
+            log(f"Drawings saved: {pdf_output.name}")
     
     progress_callback(100)
     
     # === SUMMARY ===
     log("")
     log("=" * 50)
-    log("📊 EXTRACTION SUMMARY")
+    log("EXTRACTION SUMMARY")
     log("=" * 50)
-    log(f"✅ Processed: {len(pdfs)} PDFs")
-    log(f"✅ Extracted: {len(all_rows)} rows")
-    log(f"✅ Added: {added} new rows")
-    log(f"✅ Output folder: {output_folder}/")
-    log(f"✅ Excel file: {xlsx_path}")
-    log(f"✅ Validation reports:")
+    log(f"Processed: {len(pdfs)} PDFs")
+    log(f"Extracted: {len(all_rows)} rows")
+    log(f"Added: {added} new rows")
+    log(f"Output folder: {output_folder}/")
+    log(f"Excel file: {xlsx_path}")
+    log(f"Validation reports:")
     log(f"   - {output_name}_missing_items.xlsx")
     log(f"   - {output_name}_analysis.txt")
     if extract_drawings and pdf_output:
-        log(f"✅ Drawings: {pdf_output}")
+        log(f"Drawings: {pdf_output}")
     log("=" * 50)
-    log("🎉 Part Sketch Extractor completed successfully!")
+    log("Part Sketch Extractor completed successfully!")
 
 
 if __name__ == "__main__":
@@ -708,6 +708,6 @@ if __name__ == "__main__":
     
     try:
         run(params={'console': None}, progress_callback=progress, cancel_event=cancel_event)
-        print("\n✅ Done!")
+        print("\nDone!")
     except Exception as e:
-        print(f"\n❌ Failed: {e}")
+        print(f"\nERROR: Failed: {e}")

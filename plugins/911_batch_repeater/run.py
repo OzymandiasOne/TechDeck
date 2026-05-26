@@ -22,30 +22,30 @@ import re
 import shutil
 from pathlib import Path
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def _repeater_root() -> Path:
+def _repeater_root() -> Path | None:
+    """REPEATER folder under the 911 QTDR root. Auto-discovers the QTDR root
+    across all OneDrive path variants; returns None if it can't be found."""
+    qtdr = sdk.resolve_911_qtdr_root()
+    if qtdr is None:
+        return None
     return (
-        Path.home()
-        / "American Steel & Alum"
-        / "Communication site - Electric Boat ASA Docs"
-        / "Pilot Program"
-        / "911 QTDR"
+        qtdr
         / "04 - Notes - Protocols - Tutorials"
         / "TECH SERVICES"
         / "REPEATER"
     )
-
-
-def _master_parts_library() -> Path:
-    return _repeater_root() / "MASTER PARTS LIBRARY"
-
-
-def _master_inspection_library() -> Path:
-    return _repeater_root() / "MASTER INSPECTION LIBRARY"
 
 
 # ---------------------------------------------------------------------------
@@ -54,20 +54,6 @@ def _master_inspection_library() -> Path:
 
 # Matches e.g. "S025 P07750", "V086 P07685", "V071 P08001"
 _BATCH_NEST_RE = re.compile(r'[VS]\d{2,4}\s+P0\d+', re.IGNORECASE)
-
-
-def _find_batch_folder(qtdr_root: Path, batch_number: str) -> Path:
-    exact = qtdr_root / batch_number
-    if exact.exists():
-        return exact
-    batch_upper = batch_number.upper()
-    for entry in qtdr_root.iterdir():
-        if entry.is_dir() and entry.name.upper() == batch_upper:
-            return entry
-    raise FileNotFoundError(
-        f"Batch folder '{batch_number}' not found under:\n{qtdr_root}\n"
-        "Check that the batch folder exists inside the REPEATER directory."
-    )
 
 
 def _find_nest_excel(nest_folder: Path, batch_number: str, nest_number: str) -> Path | None:
@@ -174,11 +160,11 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
                         continue
 
                     old_text = _BATCH_NEST_RE.search(line_text).group(0)
-                    log(f"    Found '{old_text}' → '{replacement}'")
+                    log(f"    Found '{old_text}' -> '{replacement}'")
 
                     match_rect = _find_match_rect(line, fitz)
                     if match_rect is None:
-                        log(f"    WARNING: Could not locate rect for '{old_text}' — skipping")
+                        log(f"    WARNING: Could not locate rect for '{old_text}' - skipping")
                         continue
 
                     font_size = line["spans"][0]["size"] if line["spans"] else 10
@@ -197,14 +183,14 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
                     break
 
         if replaced:
-            # Save to a temp file then replace — required when using redactions
+            # Save to a temp file then replace - required when using redactions
             tmp = pdf_path.with_suffix(".tmp.pdf")
             doc.save(str(tmp), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
             doc.close()
             tmp.replace(pdf_path)
             return True
         else:
-            log(f"    WARNING: No batch/nest pattern found in PDF — file unchanged")
+            log(f"    WARNING: No batch/nest pattern found in PDF - file unchanged")
     finally:
         if not doc.is_closed:
             doc.close()
@@ -224,7 +210,7 @@ def run(params, progress_callback, cancel_event):
     progress_callback(0)
 
     # ------------------------------------------------------------------ #
-    # Step 1 — Prompt for batch number
+    # Step 1 - Prompt for batch number
     # ------------------------------------------------------------------ #
     if console is not None:
         batch_number = console.request_input(
@@ -234,23 +220,23 @@ def run(params, progress_callback, cancel_event):
         batch_number = input("Enter Batch Number (e.g. V072, S045): ").strip().upper()
 
     if not batch_number:
-        log("No batch number entered — aborting.")
+        log("No batch number entered - aborting.")
         return
 
     log(f"Batch         : {batch_number}")
 
     # ------------------------------------------------------------------ #
-    # Step 2 — Resolve and validate paths
+    # Step 2 - Resolve and validate paths
     # ------------------------------------------------------------------ #
     repeater_root = _repeater_root()
+    if repeater_root is None or not repeater_root.exists():
+        log("ERROR: Could not locate the 911 QTDR REPEATER folder. "
+            "Verify OneDrive is synced.")
+        return
     log(f"Repeater root : {repeater_root}")
 
-    if not repeater_root.exists():
-        log(f"ERROR: REPEATER folder not found:\n  {repeater_root}")
-        return
-
-    parts_lib = _master_parts_library()
-    insp_lib = _master_inspection_library()
+    parts_lib = repeater_root / "MASTER PARTS LIBRARY"
+    insp_lib = repeater_root / "MASTER INSPECTION LIBRARY"
 
     if not parts_lib.exists():
         log(f"ERROR: Master Parts Library not found:\n  {parts_lib}")
@@ -261,12 +247,13 @@ def run(params, progress_callback, cancel_event):
         return
 
     # ------------------------------------------------------------------ #
-    # Step 3 — Locate batch folder in QTDR
+    # Step 3 - Locate batch folder in QTDR
     # ------------------------------------------------------------------ #
-    try:
-        batch_folder = _find_batch_folder(repeater_root, batch_number)
-    except FileNotFoundError as exc:
-        log(f"ERROR: {exc}")
+    batch_folder = sdk.find_911_batch_folder(repeater_root, batch_number)
+    if batch_folder is None:
+        log(f"ERROR: Batch folder '{batch_number}' not found under:\n"
+            f"  {repeater_root}\n"
+            "Check that the batch folder exists inside the REPEATER directory.")
         return
 
     log(f"Batch folder  : {batch_folder}")
@@ -276,7 +263,7 @@ def run(params, progress_callback, cancel_event):
         return
 
     # ------------------------------------------------------------------ #
-    # Step 4 — Build library indexes once
+    # Step 4 - Build library indexes once
     # ------------------------------------------------------------------ #
     log("Indexing Master Parts Library...")
     nc_index = _build_library_index(parts_lib, ".NC")
@@ -292,7 +279,7 @@ def run(params, progress_callback, cancel_event):
         return
 
     # ------------------------------------------------------------------ #
-    # Step 5 — Collect DYPNs per nest
+    # Step 5 - Collect DYPNs per nest
     # ------------------------------------------------------------------ #
     nest_folders = sorted([d for d in batch_folder.iterdir() if d.is_dir()])
 
@@ -309,13 +296,13 @@ def run(params, progress_callback, cancel_event):
         excel_path = _find_nest_excel(nest_dir, batch_number, nest_name)
 
         if excel_path is None:
-            log(f"  [{nest_name}] WARNING: No 911 Batch Excel found — skipping")
+            log(f"  [{nest_name}] WARNING: No 911 Batch Excel found - skipping")
             continue
 
         try:
             dypns = _read_dypns(excel_path)
         except Exception as exc:
-            log(f"  [{nest_name}] WARNING: Could not read Excel ({exc}) — skipping")
+            log(f"  [{nest_name}] WARNING: Could not read Excel ({exc}) - skipping")
             continue
 
         if not dypns:
@@ -328,14 +315,14 @@ def run(params, progress_callback, cancel_event):
     progress_callback(30)
 
     if not nest_dypns:
-        log("No DYPNs found across any nest — nothing to do.")
+        log("No DYPNs found across any nest - nothing to do.")
         return
 
     if cancel_event.is_set():
         return
 
     # ------------------------------------------------------------------ #
-    # Step 6 — Per nest: match, copy, edit PDFs
+    # Step 6 - Per nest: match, copy, edit PDFs
     # ------------------------------------------------------------------ #
     total_nc = 0
     total_pdf = 0
@@ -367,7 +354,7 @@ def run(params, progress_callback, cancel_event):
 
             nc_src = nc_index.get(dypn_key)
             if nc_src is None:
-                log(f"  {dypn} — not in parts library (new part, skipped)")
+                log(f"  {dypn} - not in parts library (new part, skipped)")
                 total_new += 1
                 continue
 
@@ -375,33 +362,33 @@ def run(params, progress_callback, cancel_event):
             nc_dest = nc_out / nc_src.name
             try:
                 if nc_dest.exists():
-                    log(f"  {dypn} — NC already exists, skipping")
+                    log(f"  {dypn} - NC already exists, skipping")
                 else:
                     shutil.copy2(nc_src, nc_dest)
                     nest_nc += 1
-                    log(f"  {dypn} — NC copied")
+                    log(f"  {dypn} - NC copied")
             except Exception as exc:
-                log(f"  {dypn} — ERROR copying NC: {exc}")
+                log(f"  {dypn} - ERROR copying NC: {exc}")
                 nest_errors += 1
 
             # Copy and edit PDF
             pdf_src = pdf_index.get(dypn_key)
             if pdf_src is None:
-                log(f"  {dypn} — no PDF in Inspection Library (NC only)")
+                log(f"  {dypn} - no PDF in Inspection Library (NC only)")
                 continue
 
             pdf_dest = insp_out / pdf_src.name
             try:
                 if pdf_dest.exists():
-                    log(f"  {dypn} — PDF already exists, skipping")
+                    log(f"  {dypn} - PDF already exists, skipping")
                 else:
                     shutil.copy2(pdf_src, pdf_dest)
                     nest_pdf += 1
-                    log(f"  {dypn} — PDF copied, updating batch/nest text...")
+                    log(f"  {dypn} - PDF copied, updating batch/nest text...")
                     if _replace_batch_nest_in_pdf(pdf_dest, batch_number, nest_name, log):
                         nest_edited += 1
             except Exception as exc:
-                log(f"  {dypn} — ERROR with PDF: {exc}")
+                log(f"  {dypn} - ERROR with PDF: {exc}")
                 nest_errors += 1
 
         log(f"  [{nest_name}] NC: {nest_nc} copied | PDF: {nest_pdf} copied, {nest_edited} edited")
@@ -413,7 +400,7 @@ def run(params, progress_callback, cancel_event):
         progress_callback(30 + int((nest_idx + 1) / len(nest_list) * 65))
 
     # ------------------------------------------------------------------ #
-    # Step 7 — Summary
+    # Step 7 - Summary
     # ------------------------------------------------------------------ #
     progress_callback(100)
     log("\n" + "=" * 50)

@@ -1,5 +1,5 @@
 """
-LST Organizer Plugin — v15
+LST Organizer Plugin - v15
 Single-file TechDeck plugin. All logic runs in-process (no subprocess or external script).
 
 Changes from v14:
@@ -24,6 +24,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 # ── Material sets ──────────────────────────────────────────────────────────────
 
 STANDARD_TUBE_MATERIALS = {
@@ -43,61 +50,11 @@ ALL_TUBE_MATERIALS = STANDARD_TUBE_MATERIALS | OVERSIZED_TUBE_MATERIALS
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
 
-def _candidate_roots() -> List[Path]:
-    home = Path.home()
-    rel = "Communication site - Electric Boat ASA Docs/Pilot Program/922 QTDR Production Packages"
-    cands = [
-        home / "American Steel & Alum" / rel,
-        home / "OneDrive - American Steel & Alum" / rel,
-    ]
-    od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
-    if od:
-        cands.append(Path(od) / rel)
-    seen: set = set(); out = []
-    for c in cands:
-        s = str(c)
-        if s not in seen:
-            out.append(c); seen.add(s)
-    return out
-
-
-def _locate_root() -> Optional[Path]:
-    for r in _candidate_roots():
-        if r.exists():
-            return r
-    return None
-
-
-def _find_batch_path(root: Path, batch: str) -> Optional[Path]:
-    live = root / f"Batch {batch}"
-    if live.exists():
-        return live
-    archived = root / "1 - Completed" / f"Batch {batch}"
-    if archived.exists():
-        return archived
-    return None
-
-
 def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
 ORDER_PREFIX = re.compile(r"^(X|BJ|BK|XY)[0-9]+$", re.IGNORECASE)
-_BATCH_INPUT_RE = re.compile(r'^(?:batch|po)\s+([0-9]+)$', re.IGNORECASE)
-
-
-def _parse_batch_input(raw: str) -> Optional[str]:
-    """
-    Accept 'Batch 403', 'PO 403', or bare '403' (all case-insensitive).
-    Returns the numeric batch string, or None if unrecognisable.
-    """
-    raw = raw.strip()
-    m = _BATCH_INPUT_RE.match(raw)
-    if m:
-        return m.group(1)
-    if re.match(r'^[0-9]+$', raw):
-        return raw
-    return None
 
 # ── LST discovery ──────────────────────────────────────────────────────────────
 
@@ -554,32 +511,25 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     do_organize = settings.get('organize_by_material', True)
 
     # Always prompt for batch number at run time
-    console = params.get('console')
-    if console and hasattr(console, 'request_input'):
-        raw = console.request_input('Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
-    else:
-        raw = input('Enter batch number: ')
-    batch_no = _parse_batch_input(raw or '')
+    raw = sdk.request_batch_number(
+        params, 'Enter batch number (e.g. "403", "Batch 403", or "PO 403"):'
+    )
+    batch_no = sdk.parse_922_batch(raw or '')
     if not batch_no:
         raise ValueError(f"Unrecognised batch number input: {raw!r}")
 
-    # Resolve base path — auto-discover if not set
-    if base_path_str:
-        root = Path(base_path_str)
-        if not root.is_dir():
-            raise ValueError(f"Base directory not found: {base_path_str}")
-        log(f"Base directory: {root}")
-    else:
-        log("Base path not set — searching OneDrive paths...")
-        root = _locate_root()
-        if not root:
-            raise RuntimeError(
-                "Could not auto-locate '922 QTDR Production Packages'. "
-                "Set Base Directory in plugin settings."
-            )
-        log(f"Auto-discovered: {root}")
+    # Resolve base path - override wins, otherwise auto-discover
+    root = sdk.resolve_922_root(base_path_str)
+    if not root:
+        raise RuntimeError(
+            "Could not auto-locate '922 QTDR Production Packages'. "
+            "Set Base Directory in plugin settings."
+        )
+    if not root.is_dir():
+        raise ValueError(f"Base directory not found: {root}")
+    log(f"Base directory: {root}")
 
-    batch_path = _find_batch_path(root, batch_no)
+    batch_path = sdk.find_922_batch_path(root, batch_no)
     if not batch_path:
         raise RuntimeError(
             f"Batch {batch_no} not found under {root} (also checked '1 - Completed'). "
@@ -588,7 +538,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
 
     log(f"Batch {batch_no}: {batch_path}")
     if dry_run:
-        log("DRY RUN MODE — no files will be copied or moved.")
+        log("DRY RUN MODE - no files will be copied or moved.")
 
     # Output file paths
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -636,7 +586,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         master_po = _autodiscover_master_po(batch_path, debug_fp)
 
         if not master_po or not master_po.exists():
-            log("WARNING: Master PO not found — writing seed file (filenames only).")
+            log("WARNING: Master PO not found - writing seed file (filenames only).")
             seed_rows = [(p.name, None, _strip_step(p.stem), None, None, None) for p in copied]
             _write_overview_txt(
                 txt_path, seed_rows, ["Master PO workbook NOT FOUND"],
@@ -703,7 +653,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
 
     # ── Console summary ────────────────────────────────────────────────────────
     log("=" * 60)
-    log(f"LST Organizer — Batch {batch_no} Complete")
+    log(f"LST Organizer - Batch {batch_no} Complete")
     log("=" * 60)
     log(f"Files gathered:  {moved_files}")
     log(f"Unique parts:    {moved_unique}")
@@ -726,7 +676,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         log("\nAll expected standard tube files found.")
 
     if issues:
-        log(f"\n{len(issues)} issue(s) logged — see report for details.")
+        log(f"\n{len(issues)} issue(s) logged - see report for details.")
 
     log("")
     log(f"Main report:   {txt_path}")

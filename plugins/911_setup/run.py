@@ -3,16 +3,16 @@
 ================
 Automates the full 911 QTDR batch setup workflow:
 
-  1. Prompt for batch number → locate batch folder
-  2. Read BATCH LIST → extract unique nest numbers from "Nest Pkg Nbr" header column
+  1. Prompt for batch number -> locate batch folder
+  2. Read BATCH LIST -> extract unique nest numbers from "Nest Pkg Nbr" header column
   3. Create a subfolder per nest inside the batch folder
   4. Copy "911 BATCH _.xlsx" template into each nest folder, rename it
-  5. Copy Working Forecast List → extract rows for each nest → paste into
+  5. Copy Working Forecast List -> extract rows for each nest -> paste into
      NEST sheet cols A-C starting row 4
-  6. Parse NEST PACKAGES PDFs → extract MIL-S spec (→ D4) and MATL (→ E4)
-  7. Read BATCH LIST → filter rows by nest number → paste into NEST cols F-K
+  6. Parse NEST PACKAGES PDFs -> extract MIL-S spec (-> D4) and MATL (-> E4)
+  7. Read BATCH LIST -> filter rows by nest number -> paste into NEST cols F-K
      starting row 4
-  8. Read DYPN values from NEST col G → copy INSPECTION SHEET tab for each
+  8. Read DYPN values from NEST col G -> copy INSPECTION SHEET tab for each
      part, write full DYPN into A16 (merged A16:C17). Nothing else on the
      copied sheet is modified -- the template's formulas/CF drive the rest
      off A16. Sheet name = suffix (e.g. "-80"); on collisions, both
@@ -57,6 +57,13 @@ from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
 try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
+try:
     import fitz  # PyMuPDF
     PYMUPDF_AVAILABLE = True
 except ImportError:
@@ -92,40 +99,22 @@ _DEFAULT_TEMPLATE_SUBDIR = "03 - Processing Forms & Templates\\00 - SACO"
 _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 
 
-def _default_qtdr() -> Path:
-    """Default 911 QTDR root, used when no override is configured."""
-    return (
-        Path.home()
-        / "American Steel & Alum"
-        / "Communication site - Electric Boat ASA Docs"
-        / "Pilot Program"
-        / "911 QTDR"
-    )
-
-
-def _default_forecast_dir() -> Path:
-    """Default Forecast and Inventory Reports root."""
-    return (
-        Path.home()
-        / "American Steel & Alum"
-        / "Communication site - Electric Boat ASA Docs"
-        / "Pilot Program"
-        / "Forecast and Inventory Reports"
-    )
-
-
 def _base_qtdr(override: str = "") -> Path:
-    """911 QTDR root. Uses the configured override if non-empty."""
-    if override:
-        return Path(override).expanduser()
-    return _default_qtdr()
+    """911 QTDR root. Override wins; otherwise auto-discover across every
+    OneDrive path variant. Falls back to the canonical default path (which
+    may not exist) so the caller's existence check reports something useful."""
+    root = sdk.resolve_911_qtdr_root(override)
+    if root is not None:
+        return root
+    return sdk.pilot_program_roots()[0] / "911 QTDR"
 
 
 def _forecast_dir(override: str = "") -> Path:
-    """Forecast and Inventory Reports root. Uses the configured override if non-empty."""
-    if override:
-        return Path(override).expanduser()
-    return _default_forecast_dir()
+    """Forecast and Inventory Reports root. Override wins; otherwise auto-discover."""
+    root = sdk.resolve_forecast_dir(override)
+    if root is not None:
+        return root
+    return sdk.pilot_program_roots()[0] / "Forecast and Inventory Reports"
 
 
 def _template_dir(qtdr_override: str = "",
@@ -441,7 +430,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         doc.close()
 
         if not keep_indices:
-            log(f"  WARNING: All {total_pages} pages are MOVE TICKET pages — nothing to write for {nest_number}.")
+            log(f"  WARNING: All {total_pages} pages are MOVE TICKET pages - nothing to write for {nest_number}.")
             return False
 
         reader = PdfReader(str(matching_pdf))

@@ -13,18 +13,18 @@
         "key": "base_directory",
         "type": "directory",
         "label": "Base Directory",
-        "description": "Path to '922 QTDR Production Packages' folder",
+        "description": "Path to '922 QTDR Production Packages' folder. Leave blank to auto-discover from OneDrive.",
         "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\922 QTDR Production Packages",
-        "required": true,
+        "required": false,
         "default": ""
       },
       {
         "key": "spreadsheet_filename",
         "type": "string",
         "label": "Spreadsheet Filename",
-        "description": "Name of the Excel file (e.g., 922 MPL.xlsx)",
+        "description": "Name of the Excel file (defaults to 922 MPL.xlsx).",
         "placeholder": "922 MPL.xlsx",
-        "required": true,
+        "required": false,
         "default": "922 MPL.xlsx",
         "validation": {
           "pattern": "^.*\\.xlsx?$",

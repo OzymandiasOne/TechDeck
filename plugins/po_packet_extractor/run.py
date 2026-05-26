@@ -306,7 +306,7 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Dict]:
         order_no, line_index = build_line_index(doc, log)
         
         if not order_no:
-            log(f"   ⚠️  No order number found in {pdf_path.name}")
+            log(f"   WARNING: No order number found in {pdf_path.name}")
             return []
         
         # Extract Ship To address once
@@ -479,7 +479,7 @@ def write_missing_items_excel(output_path: Path, missing_items: List[Dict],
                 current_row += 1
     
     wb.save(str(output_path))
-    log(f"   ✅ Missing items report: {output_path.name}")
+    log(f"   Missing items report: {output_path.name}")
 
 
 def write_analysis_txt(output_path: Path, summary_counts: Dict[str, int], 
@@ -508,7 +508,7 @@ def write_analysis_txt(output_path: Path, summary_counts: Dict[str, int],
         else:
             f.write("\nNo missing sequential LINE numbers - all LINE sequences are complete.\n")
     
-    log(f"   ✅ Analysis report: {output_path.name}")
+    log(f"   Analysis report: {output_path.name}")
 
 
 # ===== MAIN PLUGIN FUNCTION =====
@@ -516,35 +516,35 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     """Main plugin execution."""
     log = params.get('log', print)
     
-    log("📋 Starting PO Packet Extractor v2.3.0...")
+    log("Starting PO Packet Extractor v2.3.0...")
     progress_callback(0)
     
     # === PROMPT 1: FOLDER PATH ===
-    log("📂 Input required from user...")
+    log("Input required from user...")
     folder_input = get_console_input(params, "Enter folder path containing PO packet PDFs")
     
     folder = Path(folder_input.strip()).expanduser().resolve()
     if not folder.exists():
-        log(f"❌ Folder does not exist: {folder}")
+        log(f"ERROR: Folder does not exist: {folder}")
         raise ValueError(f"Folder does not exist: {folder}")
     if not folder.is_dir():
-        log(f"❌ Path is not a directory: {folder}")
+        log(f"ERROR: Path is not a directory: {folder}")
         raise ValueError(f"Path is not a directory: {folder}")
     
-    log(f"✅ Folder: {folder}")
+    log(f"Folder: {folder}")
     progress_callback(5)
     
     # === PROMPT 2: OUTPUT FILENAME ===
     output_input = get_console_input(params, "Enter output Excel filename (e.g., 'po_data')")
     
     if not output_input.strip():
-        log("❌ Output filename cannot be empty!")
+        log("ERROR: Output filename cannot be empty!")
         raise ValueError("Output filename is required")
     
     # Auto-append .xlsx if not present
     output_filename = output_input.strip()
     if '/' in output_filename or '\\' in output_filename:
-        log("❌ Filename cannot contain path separators!")
+        log("ERROR: Filename cannot contain path separators!")
         raise ValueError("Filename cannot contain path separators")
     
     if not output_filename.lower().endswith('.xlsx'):
@@ -562,8 +562,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     missing_items_path = output_folder / f"{output_base_name}_missing_items.xlsx"
     analysis_path = output_folder / f"{output_base_name}_analysis.txt"
     
-    log(f"✅ Output folder: {output_folder.name}/")
-    log(f"✅ Main output: {output_filename}")
+    log(f"Output folder: {output_folder.name}/")
+    log(f"Main output: {output_filename}")
     log("")
     progress_callback(10)
     
@@ -572,18 +572,18 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
         return
     
     # === FIND PDFs ===
-    log("🔍 Finding PDFs...")
+    log("Finding PDFs...")
     pdfs = sorted([p for p in folder.iterdir() if p.suffix.lower() == ".pdf"])
     
     if not pdfs:
-        log("❌ No PDFs found in folder")
+        log("ERROR: No PDFs found in folder")
         raise ValueError("No PDFs found")
     
-    log(f"✅ Found {len(pdfs)} PDF(s)")
+    log(f"Found {len(pdfs)} PDF(s)")
     progress_callback(15)
     
     # === EXTRACT DATA ===
-    log("📊 Extracting PO packet data...")
+    log("Extracting PO packet data...")
     log("   This may take a few minutes...")
     log("")
     
@@ -592,7 +592,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     for idx, pdf in enumerate(pdfs):
         if cancel_event.is_set():
-            log("⚠️  Cancelled by user")
+            log("WARNING: Cancelled by user")
             return
         
         try:
@@ -601,34 +601,34 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
             all_records.extend(records)
             log(f"   Extracted {len(records)} record(s)")
         except Exception as e:
-            log(f"   ⚠️  Error: {e}")
+            log(f"   WARNING: Error: {e}")
         
         progress = 15 + int((idx + 1) / total * 60)
         progress_callback(progress)
     
     log("")
-    log(f"📊 Total records extracted: {len(all_records)}")
+    log(f"Total records extracted: {len(all_records)}")
     progress_callback(75)
     
     if not all_records:
-        log("⚠️  No records extracted")
+        log("WARNING: No records extracted")
         progress_callback(100)
         return
     
     # === WRITE TO EXCEL ===
-    log("💾 Writing to Excel...")
+    log("Writing to Excel...")
     try:
         write_to_excel(xlsx_path, all_records, log)
-        log(f"✅ Wrote {len(all_records)} records to {xlsx_path.name}")
+        log(f"Wrote {len(all_records)} records to {xlsx_path.name}")
     except Exception as e:
-        log(f"❌ Failed to write Excel: {e}")
+        log(f"ERROR: Failed to write Excel: {e}")
         raise
     
     progress_callback(85)
     
     # === VALIDATE DATA ===
     log("")
-    log("🔍 Validating extracted data...")
+    log("Validating extracted data...")
     
     # Check for missing cell data
     missing_items, summary_counts = validate_extracted_data(all_records)
@@ -638,13 +638,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     if missing_items or missing_lines_per_po:
         if missing_items:
-            log(f"⚠️  Found {len(missing_items)} PO(s) with missing cell data")
+            log(f"WARNING: Found {len(missing_items)} PO(s) with missing cell data")
         if missing_lines_per_po:
             total_missing_lines = sum(len(lines) for lines in missing_lines_per_po.values())
-            log(f"⚠️  Found {total_missing_lines} missing LINE number(s) across {len(missing_lines_per_po)} PO(s)")
+            log(f"WARNING: Found {total_missing_lines} missing LINE number(s) across {len(missing_lines_per_po)} PO(s)")
         
         log("")
-        log("📝 Generating validation reports...")
+        log("Generating validation reports...")
         
         # Write missing items Excel (includes both missing cells and missing LINE numbers)
         if missing_items or missing_lines_per_po:
@@ -653,18 +653,18 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
         # Write analysis text (includes both cell data and line sequences)
         write_analysis_txt(analysis_path, summary_counts, missing_lines_per_po, log)
     else:
-        log("✅ All records complete - no missing data or LINE gaps")
+        log("All records complete - no missing data or LINE gaps")
     
     progress_callback(95)
     
     # === SUMMARY ===
     log("")
     log("=" * 50)
-    log("📊 EXTRACTION SUMMARY")
+    log("EXTRACTION SUMMARY")
     log("=" * 50)
-    log(f"✅ Processed: {len(pdfs)} PDFs")
-    log(f"✅ Extracted: {len(all_records)} records")
-    log(f"✅ Output folder: {output_folder.name}/")
+    log(f"Processed: {len(pdfs)} PDFs")
+    log(f"Extracted: {len(all_records)} records")
+    log(f"Output folder: {output_folder.name}/")
     log(f"   • Main data: {output_filename}")
     
     # List validation files that were created
@@ -679,7 +679,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
             log(f"   • {file_desc}")
     
     log("=" * 50)
-    log("🎉 PO Packet Extractor completed successfully!")
+    log("PO Packet Extractor completed successfully!")
     
     progress_callback(100)
 
@@ -693,6 +693,6 @@ if __name__ == "__main__":
     
     try:
         run(params={'console': None}, progress_callback=progress, cancel_event=cancel_event)
-        print("\n✅ Done!")
+        print("\nDone!")
     except Exception as e:
-        print(f"\n❌ Failed: {e}")
+        print(f"\nERROR: Failed: {e}")

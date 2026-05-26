@@ -12,9 +12,9 @@
         "key": "base_path",
         "type": "directory",
         "label": "Base Directory",
-        "description": "Path to '922 QTDR Production Packages' folder",
+        "description": "Path to '922 QTDR Production Packages' folder. Leave blank to auto-discover from OneDrive.",
         "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
-        "required": true,
+        "required": false,
         "default": "",
         "validation": {
           "pattern": ".*",

@@ -13,6 +13,13 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 import pandas as pd
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
 COMPLETED_FOLDER_NAME = "1 - Completed"
@@ -75,47 +82,37 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     settings = params.get('settings', {})
     log = params.get('log', print)  # Get log callback
     
-    log("🚀 Starting 922 Batch Repeater v2.0.0...")
+    log("Starting 922 Batch Repeater v2.0.0...")
     progress_callback(0)
     
-    # FIXED: Get settings with correct keys matching plugin.json
+    # Base directory is an optional override; auto-discover by default so the
+    # user never has to configure a path everyone already shares.
     base_directory = settings.get('base_directory', '')
-    spreadsheet_filename = settings.get('spreadsheet_filename', '')
-    
-    # Validate settings
-    if not base_directory:
-        log("❌ Base directory not configured!")
-        log("Go to: Settings > Plugin Settings > Batch Repeater")
-        raise ValueError("Base directory not configured")
-    
-    if not spreadsheet_filename:
-        log("❌ Spreadsheet filename not configured!")
-        log("Go to: Settings > Plugin Settings > Batch Repeater")
-        raise ValueError("Spreadsheet filename not configured")
-    
-    # Construct full path
-    base_path = Path(base_directory)
-    if not base_path.exists():
-        log(f"❌ Base directory not found: {base_path}")
-        raise ValueError(f"Base directory not found: {base_path}")
-    
+    spreadsheet_filename = (settings.get('spreadsheet_filename', '') or '').strip() or '922 MPL.xlsx'
+
+    base_path = sdk.resolve_922_root(base_directory)
+    if base_path is None or not base_path.exists():
+        log("ERROR: Could not locate '922 QTDR Production Packages'.")
+        log("Verify OneDrive is synced, or set Base Directory in plugin settings.")
+        raise ValueError("922 QTDR Production Packages root not found")
+
     spreadsheet_path = base_path / spreadsheet_filename
     if not spreadsheet_path.exists():
-        log(f"❌ Spreadsheet not found: {spreadsheet_path}")
+        log(f"ERROR: Spreadsheet not found: {spreadsheet_path}")
         raise ValueError(f"Spreadsheet not found: {spreadsheet_path}")
-    
+
     completed_root = base_path / COMPLETED_FOLDER_NAME
     
     log("")
-    log(f"📁 Base directory: {base_path}")
-    log(f"📊 Spreadsheet: {spreadsheet_path.name}")
-    log(f"📄 Sheet: {SHEET_NAME}")
+    log(f"Base directory: {base_path}")
+    log(f"Spreadsheet: {spreadsheet_path.name}")
+    log(f"Sheet: {SHEET_NAME}")
     log("")
     
     progress_callback(5)
     
     # === ASK FOR BATCH FOLDER NAME ===
-    log("📝 Input required from user...")
+    log("Input required from user...")
     batch_name_input = get_console_input(
         params,
         "Enter batch number or full folder name (e.g., '429' or 'Batch 429')"
@@ -123,7 +120,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     raw_input = batch_name_input.strip()
     if not raw_input:
-        log("❌ Batch name cannot be empty!")
+        log("ERROR: Batch name cannot be empty!")
         raise ValueError("Batch name cannot be empty")
 
     # Extract a number from whatever the user typed
@@ -140,33 +137,33 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                     matched_folder = entry
                     break
         except (FileNotFoundError, PermissionError) as e:
-            log(f"⚠️ Could not scan base directory: {e}")
+            log(f"WARNING: Could not scan base directory: {e}")
 
         if matched_folder:
             actual_batch_name = matched_folder
-            log(f"✅ Matched existing folder: {actual_batch_name}")
+            log(f"Matched existing folder: {actual_batch_name}")
         else:
             actual_batch_name = f"Batch {extracted_num}"
-            log(f"✅ No existing folder found — will create: {actual_batch_name}")
+            log(f"No existing folder found - will create: {actual_batch_name}")
     else:
-        # No number in input — use raw input as folder name (will create new)
+        # No number in input - use raw input as folder name (will create new)
         actual_batch_name = raw_input
-        log(f"✅ Using batch name: {actual_batch_name}")
+        log(f"Using batch name: {actual_batch_name}")
     
     # === EXTRACT PO NUMBER FROM BATCH NAME ===
     # Look for numbers in the batch name
     po_match = re.search(r'\d+', actual_batch_name)
     if not po_match:
-        log("❌ Could not find PO number in batch name!")
+        log("ERROR: Could not find PO number in batch name!")
         log("   Batch name must contain a number (e.g., 'Batch 429')")
         raise ValueError("Could not extract PO number from batch name")
     
     new_po_num = int(po_match.group())
-    log(f"✅ Extracted PO: {new_po_num}")
+    log(f"Extracted PO: {new_po_num}")
     
     log("")
-    log(f"🔢 PO Number: {new_po_num}")
-    log(f"📂 Batch folder: {actual_batch_name}")
+    log(f"PO Number: {new_po_num}")
+    log(f"Batch folder: {actual_batch_name}")
     log("")
     
     progress_callback(10)
@@ -177,17 +174,17 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         return
     
     # Read Excel file
-    log("📖 Reading Excel spreadsheet...")
+    log("Reading Excel spreadsheet...")
     try:
         df = pd.read_excel(spreadsheet_path, sheet_name=SHEET_NAME, header=2)
     except Exception as e:
-        log(f"❌ Error reading spreadsheet: {e}")
+        log(f"ERROR: Error reading spreadsheet: {e}")
         raise RuntimeError(f"Error reading spreadsheet: {e}")
     
     progress_callback(15)
     
     # Identify PO columns
-    log("🔍 Identifying PO columns...")
+    log("Identifying PO columns...")
     po_columns: Dict[int, str] = {}
     for col in df.columns:
         if isinstance(col, str) and col.strip().lower().startswith("po"):
@@ -197,16 +194,16 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                 po_columns[po_num] = col
     
     if not po_columns:
-        log("❌ No PO columns found in spreadsheet.")
+        log("ERROR: No PO columns found in spreadsheet.")
         raise ValueError("No PO columns found in spreadsheet.")
     
-    log(f"✅ Found {len(po_columns)} PO columns")
+    log(f"Found {len(po_columns)} PO columns")
     progress_callback(20)
     
     # Check if new PO exists
     if new_po_num not in po_columns:
         available_pos = sorted(po_columns.keys())
-        log(f"❌ PO {new_po_num} not found. Available: {available_pos}")
+        log(f"ERROR: PO {new_po_num} not found. Available: {available_pos}")
         raise ValueError(f"PO {new_po_num} not found. Available: {available_pos}")
     
     new_po_col = po_columns[new_po_num]
@@ -215,28 +212,28 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Setup destination folders
     new_po_folder = base_path / actual_batch_name
     new_po_folder.mkdir(exist_ok=True)
-    log(f"📂 Created: {new_po_folder.name}")
+    log(f"Created: {new_po_folder.name}")
     
     repeat_batch_folder = new_po_folder / "REPEAT BATCHES"
     repeat_batch_folder.mkdir(exist_ok=True)
-    log(f"📂 Created: REPEAT BATCHES")
+    log(f"Created: REPEAT BATCHES")
     log("")
     
     progress_callback(25)
     
     # Get unique orders
-    log("🔎 Analyzing orders...")
+    log("Analyzing orders...")
     new_po_orders = {
         str(order).strip()
         for order in df[new_po_col]
         if pd.notna(order) and str(order).strip()
     }
-    log(f"✅ Found {len(new_po_orders)} unique orders")
+    log(f"Found {len(new_po_orders)} unique orders")
     
     progress_callback(30)
     
     # Find source PO for each order
-    log("🔍 Searching for repeat orders...")
+    log("Searching for repeat orders...")
     orders_to_copy: Dict[str, int] = {}
     
     for order in new_po_orders:
@@ -253,16 +250,16 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         if source_po_num is not None:
             orders_to_copy[order] = source_po_num
     
-    log(f"✅ Found {len(orders_to_copy)} repeat orders")
+    log(f"Found {len(orders_to_copy)} repeat orders")
     progress_callback(35)
     
     if not orders_to_copy:
-        log("🎉 No repeat orders! All new!")
+        log("No repeat orders! All new!")
         progress_callback(100)
         return
     
     log("")
-    log("📦 Copying order folders...")
+    log("Copying order folders...")
     
     # Copy folders with progress
     copied_count = 0
@@ -276,7 +273,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     for idx, (order, source_po) in enumerate(orders_to_copy.items()):
         if cancel_event.is_set():
             log("")
-            log("⚠️ Cancelled by user")
+            log("WARNING: Cancelled by user")
             log(f"Copied {copied_count} of {total_orders}")
             return
         
@@ -286,7 +283,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         batch_root = find_batch_root(source_po, base_path, completed_root)
         
         if not batch_root:
-            log(f"⚠️ Batch {source_po} not found for {order}")
+            log(f"WARNING: Batch {source_po} not found for {order}")
             not_found_count += 1
             continue
         
@@ -298,22 +295,22 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                     found_folder = entry_path
                     break
         except (FileNotFoundError, PermissionError) as e:
-            log(f"❌ Error accessing Batch {source_po}: {e}")
+            log(f"ERROR: Error accessing Batch {source_po}: {e}")
             error_count += 1
             continue
         
         if not found_folder:
-            log(f"⚠️ '{order}' not found in Batch {source_po}")
+            log(f"WARNING: '{order}' not found in Batch {source_po}")
             not_found_count += 1
             continue
         
         destination_folder = repeat_batch_folder / found_folder.name
         try:
             shutil.copytree(found_folder, destination_folder, dirs_exist_ok=True)
-            log(f"✔ Copied {order} from Batch {source_po}")
+            log(f"Copied {order} from Batch {source_po}")
             copied_count += 1
         except Exception as e:
-            log(f"❌ Failed to copy {order}: {e}")
+            log(f"ERROR: Failed to copy {order}: {e}")
             error_count += 1
     
     progress_callback(95)
@@ -321,24 +318,24 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Summary
     log("")
     log("=" * 50)
-    log("📊 COPY SUMMARY")
+    log("COPY SUMMARY")
     log("=" * 50)
-    log(f"✅ Successfully copied: {copied_count}")
+    log(f"Successfully copied: {copied_count}")
     
     if not_found_count > 0:
-        log(f"⚠️ Not found: {not_found_count}")
+        log(f"Not found: {not_found_count}")
     
     if error_count > 0:
-        log(f"❌ Errors: {error_count}")
+        log(f"Errors: {error_count}")
     
     log("=" * 50)
     
     progress_callback(100)
     
     if error_count > 0 or not_found_count > 0:
-        log("⚠️ Completed with warnings")
+        log("WARNING: Completed with warnings")
     else:
-        log("🎉 All done successfully!")
+        log("All done successfully!")
 
 
 if __name__ == "__main__":
@@ -361,6 +358,6 @@ if __name__ == "__main__":
             progress_callback=progress,
             cancel_event=cancel_event
         )
-        print("\n✅ Done!")
+        print("\nDone!")
     except Exception as e:
-        print(f"\n❌ Failed: {e}")
+        print(f"\nERROR: Failed: {e}")

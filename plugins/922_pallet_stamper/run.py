@@ -14,6 +14,13 @@ import pandas as pd
 import fitz  # PyMuPDF
 import warnings
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 # Suppress openpyxl warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
@@ -25,7 +32,7 @@ _STAMP_SPAN_RE = re.compile(
     re.IGNORECASE
 )
 
-# Red color as packed int (fitz encodes RGB 1,0,0 → 0xFF0000 → 16711680)
+# Red color as packed int (fitz encodes RGB 1,0,0 -> 0xFF0000 -> 16711680)
 _RED_COLOR_INT = 0xFF0000
 
 
@@ -167,7 +174,7 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
         return True
 
     except Exception as e:
-        log(f"❌ PDF error for {pdf_path}: {e}")
+        log(f"ERROR: PDF error for {pdf_path}: {e}")
         return False
 
 
@@ -183,20 +190,21 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     settings = params.get('settings', {})
     log = params.get('log', print)
 
-    log("📦 Starting 922 Pallet Stamper...")
+    log("Starting 922 Pallet Stamper...")
     progress_callback(0)
 
-    # Get settings
+    # Get settings. base_path is an optional override; auto-discover otherwise
+    # so the user never has to configure a shared directory.
     base_path = settings.get('base_path', '')
     font_size = settings.get('font_size', 18)
     h_offset = float(settings.get('h_offset_inches', 4.0))
     v_offset = float(settings.get('v_offset_inches', 7.0))
 
-    # Validate base path
-    if not base_path:
-        log("❌ Base directory not configured!")
-        log("Go to: Settings > Plugin Settings > 922 Pallet Stamper")
-        raise ValueError("Base directory not configured")
+    root = sdk.resolve_922_root(base_path)
+    if root is None or not root.exists():
+        log("ERROR: Could not locate '922 QTDR Production Packages'.")
+        log("Verify OneDrive is synced, or set Base Directory in plugin settings.")
+        raise ValueError("922 QTDR Production Packages root not found")
 
     # Prompt for batch number via console
     raw_input = get_console_input(
@@ -206,27 +214,25 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     batch_no = parse_batch_number(raw_input.strip())
 
     if not batch_no:
-        log("❌ No valid batch number entered.")
+        log("ERROR: No valid batch number entered.")
         raise ValueError("No valid batch number entered")
 
-    log(f"🔢 Batch number: {batch_no}")
+    log(f"Batch number: {batch_no}")
 
-    # Construct paths
-    batch_path = Path(base_path) / f"Batch {batch_no}"
+    # Construct paths (checks the live root and the 1 - Completed archive)
+    batch_path = sdk.find_922_batch_path(root, batch_no)
+    if batch_path is None:
+        log(f"ERROR: Batch {batch_no} not found under {root} (also checked '1 - Completed').")
+        raise ValueError(f"Batch {batch_no} not found")
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     xl_path = doc_folder / f"PO H{batch_no} Pallet & Rod Organizer.xlsx"
 
-    # Validate paths
-    if not batch_path.is_dir():
-        log(f"❌ Batch folder not found: {batch_path}")
-        raise ValueError(f"Batch folder not found: {batch_path}")
-
     if not xl_path.is_file():
-        log(f"❌ Organizer Excel file not found: {xl_path}")
+        log(f"ERROR: Organizer Excel file not found: {xl_path}")
         raise ValueError(f"Organizer Excel file not found: {xl_path}")
 
-    log(f"📁 Batch folder: {batch_path.name}")
-    log(f"📊 Reading pallet assignments from Excel...")
+    log(f"Batch folder: {batch_path.name}")
+    log(f"Reading pallet assignments from Excel...")
     progress_callback(10)
 
     # Read Excel pallet organizer
@@ -239,7 +245,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             nrows=19
         )
     except Exception as e:
-        log(f"❌ Excel read error: {e}")
+        log(f"ERROR: Excel read error: {e}")
         raise RuntimeError(f"Excel read error: {e}")
 
     # Build order-to-pallet mapping
@@ -249,7 +255,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         for order in df[col].dropna():
             order_to_pallet[str(order).strip().upper()] = pallet
 
-    log(f"✅ Found {len(order_to_pallet)} order-to-pallet mappings")
+    log(f"Found {len(order_to_pallet)} order-to-pallet mappings")
     progress_callback(20)
 
     if cancel_event.is_set():
@@ -267,13 +273,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     skipped_count = 0
     error_count = 0
 
-    log(f"🔍 Processing {total} order folders...")
+    log(f"Processing {total} order folders...")
     log("")
 
     for idx, sub in enumerate(subfolders):
         if cancel_event.is_set():
             log("")
-            log("⚠️ Cancelled by user")
+            log("WARNING: Cancelled by user")
             log(f"Stamped {stamped_count} of {idx}")
             return
 
@@ -286,7 +292,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         pallet_no = order_to_pallet.get(order_no)
 
         if pallet_no is None:
-            log(f"⚠️ No pallet assignment for order {order_no}")
+            log(f"WARNING: No pallet assignment for order {order_no}")
             skipped_count += 1
             continue
 
@@ -294,13 +300,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         pdfs = [f for f in sub.iterdir() if f.suffix.lower() == '.pdf']
 
         if not pdfs:
-            log(f"⚠️ No PDF found in {sub.name}")
+            log(f"WARNING: No PDF found in {sub.name}")
             skipped_count += 1
             continue
 
         pdf_path = str(pdfs[0])
         if stamp_single(pdf_path, batch_no, pallet_no, font_size, h_offset, v_offset, log):
-            log(f"✔ Stamped {order_no} → Pallet {pallet_no}")
+            log(f"Stamped {order_no} -> Pallet {pallet_no}")
             stamped_count += 1
         else:
             error_count += 1
@@ -309,24 +315,24 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     log("")
     log("=" * 50)
-    log("📊 STAMP SUMMARY")
+    log("STAMP SUMMARY")
     log("=" * 50)
-    log(f"✅ Successfully stamped: {stamped_count}")
+    log(f"Successfully stamped: {stamped_count}")
 
     if skipped_count > 0:
-        log(f"⚠️ Skipped: {skipped_count}")
+        log(f"Skipped: {skipped_count}")
 
     if error_count > 0:
-        log(f"❌ Errors: {error_count}")
+        log(f"Errors: {error_count}")
 
     log("=" * 50)
 
     progress_callback(100)
 
     if error_count > 0:
-        log("⚠️ Completed with errors")
+        log("WARNING: Completed with errors")
     else:
-        log("🎉 All done successfully!")
+        log("All done successfully!")
 
 
 if __name__ == "__main__":
@@ -356,6 +362,6 @@ if __name__ == "__main__":
             progress_callback=progress,
             cancel_event=cancel_event
         )
-        print("\n✅ Done!")
+        print("\nDone!")
     except Exception as e:
-        print(f"\n❌ Failed: {e}")
+        print(f"\nERROR: Failed: {e}")

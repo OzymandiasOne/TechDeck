@@ -9,7 +9,6 @@ PDF text extraction uses pypdf (simple text-layer PDFs only).
 """
 from __future__ import annotations
 
-import os
 import re
 import threading
 from pathlib import Path
@@ -17,12 +16,14 @@ from typing import Optional, Set
 
 from pypdf import PdfReader
 
-# ── Regex patterns ─────────────────────────────────────────────────────────────
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
 
-# Accept: "Batch 403", "Batch #403", "PO 403", "PO #403", "403", "#403"
-_BATCH_INPUT_RE = re.compile(
-    r'^(?:(?:batch|po)\s+#?\s*|#\s*)([0-9]+)$', re.IGNORECASE
-)
+# ── Regex patterns ─────────────────────────────────────────────────────────────
 
 # Match "Machine time decimal ... <number> min" with flexible spacing/punctuation
 _MACHINE_TIME_RE = re.compile(
@@ -31,54 +32,6 @@ _MACHINE_TIME_RE = re.compile(
 )
 
 SKIP_FOLDER_NAMES = frozenset({"repeat batches"})
-
-# ── Path helpers ───────────────────────────────────────────────────────────────
-
-def _candidate_roots() -> list[Path]:
-    home = Path.home()
-    rel = "Communication site - Electric Boat ASA Docs/Pilot Program/922 QTDR Production Packages"
-    candidates = [
-        home / "American Steel & Alum" / rel,
-        home / "OneDrive - American Steel & Alum" / rel,
-    ]
-    od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
-    if od:
-        candidates.append(Path(od) / rel)
-    seen: set = set()
-    out = []
-    for c in candidates:
-        s = str(c)
-        if s not in seen:
-            out.append(c)
-            seen.add(s)
-    return out
-
-
-def _locate_root() -> Optional[Path]:
-    for r in _candidate_roots():
-        if r.exists():
-            return r
-    return None
-
-
-def _find_batch_path(root: Path, batch: str) -> Optional[Path]:
-    live = root / f"Batch {batch}"
-    if live.exists():
-        return live
-    archived = root / "1 - Completed" / f"Batch {batch}"
-    if archived.exists():
-        return archived
-    return None
-
-
-def _parse_batch_input(raw: str) -> Optional[str]:
-    raw = raw.strip()
-    m = _BATCH_INPUT_RE.match(raw)
-    if m:
-        return m.group(1)
-    if re.match(r'^[0-9]+$', raw):
-        return raw
-    return None
 
 # ── LST reference collection ───────────────────────────────────────────────────
 
@@ -129,27 +82,24 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     progress_callback(0)
 
     # ── Batch number ───────────────────────────────────────────────────────────
-    if console and hasattr(console, 'request_input'):
-        raw = console.request_input(
-            'Enter batch number (e.g. "403", "Batch 403", "PO #403"):'
-        )
-    else:
-        raw = input('Enter batch number: ')
+    raw = sdk.request_batch_number(
+        params, 'Enter batch number (e.g. "403", "Batch 403", "PO #403"):'
+    )
 
-    batch_no = _parse_batch_input(raw or '')
+    batch_no = sdk.parse_922_batch(raw or '')
     if not batch_no:
         raise ValueError(f"Unrecognised batch input: {raw!r}")
     log(f"Batch: {batch_no}")
 
     # ── Locate batch root ──────────────────────────────────────────────────────
-    root = _locate_root()
+    root = sdk.resolve_922_root()
     if not root:
         raise RuntimeError(
             "Could not locate '922 QTDR Production Packages'. "
             "Verify OneDrive is synced."
         )
 
-    batch_path = _find_batch_path(root, batch_no)
+    batch_path = sdk.find_922_batch_path(root, batch_no)
     if not batch_path:
         raise RuntimeError(
             f"Batch {batch_no} not found under {root} "
@@ -164,7 +114,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     lst_stems = _collect_lst_stems(lst_dir)
     log(f"LST reference files: {len(lst_stems)}")
     if not lst_stems:
-        log("WARNING: No .lst files found in LST folder — all PDFs will be skipped.")
+        log("WARNING: No .lst files found in LST folder - all PDFs will be skipped.")
     progress_callback(10)
 
     # ── Order folders ──────────────────────────────────────────────────────────
@@ -211,7 +161,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
             if len(pdfs) > 1:
                 names = ", ".join(p.name for p in pdfs)
-                log(f"  WARNING: {len(pdfs)} PDFs in {folder_7000} — using first alphabetically: {pdfs[0].name} (others: {names})")
+                log(f"  WARNING: {len(pdfs)} PDFs in {folder_7000} - using first alphabetically: {pdfs[0].name} (others: {names})")
 
             pdf = sorted(pdfs)[0]
 
@@ -222,7 +172,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             minutes, err = _extract_machine_time(pdf)
             if minutes is None:
                 skipped_no_time += 1
-                log(f"  WARNING: Could not extract machine time from {pdf.name} — {err}")
+                log(f"  WARNING: Could not extract machine time from {pdf.name} - {err}")
                 continue
 
             log(f"  {pdf.stem}: {minutes} min")
@@ -244,7 +194,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     lst_dir.mkdir(parents=True, exist_ok=True)
     out_path = lst_dir / f"Run Time Estimate - Batch {batch_no}.txt"
     with open(out_path, "w", encoding="utf-8") as f:
-        f.write(f"Run Time Estimate — Batch {batch_no}\n")
+        f.write(f"Run Time Estimate - Batch {batch_no}\n")
         f.write("=" * 30 + "\n")
         f.write(f"Parts matched : {matched_count}\n")
         f.write(f"Total (seconds): {total_seconds:.1f} seconds\n")
@@ -255,7 +205,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # ── Console summary ────────────────────────────────────────────────────────
     log("=" * 50)
-    log(f"Run Time Estimate — Batch {batch_no}")
+    log(f"Run Time Estimate - Batch {batch_no}")
     log("=" * 50)
     log(f"Parts matched    : {matched_count}")
     log(f"Total (seconds)  : {total_seconds:.1f}")

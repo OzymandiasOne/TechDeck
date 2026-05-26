@@ -23,65 +23,21 @@ import fitz
 import openpyxl
 from openpyxl.styles import Font
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 
 # Regex patterns ---------------------------------------------------------------
 
-_BATCH_INPUT_RE = re.compile(
-    r'^(?:(?:batch|po)\s+#?\s*|#\s*)([0-9]+)$', re.IGNORECASE
-)
 _UP_DEG_R_RE = re.compile(r'UP\s*\d+(?:\.\d+)?\s*°\s*R', re.IGNORECASE)
 _DEG_WORD_RE = re.compile(r'\d+\s*°')
 _NUMERIC_WORD_RE = re.compile(r'^\d+\.?\d*$')
 
 PURPLE_HEX = "FF7030A0"
-
-
-# Path helpers -----------------------------------------------------------------
-
-def _candidate_roots() -> list[Path]:
-    home = Path.home()
-    rel = "Communication site - Electric Boat ASA Docs/Pilot Program/922 QTDR Production Packages"
-    candidates = [
-        home / "American Steel & Alum" / rel,
-        home / "OneDrive - American Steel & Alum" / rel,
-    ]
-    od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
-    if od:
-        candidates.append(Path(od) / rel)
-    seen, out = set(), []
-    for c in candidates:
-        s = str(c)
-        if s not in seen:
-            out.append(c)
-            seen.add(s)
-    return out
-
-
-def _locate_root() -> Optional[Path]:
-    for r in _candidate_roots():
-        if r.exists():
-            return r
-    return None
-
-
-def _find_batch_path(root: Path, batch: str) -> Optional[Path]:
-    live = root / f"Batch {batch}"
-    if live.exists():
-        return live
-    archived = root / "1 - Completed" / f"Batch {batch}"
-    if archived.exists():
-        return archived
-    return None
-
-
-def _parse_batch_input(raw: str) -> Optional[str]:
-    raw = raw.strip()
-    m = _BATCH_INPUT_RE.match(raw)
-    if m:
-        return m.group(1)
-    if re.match(r'^[0-9]+$', raw):
-        return raw
-    return None
 
 
 # DYPN helpers -----------------------------------------------------------------
@@ -402,20 +358,6 @@ def _method3(
 
 # Phase 2 ----------------------------------------------------------------------
 
-def _merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
-    out = fitz.open()
-    try:
-        for p in pdfs:
-            src = fitz.open(p)
-            try:
-                out.insert_pdf(src)
-            finally:
-                src.close()
-        out.save(str(out_path))
-    finally:
-        out.close()
-
-
 def _update_bent_plates(
     organizer_path: Path,
     batch_no: str,
@@ -484,17 +426,17 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     else:
         raw = input('Enter batch number: ')
 
-    batch_no = _parse_batch_input(raw or '')
+    batch_no = sdk.parse_922_batch(raw or '')
     if not batch_no:
         raise ValueError(f"Unrecognised batch input: {raw!r}")
     log(f"Batch: {batch_no}")
 
-    root = _locate_root()
+    root = sdk.resolve_922_root()
     if not root:
         raise RuntimeError(
             "Could not locate '922 QTDR Production Packages'. Verify OneDrive sync."
         )
-    batch_path = _find_batch_path(root, batch_no)
+    batch_path = sdk.find_922_batch_path(root, batch_no)
     if not batch_path:
         raise RuntimeError(
             f"Batch {batch_no} not found under {root} (also checked '1 - Completed')."
@@ -607,7 +549,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # Merge
     merged_path = forming_dir / f"Forming {batch_no}.pdf"
     log(f"Merging {len(copied_paths)} PDF(s) into {merged_path.name}")
-    _merge_pdfs(copied_paths, merged_path)
+    sdk.merge_pdfs(copied_paths, merged_path)
     progress_callback(90)
 
     # Build Bent Plates row data (sorted by SOURCE MATERIAL)

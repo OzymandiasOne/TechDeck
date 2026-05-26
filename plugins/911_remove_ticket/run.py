@@ -67,7 +67,7 @@ def _process_pdf(pdf_path: Path, output_path: Path, log) -> bool:
         keep = [i for i in range(total) if i not in remove_pages]
 
         if not keep:
-            log(f"  WARNING: All {total} pages would be removed — nothing to write for {pdf_path.name}")
+            log(f"  WARNING: All {total} pages would be removed - nothing to write for {pdf_path.name}")
             return False
 
         writer = PdfWriter()
