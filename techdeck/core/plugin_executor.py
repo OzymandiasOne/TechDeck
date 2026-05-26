@@ -6,7 +6,12 @@ PHASE 1 FIX: Added thread safety with RLock for all shared dictionary access
 PHASE 2 FIX: Added configurable timeout mechanism to prevent runaway plugins
 """
 
+import os
 import threading
+import logging
+import logging.handlers
+import traceback
+from pathlib import Path
 from PySide6.QtCore import QTimer
 import time
 from typing import Dict, Any, Callable, Optional
@@ -16,8 +21,61 @@ from enum import Enum
 from techdeck.core.plugin_loader import PluginLoader, Plugin
 
 
-# PHASE 2: Default plugin timeout (5 minutes)
-DEFAULT_PLUGIN_TIMEOUT = 300  # seconds
+# Default plugin IDLE timeout. The watchdog is inactivity-based: a plugin is
+# only cancelled after this many seconds with NO log/progress activity (and
+# while it is not blocked waiting for user input). This lets legitimately
+# long jobs run for hours — common when OneDrive sync stalls file I/O — as
+# long as they keep making progress, while still catching a genuinely hung
+# plugin. A per-plugin "timeout" in plugin.json overrides this; 0 disables it.
+DEFAULT_PLUGIN_TIMEOUT = 1800  # seconds of inactivity
+
+
+def _run_log_dir() -> Path:
+    """Directory for persistent plugin run logs."""
+    if os.name == 'nt':
+        base = Path(os.environ.get('LOCALAPPDATA', Path.home()))
+    else:
+        base = Path.home() / '.local' / 'share'
+    return base / 'TechDeck' / 'logs'
+
+
+_run_logger: Optional[logging.Logger] = None
+
+
+def get_run_logger() -> logging.Logger:
+    """Return the shared plugin run-log logger, configuring a rotating file
+    handler on first use. Writes to %LOCALAPPDATA%/TechDeck/logs/plugin_runs.log
+    so colleague-reported failures can be diagnosed after the fact. Never
+    raises — logging must not break plugin execution."""
+    global _run_logger
+    if _run_logger is not None:
+        return _run_logger
+
+    logger = logging.getLogger('techdeck.plugin_runs')
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    if not logger.handlers:
+        try:
+            log_dir = _run_log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                log_dir / 'plugin_runs.log',
+                maxBytes=1_000_000,
+                backupCount=5,
+                encoding='utf-8',
+            )
+            handler.setFormatter(logging.Formatter(
+                '%(asctime)s %(levelname)-7s %(message)s'
+            ))
+            logger.addHandler(handler)
+        except Exception:
+            # If the file handler can't be created, fall back to a no-op
+            # handler so logging calls never raise.
+            logger.addHandler(logging.NullHandler())
+
+    _run_logger = logger
+    return logger
 
 
 class PluginStatus(Enum):
@@ -68,6 +126,8 @@ class PluginExecutor:
         self.cancel_events: Dict[str, threading.Event] = {}
         self.results: Dict[str, PluginResult] = {}
         self.start_times: Dict[str, float] = {}  # PHASE 2: Track start times
+        # Last log/progress activity per plugin — drives the inactivity watchdog
+        self.last_activity: Dict[str, float] = {}
         # PHASE 1 FIX: Thread safety - RLock allows same thread to acquire multiple times
         self._lock = threading.RLock()
         # PHASE 2: Default timeout
@@ -134,7 +194,13 @@ class PluginExecutor:
             
             # PHASE 2: Record start time
             self.start_times[plugin_id] = time.time()
-            
+            # Seed activity timestamp for the inactivity watchdog
+            self.last_activity[plugin_id] = time.time()
+
+            # Console reference (if any) lets the watchdog tell "blocked waiting
+            # for user input" apart from "genuinely hung".
+            console = (params or {}).get('console')
+
             # Check if plugin requires main thread
             if plugin.requires_main_thread:
                 # Execute in main thread using QTimer
@@ -158,11 +224,11 @@ class PluginExecutor:
                 self.running_threads[plugin_id] = thread
                 thread.start()
                 
-                # PHASE 2: Start timeout monitor if timeout is set
+                # Start inactivity watchdog if an idle limit is set
                 if effective_timeout > 0:
                     monitor_thread = threading.Thread(
                         target=self._timeout_monitor,
-                        args=(plugin_id, effective_timeout, log_callback),
+                        args=(plugin_id, effective_timeout, log_callback, console),
                         name=f"Timeout-{plugin_id}",
                         daemon=True
                     )
@@ -170,53 +236,73 @@ class PluginExecutor:
             
         return True
     
+    def _touch_activity(self, plugin_id: str) -> None:
+        """Mark the plugin as active right now, resetting the inactivity
+        watchdog. Called on every log line and progress update."""
+        with self._lock:
+            if plugin_id in self.last_activity:
+                self.last_activity[plugin_id] = time.time()
+
     def _timeout_monitor(
         self,
         plugin_id: str,
         timeout: int,
-        log_callback: Optional[Callable[[str], None]]
+        log_callback: Optional[Callable[[str], None]],
+        console: Any = None,
     ) -> None:
         """
-        PHASE 2: Monitor plugin execution and cancel if timeout exceeded.
-        
+        Inactivity watchdog. Cancels a plugin only after `timeout` seconds with
+        NO log/progress activity. Time spent blocked waiting for user input
+        (console.waiting_for_input) does not count as inactivity.
+
+        This replaces the old wall-clock timeout, which wrongly killed long
+        but healthy jobs — e.g. the 922 repeater, which can run for hours when
+        OneDrive stalls file I/O. As long as a plugin keeps logging or
+        reporting progress, it is never cancelled by the watchdog.
+
         Args:
             plugin_id: Plugin ID to monitor
-            timeout: Timeout in seconds
+            timeout: Max seconds of inactivity before cancelling
             log_callback: Logging callback
+            console: Optional console; if it is waiting for input, the idle
+                     timer is held so user think-time never trips the watchdog.
         """
-        start_time = time.time()
-        
         while True:
             time.sleep(1)  # Check every second
-            
+
             # Check if plugin is still running
             with self._lock:
                 if plugin_id not in self.running_threads:
                     return  # Plugin completed normally
-                
+
                 thread = self.running_threads.get(plugin_id)
                 if thread is None or not thread.is_alive():
                     return  # Plugin finished
-            
-            # Check if timeout exceeded
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                # Timeout exceeded - cancel the plugin
+
+            # Blocked on user input is not "hung" — keep the idle timer fresh.
+            if console is not None and getattr(console, 'waiting_for_input', False):
+                with self._lock:
+                    self.last_activity[plugin_id] = time.time()
+                continue
+
+            # Cancel only after `timeout` seconds with no activity
+            with self._lock:
+                last = self.last_activity.get(plugin_id, time.time())
+            idle = time.time() - last
+            if idle >= timeout:
                 if log_callback:
-                    log_callback(f"⚠️ Plugin execution timeout ({timeout}s) - cancelling...")
-                
-                # Set cancel event
+                    log_callback(
+                        f"WARNING: no activity for {timeout}s - plugin appears "
+                        f"hung, cancelling..."
+                    )
                 with self._lock:
                     if plugin_id in self.cancel_events:
                         self.cancel_events[plugin_id].set()
-                    
-                    # Update result status
                     if plugin_id in self.results:
                         result = self.results[plugin_id]
                         result.status = PluginStatus.TIMEOUT
-                        result.message = f"Execution timeout after {timeout} seconds"
-                        result.error = "Plugin exceeded maximum execution time"
-                
+                        result.message = f"Cancelled after {timeout}s of inactivity"
+                        result.error = "Plugin stopped making progress (inactivity timeout)"
                 return
     
     def _execute_plugin_thread(
@@ -251,13 +337,15 @@ class PluginExecutor:
         
         # Create wrapped callbacks that are thread-safe
         def safe_log(message: str):
+            self._touch_activity(plugin_id)
             if log_callback:
                 try:
                     log_callback(message)
                 except Exception as e:
                     print(f"Error in log callback: {e}")
-        
+
         def safe_progress(value: int):
+            self._touch_activity(plugin_id)
             if progress_callback:
                 try:
                     # Clamp progress to 0-100
@@ -273,11 +361,12 @@ class PluginExecutor:
             from techdeck.core.flavor import get_start_message
             settings_manager = SettingsManager()
             start_msg = get_start_message(plugin.name)
-            if timeout > 0:
-                safe_log(f"{start_msg} (timeout: {timeout}s)")
-            else:
-                safe_log(start_msg)
+            safe_log(start_msg)
             safe_progress(0)
+            get_run_logger().info(
+                "RUN START %s (v%s) idle_limit=%ss",
+                plugin_id, plugin.version, timeout,
+            )
 
             # Load plugin module
             try:
@@ -310,13 +399,18 @@ class PluginExecutor:
             # Check if cancelled or timed out
             if cancel_event.is_set():
                 with self._lock:
-                    if result.status == PluginStatus.TIMEOUT:
+                    timed_out = result.status == PluginStatus.TIMEOUT
+                    if timed_out:
                         safe_log(f"Plugin timed out after {execution_time:.1f}s")
                     else:
                         result.status = PluginStatus.CANCELLED
                         result.message = "Cancelled by user"
                         safe_log("Plugin execution cancelled")
                     result.execution_time = execution_time
+                get_run_logger().warning(
+                    "RUN %s %s after %.1fs",
+                    "TIMEOUT" if timed_out else "CANCELLED", plugin_id, execution_time,
+                )
             else:
                 with self._lock:
                     result.status = PluginStatus.SUCCESS
@@ -325,6 +419,7 @@ class PluginExecutor:
                     result.execution_time = execution_time
                 settings_manager.increment_plugin_runs(plugin_id)
                 safe_progress(100)
+                get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
 
         except Exception as e:
             # PHASE 2: Calculate execution time even on error
@@ -345,6 +440,10 @@ class PluginExecutor:
                 result.execution_time = execution_time
             safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
+            get_run_logger().error(
+                "RUN ERROR %s after %.1fs\n%s",
+                plugin_id, execution_time, traceback.format_exc(),
+            )
         
         finally:
             # Call completion callback
@@ -363,6 +462,8 @@ class PluginExecutor:
                     del self.cancel_events[plugin_id]
                 if plugin_id in self.start_times:
                     del self.start_times[plugin_id]
+                if plugin_id in self.last_activity:
+                    del self.last_activity[plugin_id]
     
     def _execute_plugin_directly(
         self,
@@ -383,13 +484,15 @@ class PluginExecutor:
             result.status = PluginStatus.RUNNING
         
         def safe_log(message: str):
+            self._touch_activity(plugin_id)
             if log_callback:
                 try:
                     log_callback(message)
                 except Exception as e:
                     print(f"Error in log callback: {e}")
-        
+
         def safe_progress(value: int):
+            self._touch_activity(plugin_id)
             if progress_callback:
                 try:
                     clamped = max(0, min(100, value))
@@ -405,6 +508,7 @@ class PluginExecutor:
             settings_manager = SettingsManager()
             safe_log(get_start_message(plugin.name))
             safe_progress(0)
+            get_run_logger().info("RUN START %s (v%s) [main thread]", plugin_id, plugin.version)
 
             module = self.plugin_loader.load_plugin_module(plugin_id)
 
@@ -432,6 +536,7 @@ class PluginExecutor:
                 result.execution_time = execution_time
             settings_manager.increment_plugin_runs(plugin_id)
             safe_progress(100)
+            get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
 
         except Exception as e:
             execution_time = time.time() - start_time
@@ -449,6 +554,10 @@ class PluginExecutor:
                 result.execution_time = execution_time
             safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
+            get_run_logger().error(
+                "RUN ERROR %s after %.1fs\n%s",
+                plugin_id, execution_time, traceback.format_exc(),
+            )
 
         finally:
             if completion_callback:
@@ -462,6 +571,8 @@ class PluginExecutor:
                     del self.cancel_events[plugin_id]
                 if plugin_id in self.start_times:
                     del self.start_times[plugin_id]
+                if plugin_id in self.last_activity:
+                    del self.last_activity[plugin_id]
     
     def cancel_plugin(self, plugin_id: str) -> bool:
         """
