@@ -1,5 +1,5 @@
 """
-PO Packet Extractor Plugin for TechDeck v2.3.0
+911 PO PDF Extractor Plugin for TechDeck v2.3.0
 Extracts PO (Purchase Order) information from PDF packets into Excel.
 
 NEW in v2.3.0:
@@ -516,7 +516,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     """Main plugin execution."""
     log = params.get('log', print)
     
-    log("Starting PO Packet Extractor v2.3.0...")
+    log("Starting 911 PO PDF Extractor v2.3.0...")
     progress_callback(0)
     
     # === PROMPT 1: FOLDER PATH ===
@@ -679,7 +679,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
             log(f"   • {file_desc}")
     
     log("=" * 50)
-    log("PO Packet Extractor completed successfully!")
+    log("911 PO PDF Extractor completed successfully!")
     
     progress_callback(100)
 

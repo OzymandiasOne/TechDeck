@@ -1,5 +1,5 @@
 """
-LST Organizer Plugin - v15
+922 LST Organizer Plugin - v15
 Single-file TechDeck plugin. All logic runs in-process (no subprocess or external script).
 
 Changes from v14:
@@ -492,7 +492,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     settings = params.get('settings', {})
     log = params.get('log', print)
 
-    log("Starting LST Organizer...")
+    log("Starting 922 LST Organizer...")
     progress_callback(0)
 
     base_path_str = settings.get('base_path', '').strip()
@@ -642,7 +642,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
 
     # ── Console summary ────────────────────────────────────────────────────────
     log("=" * 60)
-    log(f"LST Organizer - Batch {batch_no} Complete")
+    log(f"922 LST Organizer - Batch {batch_no} Complete")
     log("=" * 60)
     log(f"Files gathered:  {moved_files}")
     log(f"Unique parts:    {moved_unique}")

@@ -75,11 +75,11 @@ Explorer and on pinned shortcuts.
 | 922 FormSeeker | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet |
 | 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF |
 | Batch Repeater | Copies repeat orders from prior 922 batches |
-| LST Organizer | Organizes .lst files by material type; outputs per-batch overview |
-| PO Packet Extractor | Extracts PO data from PDFs into Excel |
-| Part Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
+| 922 LST Organizer | Organizes .lst files by material type; outputs per-batch overview |
+| 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |
+| 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
 | QR Code Generator | GUI plugin — dual-tab QR library and generator |
-| Run Time Estimator | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer |
+| 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer |
 
 ---
 

@@ -1,6 +1,6 @@
 {
-  "id": "part_sketch_extractor",
-  "name": "Part Sketch Extractor",
+  "id": "911_sketch_extractor",
+  "name": "911 Sketch Extractor",
   "description": "Extract PART SKETCH data from PDF packets to Excel with 17-column structure, combined weight, validation reports, and organized output folders",
   "version": "2.3.0",
   "author": "Anthony Sieben",

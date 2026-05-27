@@ -20,6 +20,17 @@ from techdeck.core.constants import (
 )
 
 
+# Plugin folder/IDs renamed in the line-prefix rename. Maps old ID -> new ID.
+# Applied once at load so existing installs keep their profile tiles, plugin
+# settings, and run stats after the rename.
+_PLUGIN_ID_RENAMES = {
+    "lst_organizer": "922_lst_organizer",
+    "part_sketch_extractor": "911_sketch_extractor",
+    "po_packet_extractor": "911_po_pdf_extractor",
+    "run_time_estimator": "922_runtime_genie",
+}
+
+
 class SettingsManager:
     """
     Manages application settings and profiles.
@@ -202,7 +213,10 @@ class SettingsManager:
         
         # Migrate legacy blank profile ("") to Default
         self._migrate_blank_profile()
-        
+
+        # Migrate renamed plugin IDs (folder rename) across tiles/settings/stats
+        self._migrate_plugin_ids()
+
         self.save()
     
     def _migrate_blank_profile(self) -> None:
@@ -225,7 +239,38 @@ class SettingsManager:
             # If current_profile was "", update to Default
             if self.data.get("current_profile") == "":
                 self.data["current_profile"] = DEFAULT_PROFILE_NAME
-    
+
+    def _migrate_plugin_ids(self) -> None:
+        """Rewrite plugin IDs that changed in the folder rename.
+
+        Updates the keys under plugin_settings/plugin_stats and the tile
+        references in every profile. Idempotent: only acts when an old ID is
+        present, and never overwrites an entry already stored under the new ID.
+        """
+        # Rename dict keys in plugin_settings and plugin_stats
+        for section in ("plugin_settings", "plugin_stats"):
+            bucket = self.data.get(section)
+            if not isinstance(bucket, dict):
+                continue
+            for old_id, new_id in _PLUGIN_ID_RENAMES.items():
+                if old_id not in bucket:
+                    continue
+                if new_id not in bucket:
+                    bucket[new_id] = bucket[old_id]
+                del bucket[old_id]
+
+        # Rewrite tile references in every profile (preserve order, dedupe)
+        for profile in self.data.get("profiles", {}).values():
+            tiles = profile.get("tiles")
+            if not isinstance(tiles, list):
+                continue
+            new_tiles: List[str] = []
+            for tile in tiles:
+                mapped = _PLUGIN_ID_RENAMES.get(tile, tile)
+                if mapped not in new_tiles:
+                    new_tiles.append(mapped)
+            profile["tiles"] = new_tiles
+
     # ========== Profile Management ==========
     
     def get_profile_names(self) -> List[str]:

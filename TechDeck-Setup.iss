@@ -59,6 +59,16 @@ Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs
 ; Documentation (optional - comment out if not present)
 ; Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
+[InstallDelete]
+; Remove plugin folders that were renamed (old IDs). Processed before [Files],
+; so the new folders install cleanly and upgrades don't leave duplicate tiles.
+; The app migrates settings.json (profile tiles, plugin settings, run stats)
+; from the old IDs to the new ones on first launch.
+Type: filesandordirs; Name: "{app}\plugins\lst_organizer"
+Type: filesandordirs; Name: "{app}\plugins\part_sketch_extractor"
+Type: filesandordirs; Name: "{app}\plugins\po_packet_extractor"
+Type: filesandordirs; Name: "{app}\plugins\run_time_estimator"
+
 [Dirs]
 ; Create %LOCALAPPDATA%\TechDeck directory structure with full user permissions
 Name: "{localappdata}\TechDeck"; Permissions: users-full

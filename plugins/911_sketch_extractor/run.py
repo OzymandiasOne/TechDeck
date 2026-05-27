@@ -1,5 +1,5 @@
 """
-Part Sketch Extractor Plugin for TechDeck v2.3.0
+911 Sketch Extractor Plugin for TechDeck v2.3.0
 Extracts PART SKETCH data from PDF packets into Excel workbook.
 
 NEW in v2.3.0:
@@ -564,7 +564,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     """Main plugin execution."""
     log = params.get('log', print)
     
-    log("Starting Part Sketch Extractor v2.3.0...")
+    log("Starting 911 Sketch Extractor v2.3.0...")
     progress_callback(0)
     
     # === PROMPT 1: FOLDER PATH ===
@@ -696,7 +696,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     if extract_drawings and pdf_output:
         log(f"Drawings: {pdf_output}")
     log("=" * 50)
-    log("Part Sketch Extractor completed successfully!")
+    log("911 Sketch Extractor completed successfully!")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """
-Run Time Estimator Plugin
-=========================
+922 Runtime Genie Plugin
+========================
 Scans 7000 folders in a 922 batch for CNC machine time data, matches each PDF
 against the LST reference file list, sums machine times, and writes a run time
 estimate (with 40% buffer) to the batch LST folder.
@@ -78,7 +78,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get('log', print)
     console = params.get('console')
 
-    log("Starting Run Time Estimator...")
+    log("Starting 922 Runtime Genie...")
     progress_callback(0)
 
     # ── Batch number ───────────────────────────────────────────────────────────

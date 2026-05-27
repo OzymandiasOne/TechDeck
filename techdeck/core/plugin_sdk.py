@@ -229,7 +229,7 @@ def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
 # laser-cuttable (we expect 7000 shop-print folders for orders that contain
 # them). OVERSIZED tubes are too thick for the laser (>0.375" NOM) and are cut
 # elsewhere, so they do NOT imply a 7000 folder. These sets are the single
-# source of truth, shared by lst_organizer and batch_auditor.
+# source of truth, shared by 922_lst_organizer and batch_auditor.
 # ─────────────────────────────────────────────────────────────────────────────
 
 STANDARD_TUBE_MATERIALS = {
