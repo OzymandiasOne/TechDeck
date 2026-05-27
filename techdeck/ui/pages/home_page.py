@@ -287,15 +287,18 @@ class HomePage(QWidget, ThemeAware):
     all_plugins_done = Signal()               # emitted on main thread after every plugin in a run finishes
     _plugins_all_done = Signal()              # internal — emitted from worker thread, handled on main thread
 
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager, parent=None, plugin_loader: 'PluginLoader' = None):
         super().__init__(parent)
         self.settings = settings
         self.selected_tiles = set()
         self.tile_cards = {}  # PHASE 3: Track card widgets by tile_id
         self._is_running = False  # True while any plugin is executing
-        
-        self.plugin_loader = PluginLoader()
-        self.plugin_loader.discover_plugins()
+
+        # Use the shared loader if MainWindow gave us one; otherwise scan now.
+        if plugin_loader is None:
+            plugin_loader = PluginLoader()
+            plugin_loader.discover_plugins()
+        self.plugin_loader = plugin_loader
         self.plugin_executor = PluginExecutor(self.plugin_loader)
         self._plugin_queue: list = []
         self._plugin_params: dict = {}
@@ -438,7 +441,7 @@ class HomePage(QWidget, ThemeAware):
         self.btn_add.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent};
-                color: #FFFFFF;
+                color: {theme.accent_text};
                 border: none;
                 border-radius: 8px;
                 font-weight: 600;
@@ -520,10 +523,11 @@ class HomePage(QWidget, ThemeAware):
             )
             self.tile_grid.addWidget(label, 0, 0)
         else:
+            from PySide6.QtWidgets import QApplication
             row, col = 0, 0
             for tile_id in tile_ids:
                 plugin = self.plugin_loader.get_plugin(tile_id)
-                
+
                 if plugin:
                     # PHASE 3: Create professional card
                     card = PluginCard(
@@ -534,9 +538,11 @@ class HomePage(QWidget, ThemeAware):
                         parent=self
                     )
                     card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled(tid, checked))
-                    
+
                     self.tile_cards[tile_id] = card
                     self.tile_grid.addWidget(card, row, col)
+                    # Yield to event loop between cards so the splash GIF can advance
+                    QApplication.processEvents()
                 else:
                     # Missing plugin - show disabled card with remove button
                     card = QFrame()
@@ -820,7 +826,7 @@ class HomePage(QWidget, ThemeAware):
         self.run_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent};
-                color: #FFFFFF;
+                color: {theme.accent_text};
                 border: none;
                 border-radius: 6px;
                 font-weight: 600;

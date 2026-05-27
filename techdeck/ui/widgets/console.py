@@ -6,15 +6,18 @@ FIXED: Uses BlockingQueuedConnection to properly synchronize worker thread with 
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
-    QLineEdit, QPushButton, QLabel
+    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
+    QLineEdit, QPushButton, QLabel, QTabBar, QStackedWidget, QFrame, QToolButton
 )
 from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot
 from PySide6.QtGui import QTextCursor, QFont
 import threading
 
+from techdeck.ui.widgets.dashboard import DashboardView
+from techdeck.ui.theme_aware import ThemeAware
 
-class ConsoleWidget(QWidget):
+
+class ConsoleWidget(QWidget, ThemeAware):
     """
     Console/chat widget with message history, command input, and plugin input support.
     
@@ -30,6 +33,7 @@ class ConsoleWidget(QWidget):
     message_entered = Signal(str)
     input_provided = Signal(str)  # NEW: For plugin input requests
     before_input_request = Signal()  # Emitted just before showing a plugin input prompt
+    dashboard_shown = Signal()  # Emitted when a dashboard is rendered (shell auto-expands)
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
@@ -49,38 +53,90 @@ class ConsoleWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
         
-        # ===== Header =====
+        # ===== Header: tab bar (bottom-aligned so tabs meet the panel) + buttons =====
+        # The tabs sit inline with the Run/Clear buttons but bottom-align onto
+        # the content panel, and the selected tab merges into the panel's top
+        # edge — so the active tab flows into the console like a Chrome tab.
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
-        
-        title = QLabel("Console / Chat")
-        title.setStyleSheet("font-size: 14px; font-weight: bold;")
-        
-        self.line_count_label = QLabel("0 lines")
-        self.line_count_label.setStyleSheet("font-size: 11px; color: #888;")
-        
+
+        self.tab_bar = QTabBar()
+        self.tab_bar.setObjectName("consoleTabBar")
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setDrawBase(False)
+        self.tab_bar.setUsesScrollButtons(False)
+        self.tab_bar.currentChanged.connect(self._on_tab_changed)
+
         self.clear_btn = QPushButton("Clear")
         self.clear_btn.setMaximumWidth(80)
+        self.clear_btn.setMinimumHeight(36)  # match Run so the two line up
         self.clear_btn.clicked.connect(self.clear)
-        
-        header.addWidget(title)
-        header.addWidget(self.line_count_label)
+
+        header.addWidget(self.tab_bar, 0, Qt.AlignmentFlag.AlignBottom)
         header.addStretch()
-        header.addWidget(self.clear_btn)
-        
+        header.addWidget(self.clear_btn, 0, Qt.AlignmentFlag.AlignTop)
         self.header = header
-        layout.addLayout(self.header)
-        
-        # ===== Output Area =====
+
+        # Fixed-height header: top-aligned buttons sit a few px above the
+        # bottom-aligned tabs (which stay pinned to the panel top).
+        self._header_widget = QWidget()
+        self._header_widget.setLayout(header)
+        self._header_widget.setFixedHeight(42)
+
+        # ===== Content pages =====
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         self.output.document().setMaximumBlockCount(self.MAX_LINES + 100)
-        
-        font = QFont("Consolas", 10)
-        font.setStyleHint(QFont.StyleHint.Monospace)
-        self.output.setFont(font)
-        
-        layout.addWidget(self.output, 1)
+        _font = QFont("Consolas", 10)
+        _font.setStyleHint(QFont.StyleHint.Monospace)
+        self.output.setFont(_font)
+
+        self._console_page = QWidget()
+        _cp = QVBoxLayout(self._console_page)
+        _cp.setContentsMargins(0, 0, 0, 0)
+        _cp.addWidget(self.output)
+
+        self.dashboard = DashboardView()
+        self._dash_page = QWidget()
+        _dp = QVBoxLayout(self._dash_page)
+        _dp.setContentsMargins(0, 0, 0, 0)
+        _dp.addWidget(self.dashboard, 1)
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self._console_page)
+        self.stack.addWidget(self._dash_page)
+
+        # The panel is the single bordered box the active tab connects to.
+        # The text area inside is borderless so only the panel draws the box.
+        self.panel = QFrame()
+        self.panel.setObjectName("consolePanel")
+        _pl = QVBoxLayout(self.panel)
+        _pl.setContentsMargins(8, 8, 8, 8)
+        _pl.addWidget(self.stack)
+
+        # Header + panel share a zero-gap sub-layout so the tabs touch the panel.
+        body = QVBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self._header_widget)
+        body.addWidget(self.panel, 1)
+        layout.addLayout(body, 1)
+
+        # tabData holds the stack page each tab drives, so indices can shift
+        # when the Dashboard tab is closed/reopened. Only the Dashboard tab gets
+        # a close affordance — a box-less "x" placed next to its label.
+        _ci = self.tab_bar.addTab("Console")
+        self.tab_bar.setTabData(_ci, self._console_page)
+        _di = self.tab_bar.addTab("Dashboard")
+        self.tab_bar.setTabData(_di, self._dash_page)
+        self.tab_bar.setTabButton(
+            _di, QTabBar.ButtonPosition.RightSide, self._make_close_button()
+        )
+
+        self.tab_bar.setCurrentIndex(_ci)
+        self.stack.setCurrentWidget(self._console_page)
+        self._pending_dashboard = None
 
         # ===== Spinner Label (hidden until an animation is active) =====
         self._spinner_label = QLabel()
@@ -111,13 +167,24 @@ class ConsoleWidget(QWidget):
         
         layout.addLayout(input_layout)
         
+        # Theme the tab bar + readout (and re-theme on live theme switch)
+        self.setup_theme_awareness()
+
         # Initial message
-        self.append_system("TechDeck Console ready. Type /help for available commands.")
+        self.append_system("TechDeck online. Type /help for available commands.")
     
-    def add_header_button(self, button: QPushButton):
-        """Add a button to the console header."""
-        count = self.header.count()
-        self.header.insertWidget(count - 1, button)
+    def add_header_button(self, button: QPushButton, far_right: bool = False):
+        """Add a button to the console header.
+
+        By default the button is inserted just left of the Clear button.
+        Pass far_right=True to append it at the very end of the header.
+        """
+        align = Qt.AlignmentFlag.AlignTop
+        if far_right:
+            self.header.addWidget(button, 0, align)
+        else:
+            count = self.header.count()
+            self.header.insertWidget(count - 1, button, 0, align)
     
     def _on_input_submitted(self):
         """Handle user input submission."""
@@ -227,6 +294,53 @@ class ConsoleWidget(QWidget):
         self.input_field.setFocus()
         self._scroll_to_bottom()
     
+    def request_nest_selection(self, batch_number: str, all_nests: list,
+                               existing_nests=None):
+        """Show the nest-selection dialog and BLOCK until the user submits.
+
+        Callable from a plugin worker thread (same contract as request_input):
+        the modal dialog is run on the GUI thread via BlockingQueuedConnection,
+        so this call returns only once the user has chosen.
+
+        Returns the list of selected nest numbers, or None if the user
+        cancelled the dialog.
+        """
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_nest_selection() cannot be called from main GUI thread"
+            )
+
+        self._nest_sel_args = (batch_number, list(all_nests), set(existing_nests or []))
+        self._nest_sel_result = None
+
+        # Hold the inactivity watchdog while the dialog is up — user think-time
+        # in the dialog must not count as a hung plugin (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_nest_selection_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._nest_sel_result
+
+    @Slot()
+    def _nest_selection_gui(self):
+        """GUI-thread half of request_nest_selection: run the modal dialog."""
+        from techdeck.ui.dialogs.nest_selection_dialog import NestSelectionDialog
+
+        batch_number, all_nests, existing = self._nest_sel_args
+        dlg = NestSelectionDialog(batch_number, all_nests, existing, parent=self.window())
+        if dlg.exec():
+            self._nest_sel_result = dlg.selected_nests()
+        else:
+            self._nest_sel_result = None
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""
@@ -235,7 +349,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     @Slot(str)
     def append_system(self, text: str):
@@ -245,7 +358,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     @Slot(str)
     def append_assistant(self, text: str):
@@ -255,7 +367,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     @Slot(str)
     def append_error(self, text: str):
@@ -265,7 +376,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     @Slot(str, str)
     def append_plugin_output(self, plugin_name: str, text: str):
@@ -275,7 +385,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     @Slot(str)
     def append_game(self, text: str):
@@ -285,7 +394,6 @@ class ConsoleWidget(QWidget):
             f'{self._escape_html(text)}</span>'
         )
         self._scroll_to_bottom()
-        self._update_line_count()
 
     def safe_game_log(self, text: str):
         """Call append_game from any thread safely."""
@@ -309,7 +417,138 @@ class ConsoleWidget(QWidget):
         """Hide the spinner label."""
         self._spinner_label.hide()
         self._spinner_label.setText("")
-    
+
+    # ===== Dashboard API (thread-safe — callable from plugin worker threads) =====
+    def show_dashboard(self, spec: dict):
+        """Render a dashboard spec on the Dashboard tab and switch to it.
+
+        Safe to call from a plugin's worker thread: the actual render is
+        marshalled onto the GUI thread (same pattern as request_input /
+        safe_game_log). See techdeck.ui.widgets.dashboard for the spec format.
+        """
+        self._pending_dashboard = spec
+        QMetaObject.invokeMethod(
+            self, "_show_dashboard_gui", Qt.ConnectionType.QueuedConnection
+        )
+
+    def clear_dashboard(self):
+        """Reset the Dashboard tab to its empty state (thread-safe)."""
+        QMetaObject.invokeMethod(
+            self, "_clear_dashboard_gui", Qt.ConnectionType.QueuedConnection
+        )
+
+    @Slot()
+    def _show_dashboard_gui(self):
+        self.dashboard.render_spec(self._pending_dashboard)
+        self.tab_bar.setCurrentIndex(self._ensure_dashboard_tab())
+        self.dashboard_shown.emit()
+
+    @Slot()
+    def _clear_dashboard_gui(self):
+        self.dashboard.clear_dashboard()
+
+    def reopen_dashboard(self):
+        """Re-add (if closed) and switch to the Dashboard tab. Backs the /dash
+        command and the auto-open when a plugin renders a dashboard."""
+        self.tab_bar.setCurrentIndex(self._ensure_dashboard_tab())
+        self.dashboard_shown.emit()
+
+    # ----- tab plumbing -----
+    def _on_tab_changed(self, index: int):
+        if index < 0:
+            return
+        page = self.tab_bar.tabData(index)
+        if page is not None:
+            self.stack.setCurrentWidget(page)
+            if page is self._dash_page:
+                # Refresh the idle view so usage/bankroll are current.
+                self.dashboard.refresh_idle()
+
+    def _close_dashboard_tab(self):
+        idx = self._dash_tab_index()
+        if idx != -1:
+            self.tab_bar.removeTab(idx)
+            self.stack.setCurrentWidget(self._console_page)
+
+    def _make_close_button(self) -> QToolButton:
+        """A small, box-less 'x' that closes the Dashboard tab, sitting right
+        next to the label."""
+        btn = QToolButton()
+        btn.setObjectName("dashCloseBtn")
+        btn.setText("×")  # multiplication sign reads as a clean close 'x'
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setFixedSize(16, 16)
+        btn.clicked.connect(self._close_dashboard_tab)
+        self._style_close_button(btn)
+        return btn
+
+    def _style_close_button(self, btn: QToolButton):
+        p = self.get_current_palette()
+        btn.setStyleSheet(
+            "QToolButton#dashCloseBtn { border: none; background: transparent;"
+            f" color: {p.text_secondary}; font-size: 16px; font-weight: bold;"
+            " padding: 0; margin: 0 0 3px -7px; }"
+            f"QToolButton#dashCloseBtn:hover {{ color: {p.text}; }}"
+        )
+
+    def _dash_tab_index(self) -> int:
+        for i in range(self.tab_bar.count()):
+            if self.tab_bar.tabData(i) is self._dash_page:
+                return i
+        return -1
+
+    def _ensure_dashboard_tab(self) -> int:
+        idx = self._dash_tab_index()
+        if idx == -1:
+            idx = self.tab_bar.addTab("Dashboard")
+            self.tab_bar.setTabData(idx, self._dash_page)
+            self.tab_bar.setTabButton(
+                idx, QTabBar.ButtonPosition.RightSide, self._make_close_button()
+            )
+        return idx
+
+    def apply_theme(self):
+        """ThemeAware hook — restyle the Chrome-style tabs so the active tab
+        connects into the content panel, plus the borderless text area + readout."""
+        p = self.get_current_palette()
+
+        # Console body and the selected tab share ONE color (console_bg, the
+        # darker terminal shade) so the active tab blends into the console with
+        # no shade difference. The text area is set explicitly (not transparent)
+        # to guarantee it matches the tab exactly.
+        body_bg = p.console_bg
+
+        # The console box — no outline. Top-left stays square where the tabs
+        # connect; the other three corners are rounded.
+        self.panel.setStyleSheet(
+            f"QFrame#consolePanel {{ background: {body_bg}; border: none;"
+            " border-top-left-radius: 0; border-top-right-radius: 6px;"
+            " border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }"
+        )
+        # Inner text area: borderless, square on all four corners, same body color.
+        self.output.setStyleSheet(
+            f"QTextEdit {{ border: none; border-radius: 0; background: {body_bg};"
+            f" color: {p.console_text}; }}"
+        )
+        # Tabs: no outlines either. The selected tab fills with body_bg so it is
+        # the same color as the console; inactive tabs use the lighter surface
+        # fill so they still read as separate tabs.
+        self.tab_bar.setStyleSheet(
+            "QTabBar#consoleTabBar { background: transparent; }"
+            f"QTabBar#consoleTabBar::tab {{ background: {p.surface}; color: {p.text_secondary};"
+            " font-weight: bold; padding: 6px 14px; margin-right: 3px; border: none;"
+            " border-top-left-radius: 8px; border-top-right-radius: 8px; }"
+            f"QTabBar#consoleTabBar::tab:selected {{ background: {body_bg}; color: {p.text}; }}"
+            f"QTabBar#consoleTabBar::tab:hover:!selected {{ background: {p.surface_hover}; }}"
+        )
+        # Re-tint the Dashboard close button if the tab is present.
+        di = self._dash_tab_index()
+        if di != -1:
+            btn = self.tab_bar.tabButton(di, QTabBar.ButtonPosition.RightSide)
+            if btn is not None:
+                self._style_close_button(btn)
+
     def clear(self):
         """Clear console output."""
         from techdeck.core.audio_manager import get_audio_manager, SOUND_CLEAR
@@ -322,19 +561,6 @@ class ConsoleWidget(QWidget):
         cursor = self.output.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.output.setTextCursor(cursor)
-    
-    def _update_line_count(self):
-        """Update line count indicator in header."""
-        doc = self.output.document()
-        line_count = doc.blockCount()
-        self.line_count_label.setText(f"{line_count} lines")
-        
-        if line_count > self.MAX_LINES * 0.9:
-            self.line_count_label.setStyleSheet("font-size: 11px; color: #F59E0B; font-weight: bold;")
-        elif line_count > self.MAX_LINES * 0.75:
-            self.line_count_label.setStyleSheet("font-size: 11px; color: #F59E0B;")
-        else:
-            self.line_count_label.setStyleSheet("font-size: 11px; color: #888;")
     
     def _escape_html(self, text: str) -> str:
         """Escape HTML characters in text, preserving newlines.

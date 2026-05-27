@@ -37,11 +37,16 @@ class SettingsPage(QWidget, ThemeAware):
 
     theme_changed = Signal(str)
 
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager, parent=None, plugin_loader=None):
         super().__init__(parent)
         self.settings = settings
-        self.plugin_loader = PluginLoader()
-        self.plugin_loader.discover_plugins()
+
+        # Use the shared loader if MainWindow gave us one; otherwise scan now.
+        if plugin_loader is None:
+            plugin_loader = PluginLoader()
+            plugin_loader.discover_plugins()
+        self.plugin_loader = plugin_loader
+
         self.current_plugin_widget = None
         self._rogue_player = None  # keep alive
 
@@ -54,7 +59,7 @@ class SettingsPage(QWidget, ThemeAware):
 
         self.tabs.addTab(self._create_personalization_tab(), "Personalization")
         self.tabs.addTab(self._create_plugin_tab(),          "Apps")
-        self.tabs.addTab(self._create_helpfeedback_tab(),    "Help & Feedback")
+        self.tabs.addTab(self._create_helpfeedback_tab(),    "Help && Feedback")
 
         layout.addWidget(self.tabs)
 
@@ -111,6 +116,26 @@ class SettingsPage(QWidget, ThemeAware):
             style.polish(combo)
             combo.update()
 
+        # Report Feedback button uses the secondary accent — re-stamp it.
+        if getattr(self, "fb_btn", None) is not None:
+            self.fb_btn.setStyleSheet(self._fb_btn_style(theme))
+
+    @staticmethod
+    def _fb_btn_style(theme) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {theme.accent_two};
+                color: {theme.accent_two_text};
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.accent_two_hover};
+            }}
+        """
+
     # ──────────────────────────────────────────────────────────────────────
     # HELP & FEEDBACK TAB
     # ──────────────────────────────────────────────────────────────────────
@@ -126,7 +151,7 @@ class SettingsPage(QWidget, ThemeAware):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
 
-        title = QLabel("Help & Feedback")
+        title = QLabel("Help && Feedback")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
@@ -141,24 +166,12 @@ class SettingsPage(QWidget, ThemeAware):
         fb_desc.setWordWrap(True)
         fb_section.addWidget(fb_desc)
 
-        fb_btn = QPushButton("Open Report Feedback…")
-        fb_btn.setMinimumHeight(36)
-        fb_btn.setMaximumWidth(220)
-        fb_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme.accent_two};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                font-weight: 600;
-                padding: 6px 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme.accent_two_hover};
-            }}
-        """)
-        fb_btn.clicked.connect(self._open_feedback_dialog)
-        fb_section.addWidget(fb_btn)
+        self.fb_btn = QPushButton("Open Report Feedback…")
+        self.fb_btn.setMinimumHeight(36)
+        self.fb_btn.setMaximumWidth(220)
+        self.fb_btn.setStyleSheet(self._fb_btn_style(theme))
+        self.fb_btn.clicked.connect(self._open_feedback_dialog)
+        fb_section.addWidget(self.fb_btn)
         layout.addLayout(fb_section)
 
         # ── About ──

@@ -131,7 +131,7 @@ class UpdateDialog(QDialog):
         return f"""
             QPushButton {{
                 background-color: {t.accent_two};
-                color: white;
+                color: {t.accent_two_text};
                 border: none;
                 padding: 10px 30px;
                 border-radius: 8px;

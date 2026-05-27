@@ -1,0 +1,491 @@
+"""
+922 Kitting
+===========
+Formats and prints kitting paperwork for an entire 922 batch.
+
+Phase 1: applies the batch color (read from legend AD3..AD12) to the Bin Label
+& Checklist sheet header/footer cells, with luminance-based text color and a
+lightened secondary shade.
+
+Phase 2: loops the driver cell D21 over 1, 3, ..., 35 (18 iterations / 36
+orders), detects FORMED parts against the Bent Plates sheet by appending
+&" FORMED" to the Material Desc formula, exports each iteration as a 2-page
+PDF, reverts the FORMED edits, then merges all per-iteration PDFs into
+Kitting {batch}.pdf.
+
+Requires Excel COM (pywin32). The workbook is staged locally before any COM
+work - OneDrive can interfere with Excel COM saves.
+"""
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import tempfile
+import threading
+from pathlib import Path
+from typing import Optional
+
+import fitz
+
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
+try:
+    import pythoncom
+    import win32com.client as win32
+    _COM_AVAILABLE = True
+except ImportError:
+    _COM_AVAILABLE = False
+
+
+# Constants -------------------------------------------------------------------
+
+_XL_CALC_AUTOMATIC = -4105
+_XL_TYPE_PDF = 0
+
+SHEET_NAME = "Bin Label & Checklist"
+BENT_PLATES_SHEET = "Bent Plates"
+
+PRIMARY_CELLS = ["C2", "R2", "C20", "R20"]
+SECONDARY_CELLS = ["C3", "R3", "C21", "R21"]
+
+PART_ROWS = range(22, 32)
+LEFT_DYPN_COL = "F"
+LEFT_MATDESC_COL = "H"
+RIGHT_DYPN_COL = "U"
+RIGHT_MATDESC_COL = "W"
+
+LUMINANCE_DARK_CUTOFF = 140.0
+LIGHTEN_FACTOR = 0.40
+
+# Labels-only export: top portion of the sheet (no material list)
+LABELS_END_ROW = 17
+LABELS_FALLBACK_PRINT_AREA = "$A$1:$AC$17"
+
+# Matches a single cell range like $A$1:$Q$35 (with or without sheet prefix outside)
+_RANGE_RE = re.compile(r"(\$?[A-Z]+)\$?(\d+):(\$?[A-Z]+)\$?(\d+)")
+
+
+def _find_organizer_workbook(doc_folder: Path, batch_no: str) -> Optional[Path]:
+    matches = [
+        p for p in doc_folder.glob(f"PO H{batch_no} Pallet & Rod Organizer*.xlsx")
+        if not p.name.startswith("~")
+    ]
+    return sorted(matches)[0] if matches else None
+
+
+# Color helpers ---------------------------------------------------------------
+
+def _bgr_to_rgb(bgr: int) -> tuple[int, int, int]:
+    r = bgr & 0xFF
+    g = (bgr >> 8) & 0xFF
+    b = (bgr >> 16) & 0xFF
+    return (r, g, b)
+
+
+def _rgb_to_bgr(rgb: tuple[int, int, int]) -> int:
+    r, g, b = rgb
+    return (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16)
+
+
+def _luminance(rgb: tuple[int, int, int]) -> float:
+    r, g, b = rgb
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _lighten(rgb: tuple[int, int, int], factor: float = LIGHTEN_FACTOR) -> tuple[int, int, int]:
+    r, g, b = rgb
+    return (
+        min(255, int(r + (255 - r) * factor)),
+        min(255, int(g + (255 - g) * factor)),
+        min(255, int(b + (255 - b) * factor)),
+    )
+
+
+def _legend_cell_for_batch(batch_no: str) -> str:
+    # Last digit 1->AD3, 2->AD4, ..., 9->AD11, 0->AD12
+    digit = int(batch_no[-1])
+    if digit == 0:
+        return "AD12"
+    return f"AD{2 + digit}"
+
+
+def _derive_labels_print_area(original: str) -> str:
+    """Rewrite a PrintArea string so each region keeps its column boundaries but
+    spans rows 1..LABELS_END_ROW. Returns LABELS_FALLBACK_PRINT_AREA if the
+    original is empty or unparseable."""
+    if not original:
+        return LABELS_FALLBACK_PRINT_AREA
+
+    def _replace(m: re.Match) -> str:
+        col_start = m.group(1).replace("$", "")
+        col_end = m.group(3).replace("$", "")
+        return f"${col_start}$1:${col_end}${LABELS_END_ROW}"
+
+    rewritten = _RANGE_RE.sub(_replace, original)
+    if not rewritten or "$" not in rewritten:
+        return LABELS_FALLBACK_PRINT_AREA
+    return rewritten
+
+
+# Phase 1: color formatting ---------------------------------------------------
+
+def _apply_color_formatting(ws, batch_no: str, log) -> None:
+    legend_addr = _legend_cell_for_batch(batch_no)
+    legend_color = int(ws.Range(legend_addr).Interior.Color)
+    rgb = _bgr_to_rgb(legend_color)
+    log(f"  Legend {legend_addr}: RGB{rgb}")
+
+    primary_text = (255, 255, 255) if _luminance(rgb) < LUMINANCE_DARK_CUTOFF else (0, 0, 0)
+    light_rgb = _lighten(rgb)
+    secondary_text = (255, 255, 255) if _luminance(light_rgb) < LUMINANCE_DARK_CUTOFF else (0, 0, 0)
+
+    primary_bgr = _rgb_to_bgr(rgb)
+    primary_text_bgr = _rgb_to_bgr(primary_text)
+    secondary_bgr = _rgb_to_bgr(light_rgb)
+    secondary_text_bgr = _rgb_to_bgr(secondary_text)
+
+    for addr in PRIMARY_CELLS:
+        cell = ws.Range(addr)
+        cell.Interior.Color = primary_bgr
+        cell.Font.Color = primary_text_bgr
+
+    for addr in SECONDARY_CELLS:
+        cell = ws.Range(addr)
+        cell.Interior.Color = secondary_bgr
+        cell.Font.Color = secondary_text_bgr
+
+    log(f"  Primary fill RGB{rgb}, text {'white' if primary_text == (255, 255, 255) else 'black'}")
+    log(f"  Secondary fill RGB{light_rgb}, text {'white' if secondary_text == (255, 255, 255) else 'black'}")
+
+
+# Bent Plates DYPN collection -------------------------------------------------
+
+def _collect_bent_dypns(wb, log) -> set[str]:
+    try:
+        ws = wb.Worksheets(BENT_PLATES_SHEET)
+    except Exception:
+        log(f"  WARNING: '{BENT_PLATES_SHEET}' sheet not found; no FORMED detection")
+        return set()
+
+    header_row = 2
+    dypn_col = None
+    last_col = max(int(ws.UsedRange.Columns.Count), 8)
+    for c in range(1, last_col + 1):
+        val = ws.Cells(header_row, c).Value
+        if isinstance(val, str) and val.strip().upper() == "DYPN":
+            dypn_col = c
+            break
+    if dypn_col is None:
+        log("  WARNING: DYPN column not found in Bent Plates header; no FORMED detection")
+        return set()
+
+    bent: set[str] = set()
+    last_row = max(int(ws.UsedRange.Rows.Count), 3)
+    for r in range(3, last_row + 1):
+        v = ws.Cells(r, dypn_col).Value
+        if v is None or v == "":
+            continue
+        bent.add(str(v).strip().casefold())
+    return bent
+
+
+# FORMED edits ----------------------------------------------------------------
+
+def _apply_formed_edits(ws, bent_dypns: set[str], log) -> list[tuple[str, str]]:
+    if not bent_dypns:
+        return []
+
+    edits: list[tuple[str, str]] = []
+    for r in PART_ROWS:
+        for dypn_col, desc_col in (
+            (LEFT_DYPN_COL, LEFT_MATDESC_COL),
+            (RIGHT_DYPN_COL, RIGHT_MATDESC_COL),
+        ):
+            dypn_val = ws.Range(f"{dypn_col}{r}").Value
+            if dypn_val is None or dypn_val == "":
+                continue
+            key = str(dypn_val).strip().casefold()
+            if key not in bent_dypns:
+                continue
+            desc_addr = f"{desc_col}{r}"
+            try:
+                desc_cell = ws.Range(desc_addr)
+                original = desc_cell.Formula
+                if original is None or original == "":
+                    continue
+                if isinstance(original, str) and original.startswith("="):
+                    new_formula = f'{original}&" FORMED"'
+                else:
+                    new_formula = f'{original} FORMED'
+                desc_cell.Formula = new_formula
+                edits.append((desc_addr, original))
+                log(f"    FORMED match: {dypn_val} at {desc_addr}")
+            except Exception as exc:
+                log(f"    WARNING: could not modify {desc_addr} for {dypn_val}: {exc}")
+    return edits
+
+
+def _revert_edits(ws, edits: list[tuple[str, str]], log) -> None:
+    for addr, original in edits:
+        try:
+            ws.Range(addr).Formula = original
+        except Exception as exc:
+            log(f"    WARNING: could not revert {addr}: {exc}")
+
+
+# Main entry ------------------------------------------------------------------
+
+def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
+    log = params.get('log', print)
+    console = params.get('console')
+
+    log("Starting 922 Kitting...")
+    progress_callback(0)
+
+    if not _COM_AVAILABLE:
+        raise RuntimeError(
+            "pywin32 (win32com.client) is not available. Excel COM is required."
+        )
+
+    raw = sdk.request_batch_number(
+        params, 'Enter batch number (e.g. "476", "Batch 476", "PO #476"):'
+    )
+
+    batch_no = sdk.parse_922_batch(raw or '')
+    if not batch_no:
+        raise ValueError(f"Unrecognised batch input: {raw!r}")
+    log(f"Batch: {batch_no}")
+
+    root = sdk.resolve_922_root()
+    if not root:
+        raise RuntimeError(
+            "Could not locate '922 QTDR Production Packages'. Verify OneDrive sync."
+        )
+    batch_path = sdk.find_922_batch_path(root, batch_no)
+    if not batch_path:
+        raise RuntimeError(
+            f"Batch {batch_no} not found under {root} (also checked '1 - Completed')."
+        )
+    doc_folder = batch_path / f"Batch {batch_no} - Documentation"
+    organizer_path = _find_organizer_workbook(doc_folder, batch_no)
+    if not organizer_path:
+        raise RuntimeError(
+            f"Pallet & Rod Organizer workbook not found in {doc_folder}"
+        )
+    log(f"Workbook: {organizer_path.name}")
+
+    kitting_dir = doc_folder / "Kitting"
+    kitting_dir.mkdir(parents=True, exist_ok=True)
+    final_pdf = kitting_dir / f"Kitting {batch_no}.pdf"
+    labels_pdf = kitting_dir / f"Bin Labels {batch_no}.pdf"
+    progress_callback(5)
+
+    # Stage workbook locally - Excel COM is unreliable directly against OneDrive paths
+    stage_dir = Path(tempfile.mkdtemp(prefix=f"techdeck_kitting_{batch_no}_"))
+    log(f"Staging dir: {stage_dir}")
+    staged_workbook = stage_dir / organizer_path.name
+    pdf_dir = stage_dir / "pdfs"
+    pdf_dir.mkdir(exist_ok=True)
+
+    shutil.copy2(organizer_path, staged_workbook)
+
+    excel = None
+    wb = None
+    ws_kit = None
+    in_progress_edits: list[tuple[str, str]] = []
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            excel = win32.DispatchEx("Excel.Application")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to launch Excel via COM: {exc}")
+
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+
+        wb = excel.Workbooks.Open(str(staged_workbook))
+
+        # Calculation property is only settable once a workbook is open
+        try:
+            excel.Calculation = _XL_CALC_AUTOMATIC
+        except Exception as exc:
+            log(f"  WARNING: could not set Calculation=Automatic ({exc}); continuing")
+
+        try:
+            ws_kit = wb.Worksheets(SHEET_NAME)
+        except Exception:
+            raise RuntimeError(f"'{SHEET_NAME}' sheet not found in workbook")
+
+        # Phase 1
+        log("Phase 1: applying batch color formatting...")
+        _apply_color_formatting(ws_kit, batch_no, log)
+        progress_callback(10)
+        if cancel_event.is_set():
+            log("Cancelled.")
+            return
+
+        bent_dypns = _collect_bent_dypns(wb, log)
+        log(f"Bent Plates DYPNs indexed: {len(bent_dypns)}")
+        progress_callback(15)
+
+        # Phase 2: print loop
+        d21 = ws_kit.Range("D21")
+        try:
+            current_val = int(float(d21.Value))
+        except (TypeError, ValueError):
+            current_val = None
+        if current_val != 1:
+            log(f"  D21 was {d21.Value!r}; resetting to 1")
+            d21.Value = 1
+            excel.CalculateFull()
+
+        # Capture original PrintArea and derive the labels-only variant
+        original_print_area = ws_kit.PageSetup.PrintArea or ""
+        labels_print_area = _derive_labels_print_area(original_print_area)
+        log(f"  Full print area  : {original_print_area or '(empty)'}")
+        log(f"  Labels print area: {labels_print_area}")
+
+        iterations = list(range(1, 36, 2))
+        total_iters = len(iterations)
+        pdf_paths: list[Path] = []
+        label_pdf_paths: list[Path] = []
+
+        for idx, n in enumerate(iterations):
+            if cancel_event.is_set():
+                log("Cancelled.")
+                return
+
+            log(f"Printing orders {n} & {n + 1}...")
+            d21.Value = n
+            excel.CalculateFull()
+
+            # Labels-only export (no FORMED edits - rows 22-31 not in this print area)
+            label_pdf = pdf_dir / f"L{idx:02d}.pdf"
+            try:
+                ws_kit.PageSetup.PrintArea = labels_print_area
+                ws_kit.ExportAsFixedFormat(_XL_TYPE_PDF, str(label_pdf))
+                if not label_pdf.exists():
+                    raise RuntimeError(f"Labels PDF was not written: {label_pdf}")
+                label_pdf_paths.append(label_pdf)
+            finally:
+                ws_kit.PageSetup.PrintArea = original_print_area
+
+            # Full kit export (with FORMED detection)
+            in_progress_edits = _apply_formed_edits(ws_kit, bent_dypns, log)
+            try:
+                if in_progress_edits:
+                    excel.CalculateFull()
+
+                out_pdf = pdf_dir / f"p{idx:02d}.pdf"
+                ws_kit.ExportAsFixedFormat(_XL_TYPE_PDF, str(out_pdf))
+
+                if not out_pdf.exists():
+                    raise RuntimeError(f"PDF was not written: {out_pdf}")
+
+                pdf_paths.append(out_pdf)
+            finally:
+                _revert_edits(ws_kit, in_progress_edits, log)
+                in_progress_edits = []
+
+            excel.CalculateFull()
+            progress_callback(15 + int((idx + 1) / total_iters * 70))
+
+        # Reset driver
+        d21.Value = 1
+        excel.CalculateFull()
+        progress_callback(88)
+
+        # Save and close
+        log("Saving workbook...")
+        wb.Save()
+        wb.Close(False)
+        wb = None
+        ws_kit = None
+        excel.Quit()
+        excel = None
+        progress_callback(92)
+
+        # Merge full-kit PDFs
+        log(f"Merging {len(pdf_paths)} full PDF(s) into {final_pdf.name}...")
+        merged = fitz.open()
+        try:
+            for p in pdf_paths:
+                src = fitz.open(p)
+                try:
+                    merged.insert_pdf(src)
+                finally:
+                    src.close()
+            merged.save(str(final_pdf))
+        finally:
+            merged.close()
+        progress_callback(94)
+
+        # Merge labels-only PDFs
+        log(f"Merging {len(label_pdf_paths)} labels PDF(s) into {labels_pdf.name}...")
+        merged_labels = fitz.open()
+        try:
+            for p in label_pdf_paths:
+                src = fitz.open(p)
+                try:
+                    merged_labels.insert_pdf(src)
+                finally:
+                    src.close()
+            merged_labels.save(str(labels_pdf))
+        finally:
+            merged_labels.close()
+        progress_callback(96)
+
+        # Copy staged workbook back over the OneDrive original
+        log("Copying workbook back to OneDrive...")
+        shutil.copy2(staged_workbook, organizer_path)
+        progress_callback(100)
+
+        log("=" * 50)
+        log(f"922 Kitting -- Batch {batch_no}")
+        log(f"  Orders printed   : 36")
+        log(f"  Full output PDF  : {final_pdf}")
+        log(f"  Labels output PDF: {labels_pdf}")
+        log("=" * 50)
+
+    finally:
+        if ws_kit is not None and in_progress_edits:
+            try:
+                _revert_edits(ws_kit, in_progress_edits, log)
+            except Exception:
+                pass
+
+        if wb is not None:
+            try:
+                wb.Close(False)
+            except Exception:
+                pass
+        if excel is not None:
+            try:
+                excel.Quit()
+            except Exception:
+                pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+        try:
+            shutil.rmtree(stage_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    cancel = threading.Event()
+    run(
+        params={'log': print, 'settings': {}, 'console': None},
+        progress_callback=lambda p: print(f"[{p}%]"),
+        cancel_event=cancel,
+    )

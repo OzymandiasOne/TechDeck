@@ -120,12 +120,12 @@ class AccountPage(QWidget):
         version_label = QLabel(f"TechDeck Version: {APP_VERSION}")
         version_label.setStyleSheet("font-size: 13px;")
         info_section.addWidget(version_label)
-        
+
         profiles_count = len(self.settings.get_profile_names())
         profiles_label = QLabel(f"Total Profiles: {profiles_count}")
         profiles_label.setStyleSheet("font-size: 13px;")
         info_section.addWidget(profiles_label)
-        
+
         default_profile = self.settings.get_current_profile_name()
         current_profile_label = QLabel(f"Current Profile: {default_profile}")
         current_profile_label.setStyleSheet("font-size: 13px;")

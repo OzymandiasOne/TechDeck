@@ -5,11 +5,16 @@ Automates the full 911 QTDR batch setup workflow:
 
   1. Prompt for batch number -> locate batch folder
   2. Read BATCH LIST -> extract unique nest numbers from "Nest Pkg Nbr" header column
-  3. Create a subfolder per nest inside the batch folder
-  4. Copy "911 BATCH _.xlsx" template into each nest folder, rename it
+  2.5 Show the nest-selection dialog -> user picks which nests to run (nests
+     with an existing folder are flagged "already set up"). Nothing below runs
+     until the user submits.
+  3. Create a subfolder per selected nest inside the batch folder
+  4. Copy "911 BATCH _.xlsx" template into each nest folder, rename it, and
+     drop the scribe-verification doc (QF-QU-15 ... SHAPES.docx) into each
   5. Copy Working Forecast List -> extract rows for each nest -> paste into
      NEST sheet cols A-C starting row 4
-  6. Parse NEST PACKAGES PDFs -> extract MIL-S spec (-> D4) and MATL (-> E4)
+  6. Parse the nest's own NEST PACKAGES packet PDF -> read the labeled
+     MIL SPEC field (-> D4) and MATERIAL field (-> E4) off the MOVE TICKET page
   7. Read BATCH LIST -> filter rows by nest number -> paste into NEST cols F-K
      starting row 4
   8. Read DYPN values from NEST col G -> copy INSPECTION SHEET tab for each
@@ -45,6 +50,32 @@ v1.2.0 changes
     nest (str) and the forecast cell value. Digits-only nests like
     "503627" failed silently because the forecast stores them as int.
     Match now normalizes both sides to stripped, upper-cased strings.
+
+v1.3.0 changes
+  - Nest selection: after the batch number is entered, a dialog lists every
+    nest in the batch with checkboxes (batch root toggles all; existing nest
+    folders are flagged "already set up"). The user picks which nests to run
+    and submits; the setup work runs only on the chosen nests. Cancelling the
+    dialog runs nothing. With no console (CLI/test) the optional 'nests'
+    param selects a subset, otherwise all nests run.
+
+  - FIXED: MIL spec and MATERIAL (cols D4/E4) are now read from the nest's
+    OWN packet PDF (the NEST PACKAGES file whose name contains the nest
+    number) instead of scanning every PDF in NEST PACKAGES and taking the
+    first match -- which let one nest inherit another nest's spec.
+
+  - FIXED: both values are read from the labeled MOVE TICKET fields
+    "MIL SPEC:" and "MATERIAL:". The old code read MIL via a bare
+    `MIL-S-\\d+` token (missing QQ-/ASTM-/AISI- specs entirely) and read
+    material from the PART SKETCH "MATL:" field, which is blank on many
+    parts -- so the old `MATL:\\s*(\\S+)` regex skipped the blank and
+    captured the next field's label (e.g. "LVL:"). A blank MATERIAL now
+    stays blank.
+
+  - Scribe-verification doc: "QF-QU-15 REV B - SCRIBE VERIFICATION -
+    SHAPES.docx" is copied from the SACO template dir into every generated
+    nest folder (one copy per nest -- skipped if already present). Missing
+    source is logged as a warning and does not abort the run.
 """
 
 import re
@@ -97,6 +128,10 @@ _NEST_RE = re.compile(r'^[PS]?\d{3,}$', re.IGNORECASE)
 
 _DEFAULT_TEMPLATE_SUBDIR = "03 - Processing Forms & Templates\\00 - SACO"
 _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
+
+# Scribe-verification form dropped into every generated nest folder. Lives in
+# the same SACO template directory as the 911 BATCH template (template_dir).
+_SCRIBE_DOC_FILENAME = "QF-QU-15 REV B - SCRIBE VERIFICATION - SHAPES.docx"
 
 
 def _base_qtdr(override: str = "") -> Path:
@@ -303,13 +338,76 @@ def _paste_forecast_into_nest(nest_ws, forecast_rows: list):
 
 
 # ---------------------------------------------------------------------------
-# Step 6: PDF -> MIL-S spec + MATL
+# Step 6: PDF -> MIL spec + MATERIAL
+#
+# The authoritative source for both values is the MOVE TICKET page in the
+# nest's own work packet, which carries explicit labeled fields:
+#       MIL SPEC: MIL-S-22698
+#       MATERIAL:
+#       HSS
+# (the value sits on the same line for MIL SPEC, the next line for MATERIAL).
+#
+# The previous version read MIL-S via a bare `MIL-S-\d+` scan across EVERY PDF
+# in NEST PACKAGES (so a nest could inherit another nest's spec) and read the
+# material from the PART SKETCH `MATL:` field -- which is blank on many parts,
+# letting the old `MATL:\s*(\S+)` regex skip the blank and grab the next field
+# label (e.g. "LVL:"). Both are fixed by scoping to the nest's own packet and
+# reading the labeled MOVE TICKET fields.
 # ---------------------------------------------------------------------------
+
+_LABEL_RE = re.compile(r'^[A-Z][A-Z0-9 ./#-]*:')
+
+
+def _looks_like_label(s: str) -> bool:
+    """True if s reads as another field label (e.g. 'DRA REV:', 'LVL:')."""
+    return bool(_LABEL_RE.match(s.strip()))
+
+
+def _labeled_value(text: str, label: str):
+    """
+    Return the value following 'label:' in PDF text. Handles both
+    'LABEL: value' (same line) and 'LABEL:\\nvalue' (value on the next line).
+    Returns None when the field is blank or the following token is itself
+    another field label.
+    """
+    pat = re.compile(
+        re.escape(label) + r'\s*:[ \t]*(?P<same>[^\n]*)(?:\n[ \t]*(?P<next>[^\n]*))?',
+        re.IGNORECASE,
+    )
+    m = pat.search(text)
+    if not m:
+        return None
+    same = (m.group("same") or "").strip()
+    if same and not _looks_like_label(same):
+        return same
+    nxt = (m.group("next") or "").strip()
+    if nxt and not _looks_like_label(nxt):
+        return nxt
+    return None
+
+
+def _find_nest_pdf(nest_packages_folder: Path, nest_number: str):
+    """Return the PDF in NEST PACKAGES whose stem contains the nest number,
+    or None. Shared by the MIL/MATERIAL read (Step 6) and the drawings
+    extraction (Step 9) so both look at the same nest-scoped packet."""
+    if not nest_packages_folder.exists():
+        return None
+    nest_upper = nest_number.upper()
+    for f in nest_packages_folder.iterdir():
+        if (f.is_file() and f.suffix.lower() == ".pdf"
+                and nest_upper in f.stem.upper()):
+            return f
+    return None
+
 
 def _extract_pdf_data(pdf_path: Path) -> tuple:
     """
-    Parse a PDF and return (mil_spec, matl_type).
-    Returns (None, None) if not found.
+    Parse a single nest packet PDF and return (mil_spec, matl_type).
+
+    MIL spec is read from the labeled 'MIL SPEC:' field, falling back to a
+    bare 'MIL-S-...' token if the label is absent. Material is read from the
+    labeled 'MATERIAL:' field only (no fallback -- a blank field stays blank).
+    Returns (None, None) if neither is found.
     """
     if not PYMUPDF_AVAILABLE:
         raise ImportError(
@@ -318,63 +416,40 @@ def _extract_pdf_data(pdf_path: Path) -> tuple:
         )
 
     doc = fitz.open(str(pdf_path))
-    mil_spec = None
-    matl_type = None
-
-    for page in doc:
-        text = page.get_text()
-
-        if mil_spec is None:
-            m = re.search(r'MIL-S-\d+', text)
-            if m:
-                mil_spec = m.group(0)
-
-        if matl_type is None:
-            m = re.search(r'MATL:\s*(\S+)', text)
-            if m:
-                matl_type = m.group(1)
-
-        if mil_spec and matl_type:
-            break
-
+    full_text = "".join(page.get_text() for page in doc)
     doc.close()
+
+    mil_spec = _labeled_value(full_text, "MIL SPEC")
+    if not mil_spec:
+        m = re.search(r'MIL-S-\S+', full_text, re.IGNORECASE)
+        mil_spec = m.group(0) if m else None
+
+    matl_type = _labeled_value(full_text, "MATERIAL")
+
     return mil_spec, matl_type
 
 
-def _get_pdf_data_for_nest(nest_packages_folder: Path, log) -> tuple:
+def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
     """
-    Search all PDFs in NEST PACKAGES folder.
-    Return (mil_spec, matl_type) aggregated across PDFs.
+    Read (mil_spec, matl_type) from THIS nest's own packet PDF in NEST PACKAGES
+    (the one whose filename contains the nest number). Scoping to the nest's
+    own packet prevents one nest from inheriting another nest's MIL spec.
     """
     if not nest_packages_folder.exists():
         log(f"  WARNING: NEST PACKAGES folder not found: {nest_packages_folder}")
         return None, None
 
-    pdfs = [f for f in nest_packages_folder.iterdir()
-            if f.is_file() and f.suffix.lower() == ".pdf"]
-
-    if not pdfs:
-        log(f"  WARNING: No PDFs found in {nest_packages_folder}")
+    nest_pdf = _find_nest_pdf(nest_packages_folder, nest_number)
+    if nest_pdf is None:
+        log(f"  WARNING: No packet PDF containing '{nest_number}' found in NEST PACKAGES.")
         return None, None
 
-    mil_spec = None
-    matl_type = None
-
-    for pdf in pdfs:
-        log(f"  Parsing PDF: {pdf.name}")
-        try:
-            ms, mt = _extract_pdf_data(pdf)
-            if ms and mil_spec is None:
-                mil_spec = ms
-            if mt and matl_type is None:
-                matl_type = mt
-        except Exception as e:
-            log(f"  WARNING: Could not parse {pdf.name}: {e}")
-
-        if mil_spec and matl_type:
-            break
-
-    return mil_spec, matl_type
+    log(f"  Parsing packet PDF: {nest_pdf.name}")
+    try:
+        return _extract_pdf_data(nest_pdf)
+    except Exception as e:
+        log(f"  WARNING: Could not parse {nest_pdf.name}: {e}")
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -401,13 +476,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         log("  WARNING: NEST PACKAGES folder not found -- skipping drawings.")
         return False
 
-    nest_upper = nest_number.upper()
-    matching_pdf = None
-    for f in nest_packages_folder.iterdir():
-        if f.is_file() and f.suffix.lower() == ".pdf":
-            if nest_upper in f.stem.upper():
-                matching_pdf = f
-                break
+    matching_pdf = _find_nest_pdf(nest_packages_folder, nest_number)
 
     if matching_pdf is None:
         log(f"  WARNING: No PDF containing '{nest_number}' found in NEST PACKAGES.")
@@ -806,17 +875,54 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     log(f"BATCH LIST    : {batch_list_path.name}")
 
     try:
-        nest_numbers = _get_unique_nests_from_batch_list(batch_list_path)
+        all_nests = _get_unique_nests_from_batch_list(batch_list_path)
     except ValueError as e:
         raise ValueError(str(e))
 
-    if not nest_numbers:
+    if not all_nests:
         raise ValueError(
             f"No nest numbers found in the 'Nest Pkg Nbr' column of {batch_list_path.name}. "
             "Check that the BATCH LIST has data starting from row 4."
         )
 
-    log(f"Nests found   : {', '.join(nest_numbers)}")
+    log(f"Nests found   : {', '.join(all_nests)}")
+
+    # ------------------------------------------------------------------ #
+    # Step 2.5 -- Let the user choose which nests to run.
+    #
+    # Nests whose folder already exists in the batch are flagged as
+    # "already set up" so the operator can tell a fresh run from a re-run.
+    # Re-running a nest overwrites it. Selection happens up front: nothing
+    # below this point runs until the user submits the dialog. Order is
+    # preserved by filtering against all_nests (a set membership test).
+    # ------------------------------------------------------------------ #
+    existing_nests = {n for n in all_nests if (batch_folder / n).is_dir()}
+    if existing_nests:
+        log(f"Already set up: {', '.join(n for n in all_nests if n in existing_nests)}")
+
+    if console is not None and hasattr(console, "request_nest_selection"):
+        selection = console.request_nest_selection(batch_number, all_nests, existing_nests)
+        if selection is None:
+            log("Nest selection cancelled -- nothing was run.")
+            progress_callback(100)
+            return
+        chosen = set(selection)
+        nest_numbers = [n for n in all_nests if n in chosen]
+    else:
+        # No console (CLI/test): honor an explicit 'nests' override, else all.
+        override = params.get("nests")
+        if override:
+            chosen = {str(n).strip().upper() for n in override}
+            nest_numbers = [n for n in all_nests if n.upper() in chosen]
+        else:
+            nest_numbers = list(all_nests)
+
+    if not nest_numbers:
+        log("No nests selected -- nothing to do.")
+        progress_callback(100)
+        return
+
+    log(f"Running nests : {', '.join(nest_numbers)}")
     progress_callback(10)
 
     # ------------------------------------------------------------------ #
@@ -847,6 +953,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     template_path = _find_template_911(template_dir)
     log(f"Template      : {template_path.name}")
 
+    # Scribe-verification doc copied into each nest folder (one copy per nest).
+    # Sourced from the same SACO template dir; missing source is non-fatal.
+    scribe_src = template_dir / _SCRIBE_DOC_FILENAME
+    scribe_available = scribe_src.exists()
+    if not scribe_available:
+        log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
+
     nest_excel_paths = {}
     for nest in nest_numbers:
         dest_name = f"911 BATCH {batch_number} {nest}.xlsx"
@@ -854,6 +967,17 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         shutil.copy2(template_path, dest_path)
         nest_excel_paths[nest] = dest_path
         log(f"  Copied -> {dest_name}")
+
+        if scribe_available:
+            scribe_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
+            if scribe_dest.exists():
+                log(f"  Scribe doc already in {nest} -- skipped")
+            else:
+                try:
+                    shutil.copy2(scribe_src, scribe_dest)
+                    log(f"  Scribe doc -> {nest}")
+                except Exception as e:
+                    log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
 
     progress_callback(20)
     if cancel_event.is_set():
@@ -916,20 +1040,20 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             _paste_forecast_into_nest(nest_ws, forecast_rows)
 
         # -- Step 6: PDF -> MIL-S spec (D4) + MATL (E4) ------------------
-        log(f"  [Step 6] Parsing PDFs in NEST PACKAGES...")
-        mil_spec, matl_type = _get_pdf_data_for_nest(nest_packages_folder, log)
+        log(f"  [Step 6] Reading MIL SPEC / MATERIAL from nest packet...")
+        mil_spec, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
 
         if mil_spec:
             nest_ws.cell(4, 4).value = mil_spec   # D4
             log(f"  MIL Spec -> D4: {mil_spec}")
         else:
-            log(f"  WARNING: MIL-S spec not found in any PDF.")
+            log(f"  WARNING: MIL spec not found in nest packet.")
 
         if matl_type:
             nest_ws.cell(4, 5).value = matl_type  # E4
-            log(f"  MATL Type -> E4: {matl_type}")
+            log(f"  Material -> E4: {matl_type}")
         else:
-            log(f"  WARNING: MATL type not found in any PDF.")
+            log(f"  WARNING: MATERIAL not found in nest packet (left blank).")
 
         # -- Step 7: BATCH LIST -> NEST cols F-K, starting row 4 ---------
         log(f"  [Step 7] Extracting batch rows for {nest}...")

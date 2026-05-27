@@ -291,6 +291,29 @@ def generate_haiku() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Sal — the blackjack dealer's one-liners (shown on the idle dashboard)
+# ---------------------------------------------------------------------------
+
+SAL_LINES = [
+    "The house always wins, kid.",
+    "Back for more?",
+    "Your chips are safe with me. Mostly.",
+    "Numbers don't lie. People do.",
+    "Don't spend it all on one batch.",
+    "Run a tool, then we'll talk.",
+    "I've seen worse bankrolls.",
+    "Keep your cards close.",
+    "Easy come, easy go.",
+    "You're up. Don't get cocky.",
+]
+
+
+def get_sal_line() -> str:
+    """A random Sal one-liner."""
+    return random.choice(SAL_LINES)
+
+
+# ---------------------------------------------------------------------------
 # Generic shuffled pool (used for /compliment and /roast)
 # ---------------------------------------------------------------------------
 

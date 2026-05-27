@@ -167,7 +167,7 @@ class FeedbackDialog(QDialog):
         return f"""
             QPushButton {{
                 background-color: {self.theme.accent_two};
-                color: white;
+                color: {self.theme.accent_two_text};
                 border: none;
                 border-radius: 6px;
                 font-weight: 600;

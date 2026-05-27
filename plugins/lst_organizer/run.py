@@ -31,22 +31,11 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-# ── Material sets ──────────────────────────────────────────────────────────────
+# ── Material sets (canonical definitions live in the SDK) ───────────────────────
 
-STANDARD_TUBE_MATERIALS = {
-    '218002867', '218003095', '218004492', '218012302', '218019939',
-    '218019941', '218021954', '218026206', '218026875', '218026962',
-    '218033112', '218136140', '40-00-2020', '40-07-1003',
-}
-
-OVERSIZED_TUBE_MATERIALS = {
-    '181361440', '218000414', '218001209', '218001975', '218002101',
-    '218002191', '218002642', '218002778', '218004273', '218012555',
-    '218017859', '218018574', '218019943', '218020020', '218020119',
-    '218026338', '218026500', '218032982',
-}
-
-ALL_TUBE_MATERIALS = STANDARD_TUBE_MATERIALS | OVERSIZED_TUBE_MATERIALS
+STANDARD_TUBE_MATERIALS = sdk.STANDARD_TUBE_MATERIALS
+OVERSIZED_TUBE_MATERIALS = sdk.OVERSIZED_TUBE_MATERIALS
+ALL_TUBE_MATERIALS = sdk.ALL_TUBE_MATERIALS
 
 # ── Path helpers ───────────────────────────────────────────────────────────────
 

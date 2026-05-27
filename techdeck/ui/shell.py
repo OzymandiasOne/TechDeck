@@ -5,14 +5,18 @@ FIXED: Inline button styling for Run Selected button
 PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
+import sys
 import time
 import random
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-    QStackedWidget, QSplitter, QPushButton, QMessageBox
+    QStackedWidget, QSplitter, QPushButton, QMessageBox,
+    QApplication,
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve, QSize
+from PySide6.QtGui import QIcon
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION
@@ -25,7 +29,7 @@ from techdeck.ui.pages.settings_page import SettingsPage
 from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.core.command_handler import CommandHandler
 from techdeck.core.update_checker import UpdateChecker
-from techdeck.core.flavor import TalkbackState, TechTipState
+from techdeck.core.flavor import TalkbackState, TechTipState, CompendiumState
 from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS, SOUND_ERROR
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
 
@@ -78,7 +82,8 @@ class MainWindow(QMainWindow):
         "Making weekend plans...",
         "Shaking fist angrily at the Old Gods...",
         "Typing /rave into the console...",
-        "Honking..."
+        "Honking...",
+        "Gandalf-maxxing...",
     ]
     _DONE_TEXTS = [
         "Combobulated for",
@@ -111,6 +116,7 @@ class MainWindow(QMainWindow):
         "Inferred in",
         "Hashbrowned in",
         "Levitated for",
+        "Gandalf-maxxed for",
 
     ]
     _SPINNER_QUOTES = [
@@ -143,7 +149,26 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: SettingsManager):
         super().__init__()
         self.settings = settings
-        
+
+        # Startup profiling — mirrors the helper in __main__.py
+        import time as _time
+        self._t0 = _time.perf_counter()
+
+        def _step(name: str):
+            ms = (_time.perf_counter() - self._t0) * 1000.0
+            print(f"[MainWindow +{ms:6.0f} ms] {name}", file=sys.stderr, flush=True)
+
+        self._step = _step
+
+        # Single shared PluginLoader — discover plugins ONCE here, then pass
+        # to each page. Eliminates the triple disk scan that was the main
+        # cause of startup lag.
+        from techdeck.core.plugin_loader import PluginLoader
+        self._plugin_loader = PluginLoader()
+        self._plugin_loader.discover_plugins()
+        _step("plugin discovery done")
+        QApplication.processEvents()
+
         # Connect signal for thread-safe update dialog
         self.show_update_signal.connect(self._show_update_dialog_slot)
 
@@ -151,6 +176,12 @@ class MainWindow(QMainWindow):
         self._talkback = TalkbackState()
         self._techtip = TechTipState()
         self._last_talkback_plugin: str | None = None
+
+        # Spinner pools — shuffled, no back-to-back repeats, exhaust before recycling.
+        # State persists across plugin runs so successive runs don't pick the same line.
+        self._spinner_text_pool = CompendiumState(self._SPINNER_TEXTS)
+        self._spinner_quote_pool = CompendiumState(self._SPINNER_QUOTES)
+        self._spinner_done_pool = CompendiumState(self._DONE_TEXTS)
 
         # Audio: configure singleton from saved settings
         audio = settings.get_audio_settings()
@@ -168,8 +199,8 @@ class MainWindow(QMainWindow):
         self._spinner_next_quote_tick = 0
         self._spinner_phase = "start"    # "start" | "running"
         self._spinner_locked_text = ""   # frozen during "start" phase
-        self._spinner_text_idx = 0       # current text index (running phase)
-        self._spinner_text_ticks = 0     # ticks elapsed in running phase
+        self._spinner_current_text = "" # current text (running phase)
+        self._spinner_text_ticks = 0     # ticks elapsed since current text shown
         
         # Window properties
         self.setWindowTitle("TechDeck")
@@ -199,14 +230,22 @@ class MainWindow(QMainWindow):
         # Start update checker after UI is ready (delayed by 3 seconds)
         QTimer.singleShot(3000, self.update_checker.start)
 
-        # Startup fade-in
+        # Startup fade-in. Window opens at opacity 0 so it is invisible behind
+        # the splash subprocess while warmup_pages() runs. __main__.py calls
+        # start_fadein() AFTER the splash closes, so the user sees a clean
+        # splash -> fade -> solid TechDeck transition with no overlap.
         self.setWindowOpacity(0.0)
         self._fadein = QPropertyAnimation(self, b"windowOpacity")
         self._fadein.setDuration(400)
         self._fadein.setStartValue(0.0)
         self._fadein.setEndValue(1.0)
         self._fadein.setEasingCurve(QEasingCurve.Type.OutCubic)
-        QTimer.singleShot(50, self._fadein.start)
+
+    def start_fadein(self):
+        """Begin the startup fade-in animation. Called by __main__.py once
+        the splash has closed, so the fade is the FIRST thing the user sees
+        in place of the splash (rather than competing with it)."""
+        self._fadein.start()
     
     def _setup_ui(self):
         """Set up the main UI layout."""
@@ -221,7 +260,9 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(settings_manager=self.settings)
         self.sidebar.page_changed.connect(self._on_page_changed)
         main_layout.addWidget(self.sidebar)
-        
+        self._step("sidebar built")
+        QApplication.processEvents()
+
         # ===== Right side: Page Stack (console integrated into home page) =====
         self.page_stack = QStackedWidget()
         
@@ -241,33 +282,31 @@ class MainWindow(QMainWindow):
         self.console.message_entered.connect(self._on_message_entered)
         self.console.input_provided.connect(self._on_console_input_provided)
         self.console.before_input_request.connect(self._flush_plugin_logs)
-        
+        self.console.dashboard_shown.connect(self._on_dashboard_shown)
+        self.console.dashboard.set_idle_provider(self._idle_dashboard_data)
+
         # Create Run Selected button and add to console header
         self.btn_run = QPushButton("Run Selected")
         self.btn_run.setMinimumHeight(36)  # Match console button height
         self.btn_run.setMinimumWidth(120)
-        # Apply primary button styling INLINE - most reliable approach
-        self.btn_run.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {theme.accent};
-                color: #FFFFFF;
-                border: none;
-                border-radius: 6px;
-                font-weight: 600;
-                padding: 6px 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme.accent_hover};
-            }}
-            QPushButton:pressed {{
-                background-color: {theme.accent_pressed};
-            }}
-            QPushButton:disabled {{
-                opacity: 0.5;
-            }}
-        """)
+        # Inline styling (re-stamped on theme change via _on_theme_changed).
+        self.btn_run.setStyleSheet(self._run_button_style(theme))
         self.console.add_header_button(self.btn_run)
-        
+
+        # Subtle icon-only control to collapse the console panel. Sits at the
+        # far-right of the console header. Styling + icon are applied in
+        # _restyle_console_controls() so they follow the active theme.
+        self.btn_collapse_console = QPushButton()
+        self.btn_collapse_console.setObjectName("consoleCollapseBtn")
+        self.btn_collapse_console.setFixedSize(26, 26)
+        self.btn_collapse_console.setIconSize(QSize(16, 16))
+        self.btn_collapse_console.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_collapse_console.setToolTip("Collapse console")
+        self.btn_collapse_console.clicked.connect(self._collapse_console)
+        self.console.add_header_button(self.btn_collapse_console, far_right=True)
+        self._step("console + run button built")
+        QApplication.processEvents()
+
         # --- Create Home Page with Console in Splitter ---
         home_container = QWidget()
         home_layout = QVBoxLayout(home_container)
@@ -279,8 +318,10 @@ class MainWindow(QMainWindow):
         self.home_splitter = QSplitter(Qt.Orientation.Vertical)
         self._restyle_home_splitter()
         
-        # Create home page
-        self.home_page = HomePage(self.settings)
+        # Create home page — uses the shared PluginLoader (no rediscovery)
+        self.home_page = HomePage(self.settings, plugin_loader=self._plugin_loader)
+        self._step("home page built")
+        QApplication.processEvents()
         self.home_page.open_library.connect(self._open_library)
         self.home_page.run_selected.connect(self._on_run_selected)
         
@@ -296,34 +337,96 @@ class MainWindow(QMainWindow):
         # Add home page and console to splitter
         self.home_splitter.addWidget(self.home_page)
         self.home_splitter.addWidget(self.console)
-        
+
         # PHASE 2: Set default splitter sizes (no persistence)
         # Users can drag to preferred height each session
         self.home_splitter.setSizes([600, 250])  # Default: 600px home, 250px console
-        
+
+        # Dragging the divider all the way down still collapses the console
+        # (kept intentionally); we detect that and surface the restore bar.
+        self.home_splitter.splitterMoved.connect(self._on_home_splitter_moved)
+
         home_layout.addWidget(self.home_splitter)
-        
+
+        # Slim bar shown only while the console is collapsed — click to restore.
+        self.console_restore_bar = QPushButton()
+        self.console_restore_bar.setObjectName("consoleRestoreBar")
+        self.console_restore_bar.setFixedHeight(28)
+        self.console_restore_bar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.console_restore_bar.setToolTip("Show console")
+        self.console_restore_bar.clicked.connect(self._expand_console)
+        self.console_restore_bar.hide()
+        home_layout.addWidget(self.console_restore_bar)
+
+        # Remembered console height for restore; styled controls follow theme.
+        self._saved_console_height = 250
+        self._restyle_console_controls()
+        QApplication.processEvents()
+
         # --- Create Other Pages (no console) ---
-        # Library page
-        self.library_page = LibraryPage(self.settings)
+        # Library page — reuses the shared loader
+        self.library_page = LibraryPage(self.settings, plugin_loader=self._plugin_loader)
         self.library_page.saved.connect(self._on_library_saved)
         self.library_page.return_home.connect(self._return_to_home)
-        
-        # Settings page
-        self.settings_page = SettingsPage(self.settings)
+        self._step("library page built")
+        QApplication.processEvents()
+
+        # Settings page — reuses the shared loader
+        self.settings_page = SettingsPage(self.settings, plugin_loader=self._plugin_loader)
         self.settings_page.theme_changed.connect(self._on_theme_changed)
-        
+        self._step("settings page built")
+        QApplication.processEvents()
+
         # Account page
         self.account_page = AccountPage(self.settings)
-        
+        self._step("account page built")
+        QApplication.processEvents()
+
         # Add all pages to stack
-        self.page_stack.addWidget(home_container)  # 0: Home (with console)
+        self.page_stack.addWidget(home_container)     # 0: Home (with console)
         self.page_stack.addWidget(self.library_page)  # 1: Library
-        self.page_stack.addWidget(self.settings_page)  # 2: Settings
+        self.page_stack.addWidget(self.settings_page) # 2: Settings
         self.page_stack.addWidget(self.account_page)  # 3: Account
         
         main_layout.addWidget(self.page_stack, 1)
     
+    def warmup_pages(self):
+        """Trigger first-paint and any one-time lazy setup on every page in
+        the stack so the user's first navigation click is instant. Called
+        from __main__.py while the splash subprocess is still covering the
+        window — Qt does the work behind the splash and the user never
+        sees the cycling."""
+        # Cycle through every stacked page so each one fires its first-show
+        # / first-paint pipeline (style polish, layout, paint).
+        for i in range(1, self.page_stack.count()):
+            self.page_stack.setCurrentIndex(i)
+            QApplication.processEvents()
+
+            page = self.page_stack.widget(i)
+            if page is not None:
+                page.ensurePolished()
+                # If the page hosts a QTabWidget, walk through every tab too —
+                # tab content is typically only laid out / painted on first
+                # selection, and SettingsPage has 3 tabs (Apps in particular
+                # builds per-plugin widgets on demand).
+                from PySide6.QtWidgets import QTabWidget
+                for tab_widget in page.findChildren(QTabWidget):
+                    original = tab_widget.currentIndex()
+                    for t in range(tab_widget.count()):
+                        tab_widget.setCurrentIndex(t)
+                        QApplication.processEvents()
+                    tab_widget.setCurrentIndex(original)
+                    QApplication.processEvents()
+
+        # Library has a refresh-on-show; do it once now.
+        if self.library_page is not None:
+            self.library_page.refresh()
+            QApplication.processEvents()
+
+        # Back to home.
+        self.page_stack.setCurrentIndex(0)
+        QApplication.processEvents()
+
     def _on_page_changed(self, page_id: str):
         """Handle sidebar navigation."""
         page_map = {
@@ -332,13 +435,20 @@ class MainWindow(QMainWindow):
             "settings": 2,
             "account": 3
         }
-        
+
         index = page_map.get(page_id, 0)
         self.page_stack.setCurrentIndex(index)
-        
-        # Refresh library page when navigating to it
-        if page_id == "library":
-            self.library_page.refresh()
+
+        # NOTE: we used to call library_page.refresh() here on every Library
+        # click, which rebuilt all 10 plugin cards from scratch and caused a
+        # ~1-second lag. The library is already kept in sync by:
+        #   - __init__ (initial load)
+        #   - warmup_pages() (startup pre-warm)
+        #   - internal handlers when the user changes profile / saves /
+        #     creates / edits / deletes a profile
+        # If you ever need an external force-refresh (e.g. after the user
+        # drops a new plugin folder), call self.library_page.refresh()
+        # explicitly at that point — don't bring this back on every nav.
     
     def _open_library(self):
         """Navigate to library page."""
@@ -357,13 +467,13 @@ class MainWindow(QMainWindow):
             self._plugin_run_start = time.time()
             self._plugin_spinner_tick = 0
             self._spinner_phase = "start"
-            self._spinner_locked_text = self._SPINNER_TEXTS[0]
-            self._spinner_text_idx = 0
+            self._spinner_locked_text = self._spinner_text_pool.get_line()
+            self._spinner_current_text = self._spinner_locked_text
             self._spinner_text_ticks = 0
             self._spinner_in_quote = False
             self._spinner_next_quote_tick = random.randint(200, 280)  # first quote ~20-28s in
             self.console.show_spinner(
-                self._plugin_spinner_html(self._SPINNER_FRAMES[0], self._SPINNER_TEXTS[0])
+                self._plugin_spinner_html(self._SPINNER_FRAMES[0], self._spinner_locked_text)
             )
             self._plugin_spinner_timer.start()
     
@@ -418,7 +528,7 @@ class MainWindow(QMainWindow):
         """Handle the end of a full run (all queued plugins finished or cancelled)."""
         self._plugin_spinner_timer.stop()
         elapsed = time.time() - self._plugin_run_start
-        done_text = random.choice(self._DONE_TEXTS)
+        done_text = self._spinner_done_pool.get_line()
         done_html = self._plugin_spinner_html(
             "✓", f"{done_text} {self._format_elapsed(elapsed)}."
         )
@@ -441,9 +551,11 @@ class MainWindow(QMainWindow):
             # Freeze on initial text; auto-transition once the plugin is clearly running
             if not self.console.waiting_for_input and tick >= 15:
                 self._spinner_phase = "running"
-                self._spinner_text_idx = 0
                 self._spinner_text_ticks = 0
                 self._spinner_in_quote = False
+                # Keep the locked text as the first running-phase text so the
+                # transition is seamless; the next 80-tick boundary will pull
+                # a fresh entry from the shuffled pool.
             text = self._spinner_locked_text
         else:
             # Running phase — slow, free-flowing transitions
@@ -452,7 +564,7 @@ class MainWindow(QMainWindow):
 
             if not self._spinner_in_quote and ttick >= self._spinner_next_quote_tick:
                 self._spinner_in_quote = True
-                self._spinner_current_quote = random.choice(self._SPINNER_QUOTES)
+                self._spinner_current_quote = self._spinner_quote_pool.get_line()
                 self._spinner_quote_end_tick = ttick + 50  # ~5s
                 self._spinner_next_quote_tick = ttick + 50 + random.randint(200, 300)
 
@@ -464,10 +576,10 @@ class MainWindow(QMainWindow):
                     self._spinner_text_ticks = 0
                 text = self._spinner_current_quote
             else:
-                # Advance text every 80 ticks (8s)
+                # Advance text every 80 ticks (8s) — pull next from shuffled pool
                 if ttick > 0 and ttick % 80 == 0:
-                    self._spinner_text_idx = (self._spinner_text_idx + 1) % len(self._SPINNER_TEXTS)
-                text = self._SPINNER_TEXTS[self._spinner_text_idx]
+                    self._spinner_current_text = self._spinner_text_pool.get_line()
+                text = self._spinner_current_text
 
         self.console.update_spinner(self._plugin_spinner_html(frame, text))
 
@@ -479,7 +591,7 @@ class MainWindow(QMainWindow):
         """When user provides input to a plugin, advance spinner to running phase."""
         if self._plugin_spinner_timer.isActive() and self._spinner_phase == "start":
             self._spinner_phase = "running"
-            self._spinner_text_idx = random.randint(1, len(self._SPINNER_TEXTS) - 1)
+            self._spinner_current_text = self._spinner_text_pool.get_line()
             self._spinner_text_ticks = 0
             self._spinner_in_quote = False
 
@@ -521,6 +633,30 @@ class MainWindow(QMainWindow):
         # explicitly — it's the visible bar between the apps area and
         # the console.
         self._restyle_home_splitter()
+        self._restyle_console_controls()
+        self.btn_run.setStyleSheet(self._run_button_style(theme_manager.get_current_palette()))
+
+    @staticmethod
+    def _run_button_style(theme) -> str:
+        return f"""
+            QPushButton {{
+                background-color: {theme.accent};
+                color: {theme.accent_text};
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.accent_hover};
+            }}
+            QPushButton:pressed {{
+                background-color: {theme.accent_pressed};
+            }}
+            QPushButton:disabled {{
+                opacity: 0.5;
+            }}
+        """
 
     def _restyle_home_splitter(self):
         """Re-apply the splitter handle/background colors for the active theme."""
@@ -553,7 +689,100 @@ class MainWindow(QMainWindow):
                 style.polish(handle)
                 handle.update()
         self.home_splitter.update()
-    
+
+    def _restyle_console_controls(self):
+        """Re-tint + restyle the console collapse button and restore bar."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        from techdeck.ui.widgets.sidebar import _tint_svg, _icon_folder_for_theme
+        tm = get_theme_manager()
+        theme = tm.get_current_palette()
+        folder = _icon_folder_for_theme(tm.get_current_theme())
+        icons_dir = Path(__file__).resolve().parent.parent.parent / "assets" / "icons" / folder
+
+        self.btn_collapse_console.setIcon(
+            QIcon(_tint_svg(icons_dir / "chevron-down.svg", theme.text_secondary, 16))
+        )
+        self.btn_collapse_console.setStyleSheet(f"""
+            QPushButton#consoleCollapseBtn {{
+                border: none;
+                background: transparent;
+                border-radius: 4px;
+            }}
+            QPushButton#consoleCollapseBtn:hover {{
+                background-color: {theme.surface_hover};
+            }}
+        """)
+
+        self.console_restore_bar.setIcon(
+            QIcon(_tint_svg(icons_dir / "chevron-up.svg", theme.text_secondary, 16))
+        )
+        self.console_restore_bar.setStyleSheet(f"""
+            QPushButton#consoleRestoreBar {{
+                border: none;
+                border-top: 1px solid {theme.divider};
+                background-color: {theme.surface};
+                color: {theme.text_secondary};
+                text-align: left;
+                padding-left: 12px;
+                font-size: 12px;
+            }}
+            QPushButton#consoleRestoreBar:hover {{
+                background-color: {theme.surface_hover};
+                color: {theme.text};
+            }}
+        """)
+
+    def _collapse_console(self):
+        """Hide the console panel and reveal the slim restore bar."""
+        sizes = self.home_splitter.sizes()
+        if len(sizes) >= 2 and sizes[1] > 0:
+            self._saved_console_height = sizes[1]
+        self.console.hide()
+        self.console_restore_bar.show()
+
+    def _expand_console(self):
+        """Restore the console panel to its last height."""
+        self.console_restore_bar.hide()
+        self.console.show()
+        height = max(150, min(self._saved_console_height or 250, 400))
+        total = sum(self.home_splitter.sizes())
+        self.home_splitter.setSizes([max(total - height, 150), height])
+
+    def _on_home_splitter_moved(self, pos, index):
+        """Convert a drag-to-bottom collapse into the restore-bar state."""
+        if not self.console.isVisible():
+            return
+        sizes = self.home_splitter.sizes()
+        if len(sizes) >= 2 and sizes[1] <= 1:
+            self._collapse_console()
+
+    def _idle_dashboard_data(self):
+        """Data for the idle (no-plugin) dashboard: top-5 most-used tools,
+        the blackjack bankroll, and a Sal one-liner."""
+        from techdeck.core.flavor import get_sal_line
+        usage = []
+        for plugin in self._plugin_loader.get_all_plugins():
+            count = self.settings.get_plugin_stats(plugin.id).get("run_count", 0)
+            if count > 0:
+                usage.append((plugin.name, count))
+        usage.sort(key=lambda x: x[1], reverse=True)
+        return {
+            "usage": usage[:5],
+            "bankroll": self.settings.get_blackjack_bankroll(),
+            "sal_message": get_sal_line(),
+        }
+
+    def _on_dashboard_shown(self):
+        """A plugin rendered a dashboard: make sure the console is visible and
+        tall enough for charts to be readable."""
+        if not self.console.isVisible():
+            self._expand_console()
+        sizes = self.home_splitter.sizes()
+        if len(sizes) >= 2:
+            total = sum(sizes)
+            desired = min(max(sizes[1], 460), max(total - 200, 200))
+            self.home_splitter.setSizes([max(total - desired, 200), desired])
+
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
         print(f"[SHELL] _on_update_available called! Version: {update_info.version}", flush=True)

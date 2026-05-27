@@ -1,0 +1,12 @@
+{
+  "id": "922_kitting",
+  "name": "922 Kitting",
+  "description": "Formats and prints kitting paperwork for an entire 922 batch. Applies batch color formatting, detects formed plates from the Bent Plates sheet, and merges all kit pages into a single PDF.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "requires_admin": false,
+  "timeout": 1200,
+  "settings": {
+    "fields": []
+  }
+}

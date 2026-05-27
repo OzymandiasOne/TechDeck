@@ -11,6 +11,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
+        'PySide6.QtCharts',
         'openpyxl', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',
         'qrcode', 'qrcode.image', 'qrcode.image.base', 'qrcode.image.pure', 
         'qrcode.image.styledpil', 'qrcode.image.svg', 'qrcode.image.styles',

@@ -223,6 +223,83 @@ def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 922 tube materials + PO (QF-QU-09) reading
+#
+# Source-material serials classify a part's stock. STANDARD tubes are
+# laser-cuttable (we expect 7000 shop-print folders for orders that contain
+# them). OVERSIZED tubes are too thick for the laser (>0.375" NOM) and are cut
+# elsewhere, so they do NOT imply a 7000 folder. These sets are the single
+# source of truth, shared by lst_organizer and batch_auditor.
+# ─────────────────────────────────────────────────────────────────────────────
+
+STANDARD_TUBE_MATERIALS = {
+    '218002867', '218003095', '218004492', '218012302', '218019939',
+    '218019941', '218021954', '218026206', '218026875', '218026962',
+    '218033112', '218136140', '40-00-2020', '40-07-1003',
+}
+
+OVERSIZED_TUBE_MATERIALS = {
+    '181361440', '218000414', '218001209', '218001975', '218002101',
+    '218002191', '218002642', '218002778', '218004273', '218012555',
+    '218017859', '218018574', '218019943', '218020020', '218020119',
+    '218026338', '218026500', '218032982',
+}
+
+ALL_TUBE_MATERIALS = STANDARD_TUBE_MATERIALS | OVERSIZED_TUBE_MATERIALS
+
+
+def tube_class(serial) -> Optional[str]:
+    """Classify a source-material serial: 'standard' (laser tube), 'oversized'
+    (too thick for the laser), or None (not a tracked tube material)."""
+    if serial is None:
+        return None
+    s = str(serial).strip()
+    if s in STANDARD_TUBE_MATERIALS:
+        return "standard"
+    if s in OVERSIZED_TUBE_MATERIALS:
+        return "oversized"
+    return None
+
+
+def read_qf_qu_09(po_path: Path):
+    """Read a 922 'PO H{n} QF-QU-09 REV C' workbook's PO sheet.
+
+    Returns (order_to_serials, dypn_to_order_serial):
+      order_to_serials       -> {order: set(source_material_serial, ...)}
+      dypn_to_order_serial   -> {dypn: (order, serial)}
+
+    Serials are stripped strings, ready to pass to tube_class(). Header row is
+    located by name (ORDER / DYPN / SOURCE MATERIAL), never by position.
+    """
+    import openpyxl
+    order_to_serials: dict[str, set] = {}
+    dypn_to_order_serial: dict[str, tuple] = {}
+
+    wb = openpyxl.load_workbook(po_path, data_only=True)
+    try:
+        ws = wb['PO'] if 'PO' in wb.sheetnames else wb.active
+        header_row, cols = find_header_row(ws, ['ORDER', 'DYPN', 'SOURCE MATERIAL'])
+        if header_row is None:
+            return order_to_serials, dypn_to_order_serial
+
+        c_order, c_dypn, c_src = cols['ORDER'], cols['DYPN'], cols['SOURCE MATERIAL']
+        for r in range(header_row + 1, ws.max_row + 1):
+            def _v(c):
+                v = ws.cell(r, c).value
+                return str(v).strip() if v not in (None, '') else None
+            order, dypn, serial = _v(c_order), _v(c_dypn), _v(c_src)
+            if order:
+                bucket = order_to_serials.setdefault(order, set())
+                if serial:
+                    bucket.add(serial)
+            if order and dypn:
+                dypn_to_order_serial[dypn] = (order, serial)
+        return order_to_serials, dypn_to_order_serial
+    finally:
+        wb.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PDF helpers (PyMuPDF / fitz)
 # ─────────────────────────────────────────────────────────────────────────────
 

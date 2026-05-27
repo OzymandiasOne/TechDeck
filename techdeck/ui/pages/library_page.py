@@ -258,17 +258,19 @@ class LibraryPage(QWidget, ThemeAware):
     saved = Signal()
     return_home = Signal()
 
-    def __init__(self, settings: SettingsManager, parent=None):
+    def __init__(self, settings: SettingsManager, parent=None, plugin_loader=None):
         super().__init__(parent)
         self.settings = settings
         self.selected_tile_ids = set()
 
-        # Import plugin loader
+        # Use the shared loader if MainWindow gave us one; otherwise scan now.
         from techdeck.core.plugin_loader import PluginLoader
-        self.plugin_loader = PluginLoader()
+        if plugin_loader is None:
+            plugin_loader = PluginLoader()
+            plugin_loader.discover_plugins()
+        self.plugin_loader = plugin_loader
 
-        # Discover available plugins
-        self.available_plugins = self.plugin_loader.discover_plugins()
+        self.available_plugins = list(plugin_loader.plugins.values())
         self.available_tiles = [p.id for p in self.available_plugins]
 
         layout = QVBoxLayout(self)
@@ -438,7 +440,7 @@ class LibraryPage(QWidget, ThemeAware):
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent_two};
-                color: #FFFFFF;
+                color: {theme.accent_two_text};
                 border: none;
                 border-radius: 8px;
                 font-weight: 600;

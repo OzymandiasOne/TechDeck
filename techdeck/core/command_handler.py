@@ -31,6 +31,7 @@ class CommandHandler:
         /help           - Show available commands
         /clear          - Clear console
         /version        - Show TechDeck version
+        /dash           - Reopen the Dashboard tab
         /fidget         - Open fidget spinner window
         /rave           - Pulse accent colors through a rainbow
         /jack           - Play blackjack in the console
@@ -76,6 +77,7 @@ class CommandHandler:
             '/clear': self._cmd_clear,
             '/version': self._cmd_version,
             '/info': self._cmd_info,
+            '/dash': self._cmd_dash,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/steelbeams': self._cmd_steelbeams,
@@ -108,10 +110,10 @@ class CommandHandler:
             "  /clear           - Clear console output\n"
             "  /version         - Show TechDeck version\n"
             "  /info            - Describe the selected tile(s)\n"
+            "  /dash            - Reopen the Dashboard tab\n"
             "  /roguemode       - Open Rogue Mode focus music player\n"
             "\n"
             "  /fidget          - Pop out a fidget spinner\n"
-            "  /rave            - Pulse accent colors through a rainbow\n"
             "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
             "  /haiku           - Print a manufacturing haiku\n"
@@ -127,6 +129,13 @@ class CommandHandler:
 
     def _cmd_version(self, args: str):
         self.console.append_system(f"TechDeck v{APP_VERSION}")
+
+    def _cmd_dash(self, args: str):
+        if hasattr(self.console, "reopen_dashboard"):
+            self.console.reopen_dashboard()
+            self.console.append_system("Dashboard reopened.")
+        else:
+            self.console.append_error("Dashboard not available.")
 
     def _cmd_info(self, args: str):
         """Print descriptions for every currently selected tile on Home.

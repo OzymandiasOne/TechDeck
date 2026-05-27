@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.4.2 - The Rave Update Pt 2 - 911 Setup formatting fix + UI polish
+; Version 0.8.5 - Redesign merge: 922 FormSeeker + Kitting, theme-matched splash, live theme switching, Steel Beams game
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.4.2"
+#define MyAppVersion "0.8.5"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

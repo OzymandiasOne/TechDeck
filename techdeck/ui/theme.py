@@ -57,6 +57,10 @@ class ColorPalette:
     # Optional overrides — these have defaults so existing themes don't need to set them
     font_family: str = '"Segoe UI", Arial, sans-serif'
     extra_stylesheet: str = ""
+    # Text color drawn ON the saturated accent backgrounds (primary buttons,
+    # selected items, etc.). Defaults to white; light-accent themes override.
+    accent_text: str = "#FFFFFF"
+    accent_two_text: str = "#FFFFFF"
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -151,7 +155,12 @@ THEMES: Dict[str, ColorPalette] = {
         border_strong="#A06858",
         divider="#A06858",
 
-        console_bg="#C87868",
+        # Light warm console so the colored labels (System/Error/etc.) keep
+        # real luminance contrast — the old mid-tone #C87868 sat right at the
+        # labels' luminance and made bold text shimmer/"scramble". Kept lighter
+        # than `surface` so the active (console_bg) tab still reads as distinct
+        # from inactive (surface) tabs.
+        console_bg="#FBE5DB",
         console_text="#2A1008",
 
         success="#10B981",
@@ -236,6 +245,8 @@ THEMES: Dict[str, ColorPalette] = {
         tile_missing_text="#500080",
         tile_missing_border="#2A0045",
 
+        accent_text="#0A0012",   # dark text on the bright-yellow accent
+        accent_two_text="#FFFFFF",  # white reads fine on the magenta CTA
         font_family='"Consolas", "Courier New", monospace',
         extra_stylesheet="""
 QLineEdit:focus, QTextEdit:focus {
@@ -245,7 +256,6 @@ QPushButton:hover {
     border-color: #FFE100;
 }
 QPushButton[class="primary"] {
-    color: #0A0012;
     border: 1px solid #FFE100;
 }
 QPushButton[class="cta"] {
@@ -288,6 +298,8 @@ QPushButton[class="cta"] {
         tile_missing_text="#005000",
         tile_missing_border="#002800",
 
+        accent_text="#000000",      # dark text on the bright-green accents
+        accent_two_text="#000000",
         font_family='"Courier New", Consolas, monospace',
         extra_stylesheet="""
 QLineEdit:focus, QTextEdit:focus {
@@ -295,12 +307,6 @@ QLineEdit:focus, QTextEdit:focus {
 }
 QPushButton:hover {
     border-color: #00FF41;
-}
-QPushButton[class="primary"] {
-    color: #000000;
-}
-QPushButton[class="cta"] {
-    color: #000000;
 }
 """,
     ),
@@ -438,7 +444,7 @@ QPushButton:checked:hover {{
 
 QPushButton[class="primary"] {{
     background-color: {theme.accent};
-    color: #FFFFFF;
+    color: {theme.accent_text};
     border: none;
     font-weight: 600;
 }}
@@ -453,7 +459,7 @@ QPushButton[class="primary"]:pressed {{
 
 QPushButton[class="cta"] {{
     background-color: {theme.accent_two};
-    color: #FFFFFF;
+    color: {theme.accent_two_text};
     border: none;
     font-weight: 600;
     border-radius: 8px;
