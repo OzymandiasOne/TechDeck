@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
 
         # PHASE 2: Set default splitter sizes (no persistence)
         # Users can drag to preferred height each session
-        self.home_splitter.setSizes([600, 250])  # Default: 600px home, 250px console
+        self.home_splitter.setSizes([520, 280])  # Default: ~280px console at the default window size
 
         # Dragging the divider all the way down still collapses the console
         # (kept intentionally); we detect that and surface the restore bar.
@@ -359,7 +359,7 @@ class MainWindow(QMainWindow):
         home_layout.addWidget(self.console_restore_bar)
 
         # Remembered console height for restore; styled controls follow theme.
-        self._saved_console_height = 250
+        self._saved_console_height = 280
         self._restyle_console_controls()
         QApplication.processEvents()
 
@@ -744,7 +744,7 @@ class MainWindow(QMainWindow):
         """Restore the console panel to its last height."""
         self.console_restore_bar.hide()
         self.console.show()
-        height = max(150, min(self._saved_console_height or 250, 400))
+        height = max(150, min(self._saved_console_height or 280, 400))
         total = sum(self.home_splitter.sizes())
         self.home_splitter.setSizes([max(total - height, 150), height])
 
