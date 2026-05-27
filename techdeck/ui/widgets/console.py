@@ -208,6 +208,11 @@ class ConsoleWidget(QWidget, ThemeAware):
         # Clear input
         self.input_field.clear()
 
+        # Submitting input brings the Console tab forward so the echoed input
+        # and any output are visible. Done before emitting so dashboard-showing
+        # commands (e.g. /dash) still end on the Dashboard tab.
+        self.tab_bar.setCurrentIndex(self._console_tab_index())
+
         # Something is waiting on console input. A slash command interrupts an
         # in-console game (owner != 'plugin') so the command can run; a running
         # plugin's input prompt supersedes commands and consumes the text as-is.
@@ -543,6 +548,12 @@ class ConsoleWidget(QWidget, ThemeAware):
             if self.tab_bar.tabData(i) is self._dash_page:
                 return i
         return -1
+
+    def _console_tab_index(self) -> int:
+        for i in range(self.tab_bar.count()):
+            if self.tab_bar.tabData(i) is self._console_page:
+                return i
+        return 0
 
     def _ensure_dashboard_tab(self) -> int:
         idx = self._dash_tab_index()
