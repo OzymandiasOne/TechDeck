@@ -1,9 +1,33 @@
-# TechDeck v0.8.5
+# TechDeck v0.8.5.1
 
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows (911 and 922 QTDR production packages)
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.5.1
+
+### 911 Setup
+
+**Pick which nests to run** — After entering the batch number, 911 Setup now shows a
+checklist of every nest in the batch. Check the whole batch or just the nests you need;
+nests that already have a folder are flagged "already set up." Nothing runs until you
+submit.
+
+**Nests listed in Windows order** — The nest checklist (and the order they're processed)
+now matches the ascending order Windows Explorer shows your files.
+
+**Correct MIL spec and material** — MIL spec and material type are now read from each
+nest's own work-packet move ticket, so every nest gets its own correct values instead
+of inheriting another nest's spec. Non-MIL specs (QQ-, ASTM-, AISI-) are captured too.
+
+**Every part row filled** — MIL spec and material now appear on every part's row across
+the NEST and SCRIBE VERIFICATION sheets, not just the first row.
+
+**Scribe verification form included** — The scribe-verification document is copied into
+every generated nest folder automatically.
 
 ---
 
@@ -85,7 +109,7 @@ Explorer and on pinned shortcuts.
 
 ## Installation
 
-Download `TechDeck-0.8.5-Setup.exe` from the [Releases](https://github.com/OzymandiasOne/TechDeck/releases) page and run it.
+Download `TechDeck-0.8.5.1-Setup.exe` from the [Releases](https://github.com/OzymandiasOne/TechDeck/releases) page and run it.
 No Python, no admin rights, no PATH changes required.
 
 TechDeck will notify you automatically when a new version is available.

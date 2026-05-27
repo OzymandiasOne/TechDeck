@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.5 - Redesign merge: 922 FormSeeker + Kitting, theme-matched splash, live theme switching, Steel Beams game
+; Version 0.8.5.1 - 911 Setup: nests in Windows order; MIL spec + material fill every part row (NEST + SCRIBE)
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.5"
+#define MyAppVersion "0.8.5.1"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
@@ -26,7 +26,7 @@ AllowNoIcons=yes
 ; Use the TechDeck icon for installer
 SetupIconFile=assets\techdeck.ico
 ; Output configuration
-OutputDir=C:\Users\ASiebenmorgen\OneDrive - American Steel & Alum\Desktop\TechDech Suite\TechDeck\installer_output
+OutputDir=installer_output
 OutputBaseFilename=TechDeck-{#MyAppVersion}-Setup
 Compression=lzma2/max
 SolidCompression=yes

@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.5"  # Redesign merge: 922 FormSeeker + Kitting plugins, theme-matched splash subprocess, live theme switching, Steel Beams game, settings reorg
+APP_VERSION = "0.8.5.1"  # 911 Setup: nests listed in Windows order; MIL spec + material now fill every part row on NEST and SCRIBE VERIFICATION
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
