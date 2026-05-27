@@ -76,11 +76,26 @@ v1.3.0 changes
     SHAPES.docx" is copied from the SACO template dir into every generated
     nest folder (one copy per nest -- skipped if already present). Missing
     source is logged as a warning and does not abort the run.
+
+v1.3.1 changes
+  - Nests are sorted in Windows Explorer ascending order (StrCmpLogicalW
+    natural sort) so the selection dialog and processing match the file
+    system's ordering instead of BATCH LIST order.
+
+  - NEST cols A-E are filled down for every part row, not just row 4. The
+    template ships D/E as formulas keyed off column C (the forecast BATCH),
+    which is usually blank, so MIL spec / material never appeared below
+    row 4. Now the row-4 values are written down every part row (formula
+    cells in D/E overwritten with the literal value; blank A-C cells filled,
+    real forecast data preserved). The SCRIBE VERIFICATION sheet mirrors
+    NEST via formulas, so it fills automatically once Excel recalculates.
 """
 
+import ctypes
 import re
 import shutil
 import threading
+from functools import cmp_to_key
 from pathlib import Path
 
 import openpyxl
@@ -115,6 +130,34 @@ except ImportError:
 # totals/footers without rejecting any real nest number we've seen.
 # ---------------------------------------------------------------------------
 _NEST_RE = re.compile(r'^[PS]?\d{3,}$', re.IGNORECASE)
+
+
+# ---------------------------------------------------------------------------
+# Windows-style natural sort
+#
+# Nests are displayed (and processed) in the same ascending order Windows
+# Explorer shows files: digit runs compared numerically, case-insensitive.
+# StrCmpLogicalW is the exact shell API Explorer uses; off Windows we fall
+# back to a manual natural-sort key.
+# ---------------------------------------------------------------------------
+try:
+    _StrCmpLogicalW = ctypes.windll.shlwapi.StrCmpLogicalW
+    _StrCmpLogicalW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
+    _StrCmpLogicalW.restype = ctypes.c_int
+except (AttributeError, OSError):
+    _StrCmpLogicalW = None
+
+
+def _windows_natural_sorted(values: list) -> list:
+    """Sort like Windows Explorer (logical/natural ascending order)."""
+    if _StrCmpLogicalW is not None:
+        return sorted(values, key=cmp_to_key(
+            lambda a, b: _StrCmpLogicalW(str(a), str(b))))
+    return sorted(
+        values,
+        key=lambda s: [int(t) if t.isdigit() else t.lower()
+                       for t in re.split(r'(\d+)', str(s))],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +245,9 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
     Read the BATCH LIST 'BATCH' sheet.
     Headers in row 3, data from row 4.
     Locates 'Nest Pkg Nbr' column by header name (case-insensitive).
-    Returns ordered list of unique nest numbers matching [PS]\\d+ pattern.
+    Returns the unique nest numbers matching the [PS]?\\d{3,} pattern, sorted in
+    Windows Explorer ascending order so the selection dialog and processing
+    follow the same ordering the operator sees in the file system.
     """
     wb = load_workbook(batch_list_path, data_only=True)
     ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
@@ -225,7 +270,7 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
                 seen.append(val)
 
     wb.close()
-    return seen
+    return _windows_natural_sorted(seen)
 
 
 def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str) -> list:
@@ -294,6 +339,42 @@ def _paste_batch_rows_into_nest(nest_ws, batch_rows: list):
         dest_row = 4 + i
         for j, val in enumerate(row_data):
             nest_ws.cell(dest_row, 6 + j).value = val  # F=6 through K=11
+
+
+def _fill_nest_part_rows(nest_ws, num_parts: int):
+    """
+    Replicate the row-4 header values (cols A-E: forecast PO/line/batch, MIL
+    spec, material type) down to every part row so each part's row is fully
+    populated.
+
+    The template ships D5:E.. as formulas keyed off column C (=IF(C5<>"",
+    $D$4,"")). Column C is the forecast BATCH, which is blank whenever the
+    forecast has no matching row, so those formulas resolve to "" and the
+    MIL spec / material never appear below row 4. We overwrite the formula
+    cells (and fill any blank A-C cell) with the literal row-4 value.
+
+    A-C cells that already hold real forecast data are left untouched (only
+    blanks are filled); D-E formula cells are always replaced with the literal
+    nest-level value, matching the template's own intent that MIL spec and
+    material repeat per row.
+
+    The SCRIBE VERIFICATION sheet is entirely formula-driven off NEST
+    (D3=IF(ISBLANK(NEST!D5),"",NEST!D5), etc.), so filling NEST fills SCRIBE
+    too once Excel recalculates (the inspection-sheet COM save does this).
+    """
+    if num_parts <= 1:
+        return
+    header = [nest_ws.cell(4, c).value for c in range(1, 6)]  # A4..E4
+    for i in range(1, num_parts):
+        row = 4 + i
+        for c in range(1, 6):
+            cur = nest_ws.cell(row, c).value
+            is_blank = (
+                cur is None
+                or (isinstance(cur, str) and (cur.strip() == "" or cur.startswith("=")))
+            )
+            if is_blank:
+                nest_ws.cell(row, c).value = header[c - 1]
 
 
 # ---------------------------------------------------------------------------
@@ -1068,6 +1149,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         else:
             log(f"  Found {len(batch_rows)} batch rows.")
             _paste_batch_rows_into_nest(nest_ws, batch_rows)
+
+        # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
+        num_parts = len(batch_rows)
+        if num_parts > 1:
+            _fill_nest_part_rows(nest_ws, num_parts)
+            log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
 
         # -- Step 8a: Collect DYPN values from NEST col G ----------------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
