@@ -59,11 +59,14 @@ class CommandHandler:
         self._rave_movie = None  # single shared QMovie — decoded once, drives all labels
         self._rave_player = None
         self._rave_audio_out = None
+        self._rave_theme_name = None     # theme to restore when the rave ends
+        self._rave_orig = None           # (accent, hover, pressed) saved before raving
         self._crabs = []
         self._moth = None
         self._moth_targets = []  # cycled through on repeat /moth calls
         self._moth_target_idx = 0
         self._jack_running = False
+        self._jack_cancel = threading.Event()  # set to fold/abort an active game
 
         self._rogue_player = None  # kept alive here to prevent GC
 
@@ -239,10 +242,12 @@ class CommandHandler:
         if theme_name not in THEMES:
             theme_name = "dark"
 
-        # Save originals
+        # Save originals (stored on self so _stop_rave can restore on /clear too)
         orig_accent = THEMES[theme_name].accent
         orig_hover = THEMES[theme_name].accent_hover
         orig_pressed = THEMES[theme_name].accent_pressed
+        self._rave_theme_name = theme_name
+        self._rave_orig = (orig_accent, orig_hover, orig_pressed)
 
         elapsed = [0]
         step = [0]
@@ -327,32 +332,7 @@ class CommandHandler:
         def tick():
             elapsed[0] += 400
             if elapsed[0] >= 10_000:
-                # Restore theme
-                THEMES[theme_name].accent = orig_accent
-                THEMES[theme_name].accent_hover = orig_hover
-                THEMES[theme_name].accent_pressed = orig_pressed
-                app.setStyleSheet(generate_stylesheet(theme_name))
-                self._rave_timer.stop()
-                self._rave_timer = None
-                # Stop all crabs
-                for crab in self._crabs:
-                    crab.stop()
-                self._crabs = []
-                # Stop music
-                if self._rave_player is not None:
-                    self._rave_player.stop()
-                    self._rave_player = None
-                    self._rave_audio_out = None
-                # Stop shared movie and close all GIF overlays
-                if self._rave_movie is not None:
-                    self._rave_movie.stop()
-                    self._rave_movie = None
-                for gif_w in self._rave_gifs:
-                    gif_w.close()
-                self._rave_gifs = []
-                # Hide spinner and log finale
-                self.console.hide_spinner()
-                self.console.append_system("Rave over. Productivity +10.")
+                self._stop_rave()
                 return
 
             color = self._RAVE_COLORS[step[0] % len(self._RAVE_COLORS)]
@@ -371,6 +351,70 @@ class CommandHandler:
         self._rave_timer.start()
 
     # ------------------------------------------------------------------ #
+    #  Session teardown — invoked by /clear and the Clear button
+    # ------------------------------------------------------------------ #
+
+    def stop_session_effects(self):
+        """End in-console easter-egg sessions on /clear or the Clear button:
+        fold blackjack, end /rave, dismiss /moth. The fidget spinner and the
+        Steel Beams game are separate windows, left to be closed manually."""
+        self._stop_jack()
+        self._stop_rave(announce=False)
+        self._stop_moth()
+
+    def _stop_jack(self):
+        """Fold an in-progress blackjack hand and end the game."""
+        if self._jack_running:
+            self._jack_cancel.set()
+            self.console.abort_input()  # unblock the game thread if it's waiting
+
+    def _stop_rave(self, announce: bool = True):
+        """Tear down the rave: restore the theme, stop crabs/music/GIFs, hide the
+        spinner. Safe to call when no rave is active. `announce` logs the finale
+        line (used by the natural timeout, suppressed on /clear)."""
+        if self._rave_timer is None:
+            return
+        from PySide6.QtWidgets import QApplication
+        from techdeck.ui.theme import THEMES, generate_stylesheet
+
+        app = QApplication.instance()
+        if self._rave_theme_name in THEMES and self._rave_orig is not None:
+            accent, hover, pressed = self._rave_orig
+            THEMES[self._rave_theme_name].accent = accent
+            THEMES[self._rave_theme_name].accent_hover = hover
+            THEMES[self._rave_theme_name].accent_pressed = pressed
+            if app is not None:
+                app.setStyleSheet(generate_stylesheet(self._rave_theme_name))
+
+        self._rave_timer.stop()
+        self._rave_timer = None
+        for crab in self._crabs:
+            crab.stop()
+        self._crabs = []
+        if self._rave_player is not None:
+            self._rave_player.stop()
+            self._rave_player = None
+            self._rave_audio_out = None
+        if self._rave_movie is not None:
+            self._rave_movie.stop()
+            self._rave_movie = None
+        for gif_w in self._rave_gifs:
+            gif_w.close()
+        self._rave_gifs = []
+        self.console.hide_spinner()
+        if announce:
+            self.console.append_system("Rave over. Productivity +10.")
+
+    def _stop_moth(self):
+        """Dismiss the moth if present (used by /clear)."""
+        if self._moth is not None:
+            try:
+                self._moth.dismiss()
+            except Exception:
+                pass
+            self._moth = None
+
+    # ------------------------------------------------------------------ #
     #  /jack  — Blackjack
     # ------------------------------------------------------------------ #
 
@@ -382,12 +426,21 @@ class CommandHandler:
             self.console.append_system("Sal is still waiting on you.")
             return
         self._jack_running = True
+        self._jack_cancel.clear()
         t = threading.Thread(target=self._jack_game_loop, daemon=True, name="BlackjackGame")
         t.start()
 
     def _jack_game_loop(self):
+        from techdeck.ui.widgets.console import InputAborted
+
         log = self.console.safe_game_log
-        ask = self.console.request_input
+
+        def ask(prompt):
+            # Marked owner='game' so a slash command folds the hand instead of
+            # being eaten as a move. _jack_cancel covers the gap between prompts.
+            if self._jack_cancel.is_set():
+                raise InputAborted()
+            return self.console.request_input(prompt, owner='game')
 
         bankroll = self.settings.get_blackjack_bankroll()
         bet = self.JACK_BET
@@ -520,6 +573,11 @@ class CommandHandler:
                     break
                 log("")
 
+        except InputAborted:
+            # Folded mid-hand because the user ran another command (or cleared).
+            self.settings.set_blackjack_bankroll(bankroll)
+            self._jack_running = False
+            return
         except Exception as e:
             log(f"  Game interrupted: {e}")
 

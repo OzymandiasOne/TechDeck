@@ -17,6 +17,13 @@ from techdeck.ui.widgets.dashboard import DashboardView
 from techdeck.ui.theme_aware import ThemeAware
 
 
+class InputAborted(Exception):
+    """Raised inside request_input() when a pending console input request is
+    cancelled — e.g. a slash command interrupts an in-console game. Worker
+    loops that call request_input should let this propagate so they unwind."""
+    pass
+
+
 class ConsoleWidget(QWidget, ThemeAware):
     """
     Console/chat widget with message history, command input, and plugin input support.
@@ -34,6 +41,7 @@ class ConsoleWidget(QWidget, ThemeAware):
     input_provided = Signal(str)  # NEW: For plugin input requests
     before_input_request = Signal()  # Emitted just before showing a plugin input prompt
     dashboard_shown = Signal()  # Emitted when a dashboard is rendered (shell auto-expands)
+    cleared = Signal()  # Emitted after the console is cleared (button or /clear)
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
@@ -48,6 +56,10 @@ class ConsoleWidget(QWidget, ThemeAware):
         self.input_prompt = ""
         self.input_response = None
         self.input_event = None
+        # Who owns the current input request: 'plugin' (supersedes commands) or
+        # 'game' (an in-console easter egg that a slash command may interrupt).
+        self._input_owner = 'plugin'
+        self._input_aborted = False
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -195,12 +207,18 @@ class ConsoleWidget(QWidget, ThemeAware):
         
         # Clear input
         self.input_field.clear()
-        
-        # NEW: Check if we're waiting for plugin input
+
+        # Something is waiting on console input. A slash command interrupts an
+        # in-console game (owner != 'plugin') so the command can run; a running
+        # plugin's input prompt supersedes commands and consumes the text as-is.
         if self.waiting_for_input:
-            self._handle_plugin_input(text)
-            return
-        
+            if text.startswith('/') and self._input_owner != 'plugin':
+                self.abort_input()
+                # fall through to dispatch the command below
+            else:
+                self._handle_plugin_input(text)
+                return
+
         # Echo user input
         self.append_user(text)
         
@@ -230,31 +248,39 @@ class ConsoleWidget(QWidget, ThemeAware):
         if self.input_event:
             self.input_event.set()
     
-    def request_input(self, prompt: str) -> str:
+    def request_input(self, prompt: str, owner: str = 'plugin') -> str:
         """
         NEW: Request input from user - BLOCKS until user provides input.
-        
+
         This method can be called from plugin threads and will safely
         request input from the main GUI thread.
-        
+
         FIXED: Uses BlockingQueuedConnection to properly synchronize threads
-        
+
         Args:
             prompt: The prompt/question to show the user
-            
+            owner: 'plugin' (default) means a real plugin owns this prompt and it
+                   supersedes commands. 'game' marks an in-console easter egg whose
+                   prompt a slash command may interrupt (raises InputAborted here).
+
         Returns:
             str: The user's input
+
+        Raises:
+            InputAborted: if the request is cancelled via abort_input()
         """
         from PySide6.QtCore import QThread, QMetaObject
-        
+
         # If we're on the main GUI thread, we can't block
         if QThread.currentThread() == self.thread():
             raise RuntimeError("request_input() cannot be called from main GUI thread")
-        
+
         # We're on a worker thread - safe to block
         self.input_response = None
+        self._input_owner = owner
+        self._input_aborted = False
         self.input_event = threading.Event()
-        
+
         # FIXED: Use BlockingQueuedConnection to ensure GUI method completes before continuing
         # This is critical - QueuedConnection would be asynchronous and cause the worker thread
         # to wait forever since the GUI method might not have executed yet
@@ -264,11 +290,31 @@ class ConsoleWidget(QWidget, ThemeAware):
             Qt.ConnectionType.BlockingQueuedConnection,  # ← FIXED: Changed from QueuedConnection
             Q_ARG(str, prompt)
         )
-        
+
         # Wait for user to provide input
         self.input_event.wait()
-        
+
+        if self._input_aborted:
+            raise InputAborted()
+
         return self.input_response
+
+    def abort_input(self):
+        """Cancel a pending request_input so a new command can run in its place.
+
+        Used to interrupt an in-console game (e.g. blackjack); a real plugin's
+        input prompt is never aborted this way. Runs on the GUI thread and wakes
+        the blocked worker, which then raises InputAborted out of request_input.
+        """
+        if not self.waiting_for_input:
+            return
+        self.waiting_for_input = False
+        self._input_aborted = True
+        self.input_prompt = ""
+        self.input_field.setPlaceholderText("Type a command (/help) or message...")
+        self.input_field.setStyleSheet("")
+        if self.input_event is not None:
+            self.input_event.set()
     
     @Slot(str)
     def _request_input_gui(self, prompt: str):
@@ -550,11 +596,13 @@ class ConsoleWidget(QWidget, ThemeAware):
                 self._style_close_button(btn)
 
     def clear(self):
-        """Clear console output."""
+        """Clear console output (Clear button or /clear). Emits `cleared` so the
+        command handler can tear down in-console sessions (blackjack, rave, moth)."""
         from techdeck.core.audio_manager import get_audio_manager, SOUND_CLEAR
         self.output.clear()
         self.append_system("Console cleared.")
         get_audio_manager().play(SOUND_CLEAR)
+        self.cleared.emit()
     
     def _scroll_to_bottom(self):
         """Scroll output to bottom."""

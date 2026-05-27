@@ -126,9 +126,14 @@ class MothWidget(QWidget):
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
+        self.dismiss()
+
+    def dismiss(self):
+        """Stop animating and remove the moth (programmatic shoo, e.g. on /clear)."""
         self._timer.stop()
-        self.hide()
+        self._flying = False
         self._target = None
+        self.close()
 
     def paintEvent(self, event):
         painter = QPainter(self)
