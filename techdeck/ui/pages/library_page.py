@@ -306,11 +306,27 @@ class LibraryPage(QWidget, ThemeAware):
         self.btn_save.setMinimumWidth(110)
         self.btn_save.clicked.connect(self._on_save)
 
+        # Sort control: alphabetical vs. by family. Persists in settings so the
+        # user's choice survives restarts.
+        self._sort_label = QLabel("Sort:")
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("Alphabetical", "alphabetical")
+        self.sort_combo.addItem("By Family", "family")
+        self.sort_combo.setMinimumHeight(36)
+        self.sort_combo.setMinimumWidth(140)
+        _initial_sort = self.settings.get_library_sort_mode()
+        _idx = self.sort_combo.findData(_initial_sort)
+        if _idx >= 0:
+            self.sort_combo.setCurrentIndex(_idx)
+        self.sort_combo.currentIndexChanged.connect(self._on_sort_mode_changed)
+
         header_layout.addWidget(self._profile_label)
         header_layout.addWidget(self.profile_combo)
         header_layout.addWidget(self.btn_create)
         header_layout.addWidget(self.btn_edit)
         header_layout.addStretch()
+        header_layout.addWidget(self._sort_label)
+        header_layout.addWidget(self.sort_combo)
         header_layout.addWidget(self.btn_save)
 
         layout.addWidget(self._header_container)
@@ -380,7 +396,7 @@ class LibraryPage(QWidget, ThemeAware):
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
 
-        self.profile_combo.setStyleSheet(f"""
+        combo_style = f"""
             QComboBox {{
                 background-color: {theme.surface};
                 color: {theme.text};
@@ -414,7 +430,12 @@ class LibraryPage(QWidget, ThemeAware):
                 selection-background-color: {theme.tile_selected};
                 outline: none;
             }}
-        """)
+        """
+        self.profile_combo.setStyleSheet(combo_style)
+        self.sort_combo.setStyleSheet(combo_style)
+        self._sort_label.setStyleSheet(
+            f"font-size: 14px; color: {theme.text}; background: transparent;"
+        )
 
         surface_btn_style = f"""
             QPushButton {{
@@ -520,10 +541,23 @@ class LibraryPage(QWidget, ThemeAware):
         
         # Combine available tiles + missing tiles from profile
         all_tile_ids = list(set(self.available_tiles) | current_profile_tiles)
-        
+
+        # Sort according to user-selected mode. "alphabetical" by display name,
+        # "family" groups 911 -> 922 -> other (alphabetical within each group).
+        sort_mode = self.settings.get_library_sort_mode()
+        _family_rank = {"911": 0, "922": 1, "other": 2}
+
+        def _sort_key(tid: str):
+            p = self.plugin_loader.get_plugin(tid)
+            name = (p.name if p else tid).lower()
+            if sort_mode == "family":
+                family = (p.family if p else "other")
+                return (_family_rank.get(family, 2), name)
+            return (name,)
+
         row, col = 0, 0
-        
-        for tile_id in sorted(all_tile_ids):
+
+        for tile_id in sorted(all_tile_ids, key=_sort_key):
             plugin = self.plugin_loader.get_plugin(tile_id)
             
             # Check if this tile is selected in current profile
@@ -623,6 +657,12 @@ class LibraryPage(QWidget, ThemeAware):
             self.settings.set_current_profile(profile_name)
             self._build_tile_grid()
             self.btn_edit.setEnabled(profile_name != DEFAULT_PROFILE_NAME)
+
+    def _on_sort_mode_changed(self, _index: int):
+        """Persist the new sort mode and rebuild the grid."""
+        mode = self.sort_combo.currentData() or "alphabetical"
+        self.settings.set_library_sort_mode(mode)
+        self._build_tile_grid()
     
     def _on_create_profile(self):
         """Show dialog to create new profile."""

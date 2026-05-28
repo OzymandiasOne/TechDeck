@@ -4,6 +4,7 @@
   "description": "Generate QR codes for URLs, text, and contact info with library management",
   "version": "1.0.0",
   "author": "Anthony Sieben",
+  "family": "other",
   "icon": "🔲",
   "requires_admin": false,
   "requires_main_thread": true,

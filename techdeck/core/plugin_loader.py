@@ -19,11 +19,30 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# Plugin family constants. Used to group related plugins for shared-state runs
+# (e.g. one batch number prompt carried across all 911 plugins in a multi-run)
+# and for the Library page "sort by family" mode.
+FAMILY_911 = "911"
+FAMILY_922 = "922"
+FAMILY_OTHER = "other"
+VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER}
+
+
+def _infer_family_from_id(plugin_id: str) -> str:
+    """Prefix-based family fallback when plugin.json omits the family field."""
+    pid = plugin_id.lower()
+    if pid.startswith("911_") or pid.startswith("911-"):
+        return FAMILY_911
+    if pid.startswith("922_") or pid.startswith("922-"):
+        return FAMILY_922
+    return FAMILY_OTHER
+
+
 @dataclass
 class Plugin:
     """
     Represents a discovered plugin.
-    
+
     Attributes:
         id: Unique plugin identifier
         name: Display name
@@ -33,6 +52,8 @@ class Plugin:
         path: Path to plugin directory
         icon: Optional icon path
         requires_admin: Whether plugin needs admin rights
+        family: Workflow grouping ("911", "922", or "other"). Drives the family-aware
+                shared-state run and the Library page's "sort by family" mode.
     """
     id: str
     name: str
@@ -44,6 +65,7 @@ class Plugin:
     requires_admin: bool = False
     requires_main_thread: bool = False
     timeout: Optional[int] = None  # Per-plugin timeout override (None = use executor default)
+    family: str = FAMILY_OTHER
 
 class PluginLoader:
     """
@@ -159,6 +181,16 @@ class PluginLoader:
                     logger.error(f"Invalid plugin ID in {item}: '{plugin_id}'")
                     continue
                 
+                # Family: explicit field wins; fall back to ID prefix.
+                family = metadata.get('family')
+                if family not in VALID_FAMILIES:
+                    if family is not None:
+                        logger.warning(
+                            f"Plugin {plugin_id}: unknown family '{family}', "
+                            f"falling back to prefix inference"
+                        )
+                    family = _infer_family_from_id(plugin_id)
+
                 # Create Plugin object
                 plugin = Plugin(
                     id=plugin_id,
@@ -170,7 +202,8 @@ class PluginLoader:
                     icon=metadata.get('icon'),
                     requires_admin=metadata.get('requires_admin', False),
                     requires_main_thread=metadata.get('requires_main_thread', False),
-                    timeout=metadata.get('timeout', None)
+                    timeout=metadata.get('timeout', None),
+                    family=family,
                 )
                 
                 # Check for duplicate plugin IDs

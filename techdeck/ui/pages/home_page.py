@@ -5,12 +5,13 @@ PHASE 3: Enhanced tiles with elevation, hover effects, status indicators, and mo
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QComboBox, QPushButton, QScrollArea, QGridLayout, QMessageBox, QCheckBox, QFrame,
-    QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
+    QComboBox, QPushButton, QScrollArea, QMessageBox, QCheckBox, QFrame,
+    QGraphicsDropShadowEffect, QGraphicsOpacityEffect, QApplication,
 )
 from PySide6.QtCore import (
     Signal, Qt, QPropertyAnimation, QEasingCurve, Property,
     QVariantAnimation, QSequentialAnimationGroup, QTimer,
+    QPoint, QObject,
 )
 from PySide6.QtGui import QFont, QColor
 
@@ -30,6 +31,11 @@ class PluginCard(QFrame, ThemeAware):
     """Professional plugin card with shadow elevation, hover lift, pulse, and flash animations."""
 
     toggled = Signal(bool)
+    # Drag signals: emitted as the user picks up, drags, and drops this card on the
+    # Home page tile grid. TileGridController receives them and animates the grid.
+    drag_started = Signal(object, QPoint)   # (card, press_pos_local)
+    drag_moved = Signal(QPoint)             # global cursor pos
+    drag_dropped = Signal(QPoint)           # global cursor pos at release
 
     STATUS_IDLE = "idle"
     STATUS_RUNNING = "running"
@@ -46,6 +52,14 @@ class PluginCard(QFrame, ThemeAware):
         self._status = self.STATUS_IDLE
         self._flash_anim = None
         self._entrance_anim = None
+        # Drag state: armed on press, promoted to dragging once movement exceeds
+        # QApplication.startDragDistance(). _can_drag is a callable so HomePage can
+        # gate drags on "not currently running a plugin" without coupling.
+        self._drag_armed = False
+        self._dragging = False
+        self._press_pos = QPoint()
+        self._press_global = QPoint()
+        self._can_drag = lambda: True
 
         self.setFixedSize(220, 140)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -256,24 +270,393 @@ class PluginCard(QFrame, ThemeAware):
             }}
         """)
 
+    def is_running(self) -> bool:
+        """Whether this card's plugin is currently executing (drag is blocked while running)."""
+        return self._status == self.STATUS_RUNNING
+
     def enterEvent(self, event):
-        if self.graphicsEffect() is self._shadow and self._status != self.STATUS_RUNNING:
+        # While dragging, the controller is animating the shadow; don't fight it.
+        if (self.graphicsEffect() is self._shadow
+                and self._status != self.STATUS_RUNNING
+                and not self._dragging):
             self._hover_out.stop()
             self._hover_in.setStartValue(self._shadow.blurRadius())
             self._hover_in.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if self.graphicsEffect() is self._shadow and self._status != self.STATUS_RUNNING:
+        if (self.graphicsEffect() is self._shadow
+                and self._status != self.STATUS_RUNNING
+                and not self._dragging):
             self._hover_in.stop()
             self._hover_out.setStartValue(self._shadow.blurRadius())
             self._hover_out.start()
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.checkbox.setChecked(not self.checkbox.isChecked())
+        # Arm a potential drag. We don't toggle the checkbox here anymore —
+        # that moves to mouseReleaseEvent so we can distinguish click from drag.
+        if event.button() == Qt.MouseButton.LeftButton and not self.is_running() and self._can_drag():
+            self._press_pos = event.position().toPoint()
+            self._press_global = event.globalPosition().toPoint()
+            self._drag_armed = True
+            self._dragging = False
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_armed and not self._dragging:
+            delta = (event.globalPosition().toPoint() - self._press_global).manhattanLength()
+            if delta >= QApplication.startDragDistance():
+                self._dragging = True
+                self.drag_started.emit(self, self._press_pos)
+        if self._dragging:
+            self.drag_moved.emit(event.globalPosition().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._drag_armed and not self._dragging:
+                # True click — preserve the legacy click-to-toggle gesture.
+                self.checkbox.setChecked(not self.checkbox.isChecked())
+            elif self._dragging:
+                self.drag_dropped.emit(event.globalPosition().toPoint())
+            self._drag_armed = False
+            self._dragging = False
+        super().mouseReleaseEvent(event)
+
+
+class _MissingTile(QFrame):
+    """Placeholder card for a tile whose plugin folder is no longer on disk.
+
+    Mirrors PluginCard's drag protocol so the user can still rearrange or remove
+    the slot; clicking does nothing (no checkbox), but the "Remove from Kit"
+    button still works.
+    """
+
+    drag_started = Signal(object, QPoint)
+    drag_moved = Signal(QPoint)
+    drag_dropped = Signal(QPoint)
+
+    def __init__(self, tile_id: str, theme, on_remove, parent=None):
+        super().__init__(parent)
+        self.tile_id = tile_id
+        self.setFixedSize(220, 140)
+
+        self._drag_armed = False
+        self._dragging = False
+        self._press_global = QPoint()
+        self._press_pos = QPoint()
+        self._can_drag = lambda: True
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(16, 12, 16, 12)
+        card_layout.setSpacing(6)
+
+        missing_label = QLabel(f"{tile_id}\n(Missing)")
+        missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        missing_label.setWordWrap(True)
+        missing_label.setStyleSheet(
+            f"color: {theme.tile_missing_text}; font-size: 11px; background: transparent;"
+        )
+
+        remove_btn = QPushButton("Remove from Kit")
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #EF4444;
+                border: 1px solid #EF4444;
+                border-radius: 4px;
+                font-size: 10px;
+                padding: 4px 8px;
+            }
+            QPushButton:hover {
+                background-color: #EF4444;
+                color: white;
+            }
+        """)
+        remove_btn.clicked.connect(lambda _checked=False, tid=tile_id: on_remove(tid))
+
+        card_layout.addWidget(missing_label)
+        card_layout.addWidget(remove_btn)
+
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {theme.surface};
+                border: 1px dashed {theme.border};
+                border-radius: 12px;
+            }}
+        """)
+
+    def is_running(self) -> bool:
+        return False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._can_drag():
+            self._press_pos = event.position().toPoint()
+            self._press_global = event.globalPosition().toPoint()
+            self._drag_armed = True
+            self._dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._drag_armed and not self._dragging:
+            delta = (event.globalPosition().toPoint() - self._press_global).manhattanLength()
+            if delta >= QApplication.startDragDistance():
+                self._dragging = True
+                self.drag_started.emit(self, self._press_pos)
+        if self._dragging:
+            self.drag_moved.emit(event.globalPosition().toPoint())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._dragging:
+                self.drag_dropped.emit(event.globalPosition().toPoint())
+            self._drag_armed = False
+            self._dragging = False
+        super().mouseReleaseEvent(event)
+
+
+class _GridSurface(QWidget):
+    """QWidget that emits `resized` so TileGridController can recompute columns."""
+    resized = Signal()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+
+class TileGridController(QObject):
+    """Absolute-position grid manager for draggable plugin tiles.
+
+    Replaces QGridLayout on the Home page surface. Each tile is placed via
+    `widget.move()` based on its logical index in `_order`. Drag-and-drop is
+    handled by animating other tiles' `pos` properties as the dragged tile
+    moves between slots, giving the smartphone/Teams-card "push aside" feel.
+    """
+
+    CELL_W = 220
+    CELL_H = 140
+    SPACING = 20
+    MARGIN = 24
+    MAX_COLS = 3
+
+    def __init__(self, surface: _GridSurface, settings, parent=None):
+        super().__init__(parent)
+        self._surface = surface
+        self._settings = settings
+        self._order: list = []
+        self._widgets: dict = {}
+        self._cols = self.MAX_COLS
+        self._anims: list = []  # keep refs so QPropertyAnimations don't GC
+
+        # Drag state
+        self._drag_card = None
+        self._drag_widget_id = None
+        self._drag_origin_index = -1
+        self._hover_index = -1
+        self._grab_offset = QPoint(0, 0)
+        self._restore_shadow = None  # (blur, x_offset, y_offset)
+
+        surface.resized.connect(self._on_resized)
+
+    # ---- setup / teardown ------------------------------------------------
+
+    def set_tiles(self, order: list, widgets: dict):
+        """Replace the current set of managed tiles. Caller owns lifecycle of evicted widgets."""
+        self._cancel_active_drag()
+        self._order = list(order)
+        self._widgets = dict(widgets)
+        for w in widgets.values():
+            if w.parent() is not self._surface:
+                w.setParent(self._surface)
+            w.show()
+        self._recompute_cols()
+        self.relayout(animated=False)
+
+    def clear(self):
+        self._cancel_active_drag()
+        self._order = []
+        self._widgets = {}
+        self._anims = []
+
+    def _cancel_active_drag(self):
+        self._drag_card = None
+        self._drag_widget_id = None
+        self._drag_origin_index = -1
+        self._hover_index = -1
+        self._restore_shadow = None
+
+    # ---- geometry --------------------------------------------------------
+
+    def slot_pos(self, index: int, cols: int) -> QPoint:
+        row, col = divmod(index, cols)
+        x = self.MARGIN + col * (self.CELL_W + self.SPACING)
+        y = self.MARGIN + row * (self.CELL_H + self.SPACING)
+        return QPoint(x, y)
+
+    def _recompute_cols(self) -> bool:
+        w = self._surface.width()
+        available = max(self.CELL_W, w - 2 * self.MARGIN + self.SPACING)
+        new_cols = max(1, available // (self.CELL_W + self.SPACING))
+        new_cols = min(self.MAX_COLS, new_cols)
+        if new_cols != self._cols:
+            self._cols = new_cols
+            return True
+        return False
+
+    def _on_resized(self):
+        changed = self._recompute_cols()
+        if changed:
+            self.relayout(animated=False)
+        else:
+            self._update_min_size()
+
+    def _index_for_point(self, p: QPoint) -> int:
+        stride_x = self.CELL_W + self.SPACING
+        stride_y = self.CELL_H + self.SPACING
+        # +SPACING//2 puts the snap boundary at the midpoint between tiles, so
+        # cursor "between" slots picks the next slot rather than the current one.
+        col = (p.x() - self.MARGIN + self.SPACING // 2) // stride_x
+        row = (p.y() - self.MARGIN + self.SPACING // 2) // stride_y
+        col = max(0, min(self._cols - 1, int(col)))
+        row = max(0, int(row))
+        idx = row * self._cols + col
+        # _order excludes the dragged card during drag, so cap at len(_order)
+        return max(0, min(idx, len(self._order)))
+
+    def _update_min_size(self):
+        # Includes the dragged card in the count so the scroll area doesn't shrink
+        # under the dragged tile mid-gesture.
+        n = len(self._order) + (1 if self._drag_card is not None else 0)
+        if n == 0:
+            self._surface.setMinimumHeight(self.MARGIN * 2 + self.CELL_H)
+            return
+        rows = (n + self._cols - 1) // self._cols
+        h = self.MARGIN * 2 + rows * self.CELL_H + max(0, rows - 1) * self.SPACING
+        self._surface.setMinimumHeight(h)
+
+    # ---- layout ---------------------------------------------------------
+
+    def relayout(self, animated: bool = True):
+        """Move every tile to its slot. During drag, the dragged card is skipped
+        (it's following the cursor) and other tiles shift to make room."""
+        display_order = list(self._order)
+        if self._drag_card is not None and self._drag_widget_id is not None:
+            insert_at = max(0, min(self._hover_index, len(display_order)))
+            display_order.insert(insert_at, self._drag_widget_id)
+
+        new_anims = []
+        for i, tid in enumerate(display_order):
+            if self._drag_widget_id is not None and tid == self._drag_widget_id:
+                continue  # dragged card follows cursor, not slots
+            card = self._widgets.get(tid)
+            if card is None:
+                continue
+            target = self.slot_pos(i, self._cols)
+            if card.pos() == target:
+                continue
+            if animated:
+                anim = QPropertyAnimation(card, b"pos", self)
+                anim.setDuration(180)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                anim.setStartValue(card.pos())
+                anim.setEndValue(target)
+                anim.start()
+                new_anims.append(anim)
+            else:
+                card.move(target)
+
+        self._anims = new_anims
+        self._update_min_size()
+
+    # ---- drag lifecycle -------------------------------------------------
+
+    def on_drag_started(self, card, press_pos: QPoint):
+        tid = getattr(card, "tile_id", None)
+        if tid is None or tid not in self._widgets:
+            return
+        if tid not in self._order:
+            return
+        self._drag_card = card
+        self._drag_widget_id = tid
+        self._drag_origin_index = self._order.index(tid)
+        self._order.pop(self._drag_origin_index)
+        self._hover_index = self._drag_origin_index
+        self._grab_offset = QPoint(press_pos)
+
+        # Lift visually: bump the existing shadow effect. A widget can only host
+        # one QGraphicsEffect, so we mutate the card's shadow rather than adding
+        # an overlay effect.
+        if hasattr(card, "_shadow") and card.graphicsEffect() is card._shadow:
+            self._restore_shadow = (
+                card._shadow.blurRadius(),
+                card._shadow.xOffset(),
+                card._shadow.yOffset(),
+            )
+            # Stop any in-flight hover animation that targets the same property.
+            if hasattr(card, "_hover_in"):
+                card._hover_in.stop()
+            if hasattr(card, "_hover_out"):
+                card._hover_out.stop()
+            card._shadow.setBlurRadius(30)
+            card._shadow.setOffset(0, 8)
+        else:
+            self._restore_shadow = None
+
+        card.raise_()
+        self.relayout(animated=True)
+
+    def on_drag_moved(self, global_pos: QPoint):
+        if self._drag_card is None:
+            return
+        local = self._surface.mapFromGlobal(global_pos)
+        self._drag_card.move(local - self._grab_offset)
+        new_idx = self._index_for_point(local)
+        if new_idx != self._hover_index:
+            self._hover_index = new_idx
+            self.relayout(animated=True)
+
+    def on_drag_dropped(self, global_pos: QPoint):
+        if self._drag_card is None:
+            return
+        card = self._drag_card
+        tid = self._drag_widget_id
+        drop_idx = max(0, min(self._hover_index, len(self._order)))
+        self._order.insert(drop_idx, tid)
+
+        # Clear drag state BEFORE the drop animation so future calls treat the
+        # card as a normal tile in the order.
+        self._drag_card = None
+        self._drag_widget_id = None
+        self._hover_index = -1
+        self._drag_origin_index = -1
+
+        target = self.slot_pos(drop_idx, self._cols)
+        anim = QPropertyAnimation(card, b"pos", self)
+        anim.setDuration(200)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.setStartValue(card.pos())
+        anim.setEndValue(target)
+        anim.start()
+        self._anims.append(anim)
+
+        if self._restore_shadow is not None and hasattr(card, "_shadow") \
+                and card.graphicsEffect() is card._shadow:
+            blur, ox, oy = self._restore_shadow
+            card._shadow.setBlurRadius(blur)
+            card._shadow.setOffset(ox, oy)
+        self._restore_shadow = None
+
+        self._update_min_size()
+        try:
+            self._settings.set_profile_tiles(list(self._order))
+        except Exception:
+            # Don't crash the UI if persistence fails — drag still completes.
+            pass
+
+    def get_order(self) -> list:
+        return list(self._order)
 
 
 class HomePage(QWidget, ThemeAware):
@@ -292,6 +675,7 @@ class HomePage(QWidget, ThemeAware):
         self.settings = settings
         self.selected_tiles = set()
         self.tile_cards = {}  # PHASE 3: Track card widgets by tile_id
+        self._missing_tiles: dict = {}  # tile_id -> _MissingTile for tiles whose plugin folder is gone
         self._is_running = False  # True while any plugin is executing
 
         # Use the shared loader if MainWindow gave us one; otherwise scan now.
@@ -342,19 +726,25 @@ class HomePage(QWidget, ThemeAware):
 
         layout.addWidget(self._profile_container)
 
-        # Tile Grid Container (scrollable)
+        # Tile Grid Container (scrollable). Replaces QGridLayout with absolute
+        # positioning managed by TileGridController so we can animate per-tile
+        # pos for drag-reorder (Phase A.2 of multi-plugin-run UX overhaul).
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self._grid_widget = QWidget()
-        self.tile_grid = QGridLayout(self._grid_widget)
-        self.tile_grid.setContentsMargins(24, 24, 24, 24)
-        self.tile_grid.setSpacing(20)
-        self.tile_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
+        self._grid_widget = _GridSurface()
         self._scroll.setWidget(self._grid_widget)
         layout.addWidget(self._scroll, 1)
+
+        self._tile_ctrl = TileGridController(self._grid_widget, self.settings, self)
+
+        # Empty-state label is a child of the surface (not managed by the controller).
+        self._empty_label = QLabel("", self._grid_widget)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setWordWrap(True)
+        self._empty_label.hide()
+        self._grid_widget.resized.connect(self._reposition_empty_label)
 
         # Subscribes to theme_changed and applies immediately.
         self.setup_theme_awareness()
@@ -500,105 +890,93 @@ class HomePage(QWidget, ThemeAware):
         self._refresh_tiles()
     
     def _refresh_tiles(self):
-        # Clear existing tiles
-        while self.tile_grid.count():
-            item = self.tile_grid.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
+        # Tear down any previous widgets the controller was managing.
+        self._tile_ctrl.clear()
+        for w in list(self._managed_tile_widgets()):
+            w.setParent(None)
+            w.deleteLater()
         self.tile_cards.clear()
-        
+        self._missing_tiles = {}
+
         tile_ids = self.settings.get_profile_tiles()
-        
-        # PROFESSIONAL: Get theme from ThemeManager, not settings
+
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        
+
         if not tile_ids:
-            label = QLabel("No apps in this kit.\n\nClick '+ Apps' to add some!")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet(
+            self._empty_label.setText("No apps in this kit.\n\nClick '+ Apps' to add some!")
+            self._empty_label.setStyleSheet(
                 f"color: {theme.text_secondary}; font-size: 14px; padding: 40px; "
                 f"background: transparent;"
             )
-            self.tile_grid.addWidget(label, 0, 0)
-        else:
-            from PySide6.QtWidgets import QApplication
-            row, col = 0, 0
-            for tile_id in tile_ids:
-                plugin = self.plugin_loader.get_plugin(tile_id)
+            self._empty_label.show()
+            self._reposition_empty_label()
+            return
 
-                if plugin:
-                    # PHASE 3: Create professional card
-                    card = PluginCard(
-                        plugin_name=plugin.name,
-                        plugin_desc=plugin.description[:60] + "..." if len(plugin.description) > 60 else plugin.description,
-                        tile_id=tile_id,
-                        theme=theme,
-                        parent=self
-                    )
-                    card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled(tid, checked))
+        self._empty_label.hide()
 
-                    self.tile_cards[tile_id] = card
-                    self.tile_grid.addWidget(card, row, col)
-                    # Yield to event loop between cards so the splash GIF can advance
-                    QApplication.processEvents()
-                else:
-                    # Missing plugin - show disabled card with remove button
-                    card = QFrame()
-                    card.setFixedSize(220, 140)
-                    card_layout = QVBoxLayout(card)
-                    card_layout.setContentsMargins(16, 12, 16, 12)
-                    card_layout.setSpacing(6)
+        order: list = []
+        widgets: dict = {}
+        for tile_id in tile_ids:
+            plugin = self.plugin_loader.get_plugin(tile_id)
 
-                    missing_label = QLabel(f"{tile_id}\n(Missing)")
-                    missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    missing_label.setWordWrap(True)
-                    missing_label.setStyleSheet(
-                        f"color: {theme.tile_missing_text}; font-size: 11px; "
-                        f"background: transparent;"
-                    )
+            if plugin:
+                desc = plugin.description
+                if len(desc) > 60:
+                    desc = desc[:60] + "..."
+                card = PluginCard(
+                    plugin_name=plugin.name,
+                    plugin_desc=desc,
+                    tile_id=tile_id,
+                    theme=theme,
+                    parent=self._grid_widget,
+                )
+                card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled(tid, checked))
+                card._can_drag = lambda: not self._is_running
+                card.drag_started.connect(self._tile_ctrl.on_drag_started)
+                card.drag_moved.connect(self._tile_ctrl.on_drag_moved)
+                card.drag_dropped.connect(self._tile_ctrl.on_drag_dropped)
+                self.tile_cards[tile_id] = card
+                widgets[tile_id] = card
+                # Yield to event loop between cards so the splash GIF can advance
+                QApplication.processEvents()
+            else:
+                tile = _MissingTile(
+                    tile_id=tile_id,
+                    theme=theme,
+                    on_remove=self._remove_missing_plugin,
+                    parent=self._grid_widget,
+                )
+                tile._can_drag = lambda: not self._is_running
+                tile.drag_started.connect(self._tile_ctrl.on_drag_started)
+                tile.drag_moved.connect(self._tile_ctrl.on_drag_moved)
+                tile.drag_dropped.connect(self._tile_ctrl.on_drag_dropped)
+                self._missing_tiles[tile_id] = tile
+                widgets[tile_id] = tile
 
-                    remove_btn = QPushButton("Remove from Kit")
-                    remove_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: transparent;
-                            color: #EF4444;
-                            border: 1px solid #EF4444;
-                            border-radius: 4px;
-                            font-size: 10px;
-                            padding: 4px 8px;
-                        }
-                        QPushButton:hover {
-                            background-color: #EF4444;
-                            color: white;
-                        }
-                    """)
-                    remove_btn.clicked.connect(
-                        lambda checked=False, tid=tile_id: self._remove_missing_plugin(tid)
-                    )
+            order.append(tile_id)
 
-                    card_layout.addWidget(missing_label)
-                    card_layout.addWidget(remove_btn)
+        self._tile_ctrl.set_tiles(order, widgets)
 
-                    card.setStyleSheet(f"""
-                        QFrame {{
-                            background-color: {theme.surface};
-                            border: 1px dashed {theme.border};
-                            border-radius: 12px;
-                        }}
-                    """)
+        # Staggered entrance for the live PluginCards (missing tiles stay solid).
+        for i, tid in enumerate(tid for tid in order if tid in self.tile_cards):
+            self.tile_cards[tid].start_entrance(i * 50)
 
-                    self.tile_grid.addWidget(card, row, col)
-                
-                col += 1
-                if col >= 3:
-                    col = 0
-                    row += 1
+    def _managed_tile_widgets(self):
+        """Generator over both live cards and missing-tile placeholders for cleanup."""
+        for w in self.tile_cards.values():
+            yield w
+        for w in getattr(self, "_missing_tiles", {}).values():
+            yield w
 
-        # Staggered entrance for all PluginCards
-        for i, card in enumerate(self.tile_cards.values()):
-            card.start_entrance(i * 50)
+    def _reposition_empty_label(self):
+        if not self._empty_label.isVisible():
+            return
+        w = self._grid_widget.width()
+        h = self._grid_widget.height()
+        lw = min(400, max(200, w - 80))
+        lh = 120
+        self._empty_label.setGeometry((w - lw) // 2, max(20, (h - lh) // 2), lw, lh)
     
     def _on_tile_toggled(self, tile_id: str, checked: bool):
         if checked:
@@ -700,7 +1078,15 @@ class HomePage(QWidget, ThemeAware):
             parent = parent.parent()
 
         from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
-        self._plugin_queue = list(self.selected_tiles)
+        # Run plugins in the user-controlled order shown on the Home page
+        # (left-to-right, top-to-bottom) — not arbitrary set-iteration order.
+        ordered = self.settings.get_profile_tiles()
+        self._plugin_queue = [tid for tid in ordered if tid in self.selected_tiles]
+        # Append any selected tiles that aren't in the saved order (defensive;
+        # shouldn't happen, but don't silently drop selections).
+        for tid in self.selected_tiles:
+            if tid not in self._plugin_queue:
+                self._plugin_queue.append(tid)
         self._plugin_params = {
             'console': console,
             # GUI plugins (requires_main_thread) suppress the auto success sound and call

@@ -4,6 +4,7 @@
   "description": "Scans 7000 folders in a 922 batch for CNC machine time, matches against LST files, and outputs a run time estimate with 40% buffer",
   "version": "1.0.0",
   "author": "Anthony Sieben",
+  "family": "922",
   "requires_admin": false,
   "settings": {
     "fields": []

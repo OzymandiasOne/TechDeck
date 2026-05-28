@@ -4,6 +4,7 @@
   "description": "Discovers formed plate PDFs in a 922 batch via filename, PO NOTES, and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet in the Pallet & Rod Organizer.",
   "version": "1.0.0",
   "author": "Anthony Sieben",
+  "family": "922",
   "requires_admin": false,
   "timeout": 900,
   "settings": {

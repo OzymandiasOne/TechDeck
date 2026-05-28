@@ -435,12 +435,27 @@ class SettingsManager:
     def get_theme(self) -> str:
         """Get current theme name."""
         return self.data.get("settings", {}).get("theme", "dark")
-    
+
     def set_theme(self, theme_name: str) -> None:
         """Set current theme."""
         if "settings" not in self.data:
             self.data["settings"] = {}
         self.data["settings"]["theme"] = theme_name
+        self.save()
+
+    # Library page tile sort. "alphabetical" sorts by plugin display name;
+    # "family" groups by 911 -> 922 -> other, alphabetical within each group.
+    _LIBRARY_SORT_MODES = ("alphabetical", "family")
+
+    def get_library_sort_mode(self) -> str:
+        return self.data.get("settings", {}).get("library_sort_mode", "alphabetical")
+
+    def set_library_sort_mode(self, mode: str) -> None:
+        if mode not in self._LIBRARY_SORT_MODES:
+            mode = "alphabetical"
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["library_sort_mode"] = mode
         self.save()
     
     # ========== Plugin Settings ==========

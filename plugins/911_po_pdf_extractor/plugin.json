@@ -4,6 +4,7 @@
   "description": "Extract PO packet data from PDFs to Excel with validation reports - prompts for folder when run",
   "version": "2.3.0",
   "author": "Anthony Sieben",
+  "family": "911",
   "icon": "📋",
   "requires_admin": false,
   "settings": {

@@ -4,6 +4,7 @@
   "description": "Finds repeat parts for a 911 QTDR batch. Reads DYPN numbers from each nest's 911 Batch Excel, matches them against the Master Parts Library (.NC files) and Master Inspection Library (PDFs), and copies matches into a REPEATS folder at the batch level.",
   "version": "1.0.0",
   "author": "Anthony Sieben",
+  "family": "911",
   "requires_admin": false,
   "requires_main_thread": false,
   "settings": {

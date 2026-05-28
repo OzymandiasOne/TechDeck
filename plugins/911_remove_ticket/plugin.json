@@ -4,6 +4,7 @@
   "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Originals are untouched.",
   "version": "1.0.0",
   "author": "Anthony Sieben",
+  "family": "911",
   "requires_admin": false,
   "requires_main_thread": false,
   "timeout": 300,

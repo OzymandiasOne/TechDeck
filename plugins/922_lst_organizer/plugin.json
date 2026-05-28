@@ -4,6 +4,7 @@
   "description": "Gather, organize, and track .lst files with tube material analysis from production packages",
   "version": "2.1.0",
   "author": "Anthony Sieben",
+  "family": "922",
   "icon": "📋",
   "requires_admin": false,
   "settings": {
