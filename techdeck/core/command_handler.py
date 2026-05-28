@@ -81,6 +81,8 @@ class CommandHandler:
             '/version': self._cmd_version,
             '/info': self._cmd_info,
             '/dash': self._cmd_dash,
+            '/pause': self._cmd_pause,
+            '/resume': self._cmd_resume,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/steelbeams': self._cmd_steelbeams,
@@ -114,6 +116,8 @@ class CommandHandler:
             "  /version         - Show TechDeck version\n"
             "  /info            - Describe the selected tile(s)\n"
             "  /dash            - Reopen the Dashboard tab\n"
+            "  /pause           - Pause the current run at its input prompt\n"
+            "  /resume          - Resume a paused run\n"
             "  /roguemode       - Open Rogue Mode focus music player\n"
             "\n"
             "  /fidget          - Pop out a fidget spinner\n"
@@ -153,6 +157,29 @@ class CommandHandler:
             self.console.append_system("Dashboard reopened.")
         else:
             self.console.append_error("Dashboard not available.")
+
+    def _cmd_pause(self, args: str):
+        """Pause the current multi-plugin run at its active input prompt."""
+        home = self._home_page()
+        if home is None:
+            self.console.append_error("Home page not available.")
+            return
+        home.pause_run(source="user")
+
+    def _cmd_resume(self, args: str):
+        """Resume a paused run from the parked plugin."""
+        home = self._home_page()
+        if home is None:
+            self.console.append_error("Home page not available.")
+            return
+        home.resume_run()
+
+    def _home_page(self):
+        """Return the HomePage instance, or None if unreachable."""
+        mw = self.main_window
+        if mw is None or not hasattr(mw, "home_page"):
+            return None
+        return mw.home_page
 
     def _cmd_info(self, args: str):
         """Print descriptions for every currently selected tile on Home.

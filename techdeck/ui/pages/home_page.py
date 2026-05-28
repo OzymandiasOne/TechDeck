@@ -43,6 +43,7 @@ class PluginCard(QFrame, ThemeAware):
     STATUS_ERROR = "error"
     STATUS_CANCELLED = "cancelled"
     STATUS_TIMEOUT = "timeout"
+    STATUS_PAUSED = "paused"   # parked by /pause or auto-idle; resumes via /resume
 
     def __init__(self, plugin_name: str, plugin_desc: str, tile_id: str, theme, parent=None):
         super().__init__(parent)
@@ -249,6 +250,11 @@ class PluginCard(QFrame, ThemeAware):
             border_color = self.theme.error
             border_hover = self.theme.error
         elif self._status == self.STATUS_CANCELLED:
+            border_color = self.theme.warning
+            border_hover = self.theme.warning
+        elif self._status == self.STATUS_PAUSED:
+            # Same warm-yellow treatment as CANCELLED so the parked tile is
+            # visually distinct from idle ones while paused.
             border_color = self.theme.warning
             border_hover = self.theme.warning
         elif self._is_checked:
@@ -669,6 +675,10 @@ class HomePage(QWidget, ThemeAware):
     plugin_status_updated = Signal(str, str)  # tile_id, status — safe to emit from any thread
     all_plugins_done = Signal()               # emitted on main thread after every plugin in a run finishes
     _plugins_all_done = Signal()              # internal — emitted from worker thread, handled on main thread
+    # Fired by the executor watchdog (background thread) when a plugin's input
+    # prompt has been idle past the auto-pause threshold. We route it through
+    # a Qt signal so the actual pause work runs on the GUI thread.
+    _input_idle_requested = Signal()
 
     def __init__(self, settings: SettingsManager, parent=None, plugin_loader: 'PluginLoader' = None):
         super().__init__(parent)
@@ -692,6 +702,14 @@ class HomePage(QWidget, ThemeAware):
         self._shared_state: dict = {"911": {}, "922": {}, "other": {}}
         self.plugin_status_updated.connect(self._apply_plugin_status)
         self._plugins_all_done.connect(self._check_run_complete)
+        self._input_idle_requested.connect(self._on_input_idle_requested)
+
+        # Pause / resume state — Phase C. _paused is True between a pause
+        # event and the following /resume. _paused_tile_id is the plugin
+        # that was running when pause hit; it's re-inserted at the head of
+        # _plugin_queue in _on_plugin_complete so /resume picks it up first.
+        self._paused: bool = False
+        self._paused_tile_id = None
 
         # Log buffer: worker threads put messages here; drain timer delivers them
         # to the main thread in batches so the Qt event queue never floods.
@@ -1071,6 +1089,15 @@ class HomePage(QWidget, ThemeAware):
         if not self.selected_tiles:
             return
 
+        # A fresh "Run Selected" overrides any prior paused state — the user
+        # is starting a new run, not resuming. Clear paused tile visual too.
+        if self._paused:
+            if self._paused_tile_id and self._paused_tile_id in self.tile_cards:
+                self.tile_cards[self._paused_tile_id].set_status(PluginCard.STATUS_IDLE)
+            self._paused = False
+            self._paused_tile_id = None
+            self._plugin_queue.clear()
+
         self.run_selected.emit(list(self.selected_tiles))
 
         console = None
@@ -1101,6 +1128,9 @@ class HomePage(QWidget, ThemeAware):
             # Family-aware shared scratch (mutated by SDK helpers — same dict
             # is reused across every plugin in this run).
             'shared_state': self._shared_state,
+            # Thread-safe hook called by the executor watchdog when a plugin's
+            # input prompt has been idle past INPUT_IDLE_PAUSE_THRESHOLD.
+            'on_input_idle': self._input_idle_callback,
         }
         self._set_button_cancel_mode()
         self._start_next_plugin()
@@ -1166,6 +1196,18 @@ class HomePage(QWidget, ThemeAware):
         final_status = PluginCard.STATUS_IDLE if status == "success" else status
         self.plugin_status_updated.emit(tile_id, final_status)
         self.plugin_completed.emit(tile_id)
+
+        # Paused: re-queue this tile at the head, halt the run, reset the
+        # button — but do NOT start the next plugin. /resume picks up here.
+        if status == "paused":
+            if not self._plugin_queue or self._plugin_queue[0] != tile_id:
+                self._plugin_queue.insert(0, tile_id)
+            self._paused = True
+            self._paused_tile_id = tile_id
+            self._set_button_run_mode()
+            # Don't emit _plugins_all_done — the run is parked, not finished.
+            return
+
         # Kick off the next plugin; if nothing started, the whole run is done
         started_another = self._start_next_plugin()
         if not started_another:
@@ -1175,6 +1217,90 @@ class HomePage(QWidget, ThemeAware):
         """Called on the main thread via queued signal when no more plugins remain."""
         self._set_button_run_mode()
         self.all_plugins_done.emit()
+
+    # ─── Pause / Resume (Phase C) ─────────────────────────────────────
+
+    def _input_idle_callback(self):
+        """Thread-safe — fired by the executor watchdog (background thread) when
+        the current input prompt has been idle past
+        INPUT_IDLE_PAUSE_THRESHOLD. Routes to the GUI thread via signal."""
+        self._input_idle_requested.emit()
+
+    def _on_input_idle_requested(self):
+        """Main-thread handler for auto-pause."""
+        self.pause_run(source="auto-idle")
+
+    def pause_run(self, source: str = "user") -> None:
+        """Park the current run at the active input prompt.
+
+        Aborts ``console.request_input`` with reason="paused"; the worker
+        raises ``InputAborted("paused")``, the executor marks the result
+        ``PluginStatus.PAUSED``, and ``_on_plugin_complete`` re-inserts the
+        tile at the head of the queue. ``/resume`` (or resume_run) restarts
+        from there.
+
+        ``source``: "user" for an explicit /pause, "auto-idle" for the
+        watchdog hitting the idle threshold. Used only for the console
+        message — the mechanism is identical.
+        """
+        if not self._is_running:
+            self._console_log("Nothing to pause.")
+            return
+        console = (self._plugin_params or {}).get('console')
+        if console is None or not getattr(console, 'waiting_for_input', False):
+            self._console_log(
+                "Can only pause while a plugin is waiting for input — try /pause again at the next prompt."
+            )
+            return
+        active = self.plugin_executor.get_active_plugins()
+        if not active:
+            return  # race: plugin finished between check and now
+        tid = active[0]
+        self._paused_tile_id = tid
+        if source == "auto-idle":
+            self._console_log(
+                "[AUTO-PAUSE] No response for 60s. Run paused — type /resume to continue."
+            )
+        else:
+            self._console_log("[PAUSED] Run paused — type /resume to continue.")
+        console.abort_input(reason="paused")
+
+    def resume_run(self) -> None:
+        """Continue a paused run from the parked tile. Re-runs the plugin from
+        its start (any pre-input work it had done is lost — accepted trade-off
+        per the Phase C plan)."""
+        if not self._paused:
+            self._console_log("Nothing to resume.")
+            return
+        if not self._plugin_queue:
+            # Shouldn't happen — pause always re-queues the tile — but be safe.
+            self._paused = False
+            self._paused_tile_id = None
+            self._console_log("Nothing to resume.")
+            return
+        self._paused = False
+        self._paused_tile_id = None
+        next_tile = self._plugin_queue[0]
+        plugin = self.plugin_executor.plugin_loader.get_plugin(next_tile)
+        name = plugin.name if plugin else next_tile
+        self._console_log(f"[RESUMED] Continuing with {name}.")
+        self._set_button_cancel_mode()
+        self._start_next_plugin()
+
+    def _console_log(self, msg: str) -> None:
+        """Emit a system message to the shared console. Used by pause/resume
+        and shelve flows where we don't want to go through plugin_log (which
+        is meant for plugin output)."""
+        console = (self._plugin_params or {}).get('console')
+        if console is None:
+            parent = self.parent()
+            while parent is not None:
+                if hasattr(parent, 'console'):
+                    console = parent.console
+                    break
+                parent = parent.parent()
+        if console is not None and hasattr(console, 'append_system'):
+            console.append_system(msg)
 
     def _set_button_cancel_mode(self):
         """Switch the Run Selected button to Cancel (red) while plugins run."""

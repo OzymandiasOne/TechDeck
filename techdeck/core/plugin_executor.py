@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from techdeck.core.plugin_loader import PluginLoader, Plugin
+from techdeck.ui.widgets.console import InputAborted
 
 
 # Default plugin IDLE timeout. The watchdog is inactivity-based: a plugin is
@@ -28,6 +29,12 @@ from techdeck.core.plugin_loader import PluginLoader, Plugin
 # long as they keep making progress, while still catching a genuinely hung
 # plugin. A per-plugin "timeout" in plugin.json overrides this; 0 disables it.
 DEFAULT_PLUGIN_TIMEOUT = 1800  # seconds of inactivity
+
+# Auto-pause threshold. If a plugin sits at a console input prompt for this
+# many seconds with no user response, the watchdog fires the on_input_idle
+# callback (HomePage routes that to pause_run). Lets a distracted user come
+# back to a clearly-paused run instead of finding a silently-blocked plugin.
+INPUT_IDLE_PAUSE_THRESHOLD = 60
 
 
 def _run_log_dir() -> Path:
@@ -86,6 +93,7 @@ class PluginStatus(Enum):
     CANCELLED = "cancelled"
     ERROR = "error"
     TIMEOUT = "timeout"  # PHASE 2: New status
+    PAUSED = "paused"    # Phase C: parked by /pause or auto-idle
 
 
 @dataclass
@@ -128,6 +136,10 @@ class PluginExecutor:
         self.start_times: Dict[str, float] = {}  # PHASE 2: Track start times
         # Last log/progress activity per plugin — drives the inactivity watchdog
         self.last_activity: Dict[str, float] = {}
+        # When the current console input prompt started (per plugin). Set when
+        # waiting_for_input flips True, cleared when it flips False. Drives the
+        # auto-pause on long input idle (Phase C).
+        self._input_wait_started: Dict[str, float] = {}
         # PHASE 1 FIX: Thread safety - RLock allows same thread to acquire multiple times
         self._lock = threading.RLock()
         # PHASE 2: Default timeout
@@ -200,6 +212,10 @@ class PluginExecutor:
             # Console reference (if any) lets the watchdog tell "blocked waiting
             # for user input" apart from "genuinely hung".
             console = (params or {}).get('console')
+            # Thread-safe callback fired by the watchdog when an input prompt
+            # has been idle past INPUT_IDLE_PAUSE_THRESHOLD. HomePage wires
+            # this to a Signal that routes to pause_run on the GUI thread.
+            on_input_idle = (params or {}).get('on_input_idle')
 
             # Check if plugin requires main thread
             if plugin.requires_main_thread:
@@ -209,26 +225,27 @@ class PluginExecutor:
                         plugin, params or {}, log_callback, progress_callback,
                         completion_callback, cancel_event, effective_timeout
                     )
-                
+
                 QTimer.singleShot(0, execute_in_main_thread)
             else:
                 # Create execution thread
                 thread = threading.Thread(
                     target=self._execute_plugin_thread,
-                    args=(plugin, params or {}, log_callback, progress_callback, 
+                    args=(plugin, params or {}, log_callback, progress_callback,
                           completion_callback, cancel_event, effective_timeout),
                     name=f"Plugin-{plugin_id}",
                     daemon=True
                 )
-                
+
                 self.running_threads[plugin_id] = thread
                 thread.start()
-                
+
                 # Start inactivity watchdog if an idle limit is set
                 if effective_timeout > 0:
                     monitor_thread = threading.Thread(
                         target=self._timeout_monitor,
-                        args=(plugin_id, effective_timeout, log_callback, console),
+                        args=(plugin_id, effective_timeout, log_callback,
+                              console, on_input_idle),
                         name=f"Timeout-{plugin_id}",
                         daemon=True
                     )
@@ -249,6 +266,7 @@ class PluginExecutor:
         timeout: int,
         log_callback: Optional[Callable[[str], None]],
         console: Any = None,
+        on_input_idle: Optional[Callable[[], None]] = None,
     ) -> None:
         """
         Inactivity watchdog. Cancels a plugin only after `timeout` seconds with
@@ -260,13 +278,22 @@ class PluginExecutor:
         OneDrive stalls file I/O. As long as a plugin keeps logging or
         reporting progress, it is never cancelled by the watchdog.
 
+        Phase C: also tracks how long the current input prompt has been
+        pending. When that crosses INPUT_IDLE_PAUSE_THRESHOLD seconds, fires
+        ``on_input_idle`` (once per prompt). HomePage uses that to enter a
+        clear paused state instead of leaving the plugin silently blocked.
+
         Args:
             plugin_id: Plugin ID to monitor
             timeout: Max seconds of inactivity before cancelling
             log_callback: Logging callback
             console: Optional console; if it is waiting for input, the idle
                      timer is held so user think-time never trips the watchdog.
+            on_input_idle: Optional thread-safe callback fired once when an
+                     input prompt has been pending longer than
+                     INPUT_IDLE_PAUSE_THRESHOLD.
         """
+        pause_signalled = False
         while True:
             time.sleep(1)  # Check every second
 
@@ -279,11 +306,34 @@ class PluginExecutor:
                 if thread is None or not thread.is_alive():
                     return  # Plugin finished
 
-            # Blocked on user input is not "hung" — keep the idle timer fresh.
-            if console is not None and getattr(console, 'waiting_for_input', False):
+            is_waiting = console is not None and getattr(console, 'waiting_for_input', False)
+            if is_waiting:
+                # Track when this prompt started so we know when to auto-pause.
                 with self._lock:
+                    if plugin_id not in self._input_wait_started:
+                        self._input_wait_started[plugin_id] = time.time()
+                    wait_start = self._input_wait_started[plugin_id]
+                    # Keep the inactivity timer fresh — user think-time isn't "hung".
                     self.last_activity[plugin_id] = time.time()
+
+                # Auto-pause once if we cross the threshold and a callback exists.
+                if (on_input_idle is not None
+                        and not pause_signalled
+                        and (time.time() - wait_start) >= INPUT_IDLE_PAUSE_THRESHOLD):
+                    pause_signalled = True
+                    try:
+                        on_input_idle()
+                    except Exception as e:
+                        # Never let a misbehaving callback stop the watchdog.
+                        if log_callback:
+                            log_callback(f"on_input_idle callback error: {e}")
                 continue
+            else:
+                # Prompt was answered (or never started); reset for the NEXT prompt
+                # this plugin might raise.
+                with self._lock:
+                    self._input_wait_started.pop(plugin_id, None)
+                pause_signalled = False
 
             # Cancel only after `timeout` seconds with no activity
             with self._lock:
@@ -426,6 +476,27 @@ class PluginExecutor:
                 safe_progress(100)
                 get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
 
+        except InputAborted as exc:
+            # Plugin's request_input was aborted. reason="paused" → user (or
+            # auto-idle) hit /pause, so park the run; anything else (e.g.
+            # "cancelled" from Clear) collapses to the cancelled path.
+            execution_time = time.time() - start_time
+            with self._lock:
+                if exc.reason == "paused":
+                    result.status = PluginStatus.PAUSED
+                    result.message = "Paused"
+                    safe_log("Plugin paused waiting for input.")
+                else:
+                    result.status = PluginStatus.CANCELLED
+                    result.message = f"Cancelled ({exc.reason})"
+                    safe_log(f"Plugin input cancelled: {exc.reason}")
+                result.execution_time = execution_time
+            get_run_logger().info(
+                "RUN %s %s after %.1fs (input aborted: %s)",
+                "PAUSED" if exc.reason == "paused" else "CANCELLED",
+                plugin_id, execution_time, exc.reason,
+            )
+
         except Exception as e:
             # PHASE 2: Calculate execution time even on error
             execution_time = time.time() - start_time
@@ -449,7 +520,7 @@ class PluginExecutor:
                 "RUN ERROR %s after %.1fs\n%s",
                 plugin_id, execution_time, traceback.format_exc(),
             )
-        
+
         finally:
             # Call completion callback
             if completion_callback:
@@ -457,7 +528,7 @@ class PluginExecutor:
                     completion_callback(result)
                 except Exception as e:
                     print(f"Error in completion callback: {e}")
-            
+
             # PHASE 1 FIX: Thread-safe cleanup
             # PHASE 2: Also clean up start_times
             with self._lock:
@@ -469,6 +540,8 @@ class PluginExecutor:
                     del self.start_times[plugin_id]
                 if plugin_id in self.last_activity:
                     del self.last_activity[plugin_id]
+                if plugin_id in self._input_wait_started:
+                    del self._input_wait_started[plugin_id]
     
     def _execute_plugin_directly(
         self,
@@ -545,6 +618,24 @@ class PluginExecutor:
             safe_progress(100)
             get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
 
+        except InputAborted as exc:
+            execution_time = time.time() - start_time
+            with self._lock:
+                if exc.reason == "paused":
+                    result.status = PluginStatus.PAUSED
+                    result.message = "Paused"
+                    safe_log("Plugin paused waiting for input.")
+                else:
+                    result.status = PluginStatus.CANCELLED
+                    result.message = f"Cancelled ({exc.reason})"
+                    safe_log(f"Plugin input cancelled: {exc.reason}")
+                result.execution_time = execution_time
+            get_run_logger().info(
+                "RUN %s %s after %.1fs (input aborted: %s)",
+                "PAUSED" if exc.reason == "paused" else "CANCELLED",
+                plugin_id, execution_time, exc.reason,
+            )
+
         except Exception as e:
             execution_time = time.time() - start_time
 
@@ -580,6 +671,8 @@ class PluginExecutor:
                     del self.start_times[plugin_id]
                 if plugin_id in self.last_activity:
                     del self.last_activity[plugin_id]
+                if plugin_id in self._input_wait_started:
+                    del self._input_wait_started[plugin_id]
     
     def cancel_plugin(self, plugin_id: str) -> bool:
         """

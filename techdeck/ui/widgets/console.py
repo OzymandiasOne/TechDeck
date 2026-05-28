@@ -19,9 +19,21 @@ from techdeck.ui.theme_aware import ThemeAware
 
 class InputAborted(Exception):
     """Raised inside request_input() when a pending console input request is
-    cancelled — e.g. a slash command interrupts an in-console game. Worker
-    loops that call request_input should let this propagate so they unwind."""
-    pass
+    cancelled. Worker loops that call request_input should let this propagate
+    so they unwind.
+
+    ``reason`` distinguishes the cause so the executor can mark the plugin
+    result correctly:
+      * ``"cancelled"`` (default) — a slash command interrupted an in-console
+        game or the user hit Clear.
+      * ``"paused"`` — a /pause or auto-idle pause request. The executor maps
+        this to PluginStatus.PAUSED so HomePage knows to park the queue
+        rather than treat it as a failure.
+    """
+
+    def __init__(self, reason: str = "cancelled"):
+        super().__init__(reason)
+        self.reason = reason
 
 
 class ConsoleWidget(QWidget, ThemeAware):
@@ -60,6 +72,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         # 'game' (an in-console easter egg that a slash command may interrupt).
         self._input_owner = 'plugin'
         self._input_aborted = False
+        self._input_aborted_reason = "cancelled"
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -300,21 +313,26 @@ class ConsoleWidget(QWidget, ThemeAware):
         self.input_event.wait()
 
         if self._input_aborted:
-            raise InputAborted()
+            raise InputAborted(self._input_aborted_reason)
 
         return self.input_response
 
-    def abort_input(self):
+    def abort_input(self, reason: str = "cancelled"):
         """Cancel a pending request_input so a new command can run in its place.
 
-        Used to interrupt an in-console game (e.g. blackjack); a real plugin's
-        input prompt is never aborted this way. Runs on the GUI thread and wakes
-        the blocked worker, which then raises InputAborted out of request_input.
+        Originally used to interrupt an in-console game (e.g. blackjack); now
+        also used by the executor watchdog and /pause to park a paused plugin
+        cleanly. Runs on the GUI thread and wakes the blocked worker, which
+        then raises ``InputAborted(reason)`` out of ``request_input``.
+
+        ``reason``: see InputAborted docstring. Default "cancelled" preserves
+        existing call sites (the game-interrupt path).
         """
         if not self.waiting_for_input:
             return
         self.waiting_for_input = False
         self._input_aborted = True
+        self._input_aborted_reason = reason
         self.input_prompt = ""
         self.input_field.setPlaceholderText("Type a command (/help) or message...")
         self.input_field.setStyleSheet("")
