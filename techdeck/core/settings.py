@@ -597,6 +597,35 @@ class SettingsManager:
         self.data["settings"]["blackjack_bankroll"] = max(0, amount)
         self.save()
 
+    # ========== Shelf (Phase D — single-slot snapshot of a paused/queued run) ==========
+
+    def get_shelf(self) -> Optional[Dict[str, Any]]:
+        """Return the current shelf entry, or None if empty.
+
+        Shape:
+            {
+              "stored_at": ISO8601 UTC timestamp,
+              "remaining_tile_ids": [str, ...],
+              "shared_state": {"911": {...}, "922": {...}, "other": {...}},
+              "originating_profile": str
+            }
+        """
+        shelf = self.data.get("shelf")
+        if isinstance(shelf, dict) and shelf.get("remaining_tile_ids"):
+            return shelf
+        return None
+
+    def set_shelf(self, entry: Dict[str, Any]) -> None:
+        """Persist a single shelf entry. Overwrites any prior shelf without prompt."""
+        self.data["shelf"] = entry
+        self.save()
+
+    def clear_shelf(self) -> None:
+        """Remove any persisted shelf entry."""
+        if "shelf" in self.data:
+            del self.data["shelf"]
+            self.save()
+
     # ========== Custom Themes ==========
 
     def get_custom_themes_dir(self) -> Path:

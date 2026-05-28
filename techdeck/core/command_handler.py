@@ -83,6 +83,7 @@ class CommandHandler:
             '/dash': self._cmd_dash,
             '/pause': self._cmd_pause,
             '/resume': self._cmd_resume,
+            '/shelve': self._cmd_shelve,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/steelbeams': self._cmd_steelbeams,
@@ -117,7 +118,10 @@ class CommandHandler:
             "  /info            - Describe the selected tile(s)\n"
             "  /dash            - Reopen the Dashboard tab\n"
             "  /pause           - Pause the current run at its input prompt\n"
-            "  /resume          - Resume a paused run\n"
+            "  /resume          - Resume a paused run (or load the shelved one)\n"
+            "  /shelve          - Save the rest of the run to disk for later\n"
+            "  /shelve view     - Show what's currently on the shelf\n"
+            "  /shelve clear    - Drop the shelf entry\n"
             "  /roguemode       - Open Rogue Mode focus music player\n"
             "\n"
             "  /fidget          - Pop out a fidget spinner\n"
@@ -167,12 +171,35 @@ class CommandHandler:
         home.pause_run(source="user")
 
     def _cmd_resume(self, args: str):
-        """Resume a paused run from the parked plugin."""
+        """Resume a paused run from the parked plugin, or load a shelved run."""
         home = self._home_page()
         if home is None:
             self.console.append_error("Home page not available.")
             return
         home.resume_run()
+
+    def _cmd_shelve(self, args: str):
+        """Single-slot shelve. Subcommands:
+          /shelve         — save the remaining queue (+ shared state) to disk
+          /shelve view    — print the current shelf
+          /shelve clear   — drop the shelf entry
+        """
+        home = self._home_page()
+        if home is None:
+            self.console.append_error("Home page not available.")
+            return
+        sub = args.strip().lower()
+        if sub == "":
+            home.shelve_run()
+        elif sub == "view":
+            home.view_shelf()
+        elif sub == "clear":
+            home.clear_shelf()
+        else:
+            self.console.append_error(
+                f"Unknown /shelve subcommand: '{sub}'. "
+                f"Use /shelve, /shelve view, or /shelve clear."
+            )
 
     def _home_page(self):
         """Return the HomePage instance, or None if unreachable."""

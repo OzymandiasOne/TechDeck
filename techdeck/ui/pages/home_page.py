@@ -710,6 +710,10 @@ class HomePage(QWidget, ThemeAware):
         # _plugin_queue in _on_plugin_complete so /resume picks it up first.
         self._paused: bool = False
         self._paused_tile_id = None
+        # Deferred-shelve flag — Phase D. When /shelve is called mid-run, we
+        # let the current plugin finish, then save the remainder. The check
+        # lives in _on_plugin_complete after the normal-status branches.
+        self._shelve_after_current: bool = False
 
         # Log buffer: worker threads put messages here; drain timer delivers them
         # to the main thread in batches so the Qt event queue never floods.
@@ -1081,8 +1085,9 @@ class HomePage(QWidget, ThemeAware):
     def _run_selected_plugins(self):
         """Run selected plugins, or cancel all if already running."""
         if self._is_running:
-            # User clicked Cancel — clear queue and signal all active plugins to stop
+            # User clicked Cancel — clear queue and abandon any pending shelve.
             self._plugin_queue.clear()
+            self._shelve_after_current = False
             self.plugin_executor.cancel_all()
             return  # button resets when the last plugin reports completion
 
@@ -1097,6 +1102,7 @@ class HomePage(QWidget, ThemeAware):
             self._paused = False
             self._paused_tile_id = None
             self._plugin_queue.clear()
+            self._shelve_after_current = False
 
         self.run_selected.emit(list(self.selected_tiles))
 
@@ -1208,6 +1214,27 @@ class HomePage(QWidget, ThemeAware):
             # Don't emit _plugins_all_done — the run is parked, not finished.
             return
 
+        # Deferred shelve — Phase D. /shelve was called mid-run; we let the
+        # current plugin finish, now save the remaining queue + shared_state.
+        if self._shelve_after_current:
+            self._shelve_after_current = False
+            if self._plugin_queue:
+                tiles = list(self._plugin_queue)
+                existed = self.settings.get_shelf() is not None
+                self._save_shelf(tiles)
+                self._plugin_queue.clear()
+                prefix = "[SHELF] (Overwriting prior shelf) " if existed else "[SHELF] "
+                plural = "s" if len(tiles) != 1 else ""
+                self._console_log(
+                    f"{prefix}Saved {len(tiles)} plugin{plural}. Type /resume "
+                    f"next session to continue."
+                )
+                self._plugins_all_done.emit()
+                return
+            self._console_log(
+                "[SHELF] Run finished before any plugin remained — nothing to save."
+            )
+
         # Kick off the next plugin; if nothing started, the whole run is done
         started_another = self._start_next_plugin()
         if not started_another:
@@ -1266,26 +1293,39 @@ class HomePage(QWidget, ThemeAware):
         console.abort_input(reason="paused")
 
     def resume_run(self) -> None:
-        """Continue a paused run from the parked tile. Re-runs the plugin from
-        its start (any pre-input work it had done is lost — accepted trade-off
-        per the Phase C plan)."""
-        if not self._paused:
-            self._console_log("Nothing to resume.")
-            return
-        if not self._plugin_queue:
-            # Shouldn't happen — pause always re-queues the tile — but be safe.
+        """Continue a paused run, or load a shelved run from disk.
+
+        Order of preference:
+        1. In-memory paused run — pick up the parked plugin.
+        2. Else, if the shelf has content and nothing's running, load it.
+        3. Else, "Nothing to resume."
+
+        Re-runs the parked/shelved plugin from its start (any pre-input work
+        it had done is lost — accepted trade-off per the plan).
+        """
+        if self._paused and self._plugin_queue:
             self._paused = False
             self._paused_tile_id = None
-            self._console_log("Nothing to resume.")
+            next_tile = self._plugin_queue[0]
+            plugin = self.plugin_executor.plugin_loader.get_plugin(next_tile)
+            name = plugin.name if plugin else next_tile
+            self._console_log(f"[RESUMED] Continuing with {name}.")
+            self._set_button_cancel_mode()
+            self._start_next_plugin()
             return
-        self._paused = False
-        self._paused_tile_id = None
-        next_tile = self._plugin_queue[0]
-        plugin = self.plugin_executor.plugin_loader.get_plugin(next_tile)
-        name = plugin.name if plugin else next_tile
-        self._console_log(f"[RESUMED] Continuing with {name}.")
-        self._set_button_cancel_mode()
-        self._start_next_plugin()
+        if self._paused:
+            # Paused flag set but queue is empty — clean up the inconsistency.
+            self._paused = False
+            self._paused_tile_id = None
+
+        # No in-memory paused run; fall back to the disk shelf if present.
+        if not self._is_running:
+            shelf = self.settings.get_shelf()
+            if shelf is not None:
+                self._load_shelf_and_run(shelf)
+                return
+
+        self._console_log("Nothing to resume.")
 
     def _console_log(self, msg: str) -> None:
         """Emit a system message to the shared console. Used by pause/resume
@@ -1301,6 +1341,167 @@ class HomePage(QWidget, ThemeAware):
                 parent = parent.parent()
         if console is not None and hasattr(console, 'append_system'):
             console.append_system(msg)
+
+    # ─── Shelve (Phase D) ─────────────────────────────────────────────
+
+    def shelve_run(self) -> None:
+        """Save the rest of the current run to disk so it can be resumed
+        across a TechDeck restart. Three cases:
+
+        * **Paused** — snapshot immediately (queue + shared_state), clear
+          paused state.
+        * **Running** — defer: let the current plugin finish, then snapshot
+          the remainder. Acts on the _shelve_after_current flag, consumed
+          in _on_plugin_complete.
+        * **Idle** — log "Nothing to shelve."
+        """
+        if self._paused:
+            tiles = list(self._plugin_queue)  # already starts with paused tile
+            if not tiles:
+                self._console_log("Nothing to shelve.")
+                return
+            existed = self.settings.get_shelf() is not None
+            self._save_shelf(tiles)
+            self._plugin_queue.clear()
+            # Reset paused-tile visual since the run is no longer parked.
+            if self._paused_tile_id and self._paused_tile_id in self.tile_cards:
+                self.tile_cards[self._paused_tile_id].set_status(PluginCard.STATUS_IDLE)
+            self._paused = False
+            self._paused_tile_id = None
+            prefix = "[SHELF] (Overwriting prior shelf) " if existed else "[SHELF] "
+            plural = "s" if len(tiles) != 1 else ""
+            self._console_log(
+                f"{prefix}Saved {len(tiles)} plugin{plural}. Type /resume next session to continue."
+            )
+            return
+        if self._is_running:
+            self._shelve_after_current = True
+            self._console_log(
+                "[SHELF] Will shelve the remainder after the current plugin finishes."
+            )
+            return
+        self._console_log("Nothing to shelve.")
+
+    def view_shelf(self) -> None:
+        """Print the current shelf contents."""
+        shelf = self.settings.get_shelf()
+        if shelf is None:
+            self._console_log("Shelf is empty.")
+            return
+        tile_ids = shelf.get("remaining_tile_ids", [])
+        stored_at = shelf.get("stored_at", "?")
+        profile = shelf.get("originating_profile", "?")
+        shared = shelf.get("shared_state", {})
+        lines = [
+            f"[SHELF] {len(tile_ids)} plugin{'s' if len(tile_ids) != 1 else ''} "
+            f"(saved {stored_at}, profile '{profile}')"
+        ]
+        for i, tid in enumerate(tile_ids, 1):
+            plugin = self.plugin_loader.get_plugin(tid)
+            name = plugin.name if plugin else f"{tid} (missing from disk)"
+            lines.append(f"  {i}. {name}")
+        captured = [
+            (fam, info.get("batch_number"))
+            for fam, info in shared.items()
+            if isinstance(info, dict) and info.get("batch_number")
+        ]
+        if captured:
+            lines.append("  Captured batch numbers:")
+            for fam, bn in captured:
+                lines.append(f"    {fam}: {bn}")
+        self._console_log("\n".join(lines))
+
+    def clear_shelf(self) -> None:
+        """Drop any persisted shelf entry."""
+        had_one = self.settings.get_shelf() is not None
+        self.settings.clear_shelf()
+        if had_one:
+            self._console_log("[SHELF] Cleared.")
+        else:
+            self._console_log("Shelf was already empty.")
+
+    def _save_shelf(self, tile_ids: list) -> None:
+        """Persist tile_ids + current shared_state as the single shelf entry."""
+        from datetime import datetime, timezone
+        entry = {
+            "stored_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "remaining_tile_ids": list(tile_ids),
+            "shared_state": {
+                k: dict(v) for k, v in (self._shared_state or {}).items()
+            },
+            "originating_profile": self.settings.get_current_profile_name(),
+        }
+        self.settings.set_shelf(entry)
+
+    def _load_shelf_and_run(self, shelf: dict) -> None:
+        """Pull tiles + shared_state out of a shelf entry and start the run.
+
+        Plugins that no longer exist on disk are skipped with a note (the
+        installed plugin set can drift between sessions). The shelf entry
+        is cleared as soon as we load it — a partially-failed resume would
+        otherwise leave a stale entry around forever.
+        """
+        tile_ids = shelf.get("remaining_tile_ids", [])
+        available = [tid for tid in tile_ids if self.plugin_loader.get_plugin(tid)]
+        missing = [tid for tid in tile_ids if not self.plugin_loader.get_plugin(tid)]
+        if not available:
+            self._console_log(
+                "Shelved plugins are all missing from disk; cannot resume. "
+                "Use /shelve clear to drop the entry."
+            )
+            return
+        if missing:
+            self._console_log(
+                f"Skipping {len(missing)} shelved plugin(s) missing from disk: "
+                f"{', '.join(missing)}"
+            )
+
+        self._plugin_queue = available
+
+        # Restore shared_state, but only into the canonical buckets we know
+        # about. A future family added between shelve and resume would be
+        # ignored — that's fine; worst case the user gets prompted again.
+        shared = shelf.get("shared_state", {})
+        self._shared_state = {"911": {}, "922": {}, "other": {}}
+        for fam, info in shared.items():
+            if fam in self._shared_state and isinstance(info, dict):
+                self._shared_state[fam].update(info)
+
+        # Reflect the loaded queue in the UI so the user can see what will run.
+        for tid in available:
+            self.selected_tiles.add(tid)
+            if tid in self.tile_cards:
+                self.tile_cards[tid].set_checked(True)
+
+        # Find the console for plugin_params.
+        console = None
+        parent = self.parent()
+        while parent is not None:
+            if hasattr(parent, 'console'):
+                console = parent.console
+                break
+            parent = parent.parent()
+
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
+        self._plugin_params = {
+            'console': console,
+            'on_success': lambda: get_audio_manager().play(SOUND_SUCCESS),
+            'shared_state': self._shared_state,
+            'on_input_idle': self._input_idle_callback,
+        }
+
+        # Loaded — consume the shelf entry. If TechDeck crashes mid-run the
+        # entry is gone, which is the trade-off we accept for not leaving a
+        # stale entry behind forever.
+        self.settings.clear_shelf()
+
+        plural = "s" if len(available) != 1 else ""
+        self._console_log(
+            f"[RESUMED FROM SHELF] Starting {len(available)} plugin{plural} "
+            f"(shared state restored)."
+        )
+        self._set_button_cancel_mode()
+        self._start_next_plugin()
 
     def _set_button_cancel_mode(self):
         """Switch the Run Selected button to Cancel (red) while plugins run."""
