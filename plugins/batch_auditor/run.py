@@ -317,7 +317,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log("Starting Batch Auditor...")
     progress_callback(0)
 
-    raw_line = sdk.request_batch_number(params, "Which line to audit? Enter 911 or 922:")
+    # Not a batch number prompt — use request_text so the answer doesn't get
+    # cached into params['shared_state'][family]['batch_number'] and silently
+    # filled in for the real batch prompt below.
+    raw_line = sdk.request_text(params, "Which line to audit? Enter 911 or 922:")
     line = "911" if "911" in (raw_line or "") else "922" if "922" in (raw_line or "") else None
     if line is None:
         raise ValueError(f"Unrecognised line: {raw_line!r} (expected 911 or 922)")

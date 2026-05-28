@@ -169,13 +169,54 @@ def find_911_batch_folder(qtdr_root: Path, batch: str) -> Optional[Path]:
 # Console input
 # ─────────────────────────────────────────────────────────────────────────────
 
-def request_batch_number(params: dict, prompt: str) -> str:
-    """Prompt for a batch number through the TechDeck console, falling back to
-    stdin input() when run standalone (no console). Returns the raw string."""
+def request_text(params: dict, prompt: str) -> str:
+    """Prompt the user for a free-form text answer through the TechDeck
+    console, falling back to stdin input() when run standalone. Returns the
+    raw string.
+
+    Unlike :func:`request_batch_number` this never reads or writes the
+    family-shared cache — every call prompts fresh. Use it for prompts whose
+    answers should NOT be reused across same-family plugins (e.g. asking the
+    user to pick a line, a mode, a filename).
+    """
     console = params.get("console")
     if console is not None and hasattr(console, "request_input"):
         return console.request_input(prompt)
     return input(prompt + " ")
+
+
+def request_batch_number(params: dict, prompt: str) -> str:
+    """Prompt for a batch number through the TechDeck console, falling back to
+    stdin input() when run standalone (no console). Returns the raw string.
+
+    Family-shared caching: when this plugin runs as part of a same-family
+    multi-plugin batch (Home page "Run Selected" with several 911s or several
+    922s), the first plugin's answer is cached in
+    ``params['shared_state'][family]['batch_number']`` and reused silently by
+    subsequent same-family plugins in the same run. Cross-family runs and
+    single-plugin runs prompt as before.
+    """
+    shared_state = params.get("shared_state")
+    family = params.get("plugin_family")
+    log = params.get("log") if callable(params.get("log")) else None
+
+    if shared_state is not None and family:
+        cached = shared_state.get(family, {}).get("batch_number")
+        if cached:
+            if log:
+                log(f"[shared] Using batch number {cached} from prior {family} "
+                    f"plugin in this run.")
+            return cached
+
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_input"):
+        answer = console.request_input(prompt)
+    else:
+        answer = input(prompt + " ")
+
+    if shared_state is not None and family and answer:
+        shared_state.setdefault(family, {})["batch_number"] = answer
+    return answer
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -385,6 +385,11 @@ class PluginExecutor:
             # Prepare parameters with log callback
             plugin_params = params.copy()
             plugin_params['log'] = safe_log
+            # Stash this plugin's own id + family so SDK helpers (e.g.
+            # request_batch_number) can resolve their context without the caller
+            # threading it through every call.
+            plugin_params['plugin_id'] = plugin_id
+            plugin_params['plugin_family'] = getattr(plugin, 'family', 'other')
 
             # Inject plugin settings
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
@@ -521,6 +526,8 @@ class PluginExecutor:
 
             plugin_params = params.copy()
             plugin_params['log'] = safe_log
+            plugin_params['plugin_id'] = plugin_id
+            plugin_params['plugin_family'] = getattr(plugin, 'family', 'other')
 
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
             plugin_params['settings'] = plugin_settings

@@ -686,6 +686,10 @@ class HomePage(QWidget, ThemeAware):
         self.plugin_executor = PluginExecutor(self.plugin_loader)
         self._plugin_queue: list = []
         self._plugin_params: dict = {}
+        # Per-run, per-family scratch dict. plugin_sdk.request_batch_number
+        # caches the first answer here and subsequent same-family plugins reuse
+        # it. Cleared when the whole multi-plugin run completes.
+        self._shared_state: dict = {"911": {}, "922": {}, "other": {}}
         self.plugin_status_updated.connect(self._apply_plugin_status)
         self._plugins_all_done.connect(self._check_run_complete)
 
@@ -1087,11 +1091,16 @@ class HomePage(QWidget, ThemeAware):
         for tid in self.selected_tiles:
             if tid not in self._plugin_queue:
                 self._plugin_queue.append(tid)
+        # Reset family-shared scratch state at the start of every multi-run.
+        self._shared_state = {"911": {}, "922": {}, "other": {}}
         self._plugin_params = {
             'console': console,
             # GUI plugins (requires_main_thread) suppress the auto success sound and call
             # this instead at a meaningful action point (e.g. file saved, code generated).
             'on_success': lambda: get_audio_manager().play(SOUND_SUCCESS),
+            # Family-aware shared scratch (mutated by SDK helpers — same dict
+            # is reused across every plugin in this run).
+            'shared_state': self._shared_state,
         }
         self._set_button_cancel_mode()
         self._start_next_plugin()
