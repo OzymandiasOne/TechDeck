@@ -4,21 +4,29 @@ User profile information and access status.
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox
 )
 from PySide6.QtCore import Qt
 import os
 
 from techdeck.core.settings import SettingsManager
-from techdeck.core.constants import APP_VERSION, DEFAULT_PROFILE_NAME
+from techdeck.core.constants import APP_VERSION
+from techdeck.ui.theme_aware import ThemeAware
 
 
-class AccountPage(QWidget):
+# Themes with light/warm backgrounds where the bright #10B981 success green
+# sits too close in luminance to the surface — bold text on those tones
+# antialiases into a shimmery/fuzzy ring. Pick a darker green there.
+_LIGHT_BG_THEMES = {"light", "salmon"}
+_STATUS_DARK_GREEN = "#0F7A55"
+
+
+class AccountPage(QWidget, ThemeAware):
     """
     My Account page - display and edit user profile information.
     """
-    
+
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
@@ -98,7 +106,7 @@ class AccountPage(QWidget):
         status_label = QLabel("Status:")
         status_label.setStyleSheet("font-weight: 600;")
         self.status_value = QLabel("Active")
-        self.status_value.setStyleSheet("color: #10B981; font-size: 14px; font-weight: bold;")
+        self._apply_status_style()
         
         status_row = QHBoxLayout()
         status_row.addWidget(status_label)
@@ -121,30 +129,43 @@ class AccountPage(QWidget):
         version_label.setStyleSheet("font-size: 13px;")
         info_section.addWidget(version_label)
 
-        profiles_count = len(self.settings.get_profile_names())
-        profiles_label = QLabel(f"Total Profiles: {profiles_count}")
-        profiles_label.setStyleSheet("font-size: 13px;")
-        info_section.addWidget(profiles_label)
-
-        default_profile = self.settings.get_current_profile_name()
-        current_profile_label = QLabel(f"Current Profile: {default_profile}")
-        current_profile_label.setStyleSheet("font-size: 13px;")
-        info_section.addWidget(current_profile_label)
-        
         layout.addLayout(info_section)
-        
+
         # Add stretch at bottom
         layout.addStretch()
-        
+
         scroll.setWidget(content)
-        
+
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
-        
+
         # Load initial data
         self._load_user_data()
+
+        # Re-stamp the Status label whenever the theme switches so the green
+        # tracks the active palette and dodges the light/salmon shimmer.
+        self.setup_theme_awareness()
+
+    def apply_theme(self):
+        self._apply_status_style()
+
+    def _apply_status_style(self):
+        """Style the 'Active' status label with a green that has real luminance
+        contrast against the current theme's surface. Bold #10B981 on the warm
+        light/salmon backgrounds shimmered (same root cause as the salmon
+        console_bg fix) — drop the boldness and shift to a darker green there."""
+        theme_name = self.settings.get_theme()
+        if theme_name in _LIGHT_BG_THEMES:
+            color = _STATUS_DARK_GREEN
+            weight = "600"
+        else:
+            color = "#10B981"
+            weight = "bold"
+        self.status_value.setStyleSheet(
+            f"color: {color}; font-size: 14px; font-weight: {weight};"
+        )
     
     def _create_section(self, title: str) -> QVBoxLayout:
         """Create a styled section with title and frame."""
