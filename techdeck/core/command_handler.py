@@ -119,13 +119,27 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
-            "  /haiku           - Print a manufacturing haiku\n"
-            "  /moth            - Summon a moth toward the Run button\n"
+            "  /haiku           - Print a haiku\n"
+            "  /moth            - Summon a moth buddy\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
         )
+        # Record where the appended block will start so we can scroll the
+        # viewport there after appending. The console auto-scrolls to bottom
+        # on every append, which lands the user at the END of the help text —
+        # disorienting because they want to read from "Available commands:"
+        # downward.
+        output = getattr(self.console, "output", None)
+        pre_pos = output.document().characterCount() - 1 if output is not None else None
         self.console.append_system(help_text)
+        if output is not None and pre_pos is not None:
+            from PySide6.QtGui import QTextCursor
+            anchor = QTextCursor(output.document())
+            anchor.setPosition(pre_pos)
+            rect = output.cursorRect(anchor)
+            sb = output.verticalScrollBar()
+            sb.setValue(sb.value() + rect.top())
 
     def _cmd_clear(self, args: str):
         self.console.clear()
