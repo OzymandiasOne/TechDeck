@@ -1,0 +1,23 @@
+{
+  "id": "911_plt_time_estimator",
+  "name": "911 PLT Time Estimator",
+  "description": "Scans a ROOT directory of order folders, reads each nest's work-package PDF (thickness, pieces, material, size, mil spec) and its batch list, computes a per-nest plate-cutting time estimate, and writes ONE consolidated Excel workbook: a flat data table across all orders plus a pivot-style summary keyed by nest number. Prompts for the ROOT directory at runtime.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "output_dir",
+        "type": "directory",
+        "label": "Output Directory (optional)",
+        "description": "Where to save the consolidated estimate workbook. Leave blank to save inside the ROOT directory you pick at runtime.",
+        "placeholder": "C:\\Users\\YourName\\Desktop",
+        "required": false,
+        "default": ""
+      }
+    ]
+  }
+}
