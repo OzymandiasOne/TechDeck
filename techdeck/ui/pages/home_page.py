@@ -447,6 +447,11 @@ class TileGridController(QObject):
     MARGIN = 24
     MAX_COLS = 3
 
+    # Auto-scroll while dragging a tile near the viewport's top/bottom edge.
+    AUTOSCROLL_ZONE = 56       # px from edge that activates scrolling
+    AUTOSCROLL_MAX_SPEED = 22  # px per tick at the very edge (ramps from 1)
+    AUTOSCROLL_INTERVAL = 15   # ms between scroll ticks
+
     def __init__(self, surface: _GridSurface, settings, parent=None):
         super().__init__(parent)
         self._surface = surface
@@ -464,7 +469,22 @@ class TileGridController(QObject):
         self._grab_offset = QPoint(0, 0)
         self._restore_shadow = None  # (blur, x_offset, y_offset)
 
+        # Auto-scroll state. The scroll area is wired in by HomePage after
+        # construction via set_scroll_area. A timer drives continuous scrolling
+        # while the cursor sits in an edge zone (drag-move events alone stop
+        # firing if the user holds still, so a timer is required).
+        self._scroll_area = None
+        self._autoscroll_velocity = 0
+        self._last_drag_global = QPoint(0, 0)
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.setInterval(self.AUTOSCROLL_INTERVAL)
+        self._autoscroll_timer.timeout.connect(self._on_autoscroll_tick)
+
         surface.resized.connect(self._on_resized)
+
+    def set_scroll_area(self, scroll_area):
+        """Wire the QScrollArea so drag-near-edge can auto-scroll the grid."""
+        self._scroll_area = scroll_area
 
     # ---- setup / teardown ------------------------------------------------
 
@@ -487,6 +507,7 @@ class TileGridController(QObject):
         self._anims = []
 
     def _cancel_active_drag(self):
+        self._stop_autoscroll()
         self._drag_card = None
         self._drag_widget_id = None
         self._drag_origin_index = -1
@@ -616,6 +637,16 @@ class TileGridController(QObject):
     def on_drag_moved(self, global_pos: QPoint):
         if self._drag_card is None:
             return
+        self._last_drag_global = QPoint(global_pos)
+        self._reposition_drag(global_pos)
+        self._update_autoscroll(global_pos)
+
+    def _reposition_drag(self, global_pos: QPoint):
+        """Move the dragged card to follow the cursor and update the hover slot.
+        Recomputed from the (unchanging) global cursor pos so it stays correct
+        even as auto-scroll shifts the surface beneath the cursor."""
+        if self._drag_card is None:
+            return
         local = self._surface.mapFromGlobal(global_pos)
         self._drag_card.move(local - self._grab_offset)
         new_idx = self._index_for_point(local)
@@ -623,9 +654,56 @@ class TileGridController(QObject):
             self._hover_index = new_idx
             self.relayout(animated=True)
 
+    # ---- auto-scroll-near-edge ------------------------------------------
+
+    def _update_autoscroll(self, global_pos: QPoint):
+        """Set scroll velocity from the cursor's distance into an edge zone."""
+        scroll = self._scroll_area
+        if scroll is None:
+            return
+        vp = scroll.viewport()
+        y = vp.mapFromGlobal(global_pos).y()
+        zone = self.AUTOSCROLL_ZONE
+        height = vp.height()
+
+        vel = 0
+        if y < zone:
+            frac = min(1.0, max(0.0, (zone - y) / zone))
+            vel = -max(1, round(self.AUTOSCROLL_MAX_SPEED * frac))
+        elif y > height - zone:
+            frac = min(1.0, max(0.0, (y - (height - zone)) / zone))
+            vel = max(1, round(self.AUTOSCROLL_MAX_SPEED * frac))
+
+        self._autoscroll_velocity = vel
+        if vel != 0 and not self._autoscroll_timer.isActive():
+            self._autoscroll_timer.start()
+        elif vel == 0 and self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
+    def _on_autoscroll_tick(self):
+        if self._drag_card is None or self._autoscroll_velocity == 0 \
+                or self._scroll_area is None:
+            self._stop_autoscroll()
+            return
+        sb = self._scroll_area.verticalScrollBar()
+        old = sb.value()
+        new = max(sb.minimum(), min(sb.maximum(), old + self._autoscroll_velocity))
+        if new == old:
+            return  # already at the end in this direction; nothing to scroll
+        sb.setValue(new)
+        # The cursor's global pos didn't change, but the surface moved under it,
+        # so re-derive the card position and hover slot from the stored global.
+        self._reposition_drag(self._last_drag_global)
+
+    def _stop_autoscroll(self):
+        self._autoscroll_velocity = 0
+        if self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
     def on_drag_dropped(self, global_pos: QPoint):
         if self._drag_card is None:
             return
+        self._stop_autoscroll()
         card = self._drag_card
         tid = self._drag_widget_id
         drop_idx = max(0, min(self._hover_index, len(self._order)))
@@ -764,6 +842,7 @@ class HomePage(QWidget, ThemeAware):
         layout.addWidget(self._scroll, 1)
 
         self._tile_ctrl = TileGridController(self._grid_widget, self.settings, self)
+        self._tile_ctrl.set_scroll_area(self._scroll)
 
         # Empty-state label is a child of the surface (not managed by the controller).
         self._empty_label = QLabel("", self._grid_widget)
