@@ -25,6 +25,15 @@ from pathlib import Path
 from techdeck.ui.theme import get_current_palette
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.plugin_icon import plugin_icon_pixmap
+
+# Windows-Settings-style tile geometry. Compact, squarish tiles: a centered
+# icon over the app name. Shared by PluginCard, _MissingTile, and the grid
+# controller so everything stays in lockstep.
+TILE_W = 120
+TILE_H = 110
+TILE_ICON = 48          # rendered icon pixmap size (px)
+TILE_ICON_BOX = 58      # icon container size — leaves room for the status ring
 
 
 class PluginCard(QFrame, ThemeAware):
@@ -45,10 +54,11 @@ class PluginCard(QFrame, ThemeAware):
     STATUS_TIMEOUT = "timeout"
     STATUS_PAUSED = "paused"   # parked by /pause or auto-idle; resumes via /resume
 
-    def __init__(self, plugin_name: str, plugin_desc: str, tile_id: str, theme, parent=None):
+    def __init__(self, plugin, plugin_desc: str, tile_id: str, theme, parent=None):
         super().__init__(parent)
         self.tile_id = tile_id
         self.theme = theme
+        self._plugin = plugin
         self._is_checked = False
         self._status = self.STATUS_IDLE
         self._flash_anim = None
@@ -62,45 +72,47 @@ class PluginCard(QFrame, ThemeAware):
         self._press_global = QPoint()
         self._can_drag = lambda: True
 
-        self.setFixedSize(220, 140)
+        self.setFixedSize(TILE_W, TILE_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 10, 6, 8)
+        layout.setSpacing(5)
 
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
+        # Icon: a centered pixmap inside a fixed box. The box's border is the
+        # status "ring" (transparent when idle). Pure-highlight selection means
+        # there's no checkbox — clicking the tile toggles _is_checked.
+        self.icon_label = QLabel()
+        self.icon_label.setObjectName("cardIcon")
+        self.icon_label.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setPixmap(plugin_icon_pixmap(plugin, TILE_ICON))
 
-        self.checkbox = QCheckBox()
-        self.checkbox.setFixedSize(20, 20)
-        self.checkbox.setStyleSheet("QCheckBox { background-color: transparent; }")
-        self.checkbox.toggled.connect(self._on_checkbox_toggled)
-
-        self.name_label = QLabel(plugin_name)
+        self.name_label = QLabel(getattr(plugin, "name", tile_id))
         self.name_label.setWordWrap(True)
-        self.name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         name_font = QFont()
-        name_font.setPointSize(11)
-        name_font.setWeight(QFont.Weight.DemiBold)
+        name_font.setPointSize(9)
+        name_font.setWeight(QFont.Weight.Medium)
         self.name_label.setFont(name_font)
         self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
 
-        top_row.addWidget(self.checkbox)
-        top_row.addWidget(self.name_label, 1)
-        layout.addLayout(top_row)
+        layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.name_label, 1)
 
         if plugin_desc:
             wrapped = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
             self.setToolTip(wrapped)
             self.setToolTipDuration(5000)
 
-        layout.addStretch()
         self._update_card_style()
 
         # --- Shadow effect (activated after entrance) ---
+        # Borderless tiles are transparent at rest, so the shadow stays at blur 0
+        # (invisible) until the tile lifts on hover/drag or pulses while running —
+        # states that paint a visible highlight background for it to cast off.
         self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(8)
+        self._shadow.setBlurRadius(0)
         self._shadow.setOffset(0, 3)
         self._shadow_base_color = self._parse_shadow_color(theme.shadow)
         self._shadow.setColor(self._shadow_base_color)
@@ -109,24 +121,24 @@ class PluginCard(QFrame, ThemeAware):
         self._hover_in = QPropertyAnimation(self._shadow, b"blurRadius", self)
         self._hover_in.setDuration(150)
         self._hover_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._hover_in.setEndValue(20.0)
+        self._hover_in.setEndValue(18.0)
 
         self._hover_out = QPropertyAnimation(self._shadow, b"blurRadius", self)
         self._hover_out.setDuration(200)
         self._hover_out.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._hover_out.setEndValue(8.0)
+        self._hover_out.setEndValue(0.0)
 
         # Running pulse (shadow breathes)
         pulse_up = QPropertyAnimation(self._shadow, b"blurRadius", self)
         pulse_up.setDuration(700)
-        pulse_up.setStartValue(10.0)
-        pulse_up.setEndValue(22.0)
+        pulse_up.setStartValue(6.0)
+        pulse_up.setEndValue(18.0)
         pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         pulse_dn = QPropertyAnimation(self._shadow, b"blurRadius", self)
         pulse_dn.setDuration(700)
-        pulse_dn.setStartValue(22.0)
-        pulse_dn.setEndValue(10.0)
+        pulse_dn.setStartValue(18.0)
+        pulse_dn.setEndValue(6.0)
         pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         self._pulse_group = QSequentialAnimationGroup(self)
@@ -175,16 +187,15 @@ class PluginCard(QFrame, ThemeAware):
             self._shadow.setColor(self._shadow_base_color)
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
 
-    def _on_checkbox_toggled(self, checked: bool):
-        self._is_checked = checked
-        self._update_card_style()
-        self.toggled.emit(checked)
-
     def is_checked(self) -> bool:
         return self._is_checked
 
     def set_checked(self, checked: bool):
-        self.checkbox.setChecked(checked)
+        if checked == self._is_checked:
+            return
+        self._is_checked = checked
+        self._update_card_style()
+        self.toggled.emit(checked)
 
     def set_status(self, status: str):
         prev = self._status
@@ -210,14 +221,14 @@ class PluginCard(QFrame, ThemeAware):
     def _stop_pulse(self):
         self._pulse_group.stop()
         if self.graphicsEffect() is self._shadow:
-            self._shadow.setBlurRadius(8)
+            self._shadow.setBlurRadius(0)
             self._shadow.setColor(self._shadow_base_color)
 
     def _flash_success(self):
-        """Flash green background then fade to normal."""
+        """Flash a green highlight behind the tile, then fade back to normal."""
         self._flash_anim = QVariantAnimation(self)
         self._flash_anim.setStartValue(QColor(self.theme.success))
-        self._flash_anim.setEndValue(QColor(self.theme.surface))
+        self._flash_anim.setEndValue(QColor(self.theme.surface_hover))
         self._flash_anim.setDuration(700)
         self._flash_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._flash_anim.valueChanged.connect(self._on_flash_color)
@@ -229,50 +240,46 @@ class PluginCard(QFrame, ThemeAware):
         self.setStyleSheet(f"""
             PluginCard {{
                 background-color: {hex_color};
-                border: 2px solid {self.theme.success};
-                border-radius: 12px;
-            }}
-            PluginCard:hover {{
-                background-color: {hex_color};
-                border: 2px solid {self.theme.success};
+                border-radius: 10px;
             }}
         """)
+        self._set_icon_ring(self.theme.success)
 
     def _on_flash_done(self):
         self._flash_anim = None
         self._update_card_style()
 
-    def _update_card_style(self):
-        if self._status == self.STATUS_RUNNING:
-            border_color = self.theme.accent
-            border_hover = self.theme.accent_hover
-        elif self._status in (self.STATUS_ERROR, self.STATUS_TIMEOUT):
-            border_color = self.theme.error
-            border_hover = self.theme.error
-        elif self._status == self.STATUS_CANCELLED:
-            border_color = self.theme.warning
-            border_hover = self.theme.warning
-        elif self._status == self.STATUS_PAUSED:
-            # Same warm-yellow treatment as CANCELLED so the parked tile is
-            # visually distinct from idle ones while paused.
-            border_color = self.theme.warning
-            border_hover = self.theme.warning
-        elif self._is_checked:
-            border_color = self.theme.accent
-            border_hover = self.theme.accent_hover
-        else:
-            border_color = self.theme.border_strong
-            border_hover = self.theme.accent
+    def _set_icon_ring(self, color: str):
+        """Color the ring around the icon box (the borderless tile's status cue)."""
+        self.icon_label.setStyleSheet(
+            f"#cardIcon {{ background: transparent; border: 2px solid {color}; "
+            f"border-radius: 16px; }}"
+        )
 
+    def _update_card_style(self):
+        # Status ring around the icon — the borderless tile's status indicator.
+        if self._status == self.STATUS_RUNNING:
+            ring = self.theme.accent
+        elif self._status in (self.STATUS_ERROR, self.STATUS_TIMEOUT):
+            ring = self.theme.error
+        elif self._status in (self.STATUS_CANCELLED, self.STATUS_PAUSED):
+            # Warm-yellow ring marks a parked/cancelled tile.
+            ring = self.theme.warning
+        else:
+            ring = "transparent"
+        self._set_icon_ring(ring)
+
+        # Tile background: transparent at rest, a soft rounded highlight when
+        # selected or in a non-idle status; hover always shows a highlight.
+        active = self._is_checked or self._status != self.STATUS_IDLE
+        bg = self.theme.tile_selected if active else "transparent"
         self.setStyleSheet(f"""
             PluginCard {{
-                background-color: {self.theme.surface};
-                border: 2px solid {border_color};
-                border-radius: 12px;
+                background-color: {bg};
+                border-radius: 10px;
             }}
             PluginCard:hover {{
                 background-color: {self.theme.surface_hover};
-                border: 2px solid {border_hover};
             }}
         """)
 
@@ -322,8 +329,8 @@ class PluginCard(QFrame, ThemeAware):
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._drag_armed and not self._dragging:
-                # True click — preserve the legacy click-to-toggle gesture.
-                self.checkbox.setChecked(not self.checkbox.isChecked())
+                # True click — toggle the pure-highlight selection.
+                self.set_checked(not self._is_checked)
             elif self._dragging:
                 self.drag_dropped.emit(event.globalPosition().toPoint())
             self._drag_armed = False
@@ -346,7 +353,7 @@ class _MissingTile(QFrame):
     def __init__(self, tile_id: str, theme, on_remove, parent=None):
         super().__init__(parent)
         self.tile_id = tile_id
-        self.setFixedSize(220, 140)
+        self.setFixedSize(TILE_W, TILE_H)
 
         self._drag_armed = False
         self._dragging = False
@@ -355,25 +362,37 @@ class _MissingTile(QFrame):
         self._can_drag = lambda: True
 
         card_layout = QVBoxLayout(self)
-        card_layout.setContentsMargins(16, 12, 16, 12)
-        card_layout.setSpacing(6)
+        card_layout.setContentsMargins(6, 8, 6, 6)
+        card_layout.setSpacing(4)
 
-        missing_label = QLabel(f"{tile_id}\n(Missing)")
-        missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        missing_label.setWordWrap(True)
-        missing_label.setStyleSheet(
-            f"color: {theme.tile_missing_text}; font-size: 11px; background: transparent;"
+        icon_box = QLabel("?")
+        icon_box.setObjectName("missingIcon")
+        icon_box.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
+        icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_box.setStyleSheet(
+            f"#missingIcon {{ color: {theme.tile_missing_text}; "
+            f"font-size: 22px; font-weight: bold; background: transparent; "
+            f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
         )
 
-        remove_btn = QPushButton("Remove from Kit")
+        missing_label = QLabel("Missing")
+        missing_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        missing_label.setWordWrap(True)
+        missing_label.setStyleSheet(
+            f"color: {theme.tile_missing_text}; font-size: 9pt; background: transparent;"
+        )
+        missing_label.setToolTip(f"{tile_id}\n(plugin missing from disk)")
+
+        remove_btn = QPushButton("Remove")
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 color: #EF4444;
                 border: 1px solid #EF4444;
                 border-radius: 4px;
-                font-size: 10px;
-                padding: 4px 8px;
+                font-size: 9px;
+                padding: 2px 6px;
             }
             QPushButton:hover {
                 background-color: #EF4444;
@@ -382,16 +401,11 @@ class _MissingTile(QFrame):
         """)
         remove_btn.clicked.connect(lambda _checked=False, tid=tile_id: on_remove(tid))
 
+        card_layout.addWidget(icon_box, 0, Qt.AlignmentFlag.AlignHCenter)
         card_layout.addWidget(missing_label)
-        card_layout.addWidget(remove_btn)
+        card_layout.addWidget(remove_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {theme.surface};
-                border: 1px dashed {theme.border};
-                border-radius: 12px;
-            }}
-        """)
+        self.setStyleSheet("_MissingTile { background-color: transparent; border-radius: 10px; }")
 
     def is_running(self) -> bool:
         return False
@@ -441,11 +455,11 @@ class TileGridController(QObject):
     moves between slots, giving the smartphone/Teams-card "push aside" feel.
     """
 
-    CELL_W = 220
-    CELL_H = 140
-    SPACING = 20
+    CELL_W = TILE_W
+    CELL_H = TILE_H
+    SPACING = 14
     MARGIN = 24
-    MAX_COLS = 3
+    MAX_COLS = 6
 
     # Auto-scroll while dragging a tile near the viewport's top/bottom edge.
     AUTOSCROLL_ZONE = 56       # px from edge that activates scrolling
@@ -1030,7 +1044,7 @@ class HomePage(QWidget, ThemeAware):
                 if len(desc) > 60:
                     desc = desc[:60] + "..."
                 card = PluginCard(
-                    plugin_name=plugin.name,
+                    plugin=plugin,
                     plugin_desc=desc,
                     tile_id=tile_id,
                     theme=theme,

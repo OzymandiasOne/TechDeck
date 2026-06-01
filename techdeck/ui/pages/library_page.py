@@ -17,6 +17,8 @@ from techdeck.ui.utils import make_tinted_svg_copy
 from pathlib import Path
 from techdeck.ui.theme import get_current_palette
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.plugin_icon import plugin_icon_pixmap
+from techdeck.ui.pages.home_page import TILE_W, TILE_H, TILE_ICON, TILE_ICON_BOX
 
 
 class ProfileDialog(QDialog):
@@ -129,118 +131,85 @@ class LibraryPluginCard(QFrame, ThemeAware):
     """
     
     toggled = Signal(bool)
-    
-    def __init__(self, plugin_name: str, plugin_desc: str, tile_id: str, theme, is_selected: bool = False, parent=None):
+
+    def __init__(self, plugin, plugin_desc: str, tile_id: str, theme, is_selected: bool = False, parent=None):
         super().__init__(parent)
         self.tile_id = tile_id
         self.theme = theme
         self._is_checked = is_selected
-        
-        self.setFixedSize(220, 140)
+
+        self.setFixedSize(TILE_W, TILE_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        
-        # Main layout
+
+        # Main layout: centered icon over the app name (Windows-Settings style).
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-        
-        # Top row: checkbox + plugin name
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-        
-        self.checkbox = QCheckBox()
-        self.checkbox.setChecked(is_selected)
-        self.checkbox.setFixedSize(20, 20)
-        self.checkbox.setStyleSheet("QCheckBox { background-color: transparent; }")
-        self.checkbox.toggled.connect(self._on_checkbox_toggled)
-        
-        # Plugin name
-        self.name_label = QLabel(plugin_name)
+        layout.setContentsMargins(6, 10, 6, 8)
+        layout.setSpacing(5)
+
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setPixmap(plugin_icon_pixmap(plugin, TILE_ICON))
+
+        self.name_label = QLabel(getattr(plugin, "name", tile_id))
         self.name_label.setWordWrap(True)
-        self.name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         name_font = QFont()
-        name_font.setPointSize(11)
-        name_font.setWeight(QFont.Weight.DemiBold)
+        name_font.setPointSize(9)
+        name_font.setWeight(QFont.Weight.Medium)
         self.name_label.setFont(name_font)
         self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
-        
-        top_row.addWidget(self.checkbox)
-        top_row.addWidget(self.name_label, 1)
-        
-        layout.addLayout(top_row)
-        
+
+        layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(self.name_label, 1)
+
         # Plugin description shown as tooltip on hover with custom styling
         if plugin_desc:
             # Wrap text at approximately 400px for better readability
             wrapped_desc = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
             self.setToolTip(wrapped_desc)
             self.setToolTipDuration(5000)  # Show for 5 seconds
-        
-        layout.addStretch()
-        
+
         # Apply base styling
         self._update_card_style()
-        
+
         # PROFESSIONAL: Setup theme awareness for live updates
         self.setup_theme_awareness()
-    
+
     def apply_theme(self):
         """Called automatically when theme changes."""
         self.theme = self.get_current_palette()
         self._update_card_style()
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
 
-    def _on_checkbox_toggled(self, checked: bool):
-        """Handle checkbox toggle."""
-        self._is_checked = checked
-        self._update_card_style()
-        self.toggled.emit(checked)
-    
     def is_checked(self) -> bool:
         """Get checked state."""
         return self._is_checked
-    
+
     def set_checked(self, checked: bool):
-        """Set checked state programmatically."""
-        self.checkbox.blockSignals(True)
-        self.checkbox.setChecked(checked)
+        """Set checked state programmatically (no signal emitted)."""
         self._is_checked = checked
         self._update_card_style()
-        self.checkbox.blockSignals(False)
-    
+
     def _update_card_style(self):
-        """Update card visual style based on state."""
-        if self._is_checked:
-            # Selected state
-            self.setStyleSheet(f"""
-                LibraryPluginCard {{
-                    background-color: {self.theme.surface};
-                    border: 2px solid {self.theme.accent};
-                    border-radius: 12px;
-                }}
-                LibraryPluginCard:hover {{
-                    background-color: {self.theme.surface_hover};
-                    border: 2px solid {self.theme.accent_hover};
-                }}
-            """)
-        else:
-            # Default state
-            self.setStyleSheet(f"""
-                LibraryPluginCard {{
-                    background-color: {self.theme.surface};
-                    border: 1px solid {self.theme.border};
-                    border-radius: 12px;
-                }}
-                LibraryPluginCard:hover {{
-                    background-color: {self.theme.surface_hover};
-                    border: 1px solid {self.theme.border_strong};
-                }}
-            """)
-    
+        """Update card visual style based on state (pure-highlight selection)."""
+        bg = self.theme.tile_selected if self._is_checked else "transparent"
+        self.setStyleSheet(f"""
+            LibraryPluginCard {{
+                background-color: {bg};
+                border-radius: 10px;
+            }}
+            LibraryPluginCard:hover {{
+                background-color: {self.theme.surface_hover};
+            }}
+        """)
+
     def mousePressEvent(self, event):
-        """Handle mouse press - toggle checkbox."""
+        """Handle mouse press - toggle the pure-highlight selection."""
         if event.button() == Qt.MouseButton.LeftButton:
-            self.checkbox.setChecked(not self.checkbox.isChecked())
+            self._is_checked = not self._is_checked
+            self._update_card_style()
+            self.toggled.emit(self._is_checked)
         super().mousePressEvent(event)
 
 
@@ -568,7 +537,7 @@ class LibraryPage(QWidget, ThemeAware):
                 desc = plugin.description[:60] + "..." if len(plugin.description) > 60 else plugin.description
                 
                 card = LibraryPluginCard(
-                    plugin_name=plugin.name,
+                    plugin=plugin,
                     plugin_desc=desc,
                     tile_id=tile_id,
                     theme=theme,
@@ -576,38 +545,46 @@ class LibraryPage(QWidget, ThemeAware):
                     parent=self
                 )
                 card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
-                
+
                 self.tile_grid.addWidget(card, row, col)
             else:
-                # Missing plugin - show disabled card
+                # Missing plugin - show disabled placeholder tile
                 card = QFrame()
-                card.setFixedSize(220, 140)
+                card.setFixedSize(TILE_W, TILE_H)
                 card_layout = QVBoxLayout(card)
-                card_layout.setContentsMargins(16, 16, 16, 16)
-                
-                missing_label = QLabel(f"{tile_id}\n(Missing)")
-                missing_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                card_layout.setContentsMargins(6, 10, 6, 8)
+                card_layout.setSpacing(5)
+
+                icon_box = QLabel("?")
+                icon_box.setObjectName("missingIcon")
+                icon_box.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
+                icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                icon_box.setStyleSheet(
+                    f"#missingIcon {{ color: {theme.tile_missing_text}; "
+                    f"font-size: 22px; font-weight: bold; background: transparent; "
+                    f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
+                )
+
+                missing_label = QLabel("Missing")
+                missing_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
                 missing_label.setWordWrap(True)
                 missing_label.setStyleSheet(
-                    f"color: {theme.tile_missing_text}; font-size: 11px; "
+                    f"color: {theme.tile_missing_text}; font-size: 9pt; "
                     f"background-color: transparent;"
                 )
-                
+                missing_label.setToolTip(f"{tile_id}\n(plugin missing from disk)")
+
+                card_layout.addWidget(icon_box, 0, Qt.AlignmentFlag.AlignHCenter)
                 card_layout.addWidget(missing_label)
-                
-                card.setStyleSheet(f"""
-                    QFrame {{
-                        background-color: {theme.surface};
-                        border: 1px dashed {theme.border};
-                        border-radius: 12px;
-                        opacity: 0.5;
-                    }}
-                """)
-                
+
+                card.setStyleSheet(
+                    "QFrame { background-color: transparent; border-radius: 10px; }"
+                )
+
                 self.tile_grid.addWidget(card, row, col)
-            
+
             col += 1
-            if col >= 3:
+            if col >= 5:
                 col = 0
                 row += 1
         
