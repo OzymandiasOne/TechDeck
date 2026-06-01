@@ -74,6 +74,8 @@ COMPUTED_COLS = ["Thickness (in)", "Stock L", "Stock W",
 # Columns dropped from the output entirely (we don't capture meaningful values
 # for them, so they only add noise).
 DROP_COLS = {"REM USED", "REM CREATED", "DOC LOCATION", "LOCATION", "PLATE WEIGHT"}
+# Columns dropped from the Plates sheet only (kept on Non-Plates).
+PLATE_ONLY_DROP = {"TRADE INSTRUCTION"}
 
 # The column the pivot sums (our formula-driven estimate, in hours).
 EST_COL = "Est Cut Hours"
@@ -452,10 +454,14 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log)
     """Write the workbook with two identically-structured sheets: 'Plates' and
     'Non-Plates'. Each holds the flat data table, the pivot, and the yellow
     missing-data highlighting."""
+    # Plates sheet drops a couple extra columns (e.g. Trade Instruction) that
+    # are only meaningful for the non-plate shapes/bars/tubes.
+    plate_headers = [h for h in data_headers if h.upper() not in PLATE_ONLY_DROP]
+
     wb = Workbook()
     ws_plate = wb.active
     ws_plate.title = "Plates"
-    write_sheet(ws_plate, data_headers, plate_rows)
+    write_sheet(ws_plate, plate_headers, plate_rows)
 
     ws_other = wb.create_sheet("Non-Plates")
     write_sheet(ws_other, data_headers, nonplate_rows)
