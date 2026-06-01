@@ -36,7 +36,7 @@ TILE_H = 110
 TILE_ICON = 48          # rendered icon pixmap size (px)
 TILE_ICON_BOX = 58      # icon container size
 
-HOME_TILE_W = 175
+HOME_TILE_W = 140      # square tiles
 HOME_TILE_H = 140
 HOME_TILE_ICON = 56
 HOME_TILE_ICON_BOX = 64
@@ -98,9 +98,9 @@ class PluginCard(QFrame, ThemeAware):
         self.name_label = QLabel(getattr(plugin, "name", tile_id))
         self.name_label.setWordWrap(True)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        name_font = QFont()
-        name_font.setPointSize(10)
-        name_font.setWeight(QFont.Weight.Bold)
+        name_font = QFont()  # old tile design font
+        name_font.setPointSize(11)
+        name_font.setWeight(QFont.Weight.DemiBold)
         self.name_label.setFont(name_font)
         self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
 
@@ -234,7 +234,7 @@ class PluginCard(QFrame, ThemeAware):
             self._shadow.setColor(self._shadow_base_color)
 
     def _flash_success(self):
-        """Flash green background then fade to normal (old behavior)."""
+        """Flash green background then fade to normal."""
         self._flash_anim = QVariantAnimation(self)
         self._flash_anim.setStartValue(QColor(self.theme.success))
         self._flash_anim.setEndValue(QColor(self.theme.surface))
@@ -246,54 +246,42 @@ class PluginCard(QFrame, ThemeAware):
 
     def _on_flash_color(self, color: QColor):
         hex_color = color.name()
-        self.setStyleSheet(f"""
-            PluginCard {{
-                background-color: {hex_color};
-                border: 2px solid {self.theme.success};
-                border-radius: 12px;
-            }}
-            PluginCard:hover {{
-                background-color: {hex_color};
-                border: 2px solid {self.theme.success};
-            }}
-        """)
+        self.setStyleSheet(
+            f"PluginCard {{ background-color: {hex_color}; border-radius: 12px; }}"
+        )
 
     def _on_flash_done(self):
         self._flash_anim = None
         self._update_card_style()
 
-    def _update_card_style(self):
-        # Solid carded tile with a state-colored 2px border (old color logic).
-        if self._status == self.STATUS_RUNNING:
-            border_color = self.theme.accent
-            border_hover = self.theme.accent_hover
-        elif self._status in (self.STATUS_ERROR, self.STATUS_TIMEOUT):
-            border_color = self.theme.error
-            border_hover = self.theme.error
-        elif self._status == self.STATUS_CANCELLED:
-            border_color = self.theme.warning
-            border_hover = self.theme.warning
-        elif self._status == self.STATUS_PAUSED:
-            # Same warm-yellow treatment as CANCELLED so the parked tile is
-            # visually distinct from idle ones while paused.
-            border_color = self.theme.warning
-            border_hover = self.theme.warning
-        elif self._is_checked:
-            border_color = self.theme.accent
-            border_hover = self.theme.accent_hover
-        else:
-            border_color = self.theme.border_strong
-            border_hover = self.theme.accent
+    def _set_icon_ring(self, color: str):
+        """Color the ring around the icon box — the borderless tile's status cue."""
+        self.icon_label.setStyleSheet(
+            f"#cardIcon {{ background: transparent; border: 2px solid {color}; "
+            f"border-radius: 18px; }}"
+        )
 
+    def _update_card_style(self):
+        # No tile border. Status shows as a ring around the icon; selection +
+        # hover show as the tile background color.
+        if self._status == self.STATUS_RUNNING:
+            ring = self.theme.accent
+        elif self._status in (self.STATUS_ERROR, self.STATUS_TIMEOUT):
+            ring = self.theme.error
+        elif self._status in (self.STATUS_CANCELLED, self.STATUS_PAUSED):
+            ring = self.theme.warning
+        else:
+            ring = "transparent"
+        self._set_icon_ring(ring)
+
+        bg = self.theme.tile_selected if self._is_checked else self.theme.surface
         self.setStyleSheet(f"""
             PluginCard {{
-                background-color: {self.theme.surface};
-                border: 2px solid {border_color};
+                background-color: {bg};
                 border-radius: 12px;
             }}
             PluginCard:hover {{
                 background-color: {self.theme.surface_hover};
-                border: 2px solid {border_hover};
             }}
         """)
 
@@ -423,8 +411,7 @@ class _MissingTile(QFrame):
         card_layout.addStretch()
 
         self.setStyleSheet(
-            f"_MissingTile {{ background-color: {theme.surface}; "
-            f"border: 1px dashed {theme.border}; border-radius: 12px; }}"
+            f"_MissingTile {{ background-color: {theme.surface}; border-radius: 12px; }}"
         )
 
     def is_running(self) -> bool:

@@ -250,8 +250,8 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self._update_card_style()
 
     def _update_card_style(self):
-        """Update card visual style based on state (pure-highlight selection)."""
-        bg = self.theme.tile_selected if self._is_checked else "transparent"
+        """Solid background; selection/hover follow the same logic as Home."""
+        bg = self.theme.tile_selected if self._is_checked else self.theme.surface
         self.setStyleSheet(f"""
             LibraryPluginCard {{
                 background-color: {bg};
