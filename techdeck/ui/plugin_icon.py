@@ -12,12 +12,44 @@ Resolution order for a plugin's tile icon:
 `plugin_icon_pixmap(plugin, size)` is the single entry point used by the tiles.
 """
 
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSize, QRectF
 from PySide6.QtGui import (
     QPixmap, QPainter, QColor, QFont, QBrush, QPainterPath, QIcon,
 )
+
+# Per-plugin tile art. Files live centrally in assets/icons/tile icons/ (bundled
+# with the build), keyed by plugin id so we don't have to copy a PNG into each
+# plugin folder or edit 14 plugin.json files. Paths are relative to that dir.
+PLUGIN_ICON_FILES = {
+    "911_setup":            "Icons8 symbols/icons8-wrench-64.png",
+    # NOTE: the 911_batch_repeater FOLDER ships plugin.json id "911_repeater";
+    # the map keys on the runtime id, not the folder name.
+    "911_repeater":         "Icons8 symbols/icons8-refresh-64.png",
+    "911_remove_ticket":    "Icons8 symbols/icons8-trash-64.png",
+    "911_po_pdf_extractor": "Icons8 symbols/icons8-document-64.png",
+    "911_sketch_extractor": "Icons8 symbols/icons8-picture-64.png",
+    "911_linear_inch_calc": "Icons8 symbols/icons8-edit-pencil-64.png",
+    "922_pallet_stamper":   "Icons8 symbols/icons8-box-64.png",
+    "922_form_seeker":      "Icons8 symbols/icons8-binoculars-64.png",
+    "922_kitting":          "Icons8 symbols/icons8-toolbox-64.png",
+    "922_lst_organizer":    "Icons8 symbols/icons8-opened-folder-64.png",
+    "922_runtime_genie":    "Icons8 symbols/icons8-clock-64.png",
+    "batch_repeater":       "Icons8 symbols/icons8-restart-64.png",
+    "batch_auditor":        "Icons8 symbols/icons8-checkmark-64.png",
+    "qr_code_generator":    "Icons8 symbols/icons8-puzzle-64.png",
+}
+
+
+def _tile_icons_dir() -> Path:
+    """Folder holding the central tile PNGs (frozen-build aware)."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets"
+    else:
+        base = Path(__file__).resolve().parents[2] / "assets"
+    return base / "icons" / "tile icons"
 
 # Fixed, theme-independent family colors for the monogram fallback. Chosen to
 # read well on both the dark and light app backgrounds.
@@ -37,6 +69,23 @@ _SCALE = 2
 
 def _icon_is_file(icon: str) -> bool:
     return bool(icon) and Path(icon).suffix.lower() in _IMAGE_EXTS
+
+
+def _load_mapped_icon(plugin, size: int) -> QPixmap | None:
+    """Load the central per-plugin tile icon (by plugin id), or None."""
+    rel = PLUGIN_ICON_FILES.get(getattr(plugin, "id", None))
+    if not rel:
+        return None
+    path = _tile_icons_dir() / rel
+    if not path.exists():
+        return None
+    pm = QPixmap(str(path))
+    if pm.isNull():
+        return None
+    if pm.width() != size or pm.height() != size:
+        pm = pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
+    return pm
 
 
 def _load_icon_file(plugin, size: int) -> QPixmap | None:
@@ -111,6 +160,9 @@ def _emoji(icon: str, size: int) -> QPixmap:
 
 def plugin_icon_pixmap(plugin, size: int = 48) -> QPixmap:
     """Return a QPixmap for a plugin's tile icon (never None)."""
+    pm = _load_mapped_icon(plugin, size)
+    if pm is not None:
+        return pm
     pm = _load_icon_file(plugin, size)
     if pm is not None:
         return pm

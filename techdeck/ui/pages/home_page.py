@@ -38,8 +38,8 @@ TILE_ICON_BOX = 58      # icon container size
 
 HOME_TILE_W = 140      # square tiles
 HOME_TILE_H = 140
-HOME_TILE_ICON = 56
-HOME_TILE_ICON_BOX = 64
+HOME_TILE_ICON = 64
+HOME_TILE_ICON_BOX = 72
 
 
 class PluginCard(QFrame, ThemeAware):
@@ -82,8 +82,8 @@ class PluginCard(QFrame, ThemeAware):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 14, 8, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 10, 6, 10)
+        layout.setSpacing(6)
 
         # Icon over name (Windows-Settings layout) on a solid carded tile.
         # Pure-highlight selection — no checkbox; clicking toggles _is_checked.
@@ -258,7 +258,7 @@ class PluginCard(QFrame, ThemeAware):
         """Color the ring around the icon box — the borderless tile's status cue."""
         self.icon_label.setStyleSheet(
             f"#cardIcon {{ background: transparent; border: 2px solid {color}; "
-            f"border-radius: 18px; }}"
+            f"border-radius: 20px; }}"
         )
 
     def _update_card_style(self):
