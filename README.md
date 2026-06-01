@@ -102,3 +102,4 @@ Batch Repeater | Copies repeat orders from prior 922 batches
 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation 
 QR Code Generator | GUI plugin - dual-tab QR library and generator 
 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer 
+911 Linear Inch Calc | Reads each nest's packet PDF and batch list across a directory of orders, computes a plate-cutting time estimate, and writes one workbook with Plates and Non-Plates sheets (data table + nest summary each) 
