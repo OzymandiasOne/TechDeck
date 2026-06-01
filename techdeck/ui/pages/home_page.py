@@ -531,11 +531,24 @@ class TileGridController(QObject):
 
     def _cancel_active_drag(self):
         self._stop_autoscroll()
+        self._clear_drag_state()
+
+    def _clear_drag_state(self):
+        """Reset all drag bookkeeping and restore the dragged card's shadow.
+        Safe to call whether or not a drag is active. `_order` is NOT touched —
+        it always holds the full tile set, so a tile can never be lost even if a
+        drop event is missed (the grid self-heals on the next relayout)."""
+        card = self._drag_card
+        if (card is not None and self._restore_shadow is not None
+                and hasattr(card, "_shadow") and card.graphicsEffect() is card._shadow):
+            blur, ox, oy = self._restore_shadow
+            card._shadow.setBlurRadius(blur)
+            card._shadow.setOffset(ox, oy)
+        self._restore_shadow = None
         self._drag_card = None
         self._drag_widget_id = None
         self._drag_origin_index = -1
         self._hover_index = -1
-        self._restore_shadow = None
 
     # ---- geometry --------------------------------------------------------
 
@@ -572,13 +585,15 @@ class TileGridController(QObject):
         col = max(0, min(self._cols - 1, int(col)))
         row = max(0, int(row))
         idx = row * self._cols + col
-        # _order excludes the dragged card during drag, so cap at len(_order)
-        return max(0, min(idx, len(self._order)))
+        # `_order` keeps the dragged tile, so there are len(_order)-1 OTHER tiles;
+        # the dragged tile can be inserted at any slot 0..(that count).
+        max_slot = max(0, len(self._order) - 1)
+        return max(0, min(idx, max_slot))
 
     def _update_min_size(self):
-        # Includes the dragged card in the count so the scroll area doesn't shrink
-        # under the dragged tile mid-gesture.
-        n = len(self._order) + (1 if self._drag_card is not None else 0)
+        # `_order` always holds every tile (including the one being dragged), so
+        # the count is just its length.
+        n = len(self._order)
         if n == 0:
             self._surface.setMinimumHeight(self.MARGIN * 2 + self.CELL_H)
             return
@@ -591,10 +606,15 @@ class TileGridController(QObject):
     def relayout(self, animated: bool = True):
         """Move every tile to its slot. During drag, the dragged card is skipped
         (it's following the cursor) and other tiles shift to make room."""
-        display_order = list(self._order)
-        if self._drag_card is not None and self._drag_widget_id is not None:
+        dragging = self._drag_card is not None and self._drag_widget_id is not None
+        if dragging:
+            # Build the visible order from the OTHER tiles, then slot the dragged
+            # tile in at the hover position. `_order` itself is left intact.
+            display_order = [t for t in self._order if t != self._drag_widget_id]
             insert_at = max(0, min(self._hover_index, len(display_order)))
             display_order.insert(insert_at, self._drag_widget_id)
+        else:
+            display_order = list(self._order)
 
         new_anims = []
         for i, tid in enumerate(display_order):
@@ -628,10 +648,16 @@ class TileGridController(QObject):
             return
         if tid not in self._order:
             return
+        # If a previous drag never delivered its drop (missed release / re-entrant
+        # press), finalize it first so its tile snaps back to its slot instead of
+        # being left floating. _order is intact, so nothing was lost.
+        if self._drag_card is not None and self._drag_card is not card:
+            self._stop_autoscroll()
+            self._clear_drag_state()
+            self.relayout(animated=False)
         self._drag_card = card
         self._drag_widget_id = tid
         self._drag_origin_index = self._order.index(tid)
-        self._order.pop(self._drag_origin_index)
         self._hover_index = self._drag_origin_index
         self._grab_offset = QPoint(press_pos)
 
@@ -727,35 +753,21 @@ class TileGridController(QObject):
         if self._drag_card is None:
             return
         self._stop_autoscroll()
-        card = self._drag_card
         tid = self._drag_widget_id
-        drop_idx = max(0, min(self._hover_index, len(self._order)))
+
+        # Move the tile to its drop slot within the OTHER tiles. remove()+insert()
+        # is balanced, so _order keeps every tile (no duplicates, no losses).
+        max_slot = max(0, len(self._order) - 1)
+        drop_idx = max(0, min(self._hover_index, max_slot))
+        if tid in self._order:
+            self._order.remove(tid)
         self._order.insert(drop_idx, tid)
 
-        # Clear drag state BEFORE the drop animation so future calls treat the
-        # card as a normal tile in the order.
-        self._drag_card = None
-        self._drag_widget_id = None
-        self._hover_index = -1
-        self._drag_origin_index = -1
+        # Clear drag state (restores the card's shadow) BEFORE relaying out so the
+        # dropped card is treated as a normal tile and animated into its slot.
+        self._clear_drag_state()
+        self.relayout(animated=True)
 
-        target = self.slot_pos(drop_idx, self._cols)
-        anim = QPropertyAnimation(card, b"pos", self)
-        anim.setDuration(200)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        anim.setStartValue(card.pos())
-        anim.setEndValue(target)
-        anim.start()
-        self._anims.append(anim)
-
-        if self._restore_shadow is not None and hasattr(card, "_shadow") \
-                and card.graphicsEffect() is card._shadow:
-            blur, ox, oy = self._restore_shadow
-            card._shadow.setBlurRadius(blur)
-            card._shadow.setOffset(ox, oy)
-        self._restore_shadow = None
-
-        self._update_min_size()
         try:
             self._settings.set_profile_tiles(list(self._order))
         except Exception:
