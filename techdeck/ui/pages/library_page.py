@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QComboBox, QPushButton, QScrollArea, QGridLayout,
     QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QFrame, QCheckBox
 )
-from PySide6.QtCore import Signal, Qt, QSize
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QFont
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import DEFAULT_PROFILE_NAME
@@ -124,31 +124,6 @@ class ProfileDialog(QDialog):
         return self.name_input.text().strip()
 
 
-class _InfoButton(QPushButton):
-    """Tiny corner button (open-book icon) that recolors on hover by swapping
-    between two pre-tinted icons — QSS can't tint an SVG, so we swap QIcons."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._normal_icon = None
-        self._hover_icon = None
-
-    def set_icons(self, normal: QIcon, hover: QIcon):
-        self._normal_icon = normal
-        self._hover_icon = hover
-        self.setIcon(normal)
-
-    def enterEvent(self, event):
-        if self._hover_icon is not None:
-            self.setIcon(self._hover_icon)
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        if self._normal_icon is not None:
-            self.setIcon(self._normal_icon)
-        super().leaveEvent(event)
-
-
 class PluginInfoDialog(QDialog):
     """Small popup window showing a plugin's full description (Library info button)."""
 
@@ -242,19 +217,16 @@ class LibraryPluginCard(QFrame, ThemeAware):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
 
-        # Corner info button (open-book icon) → opens a window with the full
-        # description. It's a child positioned absolutely in the top-right;
-        # because QPushButton consumes its own mouse press, clicking it does NOT
-        # toggle the tile's selection. (No hover tooltip — the description lives
-        # behind this button.)
-        self.info_btn = _InfoButton(self)
-        self.info_btn.setFixedSize(20, 20)
-        self.info_btn.setIconSize(QSize(15, 15))
+        # Corner "i" button → opens a window with the full description. It's a
+        # child positioned absolutely in the top-right; because QPushButton
+        # consumes its own mouse press, clicking it does NOT toggle the tile's
+        # selection. (No hover tooltip — the description lives behind this button.)
+        self.info_btn = QPushButton("i", self)
+        self.info_btn.setFixedSize(18, 18)
         self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.info_btn.setToolTip("About this app")
-        self.info_btn.move(TILE_W - 24, 5)
+        self.info_btn.move(TILE_W - 22, 5)
         self.info_btn.clicked.connect(self._show_info)
-        self._apply_info_icon()
 
         # Apply base styling
         self._update_card_style()
@@ -267,8 +239,6 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.theme = self.get_current_palette()
         self._update_card_style()
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
-        if hasattr(self, "info_btn"):
-            self._apply_info_icon()
 
     def is_checked(self) -> bool:
         """Get checked state."""
@@ -292,22 +262,19 @@ class LibraryPluginCard(QFrame, ThemeAware):
             }}
         """)
         if hasattr(self, "info_btn"):
-            self.info_btn.setStyleSheet(
-                "QPushButton { background: transparent; border: none; padding: 0px; }"
-            )
+            self.info_btn.setStyleSheet(f"""
+                QPushButton {{
+                    color: {self.theme.text_secondary};
+                    background: transparent;
+                    border: none;
+                    padding: 0px;
+                    font-style: italic;
+                    font-weight: bold;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{ color: {self.theme.accent}; }}
+            """)
             self.info_btn.raise_()
-
-    def _apply_info_icon(self):
-        """Tint the open-book icon to the current theme (normal + hover colors)."""
-        book = (Path(__file__).resolve().parents[3]
-                / "assets" / "icons" / "library" / "open-book.svg")
-        try:
-            normal = QIcon(make_tinted_svg_copy(book, self.theme.text_secondary))
-            hover = QIcon(make_tinted_svg_copy(book, self.theme.accent))
-            self.info_btn.set_icons(normal, hover)
-        except Exception:
-            # Fallback to a plain text "i" if the asset/tint is unavailable.
-            self.info_btn.setText("i")
 
     def _show_info(self):
         """Open a small window with the plugin's full description."""

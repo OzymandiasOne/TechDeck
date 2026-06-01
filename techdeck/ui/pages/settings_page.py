@@ -56,6 +56,9 @@ class SettingsPage(QWidget, ThemeAware):
 
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        # Match the console/dashboard tab bar: flat, no base line, left-aligned.
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.tabBar().setExpanding(False)
 
         self.tabs.addTab(self._create_personalization_tab(), "Personalization")
         self.tabs.addTab(self._create_plugin_tab(),          "Apps")
@@ -69,6 +72,9 @@ class SettingsPage(QWidget, ThemeAware):
     def apply_theme(self):
         """Re-style theme-sensitive surfaces whenever the theme changes."""
         theme = self.get_current_palette()
+        # Console/Dashboard tab look: the selected tab fills with the pane
+        # background so it merges into the content area; inactive tabs use the
+        # lighter surface fill. Top corners rounded, no outline, bold labels.
         self.tabs.setStyleSheet(f"""
             QTabWidget::pane {{
                 border: none;
@@ -77,20 +83,19 @@ class SettingsPage(QWidget, ThemeAware):
             QTabBar::tab {{
                 background-color: {theme.surface};
                 color: {theme.text_secondary};
-                padding: 10px 20px;
+                font-weight: bold;
+                padding: 7px 16px;
+                margin-right: 3px;
                 border: none;
-                border-bottom: 2px solid transparent;
-                margin-right: 2px;
-            }}
-            QTabBar::tab:hover {{
-                background-color: {theme.surface_hover};
-                color: {theme.text};
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
             }}
             QTabBar::tab:selected {{
-                background-color: {theme.surface};
+                background-color: {theme.background};
                 color: {theme.text};
-                border-bottom: 2px solid {theme.accent};
-                font-weight: 600;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {theme.surface_hover};
             }}
         """)
 
