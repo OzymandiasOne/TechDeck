@@ -65,13 +65,15 @@ from openpyxl.utils import get_column_letter
 
 VERSION = "1.0.0"
 
-# A.T.'s reference column set, in order. Location/Process are appended after
-# the batch-list columns (A.T. typed them by hand; they are usually absent
-# from the batch list itself).
-APPENDED_AFTER_BATCH = ["Location", "Process"]
+# Process is appended after the batch-list columns (A.T. typed it by hand;
+# it is usually absent from the batch list itself; we derive it from the PDF).
+APPENDED_AFTER_BATCH = ["Process"]
 # Our PDF-derived + computed columns, appended after everything A.T. had.
-COMPUTED_COLS = ["Thickness (in)", "Stock L", "Stock W", "Plate Weight",
+COMPUTED_COLS = ["Thickness (in)", "Stock L", "Stock W",
                  "Mil Spec", "Source", "Est Cut Hours", "Flags"]
+# Columns dropped from the output entirely (we don't capture meaningful values
+# for them, so they only add noise).
+DROP_COLS = {"REM USED", "REM CREATED", "DOC LOCATION", "LOCATION", "PLATE WEIGHT"}
 
 # The column the pivot sums (our formula-driven estimate, in hours).
 EST_COL = "Est Cut Hours"
@@ -426,6 +428,7 @@ _HDR_FONT = Font(bold=True, color="FFFFFF")
 _PIVOT_FILL = PatternFill("solid", fgColor="1F4E78")
 _NEST_FILL = PatternFill("solid", fgColor="DDEBF7")
 _TOTAL_FILL = PatternFill("solid", fgColor="FFE699")
+_MISSING_FILL = PatternFill("solid", fgColor="FFFF00")
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
@@ -452,10 +455,15 @@ def write_workbook(out_path: Path, data_headers, data_rows, pivot_tree,
 
     est_idx = data_headers.index(EST_COL) + 1
     for ri, row in enumerate(data_rows, start=2):
+        # Rows missing the data needed to compute an estimate are flagged
+        # yellow so they're easy to find and fill in by hand.
+        missing = row.get(EST_COL) is None
         for c, name in enumerate(data_headers, start=1):
             val = row.get(name)
             cell = ws.cell(ri, c, val)
             cell.border = _BORDER
+            if missing:
+                cell.fill = _MISSING_FILL
             if _is_date(val):
                 cell.number_format = "MM/DD/YYYY"
             if c == est_idx and isinstance(val, (int, float)):
@@ -530,13 +538,13 @@ def _autosize(ws, data_headers):
 def build_pivot_tree(data_rows):
     """Group rows into the nested pivot hierarchy and sum est/qty at each node.
 
-    Hierarchy: Nest Pkg Nbr -> PPN Quantity -> Description -> Location -> Process.
+    Hierarchy: Nest Pkg Nbr -> PPN Quantity -> Description -> Process.
     Returns (tree, grand_est, grand_qty).
     """
     tree = {}
     grand_est = 0.0
     grand_qty = 0.0
-    levels = ["Nest Pkg Nbr", "PPN Quantity", "Description", "Location", "Process"]
+    levels = ["Nest Pkg Nbr", "PPN Quantity", "Description", "Process"]
     for row in data_rows:
         est = row.get(EST_COL) or 0.0
         qty = _to_float(row.get("PPN Quantity")) or 0.0
@@ -547,7 +555,7 @@ def build_pivot_tree(data_rows):
         for lv in levels:
             key = row.get(lv)
             if key is None or (isinstance(key, str) and key.strip() == ""):
-                key = "" if lv in ("Location", "Process", "Description") else key
+                key = "" if lv in ("Process", "Description") else key
             node = node_map.setdefault(key, {"est": 0.0, "qty": 0.0, "children": {}})
             path_nodes.append(node)
             node_map = node["children"]
@@ -714,13 +722,16 @@ def run(params: dict, progress_callback, cancel_event):
         return
 
     # Final data-table column order: Order first, then A.T.'s batch-list
-    # columns, then Location/Process (if not already columns), then computed.
-    data_headers = ["Order"] + list(header_order)
+    # columns, then Process, then our computed columns. Dropped columns
+    # (DROP_COLS) are excluded throughout.
+    data_headers = ["Order"] + [h for h in header_order if h.upper() not in DROP_COLS]
     for extra in APPENDED_AFTER_BATCH:
-        if extra.upper() not in {h.upper() for h in data_headers}:
+        if (extra.upper() not in {h.upper() for h in data_headers}
+                and extra.upper() not in DROP_COLS):
             data_headers.append(extra)
     for extra in COMPUTED_COLS:
-        if extra.upper() not in {h.upper() for h in data_headers}:
+        if (extra.upper() not in {h.upper() for h in data_headers}
+                and extra.upper() not in DROP_COLS):
             data_headers.append(extra)
 
     # Normalize each row's keys to the exact header strings used in output.
