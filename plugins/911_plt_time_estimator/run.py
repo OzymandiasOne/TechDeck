@@ -124,6 +124,17 @@ def _is_bevel(scope) -> bool:
     return scope is not None and "BEVEL" in str(scope).strip().upper()
 
 
+def _is_plate_row(row: dict) -> bool:
+    """True if a data row is a plate (vs a structural shape/bar/tube). A row is
+    a plate when its Description says PLATE, or when an estimate was computed
+    (a plate thickness was found). Non-plates — T-SECTION, BAR, TUBE, ANGLE,
+    etc. — have no plate thickness and land on the Non-Plates sheet."""
+    desc = str(row.get("Description") or "").upper()
+    if "PLATE" in desc:
+        return True
+    return row.get(EST_COL) is not None
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # PDF field parsing (mirrors 911 Setup's labeled-value approach)
 # ──────────────────────────────────────────────────────────────────────────
@@ -437,13 +448,24 @@ def _is_date(v):
     return isinstance(v, (datetime.datetime, datetime.date))
 
 
-def write_workbook(out_path: Path, data_headers, data_rows, pivot_tree,
-                   grand_est, grand_qty, log):
-    """Write the single-sheet workbook: flat data table, then the pivot."""
+def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
+    """Write the workbook with two identically-structured sheets: 'Plates' and
+    'Non-Plates'. Each holds the flat data table, the pivot, and the yellow
+    missing-data highlighting."""
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Plate Estimates"
+    ws_plate = wb.active
+    ws_plate.title = "Plates"
+    write_sheet(ws_plate, data_headers, plate_rows)
 
+    ws_other = wb.create_sheet("Non-Plates")
+    write_sheet(ws_other, data_headers, nonplate_rows)
+
+    wb.save(str(out_path))
+
+
+def write_sheet(ws, data_headers, data_rows):
+    """Write one sheet: flat data table (yellow rows where no estimate), then a
+    pivot summary built from this sheet's own rows, then a Grand Total."""
     # ---- Data table (header row 1) ----
     for c, name in enumerate(data_headers, start=1):
         cell = ws.cell(1, c, name)
@@ -471,8 +493,8 @@ def write_workbook(out_path: Path, data_headers, data_rows, pivot_tree,
     ws.freeze_panes = "A2"
 
     # ---- Pivot summary (below the data, mirroring A.T.'s layout) ----
-    pivot_start = len(data_rows) + 4
-    r = pivot_start
+    pivot_tree, grand_est, grand_qty = build_pivot_tree(data_rows)
+    r = len(data_rows) + 4
     ws.cell(r, 1, "Row Labels").font = Font(bold=True)
     ws.cell(r, 2, f"Sum of {EST_COL}").font = Font(bold=True)
     ws.cell(r, 3, "Sum of PPN Quantity").font = Font(bold=True)
@@ -485,17 +507,15 @@ def write_workbook(out_path: Path, data_headers, data_rows, pivot_tree,
     r = _write_pivot_level(ws, r, pivot_tree, level=0)
 
     # Grand total.
-    gt = ws.cell(r, 1, "Grand Total")
-    gt.font = Font(bold=True)
+    ws.cell(r, 1, "Grand Total").font = Font(bold=True)
     e = ws.cell(r, 2, round(grand_est, 3)); e.number_format = "0.000"
-    q = ws.cell(r, 3, grand_qty)
+    ws.cell(r, 3, grand_qty)
     for c in range(1, 4):
         ws.cell(r, c).fill = _TOTAL_FILL
         ws.cell(r, c).font = Font(bold=True)
         ws.cell(r, c).border = _BORDER
 
     _autosize(ws, data_headers)
-    wb.save(str(out_path))
 
 
 def _write_pivot_level(ws, r, nodes, level):
@@ -748,8 +768,13 @@ def run(params: dict, progress_callback, cancel_event):
         nr["Est Cut Hours"] = low.get("EST CUT HOURS")
         norm_rows.append(nr)
 
-    log(f"\nBuilding summary from {len(norm_rows)} rows...")
-    pivot_tree, grand_est, grand_qty = build_pivot_tree(norm_rows)
+    # Split into plate vs non-plate (shapes/bars/tubes) — each gets its own
+    # identically-structured sheet. A row is a plate if its Description says
+    # PLATE or if we managed to compute an estimate (thickness was found).
+    plate_rows = [r for r in norm_rows if _is_plate_row(r)]
+    nonplate_rows = [r for r in norm_rows if not _is_plate_row(r)]
+    log(f"\nBuilding workbook: {len(plate_rows)} plate rows, "
+        f"{len(nonplate_rows)} non-plate rows.")
 
     # Output path.
     out_dir = settings.get("output_dir", "").strip()
@@ -757,16 +782,16 @@ def run(params: dict, progress_callback, cancel_event):
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
     out_path = out_base / f"PLATE TIME ESTIMATE - {root.name} - {stamp}.xlsx"
     try:
-        write_workbook(out_path, data_headers, norm_rows, pivot_tree,
-                       grand_est, grand_qty, log)
+        write_workbook(out_path, data_headers, plate_rows, nonplate_rows, log)
     except PermissionError:
         log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
         return
 
+    _, grand_est, grand_qty = build_pivot_tree(plate_rows)
     progress_callback(100)
     log("\n" + "=" * 60)
     log(f"DONE. Wrote: {out_path}")
-    log(f"  Rows: {len(norm_rows)}  |  Nests: {len(pivot_tree)}")
+    log(f"  Plate rows: {len(plate_rows)}  |  Non-plate rows: {len(nonplate_rows)}")
     log(f"  Grand total estimate: {grand_est:.2f} hr across {int(grand_qty)} pieces")
     if flags_summary:
         log(f"  Flags ({len(flags_summary)}):")
