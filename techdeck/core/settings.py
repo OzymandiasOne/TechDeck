@@ -28,6 +28,7 @@ _PLUGIN_ID_RENAMES = {
     "part_sketch_extractor": "911_sketch_extractor",
     "po_packet_extractor": "911_po_pdf_extractor",
     "run_time_estimator": "922_runtime_genie",
+    "911_repeater": "911_batch_repeater",  # id now matches its folder
 }
 
 

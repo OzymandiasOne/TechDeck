@@ -36,9 +36,9 @@ class FeedbackDialog(QDialog):
     FEATURE_OPTIONS = [
         "TechDeck (General)",
         "911 Setup",
-        "911 Repeater",
+        "911 Batch Repeater",
         "922 Pallet Stamper",
-        "Batch Repeater",
+        "922 Batch Repeater",
         "922 LST Organizer",
         "911 PO PDF Extractor",
         "911 Sketch Extractor",

@@ -73,10 +73,15 @@ def clipboard(d, P):       # 911 setup
         d.line([5, y, 10, y], fill=P["LIGHT"])
 
 
-def refresh(d, P):         # 911 repeater
-    d.arc([3, 3, 12, 12], 300, 210, fill=P["MID"], width=2)
-    d.polygon([(11, 1), (14, 4), (10, 5)], fill=P["ACC"])      # top arrowhead
-    d.polygon([(5, 14), (2, 11), (6, 10)], fill=P["ACC"])      # bottom arrowhead
+def repeat(d, P):          # 911 batch repeater — two arrows looping (find/copy repeats)
+    # top arrow body pointing right, bottom arrow body pointing left, joined by
+    # short vertical connectors so it reads as a clear "repeat / loop" glyph.
+    d.line([4, 5, 11, 5], fill=P["MID"], width=2)              # top bar ->
+    d.line([11, 5, 11, 7], fill=P["MID"], width=2)             # right connector
+    d.polygon([(13, 5), (10, 2), (10, 8)], fill=P["ACC"])      # right-end head (up/over)
+    d.line([5, 11, 12, 11], fill=P["MID"], width=2)            # bottom bar <-
+    d.line([5, 9, 5, 11], fill=P["MID"], width=2)              # left connector
+    d.polygon([(3, 11), (6, 8), (6, 14)], fill=P["ACC"])       # left-end head
 
 
 def scissors(d, P):        # 911 remove ticket
@@ -174,7 +179,7 @@ def qr(d, P):              # qr code generator
 
 
 ICONS = {
-    "clipboard": clipboard, "refresh": refresh, "scissors": scissors,
+    "clipboard": clipboard, "repeat": repeat, "scissors": scissors,
     "invoice": invoice, "picture": picture, "ruler": ruler, "stamp": stamp,
     "magnifier": magnifier, "toolbox": toolbox, "folders": folders,
     "stopwatch": stopwatch, "copy": copy, "badge": badge, "qr": qr,
