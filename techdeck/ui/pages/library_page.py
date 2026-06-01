@@ -185,6 +185,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.tile_id = tile_id
         self.theme = theme
         self._is_checked = is_selected
+        self._plugin = plugin
         self._plugin_name = getattr(plugin, "name", tile_id)
         # Full (untruncated) description for the info popup.
         self._full_desc = getattr(plugin, "description", "") or "No description provided."
@@ -239,6 +240,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.theme = self.get_current_palette()
         self._update_card_style()
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
+        self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, TILE_ICON))
 
     def is_checked(self) -> bool:
         """Get checked state."""

@@ -195,6 +195,8 @@ class PluginCard(QFrame, ThemeAware):
         if self._status != self.STATUS_RUNNING:
             self._shadow.setColor(self._shadow_base_color)
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
+        # Icons are theme-matched; swap to the new theme's variant.
+        self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, HOME_TILE_ICON))
 
     def is_checked(self) -> bool:
         return self._is_checked
