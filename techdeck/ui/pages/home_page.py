@@ -100,45 +100,51 @@ class PluginCard(QFrame, ThemeAware):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
 
-        if plugin_desc:
-            wrapped = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
-            self.setToolTip(wrapped)
-            self.setToolTipDuration(5000)
+        # No hover tooltip on Home tiles — descriptions are available via /info
+        # after selecting a tile (the `plugin_desc` arg is kept for signature
+        # compatibility but intentionally unused here).
 
         self._update_card_style()
 
-        # --- Shadow effect (activated after entrance) ---
-        # Borderless tiles are transparent at rest, so the shadow stays at blur 0
-        # (invisible) until the tile lifts on hover/drag or pulses while running —
-        # states that paint a visible highlight background for it to cast off.
-        self._shadow = QGraphicsDropShadowEffect(self)
+        # --- Icon shadow ---
+        # The shadow lives on the ICON ONLY, never on the card, so the name text
+        # stays crisp (a card-wide drop shadow ghosted the label and made it look
+        # fuzzy). A subtle, tight elevation under the icon reads as intentional.
+        # A QGraphicsEffect and a stylesheet can coexist on the same widget, so
+        # this doesn't conflict with the icon's status-ring stylesheet.
+        # Installed on the icon in _on_entrance_done — NOT now. During the
+        # entrance fade the card wears a temporary opacity effect, and a parent
+        # opacity effect nested with a child shadow effect cancels the child's
+        # content out (the icon would render blank until the fade ends). Holding
+        # the icon shadow back until the fade finishes avoids that nesting.
+        self._shadow = QGraphicsDropShadowEffect(self.icon_label)
         self._shadow.setBlurRadius(0)
-        self._shadow.setOffset(0, 3)
+        self._shadow.setOffset(0, 2)
         self._shadow_base_color = self._parse_shadow_color(theme.shadow)
         self._shadow.setColor(self._shadow_base_color)
 
-        # Hover lift animations
+        # Hover lift animations (icon shadow grows)
         self._hover_in = QPropertyAnimation(self._shadow, b"blurRadius", self)
         self._hover_in.setDuration(150)
         self._hover_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._hover_in.setEndValue(18.0)
+        self._hover_in.setEndValue(12.0)
 
         self._hover_out = QPropertyAnimation(self._shadow, b"blurRadius", self)
         self._hover_out.setDuration(200)
         self._hover_out.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._hover_out.setEndValue(0.0)
 
-        # Running pulse (shadow breathes)
+        # Running pulse (icon shadow breathes in accent)
         pulse_up = QPropertyAnimation(self._shadow, b"blurRadius", self)
         pulse_up.setDuration(700)
-        pulse_up.setStartValue(6.0)
-        pulse_up.setEndValue(18.0)
+        pulse_up.setStartValue(4.0)
+        pulse_up.setEndValue(14.0)
         pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         pulse_dn = QPropertyAnimation(self._shadow, b"blurRadius", self)
         pulse_dn.setDuration(700)
-        pulse_dn.setStartValue(18.0)
-        pulse_dn.setEndValue(6.0)
+        pulse_dn.setStartValue(14.0)
+        pulse_dn.setEndValue(4.0)
         pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         self._pulse_group = QSequentialAnimationGroup(self)
@@ -146,7 +152,8 @@ class PluginCard(QFrame, ThemeAware):
         self._pulse_group.addAnimation(pulse_dn)
         self._pulse_group.setLoopCount(-1)
 
-        # Entrance: start with opacity effect; swap to shadow when done
+        # Entrance fade uses a temporary opacity effect on the whole card; it's
+        # removed once the fade finishes so it never nests with the icon shadow.
         self._opacity_effect = QGraphicsOpacityEffect(self)
         self._opacity_effect.setOpacity(0.0)
         self.setGraphicsEffect(self._opacity_effect)
@@ -173,9 +180,14 @@ class PluginCard(QFrame, ThemeAware):
         QTimer.singleShot(delay_ms, self._entrance_anim.start)
 
     def _on_entrance_done(self):
-        """Swap opacity effect for shadow effect after entrance."""
+        """Drop the entrance opacity effect, then install the icon shadow."""
         self._entrance_anim = None
-        self.setGraphicsEffect(self._shadow)
+        # Remove the card-level opacity effect FIRST, then install the icon
+        # shadow — so the two effects never coexist (no nesting). Qt deletes the
+        # opacity effect; start_entrance runs exactly once per card.
+        self.setGraphicsEffect(None)
+        self._opacity_effect = None
+        self.icon_label.setGraphicsEffect(self._shadow)
         if self._status == self.STATUS_RUNNING:
             self._start_pulse()
 
@@ -212,7 +224,7 @@ class PluginCard(QFrame, ThemeAware):
             self._update_card_style()
 
     def _start_pulse(self):
-        if self.graphicsEffect() is self._shadow:
+        if self.icon_label.graphicsEffect() is self._shadow:
             c = QColor(self.theme.accent)
             c.setAlpha(160)
             self._shadow.setColor(c)
@@ -220,7 +232,7 @@ class PluginCard(QFrame, ThemeAware):
 
     def _stop_pulse(self):
         self._pulse_group.stop()
-        if self.graphicsEffect() is self._shadow:
+        if self.icon_label.graphicsEffect() is self._shadow:
             self._shadow.setBlurRadius(0)
             self._shadow.setColor(self._shadow_base_color)
 
@@ -289,7 +301,7 @@ class PluginCard(QFrame, ThemeAware):
 
     def enterEvent(self, event):
         # While dragging, the controller is animating the shadow; don't fight it.
-        if (self.graphicsEffect() is self._shadow
+        if (self.icon_label.graphicsEffect() is self._shadow
                 and self._status != self.STATUS_RUNNING
                 and not self._dragging):
             self._hover_out.stop()
@@ -298,7 +310,7 @@ class PluginCard(QFrame, ThemeAware):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        if (self.graphicsEffect() is self._shadow
+        if (self.icon_label.graphicsEffect() is self._shadow
                 and self._status != self.STATUS_RUNNING
                 and not self._dragging):
             self._hover_in.stop()
@@ -626,10 +638,11 @@ class TileGridController(QObject):
         self._hover_index = self._drag_origin_index
         self._grab_offset = QPoint(press_pos)
 
-        # Lift visually: bump the existing shadow effect. A widget can only host
-        # one QGraphicsEffect, so we mutate the card's shadow rather than adding
-        # an overlay effect.
-        if hasattr(card, "_shadow") and card.graphicsEffect() is card._shadow:
+        # Lift visually: bump the icon's shadow effect (it lives on the icon, not
+        # the card, so the dragged tile's text doesn't pick up a blur).
+        icon = getattr(card, "icon_label", None)
+        if hasattr(card, "_shadow") and icon is not None \
+                and icon.graphicsEffect() is card._shadow:
             self._restore_shadow = (
                 card._shadow.blurRadius(),
                 card._shadow.xOffset(),
@@ -640,8 +653,8 @@ class TileGridController(QObject):
                 card._hover_in.stop()
             if hasattr(card, "_hover_out"):
                 card._hover_out.stop()
-            card._shadow.setBlurRadius(30)
-            card._shadow.setOffset(0, 8)
+            card._shadow.setBlurRadius(24)
+            card._shadow.setOffset(0, 6)
         else:
             self._restore_shadow = None
 
@@ -739,8 +752,9 @@ class TileGridController(QObject):
         anim.start()
         self._anims.append(anim)
 
+        icon = getattr(card, "icon_label", None)
         if self._restore_shadow is not None and hasattr(card, "_shadow") \
-                and card.graphicsEffect() is card._shadow:
+                and icon is not None and icon.graphicsEffect() is card._shadow:
             blur, ox, oy = self._restore_shadow
             card._shadow.setBlurRadius(blur)
             card._shadow.setOffset(ox, oy)

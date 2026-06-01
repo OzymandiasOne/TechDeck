@@ -124,6 +124,54 @@ class ProfileDialog(QDialog):
         return self.name_input.text().strip()
 
 
+class PluginInfoDialog(QDialog):
+    """Small popup window showing a plugin's full description (Library 'i' button)."""
+
+    def __init__(self, name: str, description: str, theme, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(name)
+        self.setMinimumWidth(360)
+        self.setMaximumWidth(460)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(14)
+
+        title = QLabel(name)
+        title_font = QFont()
+        title_font.setPointSize(13)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        title.setFont(title_font)
+        title.setStyleSheet(f"color: {theme.text}; background: transparent;")
+
+        body = QLabel(description)
+        body.setWordWrap(True)
+        body.setStyleSheet(
+            f"color: {theme.text_secondary}; background: transparent; font-size: 13px;"
+        )
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        button_box.rejected.connect(self.reject)
+        button_box.accepted.connect(self.accept)
+
+        layout.addWidget(title)
+        layout.addWidget(body, 1)
+        layout.addWidget(button_box)
+
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: {theme.background}; }}
+            QPushButton {{
+                background-color: {theme.accent};
+                color: {theme.accent_text};
+                border: none;
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 6px 16px;
+            }}
+            QPushButton:hover {{ background-color: {theme.accent_hover}; }}
+        """)
+
+
 class LibraryPluginCard(QFrame, ThemeAware):
     """
     PHASE 3: Professional plugin card for library page.
@@ -137,6 +185,9 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.tile_id = tile_id
         self.theme = theme
         self._is_checked = is_selected
+        self._plugin_name = getattr(plugin, "name", tile_id)
+        # Full (untruncated) description for the info popup.
+        self._full_desc = getattr(plugin, "description", "") or "No description provided."
 
         self.setFixedSize(TILE_W, TILE_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -163,12 +214,16 @@ class LibraryPluginCard(QFrame, ThemeAware):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
 
-        # Plugin description shown as tooltip on hover with custom styling
-        if plugin_desc:
-            # Wrap text at approximately 400px for better readability
-            wrapped_desc = f'<div style="max-width: 400px; white-space: normal;">{plugin_desc}</div>'
-            self.setToolTip(wrapped_desc)
-            self.setToolTipDuration(5000)  # Show for 5 seconds
+        # Corner "i" button → opens a window with the full description. It's a
+        # child positioned absolutely in the top-right; because QPushButton
+        # consumes its own mouse press, clicking it does NOT toggle the tile's
+        # selection. (No hover tooltip — the description lives behind this button.)
+        self.info_btn = QPushButton("ⓘ", self)  # circled small i
+        self.info_btn.setFixedSize(18, 18)
+        self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.info_btn.setToolTip("About this app")
+        self.info_btn.move(TILE_W - 23, 5)
+        self.info_btn.clicked.connect(self._show_info)
 
         # Apply base styling
         self._update_card_style()
@@ -203,6 +258,24 @@ class LibraryPluginCard(QFrame, ThemeAware):
                 background-color: {self.theme.surface_hover};
             }}
         """)
+        if hasattr(self, "info_btn"):
+            self.info_btn.setStyleSheet(f"""
+                QPushButton {{
+                    color: {self.theme.text_secondary};
+                    background-color: transparent;
+                    border: none;
+                    font-size: 13px;
+                    padding: 0px;
+                }}
+                QPushButton:hover {{
+                    color: {self.theme.accent};
+                }}
+            """)
+            self.info_btn.raise_()
+
+    def _show_info(self):
+        """Open a small window with the plugin's full description."""
+        PluginInfoDialog(self._plugin_name, self._full_desc, self.theme, self).exec()
 
     def mousePressEvent(self, event):
         """Handle mouse press - toggle the pure-highlight selection."""
