@@ -41,6 +41,16 @@ HOME_TILE_H = 140
 HOME_TILE_ICON = 64
 HOME_TILE_ICON_BOX = 72
 
+# Fixed family-tag colors for the Home tile corner badge.
+_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B"}
+
+
+def _strip_family_prefix(name: str, family: str) -> str:
+    """Drop a leading "911 "/"922 " from a tile name (family shows as a badge)."""
+    if family in ("911", "922") and name.startswith(family + " "):
+        return name[len(family) + 1:]
+    return name
+
 
 class PluginCard(QFrame, ThemeAware):
     """Professional plugin card with shadow elevation, hover lift, pulse, and flash animations."""
@@ -95,7 +105,9 @@ class PluginCard(QFrame, ThemeAware):
         # Transparent so the solid card background shows through behind the icon.
         self.icon_label.setStyleSheet("#cardIcon { background: transparent; }")
 
-        self.name_label = QLabel(getattr(plugin, "name", tile_id))
+        # Name without the family prefix (the family shows as a corner badge).
+        self._family = getattr(plugin, "family", "other")
+        self.name_label = QLabel(_strip_family_prefix(getattr(plugin, "name", tile_id), self._family))
         self.name_label.setWordWrap(True)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         name_font = QFont()  # old tile design font
@@ -108,6 +120,14 @@ class PluginCard(QFrame, ThemeAware):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 0)
         layout.addStretch()
+
+        # Family badge in the top-left corner ("911"/"922"; hidden for "other").
+        # Absolutely-positioned child so it overlays the corner without affecting
+        # the centered icon/name layout.
+        self.family_badge = QLabel(self._family if self._family in ("911", "922") else "", self)
+        self.family_badge.move(7, 5)
+        self.family_badge.setVisible(bool(self.family_badge.text()))
+        self._style_family_badge()
 
         # No hover tooltip on Home tiles — descriptions are available via /info
         # after selecting a tile (the `plugin_desc` arg is kept for signature
@@ -197,6 +217,7 @@ class PluginCard(QFrame, ThemeAware):
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
         # Icons are theme-matched; swap to the new theme's variant.
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, HOME_TILE_ICON))
+        self.family_badge.raise_()
 
     def is_checked(self) -> bool:
         return self._is_checked
@@ -255,6 +276,19 @@ class PluginCard(QFrame, ThemeAware):
     def _on_flash_done(self):
         self._flash_anim = None
         self._update_card_style()
+
+    def _style_family_badge(self):
+        """Style the corner family tag (fixed family color, white text)."""
+        color = _FAMILY_BADGE_COLORS.get(self._family)
+        if not color:
+            self.family_badge.setVisible(False)
+            return
+        self.family_badge.setStyleSheet(
+            f"QLabel {{ background-color: {color}; color: #FFFFFF; font-size: 8pt; "
+            f"font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
+        )
+        self.family_badge.adjustSize()
+        self.family_badge.raise_()
 
     def _set_icon_ring(self, color: str):
         """Color the ring around the icon box — the borderless tile's status cue."""
