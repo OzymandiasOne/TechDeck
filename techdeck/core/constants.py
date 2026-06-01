@@ -20,7 +20,10 @@ METRICS_FILE_NAME = "metrics.jsonl"
 PLUGINS_DIR_NAME = "plugins"
 
 # UI Constants
-WINDOW_DEFAULT_WIDTH = 1200
+# Width chosen so the Home tile grid fits exactly 5 columns at startup: sidebar
+# (200) + 5*HOME_TILE_W(140) + margins/spacing/scrollbar. The grid reflows to
+# more/fewer columns as the window resizes (see TileGridController).
+WINDOW_DEFAULT_WIDTH = 1024
 WINDOW_DEFAULT_HEIGHT = 800
 CONSOLE_MIN_HEIGHT = 150
 CONSOLE_DEFAULT_HEIGHT = 280

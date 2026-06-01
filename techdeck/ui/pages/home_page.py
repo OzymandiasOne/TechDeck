@@ -466,7 +466,9 @@ class TileGridController(QObject):
     CELL_H = HOME_TILE_H
     SPACING = 16
     MARGIN = 24
-    MAX_COLS = 4
+    # Columns reflow to fill the available width (computed in _recompute_cols).
+    # MAX_COLS is just a sane upper ceiling for very wide monitors.
+    MAX_COLS = 12
 
     # Auto-scroll while dragging a tile near the viewport's top/bottom edge.
     AUTOSCROLL_ZONE = 56       # px from edge that activates scrolling
