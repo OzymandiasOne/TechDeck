@@ -53,9 +53,17 @@ THEME_PALETTES = {
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
     "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
     "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
-    "matrix":         _pal("black", "dgreen", "green", "dgrey", "lgrey", "white", "orange"),
+    "matrix":         _pal("dgreen", "green", "dgrey", "lgrey", "white"),
 }
 _DEFAULT_PALETTE = THEME_PALETTES["dark"]
+
+# Per-theme 1:1 color substitutions applied AFTER recoloring. Use this to force a
+# specific palette color into a tonal role the luminance sort wouldn't pick — it
+# swaps one output color for another and leaves everything else untouched.
+# matrix: render the white highlight tier as green (the "rest" stays identical).
+THEME_SUBSTITUTIONS = {
+    "matrix": {"#FFF1E8": "#00E436"},
+}
 
 
 # ── colour helpers ──────────────────────────────────────────────────────────
@@ -274,10 +282,13 @@ def main():
     themes = sys.argv[1:] or list(THEME_PALETTES.keys())
     for tname in themes:
         palette = [_hex(h) for h in THEME_PALETTES.get(tname, _DEFAULT_PALETTE)]
+        subs = {_hex(a): _hex(b) for a, b in THEME_SUBSTITUTIONS.get(tname, {}).items()}
         for key, fn in ICONS.items():
             im, d = _new()
             fn(d)
             mapping = _build_map(_unique_colors(im), palette)
+            if subs:
+                mapping = {k: subs.get(v, v) for k, v in mapping.items()}
             _recolor(im, mapping)
             _save(im, tname, key)
     print(f"Generated {len(ICONS)} icons x {len(themes)} theme(s): {', '.join(themes)}")
