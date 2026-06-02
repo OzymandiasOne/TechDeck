@@ -218,6 +218,10 @@ class SettingsManager:
         # Migrate renamed plugin IDs (folder rename) across tiles/settings/stats
         self._migrate_plugin_ids()
 
+        # Migrate the renamed "salmon" theme -> "cherry_blossom"
+        if self.data.get("settings", {}).get("theme") == "salmon":
+            self.data["settings"]["theme"] = "cherry_blossom"
+
         self.save()
     
     def _migrate_blank_profile(self) -> None:

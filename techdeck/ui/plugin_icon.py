@@ -44,7 +44,7 @@ PLUGIN_ICON_KEYS = {
 
 # Themes that have a generated icon palette on disk. Custom user themes fall back
 # to the "dark" set.
-_PIXEL_THEMES = {"dark", "light", "salmon", "blue", "cyberpunk", "matrix"}
+_PIXEL_THEMES = {"dark", "light", "cherry_blossom", "blue", "cyberpunk", "matrix"}
 
 
 def _tile_icons_dir() -> Path:

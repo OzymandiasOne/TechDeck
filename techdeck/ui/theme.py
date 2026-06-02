@@ -136,7 +136,7 @@ THEMES: Dict[str, ColorPalette] = {
         tile_missing_border="#D1D5DB",
     ),
 
-    "salmon": ColorPalette(
+    "cherry_blossom": ColorPalette(
         text="#2A1008",
         text_secondary="#6A3828",
         background="#D08878",
@@ -358,7 +358,7 @@ def delete_custom_theme(name: str, custom_dir: Path) -> None:
 
 
 def is_builtin_theme(name: str) -> bool:
-    return name.lower() in ("dark", "light", "salmon", "blue", "cyberpunk", "matrix")
+    return name.lower() in ("dark", "light", "cherry_blossom", "blue", "cyberpunk", "matrix")
 
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────

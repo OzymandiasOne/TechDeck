@@ -18,7 +18,7 @@ from techdeck.ui.theme_aware import ThemeAware
 # Themes with light/warm backgrounds where the bright #10B981 success green
 # sits too close in luminance to the surface — bold text on those tones
 # antialiases into a shimmery/fuzzy ring. Pick a darker green there.
-_LIGHT_BG_THEMES = {"light", "salmon"}
+_LIGHT_BG_THEMES = {"light", "cherry_blossom"}
 _STATUS_DARK_GREEN = "#0F7A55"
 
 
