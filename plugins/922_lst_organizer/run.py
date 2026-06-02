@@ -47,14 +47,20 @@ ORDER_PREFIX = re.compile(r"^(X|BJ|BK|XY)[0-9]+$", re.IGNORECASE)
 
 # ── LST discovery ──────────────────────────────────────────────────────────────
 
-def _find_lsts_for_order(order_dir: Path) -> Tuple[List[Path], str]:
+def _find_lsts_for_order(order_dir: Path, cancel_event=None) -> Tuple[List[Path], str]:
     """
     Find .lst files inside any CAD-AND-SHOP-PRINTS/*/7000/ subtree.
     Prefers non-repeat paths; falls back to repeat paths if nothing else found.
+
+    The rglob walk over a OneDrive order tree can be slow, so we poll
+    ``cancel_event`` each iteration and bail out early when set — otherwise a
+    Cancel click can't interrupt the scan (the thread is stuck in this loop).
     """
     primary: List[Path] = []
     secondary: List[Path] = []
-    for p in order_dir.rglob("*"):
+    for i, p in enumerate(order_dir.rglob("*")):
+        if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
+            break
         if not (p.is_dir() and p.name.lower() == "7000"):
             continue
         parts_lower = [seg.lower() for seg in p.parts]
@@ -379,7 +385,7 @@ def _gather_and_copy(
         if len(name.split("-")) >= 3:
             orders.add(name)
 
-        lsts, src = _find_lsts_for_order(child)
+        lsts, src = _find_lsts_for_order(child, cancel_event)
         debug_fp.write(
             json.dumps({"event": "order_probe", "dir": str(child), "source": src, "count": len(lsts)}) + "\n"
         )
