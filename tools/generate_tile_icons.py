@@ -52,7 +52,7 @@ THEME_PALETTES = {
     "light":          _pal("black", "brown", "dgrey", "lgrey", "peach", "white", "orange"),
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
     "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
-    "cyberpunk":      _pal("black", "dpurple", "red", "pink", "blue", "yellow", "white"),
+    "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
     "matrix":         _pal("black", "dgreen", "green", "dgrey", "lgrey", "white", "orange"),
 }
 _DEFAULT_PALETTE = THEME_PALETTES["dark"]
