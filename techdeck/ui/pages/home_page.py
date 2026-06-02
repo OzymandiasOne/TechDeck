@@ -217,7 +217,8 @@ class PluginCard(QFrame, ThemeAware):
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
         # Icons are theme-matched; swap to the new theme's variant.
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, HOME_TILE_ICON))
-        self.family_badge.raise_()
+        # Family tag text uses the theme accent, so re-style it on theme change.
+        self._style_family_badge()
 
     def is_checked(self) -> bool:
         return self._is_checked
@@ -278,17 +279,17 @@ class PluginCard(QFrame, ThemeAware):
         self._update_card_style()
 
     def _style_family_badge(self):
-        """Style the corner family tag. Currently TEXT-ONLY: the chip background is
-        transparent (blends with the tile in every state — idle/selected/hover),
-        and the family color lives on the text. To bring the chip back later, set
-        `background-color` to `color` and the text `color` to `#FFFFFF`."""
-        color = _FAMILY_BADGE_COLORS.get(self._family)
-        if not color:
+        """Style the corner family tag. Currently TEXT-ONLY: transparent chip
+        background (blends with the tile in every state) and the text colored with
+        the active theme's accent, so the tag matches each theme. `_FAMILY_BADGE_COLORS`
+        still gates which families get a tag (911/922 only); to bring a colored chip
+        back later, set `background-color` to that family color and text `#FFFFFF`."""
+        if self._family not in _FAMILY_BADGE_COLORS:   # 911 / 922 only
             self.family_badge.setVisible(False)
             return
         self.family_badge.setStyleSheet(
-            f"QLabel {{ background-color: transparent; color: {color}; font-size: 8pt; "
-            f"font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
+            f"QLabel {{ background-color: transparent; color: {self.theme.accent}; "
+            f"font-size: 8pt; font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
         )
         self.family_badge.adjustSize()
         self.family_badge.raise_()
