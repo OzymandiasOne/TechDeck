@@ -175,10 +175,15 @@ def _load_po_lookup(po_path: Path, log) -> dict:
 
 # Method 1 ---------------------------------------------------------------------
 
-def _method1(batch_path: Path, batch_no: str) -> dict[str, dict]:
+def _method1(batch_path: Path, batch_no: str, cancel_event=None) -> dict[str, dict]:
     """Recursively scan for PDFs with 'PLT F' in the filename (case-sensitive)."""
     found: dict[str, dict] = {}
-    for pdf in batch_path.rglob("*.pdf"):
+    # Poll cancel_event during the rglob walk — over a OneDrive batch tree this
+    # single call can run for a long time, and without the check a Cancel click
+    # can't interrupt it (the worker thread is stuck in this loop).
+    for i, pdf in enumerate(batch_path.rglob("*.pdf")):
+        if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
+            break
         if "PLT F" not in pdf.name:
             continue
         if _is_skipped(pdf, batch_path, batch_no):
@@ -194,7 +199,7 @@ def _method1(batch_path: Path, batch_no: str) -> dict[str, dict]:
 
 # Method 2 ---------------------------------------------------------------------
 
-def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str) -> Optional[Path]:
+def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=None) -> Optional[Path]:
     """Find a PDF for DYPN under {batch_root}/{order folder}/CAD-AND-SHOP-PRINTS/.
     Prefer 'PLT F' over 'PLT' if both exist."""
     order_folder = None
@@ -219,7 +224,9 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str) -> Optional[Pa
     plt_f_match: Optional[Path] = None
     plt_match: Optional[Path] = None
     needle = f"{dypn} "
-    for pdf in cad_root.rglob("*.pdf"):
+    for i, pdf in enumerate(cad_root.rglob("*.pdf")):
+        if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
+            break
         name = pdf.name
         if needle not in name or "PLT" not in name:
             continue
@@ -232,10 +239,12 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str) -> Optional[Pa
     return plt_f_match or plt_match
 
 
-def _method2(batch_path: Path, po_lookup: dict, log) -> dict[str, dict]:
+def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[str, dict]:
     """Find DYPNs where PO NOTES contain 'bend'; resolve each to a PDF on disk."""
     found: dict[str, dict] = {}
     for key, meta in po_lookup.items():
+        if cancel_event is not None and cancel_event.is_set():
+            break
         notes = meta.get('NOTES')
         if not notes or 'bend' not in str(notes).lower():
             continue
@@ -244,7 +253,7 @@ def _method2(batch_path: Path, po_lookup: dict, log) -> dict[str, dict]:
         if not order:
             log(f"  Method 2: row for {dypn} has no ORDER value; cannot resolve PDF")
             continue
-        pdf = _resolve_method2_pdf(batch_path, str(order).strip(), dypn)
+        pdf = _resolve_method2_pdf(batch_path, str(order).strip(), dypn, cancel_event)
         if not pdf:
             log(f"  Method 2: PDF not found on disk for {dypn} (order {order})")
             continue
@@ -329,7 +338,9 @@ def _method3(
 ) -> dict[str, dict]:
     found: dict[str, dict] = {}
     candidates: list[Path] = []
-    for pdf in batch_path.rglob("*.pdf"):
+    for i, pdf in enumerate(batch_path.rglob("*.pdf")):
+        if i % 64 == 0 and cancel_event.is_set():
+            return found
         if "PLT" not in pdf.name:
             continue
         if "PLT F" in pdf.name:
@@ -474,7 +485,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # Method 1
     log("Method 1: scanning filenames for 'PLT F'...")
-    m1 = _method1(batch_path, batch_no)
+    m1 = _method1(batch_path, batch_no, cancel_event)
     log(f"  Method 1 found: {len(m1)} DYPN(s)")
     progress_callback(25)
     if cancel_event.is_set():
@@ -484,7 +495,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # Method 2
     if po_lookup:
         log("Method 2: scanning PO NOTES for 'bend'...")
-        m2 = _method2(batch_path, po_lookup, log)
+        m2 = _method2(batch_path, po_lookup, log, cancel_event)
         log(f"  Method 2 found: {len(m2)} DYPN(s)")
     else:
         m2 = {}
