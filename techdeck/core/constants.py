@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.5.1"  # 911 Setup: nests listed in Windows order; MIL spec + material now fill every part row on NEST and SCRIBE VERIFICATION
+APP_VERSION = "0.8.5.2"  # Fix frozen build: bundle techdeck.core.plugin_sdk (hiddenimports) so SDK-using plugins load; theme-matched PICO-8 tile icons; Home family tag tweaks
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

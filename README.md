@@ -1,9 +1,24 @@
-# TechDeck v0.8.5.1 - 911 Setup Upgrades
+# TechDeck v0.8.5.2 - Plugin Load Fix
 
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.5.2
+
+**Plugins load again** - Fixed a packaging bug in v0.8.5.1 where most plugins failed to
+start with a "missing dependency: plugin_sdk" error. The shared plugin toolkit is now
+bundled into the build, so all plugins run normally.
+
+**Theme-matched tile icons** - The Home and Library tile icons now recolor to match the
+active theme using a curated pixel-art palette (dark, light, blue, cyberpunk, matrix, and
+cherry blossom each get their own look).
+
+**Cleaner Home family tags** - The 911/922 family tag on Home tiles is now text-only,
+colored with the active theme's accent instead of sitting in a filled chip.
 
 ---
 

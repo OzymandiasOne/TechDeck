@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.5.1 - 911 Setup: nests in Windows order; MIL spec + material fill every part row (NEST + SCRIBE)
+; Version 0.8.5.2 - Fix frozen build: bundle plugin_sdk so SDK plugins load; theme-matched PICO-8 tile icons
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.5.1"
+#define MyAppVersion "0.8.5.2"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
