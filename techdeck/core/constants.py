@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.5.2"  # Fix frozen build: bundle techdeck.core.plugin_sdk (hiddenimports) so SDK-using plugins load; theme-matched PICO-8 tile icons; Home family tag tweaks
+APP_VERSION = "0.8.5.3"  # Cancellation fixes: LST Organizer, 922 FormSeeker, and 922 Batch Repeater now interrupt their OneDrive tree walks; remove the home-tile status icon ring
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

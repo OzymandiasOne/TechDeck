@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.5.2 - Fix frozen build: bundle plugin_sdk so SDK plugins load; theme-matched PICO-8 tile icons
+; Version 0.8.5.3 - Cancellation fixes: LST Organizer / FormSeeker / Batch Repeater interrupt tree walks; remove tile status ring
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.5.2"
+#define MyAppVersion "0.8.5.3"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

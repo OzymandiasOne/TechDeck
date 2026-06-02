@@ -1,9 +1,22 @@
-# TechDeck v0.8.5.2 - Plugin Load Fix
+# TechDeck v0.8.5.3 - Cancellation Fixes
 
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.5.3
+
+**Cancel actually stops long scans** - When a plugin was scanning a large batch folder,
+clicking **Cancel** could appear to do nothing because the scan ran in one uninterruptible
+sweep. The 922 LST Organizer, 922 FormSeeker, and 922 Batch Repeater now check for
+cancellation while they scan, so Cancel stops them promptly. Cancel also logs a brief
+"Cancelling run..." message so you get immediate feedback.
+
+**Cleaner Home tiles** - Removed the status ring that appeared around a tile's icon while
+running; a tile's status now reads from its shadow pulse and the green success flash.
 
 ---
 
