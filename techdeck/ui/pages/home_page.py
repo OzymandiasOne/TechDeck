@@ -294,25 +294,12 @@ class PluginCard(QFrame, ThemeAware):
         self.family_badge.adjustSize()
         self.family_badge.raise_()
 
-    def _set_icon_ring(self, color: str):
-        """Color the ring around the icon box — the borderless tile's status cue."""
-        self.icon_label.setStyleSheet(
-            f"#cardIcon {{ background: transparent; border: 2px solid {color}; "
-            f"border-radius: 20px; }}"
-        )
-
     def _update_card_style(self):
-        # No tile border. Status shows as a ring around the icon; selection +
-        # hover show as the tile background color.
-        if self._status == self.STATUS_RUNNING:
-            ring = self.theme.accent
-        elif self._status in (self.STATUS_ERROR, self.STATUS_TIMEOUT):
-            ring = self.theme.error
-        elif self._status in (self.STATUS_CANCELLED, self.STATUS_PAUSED):
-            ring = self.theme.warning
-        else:
-            ring = "transparent"
-        self._set_icon_ring(ring)
+        # No tile border and no icon ring (users found the status ring
+        # distracting). The icon box stays transparent/borderless in every state;
+        # status reads from the card-shadow pulse (running) and the success flash.
+        # Selection + hover show as the tile background color.
+        self.icon_label.setStyleSheet("#cardIcon { background: transparent; }")
 
         bg = self.theme.tile_selected if self._is_checked else self.theme.surface
         self.setStyleSheet(f"""
@@ -1243,6 +1230,11 @@ class HomePage(QWidget, ThemeAware):
             self._plugin_queue.clear()
             self._shelve_after_current = False
             self.plugin_executor.cancel_all()
+            # Give immediate feedback — cancellation is cooperative, so the active
+            # plugin may take a moment to notice the flag and stop.
+            console = (self._plugin_params or {}).get('console') if hasattr(self, '_plugin_params') else None
+            if console is not None:
+                console.append_system("Cancelling run — waiting for the current step to stop...")
             return  # button resets when the last plugin reports completion
 
         if not self.selected_tiles:
