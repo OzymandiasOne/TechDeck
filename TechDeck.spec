@@ -10,6 +10,10 @@ a = Analysis(
         ('assets', 'assets'),
     ],
     hiddenimports=[
+        # First-party module only imported dynamically by plugins (which PyInstaller's
+        # static analysis can't see), so it must be forced in or the frozen exe is
+        # missing it -> "cannot import name 'plugin_sdk' from 'techdeck.core'".
+        'techdeck.core.plugin_sdk',
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
         'PySide6.QtCharts',
         'openpyxl', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',
