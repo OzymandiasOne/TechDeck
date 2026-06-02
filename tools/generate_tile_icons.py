@@ -48,7 +48,7 @@ def _pal(*names):
 # Per-theme subset of the PICO-8 16, chosen to match each theme's mood with
 # tasteful tonal/hue variety (not a single-hue wash). Code re-sorts by luminance.
 THEME_PALETTES = {
-    "dark":           _pal("black", "dblue", "dgrey", "blue", "lgrey", "white", "orange"),
+    "dark":           _pal("dgrey", "lavender", "blue", "orange", "lgrey", "white"),
     "light":          _pal("black", "brown", "dgrey", "lgrey", "peach", "white", "orange"),
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
     "blue":           _pal("black", "dblue", "blue", "lavender", "lgrey", "white", "orange"),
