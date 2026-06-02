@@ -45,28 +45,33 @@ def get_console_input(params: Dict[str, Any], prompt: str) -> str:
     )
 
 
-def find_batch_root(source_po: int, base_path: Path, completed_root: Path) -> Optional[Path]:
+def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
+                    cancel_event=None) -> Optional[Path]:
     """Locate the folder named 'Batch {source_po}'."""
     target = f"Batch {source_po}"
-    
+
     # 1) Active root
     candidate1 = base_path / target
     if candidate1.exists():
         return candidate1
-    
+
     # 2) Direct child of completed
     candidate2 = completed_root / target
     if candidate2.exists():
         return candidate2
-    
-    # 3) Nested child (recursive search)
+
+    # 3) Nested child (recursive search). Poll cancel_event while walking the
+    # '1 - Completed' archive — it can be a very large OneDrive tree, and without
+    # the check a Cancel click can't interrupt this walk.
     if completed_root.exists():
         target_lower = target.lower()
-        for root, dirs, _ in os.walk(completed_root):
+        for i, (root, dirs, _) in enumerate(os.walk(completed_root)):
+            if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
+                break
             for d in dirs:
                 if d.lower() == target_lower:
                     return Path(root) / d
-    
+
     return None
 
 
@@ -280,7 +285,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         progress = base_progress + int((idx / total_orders) * progress_range)
         progress_callback(progress)
         
-        batch_root = find_batch_root(source_po, base_path, completed_root)
+        batch_root = find_batch_root(source_po, base_path, completed_root, cancel_event)
         
         if not batch_root:
             log(f"WARNING: Batch {source_po} not found for {order}")
