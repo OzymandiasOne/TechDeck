@@ -49,7 +49,7 @@ def _pal(*names):
 # tasteful tonal/hue variety (not a single-hue wash). Code re-sorts by luminance.
 THEME_PALETTES = {
     "dark":           _pal("dgrey", "lavender", "blue", "orange", "lgrey", "white"),
-    "light":          _pal("black", "brown", "dgrey", "lgrey", "peach", "white", "orange"),
+    "light":          _pal("black", "dgrey", "brown", "orange", "lgrey"),
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
     "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
     "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
