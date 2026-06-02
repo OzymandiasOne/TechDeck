@@ -278,13 +278,16 @@ class PluginCard(QFrame, ThemeAware):
         self._update_card_style()
 
     def _style_family_badge(self):
-        """Style the corner family tag (fixed family color, white text)."""
+        """Style the corner family tag. Currently TEXT-ONLY: the chip background is
+        transparent (blends with the tile in every state — idle/selected/hover),
+        and the family color lives on the text. To bring the chip back later, set
+        `background-color` to `color` and the text `color` to `#FFFFFF`."""
         color = _FAMILY_BADGE_COLORS.get(self._family)
         if not color:
             self.family_badge.setVisible(False)
             return
         self.family_badge.setStyleSheet(
-            f"QLabel {{ background-color: {color}; color: #FFFFFF; font-size: 8pt; "
+            f"QLabel {{ background-color: transparent; color: {color}; font-size: 8pt; "
             f"font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
         )
         self.family_badge.adjustSize()
