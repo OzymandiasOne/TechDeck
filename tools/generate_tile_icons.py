@@ -208,8 +208,8 @@ _SCISSORS_GRID = [
     "...c........c...",
     "....c......c....",
     ".....c....c.....",
-    "......cccc......",
-    ".......ac.......",
+    "......c..c......",
+    ".......ab.......",
     "......c..c......",
     "...bbc....cbb...",
     "..b.cb....bc.b..",
@@ -373,7 +373,7 @@ _FOLDERS_GRID = [
     "................",
     "................",
     "................",
-    "..bbbbb.........",
+    "................",
     "..aaaaaaaaaaa...",
     "..abbbbbbbbba...",
     "..abcccccbbba...",
@@ -401,8 +401,8 @@ _STOPWATCH_GRID = [
     "....bdddcdddb...",
     "...bddddcddddb..",
     "...bddddcddddb..",
-    "...bddddabdddb..",
-    "...bddddddbbdb..",
+    "...bddddacdddb..",
+    "...bddddddccdb..",
     "...bdddddddddb..",
     "....bdddddddb...",
     ".....bdddddb....",
@@ -494,6 +494,916 @@ ICONS = {
     "magnifier": magnifier, "toolbox": toolbox, "folders": folders,
     "stopwatch": stopwatch, "copy": copy, "badge": badge, "qr": qr,
 }
+
+
+
+# >>> GENERATED: Icons8 symbols (do not edit between markers) >>>
+# Icons8 symbols pack, themed via the same luminance recolor as the plugin
+# icons. Snapped to each icon's true palette, then merged to a few tonal
+# tiers. Keys are sym_-prefixed so they never collide with plugin tiles.
+
+_SYM_BINOCULARS_GRID = [
+    "................",
+    "................",
+    "................",
+    "..aaa..bb..aaa..",
+    ".aaaaabbbbaaaaa.",
+    ".aaaaabbbbaaaaa.",
+    ".aaaaabbbbaaaaa.",
+    ".aaaaabddbaaaaa.",
+    ".aaaaabbbbaaaaa.",
+    ".acccab..baccca.",
+    ".accca....accca.",
+    ".accca....accca.",
+    "..aaa......aaa..",
+    "................",
+    "................",
+    "................",
+]
+_SYM_BINOCULARS_TONES = {"a": "#085295", "b": "#706D67", "c": "#589BD4", "d": "#B6B5B5"}
+
+def sym_binoculars(d):      # symbol: binoculars
+    _draw_grid(d, _SYM_BINOCULARS_GRID, _SYM_BINOCULARS_TONES)
+
+
+_SYM_BOOKMARK_GRID = [
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaa..aaaa...",
+    "....aaa..aaa....",
+    "...aa......aa...",
+    "...aa......aa...",
+    "................",
+]
+_SYM_BOOKMARK_TONES = {"a": "#E41E2F"}
+
+def sym_bookmark(d):        # symbol: bookmark
+    _draw_grid(d, _SYM_BOOKMARK_GRID, _SYM_BOOKMARK_TONES)
+
+
+_SYM_BOX_GRID = [
+    "................",
+    "................",
+    "...cccccccccc...",
+    "..cccccccccccc..",
+    "..ccccbbbbcccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccbcbcc..",
+    "..cccccccacacc..",
+    "..cccccccacacc..",
+    "..cccccccccccc..",
+    "...cccccccccc...",
+    "................",
+    "................",
+]
+_SYM_BOX_TONES = {"a": "#706D67", "b": "#F18F06", "c": "#FCC201"}
+
+def sym_box(d):             # symbol: box
+    _draw_grid(d, _SYM_BOX_GRID, _SYM_BOX_TONES)
+
+
+_SYM_CHECKMARK_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaab...",
+    "..aaaaaaaaabba..",
+    "..aaaaaaaabbaa..",
+    "..aabbaaabbaaa..",
+    "..aaabbabbaaaa..",
+    "..aaaabbbaaaaa..",
+    "..aaaaabaaaaaa..",
+    "...aaaaaaaaaa...",
+    "....aaaaaaaa....",
+    ".....aaaaaa.....",
+    "................",
+    "................",
+]
+_SYM_CHECKMARK_TONES = {"a": "#00953F", "b": "#E6E5E5"}
+
+def sym_checkmark(d):       # symbol: checkmark
+    _draw_grid(d, _SYM_CHECKMARK_GRID, _SYM_CHECKMARK_TONES)
+
+
+_SYM_CLOCK_GRID = [
+    "................",
+    "................",
+    "....bbccccbb....",
+    "...bccccccccb...",
+    "..bccccaaccccb..",
+    "..bccccaaccccb..",
+    ".bcccccaacccccb.",
+    "..cccccaaccccc..",
+    "..ccccccaccccc..",
+    ".bcccccccaccccb.",
+    "..bccccccccccb..",
+    "..bccccccccccb..",
+    "...bccccccccb...",
+    "....bbccccbb....",
+    "................",
+    "................",
+]
+_SYM_CLOCK_TONES = {"a": "#726F69", "b": "#5A9CD5", "c": "#E4E4E4"}
+
+def sym_clock(d):           # symbol: clock
+    _draw_grid(d, _SYM_CLOCK_GRID, _SYM_CLOCK_TONES)
+
+
+_SYM_CLOSE_GRID = [
+    "................",
+    "................",
+    "................",
+    "...aa......aa...",
+    "...aaa....aaa...",
+    "....aaa..aaa....",
+    ".....aaaaaa.....",
+    "......aaaa......",
+    "......aaaa......",
+    ".....aaaaaa.....",
+    "....aaa..aaa....",
+    "...aaa....aaa...",
+    "...aa......aa...",
+    "................",
+    "................",
+    "................",
+]
+_SYM_CLOSE_TONES = {"a": "#E41E2F"}
+
+def sym_close(d):           # symbol: close
+    _draw_grid(d, _SYM_CLOSE_GRID, _SYM_CLOSE_TONES)
+
+
+_SYM_CONNECT_GRID = [
+    "................",
+    "................",
+    "..........aaaa..",
+    ".........aaaaaa.",
+    "..........aaaaa.",
+    "...aa....baaaa..",
+    "..aaaa..b..aa...",
+    ".aaaaaab........",
+    ".aaaaaab........",
+    "..aaaa..b..aa...",
+    "...aa....baaaa..",
+    "..........aaaaa.",
+    ".........aaaaaa.",
+    "..........aaaa..",
+    "................",
+    "................",
+]
+_SYM_CONNECT_TONES = {"a": "#085295", "b": "#589BD4"}
+
+def sym_connect(d):         # symbol: connect
+    _draw_grid(d, _SYM_CONNECT_GRID, _SYM_CONNECT_TONES)
+
+
+_SYM_CONTACTS_GRID = [
+    "................",
+    "................",
+    "...bbcccccccc...",
+    "...bbcccccccc...",
+    "...bbcccaaccc...",
+    "...bbccaaaacc...",
+    "...bbccaaaacc...",
+    "...bbcccccccc...",
+    "...bbcccccccc...",
+    "...bbcaaaaaac...",
+    "...bbcacccccc...",
+    "...bbcccccccc...",
+    "...bddddddddc...",
+    "...bddddddddc...",
+    "................",
+    "................",
+]
+_SYM_CONTACTS_TONES = {"a": "#064678", "b": "#B5282E", "c": "#589BD4", "d": "#F8C091"}
+
+def sym_contacts(d):        # symbol: contacts
+    _draw_grid(d, _SYM_CONTACTS_GRID, _SYM_CONTACTS_TONES)
+
+
+_SYM_CURSOR_GRID = [
+    "................",
+    "....aa..........",
+    "....aa..........",
+    "....abba........",
+    "....abbba.......",
+    "....abbbba......",
+    "....abbbbba.....",
+    "....abbbbbb.....",
+    "....abbbbbbaa...",
+    "....abbbba..a...",
+    "....aaabbb......",
+    "....aa.abba.....",
+    ".......abbb.....",
+    "........abba....",
+    ".........ba.....",
+    ".........aa.....",
+]
+_SYM_CURSOR_TONES = {"a": "#706D67", "b": "#E4E3E3"}
+
+def sym_cursor(d):          # symbol: cursor
+    _draw_grid(d, _SYM_CURSOR_GRID, _SYM_CURSOR_TONES)
+
+
+_SYM_DOCUMENT_GRID = [
+    "................",
+    "...ccccccc......",
+    "..ccccccccbb....",
+    "...ccccccbbbb...",
+    "..ccccccccbbb...",
+    "..cccccccccccc..",
+    "..ccbaaabccccc..",
+    "..cccccccccccc..",
+    "..ccbaaaaaabcc..",
+    "..cccccccccccc..",
+    "..ccbaaabccccc..",
+    "..cccccccccccc..",
+    "...cbaaaaaabcc..",
+    "..cccccccccccc..",
+    "...cccccccccc...",
+    "................",
+]
+_SYM_DOCUMENT_TONES = {"a": "#716E68", "b": "#B5B4B4", "c": "#E5E4E4"}
+
+def sym_document(d):        # symbol: document
+    _draw_grid(d, _SYM_DOCUMENT_GRID, _SYM_DOCUMENT_TONES)
+
+
+_SYM_DONE_GRID = [
+    "................",
+    "................",
+    "................",
+    ".............aa.",
+    "............aaa.",
+    "...........aaa..",
+    "..........aaa...",
+    ".aa......aaa....",
+    ".aaa....aaa.....",
+    "..aaa..aaa......",
+    "...aaaaaa.......",
+    "....aaaa........",
+    ".....aa.........",
+    "................",
+    "................",
+    "................",
+]
+_SYM_DONE_TONES = {"a": "#00953F"}
+
+def sym_done(d):            # symbol: done
+    _draw_grid(d, _SYM_DONE_GRID, _SYM_DONE_TONES)
+
+
+_SYM_DOWNLOAD_FROM_THE_CLOUD_GRID = [
+    "................",
+    "................",
+    ".......bb.......",
+    ".....bbbbbb.....",
+    "....bbbbbbbb....",
+    "....bbbbbbbb....",
+    "...bbbbaabbbbb..",
+    "..bbbbbaabbbbbb.",
+    ".bbbbbaaaabbbbb.",
+    ".bbbbbaaaabbbbb.",
+    ".bbbbbbaabbbbbb.",
+    "..bbbbbbbbbbbb..",
+    "...bbbbbbbbbb...",
+    "................",
+    "................",
+    "................",
+]
+_SYM_DOWNLOAD_FROM_THE_CLOUD_TONES = {"a": "#085295", "b": "#589BD4"}
+
+def sym_download_from_the_cloud(d): # symbol: download from the cloud
+    _draw_grid(d, _SYM_DOWNLOAD_FROM_THE_CLOUD_GRID, _SYM_DOWNLOAD_FROM_THE_CLOUD_TONES)
+
+
+_SYM_EDIT_PENCIL_GRID = [
+    ".......aa.......",
+    "......aaaa......",
+    ".....accccc.....",
+    "......cccc......",
+    ".....aaaaa......",
+    ".....aaaaa......",
+    ".....aaaaa......",
+    ".....aaaaa......",
+    ".....aaaaa......",
+    ".....aaaaa......",
+    "......aaaa......",
+    ".....bbaabb.....",
+    "......bbbb......",
+    "......bbb.......",
+    ".......bb.......",
+    "................",
+]
+_SYM_EDIT_PENCIL_TONES = {"a": "#26659F", "b": "#FAC102", "c": "#E4E3E3"}
+
+def sym_edit_pencil(d):     # symbol: edit pencil
+    _draw_grid(d, _SYM_EDIT_PENCIL_GRID, _SYM_EDIT_PENCIL_TONES)
+
+
+_SYM_FOLDER_GRID = [
+    "................",
+    "................",
+    "..aaaaa.........",
+    "..aaaaaa........",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbbb.",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbbb.",
+    "..bbbbbbbbbbbb..",
+    "..bbbbbbbbbbbb..",
+    "................",
+    "................",
+]
+_SYM_FOLDER_TONES = {"a": "#F18F06", "b": "#FCC201"}
+
+def sym_folder(d):          # symbol: folder
+    _draw_grid(d, _SYM_FOLDER_GRID, _SYM_FOLDER_TONES)
+
+
+_SYM_HAND_CURSOR_GRID = [
+    "................",
+    ".....aaa........",
+    ".....aba........",
+    ".....aba........",
+    ".....abaaa......",
+    ".....ababaaa....",
+    ".....abababaaa..",
+    "..aaaabbbbbbba..",
+    "..abbabbbbbbba..",
+    "...bbbbbbbbbba..",
+    "...abbbbbbbbba..",
+    "....bbbbbbbbba..",
+    "....abbbbbbbba..",
+    "....abbbbbbbba..",
+    ".....abbbbbba...",
+    ".....aaaaaaaa...",
+]
+_SYM_HAND_CURSOR_TONES = {"a": "#726F69", "b": "#E4E3E3"}
+
+def sym_hand_cursor(d):     # symbol: hand cursor
+    _draw_grid(d, _SYM_HAND_CURSOR_GRID, _SYM_HAND_CURSOR_TONES)
+
+
+_SYM_HOME_GRID = [
+    "................",
+    ".......aa.......",
+    "......aaa.cc....",
+    ".....aabbabc....",
+    "....aabccbaa....",
+    "...aabccccbaa...",
+    "..aabccccccbaa..",
+    "..abccccccccba..",
+    "..cccccccccccc..",
+    "...ccbccccdcc...",
+    "..ccbbbccdddcc..",
+    "...cbbbccddcc...",
+    "..cccbbccccccc..",
+    "...cbbbcccccc...",
+    "................",
+    "................",
+]
+_SYM_HOME_TONES = {"a": "#E41E2D", "b": "#F19106", "c": "#FFCB03", "d": "#FFED8E"}
+
+def sym_home(d):            # symbol: home
+    _draw_grid(d, _SYM_HOME_GRID, _SYM_HOME_TONES)
+
+
+_SYM_INFO_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "..aaaaaaaaaaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "...aaaabbaaaa...",
+    "....aaaaaaaa....",
+    ".....aaaaaa.....",
+    "................",
+    "................",
+]
+_SYM_INFO_TONES = {"a": "#26659F", "b": "#E6E5E5"}
+
+def sym_info(d):            # symbol: info
+    _draw_grid(d, _SYM_INFO_GRID, _SYM_INFO_TONES)
+
+
+_SYM_LOCK_GRID = [
+    "................",
+    ".....cccccc.....",
+    "....cccccccc....",
+    "...cc......cc...",
+    "....c......c....",
+    "...bcbbbbbbcb...",
+    "..bbbbbbbbbbbb..",
+    "...bbbbbbbbbb...",
+    "..bbbbbaabbbbb..",
+    "..bbbbaaaabbbb..",
+    "..bbbbbaabbbbb..",
+    "...bbbbaabbbb...",
+    "..bbbbbaabbbbb..",
+    "...bbbbbbbbbb...",
+    "....bbbbbbbb....",
+    "................",
+]
+_SYM_LOCK_TONES = {"a": "#064678", "b": "#589BD4", "c": "#B6B5B5"}
+
+def sym_lock(d):            # symbol: lock
+    _draw_grid(d, _SYM_LOCK_GRID, _SYM_LOCK_TONES)
+
+
+_SYM_MALE_USER_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "..aaaaaaccaaaa..",
+    "...aaaaccccaa...",
+    "..aaacccccccaa..",
+    "...cccccccccc...",
+    "..cccccccccccc..",
+    "...cccccccccc...",
+    "...ccccbbccc....",
+    "....cccbbccc....",
+    ".....cccccc.....",
+    "................",
+    "................",
+]
+_SYM_MALE_USER_TONES = {"a": "#726E68", "b": "#F18F08", "c": "#F9C292"}
+
+def sym_male_user(d):       # symbol: male user
+    _draw_grid(d, _SYM_MALE_USER_GRID, _SYM_MALE_USER_TONES)
+
+
+_SYM_MENU_GRID = [
+    "................",
+    "................",
+    "................",
+    ".aaaaaaaaaaaaaa.",
+    "................",
+    "................",
+    "................",
+    "..aaaaaaaaaaaa..",
+    "..aaaaaaaaaaaa..",
+    "................",
+    "................",
+    "................",
+    ".aaaaaaaaaaaaaa.",
+    "................",
+    "................",
+    "................",
+]
+_SYM_MENU_TONES = {"a": "#706D67"}
+
+def sym_menu(d):            # symbol: menu
+    _draw_grid(d, _SYM_MENU_GRID, _SYM_MENU_TONES)
+
+
+_SYM_MUSIC_GRID = [
+    "................",
+    "................",
+    ".......bba......",
+    "........baa.....",
+    "........baaaa...",
+    ".......bb.a.aba.",
+    ".......bb.......",
+    "....bb.bb.......",
+    "...bbbbbb.......",
+    "..bcbbbb........",
+    ".bccbbbb........",
+    ".bbbbbbbb.......",
+    "..bbbbbb........",
+    "...bbbb.........",
+    "................",
+    "................",
+]
+_SYM_MUSIC_TONES = {"a": "#064678", "b": "#26669F", "c": "#589BD4"}
+
+def sym_music(d):           # symbol: music
+    _draw_grid(d, _SYM_MUSIC_GRID, _SYM_MUSIC_TONES)
+
+
+_SYM_OPENED_FOLDER_GRID = [
+    "................",
+    "................",
+    "..aaaa..........",
+    ".aaaaaa.........",
+    ".aaaaaaaaaaaa...",
+    ".aaaaaaaaaaaaa..",
+    ".aaabbbbbbbbbb..",
+    ".aabbbbbbbbbbbb.",
+    ".aabbbbbbbbbbbb.",
+    ".aabbbbbbbbbbbb.",
+    ".abbbbbbbbbbbb..",
+    ".abbbbbbbbbbbb..",
+    ".abbbbbbbbbbbb..",
+    ".bbbbbbbbbbbb...",
+    "................",
+    "................",
+]
+_SYM_OPENED_FOLDER_TONES = {"a": "#F19006", "b": "#FCC201"}
+
+def sym_opened_folder(d):   # symbol: opened folder
+    _draw_grid(d, _SYM_OPENED_FOLDER_GRID, _SYM_OPENED_FOLDER_TONES)
+
+
+_SYM_PICTURE_GRID = [
+    "................",
+    "................",
+    "..cccccccccccc..",
+    ".ccccccccccccdc.",
+    ".cccccccccccddc.",
+    ".cccccccccccccc.",
+    ".cccbbbcccccccc.",
+    ".ccbbbbbccaaacc.",
+    ".ccbbbbbbaaaacc.",
+    ".bbbbbbbbaaaaaa.",
+    ".bbbbbbbbbbaaaa.",
+    ".bbbbbbbbbbaaaa.",
+    ".bbbbbbbbbbbbaa.",
+    "..b.bbbbbbbb.a..",
+    "................",
+    "................",
+]
+_SYM_PICTURE_TONES = {"a": "#B4252C", "b": "#EF816E", "c": "#FCC201", "d": "#FFEC8E"}
+
+def sym_picture(d):         # symbol: picture
+    _draw_grid(d, _SYM_PICTURE_GRID, _SYM_PICTURE_TONES)
+
+
+_SYM_PLUS_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaabbbbbbaaa..",
+    "..aaabbbbbbaaa..",
+    "..aaaaabbaaaaa..",
+    "..aaaaabbaaaaa..",
+    "...aaaaaaaaaa...",
+    "....aaaaaaaa....",
+    ".....aaaaaa.....",
+    "................",
+    "................",
+]
+_SYM_PLUS_TONES = {"a": "#00953F", "b": "#E6E5E5"}
+
+def sym_plus(d):            # symbol: plus
+    _draw_grid(d, _SYM_PLUS_GRID, _SYM_PLUS_TONES)
+
+
+_SYM_PUZZLE_GRID = [
+    "................",
+    ".......aa.......",
+    "......aaaa......",
+    "......aaaa......",
+    ".......aa.......",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...a..aaaaaaa...",
+    ".......aaaaaa...",
+    ".......aaaaaa...",
+    "...a..aaaaaaa...",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "....aaaaaaaa....",
+    "................",
+]
+_SYM_PUZZLE_TONES = {"a": "#00953F"}
+
+def sym_puzzle(d):          # symbol: puzzle
+    _draw_grid(d, _SYM_PUZZLE_GRID, _SYM_PUZZLE_TONES)
+
+
+_SYM_REFRESH_GRID = [
+    "................",
+    "................",
+    "....aaaaaaaa....",
+    "...aaaa..aaaa...",
+    "....aa....aaa...",
+    "....a...........",
+    "..aaaaa.........",
+    "..aaaaa...aaa...",
+    "...aaa...aaaaa..",
+    ".........aaaaa..",
+    "...........a....",
+    "...aaa....aa....",
+    "...aaaa..aaaa...",
+    "....aaaaaaaa....",
+    "................",
+    "................",
+]
+_SYM_REFRESH_TONES = {"a": "#085295"}
+
+def sym_refresh(d):         # symbol: refresh
+    _draw_grid(d, _SYM_REFRESH_GRID, _SYM_REFRESH_TONES)
+
+
+_SYM_RESTART_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa.a..",
+    "...aaa....aaaa..",
+    "..aaa......aaa..",
+    "..aa......aaaa..",
+    "..aa............",
+    "..aa........aa..",
+    "..aa........aa..",
+    "..aaa......aaa..",
+    "...aaa....aaa...",
+    "....aaaaaaaa....",
+    ".....aaaaaa.....",
+    "................",
+    "................",
+]
+_SYM_RESTART_TONES = {"a": "#00953F"}
+
+def sym_restart(d):         # symbol: restart
+    _draw_grid(d, _SYM_RESTART_GRID, _SYM_RESTART_TONES)
+
+
+_SYM_SETTINGS_GRID = [
+    "................",
+    "................",
+    "....b..bb..b....",
+    "...bbbbbbbbbb...",
+    "..bbbbbaabbbbb..",
+    "...bbbaaaabbb...",
+    "...bbaaaaaabb...",
+    ".bbbaa....aabbb.",
+    ".bbbaa....aabbb.",
+    "...bbaa..aabb...",
+    "...bbbaaaabbb...",
+    "..bbbbbaabbbbb..",
+    "...bbbbbbbbbb...",
+    "....b..bb..b....",
+    "................",
+    "................",
+]
+_SYM_SETTINGS_TONES = {"a": "#716E68", "b": "#B6B5B5"}
+
+def sym_settings(d):        # symbol: settings
+    _draw_grid(d, _SYM_SETTINGS_GRID, _SYM_SETTINGS_TONES)
+
+
+_SYM_SHARE_GRID = [
+    "................",
+    "................",
+    "..........aaaa..",
+    "..........aaaaa.",
+    "........baaaaaa.",
+    "...aa..bbbaaaa..",
+    "..aaaabb....a...",
+    ".aaaaa..........",
+    ".aaaaa..........",
+    "..aaaabb....a...",
+    "...aa..bbbaaaa..",
+    "........baaaaaa.",
+    "..........aaaaa.",
+    "..........aaaa..",
+    "................",
+    "................",
+]
+_SYM_SHARE_TONES = {"a": "#085295", "b": "#589BD4"}
+
+def sym_share(d):           # symbol: share
+    _draw_grid(d, _SYM_SHARE_GRID, _SYM_SHARE_TONES)
+
+
+_SYM_SPEECH_BUBBLE_GRID = [
+    "................",
+    "................",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "..aaaaaaaaaaaa..",
+    ".aaaaaaaaaaaaaa.",
+    ".aaaaaaaaaaaaaa.",
+    ".aaaaaaaaaaaaaa.",
+    ".aaaaaaaaaaaaaa.",
+    ".aaaaaaaaaaaaaa.",
+    "..aaaaaaaaaaaa..",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaa....",
+    "..aaa...........",
+    "................",
+    "................",
+]
+_SYM_SPEECH_BUBBLE_TONES = {"a": "#589BD4"}
+
+def sym_speech_bubble(d):   # symbol: speech bubble
+    _draw_grid(d, _SYM_SPEECH_BUBBLE_GRID, _SYM_SPEECH_BUBBLE_TONES)
+
+
+_SYM_SUN_GRID = [
+    "................",
+    ".......aa.......",
+    "......aaaa......",
+    "...a.abaaba.a...",
+    "....abbbbbba....",
+    "...abbbbbbbba...",
+    "..abbbbbbbbbba..",
+    ".aaabbbbbbbbaaa.",
+    ".aaabbbbbbbbaaa.",
+    "..abbbbbbbbbba..",
+    "...abbbbbbbba...",
+    "....abbbbbba....",
+    "...a.abaaba.a...",
+    "......aaaa......",
+    ".......aa.......",
+    "................",
+]
+_SYM_SUN_TONES = {"a": "#FCC303", "b": "#FFEC8E"}
+
+def sym_sun(d):             # symbol: sun
+    _draw_grid(d, _SYM_SUN_GRID, _SYM_SUN_TONES)
+
+
+_SYM_TOOLBOX_GRID = [
+    "................",
+    "......aaaa......",
+    ".....aa..aa.....",
+    "...b.bb..bb.b...",
+    "..bbbbbbbbbbbb..",
+    ".bbbcbbbbbbcbbb.",
+    "..ccdcbccbcdcc..",
+    "..ccdccccccdcc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    "..cccccccccccc..",
+    ".cccccccccccccc.",
+    "................",
+    "................",
+]
+_SYM_TOOLBOX_TONES = {"a": "#064678", "b": "#706D67", "c": "#FCC201", "d": "#E6E5E5"}
+
+def sym_toolbox(d):         # symbol: toolbox
+    _draw_grid(d, _SYM_TOOLBOX_GRID, _SYM_TOOLBOX_TONES)
+
+
+_SYM_TRASH_GRID = [
+    "................",
+    ".......bb.......",
+    "...cccccccccc...",
+    "...bbbbbbbbbb...",
+    "....bbbbbbbb....",
+    "...bbabaababb...",
+    "...bbabaabab....",
+    "...bbabaabab....",
+    "...bbabaabab....",
+    "...bbabaabab....",
+    "...bbabaabab....",
+    "....babaabab....",
+    "...bbabaababb...",
+    "....bbbbbbbb....",
+    ".....bbbbbb.....",
+    "................",
+]
+_SYM_TRASH_TONES = {"a": "#064679", "b": "#2765A0", "c": "#589BD4"}
+
+def sym_trash(d):           # symbol: trash
+    _draw_grid(d, _SYM_TRASH_GRID, _SYM_TRASH_TONES)
+
+
+_SYM_UPLOAD_TO_THE_CLOUD_GRID = [
+    "................",
+    "................",
+    ".......bb.......",
+    ".....bbbbbb.....",
+    "....bbbbbbbb....",
+    "....bbbbbbbb....",
+    "...bbbbaabbbbb..",
+    "..bbbbaaaabbbbb.",
+    ".bbbbbaaaabbbbb.",
+    ".bbbbbbaabbbbbb.",
+    ".bbbbbbaabbbbbb.",
+    "..bbbbbbbbbbbb..",
+    "...bbbbbbbbbb...",
+    "................",
+    "................",
+    "................",
+]
+_SYM_UPLOAD_TO_THE_CLOUD_TONES = {"a": "#085295", "b": "#589BD4"}
+
+def sym_upload_to_the_cloud(d): # symbol: upload to the cloud
+    _draw_grid(d, _SYM_UPLOAD_TO_THE_CLOUD_GRID, _SYM_UPLOAD_TO_THE_CLOUD_TONES)
+
+
+_SYM_USER_FEMALE_GRID = [
+    "................",
+    "................",
+    ".....aaaaaa.....",
+    "....aaaaaaaa....",
+    "...aaaaaaaaaa...",
+    "..aaaaaacaaaaa..",
+    "...aaaacccaaa...",
+    "..aaaacccccaaa..",
+    ".aaaacccccccaaa.",
+    "..aaccccccccaa..",
+    ".aaaaccccccaaaa.",
+    "..aaaccbbccaaa..",
+    "..aacccbbcccaa..",
+    "...aaccccccaa...",
+    "................",
+    "................",
+]
+_SYM_USER_FEMALE_TONES = {"a": "#716E68", "b": "#F18F07", "c": "#F8C191"}
+
+def sym_user_female(d):     # symbol: user female
+    _draw_grid(d, _SYM_USER_FEMALE_GRID, _SYM_USER_FEMALE_TONES)
+
+
+_SYM_WRENCH_GRID = [
+    "................",
+    ".....bb..bb.....",
+    "....bb....bb....",
+    "...bb......bb...",
+    "....bb....bb....",
+    "...bbbb..bbbb...",
+    "....bbbbbbbb....",
+    ".....bbbbbb.....",
+    "......bbbb......",
+    ".......aa.......",
+    ".......aa.......",
+    "......aaaa......",
+    ".....aaaaaa.....",
+    ".....aaaaaa.....",
+    "......aaaa......",
+    ".......aa.......",
+]
+_SYM_WRENCH_TONES = {"a": "#706D67", "b": "#B6B5B5"}
+
+def sym_wrench(d):          # symbol: wrench
+    _draw_grid(d, _SYM_WRENCH_GRID, _SYM_WRENCH_TONES)
+
+ICONS.update({
+    "sym_binoculars": sym_binoculars,
+    "sym_bookmark": sym_bookmark,
+    "sym_box": sym_box,
+    "sym_checkmark": sym_checkmark,
+    "sym_clock": sym_clock,
+    "sym_close": sym_close,
+    "sym_connect": sym_connect,
+    "sym_contacts": sym_contacts,
+    "sym_cursor": sym_cursor,
+    "sym_document": sym_document,
+    "sym_done": sym_done,
+    "sym_download_from_the_cloud": sym_download_from_the_cloud,
+    "sym_edit_pencil": sym_edit_pencil,
+    "sym_folder": sym_folder,
+    "sym_hand_cursor": sym_hand_cursor,
+    "sym_home": sym_home,
+    "sym_info": sym_info,
+    "sym_lock": sym_lock,
+    "sym_male_user": sym_male_user,
+    "sym_menu": sym_menu,
+    "sym_music": sym_music,
+    "sym_opened_folder": sym_opened_folder,
+    "sym_picture": sym_picture,
+    "sym_plus": sym_plus,
+    "sym_puzzle": sym_puzzle,
+    "sym_refresh": sym_refresh,
+    "sym_restart": sym_restart,
+    "sym_settings": sym_settings,
+    "sym_share": sym_share,
+    "sym_speech_bubble": sym_speech_bubble,
+    "sym_sun": sym_sun,
+    "sym_toolbox": sym_toolbox,
+    "sym_trash": sym_trash,
+    "sym_upload_to_the_cloud": sym_upload_to_the_cloud,
+    "sym_user_female": sym_user_female,
+    "sym_wrench": sym_wrench,
+})
+# <<< GENERATED: Icons8 symbols <<<
 
 
 def main():
