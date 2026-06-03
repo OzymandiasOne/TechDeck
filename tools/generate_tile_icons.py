@@ -141,133 +141,351 @@ def _save(im, theme, key):
     im.resize((BASE * SCALE, BASE * SCALE), Image.NEAREST).save(d / f"{key}.png")
 
 
-# ── icons (natural colors; recolored per theme at generation time) ──────────
-def clipboard(d):          # 911 setup
-    d.rectangle([3, 2, 12, 15], fill="#C68A43", outline="#3A2A14")
-    d.rectangle([6, 1, 9, 3], fill="#5E3A1C", outline="#3A2A14")
-    for y in (6, 9, 12):
-        d.line([5, y, 10, y], fill="#F4ECDC")
+# ── icons (16x16 pixel grids; one char per pixel, "." = transparent) ─────
+# Each icon is a hand-editable grid plus a TONES map (char -> natural-color hex).
+# Tweak a pixel by changing its char; the colors are recolored per theme at
+# generation time (see _build_map). Tones are listed darkest -> lightest.
+def _draw_grid(d, grid, tones):
+    for y, row in enumerate(grid):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                d.point((x, y), fill=tones[ch])
 
 
-_REPEAT_GRID = [               # hand-drawn circular arrow (reverse-engineered);
-    "................",        # d = arrowhead (dark), m = ring (mid), l = highlight
+_CLIPBOARD_GRID = [
     "................",
-    ".....mmmmmm.....",
-    "....mmmmmmmm.d..",
-    "...mmm....mddd..",
-    "..mmm......ddd..",
-    "..mm......dddd..",
-    "..mm............",
-    "..mm........mm..",
-    "..mm........mm..",
-    "..mmm......mmm..",
-    "...mmm....mmm...",
-    "....mmmmmmmm....",
-    ".....mmmmmm.....",
+    "......aaaa......",
+    "...aaaabbaaaa...",
+    "...accaaaacca...",
+    "...acccccccca...",
+    "...acccccccca...",
+    "...acddddddca...",
+    "...acccccccca...",
+    "...acccccccca...",
+    "...acddddddca...",
+    "...acccccccca...",
+    "...acccccccca...",
+    "...acddddddca...",
+    "...acccccccca...",
+    "...acccccccca...",
+    "...aaaaaaaaaa...",
+]
+_CLIPBOARD_TONES = {"a": "#3A2A14", "b": "#5E3A1C", "c": "#C68A43", "d": "#F4ECDC"}
+
+def clipboard(d):       # 911 setup
+    _draw_grid(d, _CLIPBOARD_GRID, _CLIPBOARD_TONES)
+
+
+_REPEAT_GRID = [
+    "................",
+    "................",
+    ".....bbbbbb.....",
+    "....bbbbbbbb.a..",
+    "...bbb....baaa..",
+    "..bbb......aaa..",
+    "..bb......aaaa..",
+    "..bb............",
+    "..bb........bb..",
+    "..bb........bb..",
+    "..bbb......bbb..",
+    "...bbb....bbb...",
+    "....bbbbbbbb....",
+    ".....bbbbbb.....",
     "................",
     "................",
 ]
-_REPEAT_TONES = {"d": "#1E3A8A", "m": "#3B82F6", "l": "#93C5FD"}
+_REPEAT_TONES = {"a": "#1E3A8A", "b": "#3B82F6"}
+
+def repeat(d):          # 911 batch repeater
+    _draw_grid(d, _REPEAT_GRID, _REPEAT_TONES)
 
 
-def repeat(d):             # 911 batch repeater — a single arrow curving in a circle
-    for y, row in enumerate(_REPEAT_GRID):
-        for x, ch in enumerate(row):
-            if ch in _REPEAT_TONES:
-                d.point((x, y), fill=_REPEAT_TONES[ch])
+_SCISSORS_GRID = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "...c........c...",
+    "....c......c....",
+    ".....c....c.....",
+    "......cccc......",
+    ".......ac.......",
+    "......c..c......",
+    "...bbc....cbb...",
+    "..b.cb....bc.b..",
+    "..b..b....b..b..",
+    "...bb......bb...",
+    "................",
+    "................",
+]
+_SCISSORS_TONES = {"a": "#5A5A5A", "b": "#E0483C", "c": "#C3CDD5"}
+
+def scissors(d):        # 911 remove ticket
+    _draw_grid(d, _SCISSORS_GRID, _SCISSORS_TONES)
 
 
-def scissors(d):           # 911 remove ticket
-    d.ellipse([2, 10, 5, 13], outline="#E0483C")
-    d.ellipse([10, 10, 13, 13], outline="#E0483C")
-    d.line([4, 11, 12, 4], fill="#C3CDD5")
-    d.line([11, 11, 3, 4], fill="#C3CDD5")
-    d.point((7, 8), fill="#5A5A5A")
+_INVOICE_GRID = [
+    "................",
+    "....aaaaaaaa....",
+    "....aeeeeeea....",
+    "....aebbbbea....",
+    "....aeeeeeea....",
+    "....aebbbbea....",
+    "....aeeeeeea....",
+    "....aeeeeeea....",
+    "....aeeaaeea....",
+    "....aeadcaea....",
+    "....aeaccaea....",
+    "....aeeaaeea....",
+    "....aeeeeeea....",
+    "....aeeeeeea....",
+    "....aaaaaaaa....",
+    "................",
+]
+_INVOICE_TONES = {"a": "#37474F", "b": "#90A4AE", "c": "#F4B400", "d": "#FFE082", "e": "#ECEFF1"}
+
+def invoice(d):         # 911 PO PDF extractor
+    _draw_grid(d, _INVOICE_GRID, _INVOICE_TONES)
 
 
-def invoice(d):            # 911 PO PDF extractor
-    d.rectangle([4, 1, 11, 14], fill="#ECEFF1", outline="#37474F")
-    for y in (3, 5):
-        d.line([6, y, 9, y], fill="#90A4AE")
-    d.ellipse([6, 8, 9, 11], fill="#F4B400", outline="#37474F")
-    d.point((7, 9), fill="#FFE082")
+_PICTURE_GRID = [
+    "................",
+    "................",
+    "................",
+    "..bbbbbbbbbbbb..",
+    "..baaaaaaaaaab..",
+    "..baaaaaaadaab..",
+    "..baaaaaadddab..",
+    "..baaaacaadaab..",
+    "..baaacccaaaab..",
+    "..baaacccaaaab..",
+    "..baacccccaaab..",
+    "..bacccccccaab..",
+    "..bbbbbbbbbbbb..",
+    "................",
+    "................",
+    "................",
+]
+_PICTURE_TONES = {"a": "#2B3A55", "b": "#5A4423", "c": "#4C9A5A", "d": "#FBC02D"}
+
+def picture(d):         # 911 sketch extractor
+    _draw_grid(d, _PICTURE_GRID, _PICTURE_TONES)
 
 
-def picture(d):            # 911 sketch extractor
-    d.rectangle([2, 3, 13, 12], fill="#C8923C", outline="#5A4423")
-    d.rectangle([3, 4, 12, 11], fill="#2B3A55")
-    d.polygon([(4, 11), (7, 7), (10, 11)], fill="#4C9A5A")
-    d.ellipse([9, 5, 11, 7], fill="#FBC02D")
+_RULER_GRID = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".bbabababababab.",
+    ".bcacacacacacab.",
+    ".bcacccacccaccb.",
+    ".bccccccccccccb.",
+    ".bccccccccccccb.",
+    ".bbbbbbbbbbbbbb.",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+]
+_RULER_TONES = {"a": "#5A4A1A", "b": "#6B4A1A", "c": "#E8C15A"}
+
+def ruler(d):           # 911 linear inch calc
+    _draw_grid(d, _RULER_GRID, _RULER_TONES)
 
 
-def ruler(d):              # 911 linear inch calc
-    d.rectangle([1, 5, 14, 10], fill="#E8C15A", outline="#6B4A1A")
-    for i, x in enumerate(range(3, 14, 2)):
-        d.line([x, 5, x, 7 if i % 2 == 0 else 6], fill="#5A4A1A")
+_STAMP_GRID = [
+    "................",
+    "......aaaa......",
+    "......acca......",
+    "......cccc......",
+    "......cccc......",
+    "......cccc......",
+    "...aaaaaaaaaa...",
+    "...adddddddda...",
+    "...adddddddda...",
+    "...aaaaaaaaaa...",
+    "................",
+    "................",
+    "..bbbbbbbbbbbb..",
+    "................",
+    "................",
+    "................",
+]
+_STAMP_TONES = {"a": "#3A2A18", "b": "#A12E26", "c": "#7A4A24", "d": "#CF4436"}
+
+def stamp(d):           # 922 pallet stamper
+    _draw_grid(d, _STAMP_GRID, _STAMP_TONES)
 
 
-def stamp(d):              # 922 pallet stamper
-    d.rectangle([6, 1, 9, 3], fill="#7A4A24", outline="#3A2A18")
-    d.rectangle([6, 3, 9, 6], fill="#7A4A24")
-    d.rectangle([3, 6, 12, 9], fill="#CF4436", outline="#3A2A18")
-    d.line([2, 12, 13, 12], fill="#A12E26")
+_MAGNIFIER_GRID = [
+    "................",
+    "................",
+    ".....bbb........",
+    "...bbdddbb......",
+    "...bdcccdb......",
+    "..bdcdddcdb.....",
+    "..bdcdddcdb.....",
+    "..bdcdddcdb.....",
+    "...bdcccdb......",
+    "...bbdddbba.....",
+    ".....bbb.aaa....",
+    "..........aaa...",
+    "...........aaa..",
+    "............aaa.",
+    ".............aaa",
+    "..............a.",
+]
+_MAGNIFIER_TONES = {"a": "#244E5A", "b": "#2A7D8C", "c": "#7FCFC4", "d": "#CDEEF0"}
+
+def magnifier(d):       # 922 form seeker
+    _draw_grid(d, _MAGNIFIER_GRID, _MAGNIFIER_TONES)
 
 
-def magnifier(d):          # 922 form seeker
-    d.ellipse([2, 2, 10, 10], fill="#CDEEF0", outline="#2A7D8C")
-    d.ellipse([4, 4, 8, 8], outline="#7FCFC4")
-    d.line([9, 9, 14, 14], fill="#244E5A", width=2)
-    d.line([10, 10, 14, 14], fill="#244E5A", width=2)
+_TOOLBOX_GRID = [
+    "................",
+    "................",
+    "................",
+    "......cccc......",
+    "......c..c......",
+    "..aaaaaaaaaaaa..",
+    "..abbbbeebbbba..",
+    "..aaaaaeeaaaaa..",
+    "..addddeedddda..",
+    "..addddeedddda..",
+    "..adddddddddda..",
+    "..adddddddddda..",
+    "..adddddddddda..",
+    "..adddddddddda..",
+    "..aaaaaaaaaaaa..",
+    "................",
+]
+_TOOLBOX_TONES = {"a": "#5A1A12", "b": "#96281B", "c": "#455A64", "d": "#C0392B", "e": "#F4B400"}
+
+def toolbox(d):         # 922 kitting
+    _draw_grid(d, _TOOLBOX_GRID, _TOOLBOX_TONES)
 
 
-def toolbox(d):            # 922 kitting
-    d.rectangle([6, 3, 9, 5], outline="#455A64")
-    d.rectangle([2, 5, 13, 7], fill="#96281B", outline="#5A1A12")
-    d.rectangle([2, 7, 13, 14], fill="#C0392B", outline="#5A1A12")
-    d.rectangle([7, 6, 8, 9], fill="#F4B400")
+_FOLDERS_GRID = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "..bbbbb.........",
+    "..aaaaaaaaaaa...",
+    "..abbbbbbbbba...",
+    "..abcccccbbba...",
+    "..abaaaaaaaaaaa.",
+    "..abaccccccccca.",
+    "..abaccccccccca.",
+    "..abaccccccccca.",
+    "..aaaccccccccca.",
+    "....accccccccca.",
+    "....accccccccca.",
+    "....aaaaaaaaaaa.",
+]
+_FOLDERS_TONES = {"a": "#6B4A1A", "b": "#C8923C", "c": "#E8C15A"}
+
+def folders(d):         # 922 LST organizer
+    _draw_grid(d, _FOLDERS_GRID, _FOLDERS_TONES)
 
 
-def folders(d):            # 922 LST organizer
-    d.rectangle([2, 4, 6, 5], fill="#C8923C")
-    d.rectangle([2, 5, 12, 12], fill="#C8923C", outline="#6B4A1A")
-    d.rectangle([4, 7, 8, 8], fill="#E8C15A")
-    d.rectangle([4, 8, 14, 15], fill="#E8C15A", outline="#6B4A1A")
+_STOPWATCH_GRID = [
+    ".......bb.......",
+    ".......bb.......",
+    ".......bb.......",
+    "......bbbbb.....",
+    ".....bdddddb....",
+    "....bdddcdddb...",
+    "...bddddcddddb..",
+    "...bddddcddddb..",
+    "...bddddabdddb..",
+    "...bddddddbbdb..",
+    "...bdddddddddb..",
+    "....bdddddddb...",
+    ".....bdddddb....",
+    "......bbbbb.....",
+    "................",
+    "................",
+]
+_STOPWATCH_TONES = {"a": "#1A2233", "b": "#2B3A55", "c": "#C0392B", "d": "#F4E9C1"}
+
+def stopwatch(d):       # 922 runtime genie
+    _draw_grid(d, _STOPWATCH_GRID, _STOPWATCH_TONES)
 
 
-def stopwatch(d):          # 922 runtime genie
-    d.rectangle([7, 0, 8, 2], fill="#2B3A55")
-    d.ellipse([3, 3, 13, 13], fill="#F4E9C1", outline="#2B3A55")
-    d.line([8, 8, 8, 5], fill="#C0392B")
-    d.line([8, 8, 11, 9], fill="#2B3A55")
-    d.point((8, 8), fill="#1A2233")
+_COPY_GRID = [
+    "................",
+    "................",
+    "...aaaaaaa......",
+    "...accccca......",
+    "...accccca......",
+    "...accaaaaaaaa..",
+    "...accadddddda..",
+    "...accadddddda..",
+    "...accadbbbbda..",
+    "...accadddddda..",
+    "...aaaadddddda..",
+    "......adbbbbda..",
+    "......adddddda..",
+    "......adddddda..",
+    "......aaaaaaaa..",
+    "................",
+]
+_COPY_TONES = {"a": "#37474F", "b": "#90A4AE", "c": "#B0BEC5", "d": "#ECEFF1"}
+
+def copy(d):            # 922 batch repeater
+    _draw_grid(d, _COPY_GRID, _COPY_TONES)
 
 
-def copy(d):               # 922 batch repeater
-    d.rectangle([3, 2, 9, 10], fill="#B0BEC5", outline="#37474F")
-    d.rectangle([6, 5, 13, 14], fill="#ECEFF1", outline="#37474F")
-    for y in (8, 11):
-        d.line([8, y, 11, y], fill="#90A4AE")
+_BADGE_GRID = [
+    "................",
+    "................",
+    "......aaaa......",
+    "....aabbbbaa....",
+    "...abbbbbbbba...",
+    "...abbbbbbbca...",
+    "..abbbbbbbcbba..",
+    "..abbbbbbbcbba..",
+    "..abbcbbbcbbba..",
+    "..abbbcbcbbbba..",
+    "...abbcccbbba...",
+    "...abbbcbbbba...",
+    "....aabbbbaa....",
+    "......aaaa......",
+    "................",
+    "................",
+]
+_BADGE_TONES = {"a": "#1B6E36", "b": "#2E9E4F", "c": "#FFFFFF"}
+
+def badge(d):           # batch auditor
+    _draw_grid(d, _BADGE_GRID, _BADGE_TONES)
 
 
-def badge(d):              # batch auditor
-    d.ellipse([2, 2, 13, 13], fill="#2E9E4F", outline="#1B6E36")
-    d.line([5, 8, 7, 11], fill="#FFFFFF")
-    d.line([7, 11, 11, 5], fill="#FFFFFF")
-    d.line([5, 8, 7, 10], fill="#FFFFFF")
+_QR_GRID = [
+    "................",
+    "................",
+    "..aaaaccccaaaa..",
+    "..aacaccbcaaca..",
+    "..accaccccacca..",
+    "..aaaacbccabaa..",
+    "..cccccccbcccc..",
+    "..ccccbccccbcc..",
+    "..ccccccbccccc..",
+    "..cccbccccccbc..",
+    "..aaaacccccccc..",
+    "..aacaccccbccc..",
+    "..accacbccccbc..",
+    "..aaaacccccccc..",
+    "................",
+    "................",
+]
+_QR_TONES = {"a": "#263238", "b": "#37474F", "c": "#ECEFF1"}
 
-
-def qr(d):                 # qr code generator
-    d.rectangle([2, 2, 13, 13], fill="#ECEFF1")
-
-    def finder(x, y):
-        d.rectangle([x, y, x + 3, y + 3], fill="#263238")
-        d.rectangle([x + 1, y + 1, x + 2, y + 2], fill="#ECEFF1")
-        d.point((x + 1, y + 1), fill="#263238")
-
-    finder(2, 2); finder(10, 2); finder(2, 10)
-    for x, y in [(8, 3), (7, 5), (9, 6), (11, 7), (6, 7), (12, 9),
-                 (8, 8), (10, 11), (12, 12), (7, 12), (5, 9), (11, 5)]:
-        d.point((x, y), fill="#37474F")
+def qr(d):              # qr code generator
+    _draw_grid(d, _QR_GRID, _QR_TONES)
 
 
 ICONS = {
