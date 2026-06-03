@@ -1,6 +1,6 @@
 """
-922 FormSeeker
-==============
+922 FormingFinder
+=================
 Discovers formed plate PDFs in a 922 QTDR batch using three methods:
   1. Filename scan for "PLT F"
   2. PO workbook NOTES column containing "bend"
@@ -427,7 +427,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get('log', print)
     console = params.get('console')
 
-    log("Starting 922 FormSeeker...")
+    log("Starting 922 FormingFinder...")
     progress_callback(0)
 
     if console and hasattr(console, 'request_input'):
@@ -593,7 +593,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     progress_callback(100)
 
     log("=" * 50)
-    log(f"922 FormSeeker -- Batch {batch_no}")
+    log(f"922 FormingFinder -- Batch {batch_no}")
     log(f"  Total formed plates : {len(rows_data)}")
     log("=" * 50)
 

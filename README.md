@@ -63,7 +63,7 @@ every generated nest folder automatically.
 
 ### New Plugins
 
-**922 FormSeeker** - Discovers formed plate PDFs in a 922 batch via filename, PO NOTES,
+**922 FormingFinder** - Discovers formed plate PDFs in a 922 batch via filename, PO NOTES,
 and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet
 in the Pallet & Rod Organizer.
 
@@ -122,7 +122,7 @@ Explorer and on pinned shortcuts.
 911 Batch Repeater | Finds and copies repeat parts (NC files + inspection PDFs) for 911 batches 
 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs; keeps MIL-SPEC and HULL pages 
 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info 
-922 FormSeeker | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
+922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
 Batch Repeater | Copies repeat orders from prior 922 batches 
 922 LST Organizer | Organizes .lst files by material type; outputs per-batch overview 
