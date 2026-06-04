@@ -93,7 +93,7 @@ THEMES: Dict[str, ColorPalette] = {
         error="#EF4444",
         info="#3B82F6",
 
-        tile_selected="#3A3A3A",
+        tile_selected="#474747",
         shadow="rgba(0, 0, 0, 0.3)",
 
         tile_missing_bg="#1A1A1A",
@@ -106,7 +106,7 @@ THEMES: Dict[str, ColorPalette] = {
         text_secondary="#6B7280",
         background="#D6CDC1",
         surface="#DDD6CC",
-        surface_hover="#DAD2C7",
+        surface_hover="#E4DCD1",
 
         accent="#C6613F",
         accent_hover="#CB7152",
@@ -128,7 +128,7 @@ THEMES: Dict[str, ColorPalette] = {
         error="#EF4444",
         info="#3B82F6",
 
-        tile_selected="#DAD2C7",
+        tile_selected="#D1C8BA",
         shadow="rgba(0, 0, 0, 0.1)",
 
         tile_missing_bg="#F3F4F6",
@@ -291,7 +291,7 @@ QPushButton[class="cta"] {
         error="#FF0000",
         info="#00FFCC",
 
-        tile_selected="#002800",
+        tile_selected="#003A00",
         shadow="rgba(0, 255, 65, 0.15)",
 
         tile_missing_bg="#000800",
