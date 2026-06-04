@@ -530,21 +530,34 @@ def write_data_table(ws, data_headers, data_rows):
 
 
 def _nest_sums(data_rows):
-    """Aggregate rows per nest. Returns (sums_est: dict[nest -> hours],
-    sums_qty: dict[nest -> pieces], grand_est, grand_qty)."""
-    sums_est = {}
-    sums_qty = {}
+    """Aggregate rows to nest -> summed Est Cut Hours. Returns
+    (sums: dict[nest -> hours], grand_est, grand_qty)."""
+    sums = {}
     grand_est = 0.0
     grand_qty = 0.0
     for row in data_rows:
         est = row.get(EST_COL) or 0.0
         qty = _to_float(row.get("PPN Quantity")) or 0.0
         nest = str(row.get("Nest Pkg Nbr") or "").strip()
-        sums_est[nest] = sums_est.get(nest, 0.0) + est
-        sums_qty[nest] = sums_qty.get(nest, 0.0) + qty
+        sums[nest] = sums.get(nest, 0.0) + est
         grand_est += est
         grand_qty += qty
-    return sums_est, sums_qty, grand_est, grand_qty
+    return sums, grand_est, grand_qty
+
+
+def _nest_qty_groups(data_rows):
+    """Group rows by (nest, PPN Quantity) -> summed Est Cut Hours, mirroring the
+    real pivot's nest -> PPN row hierarchy. Returns (groups, grand_est) where
+    groups maps (nest, ppn) -> est hours."""
+    groups = {}
+    grand_est = 0.0
+    for row in data_rows:
+        est = row.get(EST_COL) or 0.0
+        nest = str(row.get("Nest Pkg Nbr") or "").strip()
+        ppn = _to_float(row.get("PPN Quantity"))
+        groups[(nest, ppn)] = groups.get((nest, ppn), 0.0) + est
+        grand_est += est
+    return groups, grand_est
 
 
 # Excel COM enum constants we need under late binding (no makepy types).
@@ -595,13 +608,13 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
             table_name = sheet_name.replace("-", "") + "Pivot"
             pt = cache.CreatePivotTable(TableDestination=dest, TableName=table_name)
             pt.PivotFields(nest_header).Orientation = _XL_ROW_FIELD
+            # PPN Quantity as a SECOND row field (nested under the nest) so each
+            # nest's PPN values show per row -- displayed, not summed.
+            if qty_header:
+                pt.PivotFields(qty_header).Orientation = _XL_ROW_FIELD
             df = pt.AddDataField(pt.PivotFields(EST_COL),
                                  f"Sum of {EST_COL}", _XL_SUM)
             df.NumberFormat = "0.000"
-            if qty_header:
-                qf = pt.AddDataField(pt.PivotFields(qty_header),
-                                     f"Sum of {qty_header}", _XL_SUM)
-                qf.NumberFormat = "0"
             # In Excel's naming, ColumnGrand = the grand total OF each column,
             # i.e. the total row at the BOTTOM (total of all nests) -- what we
             # want. RowGrand would add a redundant rightmost total column.
@@ -609,8 +622,8 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
             pt.RowGrand = False
         wb.Save()
         wb.Close(SaveChanges=True)
-        log("  Added real Excel PivotTables (nest -> Sum of Est Cut Hours, "
-            "Sum of PPN Quantity).")
+        log("  Added real Excel PivotTables (nest / PPN Quantity -> "
+            "Sum of Est Cut Hours).")
         return True
     except Exception as e:
         log(f"  Excel pivot creation failed ({e}); writing static summary instead.")
@@ -637,25 +650,25 @@ def add_static_pivots(out_path, plate_rows, nonplate_rows, log):
 
 
 def _write_static_summary(ws, data_rows):
-    """Append a nest -> Sum of Est Cut Hours / Sum of PPN Quantity block
-    (+ Grand Total) below the existing data table."""
-    sums_est, sums_qty, grand_est, grand_qty = _nest_sums(data_rows)
+    """Append a nest / PPN Quantity -> Sum of Est Cut Hours block (+ Grand Total)
+    below the data table, mirroring the real pivot's nest -> PPN row layout."""
+    groups, grand_est = _nest_qty_groups(data_rows)
     start = ws.max_row + 3
-    for c, label in ((1, "Nest Pkg Nbr"), (2, f"Sum of {EST_COL}"),
-                     (3, "Sum of PPN Quantity")):
+    for c, label in ((1, "Nest Pkg Nbr"), (2, "PPN Quantity"),
+                     (3, f"Sum of {EST_COL}")):
         cell = ws.cell(start, c, label)
         cell.fill = _PIVOT_FILL
         cell.font = Font(bold=True, color="FFFFFF")
         cell.border = _BORDER
     r = start + 1
-    for nest in sorted(sums_est, key=lambda n: str(n)):
+    for nest, ppn in sorted(groups, key=lambda k: (str(k[0]), k[1] or 0)):
         ws.cell(r, 1, nest)
-        e = ws.cell(r, 2, round(sums_est[nest], 3)); e.number_format = "0.000"
-        q = ws.cell(r, 3, round(sums_qty[nest])); q.number_format = "0"
+        if ppn is not None:
+            q = ws.cell(r, 2, round(ppn)); q.number_format = "0"
+        e = ws.cell(r, 3, round(groups[(nest, ppn)], 3)); e.number_format = "0.000"
         r += 1
     ws.cell(r, 1, "Grand Total").font = Font(bold=True)
-    e = ws.cell(r, 2, round(grand_est, 3)); e.number_format = "0.000"
-    q = ws.cell(r, 3, round(grand_qty)); q.number_format = "0"
+    e = ws.cell(r, 3, round(grand_est, 3)); e.number_format = "0.000"
     for c in (1, 2, 3):
         ws.cell(r, c).fill = _TOTAL_FILL
         ws.cell(r, c).font = Font(bold=True)
@@ -884,7 +897,7 @@ def run(params: dict, progress_callback, cancel_event):
             log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
             return
 
-    _, _, grand_est, grand_qty = _nest_sums(plate_rows)
+    _, grand_est, grand_qty = _nest_sums(plate_rows)
     progress_callback(100)
     log("\n" + "=" * 60)
     log(f"DONE. Wrote: {out_path}")
