@@ -1,6 +1,6 @@
 """
-911 Linear Inch Calc Plugin for TechDeck
-========================================
+911 Runtime Estimator Plugin for TechDeck
+=========================================
 
 Given a ROOT directory containing one subfolder per order (e.g. F124, P003,
 S029, V092 ...), this plugin:
@@ -604,7 +604,7 @@ def run(params: dict, progress_callback, cancel_event):
         return
 
     log("=" * 60)
-    log(f"911 PLT Time Estimator v{VERSION}")
+    log(f"911 Runtime Estimator v{VERSION}")
     log("=" * 60)
 
     raw = sdk.request_text(params, "Paste the ROOT directory of order folders:")
@@ -786,7 +786,7 @@ def run(params: dict, progress_callback, cancel_event):
     out_dir = settings.get("output_dir", "").strip()
     out_base = Path(out_dir) if out_dir else root
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
-    out_path = out_base / f"911 LINEAR INCH CALC - {root.name} - {stamp}.xlsx"
+    out_path = out_base / f"911 RUNTIME ESTIMATOR - {root.name} - {stamp}.xlsx"
     try:
         write_workbook(out_path, data_headers, plate_rows, nonplate_rows, log)
     except PermissionError:

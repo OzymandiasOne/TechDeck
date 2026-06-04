@@ -29,6 +29,7 @@ _PLUGIN_ID_RENAMES = {
     "po_packet_extractor": "911_po_pdf_extractor",
     "run_time_estimator": "922_runtime_genie",
     "911_repeater": "911_batch_repeater",  # id now matches its folder
+    "911_linear_inch_calc": "911_runtime_estimator",  # renamed 2026-06-04
 }
 
 

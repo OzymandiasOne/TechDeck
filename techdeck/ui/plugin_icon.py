@@ -31,7 +31,7 @@ PLUGIN_ICON_KEYS = {
     "911_remove_ticket":    "scissors",
     "911_po_pdf_extractor": "invoice",
     "911_sketch_extractor": "picture",
-    "911_linear_inch_calc": "ruler",
+    "911_runtime_estimator": "ruler",
     "922_pallet_stamper":   "stamp",
     "922_form_seeker":      "magnifier",
     "922_kitting":          "toolbox",

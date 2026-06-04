@@ -68,6 +68,7 @@ Type: filesandordirs; Name: "{app}\plugins\lst_organizer"
 Type: filesandordirs; Name: "{app}\plugins\part_sketch_extractor"
 Type: filesandordirs; Name: "{app}\plugins\po_packet_extractor"
 Type: filesandordirs; Name: "{app}\plugins\run_time_estimator"
+Type: filesandordirs; Name: "{app}\plugins\911_linear_inch_calc"
 
 [Dirs]
 ; Create %LOCALAPPDATA%\TechDeck directory structure with full user permissions
