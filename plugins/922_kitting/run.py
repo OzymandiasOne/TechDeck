@@ -56,8 +56,10 @@ SECONDARY_CELLS = ["C3", "R3", "C21", "R21"]
 
 PART_ROWS = range(22, 32)
 LEFT_DYPN_COL = "F"
+LEFT_RAWMAT_COL = "G"
 LEFT_MATDESC_COL = "H"
 RIGHT_DYPN_COL = "U"
+RIGHT_RAWMAT_COL = "V"
 RIGHT_MATDESC_COL = "W"
 
 LUMINANCE_DARK_CUTOFF = 140.0
@@ -164,55 +166,91 @@ def _apply_color_formatting(ws, batch_no: str, log) -> None:
     log(f"  Secondary fill RGB{light_rgb}, text {'white' if secondary_text == (255, 255, 255) else 'black'}")
 
 
-# Bent Plates DYPN collection -------------------------------------------------
+# Bent Plates collection ------------------------------------------------------
 
-def _collect_bent_dypns(wb, log) -> set[str]:
+def _norm(v) -> str:
+    """Normalise a cell value for matching. COM returns numeric material codes
+    as float (e.g. 218012959.0), so coerce integer-valued floats to int before
+    stringifying."""
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip().casefold()
+
+
+def _collect_bent_plates(wb, log) -> dict[str, set[str]]:
+    """Map each formed-plate DYPN to the set of SOURCE MATERIAL codes recorded
+    for it on the Bent Plates sheet. The source material is what distinguishes
+    the formed plate from a rod that shares the same DYPN."""
     try:
         ws = wb.Worksheets(BENT_PLATES_SHEET)
     except Exception:
         log(f"  WARNING: '{BENT_PLATES_SHEET}' sheet not found; no FORMED detection")
-        return set()
+        return {}
 
     header_row = 2
     dypn_col = None
+    src_col = None
     last_col = max(int(ws.UsedRange.Columns.Count), 8)
     for c in range(1, last_col + 1):
         val = ws.Cells(header_row, c).Value
-        if isinstance(val, str) and val.strip().upper() == "DYPN":
+        if not isinstance(val, str):
+            continue
+        name = val.strip().upper()
+        if name == "DYPN":
             dypn_col = c
-            break
+        elif name == "SOURCE MATERIAL":
+            src_col = c
     if dypn_col is None:
         log("  WARNING: DYPN column not found in Bent Plates header; no FORMED detection")
-        return set()
+        return {}
+    if src_col is None:
+        log("  WARNING: SOURCE MATERIAL column not found in Bent Plates header; "
+            "falling back to DYPN-only FORMED matching")
 
-    bent: set[str] = set()
+    bent: dict[str, set[str]] = {}
     last_row = max(int(ws.UsedRange.Rows.Count), 3)
     for r in range(3, last_row + 1):
-        v = ws.Cells(r, dypn_col).Value
-        if v is None or v == "":
+        key = _norm(ws.Cells(r, dypn_col).Value)
+        if not key:
             continue
-        bent.add(str(v).strip().casefold())
+        src = _norm(ws.Cells(r, src_col).Value) if src_col is not None else ""
+        sources = bent.setdefault(key, set())
+        if src:
+            sources.add(src)
     return bent
 
 
 # FORMED edits ----------------------------------------------------------------
 
-def _apply_formed_edits(ws, bent_dypns: set[str], log) -> list[tuple[str, str]]:
-    if not bent_dypns:
+def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log) -> list[tuple[str, str]]:
+    if not bent_plates:
         return []
 
     edits: list[tuple[str, str]] = []
     for r in PART_ROWS:
-        for dypn_col, desc_col in (
-            (LEFT_DYPN_COL, LEFT_MATDESC_COL),
-            (RIGHT_DYPN_COL, RIGHT_MATDESC_COL),
+        for dypn_col, rawmat_col, desc_col in (
+            (LEFT_DYPN_COL, LEFT_RAWMAT_COL, LEFT_MATDESC_COL),
+            (RIGHT_DYPN_COL, RIGHT_RAWMAT_COL, RIGHT_MATDESC_COL),
         ):
             dypn_val = ws.Range(f"{dypn_col}{r}").Value
             if dypn_val is None or dypn_val == "":
                 continue
-            key = str(dypn_val).strip().casefold()
-            if key not in bent_dypns:
+            key = _norm(dypn_val)
+            if key not in bent_plates:
                 continue
+            # A plate and a rod can share the same DYPN; only the plate's row
+            # carries the formed-plate source material, so require the row's
+            # Raw Material to match. (When no source material was recorded for
+            # this DYPN we fall back to a DYPN-only match.)
+            sources = bent_plates[key]
+            if sources:
+                raw_mat = _norm(ws.Range(f"{rawmat_col}{r}").Value)
+                if raw_mat not in sources:
+                    log(f"    Skip {dypn_val} at {desc_col}{r}: Raw Material "
+                        f"{raw_mat!r} not a formed source {sorted(sources)}")
+                    continue
             desc_addr = f"{desc_col}{r}"
             try:
                 desc_cell = ws.Range(desc_addr)
@@ -332,8 +370,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             log("Cancelled.")
             return
 
-        bent_dypns = _collect_bent_dypns(wb, log)
-        log(f"Bent Plates DYPNs indexed: {len(bent_dypns)}")
+        bent_plates = _collect_bent_plates(wb, log)
+        log(f"Bent Plates DYPNs indexed: {len(bent_plates)}")
         progress_callback(15)
 
         # Phase 2: print loop
@@ -379,7 +417,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 ws_kit.PageSetup.PrintArea = original_print_area
 
             # Full kit export (with FORMED detection)
-            in_progress_edits = _apply_formed_edits(ws_kit, bent_dypns, log)
+            in_progress_edits = _apply_formed_edits(ws_kit, bent_plates, log)
             try:
                 if in_progress_edits:
                     excel.CalculateFull()
