@@ -73,10 +73,11 @@ VERSION = "1.0.0"
 # column is an EB stock code; we surface it as 'Source Material' to keep it
 # distinct from the part-material designation we pull off the MOVE TICKET pages.
 BATCH_HEADER_RENAME = {"Material": "Source Material"}
-# Our generated columns, appended after the batch-list block (in this order).
-# 'Material' is the MOVE TICKET designation (sits right after MIL SPEC on the
-# packet); 'Source' is the PDF SRCE/SOURCE field (where the stock came from).
-GENERATED_COLS = ["Order", "Process", "Thickness (in)", "Stock L", "Stock W",
+# 'Order' (which order folder a row came from) leads the table; our other
+# generated columns follow the batch-list block (in this order). 'Material' is
+# the MOVE TICKET designation (sits right after MIL SPEC on the packet);
+# 'Source' is the PDF SRCE/SOURCE field (where the stock came from).
+GENERATED_COLS = ["Process", "Thickness (in)", "Stock L", "Stock W",
                   "Mil Spec", "Material", "Source", "Est Cut Hours", "Flags"]
 # For each OUTPUT header, the UPPERCASE row key its value is read from. Most map
 # to their own upper-cased name; these two are indirections (the display name
@@ -770,13 +771,14 @@ def run(params: dict, progress_callback, cancel_event):
         log("\nERROR: No rows produced; nothing to write.")
         return
 
-    # Column order: every batch-list column verbatim, in native order (with the
-    # batch list's 'Material' shown as 'Source Material'), then our generated
-    # columns. Nothing from the batch list is dropped.
+    # Column order: 'Order' first, then every batch-list column verbatim in
+    # native order (with the batch list's 'Material' shown as 'Source
+    # Material'), then our generated columns. Nothing from the batch list is
+    # dropped.
     batch_headers = [BATCH_HEADER_RENAME.get(h, h) for h in header_order]
-    seen = {h.upper() for h in batch_headers}
-    data_headers = batch_headers + [c for c in GENERATED_COLS
-                                    if c.upper() not in seen]
+    seen = {h.upper() for h in batch_headers} | {"ORDER"}
+    data_headers = (["Order"] + batch_headers
+                    + [c for c in GENERATED_COLS if c.upper() not in seen])
 
     # Normalize each row's keys to the exact header strings used in output.
     norm_rows = []
