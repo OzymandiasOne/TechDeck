@@ -16,9 +16,12 @@ S029, V092 ...), this plugin:
   3. Joins batch-list rows to nests by 'Nest Pkg Nbr' and computes a per-row
      cutting-time estimate (thickness band x thickness x pieces, +180 min per
      bevel piece) -- see CALCULATION below.
-  4. Writes ONE consolidated workbook (single sheet): a flat data table with
-     every batch-list row across ALL orders, then a pivot-style summary keyed
-     by nest number, mirroring the reference 'A.T. plate estimates' layout.
+  4. Writes ONE consolidated workbook with two sheets (Plates / Non-Plates).
+     Each is a flat data table that reproduces EVERY batch-list column in its
+     native order, then our generated columns, then a pivot-style summary keyed
+     by nest number. 'Material' on the table is the MOVE TICKET designation;
+     the batch list's own 'Material' (an EB stock code) is shown as 'Source
+     Material'.
 
 CALCULATION (per batch-list row; thickness drives the band):
     band(t): t < 0.5 -> 6 ; 0.5 <= t < 1.0 -> 9 ; 1.0 <= t < 2.0 -> 12 ; t >= 2.0 -> 18   (min/pc)
@@ -65,17 +68,23 @@ from openpyxl.utils import get_column_letter
 
 VERSION = "1.0.0"
 
-# Process is appended after the batch-list columns (A.T. typed it by hand;
-# it is usually absent from the batch list itself; we derive it from the PDF).
-APPENDED_AFTER_BATCH = ["Process"]
-# Our PDF-derived + computed columns, appended after everything A.T. had.
-COMPUTED_COLS = ["Thickness (in)", "Stock L", "Stock W",
-                 "Mil Spec", "Source", "Est Cut Hours", "Flags"]
-# Columns dropped from the output entirely (we don't capture meaningful values
-# for them, so they only add noise).
-DROP_COLS = {"REM USED", "REM CREATED", "DOC LOCATION", "LOCATION", "PLATE WEIGHT"}
-# Columns dropped from the Plates sheet only (kept on Non-Plates).
-PLATE_ONLY_DROP = {"TRADE INSTRUCTION"}
+# We reproduce EVERY batch-list column verbatim, in its native order, then
+# append our own generated columns after them. The batch list's own 'Material'
+# column is an EB stock code; we surface it as 'Source Material' to keep it
+# distinct from the part-material designation we pull off the MOVE TICKET pages.
+BATCH_HEADER_RENAME = {"Material": "Source Material"}
+# Our generated columns, appended after the batch-list block (in this order).
+# 'Material' is the MOVE TICKET designation (sits right after MIL SPEC on the
+# packet); 'Source' is the PDF SRCE/SOURCE field (where the stock came from).
+GENERATED_COLS = ["Order", "Process", "Thickness (in)", "Stock L", "Stock W",
+                  "Mil Spec", "Material", "Source", "Est Cut Hours", "Flags"]
+# For each OUTPUT header, the UPPERCASE row key its value is read from. Most map
+# to their own upper-cased name; these two are indirections (the display name
+# differs from the key the value is stored under).
+HEADER_SOURCE_KEY = {
+    "Source Material": "MATERIAL",      # batch list 'Material' (EB stock code)
+    "Material": "MT MATERIAL",          # MOVE TICKET material designation (new)
+}
 
 # The column the pivot sums (our formula-driven estimate, in hours).
 EST_COL = "Est Cut Hours"
@@ -256,7 +265,7 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     None). Thickness is the only field the calculation needs."""
     out = {"thickness": None, "pieces": None, "material": None, "source": None,
            "stock_l": None, "stock_w": None, "mil_spec": None,
-           "plate_weight": None, "process": None}
+           "plate_weight": None, "process": None, "mt_material": None}
     doc = fitz.open(str(pdf_path))
     try:
         pages = [p.get_text() for p in doc]
@@ -278,6 +287,9 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
                        or _labeled_value(full, "MATERIAL"))
     # Source: REMNANT 'SOURCE:' OR part-sketch 'SRCE:'.
     out["source"] = _labeled_value(full, "SOURCE") or _labeled_value(full, "SRCE")
+    # MOVE TICKET material designation (e.g. 'HSS'), distinct from the batch
+    # list's stock 'Material' code -- pulled only from MOVE TICKET pages.
+    out["mt_material"] = _move_ticket_material(pages)
     # Mil spec.
     out["mil_spec"] = _labeled_value(full, "MIL SPEC")
     if not out["mil_spec"]:
@@ -294,6 +306,19 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
         if tv:
             out["thickness"] = _to_float(tv)
     return out
+
+
+def _move_ticket_material(pages) -> Optional[str]:
+    """The 'MATERIAL:' value from a MOVE TICKET page (the part-material
+    designation, e.g. 'HSS') -- the value that sits right after 'MIL SPEC:' on
+    the move ticket. Returns the first non-empty one found, scanning only pages
+    that mention MOVE TICKET so a stray 'MATERIAL' elsewhere can't win."""
+    for txt in pages:
+        if "MOVE TICKET" in txt.upper():
+            val = _labeled_value(txt, "MATERIAL")
+            if val:
+                return val
+    return None
 
 
 def _parse_plate_weight(full: str, page1: str):
@@ -452,16 +477,13 @@ def _is_date(v):
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
     """Write the workbook with two identically-structured sheets: 'Plates' and
-    'Non-Plates'. Each holds the flat data table, the pivot, and the yellow
-    missing-data highlighting."""
-    # Plates sheet drops a couple extra columns (e.g. Trade Instruction) that
-    # are only meaningful for the non-plate shapes/bars/tubes.
-    plate_headers = [h for h in data_headers if h.upper() not in PLATE_ONLY_DROP]
-
+    'Non-Plates'. Each holds the flat data table (every batch-list column plus
+    our generated columns), the pivot, and the yellow missing-data
+    highlighting."""
     wb = Workbook()
     ws_plate = wb.active
     ws_plate.title = "Plates"
-    write_sheet(ws_plate, plate_headers, plate_rows)
+    write_sheet(ws_plate, data_headers, plate_rows)
 
     ws_other = wb.create_sheet("Non-Plates")
     write_sheet(ws_other, data_headers, nonplate_rows)
@@ -723,6 +745,7 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Stock W"] = (pdfd or {}).get("stock_w") if pdfd else None
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
             out_row["Mil Spec"] = (pdfd or {}).get("mil_spec") if pdfd else None
+            out_row["MT Material"] = (pdfd or {}).get("mt_material") if pdfd else None
             out_row["Source"] = (pdfd or {}).get("source") if pdfd else None
             out_row["Est Cut Hours"] = round(est_hr, 4) if est_hr is not None else None
 
@@ -747,18 +770,13 @@ def run(params: dict, progress_callback, cancel_event):
         log("\nERROR: No rows produced; nothing to write.")
         return
 
-    # Final data-table column order: Order first, then A.T.'s batch-list
-    # columns, then Process, then our computed columns. Dropped columns
-    # (DROP_COLS) are excluded throughout.
-    data_headers = ["Order"] + [h for h in header_order if h.upper() not in DROP_COLS]
-    for extra in APPENDED_AFTER_BATCH:
-        if (extra.upper() not in {h.upper() for h in data_headers}
-                and extra.upper() not in DROP_COLS):
-            data_headers.append(extra)
-    for extra in COMPUTED_COLS:
-        if (extra.upper() not in {h.upper() for h in data_headers}
-                and extra.upper() not in DROP_COLS):
-            data_headers.append(extra)
+    # Column order: every batch-list column verbatim, in native order (with the
+    # batch list's 'Material' shown as 'Source Material'), then our generated
+    # columns. Nothing from the batch list is dropped.
+    batch_headers = [BATCH_HEADER_RENAME.get(h, h) for h in header_order]
+    seen = {h.upper() for h in batch_headers}
+    data_headers = batch_headers + [c for c in GENERATED_COLS
+                                    if c.upper() not in seen]
 
     # Normalize each row's keys to the exact header strings used in output.
     norm_rows = []
@@ -766,7 +784,7 @@ def run(params: dict, progress_callback, cancel_event):
         nr = {}
         low = {k.upper(): v for k, v in row.items()}
         for h in data_headers:
-            nr[h] = low.get(h.upper())
+            nr[h] = low.get(HEADER_SOURCE_KEY.get(h, h.upper()))
         # Preserve the canonical pivot keys.
         nr["Nest Pkg Nbr"] = row.get("Nest Pkg Nbr") or low.get("NEST PKG NBR")
         nr["PPN Quantity"] = row.get("PPN Quantity") if row.get("PPN Quantity") is not None else low.get("PPN QUANTITY")
