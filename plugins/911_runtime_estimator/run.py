@@ -18,10 +18,13 @@ S029, V092 ...), this plugin:
      bevel piece) -- see CALCULATION below.
   4. Writes ONE consolidated workbook with two sheets (Plates / Non-Plates).
      Each is a flat data table that reproduces EVERY batch-list column in its
-     native order, then our generated columns, then a pivot-style summary keyed
-     by nest number. 'Material' on the table is the MOVE TICKET designation;
-     the batch list's own 'Material' (an EB stock code) is shown as 'Source
-     Material'.
+     native order, then our generated columns. 'Material' on the table is the
+     MOVE TICKET designation; the batch list's own 'Material' (an EB stock code)
+     is shown as 'Source Material'.
+  5. Drops a REAL, refreshable Excel PivotTable below the data on each sheet
+     (Nest Pkg Nbr -> Sum of Est Cut Hours, grand total at the bottom) by
+     driving Excel via COM (pywin32). If Excel/COM is unavailable or errors, it
+     falls back to a static nest->sum summary so a run never hard-crashes.
 
 CALCULATION (per batch-list row; thickness drives the band):
     band(t): t < 0.5 -> 6 ; 0.5 <= t < 1.0 -> 9 ; 1.0 <= t < 2.0 -> 12 ; t >= 2.0 -> 18   (min/pc)
@@ -465,7 +468,6 @@ def load_batch_rows(batch_list_path: Path):
 _HDR_FILL = PatternFill("solid", fgColor="305496")
 _HDR_FONT = Font(bold=True, color="FFFFFF")
 _PIVOT_FILL = PatternFill("solid", fgColor="1F4E78")
-_NEST_FILL = PatternFill("solid", fgColor="DDEBF7")
 _TOTAL_FILL = PatternFill("solid", fgColor="FFE699")
 _MISSING_FILL = PatternFill("solid", fgColor="FFFF00")
 _THIN = Side(style="thin", color="BFBFBF")
@@ -478,24 +480,28 @@ def _is_date(v):
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
     """Write the workbook with two identically-structured sheets: 'Plates' and
-    'Non-Plates'. Each holds the flat data table (every batch-list column plus
-    our generated columns), the pivot, and the yellow missing-data
-    highlighting."""
+    'Non-Plates'. Each holds ONLY the flat data table (every batch-list column
+    plus our generated columns) with the yellow missing-data highlighting; the
+    real PivotTables are added afterwards via Excel COM (see add_real_pivots).
+
+    Returns sheets_meta: [(sheet_name, data_row_count), ...] for the pivot pass.
+    """
     wb = Workbook()
     ws_plate = wb.active
     ws_plate.title = "Plates"
-    write_sheet(ws_plate, data_headers, plate_rows)
+    write_data_table(ws_plate, data_headers, plate_rows)
 
     ws_other = wb.create_sheet("Non-Plates")
-    write_sheet(ws_other, data_headers, nonplate_rows)
+    write_data_table(ws_other, data_headers, nonplate_rows)
 
     wb.save(str(out_path))
+    return [("Plates", len(plate_rows)), ("Non-Plates", len(nonplate_rows))]
 
 
-def write_sheet(ws, data_headers, data_rows):
-    """Write one sheet: flat data table (yellow rows where no estimate), then a
-    pivot summary built from this sheet's own rows, then a Grand Total."""
-    # ---- Data table (header row 1) ----
+def write_data_table(ws, data_headers, data_rows):
+    """Write one sheet's flat data table (header row 1, then data; rows missing
+    an estimate flagged yellow). No summary block -- pivots are layered on later
+    by add_real_pivots / add_static_pivots."""
     for c, name in enumerate(data_headers, start=1):
         cell = ws.cell(1, c, name)
         cell.font = _HDR_FONT
@@ -520,55 +526,129 @@ def write_sheet(ws, data_headers, data_rows):
             if c == est_idx and isinstance(val, (int, float)):
                 cell.number_format = "0.000"
     ws.freeze_panes = "A2"
-
-    # ---- Pivot summary (below the data, mirroring A.T.'s layout) ----
-    pivot_tree, grand_est, grand_qty = build_pivot_tree(data_rows)
-    r = len(data_rows) + 4
-    ws.cell(r, 1, "Row Labels").font = Font(bold=True)
-    ws.cell(r, 2, f"Sum of {EST_COL}").font = Font(bold=True)
-    ws.cell(r, 3, "Sum of PPN Quantity").font = Font(bold=True)
-    for c in range(1, 4):
-        ws.cell(r, c).fill = _PIVOT_FILL
-        ws.cell(r, c).font = Font(bold=True, color="FFFFFF")
-        ws.cell(r, c).border = _BORDER
-    r += 1
-
-    r = _write_pivot_level(ws, r, pivot_tree, level=0)
-
-    # Grand total.
-    ws.cell(r, 1, "Grand Total").font = Font(bold=True)
-    e = ws.cell(r, 2, round(grand_est, 3)); e.number_format = "0.000"
-    ws.cell(r, 3, grand_qty)
-    for c in range(1, 4):
-        ws.cell(r, c).fill = _TOTAL_FILL
-        ws.cell(r, c).font = Font(bold=True)
-        ws.cell(r, c).border = _BORDER
-
     _autosize(ws, data_headers)
 
 
-def _write_pivot_level(ws, r, nodes, level):
-    """Recursively write grouped pivot rows. `nodes` is an ordered dict of
-    label -> {'est':float,'qty':float,'children':dict}. Top level (level 0) is
-    the nest, then PPN Quantity, Description, Location, Process."""
-    indent = "    " * level
-    for label, node in nodes.items():
-        disp = "" if label is None else str(label)
-        cell = ws.cell(r, 1, f"{indent}{disp}")
-        e = ws.cell(r, 2, round(node["est"], 3)); e.number_format = "0.000"
-        ws.cell(r, 3, node["qty"])
-        if level == 0:
-            for c in range(1, 4):
-                ws.cell(r, c).fill = _NEST_FILL
-                ws.cell(r, c).font = Font(bold=True)
+def _nest_sums(data_rows):
+    """Aggregate rows to nest -> summed Est Cut Hours. Returns
+    (sums: dict[nest -> hours], grand_est, grand_qty)."""
+    sums = {}
+    grand_est = 0.0
+    grand_qty = 0.0
+    for row in data_rows:
+        est = row.get(EST_COL) or 0.0
+        qty = _to_float(row.get("PPN Quantity")) or 0.0
+        nest = str(row.get("Nest Pkg Nbr") or "").strip()
+        sums[nest] = sums.get(nest, 0.0) + est
+        grand_est += est
+        grand_qty += qty
+    return sums, grand_est, grand_qty
+
+
+# Excel COM enum constants we need under late binding (no makepy types).
+_XL_DATABASE = 1        # PivotCache SourceType (xlDatabase)
+_XL_ROW_FIELD = 1       # PivotField.Orientation (xlRowField)
+_XL_SUM = -4157         # xlConsolidationFunction (xlSum)
+
+
+def add_real_pivots(out_path, data_headers, sheets_meta, log):
+    """Open the saved workbook in Excel via COM and drop a REAL PivotTable below
+    the data table on each sheet: row field = Nest Pkg Nbr, data field =
+    Sum of Est Cut Hours, with the grand-total row turned on. Returns True on
+    success. Requires Excel + pywin32; on any failure returns False so the
+    caller can fall back to a static summary.
+
+    Runs on the plugin's worker thread, so COM MUST be initialised on this
+    thread (CoInitialize) before any Dispatch call.
+    """
+    try:
+        import pythoncom
+        import win32com.client as win32
+    except ImportError:
+        log("  Excel COM (pywin32) unavailable; writing static summary instead.")
+        return False
+
+    if EST_COL not in data_headers:
+        return False
+    nest_header = next((h for h in data_headers if h.upper() == "NEST PKG NBR"),
+                       "Nest Pkg Nbr")
+    last_col = get_column_letter(len(data_headers))
+
+    pythoncom.CoInitialize()
+    excel = None
+    try:
+        excel = win32.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        wb = excel.Workbooks.Open(str(out_path))
+        for sheet_name, n_rows in sheets_meta:
+            if n_rows < 1:
+                continue
+            ws = wb.Worksheets(sheet_name)
+            last_row = n_rows + 1  # +1 for the header row
+            src = ws.Range(f"A1:{last_col}{last_row}")
+            dest = ws.Cells(last_row + 3, 1)  # 2 blank rows under the data
+            cache = wb.PivotCaches().Create(SourceType=_XL_DATABASE, SourceData=src)
+            table_name = sheet_name.replace("-", "") + "Pivot"
+            pt = cache.CreatePivotTable(TableDestination=dest, TableName=table_name)
+            pt.PivotFields(nest_header).Orientation = _XL_ROW_FIELD
+            df = pt.AddDataField(pt.PivotFields(EST_COL),
+                                 f"Sum of {EST_COL}", _XL_SUM)
+            df.NumberFormat = "0.000"
+            # In Excel's naming, ColumnGrand = the grand total OF each column,
+            # i.e. the total row at the BOTTOM (total of all nests) -- what we
+            # want. RowGrand would add a redundant rightmost total column.
+            pt.ColumnGrand = True
+            pt.RowGrand = False
+        wb.Save()
+        wb.Close(SaveChanges=True)
+        log("  Added real Excel PivotTables (nest -> Sum of Est Cut Hours).")
+        return True
+    except Exception as e:
+        log(f"  Excel pivot creation failed ({e}); writing static summary instead.")
+        return False
+    finally:
         try:
-            ws.row_dimensions[r].outline_level = min(level, 7)
+            if excel is not None:
+                excel.Quit()
         except Exception:
             pass
+        pythoncom.CoUninitialize()
+
+
+def add_static_pivots(out_path, plate_rows, nonplate_rows, log):
+    """Fallback when Excel COM is unavailable: reopen the workbook with openpyxl
+    and append a static nest -> Sum of Est Cut Hours summary (+ grand total) to
+    each sheet, mirroring what the real PivotTable would have shown."""
+    wb = openpyxl.load_workbook(out_path)
+    for sheet_name, rows in (("Plates", plate_rows), ("Non-Plates", nonplate_rows)):
+        if sheet_name in wb.sheetnames:
+            _write_static_summary(wb[sheet_name], rows)
+    wb.save(out_path)
+    log("  Wrote static nest summary (Excel PivotTable unavailable).")
+
+
+def _write_static_summary(ws, data_rows):
+    """Append a nest -> Sum of Est Cut Hours block (+ Grand Total) below the
+    existing data table."""
+    sums, grand_est, _ = _nest_sums(data_rows)
+    start = ws.max_row + 3
+    for c, label in ((1, "Nest Pkg Nbr"), (2, f"Sum of {EST_COL}")):
+        cell = ws.cell(start, c, label)
+        cell.fill = _PIVOT_FILL
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.border = _BORDER
+    r = start + 1
+    for nest in sorted(sums, key=lambda n: str(n)):
+        ws.cell(r, 1, nest)
+        e = ws.cell(r, 2, round(sums[nest], 3)); e.number_format = "0.000"
         r += 1
-        if node.get("children"):
-            r = _write_pivot_level(ws, r, node["children"], level + 1)
-    return r
+    ws.cell(r, 1, "Grand Total").font = Font(bold=True)
+    e = ws.cell(r, 2, round(grand_est, 3)); e.number_format = "0.000"
+    for c in (1, 2):
+        ws.cell(r, c).fill = _TOTAL_FILL
+        ws.cell(r, c).font = Font(bold=True)
+        ws.cell(r, c).border = _BORDER
 
 
 def _autosize(ws, data_headers):
@@ -582,36 +662,6 @@ def _autosize(ws, data_headers):
                                           min(len(str(cell.value)) + 2, 45))
     for c, w in widths.items():
         ws.column_dimensions[get_column_letter(c)].width = w
-
-
-def build_pivot_tree(data_rows):
-    """Group rows into the nested pivot hierarchy and sum est/qty at each node.
-
-    Hierarchy: Nest Pkg Nbr -> PPN Quantity -> Description -> Process.
-    Returns (tree, grand_est, grand_qty).
-    """
-    tree = {}
-    grand_est = 0.0
-    grand_qty = 0.0
-    levels = ["Nest Pkg Nbr", "PPN Quantity", "Description", "Process"]
-    for row in data_rows:
-        est = row.get(EST_COL) or 0.0
-        qty = _to_float(row.get("PPN Quantity")) or 0.0
-        grand_est += est
-        grand_qty += qty
-        node_map = tree
-        path_nodes = []
-        for lv in levels:
-            key = row.get(lv)
-            if key is None or (isinstance(key, str) and key.strip() == ""):
-                key = "" if lv in ("Process", "Description") else key
-            node = node_map.setdefault(key, {"est": 0.0, "qty": 0.0, "children": {}})
-            path_nodes.append(node)
-            node_map = node["children"]
-        for node in path_nodes:
-            node["est"] += est
-            node["qty"] += qty
-    return tree, grand_est, grand_qty
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -808,12 +858,22 @@ def run(params: dict, progress_callback, cancel_event):
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
     out_path = out_base / f"911 RUNTIME ESTIMATOR - {root.name} - {stamp}.xlsx"
     try:
-        write_workbook(out_path, data_headers, plate_rows, nonplate_rows, log)
+        sheets_meta = write_workbook(out_path, data_headers, plate_rows,
+                                     nonplate_rows, log)
     except PermissionError:
         log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
         return
 
-    _, grand_est, grand_qty = build_pivot_tree(plate_rows)
+    # Layer on the real Excel PivotTables; fall back to a static summary if
+    # Excel COM isn't available or errors.
+    if not add_real_pivots(out_path, data_headers, sheets_meta, log):
+        try:
+            add_static_pivots(out_path, plate_rows, nonplate_rows, log)
+        except PermissionError:
+            log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
+            return
+
+    _, grand_est, grand_qty = _nest_sums(plate_rows)
     progress_callback(100)
     log("\n" + "=" * 60)
     log(f"DONE. Wrote: {out_path}")
