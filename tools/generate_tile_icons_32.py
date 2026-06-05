@@ -58,6 +58,14 @@ THEME_SUBSTITUTIONS = {
     "matrix": {"#FFF1E8": "#9BFFB0"},
 }
 
+# Per-(theme, icon-key) final-color swaps, applied AFTER recolor + substitution.
+# Scoped to ONE icon in ONE theme so it never bleeds into other themes' tiles.
+# matrix stopwatch: swap the hands (#00E436) and face (#9BFFB0) colors so the
+# hands read as the bright highlight against a green face.
+THEME_ICON_SWAPS = {
+    ("matrix", "stopwatch"): ("#00E436", "#9BFFB0"),
+}
+
 
 def _hex(h):
     h = h.lstrip("#")
@@ -119,6 +127,22 @@ def _recolor(im, mapping):
             r, g, b, a = px[x, y]
             if a:
                 px[x, y] = (*mapping[(r, g, b)], a)
+    return im
+
+
+def _swap_colors(im, hex_a, hex_b):
+    """Swap two exact colors in-place (used for per-theme, per-icon tweaks)."""
+    ca, cb = _hex(hex_a), _hex(hex_b)
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if not a:
+                continue
+            if (r, g, b) == ca:
+                px[x, y] = (*cb, a)
+            elif (r, g, b) == cb:
+                px[x, y] = (*ca, a)
     return im
 
 
@@ -2095,6 +2119,9 @@ def main():
             if subs:
                 mapping = {k: subs.get(v, v) for k, v in mapping.items()}
             _recolor(im, mapping)
+            swap = THEME_ICON_SWAPS.get((tname, key))
+            if swap:
+                _swap_colors(im, *swap)
             _save(im, tname, key)
     print(f"Generated {len(ICONS)} icons x {len(themes)} theme(s): {', '.join(themes)}")
 
