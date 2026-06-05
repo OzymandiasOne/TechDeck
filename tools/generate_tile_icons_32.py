@@ -1,12 +1,13 @@
 """
-32x32 variants of the TechDeck pixel tile icons.
+TechDeck's 32x32 pixel-art tile icons (the live set the app renders).
 
-A 2x mirror of generate_tile_icons.py: every icon (the 14 plugin tiles AND the
-36 sym_ symbols) is its 16x16 original doubled into 2x2 blocks, so each rendered
-PNG is identical to the 16x16 set until you hand-refine it. The point is the
-bigger canvas: edit these grids to add detail the 16x16 grid can't hold. Same
-per-theme luminance recolor as the 16x16 set (palettes/helpers are imported from
-generate_tile_icons.py, so theme tweaks there flow through here too).
+Each icon is drawn once on a 32x32 grid in its own natural colors, then recolored
+per theme into a curated PICO-8 subset. Recoloring is by TONAL ROLE (luminance
+rank), not hue: an icon's unique source colors are sorted by value and mapped
+monotonically onto the theme palette, so outlines stay darkest and highlights
+stay lightest. The palette table + recolor pipeline live in this file (they used
+to be shared with a 16x16 generator, generate_tile_icons.py, that has since been
+retired — so this script is now fully standalone).
 
 Drawn on a 32x32 grid (flat colors, no AA), scaled x2 (NEAREST) to 64px.
 Output: assets/icons/tile icons/TechDeck pixel 32/<theme>/<key>.png
@@ -20,13 +21,111 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
-# Reuse the palette table + recolor pipeline from the 16x16 generator (these are
-# resolution-independent), so the two sets stay perfectly in sync on theming.
-from generate_tile_icons import (  # noqa: E402
-    THEME_PALETTES, THEME_SUBSTITUTIONS, _DEFAULT_PALETTE,
-    _hex, _build_map, _unique_colors, _recolor, _draw_grid,
-)
+
+# ── theme palettes + recolor pipeline ───────────────────────────────────────
+# The one master palette every icon is recolored into: the canonical PICO-8 16.
+# Per theme we pick a tasteful SUBSET of these (no other colors allowed).
+PICO8 = {
+    "black": "#000000", "dblue": "#1D2B53", "dpurple": "#7E2553", "dgreen": "#008751",
+    "brown": "#AB5236", "dgrey": "#5F574F", "lgrey": "#C2C3C7", "white": "#FFF1E8",
+    "red": "#FF004D", "orange": "#FFA300", "yellow": "#FFEC27", "green": "#00E436",
+    "blue": "#29ADFF", "lavender": "#83769C", "pink": "#FF77A8", "peach": "#FFCCAA",
+}
+
+
+def _pal(*names):
+    return [PICO8[n] for n in names]
+
+
+# Per-theme subset of the PICO-8 16, chosen to match each theme's mood with
+# tasteful tonal/hue variety (not a single-hue wash). Code re-sorts by luminance.
+THEME_PALETTES = {
+    "dark":           _pal("dgrey", "lavender", "blue", "orange", "lgrey", "white"),
+    "light":          _pal("black", "dgrey", "brown", "orange", "lgrey"),
+    "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
+    "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
+    "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
+    "matrix":         _pal("dgreen", "green", "dgrey", "lgrey", "white"),
+}
+_DEFAULT_PALETTE = THEME_PALETTES["dark"]
+
+# Per-theme 1:1 color substitutions applied AFTER recoloring. matrix: render the
+# white highlight tier as green (everything else stays identical).
+THEME_SUBSTITUTIONS = {
+    "matrix": {"#FFF1E8": "#00E436"},
+}
+
+
+def _hex(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _lum(rgb):
+    return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+
+def _build_map(src_colors, palette):
+    """Map unique source colors onto the palette by luminance rank (monotonic).
+
+    Darkest source -> darkest palette, lightest -> lightest; strictly increasing
+    palette indices where possible so value order (outline<shadow<fill<highlight)
+    and part separation are preserved.
+    """
+    src = sorted(set(src_colors), key=_lum)
+    pal = sorted(palette, key=_lum)
+    pl = [_lum(c) for c in pal]
+    n, m = len(src), len(pal)
+    lmin, lmax = _lum(src[0]), _lum(src[-1])
+    span = (lmax - lmin) or 1.0
+    pmin, pspan = pl[0], (pl[-1] - pl[0]) or 1.0
+
+    mapping = {}
+    prev = -1
+    for i, c in enumerate(src):
+        frac = (_lum(c) - lmin) / span
+        target = pmin + frac * pspan
+        lo = min(prev + 1, m - 1)                 # keep strictly increasing
+        hi = m - 1 - (n - 1 - i)                  # leave room for lighter colors
+        hi = max(hi, lo)
+        best, bestd = lo, abs(pl[lo] - target)
+        for j in range(lo, hi + 1):
+            dd = abs(pl[j] - target)
+            if dd < bestd:
+                best, bestd = j, dd
+        mapping[c] = pal[best]
+        prev = best
+    return mapping
+
+
+def _unique_colors(im):
+    px = im.load()
+    seen = set()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a:
+                seen.add((r, g, b))
+    return seen
+
+
+def _recolor(im, mapping):
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a:
+                px[x, y] = (*mapping[(r, g, b)], a)
+    return im
+
+
+def _draw_grid(d, grid, tones):
+    """Paint a char-grid: each non-'.' char -> its TONES hex (one pixel)."""
+    for y, row in enumerate(grid):
+        for x, ch in enumerate(row):
+            if ch != ".":
+                d.point((x, y), fill=tones[ch])
+
 
 OUT_DIR = ROOT / "assets" / "icons" / "tile icons" / "TechDeck pixel 32"
 BASE = 32
@@ -102,7 +201,7 @@ _REPEAT_GRID = [
     "....bbbb............aaaaaaaa....",
     "....bbbb........................",
     "....bbbb........................",
-    "....bbbb................bbbb....",
+    "....bbbb........................",
     "....bbbb................bbbb....",
     "....bbbb................bbbb....",
     "....bbbb................bbbb....",
@@ -165,44 +264,46 @@ def scissors(d):            # 911 remove ticket
     _draw_grid(d, _SCISSORS_GRID, _SCISSORS_TONES)
 
 
-_INVOICE_GRID = [
+_CLAW_GRID = [
     "................................",
     "................................",
-    "........aaaaaaaaaaaaaaaa........",
-    "........aaaaaaaaaaaaaaaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeebbbbbbbbeeaa........",
-    "........aaeebbbbbbbbeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeebbbbbbbbeeaa........",
-    "........aaeebbbbbbbbeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeaaaaeeeeaa........",
-    "........aaeeeeaaaaeeeeaa........",
-    "........aaeeaaddccaaeeaa........",
-    "........aaeeaaddccaaeeaa........",
-    "........aaeeaaccccaaeeaa........",
-    "........aaeeaaccccaaeeaa........",
-    "........aaeeeeaaaaeeeeaa........",
-    "........aaeeeeaaaaeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaeeeeeeeeeeeeaa........",
-    "........aaaaaaaaaaaaaaaa........",
-    "........aaaaaaaaaaaaaaaa........",
+    "..........aaaaaaaaaaaa..........",
+    "..........aeeeeeeeeeea..........",
+    "..........abbbbbbbbbba..........",
+    "..........abbbbbbbbbba..........",
+    ".....aaaaaaaaaaaaaaaaaaaaaa.....",
+    ".....aaccccccccccccccccccaa.....",
+    ".....aaddddddddccddddddddaa.....",
+    ".....aaddddddddccddddddddaa.....",
+    ".....aaddddddccccccddddddaa.....",
+    ".....aadddddddccccdddddddaa.....",
+    ".....aadddddcddccddcdddddaa.....",
+    ".....aaddddcdddccdddcddddaa.....",
+    ".....aaddddddddddddddddddaa.....",
+    ".....aaddddddddddddddddddaa.....",
+    ".....aaddddddddddddddddddaa.....",
+    ".....aaddddddddddddddddddaa.....",
+    ".....aaddeeedddbbbdddeeedaa.....",
+    ".....aadeeeeedbbbbbdeeeeeaa.....",
+    ".....aadeeeeedbbbbbdeeeeeaa.....",
+    ".....aaddeeedddbbbdddeeedaa.....",
+    ".....aaaaaaaaaaaaaaaaaaaaaa.....",
+    ".....aabbbbbbbbbbbbbbbbbbaa.....",
+    ".....aabbbbbbbbbbbbbbbbbbaa.....",
+    ".....aabaddddddabbbaaebbbaa.....",
+    ".....aabaddddddabbbbbbbbbaa.....",
+    ".....aabaaaaaaaabbbbbbbbbaa.....",
+    ".....aaaaaaaaaaaaaaaaaaaaaa.....",
+    "......aaa..............aaa......",
     "................................",
     "................................",
 ]
-_INVOICE_TONES = {"a": "#37474F", "b": "#90A4AE", "c": "#F4B400", "d": "#FFE082", "e": "#ECEFF1"}
+# a: cabinet frame / outline (darkest)   b: red cabinet body + prizes
+# c: claw + rail (metal)   d: glass interior   e: marquee lights + prize highlights
+_CLAW_TONES = {"a": "#26303A", "b": "#D23B2E", "c": "#9BA6B0", "d": "#BEE3F0", "e": "#FFD23E"}
 
-def invoice(d):             # 911 PO PDF extractor
-    _draw_grid(d, _INVOICE_GRID, _INVOICE_TONES)
+def claw(d):                # 911 PO PDF extractor
+    _draw_grid(d, _CLAW_GRID, _CLAW_TONES)
 
 
 _PICTURE_GRID = [
@@ -683,47 +784,6 @@ _SYM_BOOKMARK_TONES = {"a": "#E41E2F"}
 
 def sym_bookmark(d):        # symbol: bookmark
     _draw_grid(d, _SYM_BOOKMARK_GRID, _SYM_BOOKMARK_TONES)
-
-
-_SYM_BOX_GRID = [
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "......cccccccccccccccccccc......",
-    "......cccccccccccccccccccc......",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....ccccccccbbbbbbbbcccccccc....",
-    "....ccccccccbbbbbbbbcccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "....ccccccccccccccbbccbbcccc....",
-    "....ccccccccccccccbbccbbcccc....",
-    "....ccccccccccccccaaccaacccc....",
-    "....ccccccccccccccaaccaacccc....",
-    "....ccccccccccccccaaccaacccc....",
-    "....ccccccccccccccaaccaacccc....",
-    "....cccccccccccccccccccccccc....",
-    "....cccccccccccccccccccccccc....",
-    "......cccccccccccccccccccc......",
-    "......cccccccccccccccccccc......",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-]
-_SYM_BOX_TONES = {"a": "#706D67", "b": "#F18F06", "c": "#FCC201"}
-
-def sym_box(d):             # symbol: box
-    _draw_grid(d, _SYM_BOX_GRID, _SYM_BOX_TONES)
-
 
 
 _SYM_CLOSE_GRID = [
@@ -1284,46 +1344,6 @@ _SYM_MALE_USER_TONES = {"a": "#726E68", "b": "#F18F08", "c": "#F9C292"}
 
 def sym_male_user(d):       # symbol: male user
     _draw_grid(d, _SYM_MALE_USER_GRID, _SYM_MALE_USER_TONES)
-
-
-_SYM_MENU_GRID = [
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
-    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
-    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
-    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
-    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
-    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-    "................................",
-]
-_SYM_MENU_TONES = {"a": "#706D67"}
-
-def sym_menu(d):            # symbol: menu
-    _draw_grid(d, _SYM_MENU_GRID, _SYM_MENU_TONES)
 
 
 _SYM_MUSIC_GRID = [
@@ -1970,7 +1990,7 @@ ICONS = {
     "clipboard": clipboard,
     "repeat": repeat,
     "scissors": scissors,
-    "invoice": invoice,
+    "claw": claw,
     "picture": picture,
     "ruler": ruler,
     "stamp": stamp,
@@ -1986,7 +2006,6 @@ ICONS = {
 ICONS.update({
     "sym_binoculars": sym_binoculars,
     "sym_bookmark": sym_bookmark,
-    "sym_box": sym_box,
     "sym_close": sym_close,
     "sym_connect": sym_connect,
     "sym_contacts": sym_contacts,
@@ -2001,7 +2020,6 @@ ICONS.update({
     "sym_info": sym_info,
     "sym_lock": sym_lock,
     "sym_male_user": sym_male_user,
-    "sym_menu": sym_menu,
     "sym_music": sym_music,
     "sym_opened_folder": sym_opened_folder,
     "sym_picture": sym_picture,
