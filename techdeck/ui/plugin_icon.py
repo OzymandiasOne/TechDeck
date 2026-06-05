@@ -42,7 +42,7 @@ PLUGIN_ICON_KEYS = {
     "922_form_seeker":      "futurama_bender",
     "922_kitting":          "toolbox",
     "922_lst_organizer":    "folders",
-    "922_runtime_genie":    "stopwatch",
+    "922_runtime_genie":    "lamp",
     "batch_repeater":       "copy",
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",

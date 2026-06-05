@@ -582,8 +582,48 @@ _STOPWATCH_GRID = [
 ]
 _STOPWATCH_TONES = {"a": "#1A2233", "b": "#2B3A55", "c": "#C0392B", "d": "#F4E9C1"}
 
-def stopwatch(d):           # 922 runtime genie
+def stopwatch(d):           # 922 runtime genie (legacy; kept available)
     _draw_grid(d, _STOPWATCH_GRID, _STOPWATCH_TONES)
+
+
+_LAMP_GRID = [
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    ".....e..........................",
+    ".....ee.........................",
+    "....eee.......aaaa..............",
+    ".....e........acca..............",
+    "....aaaa.....aaccaa.............",
+    "....accc....acaccaca............",
+    "....accc...acccccccca...........",
+    "....accc..acccccccccca..caaa....",
+    "....acccaaccccccccccccaa..caa...",
+    ".....accccddcccccccccccca...ca..",
+    "......acccddccccccccccccca..caa.",
+    ".....acacccccccccccccccccca..ca.",
+    ".....acccccccccccccccccccca..ca.",
+    ".....acccccccccccccccccccca..ca.",
+    ".....acccccccccccccccccccca.cca.",
+    ".....abbbbbbbbbbbbbbbbbbbba.ba..",
+    "......abbbbbbbbbbbbbbbbbbabba...",
+    ".......abbbbbbbbbbbbbbbbbbba....",
+    "........aaccccccccccccaa........",
+    "..........aaccccccccaa..........",
+    "..........acccccccccca..........",
+    "..........aaaaaaaaaaaa..........",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+]
+_LAMP_TONES = {"a": "#1A1F2B", "b": "#6B4A2A", "c": "#C9962E", "d": "#F0D89A", "e": "#FFF2C0"}
+
+def lamp(d):                # 922 runtime genie (genie/Aladdin lamp)
+    _draw_grid(d, _LAMP_GRID, _LAMP_TONES)
 
 
 _COPY_GRID = [
@@ -1998,6 +2038,7 @@ ICONS = {
     "toolbox": toolbox,
     "folders": folders,
     "stopwatch": stopwatch,
+    "lamp": lamp,
     "copy": copy,
     "badge": badge,
     "qr": qr,
