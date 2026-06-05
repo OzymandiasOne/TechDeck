@@ -32,7 +32,7 @@ from PySide6.QtGui import (
 # theme-recolored — they render in their native colors on every theme. That's
 # how 922_form_seeker uses "futurama_bender".
 PLUGIN_ICON_KEYS = {
-    "911_setup":            "clipboard",
+    "911_setup":            "microsoft_excel_2019",
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
     "911_po_pdf_extractor": "claw",
