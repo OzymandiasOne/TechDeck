@@ -25,6 +25,12 @@ from PySide6.QtGui import (
 #   assets/icons/tile icons/TechDeck pixel 32/<theme>/<key>.png
 # Keyed on the RUNTIME plugin id. The art is bundled with the build via the
 # spec's assets entry.
+#
+# A key that isn't a themed tile resolves to a generated PACK icon instead
+# (full-color brand/character art from tools/generate_pack_icons.py, under
+# "Icons8 characters pixel" / "Icons socialmedia pixel"). Those are NOT
+# theme-recolored — they render in their native colors on every theme. That's
+# how 922_form_seeker uses "futurama_bender".
 PLUGIN_ICON_KEYS = {
     "911_setup":            "clipboard",
     "911_batch_repeater":   "repeat",
@@ -33,7 +39,7 @@ PLUGIN_ICON_KEYS = {
     "911_sketch_extractor": "picture",
     "911_runtime_estimator": "ruler",
     "922_pallet_stamper":   "stamp",
-    "922_form_seeker":      "magnifier",
+    "922_form_seeker":      "futurama_bender",
     "922_kitting":          "toolbox",
     "922_lst_organizer":    "folders",
     "922_runtime_genie":    "stopwatch",
@@ -41,6 +47,10 @@ PLUGIN_ICON_KEYS = {
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",
 }
+
+# Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
+# themed pixel-32 tile. Native colors, not theme-recolored.
+_PACK_SETS = ("Icons8 characters pixel", "Icons socialmedia pixel")
 
 # Themes that have a generated icon palette on disk. Custom user themes fall back
 # to the "dark" set.
@@ -83,8 +93,22 @@ def _icon_is_file(icon: str) -> bool:
     return bool(icon) and Path(icon).suffix.lower() in _IMAGE_EXTS
 
 
+def _pack_icon_path(key: str) -> Path | None:
+    """Path to a generated PACK icon (native colors, not themed), or None."""
+    base = _tile_icons_dir()
+    for pack in _PACK_SETS:
+        candidate = base / pack / f"{key}.png"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _load_pixel_icon(plugin, size: int) -> QPixmap | None:
-    """Load the theme-matched pixel-art tile icon for this plugin, or None."""
+    """Load the theme-matched pixel-art tile icon for this plugin, or None.
+
+    Falls back to a non-themed generated pack icon when the key isn't a themed
+    pixel-32 tile (e.g. a brand/character icon like "futurama_bender").
+    """
     key = PLUGIN_ICON_KEYS.get(getattr(plugin, "id", None))
     if not key:
         return None
@@ -95,6 +119,8 @@ def _load_pixel_icon(plugin, size: int) -> QPixmap | None:
     if not path.exists():
         path = pixel_dir / "dark" / f"{key}.png"
     if not path.exists():
+        path = _pack_icon_path(key)  # non-themed brand/character pack art
+    if path is None or not path.exists():
         return None
     pm = QPixmap(str(path))
     if pm.isNull():
