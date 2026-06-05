@@ -594,13 +594,23 @@ class LibraryPage(QWidget, ThemeAware):
         sort_mode = self.settings.get_library_sort_mode()
         _family_rank = {"911": 0, "922": 1, "other": 2}
 
+        def _name_no_family(name: str) -> str:
+            # Drop a leading family number ("911 ", "922 ") so Alphabetical sorts
+            # by the descriptive part of the name. Without this it just mirrors
+            # the By-Family grouping (names are family-prefixed), so the two modes
+            # would look identical.
+            head, _, rest = name.partition(" ")
+            return rest if head.isdigit() and rest else name
+
         def _sort_key(tid: str):
             p = self.plugin_loader.get_plugin(tid)
             name = (p.name if p else tid).lower()
             if sort_mode == "family":
+                # Group 911 -> 922 -> other; alphabetical within each group.
                 family = (p.family if p else "other")
                 return (_family_rank.get(family, 2), name)
-            return (name,)
+            # Flat A-Z by the descriptive name (family number ignored).
+            return (_name_no_family(name),)
 
         row, col = 0, 0
 
