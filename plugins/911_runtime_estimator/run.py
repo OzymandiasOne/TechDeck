@@ -10,9 +10,9 @@ S029, V092 ...), this plugin:
      PDFs may live in 'NEST PACKAGES' or 'WPDD SKETCHES' under a
      'CUI- TECH DATA READ ME' folder, and layouts vary between orders).
   2. Parses each nest packet PDF (PyMuPDF) for thickness, pieces, material,
-     source, stock size, mil spec, and plate weight -- cross-checking fields
-     across the page-1 data row, the SUMMARY page, the part sketch, and the
-     MOVE TICKET, exactly like the 911 Setup plugin.
+     stock size, mil spec, and plate weight -- cross-checking fields across the
+     page-1 data row, the SUMMARY page, the part sketch, and the MOVE TICKET,
+     exactly like the 911 Setup plugin.
   3. Joins batch-list rows to nests by 'Nest Pkg Nbr' and computes a per-row
      cutting-time estimate (thickness band x thickness x pieces, +180 min per
      bevel piece) -- see CALCULATION below.
@@ -78,10 +78,9 @@ VERSION = "1.0.0"
 BATCH_HEADER_RENAME = {"Material": "Source Material"}
 # 'Order' (which order folder a row came from) leads the table; our other
 # generated columns follow the batch-list block (in this order). 'Material' is
-# the MOVE TICKET designation (sits right after MIL SPEC on the packet);
-# 'Source' is the PDF SRCE/SOURCE field (where the stock came from).
+# the MOVE TICKET designation (sits right after MIL SPEC on the packet).
 GENERATED_COLS = ["Process", "Thickness (in)", "Stock L", "Stock W",
-                  "Mil Spec", "Material", "Source", "Est Cut Hours", "Flags"]
+                  "Mil Spec", "Material", "Est Cut Hours", "Flags"]
 # For each OUTPUT header, the UPPERCASE row key its value is read from. Most map
 # to their own upper-cased name; these two are indirections (the display name
 # differs from the key the value is stored under).
@@ -267,7 +266,7 @@ def _parse_size(full_text: str):
 def parse_nest_pdf(pdf_path: Path) -> dict:
     """Parse a nest packet PDF. Returns a dict of extracted fields (any may be
     None). Thickness is the only field the calculation needs."""
-    out = {"thickness": None, "pieces": None, "material": None, "source": None,
+    out = {"thickness": None, "pieces": None, "material": None,
            "stock_l": None, "stock_w": None, "mil_spec": None,
            "plate_weight": None, "process": None, "mt_material": None}
     doc = fitz.open(str(pdf_path))
@@ -289,8 +288,6 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     out["material"] = (_labeled_value(full, "TYPE")
                        or _labeled_value(full, "MATL")
                        or _labeled_value(full, "MATERIAL"))
-    # Source: REMNANT 'SOURCE:' OR part-sketch 'SRCE:'.
-    out["source"] = _labeled_value(full, "SOURCE") or _labeled_value(full, "SRCE")
     # MOVE TICKET material designation (e.g. 'HSS'), distinct from the batch
     # list's stock 'Material' code -- pulled only from MOVE TICKET pages.
     out["mt_material"] = _move_ticket_material(pages)
@@ -564,6 +561,7 @@ def _nest_qty_groups(data_rows):
 _XL_DATABASE = 1        # PivotCache SourceType (xlDatabase)
 _XL_ROW_FIELD = 1       # PivotField.Orientation (xlRowField)
 _XL_SUM = -4157         # xlConsolidationFunction (xlSum)
+_XL_CALC_MANUAL = -4135 # xlCalculationManual
 
 
 def add_real_pivots(out_path, data_headers, sheets_meta, log):
@@ -596,6 +594,13 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
         excel = win32.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
+        # Dedicated, isolated instance (DispatchEx) -- kill the churn that makes
+        # COM pivot work slow: no screen repaints, no events, no auto-recalc
+        # after every edit. We Quit the instance afterwards, so no need to
+        # restore these.
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+        excel.Calculation = _XL_CALC_MANUAL
         wb = excel.Workbooks.Open(str(out_path))
         for sheet_name, n_rows in sheets_meta:
             if n_rows < 1:
@@ -607,6 +612,12 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
             cache = wb.PivotCaches().Create(SourceType=_XL_DATABASE, SourceData=src)
             table_name = sheet_name.replace("-", "") + "Pivot"
             pt = cache.CreatePivotTable(TableDestination=dest, TableName=table_name)
+            # Defer recalculation until every field is configured. With the
+            # default ManualUpdate=False, Excel rebuilds the WHOLE pivot after
+            # each field change -- and a row-field rebuild enumerates every
+            # distinct item across all nests, so a second row field can mean
+            # several full re-layouts. Batching them into one recalc is the fix.
+            pt.ManualUpdate = True
             pt.PivotFields(nest_header).Orientation = _XL_ROW_FIELD
             # PPN Quantity as a SECOND row field (nested under the nest) so each
             # nest's PPN values show per row -- displayed, not summed.
@@ -620,6 +631,7 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
             # want. RowGrand would add a redundant rightmost total column.
             pt.ColumnGrand = True
             pt.RowGrand = False
+            pt.ManualUpdate = False   # one recalc/re-layout, now that we're done
         wb.Save()
         wb.Close(SaveChanges=True)
         log("  Added real Excel PivotTables (nest / PPN Quantity -> "
@@ -821,7 +833,6 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
             out_row["Mil Spec"] = (pdfd or {}).get("mil_spec") if pdfd else None
             out_row["MT Material"] = (pdfd or {}).get("mt_material") if pdfd else None
-            out_row["Source"] = (pdfd or {}).get("source") if pdfd else None
             out_row["Est Cut Hours"] = round(est_hr, 4) if est_hr is not None else None
 
             flags = []
