@@ -50,9 +50,12 @@ THEME_PALETTES = {
 _DEFAULT_PALETTE = THEME_PALETTES["dark"]
 
 # Per-theme 1:1 color substitutions applied AFTER recoloring. matrix: render the
-# white highlight tier as green (everything else stays identical).
+# white highlight tier as a LIGHT green. It must stay distinct from the palette's
+# "green" (#00E436) -- mapping it to the same green collapsed the highlight and
+# mid tiers into one color, so detailed icons (stopwatch face/hands, badge
+# checkmark) blended into a flat green blob.
 THEME_SUBSTITUTIONS = {
-    "matrix": {"#FFF1E8": "#00E436"},
+    "matrix": {"#FFF1E8": "#9BFFB0"},
 }
 
 
