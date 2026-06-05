@@ -36,8 +36,7 @@ class CommandHandler:
         /rave           - Pulse accent colors through a rainbow
         /jack           - Play blackjack in the console
         /roguemode      - Open Rogue Mode focus music player
-        /haiku          - Print a manufacturing haiku
-        /moth           - Summon a moth toward the Run button
+        /moth           - Summon a themed moth that lands with a haiku bubble
         /steelbeams     - Open the Steel Tube Operation game
 
     Theme switching is handled via Settings → Personalization → Theme,
@@ -63,8 +62,6 @@ class CommandHandler:
         self._rave_orig = None           # (accent, hover, pressed) saved before raving
         self._crabs = []
         self._moth = None
-        self._moth_targets = []  # cycled through on repeat /moth calls
-        self._moth_target_idx = 0
         self._jack_running = False
         self._jack_cancel = threading.Event()  # set to fold/abort an active game
 
@@ -89,7 +86,6 @@ class CommandHandler:
             '/steelbeams': self._cmd_steelbeams,
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
-            '/haiku': self._cmd_haiku,
             '/moth': self._cmd_moth,
         }
 
@@ -127,8 +123,7 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
-            "  /haiku           - Print a haiku\n"
-            "  /moth            - Summon a moth buddy\n"
+            "  /moth            - Summon a moth that lands with a haiku\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -725,50 +720,45 @@ class CommandHandler:
             self.console.append_system("Rogue Mode player open.")
 
     # ------------------------------------------------------------------ #
-    #  /haiku
-    # ------------------------------------------------------------------ #
-
-    def _cmd_haiku(self, args: str):
-        haiku = generate_haiku()
-        for line in haiku.split("\n"):
-            self.console.append_game(f"  {line}")
-
-    # ------------------------------------------------------------------ #
-    #  /moth
+    #  /moth — flies to a random empty spot and shows a themed haiku bubble
     # ------------------------------------------------------------------ #
 
     def _cmd_moth(self, args: str):
         from techdeck.ui.widgets.moth_widget import MothWidget
+        from techdeck.ui.theme_manager import get_theme_manager
+        from PySide6.QtGui import QColor
+        from PySide6.QtCore import QPoint
 
-        if self.main_window is None:
+        mw = self.main_window
+        if mw is None:
             self.console.append_system("No window available for moth.")
             return
 
-        # Build target list once
-        if not self._moth_targets:
-            targets = []
-            mw = self.main_window
-            if hasattr(mw, 'btn_run') and mw.btn_run.isVisible():
-                targets.append(mw.btn_run)
-            if hasattr(mw, 'console') and mw.console.send_btn.isVisible():
-                targets.append(mw.console.send_btn)
-            if hasattr(mw, 'console') and mw.console.clear_btn.isVisible():
-                targets.append(mw.console.clear_btn)
-            if not targets:
-                self.console.append_system("Nothing to land on.")
-                return
-            self._moth_targets = targets
+        # A random point in the upper-central content area of the window — chosen
+        # to avoid the button bars (Run, console Send/Clear) so it never lands on
+        # a button.
+        tl = mw.mapToGlobal(QPoint(0, 0))
+        w, h = mw.width(), mw.height()
+        point = QPoint(
+            tl.x() + random.randint(int(w * 0.22), int(w * 0.78)),
+            tl.y() + random.randint(int(h * 0.18), int(h * 0.50)),
+        )
 
-        target = self._moth_targets[self._moth_target_idx % len(self._moth_targets)]
-        self._moth_target_idx += 1
+        # Colour the moth + haiku bubble to the active theme.
+        pal = get_theme_manager().get_current_palette()
+        moth_color = QColor(pal.accent)
+        moth_color.setAlpha(235)
+        fg, bg, border = QColor(pal.text), QColor(pal.surface), QColor(pal.border_strong)
+
+        haiku = generate_haiku()
 
         if self._moth is None or not self._moth.isVisible():
-            from PySide6.QtGui import QColor
-            theme = self.settings.get_theme()
-            moth_color = QColor(240, 240, 240, 230) if theme == "dark" else QColor(20, 20, 20, 230)
             self._moth = MothWidget(color=moth_color)
-            self._moth.spawn_from_edge(target)
-            self.console.append_system("Something has arrived.")
+            self._moth.set_haiku(haiku, fg, bg, border)
+            self._moth.spawn_from_edge(point)
+            self.console.append_system("A moth flutters in, bearing a haiku.")
         else:
-            self._moth.fly_to(target)
-            self.console.append_system("Shoo.")
+            self._moth.set_color(moth_color)
+            self._moth.set_haiku(haiku, fg, bg, border)
+            self._moth.fly_to(point)
+            self.console.append_system("The moth drifts off with a new haiku.")
