@@ -126,8 +126,11 @@ def _load_pixel_icon(plugin, size: int) -> QPixmap | None:
     if pm.isNull():
         return None
     if pm.width() != size or pm.height() != size:
+        # Nearest-neighbor: these are pixel-art tiles, so smooth/bilinear
+        # scaling blurs them (most visible on the 48px library tiles and on
+        # detailed art like futurama_bender). Fast keeps pixels hard-edged.
         pm = pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
-                       Qt.TransformationMode.SmoothTransformation)
+                       Qt.TransformationMode.FastTransformation)
     return pm
 
 
