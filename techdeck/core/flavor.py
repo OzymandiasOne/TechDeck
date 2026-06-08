@@ -324,7 +324,7 @@ def generate_haiku() -> str:
 
 # ---------------------------------------------------------------------------
 # Moth musings — quiet reflections drawn from Japanese philosophy/aesthetics,
-# shown by /moth in the gaps between haiku. Pre-wrapped to keep the bubble tidy.
+# shown by /friend in the gaps between haiku. Pre-wrapped to keep the bubble tidy.
 # ---------------------------------------------------------------------------
 
 _MUSINGS = [

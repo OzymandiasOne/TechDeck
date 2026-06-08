@@ -36,7 +36,7 @@ class CommandHandler:
         /rave           - Pulse accent colors through a rainbow
         /jack           - Play blackjack in the console
         /roguemode      - Open Rogue Mode focus music player
-        /moth           - Summon a themed moth that lands with a haiku bubble
+        /friend         - Summon a little friend (moth/butterfly) with haiku + musings
         /steelbeams     - Open the Steel Tube Operation game
 
     Theme switching is handled via Settings → Personalization → Theme,
@@ -86,7 +86,7 @@ class CommandHandler:
             '/steelbeams': self._cmd_steelbeams,
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
-            '/moth': self._cmd_moth,
+            '/friend': self._cmd_moth,
         }
 
     def handle_command(self, command_text: str) -> None:
@@ -123,7 +123,7 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
-            "  /moth            - Summon a moth that lands with a haiku\n"
+            "  /friend          - Summon a little friend (haiku + musings)\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -419,7 +419,7 @@ class CommandHandler:
 
     def stop_session_effects(self):
         """End in-console easter-egg sessions on /clear or the Clear button:
-        fold blackjack, end /rave, dismiss /moth. The fidget spinner and the
+        fold blackjack, end /rave, dismiss /friend. The fidget spinner and the
         Steel Beams game are separate windows, left to be closed manually."""
         self._stop_jack()
         self._stop_rave(announce=False)
@@ -720,7 +720,7 @@ class CommandHandler:
             self.console.append_system("Rogue Mode player open.")
 
     # ------------------------------------------------------------------ #
-    #  /moth — flies to a random empty spot and shows a themed haiku bubble
+    #  /friend — moth/butterfly flies to a random empty spot, shows haiku + musings
     # ------------------------------------------------------------------ #
 
     def _cmd_moth(self, args: str):
@@ -732,7 +732,7 @@ class CommandHandler:
 
         mw = self.main_window
         if mw is None:
-            self.console.append_system("No window available for moth.")
+            self.console.append_system("No window available.")
             return
 
         # A random point in the upper-central content area of the window — chosen
