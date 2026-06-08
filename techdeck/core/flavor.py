@@ -282,11 +282,11 @@ _HAIKU_LAST = [    # 5 syllables
 
 
 def generate_haiku() -> str:
-    """Generate a unique haiku from the template pools."""
+    """Generate a unique haiku from the template pools (each line ends in '...')."""
     return (
-        random.choice(_HAIKU_FIRST) + "\n"
-        + random.choice(_HAIKU_MIDDLE) + "\n"
-        + random.choice(_HAIKU_LAST)
+        random.choice(_HAIKU_FIRST) + "...\n"
+        + random.choice(_HAIKU_MIDDLE) + "...\n"
+        + random.choice(_HAIKU_LAST) + "..."
     )
 
 
@@ -318,8 +318,8 @@ _MUSINGS = [
 
 
 def generate_musing() -> str:
-    """A short Japanese-philosophy musing for the moth (1-2 lines)."""
-    return random.choice(_MUSINGS)
+    """A short Japanese-philosophy musing for the moth (1-2 lines), ending '...'."""
+    return random.choice(_MUSINGS).rstrip(" .") + "..."
 
 
 # ---------------------------------------------------------------------------
