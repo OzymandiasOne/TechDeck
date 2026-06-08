@@ -567,7 +567,9 @@ class MothWidget(QWidget):
         # Ease to a stop with a couple of decelerating flaps, then go still; the
         # flutter's completion schedules the next occasional flutter.
         self._settle()
-        self._speak_count = 0
+        # Random starting phase so the FIRST message is sometimes a haiku,
+        # sometimes a musing (haikus still recur every HAIKU_EVERY_SPEAKS).
+        self._speak_count = random.randint(0, self.HAIKU_EVERY_SPEAKS - 1)
         self._first_speak.start(
             random.randint(self.HAIKU_FIRST_MIN_MS, self.HAIKU_FIRST_MAX_MS))
 
