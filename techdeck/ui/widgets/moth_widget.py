@@ -75,8 +75,10 @@ def _next_moth_sound() -> str:
 
 
 # ── Pixel-art wing-flutter frames (generated via tools/_scratch_moth.py) ─────
-# 19x14 grids; "X" = a filled cell painted in the theme colour. Frame 0 = wings
-# spread (rest), 2 = wings raised; cycling them animates a flutter.
+# 19x14 grids. Per cell: "X" = body (theme colour), "o" = outline/2nd tone (for
+# hand-drawn detail), "." = transparent. A 1-cell outline is auto-traced around
+# the silhouette too. Frame 0 = wings spread (rest), 2 = raised; cycling animates
+# the flutter.
 MOTH_FRAMES = [
     [
         ".....X.......X.....",
@@ -132,8 +134,7 @@ _GRID_H = len(MOTH_FRAMES[0])
 
 
 # ── Pixel-art butterfly frames (cherry_blossom theme; same 19x14 size) ───────
-# Rounder, separated fore/hind wings + clubbed antennae. Generated via
-# tools/_scratch_butterfly.py.
+# Same cell key as MOTH_FRAMES: "X" = body, "o" = outline/2nd tone, "." = empty.
 BUTTERFLY_FRAMES = [
     [
         "......XX...XX......",
@@ -776,9 +777,13 @@ class MothWidget(QWidget):
                 if any(filled(x + dx, y + dy)
                        for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy):
                     painter.fillRect((x + m) * c, (y + m) * c, c, c, self._outline)
-        # Body pass.
+        # Body pass: "X" = fill (body tone), "o" = an explicit outline-tone cell
+        # (for hand-drawn detail/shading inside the silhouette).
         for y in range(gh):
             for x in range(gw):
-                if grid[y][x] != ".":
-                    painter.fillRect((x + m) * c, (y + m) * c, c, c, self._color)
+                ch = grid[y][x]
+                if ch == ".":
+                    continue
+                tone = self._outline if ch in ("o", "O") else self._color
+                painter.fillRect((x + m) * c, (y + m) * c, c, c, tone)
         painter.end()
