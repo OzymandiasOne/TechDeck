@@ -175,13 +175,14 @@ class MothWidget(QWidget):
     SIZE_W = _GRID_W * CELL
     SIZE_H = _GRID_H * CELL
 
-    FLY_SEQ = [0, 1, 2, 1]                    # wing frames cycled while flying
-    FLUTTER_SEQ = [1, 2, 1, 0, 1, 2, 1, 0]    # one idle flutter burst
-    FLAP_MS = 70                              # per-frame step during a flutter
-    IDLE_MIN_MS, IDLE_MAX_MS = 2600, 7000     # gap between idle flutters
-    HAIKU_FIRST_MS = 30_000                   # first haiku after landing
+    FLY_SEQ = [0, 1, 2, 1]                    # fast flutter while in flight
+    FLAP_MS = 150                             # slow, graceful wing beat when perched
+    LAND_FLAPS = 2                            # graceful flaps right after landing
+    IDLE_FLAPS = (1, 3)                        # "just a few" on each random flutter
+    IDLE_MIN_MS, IDLE_MAX_MS = 5000, 15000    # long stills between flutters
+    HAIKU_FIRST_MIN_MS, HAIKU_FIRST_MAX_MS = 20_000, 50_000  # first within a minute
     HAIKU_EVERY_MS = 600_000                  # then every 10 minutes
-    HAIKU_VISIBLE_MS = 12_000                 # how long a bubble lingers
+    HAIKU_VISIBLE_MS = 13_000                 # how long a bubble lingers
 
     def __init__(self, color: QColor | None = None, parent=None):
         super().__init__(parent)
@@ -302,13 +303,21 @@ class MothWidget(QWidget):
         self.update()
 
     def _on_landed(self):
-        self._idle_timer.start(random.randint(self.IDLE_MIN_MS, self.IDLE_MAX_MS))
-        self._haiku_first.start(self.HAIKU_FIRST_MS)
+        # Settle in with a couple of slow, graceful flaps, then go still; the
+        # flutter's completion schedules the next occasional flutter.
+        self._flutter(self.LAND_FLAPS)
+        self._haiku_first.start(
+            random.randint(self.HAIKU_FIRST_MIN_MS, self.HAIKU_FIRST_MAX_MS))
 
-    # ── idle flutter ────────────────────────────────────────────────────────
+    # ── idle flutter (slow & graceful, then still) ──────────────────────────
+    def _flutter(self, flaps: int):
+        """Queue `flaps` slow graceful wing beats; _flap_step goes still after."""
+        self._flap_queue = [f for _ in range(flaps) for f in (1, 2, 1, 0)]
+        if not self._flap_timer.isActive():
+            self._flap_timer.start()
+
     def _start_flutter(self):
-        self._flap_queue = list(self.FLUTTER_SEQ)
-        self._flap_timer.start()
+        self._flutter(random.randint(*self.IDLE_FLAPS))
 
     def _flap_step(self):
         if self._flap_queue:
