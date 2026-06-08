@@ -744,21 +744,20 @@ class CommandHandler:
             tl.y() + random.randint(int(h * 0.18), int(h * 0.50)),
         )
 
-        # Colour the moth + haiku bubble to the active theme.
+        # Colour the moth + haiku bubble to the active theme. The moth holds the
+        # haiku generator and shows one ~30s after landing, then every ~10 min.
         pal = get_theme_manager().get_current_palette()
         moth_color = QColor(pal.accent)
         moth_color.setAlpha(235)
         fg, bg, border = QColor(pal.text), QColor(pal.surface), QColor(pal.border_strong)
 
-        haiku = generate_haiku()
-
         if self._moth is None or not self._moth.isVisible():
             self._moth = MothWidget(color=moth_color)
-            self._moth.set_haiku(haiku, fg, bg, border)
+            self._moth.configure_haiku(generate_haiku, fg, bg, border)
             self._moth.spawn_from_edge(point)
-            self.console.append_system("A moth flutters in, bearing a haiku.")
+            self.console.append_system("A moth flutters in and settles down.")
         else:
             self._moth.set_color(moth_color)
-            self._moth.set_haiku(haiku, fg, bg, border)
+            self._moth.configure_haiku(generate_haiku, fg, bg, border)
             self._moth.fly_to(point)
-            self.console.append_system("The moth drifts off with a new haiku.")
+            self.console.append_system("The moth flits to a new perch.")

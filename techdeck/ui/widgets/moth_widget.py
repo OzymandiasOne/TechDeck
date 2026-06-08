@@ -1,60 +1,17 @@
 """
 TechDeck Moth Widget
-A small moth that flies from a random screen edge toward a random empty point
-(never onto a button), then shows a haiku in a themed speech bubble.
-/moth sends it somewhere new with a fresh haiku. Double-click to shoo it away.
-Outline-only style, no fill; coloured to the active theme.
+A small PIXEL-ART moth that flies in from a random screen edge to a random empty
+spot (never onto a button), then perches and flutters its wings occasionally.
+About 30s after it lands it shows a manufacturing haiku in a themed speech
+bubble, and again every ~10 minutes after. Coloured to the active theme.
+/moth sends it somewhere new. Double-click to shoo it away entirely.
 """
 
 import math
 import random
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, QPointF, QPoint, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QPainterPath, QFont, QFontMetrics
-
-
-class HaikuBubble(QWidget):
-    """A small themed speech bubble showing a 3-line haiku next to the moth."""
-
-    PAD = 11
-    RADIUS = 9
-
-    def __init__(self, text: str, fg: QColor, bg: QColor, border: QColor, parent=None):
-        super().__init__(parent)
-        self._fg, self._bg, self._border = fg, bg, border
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-        self._font = QFont()
-        self._font.setPointSize(9)
-        self._font.setItalic(True)
-        fm = QFontMetrics(self._font)
-        self._lines = text.split("\n")
-        self._lh = fm.height()
-        tw = max((fm.horizontalAdvance(ln) for ln in self._lines), default=40)
-        self._w = tw + self.PAD * 2
-        self._h = self._lh * len(self._lines) + self.PAD * 2
-        self.setFixedSize(self._w, self._h)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(self._border, 1.5))
-        p.setBrush(self._bg)
-        p.drawRoundedRect(QRectF(0.75, 0.75, self._w - 1.5, self._h - 1.5),
-                          self.RADIUS, self.RADIUS)
-        p.setPen(self._fg)
-        p.setFont(self._font)
-        for i, line in enumerate(self._lines):
-            p.drawText(
-                QRectF(self.PAD, self.PAD + i * self._lh, self._w - 2 * self.PAD, self._lh),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, line)
-        p.end()
+from PySide6.QtCore import Qt, QTimer, QPoint, QRectF
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
 
 # ── Moth sound pool ────────────────────────────────────────────────────────────
 # Module-level so the pool persists across /moth invocations (new MothWidget
@@ -77,59 +34,192 @@ def _next_moth_sound() -> str:
     return sound
 
 
-class MothWidget(QWidget):
-    """
-    Translucent, frameless moth drawn with QPainter — outlines only, no fill.
-    Animates toward a target QWidget. Flaps wings in flight.
-    Half the original size (28x28 window, drawn at 56x56 then scaled 0.5).
-    Pass a QColor to override the outline color (default near-black).
-    """
+# ── Pixel-art wing-flutter frames (generated via tools/_scratch_moth.py) ─────
+# 19x14 grids; "X" = a filled cell painted in the theme colour. Frame 0 = wings
+# spread (rest), 2 = wings raised; cycling them animates a flutter.
+MOTH_FRAMES = [
+    [
+        ".....X.......X.....",
+        "......X.....X......",
+        "......XX...XX......",
+        "........X.X........",
+        "....XX..XXX..XX....",
+        "..XXXXXXXXXXXXXXX..",
+        ".XXXXXXXXXXXXXXXXX.",
+        ".XXXXXXXXXXXXXXXXX.",
+        "..XXXXXXXXXXXXXXX..",
+        "........XXX........",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXX.X.XXXX....",
+        ".....XXX.X.XXX.....",
+    ],
+    [
+        ".....X.......X.....",
+        "......X.....X......",
+        "......XX...XX......",
+        "........X.X........",
+        "....XXX.XXX.XXX....",
+        "...XXXXXXXXXXXXX...",
+        "...XXXXXXXXXXXXX...",
+        "...XXXXXXXXXXXXX...",
+        "....XXXXXXXXXXX....",
+        "........XXX........",
+        ".....XXXXXXXXX.....",
+        ".....XXXXXXXXX.....",
+        ".....XXXXXXXXX.....",
+        ".....XXX.X.XXX.....",
+    ],
+    [
+        "......X.....X......",
+        ".......X...X.......",
+        "........X.X........",
+        "...................",
+        ".....XXXXXXXXX.....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        ".....XXXXXXXXX.....",
+        "........XXX........",
+        "......XXXXXXX......",
+        "......XXXXXXX......",
+        "......XXXXXXX......",
+        "......XX.X.XX......",
+    ],
+]
+_GRID_W = len(MOTH_FRAMES[0][0])
+_GRID_H = len(MOTH_FRAMES[0])
 
-    SIZE = 28
 
-    def __init__(self, color: QColor | None = None, parent=None):
+class HaikuBubble(QWidget):
+    """A small themed speech bubble showing a 3-line haiku next to the moth."""
+
+    PAD = 9
+    RADIUS = 8
+
+    def __init__(self, text: str, fg: QColor, bg: QColor, border: QColor, parent=None):
         super().__init__(parent)
-        self._OUTLINE = color if color is not None else QColor(30, 30, 30, 220)
+        self._fg, self._bg, self._border = fg, bg, border
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self._font = QFont()
+        self._font.setPointSize(8)          # small text -> small box that fits it
+        self._font.setItalic(True)
+        fm = QFontMetrics(self._font)
+        self._lines = text.split("\n")
+        self._lh = fm.height()
+        tw = max((fm.horizontalAdvance(ln) for ln in self._lines), default=40)
+        self._w = tw + self.PAD * 2
+        self._h = self._lh * len(self._lines) + self.PAD * 2
+        self.setFixedSize(self._w, self._h)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(self._border)
+        p.setBrush(self._bg)
+        p.drawRoundedRect(QRectF(0.75, 0.75, self._w - 1.5, self._h - 1.5),
+                          self.RADIUS, self.RADIUS)
+        p.setPen(self._fg)
+        p.setFont(self._font)
+        for i, line in enumerate(self._lines):
+            p.drawText(
+                QRectF(self.PAD, self.PAD + i * self._lh, self._w - 2 * self.PAD, self._lh),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, line)
+        p.end()
+
+
+class MothWidget(QWidget):
+    """
+    Frameless, translucent pixel-art moth painted in the theme colour. Flies to a
+    global point, perches, and flutters occasionally; shows haikus on a delay.
+    """
+
+    CELL = 2                                  # px per pixel-art cell
+    SIZE_W = _GRID_W * CELL
+    SIZE_H = _GRID_H * CELL
+
+    FLY_SEQ = [0, 1, 2, 1]                    # wing frames cycled while flying
+    FLUTTER_SEQ = [1, 2, 1, 0, 1, 2, 1, 0]    # one idle flutter burst
+    FLAP_MS = 70                              # per-frame step during a flutter
+    IDLE_MIN_MS, IDLE_MAX_MS = 2600, 7000     # gap between idle flutters
+    HAIKU_FIRST_MS = 30_000                   # first haiku after landing
+    HAIKU_EVERY_MS = 600_000                  # then every 10 minutes
+    HAIKU_VISIBLE_MS = 12_000                 # how long a bubble lingers
+
+    def __init__(self, color: QColor | None = None, parent=None):
+        super().__init__(parent)
+        self._color = color if color is not None else QColor(30, 30, 30, 230)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(self.SIZE_W, self.SIZE_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        self._wing_phase = 0.0
+        self._frame_idx = 0
+        self._fly_tick = 0
         self._flying = False
-        self._target_point: QPoint | None = None   # global point to fly to
+        self._target_point: QPoint | None = None
         self._landed = False
 
-        # Pending haiku + themed bubble colors, shown once the moth lands.
-        self._haiku: str | None = None
+        # Haiku state
+        self._haiku_provider = None
         self._bubble_colors: tuple[QColor, QColor, QColor] | None = None
         self._bubble: HaikuBubble | None = None
 
-        self._timer = QTimer(self)
-        self._timer.setInterval(16)
-        self._timer.timeout.connect(self._tick)
+        # Movement during flight
+        self._move_timer = QTimer(self)
+        self._move_timer.setInterval(16)
+        self._move_timer.timeout.connect(self._tick)
 
+        # Idle flutter: a burst sequence stepped by _flap_timer, scheduled by _idle_timer
+        self._flap_queue: list[int] = []
+        self._flap_timer = QTimer(self)
+        self._flap_timer.setInterval(self.FLAP_MS)
+        self._flap_timer.timeout.connect(self._flap_step)
+        self._idle_timer = QTimer(self)
+        self._idle_timer.setSingleShot(True)
+        self._idle_timer.timeout.connect(self._start_flutter)
+
+        # Haiku timers
+        self._haiku_first = QTimer(self)
+        self._haiku_first.setSingleShot(True)
+        self._haiku_first.timeout.connect(self._do_haiku)
+        self._haiku_repeat = QTimer(self)
+        self._haiku_repeat.setInterval(self.HAIKU_EVERY_MS)
+        self._haiku_repeat.timeout.connect(self._do_haiku)
+        self._bubble_hide = QTimer(self)
+        self._bubble_hide.setSingleShot(True)
+        self._bubble_hide.timeout.connect(self._hide_bubble)
+
+    # ── public API ──────────────────────────────────────────────────────────
     def set_color(self, color: QColor):
-        """Re-theme the moth outline (e.g. on a later /moth after a theme switch)."""
-        self._OUTLINE = color
+        """Re-theme the moth (e.g. on a later /moth after a theme switch)."""
+        self._color = color
         self.update()
 
-    def set_haiku(self, text: str, fg: QColor, bg: QColor, border: QColor):
-        """Stash the haiku + themed bubble colors to show on landing."""
-        self._haiku = text
+    def configure_haiku(self, provider, fg: QColor, bg: QColor, border: QColor):
+        """provider() -> haiku str; fg/bg/border colour the bubble."""
+        self._haiku_provider = provider
         self._bubble_colors = (fg, bg, border)
 
     def fly_to(self, point: QPoint):
-        """Set a new global target point and start animating."""
+        """Set a new global target point and start flying."""
         self._hide_bubble()
+        self._cancel_idle_and_haiku()
         self._target_point = QPoint(point)
         self._flying = True
         self._landed = False
-        self._timer.start()
+        self._move_timer.start()
         self.show()
         self.raise_()
 
@@ -138,83 +228,111 @@ class MothWidget(QWidget):
         screen = QApplication.primaryScreen().geometry()
         edge = random.choice(["top", "bottom", "left", "right"])
         if edge == "top":
-            x = random.randint(screen.left(), screen.right())
-            y = screen.top() - self.SIZE
+            x, y = random.randint(screen.left(), screen.right()), screen.top() - self.SIZE_H
         elif edge == "bottom":
-            x = random.randint(screen.left(), screen.right())
-            y = screen.bottom() + self.SIZE
+            x, y = random.randint(screen.left(), screen.right()), screen.bottom() + self.SIZE_H
         elif edge == "left":
-            x = screen.left() - self.SIZE
-            y = random.randint(screen.top(), screen.bottom())
+            x, y = screen.left() - self.SIZE_W, random.randint(screen.top(), screen.bottom())
         else:
-            x = screen.right() + self.SIZE
-            y = random.randint(screen.top(), screen.bottom())
-
+            x, y = screen.right() + self.SIZE_W, random.randint(screen.top(), screen.bottom())
         self.move(x, y)
         self.fly_to(point)
 
+    # ── flight ──────────────────────────────────────────────────────────────
     def _target_top_left(self) -> QPoint | None:
         if self._target_point is None:
             return None
-        return self._target_point - QPoint(self.SIZE // 2, self.SIZE // 2)
+        return self._target_point - QPoint(self.SIZE_W // 2, self.SIZE_H // 2)
 
     def _tick(self):
-        self._wing_phase += 0.35
-
         target = self._target_top_left()
         if target is None:
-            self._timer.stop()
+            self._move_timer.stop()
             return
 
-        dx = target.x() - self.x()
-        dy = target.y() - self.y()
-        dist = math.hypot(dx, dy)
+        # flap while flying
+        self._fly_tick += 1
+        self._frame_idx = self.FLY_SEQ[(self._fly_tick // 3) % len(self.FLY_SEQ)]
 
+        dx, dy = target.x() - self.x(), target.y() - self.y()
+        dist = math.hypot(dx, dy)
         if dist < 3:
             self.move(target)
+            self._move_timer.stop()
             self._flying = False
+            self._frame_idx = 0
             if not self._landed:
                 self._landed = True
-                self._show_bubble()
+                self._on_landed()
         else:
             speed = min(dist * 0.08, 12)
             nx = self.x() + dx / dist * speed + random.uniform(-1, 1)
             ny = self.y() + dy / dist * speed + random.uniform(-1, 1)
             self.move(int(nx), int(ny))
-            if self._bubble is not None:
-                self._bubble.move(self._bubble_pos())
-
         self.update()
 
-    # ── haiku bubble ────────────────────────────────────────────────────────
-    def _show_bubble(self):
-        if not self._haiku or self._bubble_colors is None:
+    def _on_landed(self):
+        self._idle_timer.start(random.randint(self.IDLE_MIN_MS, self.IDLE_MAX_MS))
+        self._haiku_first.start(self.HAIKU_FIRST_MS)
+
+    # ── idle flutter ────────────────────────────────────────────────────────
+    def _start_flutter(self):
+        self._flap_queue = list(self.FLUTTER_SEQ)
+        self._flap_timer.start()
+
+    def _flap_step(self):
+        if self._flap_queue:
+            self._frame_idx = self._flap_queue.pop(0)
+            self.update()
+        else:
+            self._flap_timer.stop()
+            self._frame_idx = 0
+            self.update()
+            self._idle_timer.start(random.randint(self.IDLE_MIN_MS, self.IDLE_MAX_MS))
+
+    # ── haiku ───────────────────────────────────────────────────────────────
+    def _do_haiku(self):
+        if self._haiku_provider is None or self._bubble_colors is None:
             return
-        self._hide_bubble()
+        try:
+            text = self._haiku_provider()
+        except Exception:
+            return
         fg, bg, border = self._bubble_colors
-        self._bubble = HaikuBubble(self._haiku, fg, bg, border)
+        self._hide_bubble()
+        self._bubble = HaikuBubble(text, fg, bg, border)
         self._bubble.show()
         self._bubble.move(self._bubble_pos())
         self._bubble.raise_()
+        self._bubble_hide.start(self.HAIKU_VISIBLE_MS)
+        if not self._haiku_repeat.isActive():
+            self._haiku_repeat.start()
 
     def _bubble_pos(self) -> QPoint:
         """Place the bubble beside the moth, clamped on-screen."""
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
-        # Prefer to the right of the moth; flip left if it would clip.
-        bx = self.x() + self.SIZE + 8
+        bx = self.x() + self.SIZE_W + 8
         if bx + bw > screen.right():
             bx = self.x() - bw - 8
-        by = self.y() + self.SIZE // 2 - bh // 2
+        by = self.y() + self.SIZE_H // 2 - bh // 2
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
         return QPoint(bx, by)
 
     def _hide_bubble(self):
+        self._bubble_hide.stop()
         if self._bubble is not None:
             self._bubble.close()
             self._bubble = None
 
+    def _cancel_idle_and_haiku(self):
+        for t in (self._idle_timer, self._flap_timer, self._haiku_first,
+                  self._haiku_repeat, self._bubble_hide):
+            t.stop()
+        self._flap_queue = []
+
+    # ── interaction / teardown ──────────────────────────────────────────────
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             from techdeck.core.audio_manager import get_audio_manager
@@ -225,95 +343,22 @@ class MothWidget(QWidget):
         self.dismiss()
 
     def dismiss(self):
-        """Stop animating and remove the moth (programmatic shoo, e.g. on /clear)."""
-        self._timer.stop()
+        """Stop everything and remove the moth (and its bubble)."""
+        self._move_timer.stop()
+        self._cancel_idle_and_haiku()
         self._flying = False
         self._target_point = None
         self._hide_bubble()
         self.close()
 
+    # ── paint ───────────────────────────────────────────────────────────────
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Draw in 56x56 space, scaled down to 28x28
-        painter.scale(0.5, 0.5)
-
-        pen = QPen(self._OUTLINE, 1.4)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        cx = 28.0   # center of 56x56 space
-        cy = 32.0
-
-        flap = math.sin(self._wing_phase) * 0.15 if self._flying else 0.0
-
-        # Left upper wing
-        path = QPainterPath()
-        path.moveTo(cx, cy - 8)
-        path.cubicTo(
-            cx - 8 - flap * 30, cy - 26,
-            cx - 22 - flap * 10, cy - 18,
-            cx - 16, cy + 2,
-        )
-        path.cubicTo(cx - 9, cy + 4, cx - 3, cy - 2, cx, cy - 4)
-        path.closeSubpath()
-        painter.drawPath(path)
-
-        # Right upper wing
-        path = QPainterPath()
-        path.moveTo(cx, cy - 8)
-        path.cubicTo(
-            cx + 8 + flap * 30, cy - 26,
-            cx + 22 + flap * 10, cy - 18,
-            cx + 16, cy + 2,
-        )
-        path.cubicTo(cx + 9, cy + 4, cx + 3, cy - 2, cx, cy - 4)
-        path.closeSubpath()
-        painter.drawPath(path)
-
-        # Left lower wing
-        path = QPainterPath()
-        path.moveTo(cx - 2, cy - 2)
-        path.cubicTo(
-            cx - 14 - flap * 20, cy + 6,
-            cx - 14, cy + 18,
-            cx - 6, cy + 16,
-        )
-        path.cubicTo(cx - 3, cy + 12, cx - 1, cy + 6, cx - 1, cy + 2)
-        path.closeSubpath()
-        painter.drawPath(path)
-
-        # Right lower wing
-        path = QPainterPath()
-        path.moveTo(cx + 2, cy - 2)
-        path.cubicTo(
-            cx + 14 + flap * 20, cy + 6,
-            cx + 14, cy + 18,
-            cx + 6, cy + 16,
-        )
-        path.cubicTo(cx + 3, cy + 12, cx + 1, cy + 6, cx + 1, cy + 2)
-        path.closeSubpath()
-        painter.drawPath(path)
-
-        # Body
-        painter.drawEllipse(QPointF(cx, cy + 2), 4, 12)
-
-        # Head
-        painter.drawEllipse(QPointF(cx, cy - 10), 4, 4)
-
-        # Antennae
-        thin_pen = QPen(self._OUTLINE, 1.0)
-        thin_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(thin_pen)
-        painter.drawLine(QPointF(cx - 1.5, cy - 13), QPointF(cx - 10, cy - 24))
-        painter.drawLine(QPointF(cx + 1.5, cy - 13), QPointF(cx + 10, cy - 24))
-
-        # Antennae tips
-        painter.setPen(pen)
-        painter.drawEllipse(QPointF(cx - 10.5, cy - 25), 2.2, 2.2)
-        painter.drawEllipse(QPointF(cx + 10.5, cy - 25), 2.2, 2.2)
-
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._color)
+        c = self.CELL
+        for y, row in enumerate(MOTH_FRAMES[self._frame_idx]):
+            for x, ch in enumerate(row):
+                if ch != ".":
+                    painter.fillRect(x * c, y * c, c, c, self._color)
         painter.end()
