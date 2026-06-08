@@ -92,10 +92,15 @@ _GRID_H = len(MOTH_FRAMES[0])
 
 
 class HaikuBubble(QWidget):
-    """A small themed speech bubble showing a 3-line haiku next to the moth."""
+    """A themed speech bubble that types a 3-line haiku out one letter at a time.
+
+    The box is sized to the FULL text up front (so it never resizes), but only a
+    growing prefix of the characters is painted, advanced by a timer.
+    """
 
     PAD = 9
     RADIUS = 8
+    REVEAL_MS = 55          # per-character typing speed
 
     def __init__(self, text: str, fg: QColor, bg: QColor, border: QColor, parent=None):
         super().__init__(parent)
@@ -111,13 +116,28 @@ class HaikuBubble(QWidget):
         self._font = QFont()
         self._font.setPointSize(8)          # small text -> small box that fits it
         self._font.setItalic(True)
-        fm = QFontMetrics(self._font)
+        self._fm = QFontMetrics(self._font)
+        fm = self._fm
         self._lines = text.split("\n")
         self._lh = fm.height()
         tw = max((fm.horizontalAdvance(ln) for ln in self._lines), default=40)
         self._w = tw + self.PAD * 2
         self._h = self._lh * len(self._lines) + self.PAD * 2
         self.setFixedSize(self._w, self._h)
+
+        # Typewriter reveal: count visible chars across all lines.
+        self._revealed = 0
+        self._total = sum(len(ln) for ln in self._lines)
+        self._reveal_timer = QTimer(self)
+        self._reveal_timer.setInterval(self.REVEAL_MS)
+        self._reveal_timer.timeout.connect(self._reveal_step)
+        self._reveal_timer.start()
+
+    def _reveal_step(self):
+        self._revealed += 1
+        if self._revealed >= self._total:
+            self._reveal_timer.stop()
+        self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -128,10 +148,20 @@ class HaikuBubble(QWidget):
                           self.RADIUS, self.RADIUS)
         p.setPen(self._fg)
         p.setFont(self._font)
+        remaining = self._revealed
         for i, line in enumerate(self._lines):
+            take = max(0, min(len(line), remaining))
+            remaining -= len(line)
+            if take <= 0:
+                continue
+            # Draw the revealed prefix LEFT-aligned at the spot where the full
+            # (centered) line begins, so letters type in left-to-right and land
+            # in their final centered positions.
+            lw = self._fm.horizontalAdvance(line)
+            x0 = (self._w - lw) / 2.0
             p.drawText(
-                QRectF(self.PAD, self.PAD + i * self._lh, self._w - 2 * self.PAD, self._lh),
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, line)
+                QRectF(x0, self.PAD + i * self._lh, lw, self._lh),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, line[:take])
         p.end()
 
 
