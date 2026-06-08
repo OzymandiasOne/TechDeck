@@ -176,6 +176,7 @@ class SpeechBubble(QWidget):
     FONT_PT = 11
     # Margin reserved around the box for the tail (from the tail grid's size).
     TAIL_MARGIN = max(len(BUBBLE_TAIL), len(BUBBLE_TAIL[0]))
+    TAIL_OVERLAP = 2        # cells the tail base overlaps into the box (to connect)
 
     def __init__(self, text: str, fg: QColor, bg: QColor, frame: QColor,
                  corner: str = "bl", parent=None):
@@ -258,15 +259,18 @@ class SpeechBubble(QWidget):
         ht, wt = len(g), len(g[0])
         box_x, box_y = self._box_off(c)
         cols, rows = self._cols, self._rows
-        # Which box corner the tail's near-corner cell attaches to.
+        # Attach the tail's near-corner cell a few cells INTO the solid box
+        # (diagonally toward the centre), so its base overlaps the filled corner
+        # instead of the rounded-away corner cell -> it always connects.
+        ov = self.TAIL_OVERLAP
         if c == "bl":
-            bcx, bcy, acx, acy = box_x, box_y + rows - 1, wt - 1, 0
+            bcx, bcy, acx, acy = box_x + ov, box_y + rows - 1 - ov, wt - 1, 0
         elif c == "br":
-            bcx, bcy, acx, acy = box_x + cols - 1, box_y + rows - 1, 0, 0
+            bcx, bcy, acx, acy = box_x + cols - 1 - ov, box_y + rows - 1 - ov, 0, 0
         elif c == "tl":
-            bcx, bcy, acx, acy = box_x, box_y, wt - 1, ht - 1
+            bcx, bcy, acx, acy = box_x + ov, box_y + ov, wt - 1, ht - 1
         else:  # tr
-            bcx, bcy, acx, acy = box_x + cols - 1, box_y, 0, ht - 1
+            bcx, bcy, acx, acy = box_x + cols - 1 - ov, box_y + ov, 0, ht - 1
         cells, tip = [], None
         for r in range(ht):
             for col in range(wt):
