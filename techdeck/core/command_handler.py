@@ -749,15 +749,16 @@ class CommandHandler:
         pal = get_theme_manager().get_current_palette()
         moth_color = QColor(pal.accent)
         moth_color.setAlpha(235)
-        fg, bg, border = QColor(pal.text), QColor(pal.surface), QColor(pal.border_strong)
+        # bubble colours: text, interior fill, pixel-frame (accent, on-theme)
+        fg, bg, frame = QColor(pal.text), QColor(pal.surface), QColor(pal.accent)
 
         if self._moth is None or not self._moth.isVisible():
             self._moth = MothWidget(color=moth_color)
-            self._moth.configure_haiku(generate_haiku, fg, bg, border)
+            self._moth.configure_haiku(generate_haiku, fg, bg, frame)
             self._moth.spawn_from_edge(point)
             self.console.append_system("A moth flutters in and settles down.")
         else:
             self._moth.set_color(moth_color)
-            self._moth.configure_haiku(generate_haiku, fg, bg, border)
+            self._moth.configure_haiku(generate_haiku, fg, bg, frame)
             self._moth.fly_to(point)
             self.console.append_system("The moth flits to a new perch.")

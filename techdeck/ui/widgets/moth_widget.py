@@ -9,9 +9,49 @@ bubble, and again every ~10 minutes after. Coloured to the active theme.
 
 import math
 import random
+import sys
+from pathlib import Path
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtCore import Qt, QTimer, QPoint, QRectF
-from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics
+from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QFontDatabase
+
+
+# ── Haiku font (FOT Bokutoh Pro, bundled in assets/fonts) ───────────────────
+# Drop the FOT Bokutoh Pro .otf/.ttf into assets/fonts/ and it's picked up here;
+# until then the bubble falls back to a default italic face. Resolved once.
+_HAIKU_FAMILY: str | None = None
+_HAIKU_FONT_RESOLVED = False
+
+
+def _assets_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets"
+    return Path(__file__).resolve().parents[3] / "assets"
+
+
+def haiku_font(point_size: int) -> QFont:
+    """Return the FOT Bokutoh Pro font if bundled, else a default italic fallback."""
+    global _HAIKU_FAMILY, _HAIKU_FONT_RESOLVED
+    if not _HAIKU_FONT_RESOLVED:
+        _HAIKU_FONT_RESOLVED = True
+        fonts_dir = _assets_dir() / "fonts"
+        families: list[str] = []
+        if fonts_dir.is_dir():
+            for f in sorted(fonts_dir.iterdir()):
+                if f.suffix.lower() in (".otf", ".ttf", ".ttc"):
+                    fid = QFontDatabase.addApplicationFont(str(f))
+                    if fid != -1:
+                        families += QFontDatabase.applicationFontFamilies(fid)
+        _HAIKU_FAMILY = next(
+            (fam for fam in families if "bokutoh" in fam.lower()),
+            families[0] if families else None)
+    if _HAIKU_FAMILY:
+        font = QFont(_HAIKU_FAMILY)
+    else:
+        font = QFont()
+        font.setItalic(True)
+    font.setPointSize(point_size)
+    return font
 
 # ── Moth sound pool ────────────────────────────────────────────────────────────
 # Module-level so the pool persists across /moth invocations (new MothWidget
@@ -92,19 +132,25 @@ _GRID_H = len(MOTH_FRAMES[0])
 
 
 class HaikuBubble(QWidget):
-    """A themed speech bubble that types a 3-line haiku out one letter at a time.
+    """A PIXEL-ART speech bubble that types a 3-line haiku out one letter at a time.
 
-    The box is sized to the FULL text up front (so it never resizes), but only a
-    growing prefix of the characters is painted, advanced by a timer.
+    Drawn on a cell grid: a chunky one-cell frame with notched (pixel-bevelled)
+    corners + a stepped pixel tail toward the moth, filled and outlined in the
+    theme colours. Sized to the FULL text up front (so it never resizes / cuts
+    off), but only a growing prefix is painted, advanced by a timer.
     """
 
-    PAD = 9
-    RADIUS = 8
+    CELL = 4                # px per pixel-art cell
+    PAD_PX = 9              # interior breathing room around the text
+    TAIL = 3                # tail width in cells
     REVEAL_MS = 55          # per-character typing speed
+    FONT_PT = 11
 
-    def __init__(self, text: str, fg: QColor, bg: QColor, border: QColor, parent=None):
+    def __init__(self, text: str, fg: QColor, bg: QColor, frame: QColor,
+                 tail_side: str = "left", parent=None):
         super().__init__(parent)
-        self._fg, self._bg, self._border = fg, bg, border
+        self._fg, self._bg, self._frame = fg, bg, frame
+        self._tail_side = tail_side
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -113,25 +159,37 @@ class HaikuBubble(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
-        self._font = QFont()
-        self._font.setPointSize(8)          # small text -> small box that fits it
-        self._font.setItalic(True)
+        self._font = haiku_font(self.FONT_PT)
         self._fm = QFontMetrics(self._font)
-        fm = self._fm
         self._lines = text.split("\n")
-        self._lh = fm.height()
-        tw = max((fm.horizontalAdvance(ln) for ln in self._lines), default=40)
-        self._w = tw + self.PAD * 2
-        self._h = self._lh * len(self._lines) + self.PAD * 2
-        self.setFixedSize(self._w, self._h)
+        self._lh = self._fm.height()
+        # Width via tight ink bounds (handles italic/brush overhang the advance
+        # width misses — the old cutoff) + generous padding.
+        tw = max((self._fm.boundingRect(ln).width() for ln in self._lines), default=40)
+        th = self._lh * len(self._lines)
 
-        # Typewriter reveal: count visible chars across all lines.
+        S = self.CELL
+        self._cols = math.ceil((tw + self.PAD_PX * 2) / S) + 2   # +2 = frame
+        self._rows = math.ceil((th + self.PAD_PX * 2) / S) + 2
+        self._box_w = self._cols * S
+        self.setFixedSize(self._box_w + self.TAIL * S, self._rows * S)
+
+        # Typewriter reveal across all lines.
         self._revealed = 0
         self._total = sum(len(ln) for ln in self._lines)
         self._reveal_timer = QTimer(self)
         self._reveal_timer.setInterval(self.REVEAL_MS)
         self._reveal_timer.timeout.connect(self._reveal_step)
         self._reveal_timer.start()
+
+    def set_tail_side(self, side: str):
+        """'left' = tail on the box's left edge (bubble sits right of the moth)."""
+        if side != self._tail_side:
+            self._tail_side = side
+            self.update()
+
+    def _box_origin_x(self) -> int:
+        return self.TAIL * self.CELL if self._tail_side == "left" else 0
 
     def _reveal_step(self):
         self._revealed += 1
@@ -141,27 +199,51 @@ class HaikuBubble(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(self._border)
-        p.setBrush(self._bg)
-        p.drawRoundedRect(QRectF(0.75, 0.75, self._w - 1.5, self._h - 1.5),
-                          self.RADIUS, self.RADIUS)
+        p.setPen(Qt.PenStyle.NoPen)
+        S = self.CELL
+        cols, rows = self._cols, self._rows
+        ox = self._box_origin_x()
+
+        # Frame + fill on a cell grid; notch the 4 corner cells for a pixel bevel.
+        for cy in range(rows):
+            for cx in range(cols):
+                if cx in (0, cols - 1) and cy in (0, rows - 1):
+                    continue
+                edge = cx in (0, cols - 1) or cy in (0, rows - 1)
+                p.fillRect(ox + cx * S, cy * S, S, S,
+                           self._frame if edge else self._bg)
+
+        # Stepped pixel tail toward the moth.
+        mid = rows // 2
+        if self._tail_side == "left":
+            cells = [(2, mid - 1), (2, mid), (2, mid + 1), (1, mid), (0, mid)]
+            for cx, cy in cells:
+                p.fillRect(cx * S, cy * S, S, S, self._frame)
+        else:
+            base = cols
+            cells = [(0, mid - 1), (0, mid), (0, mid + 1), (1, mid), (2, mid)]
+            for cx, cy in cells:
+                p.fillRect((base + cx) * S, cy * S, S, S, self._frame)
+
+        # Typewriter text, centered in the interior; prefix drawn left-aligned at
+        # the full line's centered start so it types left-to-right.
         p.setPen(self._fg)
         p.setFont(self._font)
+        ix = ox + S
+        iw = (cols - 2) * S
+        interior_h = (rows - 2) * S
+        ty = S + (interior_h - self._lh * len(self._lines)) / 2.0
         remaining = self._revealed
         for i, line in enumerate(self._lines):
             take = max(0, min(len(line), remaining))
             remaining -= len(line)
             if take <= 0:
                 continue
-            # Draw the revealed prefix LEFT-aligned at the spot where the full
-            # (centered) line begins, so letters type in left-to-right and land
-            # in their final centered positions.
-            lw = self._fm.horizontalAdvance(line)
-            x0 = (self._w - lw) / 2.0
-            p.drawText(
-                QRectF(x0, self.PAD + i * self._lh, lw, self._lh),
-                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, line[:take])
+            lw = self._fm.boundingRect(line).width()
+            x0 = ix + (iw - lw) / 2.0
+            p.drawText(QRectF(x0, ty + i * self._lh, lw + 6, self._lh),
+                       Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                       line[:take])
         p.end()
 
 
@@ -337,27 +419,35 @@ class MothWidget(QWidget):
             text = self._haiku_provider()
         except Exception:
             return
-        fg, bg, border = self._bubble_colors
+        fg, bg, frame = self._bubble_colors
         self._hide_bubble()
-        self._bubble = HaikuBubble(text, fg, bg, border)
+        self._bubble = HaikuBubble(text, fg, bg, frame)
+        pos, side = self._bubble_place()
+        self._bubble.set_tail_side(side)
         self._bubble.show()
-        self._bubble.move(self._bubble_pos())
+        self._bubble.move(pos)
         self._bubble.raise_()
         self._bubble_hide.start(self.HAIKU_VISIBLE_MS)
         if not self._haiku_repeat.isActive():
             self._haiku_repeat.start()
 
-    def _bubble_pos(self) -> QPoint:
-        """Place the bubble beside the moth, clamped on-screen."""
+    def _bubble_place(self):
+        """Position the bubble beside the moth (clamped); return (pos, tail_side).
+
+        Prefer the bubble to the moth's right (tail on its left); flip to the
+        left (tail on its right) if it would run off-screen.
+        """
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
-        bx = self.x() + self.SIZE_W + 8
+        side = "left"
+        bx = self.x() + self.SIZE_W + 6
         if bx + bw > screen.right():
-            bx = self.x() - bw - 8
+            bx = self.x() - bw - 6
+            side = "right"
         by = self.y() + self.SIZE_H // 2 - bh // 2
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
-        return QPoint(bx, by)
+        return QPoint(bx, by), side
 
     def _hide_bubble(self):
         self._bubble_hide.stop()
