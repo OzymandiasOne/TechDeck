@@ -145,16 +145,15 @@ class SpeechBubble(QWidget):
     CELL = 4                # px per pixel-art cell
     PAD_PX = 11             # interior breathing room around the text
     RADIUS = 5              # rounded-corner radius in cells
-    ARROW_W = 5             # arrow base width in cells (odd)
-    ARROW_H = 3             # arrow height in cells
+    TAIL = 5                # diagonal corner tail length in cells (margin reserve)
     REVEAL_MS = 55          # per-character typing speed
     FONT_PT = 11
 
     def __init__(self, text: str, fg: QColor, bg: QColor, frame: QColor,
-                 tail_dir: str = "down", parent=None):
+                 corner: str = "bl", parent=None):
         super().__init__(parent)
         self._fg, self._bg, self._frame = fg, bg, frame
-        self._tail_dir = tail_dir            # "down" = bubble above the moth
+        self._corner = corner                # 'bl'/'br'/'tl'/'tr' = corner the tail leaves from
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -174,8 +173,8 @@ class SpeechBubble(QWidget):
         S = self.CELL
         self._cols = math.ceil((tw + self.PAD_PX * 2) / S) + 2   # +2 = frame
         self._rows = math.ceil((th + self.PAD_PX * 2) / S) + 2
-        self._arrow_col = self._cols // 2                        # points at moth
-        self.setFixedSize(self._cols * S, (self._rows + self.ARROW_H) * S)
+        # Widget reserves TAIL cells of margin on each axis for the corner tail.
+        self.setFixedSize((self._cols + self.TAIL) * S, (self._rows + self.TAIL) * S)
 
         # Typewriter reveal across all lines.
         self._revealed = 0
@@ -185,13 +184,42 @@ class SpeechBubble(QWidget):
         self._reveal_timer.timeout.connect(self._reveal_step)
         self._reveal_timer.start()
 
-    def set_tail(self, direction: str, arrow_x_px: int):
-        """direction 'down'/'up'; arrow_x_px = where the arrow should point (px from
-        the bubble's left edge), so it aims at the moth even when clamped."""
-        self._tail_dir = direction
-        lo, hi = self.ARROW_W // 2, self._cols - 1 - self.ARROW_W // 2
-        self._arrow_col = max(lo, min(round(arrow_x_px / self.CELL), hi))
+    def set_tail(self, corner: str):
+        """Which corner the tail leaves from: bl/br = bubble above the moth,
+        tl/tr = below; l/r picks the near side."""
+        self._corner = corner
         self.update()
+
+    def _layout(self):
+        """(hx, vy, box_x_cells, box_y_cells) for the current corner."""
+        hx = -1 if self._corner in ("bl", "tl") else 1     # tail extends left/right
+        vy = 1 if self._corner in ("bl", "br") else -1     # ...and down/up
+        box_x = self.TAIL if hx < 0 else 0                 # margin sits on the tail side
+        box_y = self.TAIL if vy < 0 else 0
+        return hx, vy, box_x, box_y
+
+    def _tail_cells(self):
+        """Diagonal stepped tail cells (widget coords) + the tip cell."""
+        hx, vy, box_x, box_y = self._layout()
+        cols, rows = self._cols, self._rows
+        cx = box_x + (1 if hx < 0 else cols - 2)           # attach 1 cell in from corner
+        cy = box_y + (rows - 1 if vy > 0 else 0)
+        cells = []
+        for _ in range(self.TAIL):
+            cells.append((cx, cy))
+            cells.append((cx, cy + vy))                    # a little thickness
+            cx += hx
+            cy += vy
+        return cells, (cx, cy)
+
+    def tip_offset(self, corner: str):
+        """Pixel offset of the tail tip from the widget's top-left, for `corner`."""
+        prev = self._corner
+        self._corner = corner
+        _, tip = self._tail_cells()
+        self._corner = prev
+        S = self.CELL
+        return (tip[0] * S + S // 2, tip[1] * S + S // 2)
 
     def _reveal_step(self):
         self._revealed += 1
@@ -212,10 +240,13 @@ class SpeechBubble(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         S = self.CELL
         cols, rows = self._cols, self._rows
-        boy = 0 if self._tail_dir == "down" else self.ARROW_H   # box y-offset (cells)
+        _, _, box_x, box_y = self._layout()
 
-        # Rounded box: surface fill, accent border (a cell whose 4-neighbour is
-        # outside the rounded shape, or on the grid edge).
+        # Diagonal corner tail (drawn first so the box edge overlaps its base).
+        for cx, cy in self._tail_cells()[0]:
+            p.fillRect(cx * S, cy * S, S, S, self._frame)
+
+        # Rounded box at its offset: surface fill, accent border.
         for cy in range(rows):
             for cx in range(cols):
                 if not self._inside(cx, cy):
@@ -223,22 +254,8 @@ class SpeechBubble(QWidget):
                 border = (cx == 0 or cy == 0 or cx == cols - 1 or cy == rows - 1
                           or not self._inside(cx - 1, cy) or not self._inside(cx + 1, cy)
                           or not self._inside(cx, cy - 1) or not self._inside(cx, cy + 1))
-                p.fillRect(cx * S, (boy + cy) * S, S, S,
+                p.fillRect((box_x + cx) * S, (box_y + cy) * S, S, S,
                            self._frame if border else self._bg)
-
-        # Pixel arrow toward the moth, in the accent colour.
-        ac = self._arrow_col
-        for k in range(self.ARROW_H):
-            if self._tail_dir == "down":            # below the box, tip at bottom
-                half = (self.ARROW_W // 2) - k
-                ry = rows + k
-            else:                                   # above the box, tip at top
-                half = k
-                ry = k
-            if half < 0:
-                continue
-            for cx in range(ac - half, ac + half + 1):
-                p.fillRect(cx * S, ry * S, S, S, self._frame)
 
         # Typewriter text, centered in the interior; prefix drawn left-aligned at
         # the full line's centered start so it types left-to-right.
@@ -246,7 +263,7 @@ class SpeechBubble(QWidget):
         p.setFont(self._font)
         iw = (cols - 2) * S
         interior_h = (rows - 2) * S
-        ty = boy * S + S + (interior_h - self._lh * len(self._lines)) / 2.0
+        ty = (box_y + 1) * S + (interior_h - self._lh * len(self._lines)) / 2.0
         remaining = self._revealed
         for i, line in enumerate(self._lines):
             take = max(0, min(len(line), remaining))
@@ -254,7 +271,7 @@ class SpeechBubble(QWidget):
             if take <= 0:
                 continue
             lw = self._fm.boundingRect(line).width()
-            x0 = S + (iw - lw) / 2.0
+            x0 = (box_x + 1) * S + (iw - lw) / 2.0
             p.drawText(QRectF(x0, ty + i * self._lh, lw + 6, self._lh),
                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                        line[:take])
@@ -469,8 +486,8 @@ class MothWidget(QWidget):
         fg, bg, frame = self._bubble_colors
         self._hide_bubble()
         self._bubble = SpeechBubble(text, fg, bg, frame)
-        pos, direction, arrow_x = self._bubble_place()
-        self._bubble.set_tail(direction, arrow_x)
+        pos, corner = self._bubble_place()
+        self._bubble.set_tail(corner)
         self._bubble.show()
         self._bubble.move(pos)
         self._bubble.raise_()
@@ -479,35 +496,30 @@ class MothWidget(QWidget):
             self._speak_timer.start()
 
     def _bubble_place(self):
-        """Position the bubble to one side of the moth (clamped); return
-        (pos, dir, arrow_x).
+        """Position the bubble beside/above the moth (clamped); return (pos, corner).
 
-        The body extends toward whichever side has more room (so it stays off the
-        nearer screen edge), and the arrow drops from the near BOTTOM CORNER onto
-        the moth. Sits above the moth (arrow points down); flips below if there's
-        no room above.
+        The body extends toward whichever side has more room, and the tail leaves
+        the near corner diagonally onto the moth. Tail from a BOTTOM corner (bubble
+        above the moth) by default; from a TOP corner (below) if there's no room.
         """
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
         moth_cx = self.x() + self.SIZE_W // 2
-        gap = 12                                     # clear space between arrow tip and moth
+        gap = 8
+        left = moth_cx <= (screen.left() + screen.right()) // 2   # moth on left -> tail on left
 
-        # Arrow inset from the corner (just past the rounded part).
-        corner = (self._bubble.RADIUS + 1) * self._bubble.CELL
-        screen_cx = (screen.left() + screen.right()) // 2
-        if moth_cx <= screen_cx:                     # room on the right -> extend right
-            bx = moth_cx - corner                    # arrow at the bottom-LEFT corner
-        else:                                        # extend left -> arrow bottom-RIGHT
-            bx = moth_cx - (bw - corner)
-
-        direction = "down"
-        by = self.y() - bh - gap                     # bubble above, arrow points down
-        if by < screen.top() + 4:
-            direction = "up"
-            by = self.y() + self.SIZE_H + gap        # flip below, arrow points up
+        # Prefer above: bottom corner, tip a touch above the moth.
+        corner = "bl" if left else "br"
+        tipx, tipy = self._bubble.tip_offset(corner)
+        by = (self.y() - gap) - tipy
+        if by < screen.top() + 4:                    # no room above -> go below
+            corner = "tl" if left else "tr"
+            tipx, tipy = self._bubble.tip_offset(corner)
+            by = (self.y() + self.SIZE_H + gap) - tipy
+        bx = moth_cx - tipx                          # tip column over the moth centre
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
-        return QPoint(bx, by), direction, moth_cx - bx
+        return QPoint(bx, by), corner
 
     def _hide_bubble(self):
         self._bubble_hide.stop()
