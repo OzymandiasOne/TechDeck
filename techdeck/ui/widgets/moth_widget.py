@@ -258,6 +258,7 @@ class MothWidget(QWidget):
     SIZE_H = _GRID_H * CELL
 
     FLY_SEQ = [0, 1, 2, 1]                    # fast flutter while in flight
+    MAX_FLY_TICKS = 240                       # ~3.8s fail-safe: always land by then
     # On landing: a couple of flaps that visibly SLOW DOWN (per-frame delay ramps
     # up) so the moth eases to a graceful, still stop. (frame, ms-until-next).
     SETTLE = [(1, 90), (2, 110), (1, 135), (0, 165),
@@ -286,6 +287,8 @@ class MothWidget(QWidget):
         self._flying = False
         self._target_point: QPoint | None = None
         self._landed = False
+        self._fx = 0.0           # true float position (window pos is rounded)
+        self._fy = 0.0
 
         # Haiku state
         self._haiku_provider = None
@@ -336,6 +339,8 @@ class MothWidget(QWidget):
         self._target_point = QPoint(point)
         self._flying = True
         self._landed = False
+        self._fly_tick = 0
+        self._fx, self._fy = float(self.x()), float(self.y())
         self._move_timer.start()
         self.show()
         self.raise_()
@@ -371,10 +376,14 @@ class MothWidget(QWidget):
         self._fly_tick += 1
         self._frame_idx = self.FLY_SEQ[(self._fly_tick // 3) % len(self.FLY_SEQ)]
 
-        dx, dy = target.x() - self.x(), target.y() - self.y()
+        # Track the true position in floats so sub-pixel steering accumulates
+        # (rounding the window pos each tick would stall the drift near the target
+        # and it would never reach the threshold). Fail-safe lands a stuck flight.
+        dx, dy = target.x() - self._fx, target.y() - self._fy
         dist = math.hypot(dx, dy)
-        if dist < 3:
+        if dist < 3 or self._fly_tick > self.MAX_FLY_TICKS:
             self.move(target)
+            self._fx, self._fy = float(target.x()), float(target.y())
             self._move_timer.stop()
             self._flying = False
             self._frame_idx = 0
@@ -382,10 +391,11 @@ class MothWidget(QWidget):
                 self._landed = True
                 self._on_landed()
         else:
-            speed = min(dist * 0.08, 12)
-            nx = self.x() + dx / dist * speed + random.uniform(-1, 1)
-            ny = self.y() + dy / dist * speed + random.uniform(-1, 1)
-            self.move(int(nx), int(ny))
+            speed = min(dist * 0.085, 12.0)
+            wander = min(1.0, dist / 26.0)   # calm the wobble as it nears
+            self._fx += dx / dist * speed + random.uniform(-1, 1) * wander
+            self._fy += dy / dist * speed + random.uniform(-1, 1) * wander
+            self.move(round(self._fx), round(self._fy))
         self.update()
 
     def _on_landed(self):
