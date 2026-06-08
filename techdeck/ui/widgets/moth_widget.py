@@ -131,23 +131,51 @@ _GRID_W = len(MOTH_FRAMES[0][0])
 _GRID_H = len(MOTH_FRAMES[0])
 
 
-class SpeechBubble(QWidget):
-    """A PIXEL-ART speech bubble (Animal-Crossing-style) that types its text
-    (a haiku or a musing) out one letter at a time.
+# ── Editable speech-bubble art (hand-drawn, like MOTH_FRAMES) ───────────────
+# Edit these two grids to redesign the bubble. They are stamped/mirrored by the
+# renderer, so the bubble still auto-sizes to the text — you draw the CORNER and
+# TAIL, the straight edges + middle stretch to fit.
+#
+# BUBBLE_CORNER: the TOP-LEFT corner shape. 'x' = inside the bubble (gets filled,
+#   with its outer edge drawn as the border), '.' = outside (transparent). It is
+#   mirrored to the other three corners. Keep it square. The bottom row + right
+#   column define the straight edge thickness, so keep those solid 'x'.
+BUBBLE_CORNER = [
+    "....xxx",
+    "..xxxxx",
+    ".xxxxxx",
+    ".xxxxxx",
+    "xxxxxxx",
+    "xxxxxxx",
+    "xxxxxxx",
+]
+# BUBBLE_TAIL: the tail for the BOTTOM-LEFT corner (points down-left); mirrored
+#   for the other corners. 'x' = tail (drawn in the frame colour), 't' = the tip
+#   cell that points at the moth, '.' = transparent. Its corner nearest the box
+#   (here the top-right) attaches to the box corner.
+BUBBLE_TAIL = [
+    "...xx",
+    "..xxx",
+    ".xxx.",
+    "xxxt.",
+    "xt...",
+]
 
-    Drawn on a cell grid: a soft rounded box (pixel-stepped corners) with a
-    downward (or upward) pixel arrow pointing at the moth. Filled with the theme
-    surface, outlined + arrowed in the theme accent, text in the theme text
-    colour. Sized to the FULL text up front (so it never resizes / cuts off);
-    only a growing prefix is painted, advanced by a timer.
+
+class SpeechBubble(QWidget):
+    """A PIXEL-ART speech bubble (Animal-Crossing-style) that types its text out
+    one letter at a time. Its shape is hand-drawn in BUBBLE_CORNER / BUBBLE_TAIL
+    (above) and stamped/mirrored here; the straight edges + middle stretch so the
+    bubble auto-sizes to the text. Themed: surface fill, accent border + tail,
+    distinct text colour.
     """
 
     CELL = 4                # px per pixel-art cell
     PAD_PX = 11             # interior breathing room around the text
-    RADIUS = 5              # rounded-corner radius in cells
-    TAIL = 5                # diagonal corner tail length in cells (margin reserve)
     REVEAL_MS = 55          # per-character typing speed
     FONT_PT = 11
+    # Margin reserved around the box for the tail (from the tail grid's size).
+    TAIL_MARGIN = max(len(BUBBLE_TAIL), len(BUBBLE_TAIL[0]))
 
     def __init__(self, text: str, fg: QColor, bg: QColor, frame: QColor,
                  corner: str = "bl", parent=None):
@@ -175,10 +203,12 @@ class SpeechBubble(QWidget):
         th = self._lh * len(self._lines)
 
         S = self.CELL
-        self._cols = math.ceil((tw + self.PAD_PX * 2) / S) + 2   # +2 = frame
-        self._rows = math.ceil((th + self.PAD_PX * 2) / S) + 2
-        # Widget reserves TAIL cells of margin on each axis for the corner tail.
-        self.setFixedSize((self._cols + self.TAIL) * S, (self._rows + self.TAIL) * S)
+        self._C = len(BUBBLE_CORNER)                          # corner size (square)
+        # Box must be at least two corners wide/tall so the corners don't overlap.
+        self._cols = max(math.ceil((tw + self.PAD_PX * 2) / S) + 2, 2 * self._C)
+        self._rows = max(math.ceil((th + self.PAD_PX * 2) / S) + 2, 2 * self._C)
+        TM = self.TAIL_MARGIN
+        self.setFixedSize((self._cols + TM) * S, (self._rows + TM) * S)
 
         # Typewriter reveal across all lines.
         self._revealed = 0
@@ -194,40 +224,66 @@ class SpeechBubble(QWidget):
         self._corner = corner
         self.update()
 
-    def _layout(self):
-        """(hx, vy, box_x_cells, box_y_cells) for the current corner."""
-        hx = -1 if self._corner in ("bl", "tl") else 1     # tail extends left/right
-        vy = 1 if self._corner in ("bl", "br") else -1     # ...and down/up
-        box_x = self.TAIL if hx < 0 else 0                 # margin sits on the tail side
-        box_y = self.TAIL if vy < 0 else 0
-        return hx, vy, box_x, box_y
+    def _box_off(self, corner=None):
+        """(box_x_cells, box_y_cells): where the box sits, leaving tail margin."""
+        c = corner or self._corner
+        TM = self.TAIL_MARGIN
+        return (TM if c in ("bl", "tl") else 0,
+                TM if c in ("tl", "tr") else 0)
 
-    def _tail_cells(self):
-        """Diagonal stepped tail cells (widget coords) + the tip cell. The tail is
-        ~2-3 cells thick and ends in a small chunky tip (not a single skinny cell)."""
-        hx, vy, box_x, box_y = self._layout()
+    def _inside(self, cx, cy) -> bool:
+        """Is box cell (cx, cy) inside the bubble? Corners come from BUBBLE_CORNER
+        (mirrored); everything between the corners is inside."""
+        C, cols, rows = self._C, self._cols, self._rows
+        left, right = cx < C, cx >= cols - C
+        top, bot = cy < C, cy >= rows - C
+        if top and left:
+            return BUBBLE_CORNER[cy][cx] == "x"
+        if top and right:
+            return BUBBLE_CORNER[cy][(C - 1) - (cx - (cols - C))] == "x"
+        if bot and left:
+            return BUBBLE_CORNER[(C - 1) - (cy - (rows - C))][cx] == "x"
+        if bot and right:
+            return BUBBLE_CORNER[(C - 1) - (cy - (rows - C))][(C - 1) - (cx - (cols - C))] == "x"
+        return True
+
+    def _oriented_tail(self, corner=None):
+        """BUBBLE_TAIL placed (mirrored) at `corner`: (filled widget cells, tip)."""
+        c = corner or self._corner
+        g = BUBBLE_TAIL
+        if c in ("br", "tr"):
+            g = [row[::-1] for row in g]          # mirror left<->right
+        if c in ("tl", "tr"):
+            g = g[::-1]                            # mirror up<->down
+        ht, wt = len(g), len(g[0])
+        box_x, box_y = self._box_off(c)
         cols, rows = self._cols, self._rows
-        cx = box_x + (1 if hx < 0 else cols - 2)           # attach 1 cell in from corner
-        cy = box_y + (rows - 1 if vy > 0 else 0)
-        cells = []
-        for k in range(self.TAIL):
-            cells.append((cx, cy))
-            cells.append((cx, cy + vy))                    # vertical thickness
-            if k < self.TAIL - 1:
-                cells.append((cx + hx, cy + vy))           # extra body (not at the tip)
-            cx += hx
-            cy += vy
-        # Chunkier tip: a small 2x2-ish cluster at the end.
-        tx, ty = cx - hx, cy - vy
-        cells += [(tx, ty), (tx, ty + vy), (tx - hx, ty), (tx - hx, ty + vy)]
-        return cells, (tx, ty + vy)
+        # Which box corner the tail's near-corner cell attaches to.
+        if c == "bl":
+            bcx, bcy, acx, acy = box_x, box_y + rows - 1, wt - 1, 0
+        elif c == "br":
+            bcx, bcy, acx, acy = box_x + cols - 1, box_y + rows - 1, 0, 0
+        elif c == "tl":
+            bcx, bcy, acx, acy = box_x, box_y, wt - 1, ht - 1
+        else:  # tr
+            bcx, bcy, acx, acy = box_x + cols - 1, box_y, 0, ht - 1
+        cells, tip = [], None
+        for r in range(ht):
+            for col in range(wt):
+                ch = g[r][col]
+                if ch == ".":
+                    continue
+                w = (bcx + (col - acx), bcy + (r - acy))
+                cells.append(w)
+                if ch == "t":
+                    tip = w
+        if tip is None:
+            tip = cells[-1] if cells else (bcx, bcy)
+        return cells, tip
 
     def tip_offset(self, corner: str):
         """Pixel offset of the tail tip from the widget's top-left, for `corner`."""
-        prev = self._corner
-        self._corner = corner
-        _, tip = self._tail_cells()
-        self._corner = prev
+        _, tip = self._oriented_tail(corner)
         S = self.CELL
         return (tip[0] * S + S // 2, tip[1] * S + S // 2)
 
@@ -236,14 +292,6 @@ class SpeechBubble(QWidget):
         if self._revealed >= self._total:
             self._reveal_timer.stop()
         self.update()
-
-    def _inside(self, cx, cy) -> bool:
-        """Rounded-rectangle membership test for the box cell (cx, cy)."""
-        R, cols, rows = self.RADIUS, self._cols, self._rows
-        px, py = cx + 0.5, cy + 0.5
-        qx = R if px < R else (cols - R if px > cols - R else px)
-        qy = R if py < R else (rows - R if py > rows - R else py)
-        return (px - qx) ** 2 + (py - qy) ** 2 <= R * R + 0.25
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -254,13 +302,14 @@ class SpeechBubble(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         S = self.CELL
         cols, rows = self._cols, self._rows
-        _, _, box_x, box_y = self._layout()
+        box_x, box_y = self._box_off()
 
-        # Diagonal corner tail (drawn first so the box edge overlaps its base).
-        for cx, cy in self._tail_cells()[0]:
-            p.fillRect(cx * S, cy * S, S, S, self._frame)
+        # Tail (drawn first so the box edge overlaps its base).
+        for wx, wy in self._oriented_tail()[0]:
+            p.fillRect(wx * S, wy * S, S, S, self._frame)
 
-        # Rounded box at its offset: surface fill, accent border.
+        # Box: hand-drawn corner shape, surface fill, accent border (an inside
+        # cell adjacent to outside / the grid edge).
         for cy in range(rows):
             for cx in range(cols):
                 if not self._inside(cx, cy):
