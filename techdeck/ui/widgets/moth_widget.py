@@ -228,9 +228,9 @@ class SpeechBubble(QWidget):
     """
 
     CELL = 4                # px per pixel-art cell
-    PAD_PX = 11             # interior breathing room around the text
+    PAD_PX = 8              # interior breathing room around the text
     REVEAL_MS = 55          # per-character typing speed
-    FONT_PT = 11
+    FONT_PT = 9
     # Margin reserved around the box for the tail (from the tail grid's size).
     TAIL_MARGIN = max(len(BUBBLE_TAIL), len(BUBBLE_TAIL[0]))
     TAIL_OVERLAP = 2        # cells the tail base overlaps into the box (to connect)
