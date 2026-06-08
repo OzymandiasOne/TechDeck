@@ -258,8 +258,11 @@ class MothWidget(QWidget):
     SIZE_H = _GRID_H * CELL
 
     FLY_SEQ = [0, 1, 2, 1]                    # fast flutter while in flight
-    FLAP_MS = 150                             # slow, graceful wing beat when perched
-    LAND_FLAPS = 2                            # graceful flaps right after landing
+    # On landing: a couple of flaps that visibly SLOW DOWN (per-frame delay ramps
+    # up) so the moth eases to a graceful, still stop. (frame, ms-until-next).
+    SETTLE = [(1, 90), (2, 110), (1, 135), (0, 165),
+              (1, 205), (2, 255), (1, 320), (0, 400)]
+    IDLE_FLAP_MS = 165                        # slow, gentle beat for idle flutters
     IDLE_FLAPS = (1, 3)                        # "just a few" on each random flutter
     IDLE_MIN_MS, IDLE_MAX_MS = 5000, 15000    # long stills between flutters
     HAIKU_FIRST_MIN_MS, HAIKU_FIRST_MAX_MS = 20_000, 50_000  # first within a minute
@@ -294,10 +297,11 @@ class MothWidget(QWidget):
         self._move_timer.setInterval(16)
         self._move_timer.timeout.connect(self._tick)
 
-        # Idle flutter: a burst sequence stepped by _flap_timer, scheduled by _idle_timer
-        self._flap_queue: list[int] = []
+        # Flutter: a (frame, delay) sequence stepped by a single-shot timer whose
+        # delay is re-set per step (so flaps can slow down); scheduled by _idle_timer.
+        self._flap_seq: list[tuple[int, int]] = []
         self._flap_timer = QTimer(self)
-        self._flap_timer.setInterval(self.FLAP_MS)
+        self._flap_timer.setSingleShot(True)
         self._flap_timer.timeout.connect(self._flap_step)
         self._idle_timer = QTimer(self)
         self._idle_timer.setSingleShot(True)
@@ -385,28 +389,35 @@ class MothWidget(QWidget):
         self.update()
 
     def _on_landed(self):
-        # Settle in with a couple of slow, graceful flaps, then go still; the
+        # Ease to a stop with a couple of decelerating flaps, then go still; the
         # flutter's completion schedules the next occasional flutter.
-        self._flutter(self.LAND_FLAPS)
+        self._settle()
         self._haiku_first.start(
             random.randint(self.HAIKU_FIRST_MIN_MS, self.HAIKU_FIRST_MAX_MS))
 
-    # ── idle flutter (slow & graceful, then still) ──────────────────────────
-    def _flutter(self, flaps: int):
-        """Queue `flaps` slow graceful wing beats; _flap_step goes still after."""
-        self._flap_queue = [f for _ in range(flaps) for f in (1, 2, 1, 0)]
+    # ── flutter (slow & graceful, then still) ───────────────────────────────
+    def _play_flaps(self, seq):
+        """Play a (frame, delay-ms) sequence; _flap_step goes still after."""
+        self._flap_seq = list(seq)
         if not self._flap_timer.isActive():
-            self._flap_timer.start()
+            self._flap_step()
+
+    def _settle(self):
+        """The decelerating landing flutter -> graceful, still stop."""
+        self._play_flaps(self.SETTLE)
 
     def _start_flutter(self):
-        self._flutter(random.randint(*self.IDLE_FLAPS))
+        """An occasional gentle idle flutter: a few slow, even-paced beats."""
+        n = random.randint(*self.IDLE_FLAPS)
+        self._play_flaps([(f, self.IDLE_FLAP_MS) for _ in range(n) for f in (1, 2, 1, 0)])
 
     def _flap_step(self):
-        if self._flap_queue:
-            self._frame_idx = self._flap_queue.pop(0)
+        if self._flap_seq:
+            frame, delay = self._flap_seq.pop(0)
+            self._frame_idx = frame
             self.update()
+            self._flap_timer.start(delay)
         else:
-            self._flap_timer.stop()
             self._frame_idx = 0
             self.update()
             self._idle_timer.start(random.randint(self.IDLE_MIN_MS, self.IDLE_MAX_MS))
@@ -459,7 +470,7 @@ class MothWidget(QWidget):
         for t in (self._idle_timer, self._flap_timer, self._haiku_first,
                   self._haiku_repeat, self._bubble_hide):
             t.stop()
-        self._flap_queue = []
+        self._flap_seq = []
 
     # ── interaction / teardown ──────────────────────────────────────────────
     def mousePressEvent(self, event):
