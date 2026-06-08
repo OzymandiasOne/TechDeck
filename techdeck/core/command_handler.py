@@ -759,10 +759,12 @@ class CommandHandler:
         if self._moth is None or not self._moth.isVisible():
             self._moth = MothWidget(color=moth_color)
             self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
+            self._moth.attach_to(mw)             # follow + minimize with the window
             self._moth.spawn_from_edge(point)
             self.console.append_system("A moth flutters in and settles down.")
         else:
             self._moth.set_color(moth_color)
             self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
+            self._moth.attach_to(mw)
             self._moth.fly_to(point)
             self.console.append_system("The moth flits to a new perch.")

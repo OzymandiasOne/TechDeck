@@ -12,7 +12,7 @@ import random
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, QPoint, QRectF
+from PySide6.QtCore import Qt, QTimer, QPoint, QRectF, QEvent
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QFontDatabase
 
 
@@ -163,6 +163,10 @@ class SpeechBubble(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._font = haiku_font(self.FONT_PT)
+        # Antialias + no aggressive hinting -> uniform glyph sizes (full hinting at
+        # small sizes can pixel-snap some letters larger than others).
+        self._font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias)
+        self._font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
         self._fm = QFontMetrics(self._font)
         self._lines = text.split("\n")
         self._lh = self._fm.height()
@@ -199,18 +203,24 @@ class SpeechBubble(QWidget):
         return hx, vy, box_x, box_y
 
     def _tail_cells(self):
-        """Diagonal stepped tail cells (widget coords) + the tip cell."""
+        """Diagonal stepped tail cells (widget coords) + the tip cell. The tail is
+        ~2-3 cells thick and ends in a small chunky tip (not a single skinny cell)."""
         hx, vy, box_x, box_y = self._layout()
         cols, rows = self._cols, self._rows
         cx = box_x + (1 if hx < 0 else cols - 2)           # attach 1 cell in from corner
         cy = box_y + (rows - 1 if vy > 0 else 0)
         cells = []
-        for _ in range(self.TAIL):
+        for k in range(self.TAIL):
             cells.append((cx, cy))
-            cells.append((cx, cy + vy))                    # a little thickness
+            cells.append((cx, cy + vy))                    # vertical thickness
+            if k < self.TAIL - 1:
+                cells.append((cx + hx, cy + vy))           # extra body (not at the tip)
             cx += hx
             cy += vy
-        return cells, (cx, cy)
+        # Chunkier tip: a small 2x2-ish cluster at the end.
+        tx, ty = cx - hx, cy - vy
+        cells += [(tx, ty), (tx, ty + vy), (tx - hx, ty), (tx - hx, ty + vy)]
+        return cells, (tx, ty + vy)
 
     def tip_offset(self, corner: str):
         """Pixel offset of the tail tip from the widget's top-left, for `corner`."""
@@ -237,6 +247,10 @@ class SpeechBubble(QWidget):
 
     def paintEvent(self, event):
         p = QPainter(self)
+        # Pixel cells are integer-aligned rects (AA can't blur them), but text
+        # needs antialiasing or letters render unevenly at this size.
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         p.setPen(Qt.PenStyle.NoPen)
         S = self.CELL
         cols, rows = self._cols, self._rows
@@ -321,6 +335,9 @@ class MothWidget(QWidget):
         self._landed = False
         self._fx = 0.0           # true float position (window pos is rounded)
         self._fy = 0.0
+        self._host = None        # main window we follow / minimize with
+        self._host_pos = None
+        self._host_hid = False   # we hid because the host minimized/hid
 
         # Speech state (haiku + Japanese-philosophy musings in between)
         self._haiku_provider = None
@@ -367,6 +384,65 @@ class MothWidget(QWidget):
         self._haiku_provider = haiku_provider
         self._musing_provider = musing_provider
         self._bubble_colors = (fg, bg, frame)
+
+    def attach_to(self, host):
+        """Follow the host window: move with it and hide while it's minimized."""
+        if host is None or host is self._host:
+            if host is not None:
+                self._host_pos = host.frameGeometry().topLeft()
+            return
+        if self._host is not None:
+            try:
+                self._host.removeEventFilter(self)
+            except RuntimeError:
+                pass
+        self._host = host
+        self._host_pos = host.frameGeometry().topLeft()
+        host.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if obj is self._host:
+            et = event.type()
+            if et == QEvent.Type.Move:
+                new = self._host.frameGeometry().topLeft()
+                delta = new - self._host_pos
+                self._host_pos = new
+                if not delta.isNull():
+                    self._shift_by(delta)
+            elif et == QEvent.Type.WindowStateChange:
+                (self._hide_for_host if self._host.isMinimized()
+                 else self._show_for_host)()
+            elif et == QEvent.Type.Hide:
+                self._hide_for_host()
+            elif et == QEvent.Type.Show:
+                self._show_for_host()
+        return super().eventFilter(obj, event)
+
+    def _shift_by(self, delta: QPoint):
+        """Move the moth (and any bubble + flight state) by the host's move delta."""
+        self.move(self.pos() + delta)
+        self._fx += delta.x()
+        self._fy += delta.y()
+        if self._target_point is not None:
+            self._target_point += delta
+        if self._bubble is not None:
+            self._bubble.move(self._bubble.pos() + delta)
+
+    def _hide_for_host(self):
+        if self.isVisible():
+            self._host_hid = True
+            self.hide()
+        if self._bubble is not None:
+            self._bubble.hide()
+
+    def _show_for_host(self):
+        if self._host_hid:
+            self._host_hid = False
+            self.show()
+            self.raise_()
+            if self._bubble is not None:
+                self._bubble.show()
+                self._bubble.raise_()
 
     def fly_to(self, point: QPoint):
         """Set a new global target point and start flying."""
@@ -551,6 +627,12 @@ class MothWidget(QWidget):
         self._flying = False
         self._target_point = None
         self._hide_bubble()
+        if self._host is not None:
+            try:
+                self._host.removeEventFilter(self)
+            except RuntimeError:
+                pass
+            self._host = None
         self.close()
 
     # ── paint ───────────────────────────────────────────────────────────────
