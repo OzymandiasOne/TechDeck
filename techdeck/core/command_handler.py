@@ -724,7 +724,8 @@ class CommandHandler:
     # ------------------------------------------------------------------ #
 
     def _cmd_moth(self, args: str):
-        from techdeck.ui.widgets.moth_widget import MothWidget
+        from techdeck.ui.widgets.moth_widget import (
+            MothWidget, MOTH_FRAMES, BUTTERFLY_FRAMES)
         from techdeck.ui.theme_manager import get_theme_manager
         from PySide6.QtGui import QColor
         from PySide6.QtCore import QPoint
@@ -746,9 +747,16 @@ class CommandHandler:
 
         # Colour the moth + haiku bubble to the active theme. The moth holds the
         # haiku generator and shows one ~30s after landing, then every ~10 min.
-        pal = get_theme_manager().get_current_palette()
+        tm = get_theme_manager()
+        pal = tm.get_current_palette()
+        # Two-tone body + darker outline, coloured to the theme accent.
         moth_color = QColor(pal.accent)
         moth_color.setAlpha(235)
+        moth_outline = moth_color.darker(260)
+        # Cherry theme gets a butterfly instead of a moth.
+        is_butterfly = tm.get_current_theme() == "cherry_blossom"
+        frames = BUTTERFLY_FRAMES if is_butterfly else MOTH_FRAMES
+        critter = "butterfly" if is_butterfly else "moth"
         # bubble: surface fill, accent frame/arrow, and a text colour kept DISTINCT
         # from the frame -- warm cream on a dark fill, warm brown on a light fill
         # (AC-style, readable, and never the same as the accent).
@@ -757,14 +765,15 @@ class CommandHandler:
         fg = QColor("#3A2A14") if lum > 150 else QColor("#F3EAD2")
 
         if self._moth is None or not self._moth.isVisible():
-            self._moth = MothWidget(color=moth_color)
+            self._moth = MothWidget(color=moth_color, outline=moth_outline, frames=frames)
             self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
             self._moth.attach_to(mw)             # follow + minimize with the window
             self._moth.spawn_from_edge(point)
-            self.console.append_system("A moth flutters in and settles down.")
+            self.console.append_system(f"A {critter} flutters in and settles down.")
         else:
-            self._moth.set_color(moth_color)
+            self._moth.set_color(moth_color, moth_outline)
+            self._moth.set_frames(frames)
             self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
             self._moth.attach_to(mw)
             self._moth.fly_to(point)
-            self.console.append_system("The moth flits to a new perch.")
+            self.console.append_system(f"The {critter} flits to a new perch.")

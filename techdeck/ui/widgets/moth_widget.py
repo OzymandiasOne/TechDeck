@@ -131,6 +131,61 @@ _GRID_W = len(MOTH_FRAMES[0][0])
 _GRID_H = len(MOTH_FRAMES[0])
 
 
+# ── Pixel-art butterfly frames (cherry_blossom theme; same 19x14 size) ───────
+# Rounder, separated fore/hind wings + clubbed antennae. Generated via
+# tools/_scratch_butterfly.py.
+BUTTERFLY_FRAMES = [
+    [
+        "......X.....X......",
+        ".......X...X.......",
+        "..XXXXX.XXX.XXXXX..",
+        ".XXXXXXXXXXXXXXXXX.",
+        ".XXXXXXXXXXXXXXXXX.",
+        ".XXXXXXXXXXXXXXXXX.",
+        ".XXXXXXXXXXXXXXXXX.",
+        ".........X.........",
+        "...XXXXX.X.XXXXX...",
+        "..XXXXXXXXXXXXXXX..",
+        "..XXXXXXXXXXXXXXX..",
+        "...XXXXXXXXXXXXX...",
+        "....XXX..X..XXX....",
+        "...................",
+    ],
+    [
+        "......X.....X......",
+        ".......X...X.......",
+        "...XXXXXXXXXXXXX...",
+        "...XXXXXXXXXXXXX...",
+        "..XXXXXXXXXXXXXXX..",
+        "..XXXXXXXXXXXXXXX..",
+        "..XXXXXXXXXXXXXXX..",
+        ".........X.........",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        ".....XXX.X.XXX.....",
+        "...................",
+    ],
+    [
+        ".......X...X.......",
+        "...................",
+        ".....XXXXXXXXX.....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        "....XXXXXXXXXXX....",
+        ".........X.........",
+        ".....XXXXXXXXX.....",
+        ".....XXXXXXXXX.....",
+        ".....XXXXXXXXX.....",
+        ".....XXXXXXXXX.....",
+        "......XX.X.XX......",
+        "...................",
+    ],
+]
+
+
 # ── Editable speech-bubble art (hand-drawn, like MOTH_FRAMES) ───────────────
 # Edit these two grids to redesign the bubble. They are stamped/mirrored by the
 # renderer, so the bubble still auto-sizes to the text — you draw the CORNER and
@@ -352,8 +407,9 @@ class MothWidget(QWidget):
     """
 
     CELL = 2                                  # px per pixel-art cell
-    SIZE_W = _GRID_W * CELL
-    SIZE_H = _GRID_H * CELL
+    MARGIN = 1                                 # 1-cell border so the outline isn't clipped
+    SIZE_W = (_GRID_W + 2 * MARGIN) * CELL
+    SIZE_H = (_GRID_H + 2 * MARGIN) * CELL
 
     FLY_SEQ = [0, 1, 2, 1]                    # fast flutter while in flight
     MAX_FLY_TICKS = 240                       # ~3.8s fail-safe: always land by then
@@ -369,9 +425,12 @@ class MothWidget(QWidget):
     HAIKU_EVERY_SPEAKS = 3                     # ...every 3rd is a haiku (~10 min apart)
     HAIKU_VISIBLE_MS = 13_000                 # how long a bubble lingers
 
-    def __init__(self, color: QColor | None = None, parent=None):
+    def __init__(self, color: QColor | None = None, outline: QColor | None = None,
+                 frames=None, parent=None):
         super().__init__(parent)
         self._color = color if color is not None else QColor(30, 30, 30, 230)
+        self._outline = outline if outline is not None else self._color.darker(260)
+        self._frames = frames if frames is not None else MOTH_FRAMES
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -426,9 +485,15 @@ class MothWidget(QWidget):
         self._bubble_hide.timeout.connect(self._hide_bubble)
 
     # ── public API ──────────────────────────────────────────────────────────
-    def set_color(self, color: QColor):
+    def set_color(self, color: QColor, outline: QColor | None = None):
         """Re-theme the moth (e.g. on a later /moth after a theme switch)."""
         self._color = color
+        self._outline = outline if outline is not None else color.darker(260)
+        self.update()
+
+    def set_frames(self, frames):
+        """Swap the pixel-art frames (e.g. butterfly for the cherry theme)."""
+        self._frames = frames
         self.update()
 
     def configure_speech(self, haiku_provider, musing_provider,
@@ -694,10 +759,25 @@ class MothWidget(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color)
-        c = self.CELL
-        for y, row in enumerate(MOTH_FRAMES[self._frame_idx]):
-            for x, ch in enumerate(row):
-                if ch != ".":
-                    painter.fillRect(x * c, y * c, c, c, self._color)
+        c, m = self.CELL, self.MARGIN
+        grid = self._frames[self._frame_idx]
+        gh, gw = len(grid), len(grid[0])
+
+        def filled(x, y):
+            return 0 <= y < gh and 0 <= x < gw and grid[y][x] != "."
+
+        # Outline pass: every empty cell (incl. the 1-cell margin) touching a
+        # filled cell, painted in the second tone.
+        for y in range(-1, gh + 1):
+            for x in range(-1, gw + 1):
+                if filled(x, y):
+                    continue
+                if any(filled(x + dx, y + dy)
+                       for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy):
+                    painter.fillRect((x + m) * c, (y + m) * c, c, c, self._outline)
+        # Body pass.
+        for y in range(gh):
+            for x in range(gw):
+                if grid[y][x] != ".":
+                    painter.fillRect((x + m) * c, (y + m) * c, c, c, self._color)
         painter.end()
