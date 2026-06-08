@@ -291,6 +291,38 @@ def generate_haiku() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Moth musings — quiet reflections drawn from Japanese philosophy/aesthetics,
+# shown by /moth in the gaps between haiku. Pre-wrapped to keep the bubble tidy.
+# ---------------------------------------------------------------------------
+
+_MUSINGS = [
+    "Wabi-sabi —\nbeauty in the worn and uneven.",
+    "Mono no aware:\na gentle ache for what passes.",
+    "In ma, the space between,\nthe work can breathe.",
+    "Mujo — nothing is finished,\nonly set down for now.",
+    "Kintsugi: the break, filled with gold,\nbecomes the story.",
+    "Shoganai —\nwhat cannot be helped, let go.",
+    "Seek your ikigai:\nthe reason you rise to the bench.",
+    "Kaizen —\na little better, one nest at a time.",
+    "Mottainai —\nwaste nothing, not even a remnant.",
+    "Shu-ha-ri:\nfollow, then break, then become.",
+    "The bamboo bends in the storm\nand does not break.",
+    "Mu — the empty cut\nholds as much as the steel.",
+    "Gaman:\nendure with quiet dignity.",
+    "Ichi-go ichi-e —\neach batch, a once-only meeting.",
+    "Fall seven times,\nstand up eight.",
+    "The still pond\nreflects the whole sky.",
+    "Yugen —\na depth too quiet to name.",
+    "The plate that lies flat\nmeets the laser unafraid.",
+]
+
+
+def generate_musing() -> str:
+    """A short Japanese-philosophy musing for the moth (1-2 lines)."""
+    return random.choice(_MUSINGS)
+
+
+# ---------------------------------------------------------------------------
 # Sal — the blackjack dealer's one-liners (shown on the idle dashboard)
 # ---------------------------------------------------------------------------
 

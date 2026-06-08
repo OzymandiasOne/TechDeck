@@ -131,9 +131,9 @@ _GRID_W = len(MOTH_FRAMES[0][0])
 _GRID_H = len(MOTH_FRAMES[0])
 
 
-class HaikuBubble(QWidget):
-    """A PIXEL-ART speech bubble (Animal-Crossing-style) that types a 3-line haiku
-    out one letter at a time.
+class SpeechBubble(QWidget):
+    """A PIXEL-ART speech bubble (Animal-Crossing-style) that types its text
+    (a haiku or a musing) out one letter at a time.
 
     Drawn on a cell grid: a soft rounded box (pixel-stepped corners) with a
     downward (or upward) pixel arrow pointing at the moth. Filled with the theme
@@ -280,8 +280,9 @@ class MothWidget(QWidget):
     IDLE_FLAP_MS = 165                        # slow, gentle beat for idle flutters
     IDLE_FLAPS = (1, 3)                        # "just a few" on each random flutter
     IDLE_MIN_MS, IDLE_MAX_MS = 5000, 15000    # long stills between flutters
-    HAIKU_FIRST_MIN_MS, HAIKU_FIRST_MAX_MS = 20_000, 50_000  # first within a minute
-    HAIKU_EVERY_MS = 600_000                  # then every 10 minutes
+    HAIKU_FIRST_MIN_MS, HAIKU_FIRST_MAX_MS = 20_000, 50_000  # first haiku within a minute
+    SPEAK_EVERY_MS = 200_000                  # then it speaks every ~3.3 min...
+    HAIKU_EVERY_SPEAKS = 3                     # ...every 3rd is a haiku (~10 min apart)
     HAIKU_VISIBLE_MS = 13_000                 # how long a bubble lingers
 
     def __init__(self, color: QColor | None = None, parent=None):
@@ -304,10 +305,12 @@ class MothWidget(QWidget):
         self._fx = 0.0           # true float position (window pos is rounded)
         self._fy = 0.0
 
-        # Haiku state
+        # Speech state (haiku + Japanese-philosophy musings in between)
         self._haiku_provider = None
+        self._musing_provider = None
+        self._speak_count = 0
         self._bubble_colors: tuple[QColor, QColor, QColor] | None = None
-        self._bubble: HaikuBubble | None = None
+        self._bubble: SpeechBubble | None = None
 
         # Movement during flight
         self._move_timer = QTimer(self)
@@ -324,13 +327,13 @@ class MothWidget(QWidget):
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(self._start_flutter)
 
-        # Haiku timers
-        self._haiku_first = QTimer(self)
-        self._haiku_first.setSingleShot(True)
-        self._haiku_first.timeout.connect(self._do_haiku)
-        self._haiku_repeat = QTimer(self)
-        self._haiku_repeat.setInterval(self.HAIKU_EVERY_MS)
-        self._haiku_repeat.timeout.connect(self._do_haiku)
+        # Speech timers: first utterance soon after landing, then on a cadence.
+        self._first_speak = QTimer(self)
+        self._first_speak.setSingleShot(True)
+        self._first_speak.timeout.connect(self._do_speak)
+        self._speak_timer = QTimer(self)
+        self._speak_timer.setInterval(self.SPEAK_EVERY_MS)
+        self._speak_timer.timeout.connect(self._do_speak)
         self._bubble_hide = QTimer(self)
         self._bubble_hide.setSingleShot(True)
         self._bubble_hide.timeout.connect(self._hide_bubble)
@@ -341,10 +344,12 @@ class MothWidget(QWidget):
         self._color = color
         self.update()
 
-    def configure_haiku(self, provider, fg: QColor, bg: QColor, border: QColor):
-        """provider() -> haiku str; fg/bg/border colour the bubble."""
-        self._haiku_provider = provider
-        self._bubble_colors = (fg, bg, border)
+    def configure_speech(self, haiku_provider, musing_provider,
+                         fg: QColor, bg: QColor, frame: QColor):
+        """haiku_provider()/musing_provider() -> str; fg/bg/frame colour the bubble."""
+        self._haiku_provider = haiku_provider
+        self._musing_provider = musing_provider
+        self._bubble_colors = (fg, bg, frame)
 
     def fly_to(self, point: QPoint):
         """Set a new global target point and start flying."""
@@ -416,7 +421,8 @@ class MothWidget(QWidget):
         # Ease to a stop with a couple of decelerating flaps, then go still; the
         # flutter's completion schedules the next occasional flutter.
         self._settle()
-        self._haiku_first.start(
+        self._speak_count = 0
+        self._first_speak.start(
             random.randint(self.HAIKU_FIRST_MIN_MS, self.HAIKU_FIRST_MAX_MS))
 
     # ── flutter (slow & graceful, then still) ───────────────────────────────
@@ -446,25 +452,31 @@ class MothWidget(QWidget):
             self.update()
             self._idle_timer.start(random.randint(self.IDLE_MIN_MS, self.IDLE_MAX_MS))
 
-    # ── haiku ───────────────────────────────────────────────────────────────
-    def _do_haiku(self):
-        if self._haiku_provider is None or self._bubble_colors is None:
+    # ── speech (haiku + musings) ────────────────────────────────────────────
+    def _do_speak(self):
+        if self._bubble_colors is None:
+            return
+        # Every Nth utterance is a haiku; the rest are musings (the "in between").
+        is_haiku = (self._speak_count % self.HAIKU_EVERY_SPEAKS == 0)
+        provider = self._haiku_provider if is_haiku else self._musing_provider
+        self._speak_count += 1
+        if provider is None:
             return
         try:
-            text = self._haiku_provider()
+            text = provider()
         except Exception:
             return
         fg, bg, frame = self._bubble_colors
         self._hide_bubble()
-        self._bubble = HaikuBubble(text, fg, bg, frame)
+        self._bubble = SpeechBubble(text, fg, bg, frame)
         pos, direction, arrow_x = self._bubble_place()
         self._bubble.set_tail(direction, arrow_x)
         self._bubble.show()
         self._bubble.move(pos)
         self._bubble.raise_()
         self._bubble_hide.start(self.HAIKU_VISIBLE_MS)
-        if not self._haiku_repeat.isActive():
-            self._haiku_repeat.start()
+        if not self._speak_timer.isActive():
+            self._speak_timer.start()
 
     def _bubble_place(self):
         """Position the bubble over the moth (clamped); return (pos, dir, arrow_x).
@@ -493,10 +505,11 @@ class MothWidget(QWidget):
             self._bubble = None
 
     def _cancel_idle_and_haiku(self):
-        for t in (self._idle_timer, self._flap_timer, self._haiku_first,
-                  self._haiku_repeat, self._bubble_hide):
+        for t in (self._idle_timer, self._flap_timer, self._first_speak,
+                  self._speak_timer, self._bubble_hide):
             t.stop()
         self._flap_seq = []
+        self._speak_count = 0
 
     # ── interaction / teardown ──────────────────────────────────────────────
     def mousePressEvent(self, event):

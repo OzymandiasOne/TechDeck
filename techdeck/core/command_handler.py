@@ -10,7 +10,7 @@ from typing import Callable
 from pathlib import Path
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import APP_VERSION
-from techdeck.core.flavor import generate_haiku
+from techdeck.core.flavor import generate_haiku, generate_musing
 from techdeck.core.audio_manager import (
     get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
 )
@@ -749,16 +749,20 @@ class CommandHandler:
         pal = get_theme_manager().get_current_palette()
         moth_color = QColor(pal.accent)
         moth_color.setAlpha(235)
-        # bubble colours: text, interior fill, pixel-frame (accent, on-theme)
-        fg, bg, frame = QColor(pal.text), QColor(pal.surface), QColor(pal.accent)
+        # bubble: surface fill, accent frame/arrow, and a text colour kept DISTINCT
+        # from the frame -- warm cream on a dark fill, warm brown on a light fill
+        # (AC-style, readable, and never the same as the accent).
+        bg, frame = QColor(pal.surface), QColor(pal.accent)
+        lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
+        fg = QColor("#3A2A14") if lum > 150 else QColor("#F3EAD2")
 
         if self._moth is None or not self._moth.isVisible():
             self._moth = MothWidget(color=moth_color)
-            self._moth.configure_haiku(generate_haiku, fg, bg, frame)
+            self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
             self._moth.spawn_from_edge(point)
             self.console.append_system("A moth flutters in and settles down.")
         else:
             self._moth.set_color(moth_color)
-            self._moth.configure_haiku(generate_haiku, fg, bg, frame)
+            self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
             self._moth.fly_to(point)
             self.console.append_system("The moth flits to a new perch.")
