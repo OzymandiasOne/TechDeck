@@ -196,10 +196,10 @@ BUTTERFLY_FRAMES = [
 #   mirrored to the other three corners. Keep it square. The bottom row + right
 #   column define the straight edge thickness, so keep those solid 'x'.
 BUBBLE_CORNER = [
-    "....xxx",
+    ".....xx",
     "..xxxxx",
     ".xxxxxx",
-    ".xxxxxx",
+    "xxxxxxx",
     "xxxxxxx",
     "xxxxxxx",
     "xxxxxxx",
@@ -209,11 +209,12 @@ BUBBLE_CORNER = [
 #   cell that points at the moth, '.' = transparent. Its corner nearest the box
 #   (here the top-right) attaches to the box corner.
 BUBBLE_TAIL = [
-    "...xx",
-    "..xxx",
-    ".xxx.",
-    "xxxt.",
-    "xt...",
+    ".....xxxx",
+    "....xxxx.",
+    "...xxxx..",
+    "..xxx....",
+    ".xx......",
+    "x........",
 ]
 
 
