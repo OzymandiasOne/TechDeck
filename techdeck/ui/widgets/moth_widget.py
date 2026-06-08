@@ -132,25 +132,29 @@ _GRID_H = len(MOTH_FRAMES[0])
 
 
 class HaikuBubble(QWidget):
-    """A PIXEL-ART speech bubble that types a 3-line haiku out one letter at a time.
+    """A PIXEL-ART speech bubble (Animal-Crossing-style) that types a 3-line haiku
+    out one letter at a time.
 
-    Drawn on a cell grid: a chunky one-cell frame with notched (pixel-bevelled)
-    corners + a stepped pixel tail toward the moth, filled and outlined in the
-    theme colours. Sized to the FULL text up front (so it never resizes / cuts
-    off), but only a growing prefix is painted, advanced by a timer.
+    Drawn on a cell grid: a soft rounded box (pixel-stepped corners) with a
+    downward (or upward) pixel arrow pointing at the moth. Filled with the theme
+    surface, outlined + arrowed in the theme accent, text in the theme text
+    colour. Sized to the FULL text up front (so it never resizes / cuts off);
+    only a growing prefix is painted, advanced by a timer.
     """
 
     CELL = 4                # px per pixel-art cell
-    PAD_PX = 9              # interior breathing room around the text
-    TAIL = 3                # tail width in cells
+    PAD_PX = 11             # interior breathing room around the text
+    RADIUS = 5              # rounded-corner radius in cells
+    ARROW_W = 5             # arrow base width in cells (odd)
+    ARROW_H = 3             # arrow height in cells
     REVEAL_MS = 55          # per-character typing speed
     FONT_PT = 11
 
     def __init__(self, text: str, fg: QColor, bg: QColor, frame: QColor,
-                 tail_side: str = "left", parent=None):
+                 tail_dir: str = "down", parent=None):
         super().__init__(parent)
         self._fg, self._bg, self._frame = fg, bg, frame
-        self._tail_side = tail_side
+        self._tail_dir = tail_dir            # "down" = bubble above the moth
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -163,16 +167,15 @@ class HaikuBubble(QWidget):
         self._fm = QFontMetrics(self._font)
         self._lines = text.split("\n")
         self._lh = self._fm.height()
-        # Width via tight ink bounds (handles italic/brush overhang the advance
-        # width misses — the old cutoff) + generous padding.
+        # Width via tight ink bounds (handles italic/brush overhang) + padding.
         tw = max((self._fm.boundingRect(ln).width() for ln in self._lines), default=40)
         th = self._lh * len(self._lines)
 
         S = self.CELL
         self._cols = math.ceil((tw + self.PAD_PX * 2) / S) + 2   # +2 = frame
         self._rows = math.ceil((th + self.PAD_PX * 2) / S) + 2
-        self._box_w = self._cols * S
-        self.setFixedSize(self._box_w + self.TAIL * S, self._rows * S)
+        self._arrow_col = self._cols // 2                        # points at moth
+        self.setFixedSize(self._cols * S, (self._rows + self.ARROW_H) * S)
 
         # Typewriter reveal across all lines.
         self._revealed = 0
@@ -182,14 +185,13 @@ class HaikuBubble(QWidget):
         self._reveal_timer.timeout.connect(self._reveal_step)
         self._reveal_timer.start()
 
-    def set_tail_side(self, side: str):
-        """'left' = tail on the box's left edge (bubble sits right of the moth)."""
-        if side != self._tail_side:
-            self._tail_side = side
-            self.update()
-
-    def _box_origin_x(self) -> int:
-        return self.TAIL * self.CELL if self._tail_side == "left" else 0
+    def set_tail(self, direction: str, arrow_x_px: int):
+        """direction 'down'/'up'; arrow_x_px = where the arrow should point (px from
+        the bubble's left edge), so it aims at the moth even when clamped."""
+        self._tail_dir = direction
+        lo, hi = self.ARROW_W // 2, self._cols - 1 - self.ARROW_W // 2
+        self._arrow_col = max(lo, min(round(arrow_x_px / self.CELL), hi))
+        self.update()
 
     def _reveal_step(self):
         self._revealed += 1
@@ -197,42 +199,54 @@ class HaikuBubble(QWidget):
             self._reveal_timer.stop()
         self.update()
 
+    def _inside(self, cx, cy) -> bool:
+        """Rounded-rectangle membership test for the box cell (cx, cy)."""
+        R, cols, rows = self.RADIUS, self._cols, self._rows
+        px, py = cx + 0.5, cy + 0.5
+        qx = R if px < R else (cols - R if px > cols - R else px)
+        qy = R if py < R else (rows - R if py > rows - R else py)
+        return (px - qx) ** 2 + (py - qy) ** 2 <= R * R + 0.25
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setPen(Qt.PenStyle.NoPen)
         S = self.CELL
         cols, rows = self._cols, self._rows
-        ox = self._box_origin_x()
+        boy = 0 if self._tail_dir == "down" else self.ARROW_H   # box y-offset (cells)
 
-        # Frame + fill on a cell grid; notch the 4 corner cells for a pixel bevel.
+        # Rounded box: surface fill, accent border (a cell whose 4-neighbour is
+        # outside the rounded shape, or on the grid edge).
         for cy in range(rows):
             for cx in range(cols):
-                if cx in (0, cols - 1) and cy in (0, rows - 1):
+                if not self._inside(cx, cy):
                     continue
-                edge = cx in (0, cols - 1) or cy in (0, rows - 1)
-                p.fillRect(ox + cx * S, cy * S, S, S,
-                           self._frame if edge else self._bg)
+                border = (cx == 0 or cy == 0 or cx == cols - 1 or cy == rows - 1
+                          or not self._inside(cx - 1, cy) or not self._inside(cx + 1, cy)
+                          or not self._inside(cx, cy - 1) or not self._inside(cx, cy + 1))
+                p.fillRect(cx * S, (boy + cy) * S, S, S,
+                           self._frame if border else self._bg)
 
-        # Stepped pixel tail toward the moth.
-        mid = rows // 2
-        if self._tail_side == "left":
-            cells = [(2, mid - 1), (2, mid), (2, mid + 1), (1, mid), (0, mid)]
-            for cx, cy in cells:
-                p.fillRect(cx * S, cy * S, S, S, self._frame)
-        else:
-            base = cols
-            cells = [(0, mid - 1), (0, mid), (0, mid + 1), (1, mid), (2, mid)]
-            for cx, cy in cells:
-                p.fillRect((base + cx) * S, cy * S, S, S, self._frame)
+        # Pixel arrow toward the moth, in the accent colour.
+        ac = self._arrow_col
+        for k in range(self.ARROW_H):
+            if self._tail_dir == "down":            # below the box, tip at bottom
+                half = (self.ARROW_W // 2) - k
+                ry = rows + k
+            else:                                   # above the box, tip at top
+                half = k
+                ry = k
+            if half < 0:
+                continue
+            for cx in range(ac - half, ac + half + 1):
+                p.fillRect(cx * S, ry * S, S, S, self._frame)
 
         # Typewriter text, centered in the interior; prefix drawn left-aligned at
         # the full line's centered start so it types left-to-right.
         p.setPen(self._fg)
         p.setFont(self._font)
-        ix = ox + S
         iw = (cols - 2) * S
         interior_h = (rows - 2) * S
-        ty = S + (interior_h - self._lh * len(self._lines)) / 2.0
+        ty = boy * S + S + (interior_h - self._lh * len(self._lines)) / 2.0
         remaining = self._revealed
         for i, line in enumerate(self._lines):
             take = max(0, min(len(line), remaining))
@@ -240,7 +254,7 @@ class HaikuBubble(QWidget):
             if take <= 0:
                 continue
             lw = self._fm.boundingRect(line).width()
-            x0 = ix + (iw - lw) / 2.0
+            x0 = S + (iw - lw) / 2.0
             p.drawText(QRectF(x0, ty + i * self._lh, lw + 6, self._lh),
                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                        line[:take])
@@ -443,8 +457,8 @@ class MothWidget(QWidget):
         fg, bg, frame = self._bubble_colors
         self._hide_bubble()
         self._bubble = HaikuBubble(text, fg, bg, frame)
-        pos, side = self._bubble_place()
-        self._bubble.set_tail_side(side)
+        pos, direction, arrow_x = self._bubble_place()
+        self._bubble.set_tail(direction, arrow_x)
         self._bubble.show()
         self._bubble.move(pos)
         self._bubble.raise_()
@@ -453,22 +467,23 @@ class MothWidget(QWidget):
             self._haiku_repeat.start()
 
     def _bubble_place(self):
-        """Position the bubble beside the moth (clamped); return (pos, tail_side).
+        """Position the bubble over the moth (clamped); return (pos, dir, arrow_x).
 
-        Prefer the bubble to the moth's right (tail on its left); flip to the
-        left (tail on its right) if it would run off-screen.
+        Prefer ABOVE the moth (arrow points down at it); flip below if there's no
+        room above. The arrow aims at the moth's horizontal centre.
         """
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
-        side = "left"
-        bx = self.x() + self.SIZE_W + 6
-        if bx + bw > screen.right():
-            bx = self.x() - bw - 6
-            side = "right"
-        by = self.y() + self.SIZE_H // 2 - bh // 2
+        moth_cx = self.x() + self.SIZE_W // 2
+        direction = "down"
+        by = self.y() - bh + 6                       # bubble above; arrow tip into moth top
+        if by < screen.top() + 4:
+            direction = "up"
+            by = self.y() + self.SIZE_H - 6          # bubble below; arrow tip into moth base
+        bx = moth_cx - bw // 2
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
-        return QPoint(bx, by), side
+        return QPoint(bx, by), direction, moth_cx - bx
 
     def _hide_bubble(self):
         self._bubble_hide.stop()
