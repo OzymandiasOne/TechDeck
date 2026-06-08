@@ -281,13 +281,45 @@ _HAIKU_LAST = [    # 5 syllables
 ]
 
 
+class _ShuffledDeck:
+    """Draw items in a shuffled order, exhausting all before any repeat, and never
+    the same item twice in a row (even across a reshuffle). Feels random but never
+    stale."""
+
+    def __init__(self, items):
+        self._items = list(items)
+        self._pool: list[int] = []
+        self._last = -1
+
+    def draw(self):
+        if not self._pool:
+            self._pool = list(range(len(self._items)))
+            random.shuffle(self._pool)
+            if len(self._pool) > 1 and self._pool[0] == self._last:
+                self._pool.append(self._pool.pop(0))   # don't reopen on a repeat
+        idx = self._pool.pop(0)
+        self._last = idx
+        return self._items[idx]
+
+
+_recent_haikus: list[str] = []
+
+
 def generate_haiku() -> str:
-    """Generate a unique haiku from the template pools (each line ends in '...')."""
-    return (
-        random.choice(_HAIKU_FIRST) + "...\n"
-        + random.choice(_HAIKU_MIDDLE) + "...\n"
-        + random.choice(_HAIKU_LAST) + "..."
-    )
+    """A haiku from the template pools (each line ends '...'), never repeating a
+    recently-shown haiku."""
+    for _ in range(20):
+        haiku = (
+            random.choice(_HAIKU_FIRST) + "...\n"
+            + random.choice(_HAIKU_MIDDLE) + "...\n"
+            + random.choice(_HAIKU_LAST) + "..."
+        )
+        if haiku not in _recent_haikus:
+            break
+    _recent_haikus.append(haiku)
+    if len(_recent_haikus) > 12:
+        _recent_haikus.pop(0)
+    return haiku
 
 
 # ---------------------------------------------------------------------------
@@ -322,9 +354,13 @@ _MUSINGS = [
 ]
 
 
+_musing_deck = _ShuffledDeck(_MUSINGS)
+
+
 def generate_musing() -> str:
-    """A short Japanese-philosophy musing for the moth (1-2 lines), ending '...'."""
-    return random.choice(_MUSINGS).rstrip(" .") + "..."
+    """A musing for the moth (1-2 lines, ending '...'). Drawn from a shuffled deck:
+    never repeats until every musing has been shown, and never twice in a row."""
+    return _musing_deck.draw().rstrip(" .") + "..."
 
 
 # ---------------------------------------------------------------------------
