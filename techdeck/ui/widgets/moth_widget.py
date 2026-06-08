@@ -137,51 +137,51 @@ _GRID_H = len(MOTH_FRAMES[0])
 # Same cell key as MOTH_FRAMES: "X" = body, "o" = outline/2nd tone, "." = empty.
 BUTTERFLY_FRAMES = [
     [
-        "......XX...XX......",
-        ".XXXXX..XXX..XXXXX.",
-        "..XXXXXXXXXXXXXXX..",
-        "..XXXXXXXXXXXXXXX..",
-        "...XXXXXXXXXXXXX...",
-        "...XXXXXXXXXXXXX...",
-        "....XXXXXXXXXXX....",
-        "......XXXXXXX......",
-        ".....XXXXXXXXX.....",
-        "....XXXXXXXXXXX....",
-        "...XXXXXXXXXXXXX...",
-        "..XXXXXXXXXXXXXXX..",
-        "..XXXXXX.X.XXXXXX..",
+        "...................",
+        ".XXXXX.......XXXXX.",
+        "..XXXXXX...XXXXXX..",
+        "..XXXXXXXoXXXXXXX..",
+        "...XXXXXXoXXXXXX...",
+        "...XXXXXXoXXXXXX...",
+        "....XXXXXoXXXXX....",
+        "......XXXoXXX......",
+        ".......ooooo.......",
+        "....XXXXXoXXXXX....",
+        "...XXXXXXoXXXXXX...",
+        "..XXXXXXXoXXXXXXX..",
+        "..XXXXXX...XXXXXX..",
         "...XXX.......XXX...",
     ],
     [
-        ".......X...X.......",
-        "...XXXX.XXX.XXXX...",
-        "...XXXXXXXXXXXXX...",
-        "...XXXXXXXXXXXXX...",
-        "....XXXXXXXXXXX....",
-        "....XXXXXXXXXXX....",
-        ".....XXXXXXXXX.....",
-        ".......XXXXX.......",
-        "......XXXXXXX......",
-        ".....XXXXXXXXX.....",
-        "....XXXXXXXXXXX....",
-        "...XXXXXXXXXXXXX...",
-        "...XXXXX.X.XXXXX...",
+        "...................",
+        "...XXXX.....XXXX...",
+        "...XXXXX...XXXXX...",
+        "...XXXXXXoXXXXXX...",
+        "....XXXXXoXXXXX....",
+        "....XXXXXoXXXXX....",
+        ".....XXXXoXXXX.....",
+        ".......XXoXX.......",
+        "......ooooooo......",
+        ".....XXXXoXXXX.....",
+        "....XXXXXoXXXXX....",
+        "...XXXXXXoXXXXXX...",
+        "...XXXXX...XXXXX...",
         "....XXX.....XXX....",
     ],
     [
-        ".......XX.XX.......",
-        "....XXXXXXXXXXX....",
-        ".....XXXXXXXXX.....",
-        ".....XXXXXXXXX.....",
-        ".....XXXXXXXXX.....",
-        ".....XXXXXXXXX.....",
-        "......XXXXXXX......",
-        ".......XXXXX.......",
-        ".......XXXXX.......",
-        "......XXXXXXX......",
-        ".....XXXXXXXXX.....",
-        ".....XXXXXXXXX.....",
-        ".....XXXXXXXXX.....",
+        "...................",
+        "....XXXXX.XXXXX....",
+        ".....XXXX.XXXX.....",
+        ".....XXXXoXXXX.....",
+        ".....XXXXoXXXX.....",
+        ".....XXXXoXXXX.....",
+        "......XXXoXXX......",
+        ".......XXoXX.......",
+        ".......ooooo.......",
+        "......XXXoXXX......",
+        ".....XXXXoXXXX.....",
+        ".....XXXXoXXXX.....",
+        ".....XXXX.XXXX.....",
         ".....XXX...XXX.....",
     ],
 ]
@@ -763,10 +763,13 @@ class MothWidget(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         c, m = self.CELL, self.MARGIN
         grid = self._frames[self._frame_idx]
-        gh, gw = len(grid), len(grid[0])
+        gh = len(grid)
+        gw = max((len(r) for r in grid), default=0)   # widest row (rows may be ragged)
 
         def filled(x, y):
-            return 0 <= y < gh and 0 <= x < gw and grid[y][x] != "."
+            # Bounds-checked against the ACTUAL row length so a hand-edited frame
+            # with a wrong-width row can never crash the paint.
+            return 0 <= y < gh and 0 <= x < len(grid[y]) and grid[y][x] != "."
 
         # Outline pass: every empty cell (incl. the 1-cell margin) touching a
         # filled cell, painted in the second tone.
@@ -780,8 +783,9 @@ class MothWidget(QWidget):
         # Body pass: "X" = fill (body tone), "o" = an explicit outline-tone cell
         # (for hand-drawn detail/shading inside the silhouette).
         for y in range(gh):
-            for x in range(gw):
-                ch = grid[y][x]
+            row = grid[y]
+            for x in range(len(row)):
+                ch = row[x]
                 if ch == ".":
                     continue
                 tone = self._outline if ch in ("o", "O") else self._color
