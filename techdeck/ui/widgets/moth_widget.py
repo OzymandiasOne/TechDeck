@@ -475,11 +475,12 @@ class MothWidget(QWidget):
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
         moth_cx = self.x() + self.SIZE_W // 2
+        gap = 12                                     # clear space between arrow tip and moth
         direction = "down"
-        by = self.y() - bh + 6                       # bubble above; arrow tip into moth top
+        by = self.y() - bh - gap                     # bubble above, arrow tip above the moth
         if by < screen.top() + 4:
             direction = "up"
-            by = self.y() + self.SIZE_H - 6          # bubble below; arrow tip into moth base
+            by = self.y() + self.SIZE_H + gap        # bubble below, arrow tip below the moth
         bx = moth_cx - bw // 2
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
