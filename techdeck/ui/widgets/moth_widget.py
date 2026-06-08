@@ -479,21 +479,32 @@ class MothWidget(QWidget):
             self._speak_timer.start()
 
     def _bubble_place(self):
-        """Position the bubble over the moth (clamped); return (pos, dir, arrow_x).
+        """Position the bubble to one side of the moth (clamped); return
+        (pos, dir, arrow_x).
 
-        Prefer ABOVE the moth (arrow points down at it); flip below if there's no
-        room above. The arrow aims at the moth's horizontal centre.
+        The body extends toward whichever side has more room (so it stays off the
+        nearer screen edge), and the arrow drops from the near BOTTOM CORNER onto
+        the moth. Sits above the moth (arrow points down); flips below if there's
+        no room above.
         """
         screen = QApplication.primaryScreen().availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
         moth_cx = self.x() + self.SIZE_W // 2
         gap = 12                                     # clear space between arrow tip and moth
+
+        # Arrow inset from the corner (just past the rounded part).
+        corner = (self._bubble.RADIUS + 1) * self._bubble.CELL
+        screen_cx = (screen.left() + screen.right()) // 2
+        if moth_cx <= screen_cx:                     # room on the right -> extend right
+            bx = moth_cx - corner                    # arrow at the bottom-LEFT corner
+        else:                                        # extend left -> arrow bottom-RIGHT
+            bx = moth_cx - (bw - corner)
+
         direction = "down"
-        by = self.y() - bh - gap                     # bubble above, arrow tip above the moth
+        by = self.y() - bh - gap                     # bubble above, arrow points down
         if by < screen.top() + 4:
             direction = "up"
-            by = self.y() + self.SIZE_H + gap        # bubble below, arrow tip below the moth
-        bx = moth_cx - bw // 2
+            by = self.y() + self.SIZE_H + gap        # flip below, arrow points up
         bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
         by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
         return QPoint(bx, by), direction, moth_cx - bx
