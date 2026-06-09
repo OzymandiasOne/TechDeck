@@ -102,11 +102,14 @@ THEMES: Dict[str, ColorPalette] = {
     ),
 
     "light": ColorPalette(
-        text="#3D3D3A",
-        text_secondary="#6B7280",
-        background="#D6CDC1",
-        surface="#DDD6CC",
-        surface_hover="#E4DCD1",
+        # Warm parchment, not gray: the neutrals lean cream/taupe instead of the
+        # cool slate/blue-gray they used to be, so the whole theme reads like aged
+        # paper rather than office-white.
+        text="#3A352B",
+        text_secondary="#7A6E57",
+        background="#E1D8BE",
+        surface="#E8E0CC",
+        surface_hover="#EFE8D6",
 
         accent="#C6613F",
         accent_hover="#CB7152",
@@ -116,24 +119,24 @@ THEMES: Dict[str, ColorPalette] = {
         accent_two_hover="#3E3E3C",
         accent_two_pressed="#1F1F1E",
 
-        border="#E5E7EB",
-        border_strong="#EBE9E4",
-        divider="#7A8190",
+        border="#D5C9AC",
+        border_strong="#C7B996",
+        divider="#B6A684",
 
-        console_bg="#F9FAFB",
-        console_text="#1F2937",
+        console_bg="#F6F0E0",
+        console_text="#2F2A20",
 
         success="#10B981",
         warning="#F59E0B",
         error="#EF4444",
         info="#3B82F6",
 
-        tile_selected="#D1C8BA",
-        shadow="rgba(0, 0, 0, 0.1)",
+        tile_selected="#D6CBAD",
+        shadow="rgba(70, 55, 25, 0.12)",
 
-        tile_missing_bg="#F3F4F6",
-        tile_missing_text="#9CA3AF",
-        tile_missing_border="#D1D5DB",
+        tile_missing_bg="#ECE5D1",
+        tile_missing_text="#A89A7C",
+        tile_missing_border="#D5C9AC",
     ),
 
     "cherry_blossom": ColorPalette(
