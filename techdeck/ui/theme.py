@@ -105,11 +105,11 @@ THEMES: Dict[str, ColorPalette] = {
         # Warm parchment, not gray: the neutrals lean cream/taupe instead of the
         # cool slate/blue-gray they used to be, so the whole theme reads like aged
         # paper rather than office-white.
-        text="#3A352B",
-        text_secondary="#7A6E57",
-        background="#E1D8BE",
-        surface="#E8E0CC",
-        surface_hover="#EFE8D6",
+        text="#3A3526",
+        text_secondary="#7A6E4E",
+        background="#E1D8B2",
+        surface="#E8E0C0",
+        surface_hover="#EFE8CA",
 
         accent="#C6613F",
         accent_hover="#CB7152",
@@ -119,24 +119,24 @@ THEMES: Dict[str, ColorPalette] = {
         accent_two_hover="#3E3E3C",
         accent_two_pressed="#1F1F1E",
 
-        border="#D5C9AC",
-        border_strong="#C7B996",
-        divider="#B6A684",
+        border="#D5C9A0",
+        border_strong="#C7B98A",
+        divider="#B6A678",
 
-        console_bg="#F6F0E0",
-        console_text="#2F2A20",
+        console_bg="#F6F0D6",
+        console_text="#2F2A1C",
 
         success="#10B981",
         warning="#F59E0B",
         error="#EF4444",
         info="#3B82F6",
 
-        tile_selected="#D6CBAD",
+        tile_selected="#D6CBA1",
         shadow="rgba(70, 55, 25, 0.12)",
 
-        tile_missing_bg="#ECE5D1",
-        tile_missing_text="#A89A7C",
-        tile_missing_border="#D5C9AC",
+        tile_missing_bg="#ECE5C6",
+        tile_missing_text="#A89A70",
+        tile_missing_border="#D5C9A0",
     ),
 
     "cherry_blossom": ColorPalette(
