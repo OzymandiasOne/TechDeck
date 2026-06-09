@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.5.3"  # Cancellation fixes: LST Organizer, 922 FormSeeker, and 922 Batch Repeater now interrupt their OneDrive tree walks; remove the home-tile status icon ring
+APP_VERSION = "0.8.5.4"  # Light theme warmed to a parchment palette (less gray/blue); tile icons: 922 LST Organizer -> opened folder, 911 Sketch Extractor -> picture
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

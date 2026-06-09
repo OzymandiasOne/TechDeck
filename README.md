@@ -1,9 +1,20 @@
-# TechDeck v0.8.5.3 - Cancellation Fixes
+# TechDeck v0.8.5.4 - Parchment Light Theme
 
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.5.4
+
+**Warmer Light theme** - The Light theme now uses a warm parchment palette instead of the
+cooler gray it had before. Backgrounds, panels, borders, and dividers lean toward aged-paper
+cream/taupe, so the theme reads softer and warmer.
+
+**Refreshed tile icons** - The 922 LST Organizer tile now shows an open-folder icon, and the
+911 Sketch Extractor tile now shows a picture icon, for clearer at-a-glance recognition.
 
 ---
 

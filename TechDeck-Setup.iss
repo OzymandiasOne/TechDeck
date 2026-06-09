@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.5.3 - Cancellation fixes: LST Organizer / FormSeeker / Batch Repeater interrupt tree walks; remove tile status ring
+; Version 0.8.5.4 - Light theme warmed to parchment; LST Organizer + Sketch Extractor tile icons swapped
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.5.3"
+#define MyAppVersion "0.8.5.4"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
