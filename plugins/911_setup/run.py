@@ -35,10 +35,12 @@ v1.2.0 changes
     Blank/missing values fall back to the original Path.home() defaults,
     so existing installs keep working without any setup.
 
-  - Nest number regex updated to ^[PS]?\\d{3,}$ (case-insensitive).
-    Accepts:
-      * P07866, S013      (existing P/S-prefixed format)
-      * 503682            (new digits-only format)
+  - Nest number regex accepts legacy numeric and alphanumeric formats
+    (case-insensitive):
+      * P07866, S013      (P/S-prefixed format)
+      * 503682            (digits-only format)
+      * 5CDAVW, 9FANDR    (alphanumeric IDs, 4-8 chars with at least one
+                           digit -- first seen in batch GX030)
     Rejects stray small numbers (< 3 digits) that could appear in totals
     or footer rows.
 
@@ -125,11 +127,17 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Nest number pattern
 #
-# Accepts an optional P or S prefix (case-insensitive), then 3 or more digits.
-# The 3-digit minimum filters out stray small numbers that could appear in
-# totals/footers without rejecting any real nest number we've seen.
+# Two real-world formats:
+#   - legacy numeric: optional P or S prefix, then 3+ digits (P0123, 503627)
+#   - alphanumeric IDs: 4-8 letters/digits with at least one digit
+#     (5CDAVW, 9FANDR -- first seen in batch GX030, May 2026)
+# The at-least-one-digit requirement keeps footer/total text like "TOTALS"
+# out, which is the whole reason this filter exists.
 # ---------------------------------------------------------------------------
-_NEST_RE = re.compile(r'^[PS]?\d{3,}$', re.IGNORECASE)
+_NEST_RE = re.compile(
+    r'^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$',
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +253,7 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
     Read the BATCH LIST 'BATCH' sheet.
     Headers in row 3, data from row 4.
     Locates 'Nest Pkg Nbr' column by header name (case-insensitive).
-    Returns the unique nest numbers matching the [PS]?\\d{3,} pattern, sorted in
+    Returns the unique nest numbers matching _NEST_RE, sorted in
     Windows Explorer ascending order so the selection dialog and processing
     follow the same ordering the operator sees in the file system.
     """

@@ -26,7 +26,12 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-_NEST_RE = re.compile(r'^[PS]?\d{3,}$', re.IGNORECASE)
+# Legacy numeric nests ([PS]?\d{3,}) plus alphanumeric IDs like 5CDAVW
+# (4-8 chars, must contain a digit so footer text like "TOTALS" is rejected).
+_NEST_RE = re.compile(
+    r'^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$',
+    re.IGNORECASE,
+)
 
 
 # ── status helpers ──────────────────────────────────────────────────────────
