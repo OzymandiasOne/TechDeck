@@ -42,8 +42,12 @@ v1.2.0 changes
     DYPN + Work Order); the column the packets agree with feeds the nest
     workbooks regardless of its label, the swapped headers are repaired in
     the BATCH LIST file (skipped with a warning if it's open in Excel),
-    and any row whose qty still disagrees with the packet gets a console
-    QTY MISMATCH warning.
+    and any row whose qty still disagrees with the packet keeps the BATCH
+    LIST value but is flagged three ways: its DYPN QTY cell (NEST col I)
+    is filled yellow in the workbook, a QTY MISMATCH console warning is
+    logged, and an end-of-run QTY VERIFICATION summary repeats every
+    mismatch. Parts missing from the packet summary are reported as
+    UNVERIFIED in the same summary.
 
   - Nest number regex accepts legacy numeric and alphanumeric formats
     (case-insensitive):
@@ -112,6 +116,7 @@ from pathlib import Path
 
 import openpyxl
 from openpyxl import load_workbook
+from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
@@ -553,6 +558,39 @@ def _paste_batch_rows_into_nest(nest_ws, batch_rows: list):
         dest_row = 4 + i
         for j, val in enumerate(row_data):
             nest_ws.cell(dest_row, 6 + j).value = val  # F=6 through K=11
+
+
+# Yellow fill marking a DYPN QTY cell that disagrees with the nest packet.
+_QTY_MISMATCH_FILL = PatternFill("solid", fgColor="FFFF00")
+
+
+def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
+                         workbook_name: str, log, mismatches: list,
+                         unverified: list):
+    """
+    Compare each pasted batch row's qty against the nest packet's
+    SUMMARY OF NEST quantities (pmap, keyed (DYPN, WORK ORDER) upper).
+
+    A row whose qty disagrees with the packet keeps the BATCH LIST value
+    but gets its DYPN QTY cell (NEST col I) filled yellow plus a console
+    warning. A row absent from a non-empty packet summary is reported as
+    unverifiable. Both are appended to the run-level mismatches /
+    unverified lists that feed the end-of-run summary block.
+    """
+    for i, (wo, dypn, _mat, qty, _nestval, _scope) in enumerate(batch_rows):
+        pdf_qty = pmap.get((str(dypn).strip().upper(),
+                            str(wo).strip().upper()))
+        if pdf_qty is None:
+            if pmap:
+                unverified.append((nest, dypn, wo, qty))
+                log(f"  WARNING: {dypn} / {wo} is not in the nest packet "
+                    f"summary -- qty {qty} could NOT be verified.")
+        elif _as_int(qty) != pdf_qty:
+            mismatches.append((nest, dypn, wo, qty, pdf_qty))
+            nest_ws.cell(4 + i, 9).fill = _QTY_MISMATCH_FILL  # col I = DYPN QTY
+            log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: BATCH LIST says "
+                f"{qty}, nest packet says {pdf_qty} -- qty cell highlighted "
+                f"yellow in {workbook_name}.")
 
 
 def _fill_nest_part_rows(nest_ws, num_parts: int):
@@ -1323,6 +1361,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     # Per-nest processing loop
     # ------------------------------------------------------------------ #
+    qty_mismatches = []   # (nest, dypn, wo, batch qty, packet qty)
+    qty_unverified = []   # (nest, dypn, wo, batch qty) -- not in packet summary
     total_nests = len(nest_numbers)
     for nest_idx, nest in enumerate(nest_numbers):
         if cancel_event.is_set():
@@ -1377,15 +1417,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             _paste_batch_rows_into_nest(nest_ws, batch_rows)
 
             # Residual QTY check: even the verified column can disagree
-            # with the packet on individual rows -- flag those loudly so
-            # the operator cross-checks the paperwork.
-            pmap = packet_qtys.get(nest) or {}
-            for wo, dypn, _mat, qty, _nestval, _scope in batch_rows:
-                pdf_qty = pmap.get((str(dypn).strip().upper(),
-                                    str(wo).strip().upper()))
-                if pdf_qty is not None and _as_int(qty) != pdf_qty:
-                    log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: "
-                        f"BATCH LIST says {qty}, nest packet says {pdf_qty}.")
+            # with the packet on individual rows -- highlight those cells
+            # and collect them for the end-of-run summary.
+            _flag_qty_mismatches(nest_ws, batch_rows,
+                                 packet_qtys.get(nest) or {}, nest,
+                                 nest_excel.name, log,
+                                 qty_mismatches, qty_unverified)
 
         # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
         num_parts = len(batch_rows)
@@ -1432,6 +1469,25 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # Cleanup
     # ------------------------------------------------------------------ #
     forecast_wb.close()
+
+    # ------------------------------------------------------------------ #
+    # QTY verification summary -- repeated at the end so warnings that
+    # scrolled by during the run cannot be missed.
+    # ------------------------------------------------------------------ #
+    if qty_mismatches or qty_unverified:
+        log(f"\n{'!'*50}")
+        log("QTY VERIFICATION -- MANUAL REVIEW NEEDED:")
+        for nest, dypn, wo, qty, pdf_qty in qty_mismatches:
+            log(f"  MISMATCH    {nest}  {dypn} / {wo}: workbook has {qty}, "
+                f"nest packet says {pdf_qty} (cell highlighted yellow)")
+        for nest, dypn, wo, qty in qty_unverified:
+            log(f"  UNVERIFIED  {nest}  {dypn} / {wo}: qty {qty} not found "
+                f"in the packet summary")
+        log("Cross-check these against page 2 of the nest packet PDF "
+            "before releasing paperwork.")
+        log(f"{'!'*50}")
+    elif packet_qtys:
+        log("\nAll part quantities verified against the nest packet PDFs.")
 
     progress_callback(100)
     log(f"\n{'='*50}")
