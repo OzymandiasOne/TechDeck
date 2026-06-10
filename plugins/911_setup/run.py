@@ -35,6 +35,16 @@ v1.2.0 changes
     Blank/missing values fall back to the original Path.home() defaults,
     so existing installs keep working without any setup.
 
+  - DYPN QTY verification (v1.4.0): some upstream BATCH LISTs arrive with
+    the 'DYPN QTY' and 'Material Amount (Total)' headers swapped. Before
+    pasting batch rows, both columns are scored against the per-part
+    quantities in each nest packet PDF's SUMMARY OF NEST page (keyed by
+    DYPN + Work Order); the column the packets agree with feeds the nest
+    workbooks regardless of its label, the swapped headers are repaired in
+    the BATCH LIST file (skipped with a warning if it's open in Excel),
+    and any row whose qty still disagrees with the packet gets a console
+    QTY MISMATCH warning.
+
   - Nest number regex accepts legacy numeric and alphanumeric formats
     (case-insensitive):
       * P07866, S013      (P/S-prefixed format)
@@ -281,7 +291,198 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
     return _windows_natural_sorted(seen)
 
 
-def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str) -> list:
+# ---------------------------------------------------------------------------
+# DYPN QTY verification against the nest packet PDFs
+#
+# Upstream BATCH LISTs sometimes ship with the 'DYPN QTY' and
+# 'Material Amount (Total)' headers swapped, so the column labeled
+# 'DYPN QTY' carries material amounts and vice versa (first confirmed in
+# GX030, Jun 2026). The packet PDF's SUMMARY OF NEST page is the ground
+# truth for per-part quantities, so before pasting batch rows we check
+# both candidate columns against the packets, use whichever column the
+# packets agree with, and repair the swapped headers in the BATCH LIST.
+# ---------------------------------------------------------------------------
+
+_SUMMARY_REF_RE = re.compile(r'^\d{1,4}$')
+_SUMMARY_WO_RE = re.compile(r'^[A-Z]{1,2}\d{5,8}$', re.IGNORECASE)
+_SUMMARY_PART_RE = re.compile(r'^[A-Z0-9][A-Z0-9.\-]{3,}$', re.IGNORECASE)
+
+
+def _as_int(value):
+    """Coerce a cell/PDF value to int, or None if it isn't numeric."""
+    try:
+        return int(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_packet_summary_qtys(pdf_path: Path) -> dict:
+    """
+    Parse the SUMMARY OF NEST table(s) in a nest packet PDF.
+
+    Returns {(PART NUMBER, WORK ORDER): qty} (keys uppercased, qty summed
+    across duplicate rows). The table renders as a flat line sequence --
+    REF / PART NUMBER / QTY / WORK ORDER / SK headers, then per part:
+      <ref int> <part number> <qty int> <work order> [sk]
+    -- so rows are recovered by sliding a 4-line window over the page text
+    and keeping windows that match that shape.
+    """
+    qtys = {}
+    if not PYMUPDF_AVAILABLE:
+        return qtys
+    doc = fitz.open(pdf_path)
+    try:
+        for page in doc:
+            text = page.get_text()
+            if "SUMMARY OF NEST" not in text.upper():
+                continue
+            lines = [ln.strip() for ln in text.splitlines()]
+            i = 0
+            while i + 3 < len(lines):
+                ref, part, qty, wo = lines[i:i + 4]
+                if (_SUMMARY_REF_RE.match(ref)
+                        and _SUMMARY_PART_RE.match(part)
+                        and not _SUMMARY_REF_RE.match(part)
+                        and _SUMMARY_REF_RE.match(qty)
+                        and _SUMMARY_WO_RE.match(wo)):
+                    key = (part.upper(), wo.upper())
+                    qtys[key] = qtys.get(key, 0) + int(qty)
+                    i += 4
+                else:
+                    i += 1
+    finally:
+        doc.close()
+    return qtys
+
+
+def _find_header_col_prefix(ws, prefix: str, header_row: int):
+    """Like _find_header_col but matches on a case-insensitive prefix, so
+    'Material Amount (Total)' and any future suffix variants both hit."""
+    for col in range(1, ws.max_column + 1):
+        val = ws.cell(header_row, col).value
+        if val is not None and str(val).strip().upper().startswith(prefix.upper()):
+            return col
+    return None
+
+
+def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
+                          nests: list, log) -> tuple:
+    """
+    Decide which BATCH LIST column truly holds the DYPN quantities by
+    scoring the column labeled 'DYPN QTY' and the one labeled
+    'Material Amount (Total)' against every available packet PDF's
+    SUMMARY OF NEST quantities (keyed by DYPN + Work Order).
+
+    Returns (qty_col, swap_with, packet_qtys):
+      qty_col     -- 1-based column to read DYPN QTY from
+      swap_with   -- column whose header must be swapped with qty_col in
+                     the BATCH LIST file (None when the label is correct)
+      packet_qtys -- {nest: {(part, wo): qty}} for later per-row warnings
+    Falls back to the labeled column (with a warning) when there is
+    nothing to verify against.
+    """
+    HEADER_ROW = 3
+    wb = load_workbook(batch_list_path, data_only=True)
+    ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
+
+    col_labeled = _find_header_col(ws, "DYPN QTY", HEADER_ROW)
+    col_mat = _find_header_col_prefix(ws, "Material Amount", HEADER_ROW)
+    col_dypn = _find_header_col(ws, "DYPN", HEADER_ROW)
+    col_wo = _find_header_col(ws, "Work Order", HEADER_ROW)
+    col_nest = _find_header_col(ws, "Nest Pkg Nbr", HEADER_ROW)
+
+    packet_qtys = {}
+    for nest in nests:
+        pdf = _find_nest_pdf(nest_packages_folder, nest)
+        if pdf is None:
+            log(f"  WARNING: No packet PDF for nest {nest} -- skipping it in QTY verification.")
+            continue
+        try:
+            qmap = _parse_packet_summary_qtys(pdf)
+        except Exception as e:
+            log(f"  WARNING: Could not parse {pdf.name} for quantities: {e}")
+            continue
+        if qmap:
+            packet_qtys[nest] = qmap
+        else:
+            log(f"  WARNING: No SUMMARY OF NEST quantities found in {pdf.name}.")
+
+    if col_labeled is None or None in (col_dypn, col_wo, col_nest) or not packet_qtys:
+        wb.close()
+        log("  WARNING: Could not verify the DYPN QTY column against the nest "
+            "packets -- using the column labeled 'DYPN QTY' as-is.")
+        return col_labeled, None, packet_qtys
+
+    match_labeled = match_mat = compared = 0
+    for row in range(HEADER_ROW + 1, ws.max_row + 1):
+        nest_val = ws.cell(row, col_nest).value
+        qmap = packet_qtys.get(str(nest_val).strip()) if nest_val is not None else None
+        if not qmap:
+            continue
+        key = (str(ws.cell(row, col_dypn).value).strip().upper(),
+               str(ws.cell(row, col_wo).value).strip().upper())
+        pdf_qty = qmap.get(key)
+        if pdf_qty is None:
+            continue
+        compared += 1
+        if _as_int(ws.cell(row, col_labeled).value) == pdf_qty:
+            match_labeled += 1
+        if col_mat is not None and _as_int(ws.cell(row, col_mat).value) == pdf_qty:
+            match_mat += 1
+
+    mat_header = str(ws.cell(HEADER_ROW, col_mat).value).strip() if col_mat else ""
+    wb.close()
+
+    if compared == 0:
+        log("  WARNING: No BATCH LIST rows could be matched to the nest packets "
+            "(DYPN/Work Order mismatch?) -- using the column labeled 'DYPN QTY' as-is.")
+        return col_labeled, None, packet_qtys
+
+    log(f"  'DYPN QTY' column matches the packets on {match_labeled}/{compared} rows; "
+        f"'{mat_header or 'Material Amount'}' on {match_mat}/{compared}.")
+
+    if match_mat > match_labeled:
+        log(f"  Headers are SWAPPED: true DYPN QTY is column "
+            f"{get_column_letter(col_mat)} ('{mat_header}').")
+        return col_mat, col_labeled, packet_qtys
+
+    if match_labeled == 0:
+        log("  WARNING: NEITHER column matches the packet quantities -- "
+            "using the column labeled 'DYPN QTY'; verify the paperwork by hand.")
+    else:
+        log("  Verified: the column labeled 'DYPN QTY' holds the true quantities.")
+    return col_labeled, None, packet_qtys
+
+
+def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log):
+    """
+    Swap the two row-3 header cells in the BATCH LIST file so 'DYPN QTY'
+    sits over the column that actually matches the nest packets. A locked
+    file (open in Excel) is non-fatal: setup still reads the verified
+    column either way, only the on-disk label stays wrong.
+    """
+    try:
+        wb = load_workbook(batch_list_path)
+        ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
+        a, b = ws.cell(3, col_a).value, ws.cell(3, col_b).value
+        ws.cell(3, col_a).value = b
+        ws.cell(3, col_b).value = a
+        wb.save(batch_list_path)
+        wb.close()
+        log(f"  Swapped BATCH LIST headers: '{b}' <-> '{a}' "
+            f"(cols {get_column_letter(col_a)}/{get_column_letter(col_b)}).")
+        return True
+    except PermissionError:
+        log("  WARNING: BATCH LIST is open or locked -- headers NOT swapped. "
+            "Close it and re-run, or swap the two headers by hand.")
+        return False
+    except Exception as e:
+        log(f"  WARNING: Could not swap BATCH LIST headers: {e}")
+        return False
+
+
+def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str,
+                             qty_col_override: int = None) -> list:
     """
     Read the BATCH LIST 'BATCH' sheet and return rows matching nest_number
     in the 'Nest Pkg Nbr' column.
@@ -289,6 +490,10 @@ def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str) -> list:
     Headers in row 3, data from row 4.
     Pulls these columns by header name (case-insensitive):
       Work Order, DYPN, Material, DYPN QTY, Nest Pkg Nbr, SCOPE OF WORK
+
+    qty_col_override, when given, is the packet-verified DYPN QTY column
+    from _resolve_dypn_qty_col and is used instead of the 'DYPN QTY'
+    header lookup (the header can sit on the wrong column upstream).
 
     Returns list of 6-tuples in that order.
     """
@@ -300,7 +505,8 @@ def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str) -> list:
     col_work_order = _find_header_col(ws, "Work Order",    HEADER_ROW)
     col_dypn       = _find_header_col(ws, "DYPN",          HEADER_ROW)
     col_material   = _find_header_col(ws, "Material",      HEADER_ROW)
-    col_dypn_qty   = _find_header_col(ws, "DYPN QTY",      HEADER_ROW)
+    col_dypn_qty   = qty_col_override if qty_col_override is not None \
+        else _find_header_col(ws, "DYPN QTY", HEADER_ROW)
     col_nest       = _find_header_col(ws, "Nest Pkg Nbr",  HEADER_ROW)
     col_scope      = _find_header_col(ws, "SCOPE OF WORK", HEADER_ROW)
 
@@ -1015,6 +1221,22 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     progress_callback(10)
 
     # ------------------------------------------------------------------ #
+    # Step 2.7 -- Verify which BATCH LIST column truly holds DYPN QTY.
+    #
+    # The 'DYPN QTY' / 'Material Amount (Total)' headers arrive swapped on
+    # some batches; the packet PDFs' SUMMARY OF NEST quantities are ground
+    # truth. Score both columns against every available packet, use the
+    # winner for the nest workbooks, and repair the headers in the file.
+    # ------------------------------------------------------------------ #
+    nest_packages_folder = batch_folder / "NEST PACKAGES"
+
+    log("Verifying DYPN QTY column against the nest packet PDFs...")
+    qty_col, swap_with, packet_qtys = _resolve_dypn_qty_col(
+        batch_list_path, nest_packages_folder, all_nests, log)
+    if swap_with is not None:
+        _swap_batch_list_headers(batch_list_path, qty_col, swap_with, log)
+
+    # ------------------------------------------------------------------ #
     # Step 3 -- Create nest subfolders
     # ------------------------------------------------------------------ #
     log("Creating nest folders...")
@@ -1096,11 +1318,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         forecast_wb.close()
         return
 
-    # ------------------------------------------------------------------ #
-    # Determine NEST PACKAGES folder path
-    # ------------------------------------------------------------------ #
-    nest_packages_folder = batch_folder / "NEST PACKAGES"
-
     progress_callback(30)
 
     # ------------------------------------------------------------------ #
@@ -1147,7 +1364,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # -- Step 7: BATCH LIST -> NEST cols F-K, starting row 4 ---------
         log(f"  [Step 7] Extracting batch rows for {nest}...")
         try:
-            batch_rows = _get_batch_rows_for_nest(batch_list_path, nest)
+            batch_rows = _get_batch_rows_for_nest(batch_list_path, nest,
+                                                  qty_col_override=qty_col)
         except ValueError as e:
             log(f"  WARNING: {e} -- skipping batch data for {nest}")
             batch_rows = []
@@ -1157,6 +1375,17 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         else:
             log(f"  Found {len(batch_rows)} batch rows.")
             _paste_batch_rows_into_nest(nest_ws, batch_rows)
+
+            # Residual QTY check: even the verified column can disagree
+            # with the packet on individual rows -- flag those loudly so
+            # the operator cross-checks the paperwork.
+            pmap = packet_qtys.get(nest) or {}
+            for wo, dypn, _mat, qty, _nestval, _scope in batch_rows:
+                pdf_qty = pmap.get((str(dypn).strip().upper(),
+                                    str(wo).strip().upper()))
+                if pdf_qty is not None and _as_int(qty) != pdf_qty:
+                    log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: "
+                        f"BATCH LIST says {qty}, nest packet says {pdf_qty}.")
 
         # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
         num_parts = len(batch_rows)

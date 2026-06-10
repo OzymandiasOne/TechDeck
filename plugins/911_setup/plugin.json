@@ -2,7 +2,7 @@
   "id": "911_setup",
   "name": "911 Setup",
   "description": "Automates the full 911 QTDR batch setup: pick which nests to run, then creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, and generates inspection sheets. Nest numbers are sourced from the Quote File NEST column.",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
