@@ -388,6 +388,11 @@ class LinearInchWindow(PluginWindow):
 
     HIDDEN_BY_DEFAULT = {"BOUNDING_BOX", "BOUNDING BOX", "IGNORE"}
 
+    @classmethod
+    def _hidden_by_default(cls, layer):
+        name = layer.upper()
+        return name in cls.HIDDEN_BY_DEFAULT or name.startswith("BEND")
+
     def __init__(self, log=print):
         super().__init__("linear_inch_calculator", "Linear Inch Calculator")
         self.resize(1320, 840)
@@ -587,7 +592,7 @@ class LinearInchWindow(PluginWindow):
             chip = QPixmap(12, 12)
             chip.fill(QColor(self._layer_color(layer)))
             chk.setIcon(QIcon(chip))
-            chk.setChecked(layer.upper() not in self.HIDDEN_BY_DEFAULT)
+            chk.setChecked(not self._hidden_by_default(layer))
             chk.toggled.connect(self._on_layer_toggled)
             self.layers_layout.addWidget(chk)
             self.layer_checks[layer] = chk
