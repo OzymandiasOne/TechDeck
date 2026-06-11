@@ -398,20 +398,13 @@ class _MissingTile(QFrame):
         icon_box.setObjectName("missingIcon")
         icon_box.setFixedSize(HOME_TILE_ICON_BOX, HOME_TILE_ICON_BOX)
         icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_box.setStyleSheet(
-            f"#missingIcon {{ color: {theme.tile_missing_text}; "
-            f"font-size: 24px; font-weight: bold; background: transparent; "
-            f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
-        )
+        self._icon_box = icon_box
 
         missing_label = QLabel("Missing")
         missing_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         missing_label.setWordWrap(True)
-        missing_label.setStyleSheet(
-            f"color: {theme.tile_missing_text}; font-size: 10pt; font-weight: bold; "
-            f"background: transparent;"
-        )
         missing_label.setToolTip(f"{tile_id}\n(plugin missing from disk)")
+        self._missing_label = missing_label
 
         remove_btn = QPushButton("Remove")
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -437,6 +430,20 @@ class _MissingTile(QFrame):
         card_layout.addWidget(remove_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         card_layout.addStretch()
 
+        self.restyle(theme)
+
+    def restyle(self, theme):
+        """Apply theme colors. Called at construction and on live theme change
+        (this widget isn't ThemeAware, so HomePage.apply_theme re-stamps it)."""
+        self._icon_box.setStyleSheet(
+            f"#missingIcon {{ color: {theme.tile_missing_text}; "
+            f"font-size: 24px; font-weight: bold; background: transparent; "
+            f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
+        )
+        self._missing_label.setStyleSheet(
+            f"color: {theme.tile_missing_text}; font-size: 10pt; font-weight: bold; "
+            f"background: transparent;"
+        )
         self.setStyleSheet(
             f"_MissingTile {{ background-color: {theme.surface}; border-radius: 12px; }}"
         )
@@ -807,6 +814,7 @@ class TileGridController(QObject):
 
 class HomePage(QWidget, ThemeAware):
     profile_changed = Signal(str)
+    kit_changed = Signal()  # tile membership of the current kit changed from Home (e.g. missing-tile Remove)
     open_library = Signal()
     run_selected = Signal(list)
     plugin_log = Signal(str, str)
@@ -1032,6 +1040,11 @@ class HomePage(QWidget, ThemeAware):
             }}
         """)
         self._grid_widget.setStyleSheet(f"background-color: {theme.background};")
+
+        # Missing-tile placeholders bake their colors in, so re-stamp them here
+        # (PluginCards re-theme themselves via ThemeAware).
+        for tile in self._missing_tiles.values():
+            tile.restyle(theme)
 
         # Run button (shell hands this off to us via set_run_button).
         # Re-style based on its current mode (Run vs Cancel).
@@ -1315,6 +1328,9 @@ class HomePage(QWidget, ThemeAware):
             current_tiles.remove(tile_id)
             self.settings.set_profile_tiles(current_tiles)
         self._refresh_tiles()
+        # Keep the Library page in sync — it doesn't refresh on navigation, so
+        # without this it keeps showing (and re-saving!) the removed tile.
+        self.kit_changed.emit()
 
     def _drain_log_buffer(self):
         """Drain buffered log messages in batches to avoid flooding the Qt event queue."""

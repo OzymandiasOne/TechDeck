@@ -30,6 +30,7 @@ _PLUGIN_ID_RENAMES = {
     "run_time_estimator": "922_runtime_genie",
     "911_repeater": "911_batch_repeater",  # id now matches its folder
     "911_linear_inch_calc": "911_runtime_estimator",  # renamed 2026-06-04
+    "linear_inch_calculator": "customer_dxf_quoting",  # renamed 2026-06-10
 }
 
 

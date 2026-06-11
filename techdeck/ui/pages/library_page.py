@@ -291,6 +291,84 @@ class LibraryPluginCard(QFrame, ThemeAware):
         super().mousePressEvent(event)
 
 
+class _MissingLibraryTile(QFrame):
+    """Placeholder card for a kit tile whose plugin folder is gone from disk.
+
+    Toggleable like LibraryPluginCard: it starts CHECKED (it's still in the
+    kit), and the user can click to deselect it so the next Save drops it from
+    the profile. Without this, Save would silently write the dead id back.
+    """
+
+    toggled = Signal(bool)
+
+    def __init__(self, tile_id: str, theme, parent=None):
+        super().__init__(parent)
+        self.tile_id = tile_id
+        self.theme = theme
+        self._is_checked = True
+        self.setFixedSize(TILE_W, TILE_H)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        card_layout = QVBoxLayout(self)
+        card_layout.setContentsMargins(6, 10, 6, 8)
+        card_layout.setSpacing(5)
+
+        self._icon_box = QLabel("?")
+        self._icon_box.setObjectName("missingIcon")
+        self._icon_box.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
+        self._icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._missing_label = QLabel("Missing")
+        self._missing_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self._missing_label.setWordWrap(True)
+
+        self.setToolTip(
+            f"{tile_id}\n(plugin missing from disk)\n"
+            f"Click to deselect, then Save to remove it from this kit."
+        )
+
+        card_layout.addWidget(self._icon_box, 0, Qt.AlignmentFlag.AlignHCenter)
+        card_layout.addWidget(self._missing_label)
+
+        self.restyle(theme)
+
+    def restyle(self, theme):
+        """Apply theme colors. Called at construction and on live theme change
+        (this widget isn't ThemeAware, so LibraryPage.apply_theme re-stamps it)."""
+        self.theme = theme
+        self._icon_box.setStyleSheet(
+            f"#missingIcon {{ color: {theme.tile_missing_text}; "
+            f"font-size: 22px; font-weight: bold; background: transparent; "
+            f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
+        )
+        self._missing_label.setStyleSheet(
+            f"color: {theme.tile_missing_text}; font-size: 9pt; "
+            f"background-color: transparent;"
+        )
+        self._update_card_style()
+
+    def _update_card_style(self):
+        # Same selection visual as LibraryPluginCard so checked state reads
+        # the same way across the grid.
+        bg = self.theme.tile_selected if self._is_checked else self.theme.surface
+        self.setStyleSheet(f"""
+            _MissingLibraryTile {{
+                background-color: {bg};
+                border-radius: 10px;
+            }}
+            _MissingLibraryTile:hover {{
+                background-color: {self.theme.surface_hover};
+            }}
+        """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_checked = not self._is_checked
+            self._update_card_style()
+            self.toggled.emit(self._is_checked)
+        super().mousePressEvent(event)
+
+
 class LibraryPage(QWidget, ThemeAware):
     """
     Library page for browsing and selecting tiles.
@@ -309,6 +387,7 @@ class LibraryPage(QWidget, ThemeAware):
         super().__init__(parent)
         self.settings = settings
         self.selected_tile_ids = set()
+        self._missing_tile_widgets: list = []  # _MissingLibraryTile instances for theme re-stamping
 
         # Use the shared loader if MainWindow gave us one; otherwise scan now.
         from techdeck.core.plugin_loader import PluginLoader
@@ -541,7 +620,12 @@ class LibraryPage(QWidget, ThemeAware):
                 border-radius: 0px;
             }}
         """)
-    
+
+        # Missing-tile placeholders bake their colors in, so re-stamp them here
+        # (LibraryPluginCards re-theme themselves via ThemeAware).
+        for tile in self._missing_tile_widgets:
+            tile.restyle(theme)
+
     def refresh(self):
         """Reload profiles and current selection."""
         # Update profile dropdown
@@ -567,6 +651,7 @@ class LibraryPage(QWidget, ThemeAware):
     def _build_tile_grid(self):
         """Build the grid of available tiles + missing tiles from current profile."""
         # Clear existing tiles
+        self._missing_tile_widgets = []
         while self.tile_grid.count():
             item = self.tile_grid.takeAt(0)
             if item.widget():
@@ -636,39 +721,11 @@ class LibraryPage(QWidget, ThemeAware):
 
                 self.tile_grid.addWidget(card, row, col)
             else:
-                # Missing plugin - show disabled placeholder tile
-                card = QFrame()
-                card.setFixedSize(TILE_W, TILE_H)
-                card_layout = QVBoxLayout(card)
-                card_layout.setContentsMargins(6, 10, 6, 8)
-                card_layout.setSpacing(5)
-
-                icon_box = QLabel("?")
-                icon_box.setObjectName("missingIcon")
-                icon_box.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
-                icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                icon_box.setStyleSheet(
-                    f"#missingIcon {{ color: {theme.tile_missing_text}; "
-                    f"font-size: 22px; font-weight: bold; background: transparent; "
-                    f"border: 2px dashed {theme.tile_missing_border}; border-radius: 16px; }}"
-                )
-
-                missing_label = QLabel("Missing")
-                missing_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-                missing_label.setWordWrap(True)
-                missing_label.setStyleSheet(
-                    f"color: {theme.tile_missing_text}; font-size: 9pt; "
-                    f"background-color: transparent;"
-                )
-                missing_label.setToolTip(f"{tile_id}\n(plugin missing from disk)")
-
-                card_layout.addWidget(icon_box, 0, Qt.AlignmentFlag.AlignHCenter)
-                card_layout.addWidget(missing_label)
-
-                card.setStyleSheet(
-                    "QFrame { background-color: transparent; border-radius: 10px; }"
-                )
-
+                # Missing plugin — toggleable placeholder so the user can
+                # deselect it and Save to drop the dead id from the kit.
+                card = _MissingLibraryTile(tile_id, theme, parent=self)
+                card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
+                self._missing_tile_widgets.append(card)
                 self.tile_grid.addWidget(card, row, col)
 
             col += 1

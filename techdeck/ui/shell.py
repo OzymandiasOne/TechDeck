@@ -369,6 +369,11 @@ class MainWindow(QMainWindow):
         self.library_page = LibraryPage(self.settings, plugin_loader=self._plugin_loader)
         self.library_page.saved.connect(self._on_library_saved)
         self.library_page.return_home.connect(self._return_to_home)
+        # Library doesn't refresh on navigation (perf), so re-sync it whenever
+        # Home changes the kit (missing-tile Remove) or switches profile —
+        # otherwise its stale selection re-saves removed tiles back into the kit.
+        self.home_page.kit_changed.connect(self.library_page.refresh)
+        self.home_page.profile_changed.connect(lambda _name: self.library_page.refresh())
         self._step("library page built")
         QApplication.processEvents()
 
