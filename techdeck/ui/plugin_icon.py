@@ -46,6 +46,7 @@ PLUGIN_ICON_KEYS = {
     "batch_repeater":       "copy",
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",
+    "customer_dxf_quoting": "blueprint",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a

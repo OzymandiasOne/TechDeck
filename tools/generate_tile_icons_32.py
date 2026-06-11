@@ -773,6 +773,48 @@ def qr(d):                  # qr code generator
     _draw_grid(d, _QR_GRID, _QR_TONES)
 
 
+_BLUEPRINT_GRID = [
+    "................................",
+    "................................",
+    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
+    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
+    "..aabbbbbbbbbbbbbbbbbbbbbbbbaa..",
+    "..aabbbbbbbbbbbbbbbbbbbbbbbbaa..",
+    "..aabbbbbbbbbbbbbbbbbbbbbbbbaa..",
+    "..aabbbbbbbbbbbbbbbbbbbbbbbbaa..",
+    "..aabbbbddddddddddddddddbbbbaa..",
+    "..aabbbbddddddddddddddddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbddbbddbbbbddbbbbaa..",
+    "..aabbbbddbbddbbddbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddbbbbbbbbbbbbddbbbbaa..",
+    "..aabbbbddddddddddddddddbbbbaa..",
+    "..aabbbbddddddddddddddddbbbbaa..",
+    "..aabbbbbbbbbbbbbbbbccccccbbaa..",
+    "..aabbbbbbbbbbbbbbbbccccccbbaa..",
+    "..aabbbbbbbbbbbbbbbbccccccbbaa..",
+    "..aabbbbbbbbbbbbbbbbccccccbbaa..",
+    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
+    "..aaaaaaaaaaaaaaaaaaaaaaaaaaaa..",
+    "................................",
+    "................................",
+]
+# a: sheet border (darkest)   b: blueprint-blue paper   c: title block
+# d: white drawing lines (part outline + dashed bend line)
+_BLUEPRINT_TONES = {"a": "#16324C", "b": "#1D5C9E", "c": "#3E86C8", "d": "#EAF4FB"}
+
+def blueprint(d):           # customer dxf quoting
+    _draw_grid(d, _BLUEPRINT_GRID, _BLUEPRINT_TONES)
+
+
 _SYM_BINOCULARS_GRID = [
     "................................",
     "................................",
@@ -1989,6 +2031,7 @@ ICONS = {
     "copy": copy,
     "badge": badge,
     "qr": qr,
+    "blueprint": blueprint,
 }
 # Icons8 symbols (themed like the plugin tiles; sym_-prefixed keys).
 ICONS.update({
