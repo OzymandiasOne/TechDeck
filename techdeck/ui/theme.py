@@ -538,7 +538,12 @@ QComboBox::drop-down {{
 }}
 
 QComboBox::down-arrow {{
+    /* CSS border-triangle: width/height MUST be 0 or the subcontrol keeps its
+       default size and the borders paint as a solid blob instead of an arrow
+       (this is the only arrow styling plugin windows get). */
     image: none;
+    width: 0px;
+    height: 0px;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
     border-top: 5px solid {theme.text};
@@ -696,22 +701,3 @@ def get_current_palette(theme_name: str = "dark") -> ColorPalette:
     return THEMES.get(theme_name, THEMES["dark"])
 
 
-def get_missing_tile_style(theme_name: str = "dark") -> str:
-    theme = THEMES.get(theme_name, THEMES["dark"])
-    return f"""
-        QPushButton {{
-            background-color: {theme.tile_missing_bg};
-            color: {theme.tile_missing_text};
-            border: 1px solid {theme.tile_missing_border};
-            border-radius: 12px;
-        }}
-        QPushButton:hover {{
-            background-color: {theme.tile_missing_bg};
-            opacity: 0.9;
-        }}
-        QPushButton:checked {{
-            background-color: {theme.tile_missing_bg};
-            border: 1px solid {theme.tile_missing_border};
-            border-radius: 12px;
-        }}
-    """

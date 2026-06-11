@@ -323,6 +323,11 @@ class DxfView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setBackgroundBrush(QColor("#14141c"))
         self.setDragMode(QGraphicsView.NoDrag)
+        # No visible scrollbars: pan is drag-based (the hidden bars still hold
+        # the scroll range, so the drag-pan handlers keep working) and edge
+        # dimension labels no longer butt up against a scrollbar.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def wheelEvent(self, event):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
@@ -427,10 +432,11 @@ class QuotingWindow(PluginWindow):
         assign_row.addWidget(QLabel("Assign selected lines to:"))
         self.cmb_assign = QComboBox()
         self.cmb_assign.addItems(STANDARD_LAYERS)
+        # Auto-apply: picking a layer assigns the selected lines immediately —
+        # no Apply click. `activated` only fires on USER interaction (including
+        # re-picking the same entry), never on programmatic combo refreshes.
+        self.cmb_assign.activated.connect(self._assign_selected)
         assign_row.addWidget(self.cmb_assign, 1)
-        self.btn_assign = QPushButton("Apply")
-        self.btn_assign.clicked.connect(self._assign_selected)
-        assign_row.addWidget(self.btn_assign)
         right_layout.addLayout(assign_row)
 
         self.table = QTableWidget(0, 4)
@@ -573,6 +579,15 @@ class QuotingWindow(PluginWindow):
             self._geom_rect = QRectF(min(xs), min(ys),
                                      (max(xs) - min(xs)) or 1.0,
                                      (max(ys) - min(ys)) or 1.0)
+            # Pin the scene rect symmetrically around the part. Without this
+            # the label items inflate sceneRect asymmetrically (down/right),
+            # so fitInView's centering scroll could not reach center and the
+            # part sat high in the viewport. The 1x padding each side leaves
+            # room to drag-pan when zoomed in.
+            pad_x = max(self._geom_rect.width(), 1.0)
+            pad_y = max(self._geom_rect.height(), 1.0)
+            self.scene.setSceneRect(
+                self._geom_rect.adjusted(-pad_x, -pad_y, pad_x, pad_y))
 
     def _populate_layer_checks(self, preserve=None):
         preserve = preserve or {}
@@ -650,12 +665,13 @@ class QuotingWindow(PluginWindow):
                 pen.setWidthF(1.4)
             item.setPen(pen)
 
-    def _assign_selected(self):
+    def _assign_selected(self, _index=None):
         rows = sorted(self._selected_rows())
         if not rows:
-            QMessageBox.information(self, "Customer DXF Quoting",
-                                    "Select one or more lines first - click them in the "
-                                    "view (Ctrl+click for multiple) or in the table.")
+            # Combo navigation with nothing selected is a no-op (auto-apply
+            # fires on every pick) — a modal here would nag, so just log a hint.
+            self._log("No lines selected — click a line in the view or table, "
+                      "then pick a layer to reassign it.")
             return
         layer = self.cmb_assign.currentText()
         if layer not in self.layer_colors:
@@ -709,8 +725,10 @@ class QuotingWindow(PluginWindow):
 
     def fit_view(self):
         if not self._geom_rect.isNull():
-            margin_x = self._geom_rect.width() * 0.05
-            margin_y = self._geom_rect.height() * 0.05
+            # 12% breathing room so edge dimension labels (fixed-size text
+            # hanging outside the geometry) stay clear of the view edges.
+            margin_x = self._geom_rect.width() * 0.12
+            margin_y = self._geom_rect.height() * 0.12
             self.view.fitInView(self._geom_rect.adjusted(-margin_x, -margin_y,
                                                          margin_x, margin_y),
                                 Qt.KeepAspectRatio)
