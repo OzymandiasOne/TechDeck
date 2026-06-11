@@ -1,0 +1,24 @@
+{
+  "id": "linear_inch_calculator",
+  "name": "Linear Inch Calculator",
+  "description": "Opens a DXF flat pattern in an interactive viewer: layer-colored geometry, per-line measurements, and total linear inches of cut.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "other",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "timeout": 1800,
+  "settings": {
+    "fields": [
+      {
+        "key": "default_dxf",
+        "type": "file",
+        "label": "Default DXF File",
+        "description": "Optional DXF to open automatically on launch. Leave blank to pick a file each time.",
+        "placeholder": "C:\\path\\to\\part.DXF",
+        "required": false,
+        "default": ""
+      }
+    ]
+  }
+}
