@@ -156,7 +156,9 @@ class SettingsPage(QWidget, ThemeAware):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(24)
 
-        title = QLabel("Help && Feedback")
+        # Plain QLabels render text literally (no mnemonic handling), so a
+        # single & is correct here — the && escape is only for the tab text.
+        title = QLabel("Help & Feedback")
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
@@ -263,7 +265,9 @@ class SettingsPage(QWidget, ThemeAware):
         btn_row = QHBoxLayout()
         self.save_plugin_btn = QPushButton("Save App Settings")
         self.save_plugin_btn.setMinimumHeight(36)
-        self.save_plugin_btn.setMaximumWidth(150)
+        # Wide enough for the full label — 150 clipped "Save App Settings".
+        self.save_plugin_btn.setMinimumWidth(170)
+        self.save_plugin_btn.setMaximumWidth(220)
         self.save_plugin_btn.setEnabled(False)
         self.save_plugin_btn.clicked.connect(self._save_plugin_settings)
         btn_row.addWidget(self.save_plugin_btn)
