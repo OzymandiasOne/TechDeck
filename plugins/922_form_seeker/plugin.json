@@ -8,6 +8,16 @@
   "requires_admin": false,
   "timeout": 900,
   "settings": {
-    "fields": []
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "922 Production Packages Root",
+        "description": "Where 'Batch {N}' folders live. Leave blank to auto-detect '922 QTDR Production Packages' under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
+        "required": false,
+        "default": ""
+      }
+    ]
   }
 }

@@ -8,6 +8,16 @@
   "requires_admin": false,
   "requires_main_thread": false,
   "settings": {
-    "fields": []
+    "fields": [
+      {
+        "key": "qtdr_base_path",
+        "type": "directory",
+        "label": "911 QTDR Root",
+        "description": "Root containing '04 - Notes - Protocols - Tutorials \\ TECH SERVICES \\ REPEATER'. Leave blank to auto-detect '911 QTDR' under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 911 QTDR",
+        "required": false,
+        "default": ""
+      }
+    ]
   }
 }

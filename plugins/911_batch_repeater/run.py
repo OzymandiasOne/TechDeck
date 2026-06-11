@@ -34,10 +34,11 @@ except ModuleNotFoundError:
 # Path helpers
 # ---------------------------------------------------------------------------
 
-def _repeater_root() -> Path | None:
-    """REPEATER folder under the 911 QTDR root. Auto-discovers the QTDR root
-    across all OneDrive path variants; returns None if it can't be found."""
-    qtdr = sdk.resolve_911_qtdr_root()
+def _repeater_root(qtdr_override: str = "") -> Path | None:
+    """REPEATER folder under the 911 QTDR root. A configured override wins;
+    otherwise auto-discovers the QTDR root across all OneDrive path variants;
+    returns None if it can't be found."""
+    qtdr = sdk.resolve_911_qtdr_root(qtdr_override)
     if qtdr is None:
         return None
     return (
@@ -205,6 +206,7 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
 def run(params, progress_callback, cancel_event):
     log = params.get("log", print)
     console = params.get("console", None)
+    settings = params.get("settings", {}) or {}
 
     log("911 Repeater starting...")
     progress_callback(0)
@@ -228,10 +230,11 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     # Step 2 - Resolve and validate paths
     # ------------------------------------------------------------------ #
-    repeater_root = _repeater_root()
+    repeater_root = _repeater_root(settings.get("qtdr_base_path", ""))
     if repeater_root is None or not repeater_root.exists():
         log("ERROR: Could not locate the 911 QTDR REPEATER folder. "
-            "Verify OneDrive is synced.")
+            "Verify OneDrive is synced, or set the 911 QTDR root in "
+            "Settings > Apps > 911 Batch Repeater.")
         return
     log(f"Repeater root : {repeater_root}")
 

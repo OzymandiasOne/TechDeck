@@ -8,6 +8,25 @@
   "requires_admin": false,
   "timeout": 1800,
   "settings": {
-    "fields": []
+    "fields": [
+      {
+        "key": "qtdr_911_root",
+        "type": "directory",
+        "label": "911 QTDR Root",
+        "description": "Where 911 batch folders are audited from. Leave blank to auto-detect '911 QTDR' under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 911 QTDR",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "qtdr_922_root",
+        "type": "directory",
+        "label": "922 Production Packages Root",
+        "description": "Where 922 'Batch {N}' folders are audited from. Leave blank to auto-detect '922 QTDR Production Packages' under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
+        "required": false,
+        "default": ""
+      }
+    ]
   }
 }

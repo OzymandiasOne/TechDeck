@@ -318,6 +318,7 @@ def _audit_911(batch: str, batch_folder: Path, log):
 def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get("log", print)
     console = params.get("console")
+    settings = params.get("settings", {}) or {}
 
     log("Starting Batch Auditor...")
     progress_callback(0)
@@ -337,9 +338,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         batch_no = sdk.parse_922_batch(raw_batch or "")
         if not batch_no:
             raise ValueError(f"Unrecognised 922 batch: {raw_batch!r}")
-        root = sdk.resolve_922_root()
+        root = sdk.resolve_922_root(settings.get("qtdr_922_root", ""))
         if not root:
-            raise RuntimeError("Could not locate '922 QTDR Production Packages'. Verify OneDrive sync.")
+            raise RuntimeError(
+                "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
+                "sync, or set the root in Settings > Apps > Batch Auditor.")
         batch_path = sdk.find_922_batch_path(root, batch_no)
         if not batch_path:
             raise RuntimeError(f"Batch {batch_no} not found under {root} (also checked '1 - Completed').")
@@ -352,9 +355,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         batch = sdk.normalize_911_batch(raw_batch or "")
         if not batch:
             raise ValueError("No 911 batch entered.")
-        root = sdk.resolve_911_qtdr_root()
+        root = sdk.resolve_911_qtdr_root(settings.get("qtdr_911_root", ""))
         if not root:
-            raise RuntimeError("Could not locate '911 QTDR'. Verify OneDrive sync.")
+            raise RuntimeError(
+                "Could not locate '911 QTDR'. Verify OneDrive sync, or set "
+                "the root in Settings > Apps > Batch Auditor.")
         batch_folder = sdk.find_911_batch_folder(root, batch)
         if not batch_folder:
             raise RuntimeError(f"911 batch folder '{batch}' not found under {root}.")

@@ -282,6 +282,7 @@ def _revert_edits(ws, edits: list[tuple[str, str]], log) -> None:
 def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get('log', print)
     console = params.get('console')
+    settings = params.get('settings', {}) or {}
 
     log("Starting 922 Kitting...")
     progress_callback(0)
@@ -300,10 +301,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         raise ValueError(f"Unrecognised batch input: {raw!r}")
     log(f"Batch: {batch_no}")
 
-    root = sdk.resolve_922_root()
+    root = sdk.resolve_922_root(settings.get('base_path', ''))
     if not root:
         raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. Verify OneDrive sync."
+            "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
+            "sync, or set the root in Settings > Apps > 922 Kitting."
         )
     batch_path = sdk.find_922_batch_path(root, batch_no)
     if not batch_path:

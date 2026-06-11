@@ -77,6 +77,7 @@ def _find_7000_folders(order_dir: Path) -> list[Path]:
 def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get('log', print)
     console = params.get('console')
+    settings = params.get('settings', {}) or {}
 
     log("Starting 922 Runtime Genie...")
     progress_callback(0)
@@ -92,11 +93,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log(f"Batch: {batch_no}")
 
     # ── Locate batch root ──────────────────────────────────────────────────────
-    root = sdk.resolve_922_root()
+    root = sdk.resolve_922_root(settings.get('base_path', ''))
     if not root:
         raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. "
-            "Verify OneDrive is synced."
+            "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
+            "is synced, or set the root in Settings > Apps > 922 Runtime Genie."
         )
 
     batch_path = sdk.find_922_batch_path(root, batch_no)
