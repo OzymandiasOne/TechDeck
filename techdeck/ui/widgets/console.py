@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QLineEdit, QPushButton, QLabel, QTabBar, QStackedWidget, QFrame, QToolButton
 )
-from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot
+from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer
 from PySide6.QtGui import QTextCursor, QFont
 import threading
 
@@ -198,6 +198,46 @@ class ConsoleWidget(QWidget, ThemeAware):
         # Initial message
         self.append_system("TechDeck online. Type /help for available commands.")
     
+    def show_read_more_hint(self):
+        """Float a small "read more" pill at the bottom of the output viewport.
+
+        Used by /help, which anchors the scroll at the START of its block —
+        the pill makes it obvious there is more content below the fold. It
+        hides as soon as the user scrolls (any further append auto-scrolls,
+        which also hides it) or after a few seconds.
+        """
+        from techdeck.ui.theme_manager import get_theme_manager
+        theme = get_theme_manager().get_current_palette()
+        if getattr(self, "_read_more_pill", None) is None:
+            self._read_more_pill = QLabel(self.output)
+            self._read_more_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._read_more_pill.hide()
+            self._read_more_timer = QTimer(self)
+            self._read_more_timer.setSingleShot(True)
+            self._read_more_timer.timeout.connect(self._read_more_pill.hide)
+            self.output.verticalScrollBar().valueChanged.connect(
+                self._hide_read_more_hint)
+        self._read_more_pill.setText("▼  read more  ▼")
+        self._read_more_pill.setStyleSheet(
+            f"background-color: {theme.surface}; color: {theme.text}; "
+            f"border: 1px solid {theme.border_strong}; border-radius: 10px; "
+            f"padding: 3px 12px; font-size: 11px;"
+        )
+        self._read_more_pill.adjustSize()
+        vp = self.output.viewport()
+        self._read_more_pill.move(
+            (vp.width() - self._read_more_pill.width()) // 2,
+            vp.height() - self._read_more_pill.height() - 8,
+        )
+        self._read_more_pill.show()
+        self._read_more_pill.raise_()
+        self._read_more_timer.start(8000)
+
+    def _hide_read_more_hint(self, _value=None):
+        pill = getattr(self, "_read_more_pill", None)
+        if pill is not None and pill.isVisible():
+            pill.hide()
+
     def add_header_button(self, button: QPushButton, far_right: bool = False):
         """Add a button to the console header.
 

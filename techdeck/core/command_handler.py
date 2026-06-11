@@ -61,7 +61,7 @@ class CommandHandler:
         self._rave_theme_name = None     # theme to restore when the rave ends
         self._rave_orig = None           # (accent, hover, pressed) saved before raving
         self._crabs = []
-        self._moth = None
+        self._moths = []  # every /friend adds one (capped), /clear shoos them all
         self._jack_running = False
         self._jack_cancel = threading.Event()  # set to fold/abort an active game
 
@@ -123,7 +123,7 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
-            "  /friend          - Summon a little friend (haiku + musings)\n"
+            "  /friend          - Summon a little friend\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -143,6 +143,10 @@ class CommandHandler:
             rect = output.cursorRect(anchor)
             sb = output.verticalScrollBar()
             sb.setValue(sb.value() + rect.top())
+            # Anchoring at the top hides the rest of the list below the fold —
+            # show a floating "read more" pill so that's discoverable.
+            if sb.value() < sb.maximum():
+                self.console.show_read_more_hint()
 
     def _cmd_clear(self, args: str):
         self.console.clear()
@@ -469,13 +473,13 @@ class CommandHandler:
             self.console.append_system("Rave over. Productivity +10.")
 
     def _stop_moth(self):
-        """Dismiss the moth if present (used by /clear)."""
-        if self._moth is not None:
+        """Dismiss all moths if present (used by /clear)."""
+        for moth in self._moths:
             try:
-                self._moth.dismiss()
+                moth.dismiss()
             except Exception:
                 pass
-            self._moth = None
+        self._moths = []
 
     # ------------------------------------------------------------------ #
     #  /jack  — Blackjack
@@ -510,7 +514,7 @@ class CommandHandler:
 
         log("")
         log(f"  -- BLACKJACK with {self.DEALER_NAME} --")
-        log(f"  Bankroll: ${bankroll}   Bet: ${bet} per hand")
+        log(f"  Bankroll: ${bankroll}   You set your bet each hand (starts at ${bet})")
         log(f"  Commands: hit  stand  double  quit")
         log("")
 
@@ -521,9 +525,31 @@ class CommandHandler:
                     bankroll = 100
                     self.settings.set_blackjack_bankroll(bankroll)
 
-                if bankroll < bet:
-                    log(f"  Not enough for a full bet. Bankroll: ${bankroll}")
-                    break
+                # --- Bet for this hand ---
+                # (The console ignores empty submissions, so "same" repeats
+                # the previous bet instead of a bare Enter.)
+                bet = min(bet, bankroll)
+                while True:
+                    raw = ask(f"  Bet? (1-{bankroll}, 'same' = ${bet}, quit)").strip().lower()
+                    if raw in ("quit", "q"):
+                        log(f"  {self.DEALER_NAME}: Come back when you're ready.")
+                        self.settings.set_blackjack_bankroll(bankroll)
+                        self._jack_running = False
+                        return
+                    if raw in ("same", "s"):
+                        break
+                    try:
+                        amount = int(raw.lstrip("$"))
+                    except ValueError:
+                        log("  A dollar amount, 'same', or 'quit'.")
+                        continue
+                    if amount < 1:
+                        log("  Minimum bet is $1.")
+                    elif amount > bankroll:
+                        log(f"  You only have ${bankroll}.")
+                    else:
+                        bet = amount
+                        break
 
                 # --- Deal ---
                 deck = self._new_deck()
@@ -574,6 +600,11 @@ class CommandHandler:
                             bankroll -= bet
                             self.settings.set_blackjack_bankroll(bankroll)
                             log(f"  {self.DEALER_NAME}: {random.choice(['Happens.', 'Too many.', 'Rough.'])}")
+                            break
+                        if player_total == 21:
+                            # Nothing left to decide — stand automatically and
+                            # let the dealer play out the hand.
+                            log(f"  Twenty-one. {self.DEALER_NAME} plays it out.")
                             break
 
                     elif resp in ("s", "stand"):
@@ -764,16 +795,20 @@ class CommandHandler:
         lum = 0.299 * bg.red() + 0.587 * bg.green() + 0.114 * bg.blue()
         fg = QColor("#3A2A14") if lum > 150 else QColor("#F3EAD2")
 
-        if self._moth is None or not self._moth.isVisible():
-            self._moth = MothWidget(color=moth_color, outline=moth_outline, frames=frames)
-            self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
-            self._moth.attach_to(mw)             # follow + minimize with the window
-            self._moth.spawn_from_edge(point)
+        # Every /friend invites ANOTHER critter in (click one to send it to a
+        # new perch; double-click or /clear to shoo them away). Capped so the
+        # office doesn't turn into an aviary.
+        self._moths = [m for m in self._moths if m is not None and m.isVisible()]
+        if len(self._moths) >= 6:
+            self.console.append_system(
+                f"Six {critter}s is plenty. The office is not an aviary.")
+            return
+        moth = MothWidget(color=moth_color, outline=moth_outline, frames=frames)
+        moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
+        moth.attach_to(mw)             # follow + minimize with the window
+        moth.spawn_from_edge(point)
+        self._moths.append(moth)
+        if len(self._moths) == 1:
             self.console.append_system(f"A {critter} flutters in and settles down.")
         else:
-            self._moth.set_color(moth_color, moth_outline)
-            self._moth.set_frames(frames)
-            self._moth.configure_speech(generate_haiku, generate_musing, fg, bg, frame)
-            self._moth.attach_to(mw)
-            self._moth.fly_to(point)
-            self.console.append_system(f"The {critter} flits to a new perch.")
+            self.console.append_system(f"Another {critter} flutters in to join the first.")

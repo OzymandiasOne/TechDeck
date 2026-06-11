@@ -12,7 +12,7 @@ import random
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtCore import Qt, QTimer, QPoint, QRectF, QEvent
+from PySide6.QtCore import Qt, QTimer, QPoint, QRect, QRectF, QEvent
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QFontDatabase
 
 
@@ -699,24 +699,32 @@ class MothWidget(QWidget):
         The body extends toward whichever side has more room, and the tail leaves
         the near corner diagonally onto the moth. Tail from a BOTTOM corner (bubble
         above the moth) by default; from a TOP corner (below) if there's no room.
+
+        Clamps to the HOST WINDOW when attached — clamping to the primary
+        screen put the bubble outside the TechDeck window (most visibly with
+        the window maximized on a non-primary monitor).
         """
-        screen = QApplication.primaryScreen().availableGeometry()
+        if self._host is not None:
+            bounds = QRect(self._host.mapToGlobal(QPoint(0, 0)), self._host.size())
+        else:
+            scr = self.screen() or QApplication.primaryScreen()
+            bounds = scr.availableGeometry()
         bw, bh = self._bubble.width(), self._bubble.height()
         moth_cx = self.x() + self.SIZE_W // 2
         gap = 8
-        left = moth_cx <= (screen.left() + screen.right()) // 2   # moth on left -> tail on left
+        left = moth_cx <= (bounds.left() + bounds.right()) // 2   # moth on left -> tail on left
 
         # Prefer above: bottom corner, tip a touch above the moth.
         corner = "bl" if left else "br"
         tipx, tipy = self._bubble.tip_offset(corner)
         by = (self.y() - gap) - tipy
-        if by < screen.top() + 4:                    # no room above -> go below
+        if by < bounds.top() + 4:                    # no room above -> go below
             corner = "tl" if left else "tr"
             tipx, tipy = self._bubble.tip_offset(corner)
             by = (self.y() + self.SIZE_H + gap) - tipy
         bx = moth_cx - tipx                          # tip column over the moth centre
-        bx = max(screen.left() + 4, min(bx, screen.right() - bw - 4))
-        by = max(screen.top() + 4, min(by, screen.bottom() - bh - 4))
+        bx = max(bounds.left() + 4, min(bx, bounds.right() - bw - 4))
+        by = max(bounds.top() + 4, min(by, bounds.bottom() - bh - 4))
         return QPoint(bx, by), corner
 
     def _hide_bubble(self):
@@ -732,11 +740,27 @@ class MothWidget(QWidget):
         self._flap_seq = []
         self._speak_count = 0
 
+    def flit_somewhere(self):
+        """Fly to a fresh random perch in the host's upper-central area
+        (same zone /friend spawns into, so it never lands on a button)."""
+        if self._host is not None:
+            tl = self._host.mapToGlobal(QPoint(0, 0))
+            w, h = self._host.width(), self._host.height()
+        else:
+            geo = (self.screen() or QApplication.primaryScreen()).availableGeometry()
+            tl, w, h = geo.topLeft(), geo.width(), geo.height()
+        self.fly_to(QPoint(
+            tl.x() + random.randint(int(w * 0.22), int(w * 0.78)),
+            tl.y() + random.randint(int(h * 0.18), int(h * 0.50)),
+        ))
+
     # ── interaction / teardown ──────────────────────────────────────────────
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             from techdeck.core.audio_manager import get_audio_manager
             get_audio_manager().play(_next_moth_sound())
+            # A poke sends it fluttering off to a new perch.
+            self.flit_somewhere()
         super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
