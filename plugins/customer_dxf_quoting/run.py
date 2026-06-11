@@ -1,10 +1,11 @@
 """
-Linear Inch Calculator plugin for TechDeck.
+Customer DXF Quoting plugin for TechDeck.
 
-Opens a DXF flat pattern in an interactive viewer: geometry rendered with layer
-colors, a table of every entity's length, per-layer subtotals, and a grand total
-of linear inches. Optionally treats the drawing's bounding box as the stock size
-and excludes cuts that coincide with the stock edge.
+Opens a customer DXF flat pattern in an interactive viewer: geometry rendered
+with layer colors, a table of every entity's length, per-layer subtotals, and a
+grand total of linear inches for quoting. Lines can be reassigned to a different
+layer (CUT / BEND_UP / BEND_DOWN / BOUNDING_BOX) when the customer's file is
+mis-layered. BOUNDING_BOX and IGNORE layers never count toward the total.
 
 The DXF parser is self-contained (stdlib only) so the frozen build needs no new
 hiddenimports. ASCII DXF only; supports LINE, ARC, CIRCLE, LWPOLYLINE, POLYLINE.
@@ -15,11 +16,11 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QGraphicsView, QGraphicsScene,
-    QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsItem, QSplitter,
-    QFileDialog, QMessageBox, QGroupBox, QAbstractItemView
+    QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QGraphicsView,
+    QGraphicsScene, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsItem,
+    QSplitter, QFileDialog, QMessageBox, QGroupBox, QAbstractItemView
 )
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, QRectF, QTimer, QItemSelectionModel
 from PySide6.QtGui import QPen, QBrush, QColor, QPainter, QPainterPath, QPixmap, QIcon
 
 from techdeck.core.plugin_window import PluginWindow
@@ -37,6 +38,17 @@ ACI_COLORS = {
     250: "#3C3C3C", 251: "#5B5B5B", 252: "#848484", 253: "#ADADAD",
     254: "#D6D6D6", 255: "#FFFFFF",
 }
+
+# Layers offered for (re)assignment, and their colors when the file doesn't define them
+STANDARD_LAYERS = ["CUT", "BEND_UP", "BEND_DOWN", "BOUNDING_BOX"]
+DEFAULT_LAYER_COLORS = {
+    "CUT": ACI_COLORS[1], "BEND_UP": ACI_COLORS[4], "BEND_DOWN": ACI_COLORS[6],
+    "BOUNDING_BOX": ACI_COLORS[9], "ETCH": ACI_COLORS[2], "FORM": ACI_COLORS[3],
+    "IGNORE": ACI_COLORS[8],
+}
+
+# Layers that are reference-only: never included in the linear-inch total
+NEVER_COUNT = {"BOUNDING_BOX", "BOUNDING BOX", "IGNORE"}
 
 
 def aci_to_hex(index):
@@ -296,48 +308,12 @@ def parse_dxf(path):
 
 
 # ---------------------------------------------------------------------------
-# Stock-edge analysis
-# ---------------------------------------------------------------------------
-
-def compute_extents(entities):
-    xs = [x for e in entities for x, _ in e["points"]]
-    ys = [y for e in entities for _, y in e["points"]]
-    if not xs:
-        return None
-    return min(xs), min(ys), max(xs), max(ys)
-
-
-def stock_extents(entities):
-    """Bounding-box layer extents if one exists, else extents of everything."""
-    bbox_ents = [e for e in entities if e["layer"].upper() in ("BOUNDING_BOX", "BOUNDING BOX")]
-    return compute_extents(bbox_ents or entities)
-
-
-def flag_stock_edges(entities, extents):
-    """Mark straight LINE entities lying on a stock edge with e['on_edge']=True."""
-    if extents is None:
-        return
-    xmin, ymin, xmax, ymax = extents
-    tol = max(1e-6, 1e-4 * max(xmax - xmin, ymax - ymin))
-    for e in entities:
-        on_edge = False
-        if e["type"] == "LINE":
-            (x1, y1), (x2, y2) = e["points"][0], e["points"][-1]
-            for edge in (xmin, xmax):
-                if abs(x1 - edge) <= tol and abs(x2 - edge) <= tol:
-                    on_edge = True
-            for edge in (ymin, ymax):
-                if abs(y1 - edge) <= tol and abs(y2 - edge) <= tol:
-                    on_edge = True
-        e["on_edge"] = on_edge
-
-
-# ---------------------------------------------------------------------------
 # UI
 # ---------------------------------------------------------------------------
 
 class DxfView(QGraphicsView):
-    """Graphics view with wheel zoom, middle/right-drag pan, left-click select."""
+    """Graphics view with wheel zoom, middle/right-drag pan, left-click select
+    (Ctrl+click adds to / removes from the selection)."""
 
     def __init__(self, on_pick, parent=None):
         super().__init__(parent)
@@ -363,7 +339,7 @@ class DxfView(QGraphicsView):
             picked = self.items(QRect(pos.x() - 4, pos.y() - 4, 9, 9))
             for item in picked:
                 if isinstance(item, QGraphicsPathItem) and item.data(0) is not None:
-                    self._on_pick(item.data(0))
+                    self._on_pick(item.data(0), event.modifiers())
                     return
         super().mousePressEvent(event)
 
@@ -384,7 +360,7 @@ class DxfView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
 
-class LinearInchWindow(PluginWindow):
+class QuotingWindow(PluginWindow):
 
     HIDDEN_BY_DEFAULT = {"BOUNDING_BOX", "BOUNDING BOX", "IGNORE"}
 
@@ -394,7 +370,7 @@ class LinearInchWindow(PluginWindow):
         return name in cls.HIDDEN_BY_DEFAULT or name.startswith("BEND")
 
     def __init__(self, log=print):
-        super().__init__("linear_inch_calculator", "Linear Inch Calculator")
+        super().__init__("customer_dxf_quoting", "Customer DXF Quoting")
         self.resize(1320, 840)
         self._log = log
         self.entities = []
@@ -402,7 +378,7 @@ class LinearInchWindow(PluginWindow):
         self.items = []        # QGraphicsPathItem per entity
         self.labels = []       # QGraphicsSimpleTextItem per entity
         self.layer_checks = {}
-        self.selected = None
+        self._geom_rect = QRectF()
         self._build_ui()
 
     # ----- UI construction -------------------------------------------------
@@ -421,14 +397,11 @@ class LinearInchWindow(PluginWindow):
         self.chk_labels = QCheckBox("Show length labels")
         self.chk_labels.setChecked(True)
         self.chk_labels.toggled.connect(self._update_label_visibility)
-        self.chk_stock = QCheckBox("Bounding box = stock (exclude edge cuts)")
-        self.chk_stock.toggled.connect(self.refresh_totals)
         self.lbl_file = QLabel("No file loaded")
         toolbar.addWidget(self.btn_open)
         toolbar.addWidget(self.btn_fit)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.chk_labels)
-        toolbar.addWidget(self.chk_stock)
         toolbar.addStretch(1)
         toolbar.addWidget(self.lbl_file)
         root.addLayout(toolbar)
@@ -436,7 +409,7 @@ class LinearInchWindow(PluginWindow):
         splitter = QSplitter(Qt.Horizontal)
 
         self.scene = QGraphicsScene()
-        self.view = DxfView(on_pick=self.select_entity)
+        self.view = DxfView(on_pick=self._on_view_pick)
         self.view.setScene(self.scene)
         splitter.addWidget(self.view)
 
@@ -450,25 +423,34 @@ class LinearInchWindow(PluginWindow):
         self.layers_layout.setSpacing(2)
         right_layout.addWidget(self.layers_group)
 
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["#", "Layer", "Type", "Length (in)", "Stock Edge"])
+        assign_row = QHBoxLayout()
+        assign_row.addWidget(QLabel("Assign selected lines to:"))
+        self.cmb_assign = QComboBox()
+        self.cmb_assign.addItems(STANDARD_LAYERS)
+        assign_row.addWidget(self.cmb_assign, 1)
+        self.btn_assign = QPushButton("Apply")
+        self.btn_assign.clicked.connect(self._assign_selected)
+        assign_row.addWidget(self.btn_assign)
+        right_layout.addLayout(assign_row)
+
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["#", "Layer", "Type", "Length (in)"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
-        self.table.cellClicked.connect(lambda row, _col: self.select_entity(row, center=True))
+        self.table.itemSelectionChanged.connect(self._sync_highlights)
+        self.table.cellClicked.connect(self._center_on_row)
         right_layout.addWidget(self.table, 1)
 
         totals = QGroupBox("Totals")
         totals_layout = QVBoxLayout(totals)
         self.lbl_total = QLabel("Total linear inches: -")
         self.lbl_total.setStyleSheet("font-size: 15px; font-weight: bold;")
-        self.lbl_cut = QLabel("")
-        self.lbl_stock = QLabel("")
         self.lbl_skipped = QLabel("")
-        for lbl in (self.lbl_total, self.lbl_cut, self.lbl_stock, self.lbl_skipped):
-            totals_layout.addWidget(lbl)
+        totals_layout.addWidget(self.lbl_total)
+        totals_layout.addWidget(self.lbl_skipped)
         right_layout.addWidget(totals)
 
         splitter.addWidget(right)
@@ -492,27 +474,27 @@ class LinearInchWindow(PluginWindow):
         try:
             entities, layer_colors, skipped, insunits = parse_dxf(path)
         except Exception as e:
-            QMessageBox.critical(self, "Linear Inch Calculator", f"Could not read DXF:\n{e}")
+            QMessageBox.critical(self, "Customer DXF Quoting", f"Could not read DXF:\n{e}")
             self._log(f"Failed to read {path}: {e}")
             return
         if not entities:
-            QMessageBox.warning(self, "Linear Inch Calculator",
+            QMessageBox.warning(self, "Customer DXF Quoting",
                                 "No measurable geometry (LINE/ARC/CIRCLE/POLYLINE) found.")
             return
 
         self.entities = entities
         self.layer_colors = layer_colors
-        self.selected = None
-        self._extents = stock_extents(entities)
-        flag_stock_edges(entities, self._extents)
 
         self.lbl_file.setText(Path(path).name)
         self._populate_scene()
         self._populate_layer_checks()
+        self._refresh_assign_combo()
         self._populate_table()
         self._apply_layer_visibility()
         self.refresh_totals()
-        self.fit_view()
+        # Defer the fit until the splitter/layout has settled at its real size,
+        # otherwise the drawing lands off-center in a half-laid-out view
+        QTimer.singleShot(0, self.fit_view)
 
         if skipped:
             detail = ", ".join(f"{t} x{c}" for t, c in sorted(skipped.items()))
@@ -530,10 +512,8 @@ class LinearInchWindow(PluginWindow):
         for layer in self._layers_in_order():
             ents = [e for e in self.entities if e["layer"] == layer]
             total = sum(e["length"] for e in ents)
-            self._log(f"  {layer}: {total:.4f} in ({len(ents)} entities)")
-        if self._extents:
-            xmin, ymin, xmax, ymax = self._extents
-            self._log(f"  Stock bounding box: {xmax - xmin:.4f} x {ymax - ymin:.4f} in")
+            suffix = "  [not counted]" if layer.upper() in NEVER_COUNT else ""
+            self._log(f"  {layer}: {total:.4f} in ({len(ents)} entities){suffix}")
 
     # ----- scene / table / layer panel construction -------------------------
 
@@ -545,12 +525,18 @@ class LinearInchWindow(PluginWindow):
         return seen
 
     def _layer_color(self, layer):
-        return self.layer_colors.get(layer, "#DDDDDD")
+        return self.layer_colors.get(layer) or DEFAULT_LAYER_COLORS.get(layer.upper(), "#DDDDDD")
+
+    def _entity_tooltip(self, idx):
+        e = self.entities[idx]
+        return (f"#{idx + 1}  {e['type']} on {e['layer']}\n"
+                f"Length: {e['length']:.4f} in")
 
     def _populate_scene(self):
         self.scene.clear()
         self.items = []
         self.labels = []
+        xs, ys = [], []
         for idx, e in enumerate(self.entities):
             color = QColor(self._layer_color(e["layer"]))
             path = QPainterPath()
@@ -559,14 +545,15 @@ class LinearInchWindow(PluginWindow):
             path.moveTo(pts[0][0], -pts[0][1])
             for x, y in pts[1:]:
                 path.lineTo(x, -y)
+            xs.extend(p[0] for p in pts)
+            ys.extend(-p[1] for p in pts)
             item = QGraphicsPathItem(path)
             pen = QPen(color)
             pen.setCosmetic(True)
             pen.setWidthF(1.4)
             item.setPen(pen)
             item.setData(0, idx)
-            item.setToolTip(f"#{idx + 1}  {e['type']} on {e['layer']}\n"
-                            f"Length: {e['length']:.4f} in")
+            item.setToolTip(self._entity_tooltip(idx))
             self.scene.addItem(item)
             self.items.append(item)
 
@@ -579,7 +566,16 @@ class LinearInchWindow(PluginWindow):
             self.scene.addItem(label)
             self.labels.append(label)
 
-    def _populate_layer_checks(self):
+        # Fit on the geometry only - the fixed-size text labels report inflated
+        # scene bounds (ItemIgnoresTransformations), which skewed fitInView
+        self._geom_rect = QRectF()
+        if xs:
+            self._geom_rect = QRectF(min(xs), min(ys),
+                                     (max(xs) - min(xs)) or 1.0,
+                                     (max(ys) - min(ys)) or 1.0)
+
+    def _populate_layer_checks(self, preserve=None):
+        preserve = preserve or {}
         while self.layers_layout.count():
             item = self.layers_layout.takeAt(0)
             if item.widget():
@@ -588,23 +584,37 @@ class LinearInchWindow(PluginWindow):
         for layer in self._layers_in_order():
             ents = [e for e in self.entities if e["layer"] == layer]
             total = sum(e["length"] for e in ents)
-            chk = QCheckBox(f"{layer}   -   {total:.4f} in   ({len(ents)})")
+            text = f"{layer}   -   {total:.4f} in   ({len(ents)})"
+            if layer.upper() in NEVER_COUNT:
+                text += "   [never counted]"
+            chk = QCheckBox(text)
             chip = QPixmap(12, 12)
             chip.fill(QColor(self._layer_color(layer)))
             chk.setIcon(QIcon(chip))
-            chk.setChecked(not self._hidden_by_default(layer))
+            chk.setChecked(preserve.get(layer, not self._hidden_by_default(layer)))
             chk.toggled.connect(self._on_layer_toggled)
             self.layers_layout.addWidget(chk)
             self.layer_checks[layer] = chk
 
+    def _refresh_assign_combo(self):
+        current = self.cmb_assign.currentText()
+        layers = list(STANDARD_LAYERS)
+        layers += [l for l in self._layers_in_order() if l not in layers]
+        self.cmb_assign.blockSignals(True)
+        self.cmb_assign.clear()
+        self.cmb_assign.addItems(layers)
+        if current in layers:
+            self.cmb_assign.setCurrentText(current)
+        self.cmb_assign.blockSignals(False)
+
     def _populate_table(self):
+        self.table.clearSelection()
         self.table.setRowCount(len(self.entities))
         for idx, e in enumerate(self.entities):
-            cells = [str(idx + 1), e["layer"], e["type"],
-                     f"{e['length']:.4f}", "Yes" if e.get("on_edge") else ""]
+            cells = [str(idx + 1), e["layer"], e["type"], f"{e['length']:.4f}"]
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
-                if col in (0, 3, 4):
+                if col in (0, 3):
                     item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 self.table.setItem(idx, col, item)
         self.table.resizeColumnsToContents()
@@ -612,25 +622,80 @@ class LinearInchWindow(PluginWindow):
 
     # ----- interactivity ----------------------------------------------------
 
+    def _selected_rows(self):
+        return {ix.row() for ix in self.table.selectionModel().selectedRows()}
+
+    def _on_view_pick(self, idx, modifiers):
+        if modifiers & Qt.ControlModifier:
+            model_index = self.table.model().index(idx, 0)
+            self.table.selectionModel().select(
+                model_index, QItemSelectionModel.Toggle | QItemSelectionModel.Rows)
+        else:
+            self.table.selectRow(idx)
+        self.table.scrollToItem(self.table.item(idx, 0))
+
+    def _center_on_row(self, row, _col=0):
+        if 0 <= row < len(self.items):
+            self.view.centerOn(self.items[row])
+
+    def _sync_highlights(self):
+        selected = self._selected_rows()
+        for idx, item in enumerate(self.items):
+            pen = item.pen()
+            if idx in selected:
+                pen.setColor(QColor("#FFFFFF"))
+                pen.setWidthF(3.5)
+            else:
+                pen.setColor(QColor(self._layer_color(self.entities[idx]["layer"])))
+                pen.setWidthF(1.4)
+            item.setPen(pen)
+
+    def _assign_selected(self):
+        rows = sorted(self._selected_rows())
+        if not rows:
+            QMessageBox.information(self, "Customer DXF Quoting",
+                                    "Select one or more lines first - click them in the "
+                                    "view (Ctrl+click for multiple) or in the table.")
+            return
+        layer = self.cmb_assign.currentText()
+        if layer not in self.layer_colors:
+            self.layer_colors[layer] = DEFAULT_LAYER_COLORS.get(layer.upper(), "#DDDDDD")
+        color = QColor(self._layer_color(layer))
+        states = {l: c.isChecked() for l, c in self.layer_checks.items()}
+        states.setdefault(layer, True)  # make a newly used layer visible so the change shows
+        for r in rows:
+            self.entities[r]["layer"] = layer
+            self.labels[r].setBrush(QBrush(color))
+            self.items[r].setToolTip(self._entity_tooltip(r))
+            self.table.item(r, 1).setText(layer)
+        self._populate_layer_checks(preserve=states)
+        self._refresh_assign_combo()
+        self._apply_layer_visibility()
+        self._sync_highlights()
+        self.refresh_totals()
+        self._log(f"Assigned {len(rows)} line(s) to {layer}")
+
     def _included_layers(self):
-        return {layer for layer, chk in self.layer_checks.items() if chk.isChecked()}
+        return {layer for layer, chk in self.layer_checks.items()
+                if chk.isChecked() and layer.upper() not in NEVER_COUNT}
 
     def _on_layer_toggled(self, _checked):
         self._apply_layer_visibility()
         self.refresh_totals()
 
     def _apply_layer_visibility(self):
-        included = self._included_layers()
         labels_on = self.chk_labels.isChecked()
         dim = QBrush(QColor("#777777"))
         for idx, e in enumerate(self.entities):
-            visible = e["layer"] in included
+            chk = self.layer_checks.get(e["layer"])
+            visible = chk.isChecked() if chk else True
+            counted = visible and e["layer"].upper() not in NEVER_COUNT
             self.items[idx].setVisible(visible)
             self.labels[idx].setVisible(visible and labels_on)
             for col in range(self.table.columnCount()):
                 cell = self.table.item(idx, col)
                 if cell:
-                    cell.setData(Qt.ForegroundRole, None if visible else dim)
+                    cell.setData(Qt.ForegroundRole, None if counted else dim)
 
     def _update_label_visibility(self, _checked=None):
         self._apply_layer_visibility()
@@ -641,43 +706,13 @@ class LinearInchWindow(PluginWindow):
         total = sum(e["length"] for e in ents)
         self.lbl_total.setText(f"Total linear inches: {total:.4f} in"
                                f"   ({len(ents)} entities)")
-        if self.chk_stock.isChecked() and self._extents:
-            xmin, ymin, xmax, ymax = self._extents
-            cut = sum(e["length"] for e in ents if not e.get("on_edge"))
-            edge = total - cut
-            self.lbl_cut.setText(f"Cutting required (excluding {edge:.4f} in "
-                                 f"on stock edges): {cut:.4f} in")
-            self.lbl_stock.setText(f"Stock size: {xmax - xmin:.4f} x {ymax - ymin:.4f} in")
-        else:
-            self.lbl_cut.setText("")
-            self.lbl_stock.setText("")
-
-    def select_entity(self, idx, center=False):
-        if idx is None or not (0 <= idx < len(self.items)):
-            return
-        if self.selected is not None and self.selected < len(self.items):
-            prev = self.items[self.selected]
-            pen = prev.pen()
-            pen.setWidthF(1.4)
-            pen.setColor(QColor(self._layer_color(self.entities[self.selected]["layer"])))
-            prev.setPen(pen)
-        self.selected = idx
-        item = self.items[idx]
-        pen = item.pen()
-        pen.setWidthF(3.5)
-        pen.setColor(QColor("#FFFFFF"))
-        item.setPen(pen)
-        self.table.blockSignals(True)
-        self.table.selectRow(idx)
-        self.table.blockSignals(False)
-        if center:
-            self.view.centerOn(item)
 
     def fit_view(self):
-        rect = self.scene.itemsBoundingRect()
-        if not rect.isNull():
-            self.view.fitInView(rect.adjusted(-rect.width() * 0.05, -rect.height() * 0.05,
-                                              rect.width() * 0.05, rect.height() * 0.05),
+        if not self._geom_rect.isNull():
+            margin_x = self._geom_rect.width() * 0.05
+            margin_y = self._geom_rect.height() * 0.05
+            self.view.fitInView(self._geom_rect.adjusted(-margin_x, -margin_y,
+                                                         margin_x, margin_y),
                                 Qt.KeepAspectRatio)
 
 
@@ -690,10 +725,10 @@ def run(params: dict, progress_callback, cancel_event):
     log = params.get("log", print)
     settings = params.get("settings", {})
 
-    log("Opening Linear Inch Calculator...")
+    log("Opening Customer DXF Quoting...")
     progress_callback(10)
 
-    _window = LinearInchWindow(log=log)
+    _window = QuotingWindow(log=log)
     _window.show()
 
     default = (settings.get("default_dxf") or "").strip()
@@ -703,4 +738,4 @@ def run(params: dict, progress_callback, cancel_event):
         _window.open_file_dialog()
 
     progress_callback(100)
-    log("Linear Inch Calculator window opened.")
+    log("Customer DXF Quoting window opened.")
