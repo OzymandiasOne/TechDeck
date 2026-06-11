@@ -176,6 +176,9 @@ def main():
 
     from techdeck.core.settings import SettingsManager
     settings = SettingsManager()
+    # First-run seed: copy the bundled default Rogue Mode track into the
+    # user's library so /roguemode isn't empty on a fresh install.
+    settings.ensure_roguemode_default_track()
     _log_step("SettingsManager loaded")
 
     from techdeck.ui.theme import load_custom_themes

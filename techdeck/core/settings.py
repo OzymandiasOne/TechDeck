@@ -6,6 +6,7 @@ Manages profiles, user data, app configuration, and plugin settings.
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
@@ -677,6 +678,39 @@ class SettingsManager:
         """Update a single key in Rogue Mode settings."""
         rm = self.get_roguemode_settings()
         rm[key] = value
+        self.set_roguemode_settings(rm)
+
+    # Ships with the build (assets/roguemode); seeded into the user's library
+    # on first run so a fresh install isn't silent.
+    DEFAULT_ROGUE_TRACK = "Love On A Real Train - Tangerine Dream.mp3"
+
+    def ensure_roguemode_default_track(self) -> None:
+        """One-time seed of the bundled default Rogue Mode track.
+
+        Fresh installs have an empty roguemode library. Copy the bundled
+        track into the user's audio dir and register it in the Default
+        playlist. Guarded by a seeded flag so a user who deletes the track
+        later doesn't get it forced back on every launch.
+        """
+        rm = self.get_roguemode_settings()
+        if rm.get("default_track_seeded"):
+            return
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            src_dir = Path(sys._MEIPASS) / "assets" / "roguemode"
+        else:
+            src_dir = Path(__file__).resolve().parents[2] / "assets" / "roguemode"
+        src = src_dir / self.DEFAULT_ROGUE_TRACK
+        rm["default_track_seeded"] = True
+        if src.is_file():
+            try:
+                dest = self.get_roguemode_audio_dir() / src.name
+                if not dest.exists():
+                    shutil.copyfile(src, dest)
+                playlist = rm.setdefault("playlists", {}).setdefault("Default", [])
+                if dest.name not in playlist:
+                    playlist.append(dest.name)
+            except Exception:
+                pass  # never let seeding break startup; flag stays set
         self.set_roguemode_settings(rm)
 
     # ========== Helpers ==========
