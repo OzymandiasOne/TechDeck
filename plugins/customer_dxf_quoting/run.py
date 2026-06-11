@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QSplitter, QFileDialog, QMessageBox, QGroupBox, QAbstractItemView
 )
 from PySide6.QtCore import Qt, QRect, QRectF, QTimer, QItemSelectionModel
-from PySide6.QtGui import QPen, QBrush, QColor, QPainter, QPainterPath, QPixmap, QIcon
+from PySide6.QtGui import (QPen, QBrush, QColor, QPainter, QPainterPath,
+                           QPixmap, QIcon, QTransform)
 
 from techdeck.core.plugin_window import PluginWindow
 
@@ -486,9 +487,10 @@ class DxfView(QGraphicsView):
     """Graphics view with wheel zoom, middle/right-drag pan, left-click select
     (Ctrl+click adds to / removes from the selection)."""
 
-    def __init__(self, on_pick, parent=None):
+    def __init__(self, on_pick, on_zoom=None, parent=None):
         super().__init__(parent)
         self._on_pick = on_pick
+        self._on_zoom = on_zoom
         self._pan_origin = None
         self.setRenderHint(QPainter.Antialiasing)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
@@ -503,6 +505,8 @@ class DxfView(QGraphicsView):
     def wheelEvent(self, event):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.scale(factor, factor)
+        if self._on_zoom is not None:
+            self._on_zoom()  # re-spread length labels at the new zoom
 
     def mousePressEvent(self, event):
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
@@ -595,7 +599,8 @@ class QuotingWindow(PluginWindow):
         splitter = QSplitter(Qt.Horizontal)
 
         self.scene = QGraphicsScene()
-        self.view = DxfView(on_pick=self._on_view_pick)
+        self.view = DxfView(on_pick=self._on_view_pick,
+                            on_zoom=self._resolve_label_overlaps)
         self.view.setScene(self.scene)
         splitter.addWidget(self.view)
 
@@ -895,6 +900,36 @@ class QuotingWindow(PluginWindow):
                 cell = self.table.item(idx, col)
                 if cell:
                     cell.setData(Qt.ForegroundRole, None if counted else dim)
+        self._resolve_label_overlaps()
+
+    def _resolve_label_overlaps(self):
+        """Spread length labels apart in SCREEN space.
+
+        Entities can share a midpoint (a bounding-box edge over a cut edge,
+        adjacent short segments), which stacked their labels into unreadable
+        soup. Labels are ItemIgnoresTransformations, so their OWN transform
+        applies in device pixels — a translate is a fixed on-screen nudge
+        that survives panning. Recomputed on fit, zoom, and visibility
+        changes (pan never changes relative label positions).
+        """
+        placed = []
+        for label in self.labels:
+            if not label.isVisible():
+                continue
+            anchor = self.view.mapFromScene(label.pos())
+            br = label.boundingRect()  # device px (ignores transformations)
+            rect = QRectF(anchor.x(), anchor.y(), br.width(), br.height())
+            moved = True
+            while moved:
+                moved = False
+                for other in placed:
+                    if rect.intersects(other):
+                        # Drop just below the label it collides with.
+                        rect.moveTop(other.bottom() + 2)
+                        moved = True
+            label.setTransform(
+                QTransform.fromTranslate(0, rect.top() - anchor.y()))
+            placed.append(rect)
 
     def _update_label_visibility(self, _checked=None):
         self._apply_layer_visibility()
@@ -938,6 +973,7 @@ class QuotingWindow(PluginWindow):
             self.view.fitInView(self._geom_rect.adjusted(-margin_x, -margin_y,
                                                          margin_x, margin_y),
                                 Qt.KeepAspectRatio)
+            self._resolve_label_overlaps()
 
 
 # ---------------------------------------------------------------------------
