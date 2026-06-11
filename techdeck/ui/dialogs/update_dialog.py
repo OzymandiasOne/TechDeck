@@ -4,7 +4,7 @@ Update notification and download dialog.
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton,
-    QProgressBar, QHBoxLayout, QMessageBox, QFrame
+    QProgressBar, QHBoxLayout, QMessageBox, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -71,12 +71,28 @@ class UpdateDialog(QDialog):
             warning.setStyleSheet(f"color: {t.warning}; font-weight: 600;")
             layout.addWidget(warning)
 
-        # Release notes
+        # Release notes. A bare word-wrapped QLabel under-reports its height
+        # in the dialog's initial sizeHint pass, so the dialog opened too
+        # short and clipped the text until a manual resize forced a relayout.
+        # Hosting it in a scroll area sized from the wrapped text fixes the
+        # initial height, and very long notes scroll instead of ballooning.
         if self.update_info.release_notes:
             notes = QLabel(self.update_info.release_notes)
             notes.setWordWrap(True)
+            notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             notes.setStyleSheet(f"color: {t.text_secondary}; font-size: 12px;")
-            layout.addWidget(notes)
+            notes_scroll = QScrollArea()
+            notes_scroll.setWidgetResizable(True)
+            notes_scroll.setFrameShape(QFrame.NoFrame)
+            notes_scroll.setStyleSheet(
+                "QScrollArea { background: transparent; }"
+                "QScrollArea > QWidget > QWidget { background: transparent; }")
+            notes_scroll.setWidget(notes)
+            # 452 = the 500px dialog width minus the 24px content margins.
+            needed = notes.heightForWidth(452) + 8
+            notes_scroll.setMinimumHeight(max(40, min(needed, 380)))
+            notes_scroll.setMaximumHeight(380)
+            layout.addWidget(notes_scroll)
 
         # Progress bar (hidden initially)
         self.progress_bar = QProgressBar()
