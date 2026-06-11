@@ -1,5 +1,4 @@
-# TechDeck v0.8.5.4 - Parchment Light Theme
-
+# TechDeck v0.8.5.5 - 911 Setup quantity verification
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
@@ -7,14 +6,28 @@ the `.exe`.
 
 ---
 
+## What's New in v0.8.5.5
+
+**New nest number format supported** - 911 Setup and Batch Auditor now recognize the new
+alphanumeric nest package numbers (e.g. `5CDAVW`) introduced with batch GX030, alongside
+the existing numeric and P/S-prefixed formats.
+
+**911 Setup verifies quantities against the nest packets** - Some BATCH LISTs arrive with
+the `DYPN QTY` and `Material Amount (Total)` column headers swapped (confirmed on
+GX029-GX032). 911 Setup now checks both columns against the per-part quantities on the
+nest packet PDF's summary page, fills the nest workbooks from whichever column the packets
+confirm, and repairs the swapped headers in the BATCH LIST file. Any part whose quantity
+still disagrees with the packet keeps the BATCH LIST value but is flagged: its qty cell is
+highlighted yellow in the workbook, and an end-of-run QTY VERIFICATION summary lists every
+mismatched or unverifiable part so nothing slips through.
+
+---
+
 ## What's New in v0.8.5.4
 
-**Warmer Light theme** - The Light theme now uses a warm parchment palette instead of the
-cooler gray it had before. Backgrounds, panels, borders, and dividers lean toward aged-paper
-cream/taupe, so the theme reads softer and warmer.
+**Minor bug and visual fixes** - Icons updated. Visual feedback refined. Light theme tweaked to warmer values.  
 
-**Refreshed tile icons** - The 922 LST Organizer tile now shows an open-folder icon, and the
-911 Sketch Extractor tile now shows a picture icon, for clearer at-a-glance recognition.
+**Console Update** - /moth & /haiku removed; /friend added
 
 ---
 

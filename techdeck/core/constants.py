@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.5.4"  # Light theme warmed to a parchment palette (less gray/blue); tile icons: 922 LST Organizer -> opened folder, 911 Sketch Extractor -> picture
+APP_VERSION = "0.8.5.5"  # 911 Setup: alphanumeric nest IDs (5CDAVW) + DYPN QTY verification against nest packet PDFs with BATCH LIST header repair; Batch Auditor accepts new nest format
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
