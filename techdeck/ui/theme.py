@@ -5,6 +5,7 @@ Supports built-in and user-defined custom themes.
 """
 
 import json
+import sys
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, Optional
@@ -366,10 +367,54 @@ def is_builtin_theme(name: str) -> bool:
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────
 
+def _combo_arrow_qss(theme) -> str:
+    """QSS for QComboBox::down-arrow, used by every combo that doesn't get a
+    page-level override — notably plugin windows, which only see this sheet.
+
+    Uses the same theme-tinted chevron SVG as the main pages. The CSS
+    border-triangle fallback renders inconsistently (a solid blob on some
+    machines, nothing on others), so the image is the primary path.
+    """
+    try:
+        from techdeck.ui.utils import make_tinted_svg_copy
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            icons = Path(sys._MEIPASS) / "assets" / "icons"
+        else:
+            icons = Path(__file__).resolve().parents[2] / "assets" / "icons"
+        # Tinting overwrites the source color, so the "light" set works for
+        # every theme (including custom ones).
+        arrow_url = make_tinted_svg_copy(icons / "light" / "chevron-down.svg",
+                                         theme.text)
+        return f"""
+QComboBox::down-arrow {{
+    image: url("{arrow_url}");
+    width: 12px;
+    height: 12px;
+    background: transparent;
+    border: none;
+    margin-right: 5px;
+}}"""
+    except Exception:
+        # Asset missing/unwritable temp dir: fall back to the CSS triangle
+        # (width/height MUST be 0 or the borders paint as a solid blob).
+        return f"""
+QComboBox::down-arrow {{
+    image: none;
+    width: 0px;
+    height: 0px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {theme.text};
+    margin-right: 5px;
+}}"""
+
+
 def generate_stylesheet(theme_name: str = "dark") -> str:
     if theme_name not in THEMES:
         theme_name = "dark"
     theme = THEMES[theme_name]
+
+    combo_arrow = _combo_arrow_qss(theme)
 
     base = f"""
 /* ===== Global Application Styles ===== */
@@ -537,18 +582,7 @@ QComboBox::drop-down {{
     width: 20px;
 }}
 
-QComboBox::down-arrow {{
-    /* CSS border-triangle: width/height MUST be 0 or the subcontrol keeps its
-       default size and the borders paint as a solid blob instead of an arrow
-       (this is the only arrow styling plugin windows get). */
-    image: none;
-    width: 0px;
-    height: 0px;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 5px solid {theme.text};
-    margin-right: 5px;
-}}
+{combo_arrow}
 
 QComboBox QAbstractItemView {{
     background-color: {theme.surface};
