@@ -40,11 +40,18 @@ ACI_COLORS = {
 }
 
 # Layers offered for (re)assignment, and their colors when the file doesn't define them
-STANDARD_LAYERS = ["CUT", "BEND_UP", "BEND_DOWN", "BOUNDING_BOX"]
+STANDARD_LAYERS = ["CUT", "BEND_UP", "BEND_DOWN", "WELD", "BOUNDING_BOX"]
 DEFAULT_LAYER_COLORS = {
     "CUT": ACI_COLORS[1], "BEND_UP": ACI_COLORS[4], "BEND_DOWN": ACI_COLORS[6],
     "BOUNDING_BOX": ACI_COLORS[9], "ETCH": ACI_COLORS[2], "FORM": ACI_COLORS[3],
-    "IGNORE": ACI_COLORS[8],
+    "IGNORE": ACI_COLORS[8], "WELD": ACI_COLORS[5],
+}
+
+# ACI color index written into the LAYER table for layers we ADD on export
+# (hex isn't valid there; these mirror DEFAULT_LAYER_COLORS).
+_LAYER_ACI = {
+    "CUT": 1, "BEND_UP": 4, "BEND_DOWN": 6, "BOUNDING_BOX": 9,
+    "ETCH": 2, "FORM": 3, "IGNORE": 8, "WELD": 5,
 }
 
 # Layers that are reference-only: never included in the linear-inch total
@@ -59,21 +66,22 @@ def aci_to_hex(index):
 # DXF parsing
 # ---------------------------------------------------------------------------
 
-def _read_pairs(path):
-    """Read an ASCII DXF into a list of (group_code, value) pairs."""
+def _decode_dxf(path):
+    """Read + decode an ASCII DXF. Returns (text, encoding)."""
     data = Path(path).read_bytes()
     if data.startswith(b"AutoCAD Binary DXF"):
         raise ValueError("Binary DXF files are not supported - re-export as ASCII DXF.")
-    text = None
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
-            text = data.decode(enc)
-            break
+            return data.decode(enc), enc
         except UnicodeDecodeError:
             continue
-    if text is None:
-        raise ValueError("Could not decode file - is this a DXF?")
+    raise ValueError("Could not decode file - is this a DXF?")
 
+
+def _read_pairs(path):
+    """Read an ASCII DXF into a list of (group_code, value) pairs."""
+    text, _enc = _decode_dxf(path)
     lines = text.splitlines()
     pairs = []
     it = iter(lines)
@@ -239,7 +247,12 @@ def parse_dxf(path):
     Parse an ASCII DXF.
 
     Returns (entities, layer_colors, skipped, insunits):
-      entities     - list of {type, layer, points [(x,y)...], length}
+      entities     - list of {type, layer, points [(x,y)...], length,
+                     orig_layer, span}. `span` is the inclusive (start, end)
+                     range of this entity's (code, value) pairs in the file
+                     (POLYLINE spans include its VERTEXes + SEQEND) and
+                     `orig_layer` the layer as loaded — both used by
+                     export_with_layers to write reassignments back.
       layer_colors - {layer_name: hex_color}
       skipped      - {entity_type: count} of unsupported entity types
       insunits     - $INSUNITS header value or None
@@ -280,6 +293,7 @@ def parse_dxf(path):
             continue
 
         if section == "ENTITIES" and code == 0:
+            start = i
             if val == "LINE":
                 groups, i = _collect_until_next_entity(pairs, i + 1)
                 ent = _build_line(groups)
@@ -299,12 +313,169 @@ def parse_dxf(path):
                 i += 1
                 continue
             if ent is not None:
+                ent["span"] = (start, i - 1)
+                ent["orig_layer"] = ent["layer"]
                 entities.append(ent)
             continue
 
         i += 1
 
     return entities, layer_colors, skipped, insunits
+
+
+# ---------------------------------------------------------------------------
+# Export — write layer reassignments back into the ORIGINAL file text
+# ---------------------------------------------------------------------------
+
+def export_with_layers(src_path, entities):
+    """Return (text, encoding) for a DXF with the current layer assignments.
+
+    The original file is patched surgically, never regenerated: only each
+    entity's layer codes (8) are rewritten, per-entity color overrides
+    (62/420) are dropped from REASSIGNED entities so they render BYLAYER,
+    and any now-used layer missing from the LAYER table is added by cloning
+    an existing record (so strict readers like AutoCAD don't reject the
+    file over an undefined layer). All geometry stays byte-identical.
+    """
+    text, enc = _decode_dxf(src_path)
+    lines = text.splitlines()
+    newline = "\r\n" if "\r\n" in text else "\n"
+
+    # pairs[i] <-> lines[2i] (code) + lines[2i+1] (value)
+    pairs = []
+    for k in range(0, len(lines) - 1, 2):
+        try:
+            pairs.append((int(lines[k].strip()), lines[k + 1].strip()))
+        except ValueError:
+            raise ValueError("Malformed DXF (expected a numeric group code, "
+                             f"got {lines[k].strip()!r}).")
+
+    # --- entity layer rewrites -------------------------------------------
+    replace = {}        # value-line index -> new text
+    drop_pairs = set()  # pair indices to delete entirely (stale 62/420)
+    for e in entities:
+        span = e.get("span")
+        if not span:
+            continue
+        s, t = span
+        if s >= len(pairs) or pairs[s][0] != 0:
+            raise ValueError("The DXF on disk no longer matches what was "
+                             "loaded - reopen the file and retry the export.")
+        changed = e["layer"] != e.get("orig_layer", e["layer"])
+        for idx in range(s, min(t, len(pairs) - 1) + 1):
+            c = pairs[idx][0]
+            if c == 8:
+                replace[2 * idx + 1] = e["layer"]
+            elif changed and c in (62, 420):
+                drop_pairs.add(idx)
+
+    # --- LAYER table: find definitions, a template record, the insert spot
+    table_names = set()
+    template_span = None      # (start, end) pairs of the first LAYER record
+    endtab_idx = None         # pair index of the LAYER table's ENDTAB
+    section = None
+    in_layer_table = False
+    i = 0
+    while i < len(pairs):
+        code, val = pairs[i]
+        if code == 0 and val == "SECTION" and i + 1 < len(pairs) and pairs[i + 1][0] == 2:
+            section = pairs[i + 1][1]
+            i += 2
+            continue
+        if code == 0 and val == "ENDSEC":
+            section = None
+            i += 1
+            continue
+        if section == "TABLES":
+            if code == 0 and val == "TABLE":
+                in_layer_table = (i + 1 < len(pairs) and pairs[i + 1] == (2, "LAYER"))
+            elif in_layer_table and code == 0 and val == "LAYER":
+                start = i
+                j = i + 1
+                while j < len(pairs) and pairs[j][0] != 0:
+                    if pairs[j][0] == 2:
+                        table_names.add(pairs[j][1])
+                    j += 1
+                if template_span is None:
+                    template_span = (start, j - 1)
+                i = j
+                continue
+            elif in_layer_table and code == 0 and val == "ENDTAB":
+                endtab_idx = i
+                in_layer_table = False
+        i += 1
+
+    used = {e["layer"] for e in entities}
+    missing = sorted(l for l in used if l not in table_names)
+
+    insert_lines = []
+    handseed_replace = None
+    if missing:
+        if endtab_idx is None:
+            raise ValueError("No LAYER table found in this DXF - cannot add "
+                             f"layer definitions for: {', '.join(missing)}")
+        # Allocate handles above every handle in the file (codes 5/105).
+        max_handle = 0
+        handseed_pair = None
+        for idx, (c, v) in enumerate(pairs):
+            if c == 9 and v == "$HANDSEED":
+                handseed_pair = idx + 1
+            if c in (5, 105):
+                try:
+                    max_handle = max(max_handle, int(v, 16))
+                except ValueError:
+                    pass
+        next_handle = max_handle + 1
+        for name in missing:
+            aci = _LAYER_ACI.get(name.upper(), 7)
+            if template_span is not None:
+                # Clone an existing record so the new one carries whatever
+                # extras this file's flavor of DXF expects (330 owner,
+                # 370/390 plot data, ...). Swap name/handle/color.
+                s, t = template_span
+                record, seen_62 = [], False
+                for c, v in pairs[s:t + 1]:
+                    if c == 2:
+                        v = name
+                    elif c == 5:
+                        v = format(next_handle, "X")
+                    elif c == 62:
+                        v, seen_62 = str(aci), True
+                    elif c == 420:
+                        continue  # don't inherit a true-color override
+                    record.append((c, v))
+                if not seen_62:
+                    record.append((62, str(aci)))
+            else:
+                record = [(0, "LAYER"), (5, format(next_handle, "X")),
+                          (100, "AcDbSymbolTableRecord"),
+                          (100, "AcDbLayerTableRecord"),
+                          (2, name), (70, "0"), (62, str(aci)),
+                          (6, "Continuous")]
+            next_handle += 1
+            for c, v in record:
+                insert_lines.append(f"{c:3d}")
+                insert_lines.append(v)
+        if handseed_pair is not None and handseed_pair < len(pairs):
+            handseed_replace = (2 * handseed_pair + 1, format(next_handle, "X"))
+
+    # --- stitch the output -------------------------------------------------
+    drop_lines = set()
+    for idx in drop_pairs:
+        drop_lines.add(2 * idx)
+        drop_lines.add(2 * idx + 1)
+    if handseed_replace is not None:
+        replace[handseed_replace[0]] = handseed_replace[1]
+    insert_at = 2 * endtab_idx if (missing and endtab_idx is not None) else -1
+
+    out = []
+    for ln_idx, ln in enumerate(lines):
+        if ln_idx == insert_at:
+            out.extend(insert_lines)
+        if ln_idx in drop_lines:
+            continue
+        out.append(replace.get(ln_idx, ln))
+    return newline.join(out) + newline, enc
 
 
 # ---------------------------------------------------------------------------
@@ -371,8 +542,11 @@ class QuotingWindow(PluginWindow):
 
     @classmethod
     def _hidden_by_default(cls, layer):
+        # Default total = cut geometry only: bends and welds start unchecked
+        # (their per-layer subtotals still show on the checkboxes).
         name = layer.upper()
-        return name in cls.HIDDEN_BY_DEFAULT or name.startswith("BEND")
+        return (name in cls.HIDDEN_BY_DEFAULT or name.startswith("BEND")
+                or name.startswith("WELD"))
 
     def __init__(self, log=print):
         super().__init__("customer_dxf_quoting", "Customer DXF Quoting")
@@ -384,6 +558,7 @@ class QuotingWindow(PluginWindow):
         self.labels = []       # QGraphicsSimpleTextItem per entity
         self.layer_checks = {}
         self._geom_rect = QRectF()
+        self._source_path = None
         self._build_ui()
 
     # ----- UI construction -------------------------------------------------
@@ -399,12 +574,18 @@ class QuotingWindow(PluginWindow):
         self.btn_open.clicked.connect(self.open_file_dialog)
         self.btn_fit = QPushButton("Fit View")
         self.btn_fit.clicked.connect(self.fit_view)
+        self.btn_export = QPushButton("Export DXF...")
+        self.btn_export.setToolTip(
+            "Save a copy of the DXF with the current layer assignments")
+        self.btn_export.setEnabled(False)
+        self.btn_export.clicked.connect(self.export_dxf)
         self.chk_labels = QCheckBox("Show length labels")
         self.chk_labels.setChecked(True)
         self.chk_labels.toggled.connect(self._update_label_visibility)
         self.lbl_file = QLabel("No file loaded")
         toolbar.addWidget(self.btn_open)
         toolbar.addWidget(self.btn_fit)
+        toolbar.addWidget(self.btn_export)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.chk_labels)
         toolbar.addStretch(1)
@@ -490,6 +671,8 @@ class QuotingWindow(PluginWindow):
 
         self.entities = entities
         self.layer_colors = layer_colors
+        self._source_path = path
+        self.btn_export.setEnabled(True)
 
         self.lbl_file.setText(Path(path).name)
         self._populate_scene()
@@ -722,6 +905,29 @@ class QuotingWindow(PluginWindow):
         total = sum(e["length"] for e in ents)
         self.lbl_total.setText(f"Total linear inches: {total:.4f} in"
                                f"   ({len(ents)} entities)")
+
+    def export_dxf(self):
+        """Save a copy of the loaded DXF with the current layer assignments."""
+        if not self._source_path or not self.entities:
+            return
+        src = Path(self._source_path)
+        default = str(src.with_name(f"{src.stem} - Reassigned.dxf"))
+        dest, _ = QFileDialog.getSaveFileName(
+            self, "Export DXF", default, "DXF files (*.dxf)")
+        if not dest:
+            return
+        try:
+            text, enc = export_with_layers(self._source_path, self.entities)
+            Path(dest).write_text(text, encoding=enc, newline="")
+        except Exception as e:
+            QMessageBox.critical(self, "Customer DXF Quoting",
+                                 f"Export failed:\n{e}")
+            self._log(f"Export failed: {e}")
+            return
+        changed = sum(1 for ent in self.entities
+                      if ent["layer"] != ent.get("orig_layer", ent["layer"]))
+        self._log(f"Exported {Path(dest).name} "
+                  f"({changed} reassigned line(s) written back)")
 
     def fit_view(self):
         if not self._geom_rect.isNull():

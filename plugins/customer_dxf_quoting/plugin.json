@@ -1,8 +1,8 @@
 {
   "id": "customer_dxf_quoting",
   "name": "Customer DXF Quoting",
-  "description": "Interactive DXF quoting viewer: layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut.",
-  "version": "1.1.0",
+  "description": "Interactive DXF quoting viewer: layer-colored flat pattern, per-line measurements, layer reassignment for selected lines (incl. WELD), total linear inches of cut, and DXF export of the reassigned layers.",
+  "version": "1.2.0",
   "author": "Anthony Sieben",
   "family": "other",
   "requires_admin": false,
