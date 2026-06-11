@@ -27,10 +27,11 @@ from PySide6.QtGui import (
 # spec's assets entry.
 #
 # A key that isn't a themed tile resolves to a generated PACK icon instead
-# (full-color brand/character art from tools/generate_pack_icons.py, under
-# "Icons8 characters pixel" / "Icons socialmedia pixel"). Those are NOT
-# theme-recolored — they render in their native colors on every theme. That's
-# how 922_form_seeker uses "futurama_bender".
+# (full-color art from tools/generate_pack_icons.py, under "TechDeck pack
+# pixel" / "Icons8 characters pixel" / "Icons socialmedia pixel"). Those are
+# NOT theme-recolored — they render in their native colors on every theme.
+# That's how 922_form_seeker uses "futurama_bender" and customer_dxf_quoting
+# uses "blueprint".
 PLUGIN_ICON_KEYS = {
     "911_setup":            "microsoft_excel_2019",
     "911_batch_repeater":   "repeat",
@@ -51,7 +52,7 @@ PLUGIN_ICON_KEYS = {
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
 # themed pixel-32 tile. Native colors, not theme-recolored.
-_PACK_SETS = ("Icons8 characters pixel", "Icons socialmedia pixel")
+_PACK_SETS = ("TechDeck pack pixel", "Icons8 characters pixel", "Icons socialmedia pixel")
 
 # Themes that have a generated icon palette on disk. Custom user themes fall back
 # to the "dark" set.

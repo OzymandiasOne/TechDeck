@@ -1763,8 +1763,55 @@ _WOODY_WOODPECKER_TONES = {"a": "#074779", "b": "#084778", "c": "#8D1539", "d": 
 def woody_woodpecker(d):    # icons8-woody-woodpecker-64.png
     _draw_grid(d, _WOODY_WOODPECKER_GRID, _WOODY_WOODPECKER_TONES)
 
+_BLUEPRINT_GRID = [
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
+    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeebbbbbbbbbbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aabbddddddddddddddbbbbaa....",
+    "....aabbddddddddddddddbbbbaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aabbbbbbbbbbbbbbbbbbbbaa....",
+    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
+    "....aaaaaaaaaaaaaaaaaaaaaaaa....",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+]
+# Blueprint sheet for Customer DXF Quoting: dark-blue border, blueprint-blue
+# paper, solid white L-shaped flat pattern (sheet-metal part), yellow
+# dimension line underneath. Fixed palette — this icon is NOT theme-recolored
+# (it lives in a pack set, not the pixel-32 set).
+_BLUEPRINT_TONES = {"a": "#085295", "b": "#26659F", "d": "#FCC201", "e": "#E6E5E5"}
+
+def blueprint(d):           # customer dxf quoting
+    _draw_grid(d, _BLUEPRINT_GRID, _BLUEPRINT_TONES)
+
+
 # Output set -> {key: (grid, tones)}. Each grid is painted in its own colors.
 SETS = {
+    "TechDeck pack pixel": {
+        "blueprint": (_BLUEPRINT_GRID, _BLUEPRINT_TONES),
+    },
     "Icons socialmedia pixel": {
         "adobe_illustrator": (_ADOBE_ILLUSTRATOR_GRID, _ADOBE_ILLUSTRATOR_TONES),
         "adobe_photoshop": (_ADOBE_PHOTOSHOP_GRID, _ADOBE_PHOTOSHOP_TONES),
