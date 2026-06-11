@@ -4,11 +4,11 @@ Inline styling for reliable button appearance, rounded corners, and Open Plugin 
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QComboBox, QPushButton, QScrollArea, QGridLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox, QPushButton, QScrollArea, QGridLayout, QLayout,
     QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QFrame, QCheckBox
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QPoint, QRect, QSize
 from PySide6.QtGui import QFont
 
 from techdeck.core.settings import SettingsManager
@@ -19,6 +19,79 @@ from techdeck.ui.theme import get_current_palette
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.plugin_icon import plugin_icon_pixmap
 from techdeck.ui.pages.home_page import TILE_W, TILE_H, TILE_ICON, TILE_ICON_BOX
+
+
+class FlowLayout(QLayout):
+    """Left-packed wrapping layout for the tile grid (standard Qt flow layout).
+
+    Replaces QGridLayout's fixed 5-column wrap: tiles keep CONSTANT spacing and
+    fill each row before wrapping, instead of being stretched apart when the
+    window is wide (maximized) or wrapping too early when it's narrow.
+    """
+
+    def __init__(self, parent=None, margin=24, hspacing=20, vspacing=20):
+        super().__init__(parent)
+        self._items = []
+        self._h = hspacing
+        self._v = vspacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        return size + QSize(m.left() + m.right(), m.top() + m.bottom())
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        x = rect.x() + m.left()
+        y = rect.y() + m.top()
+        right = rect.right() - m.right()
+        line_height = 0
+        for item in self._items:
+            hint = item.sizeHint()
+            if line_height > 0 and x + hint.width() > right + 1:
+                x = rect.x() + m.left()
+                y += line_height + self._v
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x += hint.width() + self._h
+            line_height = max(line_height, hint.height())
+        return y + line_height + m.bottom() - rect.y()
 
 
 class ProfileDialog(QDialog):
@@ -462,9 +535,8 @@ class LibraryPage(QWidget, ThemeAware):
         self._scroll.setWidgetResizable(True)
 
         self._tile_container = QWidget()
-        self.tile_grid = QGridLayout(self._tile_container)
-        self.tile_grid.setSpacing(20)
-        self.tile_grid.setContentsMargins(24, 24, 24, 24)
+        self.tile_grid = FlowLayout(self._tile_container,
+                                    margin=24, hspacing=20, vspacing=20)
 
         self._scroll.setWidget(self._tile_container)
         layout.addWidget(self._scroll, 1)
@@ -660,17 +732,10 @@ class LibraryPage(QWidget, ThemeAware):
         # Get currently selected profile's tiles and sync selected_tile_ids to match
         current_profile_tiles = set(self.settings.get_profile_tiles())
         self.selected_tile_ids = current_profile_tiles.copy()
-        
-        # Get current theme for tile styling
-        from techdeck.ui.theme import get_current_palette
-        # PROFESSIONAL: Get theme from ThemeManager
+
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        current_theme = self.settings.get_theme()
-        
-        # Import theme helper for missing tiles
-        from techdeck.ui.theme import get_missing_tile_style
-        
+
         # Combine available tiles + missing tiles from profile
         all_tile_ids = list(set(self.available_tiles) | current_profile_tiles)
 
@@ -697,8 +762,6 @@ class LibraryPage(QWidget, ThemeAware):
             # Flat A-Z by the descriptive name (family number ignored).
             return (_name_no_family(name),)
 
-        row, col = 0, 0
-
         for tile_id in sorted(all_tile_ids, key=_sort_key):
             plugin = self.plugin_loader.get_plugin(tile_id)
             
@@ -719,60 +782,24 @@ class LibraryPage(QWidget, ThemeAware):
                 )
                 card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
 
-                self.tile_grid.addWidget(card, row, col)
+                self.tile_grid.addWidget(card)
             else:
                 # Missing plugin — toggleable placeholder so the user can
                 # deselect it and Save to drop the dead id from the kit.
                 card = _MissingLibraryTile(tile_id, theme, parent=self)
                 card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
                 self._missing_tile_widgets.append(card)
-                self.tile_grid.addWidget(card, row, col)
+                self.tile_grid.addWidget(card)
 
-            col += 1
-            if col >= 5:
-                col = 0
-                row += 1
-        
-        # No need for _load_profile_selection anymore - selection is set during card creation
-    
-    def _load_profile_selection(self):
-        """Load and display current profile's tile selection."""
-        current_profile = self.profile_combo.currentText()
-        if not current_profile:
-            return
-        
-        # Get tiles for this profile (includes missing ones)
-        profile_tiles = set(self.settings.get_profile_tiles(current_profile))
-        self.selected_tile_ids = profile_tiles.copy()
-        
-        # Update tile button states
-        for i in range(self.tile_grid.count()):
-            widget = self.tile_grid.itemAt(i).widget()
-            if widget and hasattr(widget, 'property'):
-                tile_id = widget.property("tile_id")
-                widget.blockSignals(True)
-                widget.setChecked(tile_id in profile_tiles)
-                widget.blockSignals(False)
-    
     def _on_tile_toggled_card(self, tile_id: str, checked: bool):
-        """PHASE 3: Handle card selection toggle."""
+        """Handle card selection toggle."""
         if checked:
             self.selected_tile_ids.add(tile_id)
         else:
             self.selected_tile_ids.discard(tile_id)
         from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
         get_audio_manager().play(SOUND_CLICK)
-    
-    def _on_tile_toggled(self, checked: bool):
-        """Handle tile selection toggle (legacy method for backward compatibility)."""
-        sender = self.sender()
-        tile_id = sender.property("tile_id")
-        
-        if checked:
-            self.selected_tile_ids.add(tile_id)
-        else:
-            self.selected_tile_ids.discard(tile_id)
-    
+
     def _on_profile_changed(self, profile_name: str):
         """Handle profile selection change."""
         if profile_name:
