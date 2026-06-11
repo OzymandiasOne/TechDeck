@@ -155,3 +155,4 @@ Batch Repeater | Copies repeat orders from prior 922 batches
 QR Code Generator | GUI plugin - dual-tab QR library and generator 
 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer 
 911 Runtime Estimator | Reads each nest's packet PDF and batch list across a directory of orders, computes a plate-cutting time estimate, and writes one workbook with Plates and Non-Plates sheets (data table + nest summary each) 
+Linear Inch Calculator | Interactive DXF flat-pattern viewer - layer-colored geometry, per-line measurements, and total linear inches of cut (with optional stock-edge exclusion) 
