@@ -36,29 +36,30 @@ logger = logging.getLogger(__name__)
 # Path resolution
 # ---------------------------------------------------------------------------
 
-# Subpath under each user's home directory where the synced SharePoint
-# feedback file lives. Path.home() resolves to C:\Users\<current_user>, so
-# this automatically targets the correct OneDrive cache without hardcoding
-# any specific username.
-_FEEDBACK_SUBPATH = (
-    "American Steel & Alum"
-    "/Communication site - Electric Boat ASA Docs"
-    "/Pilot Program"
-    "/922 QTDR Production Packages"
-    "/Notes"
-)
+# Workbook location relative to the Pilot Program root. The root itself is
+# resolved via plugin_sdk.pilot_program_roots(), which tries every OneDrive
+# folder-name variant ('American Steel & Alum', 'OneDrive - American Steel &
+# Alum', and the ONEDRIVE env var). The old code hardcoded ONE variant under
+# Path.home(), which broke on machines where OneDrive named the folder
+# differently — the exact problem the SDK resolver exists to solve (and why
+# the plugins never hit this).
+_FEEDBACK_REL = ("922 QTDR Production Packages", "Notes")
 _FEEDBACK_FILENAME = "TechDeck_Suggestions.xlsx"
 _FEEDBACK_SHEET_NAME = "Feedback"
 
 
-def feedback_file_path() -> Path:
-    """
-    Resolve the per-user path to the shared feedback workbook.
+def feedback_file_path() -> Optional[Path]:
+    """First EXISTING candidate for the shared feedback workbook across all
+    OneDrive folder-name variants, or None if it isn't synced anywhere."""
+    from techdeck.core import plugin_sdk as sdk
+    return sdk.resolve_under_pilot_program(*_FEEDBACK_REL, _FEEDBACK_FILENAME)
 
-    Path.home() gives C:\\Users\\<current_user>, so each user writes into
-    their own OneDrive cache for the same SharePoint location.
-    """
-    return Path.home() / Path(_FEEDBACK_SUBPATH) / _FEEDBACK_FILENAME
+
+def feedback_candidate_paths() -> list:
+    """Every location we look for the workbook (for error messages)."""
+    from techdeck.core import plugin_sdk as sdk
+    return [root.joinpath(*_FEEDBACK_REL, _FEEDBACK_FILENAME)
+            for root in sdk.pilot_program_roots()]
 
 
 # ---------------------------------------------------------------------------
@@ -129,11 +130,15 @@ def submit_feedback(suggestion: str, which_feature: str) -> Path:
     """
     path = feedback_file_path()
 
-    if not path.exists():
+    if path is None:
+        tried = "\n".join(f"  {p}" for p in feedback_candidate_paths())
         raise FileNotFoundError(
-            f"Feedback workbook not found at:\n  {path}\n\n"
-            "Check that OneDrive has synced the SharePoint folder, and that "
-            "TechDeck_Suggestions.xlsx exists at that location."
+            f"{_FEEDBACK_FILENAME} was not found in any OneDrive location. "
+            f"Checked:\n{tried}\n\n"
+            "Make sure the 'Communication site - Electric Boat ASA Docs' "
+            "SharePoint library is synced to OneDrive on this machine, and "
+            "that the workbook exists under "
+            "922 QTDR Production Packages\\Notes."
         )
 
     # Match the existing schema: A=Suggestion, B=Which Feature, C=Date Logged,
