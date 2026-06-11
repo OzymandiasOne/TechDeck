@@ -20,9 +20,7 @@ import queue as _queue
 from techdeck.core.settings import SettingsManager
 from techdeck.core.plugin_loader import PluginLoader
 from techdeck.core.plugin_executor import PluginExecutor, PluginResult
-from techdeck.ui.theme import get_missing_tile_style
 from pathlib import Path
-from techdeck.ui.theme import get_current_palette
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.plugin_icon import plugin_icon_pixmap
@@ -1155,7 +1153,10 @@ class HomePage(QWidget, ThemeAware):
         w = self._grid_widget.width()
         h = self._grid_widget.height()
         lw = min(400, max(200, w - 80))
-        lh = 120
+        # Height from the wrapped content, not a fixed constant — the fixed
+        # 120px clipped the message (3 text lines + the QSS padding > 120).
+        hfw = self._empty_label.heightForWidth(lw)
+        lh = max(150, hfw if hfw > 0 else 0)
         self._empty_label.setGeometry((w - lw) // 2, max(20, (h - lh) // 2), lw, lh)
     
     def _on_tile_toggled(self, tile_id: str, checked: bool):

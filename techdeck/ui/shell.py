@@ -22,7 +22,11 @@ from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION
 from techdeck.ui.theme import generate_stylesheet, get_current_palette
 from techdeck.ui.widgets.sidebar import Sidebar
-from techdeck.ui.pages.home_page import HomePage
+from techdeck.ui.pages.home_page import HomePage, HOME_TILE_H
+
+# Smallest the Home apps pane may get when the console is dragged up:
+# profile bar (50) + grid top margin (24) + one full tile row + a little slack.
+HOME_APPS_MIN_HEIGHT = 50 + 24 + HOME_TILE_H + 10
 from techdeck.ui.pages.library_page import LibraryPage
 from techdeck.ui.pages.account_page import AccountPage
 from techdeck.ui.pages.settings_page import SettingsPage
@@ -274,7 +278,9 @@ class MainWindow(QMainWindow):
         # --- Create Console Widget (shared, but only shown in home page) ---
         self.console = ConsoleWidget()
         self.console.setMinimumHeight(150)
-        self.console.setMaximumHeight(400)
+        # No max height — the splitter range is bounded by the Home pane's
+        # minimum instead, so the console can be dragged up until only the
+        # profile bar + top tile row remain visible.
         
         # Setup command handler (pass self so commands can reach the window + app)
         self.command_handler = CommandHandler(self.settings, self.console, main_window=self)
@@ -321,6 +327,8 @@ class MainWindow(QMainWindow):
         
         # Create home page — uses the shared PluginLoader (no rediscovery)
         self.home_page = HomePage(self.settings, plugin_loader=self._plugin_loader)
+        # Floor for the splitter: console drag stops just below the top tile row.
+        self.home_page.setMinimumHeight(HOME_APPS_MIN_HEIGHT)
         self._step("home page built")
         QApplication.processEvents()
         self.home_page.open_library.connect(self._open_library)
@@ -349,13 +357,22 @@ class MainWindow(QMainWindow):
 
         home_layout.addWidget(self.home_splitter)
 
-        # Slim bar shown only while the console is collapsed — click to restore.
-        self.console_restore_bar = QPushButton()
-        self.console_restore_bar.setObjectName("consoleRestoreBar")
-        self.console_restore_bar.setFixedHeight(28)
-        self.console_restore_bar.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.console_restore_bar.setToolTip("Show console")
-        self.console_restore_bar.clicked.connect(self._expand_console)
+        # Slim bar shown only while the console is collapsed. It's a container:
+        # a full-width restore button on the left, and the Run Selected button
+        # (reparented here for the duration of the collapse) on the right, so
+        # collapsing the console never hides Run.
+        self.console_restore_bar = QWidget()
+        self.console_restore_bar.setObjectName("consoleRestoreWrap")
+        self.console_restore_bar.setFixedHeight(44)
+        self._restore_bar_layout = QHBoxLayout(self.console_restore_bar)
+        self._restore_bar_layout.setContentsMargins(0, 0, 8, 0)
+        self._restore_bar_layout.setSpacing(8)
+        self.btn_restore_console = QPushButton()
+        self.btn_restore_console.setObjectName("consoleRestoreBar")
+        self.btn_restore_console.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_restore_console.setToolTip("Show console")
+        self.btn_restore_console.clicked.connect(self._expand_console)
+        self._restore_bar_layout.addWidget(self.btn_restore_console, 1)
         self.console_restore_bar.hide()
         home_layout.addWidget(self.console_restore_bar)
 
@@ -610,9 +627,10 @@ class MainWindow(QMainWindow):
         return f"{m}m {s:02d}s"
 
     def _on_message_entered(self, message: str):
-        """Handle natural language message (for ChatGPT later)."""
-        self.console.append_assistant("ChatGPT integration coming soon!")
-        self.console.append_system("For now, try using commands like /help")
+        """Free-text (non-command) console input — point the user at /help."""
+        self.console.append_system(
+            "Commands start with a slash — type /help to see everything "
+            "the console can do.")
     
     def _on_library_saved(self):
         """Handle library save - refresh home page."""
@@ -719,14 +737,19 @@ class MainWindow(QMainWindow):
             }}
         """)
 
-        self.console_restore_bar.setIcon(
+        self.console_restore_bar.setStyleSheet(f"""
+            QWidget#consoleRestoreWrap {{
+                background-color: {theme.surface};
+                border-top: 1px solid {theme.divider};
+            }}
+        """)
+        self.btn_restore_console.setIcon(
             QIcon(_tint_svg(icons_dir / "chevron-up.svg", theme.text_secondary, 16))
         )
-        self.console_restore_bar.setStyleSheet(f"""
+        self.btn_restore_console.setStyleSheet(f"""
             QPushButton#consoleRestoreBar {{
                 border: none;
-                border-top: 1px solid {theme.divider};
-                background-color: {theme.surface};
+                background-color: transparent;
                 color: {theme.text_secondary};
                 text-align: left;
                 padding-left: 12px;
@@ -744,15 +767,28 @@ class MainWindow(QMainWindow):
         if len(sizes) >= 2 and sizes[1] > 0:
             self._saved_console_height = sizes[1]
         self.console.hide()
+        # Keep Run reachable while collapsed: move the actual button (with its
+        # state, glow, and Run/Cancel mode intact) onto the restore bar.
+        # addWidget reparents it out of the console header automatically.
+        self._run_btn_header_index = self.console.header.indexOf(self.btn_run)
+        self._restore_bar_layout.addWidget(
+            self.btn_run, 0, Qt.AlignmentFlag.AlignVCenter)
         self.console_restore_bar.show()
 
     def _expand_console(self):
         """Restore the console panel to its last height."""
         self.console_restore_bar.hide()
+        # Give the Run button back to its original console-header slot.
+        idx = getattr(self, "_run_btn_header_index", -1)
+        if idx >= 0 and self.btn_run.parent() is self.console_restore_bar:
+            self._restore_bar_layout.removeWidget(self.btn_run)
+            self.console.header.insertWidget(
+                idx, self.btn_run, 0, Qt.AlignmentFlag.AlignTop)
         self.console.show()
-        height = max(150, min(self._saved_console_height or 280, 400))
+        height = max(150, self._saved_console_height or 280)
         total = sum(self.home_splitter.sizes())
-        self.home_splitter.setSizes([max(total - height, 150), height])
+        height = min(height, max(150, total - HOME_APPS_MIN_HEIGHT))
+        self.home_splitter.setSizes([max(total - height, HOME_APPS_MIN_HEIGHT), height])
 
     def _on_home_splitter_moved(self, pos, index):
         """Convert a drag-to-bottom collapse into the restore-bar state."""
@@ -850,6 +886,14 @@ class MainWindow(QMainWindow):
         available area, snap the window back inside. Called from
         changeEvent so a bad maximize/restore never traps the title bar.
         """
+        # A maximized window's frame legitimately extends a few px past every
+        # screen edge on Windows (hidden resize borders), so the clamp below
+        # would misfire: it re-positioned the still-maximized window one
+        # title-bar height too low, clipping the bottom of the app behind the
+        # taskbar (and hiding the collapsed-console restore bar entirely).
+        # Maximize/fullscreen placement is the OS's job — only clamp normal.
+        if self.isMaximized() or self.isFullScreen():
+            return
         from PySide6.QtGui import QGuiApplication
         screen = self.screen() or QGuiApplication.primaryScreen()
         if screen is None:
