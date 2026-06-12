@@ -63,6 +63,8 @@ def pilot_program_roots() -> list[Path]:
     * "Add shortcut to My files" layouts, where the site folder — or the
       'Pilot Program' folder itself — sits inside the personal OneDrive
     * a OneDrive relocated off the user profile (siblings of ``%OneDrive%``)
+    * the parent of any manually-set per-app directory override saved in
+      Settings > Apps (a user-confirmed location outranks globbed guesses)
     """
     home = Path.home()
     site, pilot = _PILOT_REL
@@ -83,6 +85,34 @@ def pilot_program_roots() -> list[Path]:
     add(home / "OneDrive - American Steel & Alum" / site / pilot)
     if od:
         add(Path(od) / site / pilot)
+
+    # Roots derived from saved per-app directory overrides. On a machine
+    # where auto-detect failed, the user manually set some app's 922/911
+    # folder in Settings > Apps — that override is ground truth for where the
+    # library lives, so every other consumer (all batch apps, the feedback
+    # writer) should benefit from it too. Those overrides point at a package
+    # root directly under Pilot Program, so the override's PARENT is the
+    # Pilot Program root. Keys with other semantics (pdf_directory,
+    # output_dir, ...) are deliberately not consulted.
+    try:
+        from techdeck.core.settings import SettingsManager
+        _ROOT_OVERRIDE_KEYS = ("base_path", "base_directory", "qtdr_922_root",
+                               "qtdr_911_root", "qtdr_base_path", "forecast_dir")
+        per_plugin_settings = SettingsManager().data.get("plugin_settings", {})
+        for plugin_conf in per_plugin_settings.values():
+            if not isinstance(plugin_conf, dict):
+                continue
+            for key in _ROOT_OVERRIDE_KEYS:
+                raw = str(plugin_conf.get(key) or "").strip()
+                if not raw:
+                    continue
+                parent = Path(raw).expanduser().parent
+                if parent.is_dir():
+                    add(parent)
+    except Exception:
+        # Settings must never break root resolution (e.g. plugin_sdk used
+        # standalone in CLI testing outside the app).
+        pass
 
     # Discovered layouts. Globs are shallow with fixed tails (no ** walks —
     # cheap even on OneDrive). Discovery must never break resolution, so any
