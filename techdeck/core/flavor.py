@@ -56,6 +56,7 @@ TALKBACK_LINES = [
     "Steel does not care what you name the folder. But you should name it correctly anyway.",
     "That file has been waiting in that directory for six months. It is ready.",
     "Nothing failed. Make of that what you will.",
+    "I take a chip....and *eat* it.",
     "Here I am, brain the size of a planet, and they ask me to process spreadsheets."
 ]
 

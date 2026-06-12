@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.5.5 - 911 Setup alphanumeric nest IDs + DYPN QTY verification vs nest packet PDFs
+; Version 0.8.6 - DXF Quoting WELD + export + auto-apply, feedback workbook OneDrive fix, shell/library UX fixes
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.5.5"
+#define MyAppVersion "0.8.6"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

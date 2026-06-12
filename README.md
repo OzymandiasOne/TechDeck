@@ -1,8 +1,36 @@
-# TechDeck v0.8.5.5 - 911 Setup Adjustments
+# TechDeck v0.8.6 - DXF Quoting Upgrades & Quality-of-Life Fixes
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes — just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6
+
+**Customer DXF Quoting v1.2** - Layer reassignment now applies the moment you pick a
+layer (no Apply button), WELD layers are recognized and measured (excluded from the
+default cut total, with their own subtotal), and a new **Export DXF** button saves a copy
+of the drawing with your reassignments written back — geometry untouched, missing layers
+added to the file's layer table. The part view fits centered with breathing room, and
+overlapping dimension labels now stack cleanly.
+
+**Report Feedback fixed for everyone** - The feedback workbook is now located the same
+way the apps find their folders, so it works no matter how OneDrive named the synced
+SharePoint folder on your machine.
+
+**App directory settings** - Every app that works out of a fixed OneDrive folder
+(Batch Auditor, 911 Batch Repeater, 922 Kitting, FormingFinder, Runtime Genie) now shows
+that folder in Settings > Apps — blank means auto-detect, or set it explicitly.
+
+**Window & layout fixes** - Maximized window no longer clips at the bottom of the screen;
+the Run button stays available when the console is collapsed; the console can be dragged
+much taller; the Library packs apps tightly at any window size; missing-app tiles can be
+removed cleanly and follow theme changes; the post-update notes window opens at the right
+size.
+
+**Console polish** - /help shows a "read more" hint, blackjack takes a bet each hand and
+auto-plays out a 21, and a few more surprises.
 
 ---
 
