@@ -53,7 +53,7 @@ def _bool_status(ok: bool) -> str:
 # ── small workbook readers (read-only) ──────────────────────────────────────
 
 def _count_bend_notes(po_path: Path) -> int:
-    wb = openpyxl.load_workbook(po_path, data_only=True)
+    wb = sdk.load_workbook_resilient(po_path, data_only=True)
     try:
         ws = wb['PO'] if 'PO' in wb.sheetnames else wb.active
         hr, cols = sdk.find_header_row(ws, ['DYPN', 'NOTES'])
@@ -71,7 +71,7 @@ def _count_bend_notes(po_path: Path) -> int:
 
 
 def _bent_plates_rows(organizer_path: Path) -> int:
-    wb = openpyxl.load_workbook(organizer_path, data_only=True)
+    wb = sdk.load_workbook_resilient(organizer_path, data_only=True)
     try:
         if 'Bent Plates' not in wb.sheetnames:
             return 0
@@ -89,7 +89,7 @@ def _bent_plates_rows(organizer_path: Path) -> int:
 def _pallet_assignment_count(organizer_path: Path) -> int:
     """Orders assigned to pallets in the 'Pallet Organizer' sheet. Layout
     mirrors 922_pallet_stamper: orders live in columns B/E/H from row 5 down."""
-    wb = openpyxl.load_workbook(organizer_path, data_only=True)
+    wb = sdk.load_workbook_resilient(organizer_path, data_only=True)
     try:
         if 'Pallet Organizer' not in wb.sheetnames:
             return 0
@@ -253,7 +253,7 @@ def _audit_911(batch: str, batch_folder: Path, log):
 
     nests: list[str] = []
     if batch_list.exists():
-        wb = openpyxl.load_workbook(batch_list, data_only=True)
+        wb = sdk.load_workbook_resilient(batch_list, data_only=True)
         try:
             ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
             col = sdk.find_header_col(ws, "Nest Pkg Nbr", header_row=3)

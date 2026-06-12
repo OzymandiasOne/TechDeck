@@ -109,9 +109,7 @@ def _find_excel_header_row(
 
 
 def _read_po_maps(xlsx_path: Path, debug_fp) -> Tuple[Dict, Dict]:
-    from openpyxl import load_workbook
-
-    wb = load_workbook(xlsx_path, read_only=True, data_only=True)
+    wb = sdk.load_workbook_resilient(xlsx_path, read_only=True, data_only=True)
     smap = _sheetmap(wb)
     if not {"po", "source material"}.issubset(smap.keys()):
         raise ValueError("Workbook missing required sheets: PO / SOURCE MATERIAL")

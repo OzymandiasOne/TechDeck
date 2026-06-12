@@ -181,6 +181,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Read Excel file
     log("Reading Excel spreadsheet...")
     try:
+        sdk.ensure_local(spreadsheet_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
         df = pd.read_excel(spreadsheet_path, sheet_name=SHEET_NAME, header=2)
     except Exception as e:
         log(f"ERROR: Error reading spreadsheet: {e}")

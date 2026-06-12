@@ -142,6 +142,7 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
     try:
         tmp = pdf_path + ".tmp"
 
+        sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(pdf_path)
         try:
             page = doc[0]
@@ -237,6 +238,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     # Read Excel pallet organizer
     try:
+        sdk.ensure_local(xl_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
         df = pd.read_excel(
             xl_path,
             sheet_name="Pallet Organizer",

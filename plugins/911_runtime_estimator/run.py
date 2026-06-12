@@ -269,6 +269,7 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     out = {"thickness": None, "pieces": None, "material": None,
            "stock_l": None, "stock_w": None, "mil_spec": None,
            "plate_weight": None, "process": None, "mt_material": None}
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     try:
         pages = [p.get_text() for p in doc]
@@ -421,7 +422,7 @@ def load_batch_rows(batch_list_path: Path):
     Locates the sheet + header row by scanning for 'Nest Pkg Nbr'/'PPN Quantity'
     so it survives column/row shifts and extra sheets (SCRAP, Sheet3 ...).
     """
-    wb = openpyxl.load_workbook(batch_list_path, data_only=True)
+    wb = sdk.load_workbook_resilient(batch_list_path, data_only=True)
     try:
         target_ws = None
         header_row = None

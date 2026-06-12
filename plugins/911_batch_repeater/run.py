@@ -69,8 +69,7 @@ def _find_nest_excel(nest_folder: Path, batch_number: str, nest_number: str) -> 
 
 
 def _read_dypns(excel_path: Path) -> list[str]:
-    import openpyxl
-    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    wb = sdk.load_workbook_resilient(excel_path, data_only=True)
     try:
         if "NEST" not in wb.sheetnames:
             return []
@@ -146,6 +145,7 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
     import fitz  # PyMuPDF
 
     replacement = f"{new_batch} {new_nest}"
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     replaced = False
 

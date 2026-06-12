@@ -26,6 +26,13 @@ try:
 except ImportError:
     PYPDF_AVAILABLE = False
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 
 def _find_move_ticket_pages(pdf_path: Path) -> set:
     """
@@ -36,6 +43,7 @@ def _find_move_ticket_pages(pdf_path: Path) -> set:
     """
     indices = set()
     try:
+        sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(str(pdf_path))
     except Exception:
         return indices
@@ -62,6 +70,7 @@ def _process_pdf(pdf_path: Path, output_path: Path, log) -> bool:
         return False
 
     try:
+        sdk.ensure_local(pdf_path)
         reader = PdfReader(str(pdf_path))
         total = len(reader.pages)
         keep = [i for i in range(total) if i not in remove_pages]

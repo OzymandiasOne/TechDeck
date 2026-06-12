@@ -272,7 +272,7 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
     Windows Explorer ascending order so the selection dialog and processing
     follow the same ordering the operator sees in the file system.
     """
-    wb = load_workbook(batch_list_path, data_only=True)
+    wb = sdk.load_workbook_resilient(batch_list_path, data_only=True)
     ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
 
     nest_col = _find_header_col(ws, "Nest Pkg Nbr", header_row=3)
@@ -335,6 +335,7 @@ def _parse_packet_summary_qtys(pdf_path: Path) -> dict:
     qtys = {}
     if not PYMUPDF_AVAILABLE:
         return qtys
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(pdf_path)
     try:
         for page in doc:
@@ -387,7 +388,7 @@ def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
     nothing to verify against.
     """
     HEADER_ROW = 3
-    wb = load_workbook(batch_list_path, data_only=True)
+    wb = sdk.load_workbook_resilient(batch_list_path, data_only=True)
     ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
 
     col_labeled = _find_header_col(ws, "DYPN QTY", HEADER_ROW)
@@ -467,7 +468,7 @@ def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log)
     column either way, only the on-disk label stays wrong.
     """
     try:
-        wb = load_workbook(batch_list_path)
+        wb = sdk.load_workbook_resilient(batch_list_path)
         ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
         a, b = ws.cell(3, col_a).value, ws.cell(3, col_b).value
         ws.cell(3, col_a).value = b
@@ -502,7 +503,7 @@ def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str,
 
     Returns list of 6-tuples in that order.
     """
-    wb = load_workbook(batch_list_path, data_only=True)
+    wb = sdk.load_workbook_resilient(batch_list_path, data_only=True)
     ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
 
     HEADER_ROW = 3
@@ -748,6 +749,7 @@ def _extract_pdf_data(pdf_path: Path) -> tuple:
             "Install it with: pip install pymupdf"
         )
 
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     full_text = "".join(page.get_text() for page in doc)
     doc.close()
@@ -818,6 +820,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
     log(f"  Found nest PDF: {matching_pdf.name}")
 
     try:
+        sdk.ensure_local(matching_pdf)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(str(matching_pdf))
         total_pages = len(doc)
 
@@ -1345,6 +1348,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         )
 
     forecast_copy = batch_folder / forecast_filename
+    sdk.ensure_local(forecast_src, log)  # copy reads content -> hydrate first (Hard Rule 13)
     shutil.copy2(forecast_src, forecast_copy)
     log(f"Forecast copy : {forecast_copy}")
 
@@ -1373,7 +1377,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"{'='*50}")
 
         nest_excel = nest_excel_paths[nest]
-        wb = load_workbook(nest_excel)
+        wb = sdk.load_workbook_resilient(nest_excel, log=log)
         nest_ws = wb["NEST"]
 
         # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------

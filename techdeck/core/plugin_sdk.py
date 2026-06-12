@@ -383,11 +383,10 @@ def read_qf_qu_09(po_path: Path):
     Serials are stripped strings, ready to pass to tube_class(). Header row is
     located by name (ORDER / DYPN / SOURCE MATERIAL), never by position.
     """
-    import openpyxl
     order_to_serials: dict[str, set] = {}
     dypn_to_order_serial: dict[str, tuple] = {}
 
-    wb = openpyxl.load_workbook(po_path, data_only=True)
+    wb = load_workbook_resilient(po_path, data_only=True)
     try:
         ws = wb['PO'] if 'PO' in wb.sheetnames else wb.active
         header_row, cols = find_header_row(ws, ['ORDER', 'DYPN', 'SOURCE MATERIAL'])
@@ -421,6 +420,7 @@ def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
     out = fitz.open()
     try:
         for p in pdfs:
+            ensure_local(p)
             src = fitz.open(str(p))
             try:
                 out.insert_pdf(src)
@@ -500,6 +500,19 @@ def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) ->
         f"again. For reliability, right-click the folder in File Explorer and "
         f"choose 'Always keep on this device'.\n  File: {path}"
     ) from last_err
+
+
+def ensure_local(path, log=None) -> None:
+    """Make sure `path`'s CONTENT is on disk before a library reads it.
+
+    No-op for normal files; for a OneDrive cloud-only placeholder it forces
+    the download (with retries) or raises a user-actionable RuntimeError.
+    Call immediately before fitz.open / PdfReader / pd.read_excel / text
+    reads of anything under the OneDrive tree (Hard Rule 13)."""
+    if is_cloud_placeholder(path):
+        if log:
+            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
+        hydrate_cloud_file(path, log=log)
 
 
 def load_workbook_resilient(path, log=None, **kwargs):

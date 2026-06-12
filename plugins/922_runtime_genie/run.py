@@ -49,6 +49,7 @@ def _collect_lst_stems(lst_dir: Path) -> Set[str]:
 def _extract_machine_time(pdf_path: Path) -> tuple[Optional[float], Optional[str]]:
     """Return (value_in_minutes, error_message). Value is None on failure."""
     try:
+        sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
         reader = PdfReader(str(pdf_path))
         for page in reader.pages:
             text = page.extract_text() or ""

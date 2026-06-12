@@ -31,6 +31,13 @@ import fitz  # PyMuPDF
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 
 # ===== CONSTANTS =====
 VERSION = "2.3.0"
@@ -292,6 +299,7 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Dict]:
     """Extract all PO data from a PDF."""
     doc = None
     try:
+        sdk.ensure_local(pdf_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(str(pdf_path))
     except FileNotFoundError:
         raise ValueError(f"PDF file not found: {pdf_path}")

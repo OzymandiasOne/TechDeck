@@ -269,6 +269,7 @@ def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[
 def _is_formed_pdf(pdf: Path) -> bool:
     """Open PDF; return True if Check A (UP X deg R) or Check B (spatial) passes."""
     try:
+        sdk.ensure_local(pdf)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(pdf)
     except Exception:
         return False
@@ -378,7 +379,7 @@ def _update_bent_plates(
     rows_data: list[dict],
     log,
 ) -> None:
-    wb = openpyxl.load_workbook(organizer_path)
+    wb = sdk.load_workbook_resilient(organizer_path, log=log)
     if 'Bent Plates' not in wb.sheetnames:
         wb.close()
         raise RuntimeError("'Bent Plates' sheet not found in organizer workbook")

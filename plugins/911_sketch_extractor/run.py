@@ -37,6 +37,13 @@ from pypdf import PdfWriter, PdfReader
 from openpyxl import Workbook, load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
+
 
 # ===== CONSTANTS =====
 VERSION = "2.3.0"
@@ -294,6 +301,7 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Tuple]:
     packet_name = pdf_path.stem  # .stem gives filename without extension
 
     try:
+        sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(str(pdf_path))
     except Exception as e:
         raise RuntimeError(f"Could not open PDF '{pdf_path}': {e}")
@@ -543,6 +551,7 @@ def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path], all_rows: Lis
     
     try:
         for pdf in pdfs:
+            sdk.ensure_local(pdf)
             pdf_reader = PdfReader(str(pdf))
             packet_name = pdf.stem  # Strip .pdf for comparison
             for page_idx, page_num in enumerate(range(1, len(pdf_reader.pages) + 1)):

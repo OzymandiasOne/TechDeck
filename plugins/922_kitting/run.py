@@ -458,6 +458,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         merged = fitz.open()
         try:
             for p in pdf_paths:
+                sdk.ensure_local(p)  # OneDrive placeholder -> download first (Hard Rule 13)
                 src = fitz.open(p)
                 try:
                     merged.insert_pdf(src)
@@ -473,6 +474,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         merged_labels = fitz.open()
         try:
             for p in label_pdf_paths:
+                sdk.ensure_local(p)  # OneDrive placeholder -> download first (Hard Rule 13)
                 src = fitz.open(p)
                 try:
                     merged_labels.insert_pdf(src)
