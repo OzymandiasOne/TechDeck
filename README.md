@@ -1,8 +1,27 @@
-# TechDeck v0.8.6 - DXF Quoting Upgrades & Quality-of-Life Fixes
+# TechDeck v0.8.6.1 - Hotfix: DXF Quoting Launch & Run-State Recovery
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.1
+
+**Customer DXF Quoting launches again** - The v0.8.6 build was missing a component the
+DXF viewer needs on a freshly updated machine, so it failed with "missing dependency"
+before it could open. The component now ships with the app.
+
+**A failed app launch no longer locks up TechDeck** - When an app couldn't start, the
+deck used to stay stuck on a red Cancel button with nothing actually running, and no
+other app could be launched until TechDeck was restarted. A failed start now marks the
+tile with an error, reports the real reason in the console, and frees the deck
+immediately.
+
+**Releases are verified before they ship** - The build now runs an automatic
+ship-readiness check on every app (all 15 verified for this release), so an app that
+works on the dev machine but not out of the box for everyone else can no longer reach
+an installer.
 
 ---
 

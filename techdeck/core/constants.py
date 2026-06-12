@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6"  # DXF Quoting v1.2 (WELD + DXF export + auto-apply), feedback workbook OneDrive-variant fix, shell/library UX fixes, plugin directory settings
+APP_VERSION = "0.8.6.1"  # Hotfix: DXF Quoting frozen-build launch (plugin_window hiddenimport), refused-start run-state unwind, ship-readiness build gate
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

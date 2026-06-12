@@ -28,7 +28,7 @@ if ($versionLine) {
 }
 
 # Step 1: Clean previous builds
-Write-Host "`n[1/6] Cleaning previous builds..." -ForegroundColor Yellow
+Write-Host "`n[1/7] Cleaning previous builds..." -ForegroundColor Yellow
 if (Test-Path "build") { 
     Remove-Item -Recurse -Force "build" 
     Write-Host "  [OK] Cleaned build directory" -ForegroundColor Green
@@ -39,7 +39,7 @@ if (Test-Path "dist") {
 }
 
 # Step 2: Verify source files exist
-Write-Host "`n[2/6] Verifying source files..." -ForegroundColor Yellow
+Write-Host "`n[2/7] Verifying source files..." -ForegroundColor Yellow
 $requiredFiles = @(
     "TechDeck.spec",
     "techdeck\__main__.py",
