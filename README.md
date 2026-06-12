@@ -26,6 +26,10 @@ directory is used as a hint as well.
 only a single app card until you cycled through kits; all installed apps now lay out
 correctly on first open.
 
+**Steel Tube Operation un-frozen** - The /steelbeams game froze permanently the moment
+the A-Frame Prototype completed. Fixed, and the game now reports any future fault in
+its own log instead of silently freezing.
+
 **Customer DXF Quoting launches again** - The v0.8.6 build was missing a component the
 DXF viewer needs on a freshly updated machine, so it failed with "missing dependency"
 before it could open. The component now ships with the app.
