@@ -50,27 +50,67 @@ _PILOT_REL = (
 def pilot_program_roots() -> list[Path]:
     """Candidate 'Pilot Program' directories, in priority order, de-duplicated.
 
-    Covers the two folder names OneDrive uses ('American Steel & Alum' and
-    'OneDrive - American Steel & Alum') plus whatever the ONEDRIVE env var
-    points at. Existence is NOT checked here — see resolve_under_pilot_program.
+    The fixed, known layouts come first and are NOT existence-checked (callers
+    like 911 Setup use [0] as the default for error messages). After those,
+    DISCOVERED layouts are appended — globbed from disk, so they exist — to
+    cover machines where OneDrive named things differently. Colleagues' fresh
+    installs hit exactly this (v0.8.6.1): their sync base wasn't one of the
+    two hardcoded names, so every batch app failed to locate the root until
+    the directory was set manually per app. Discovery covers:
+
+    * any tenant display-name variant: ``~\\<Tenant>\\<site>\\Pilot Program``
+    * a personal-OneDrive folder with any tenant suffix: ``~\\OneDrive - *``
+    * "Add shortcut to My files" layouts, where the site folder — or the
+      'Pilot Program' folder itself — sits inside the personal OneDrive
+    * a OneDrive relocated off the user profile (siblings of ``%OneDrive%``)
     """
     home = Path.home()
-    bases = [
-        home / "American Steel & Alum",
-        home / "OneDrive - American Steel & Alum",
-    ]
+    site, pilot = _PILOT_REL
     od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
-    if od:
-        bases.append(Path(od))
 
-    seen: set[str] = set()
     out: list[Path] = []
-    for base in bases:
-        root = base.joinpath(*_PILOT_REL)
+    seen: set[str] = set()
+
+    def add(root: Path) -> None:
         key = str(root).casefold()
         if key not in seen:
             seen.add(key)
             out.append(root)
+
+    # Known fixed layouts — keep these first so machines that work today keep
+    # resolving to the exact same path.
+    add(home / "American Steel & Alum" / site / pilot)
+    add(home / "OneDrive - American Steel & Alum" / site / pilot)
+    if od:
+        add(Path(od) / site / pilot)
+
+    # Discovered layouts. Globs are shallow with fixed tails (no ** walks —
+    # cheap even on OneDrive). Discovery must never break resolution, so any
+    # filesystem oddity just skips it.
+    try:
+        containers = [home]
+        if od:
+            od_parent = Path(od).parent
+            if str(od_parent).casefold() != str(home).casefold():
+                containers.append(od_parent)
+        for container in containers:
+            # Any tenant-named sync root (also catches the site folder synced
+            # inside a personal 'OneDrive - <tenant>' folder).
+            for hit in container.glob(f"*/{site}/{pilot}"):
+                if hit.is_dir():
+                    add(hit)
+        # 'Pilot Program' shortcut sitting directly inside a personal OneDrive
+        # ("Add shortcut to My files" on the Pilot Program folder itself).
+        personals = list(home.glob("OneDrive - *"))
+        if od:
+            personals.append(Path(od))
+        for base in personals:
+            for hit in base.glob(pilot):
+                if hit.is_dir():
+                    add(hit)
+    except OSError:
+        pass
+
     return out
 
 
