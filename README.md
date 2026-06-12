@@ -1,8 +1,24 @@
-# TechDeck v0.8.6.1 - Hotfix: DXF Quoting Launch & Run-State Recovery
+# TechDeck v0.8.6.2 - Hotfix: OneDrive Cloud Files & Cancel Reliability
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.2
+
+**Cloud-only OneDrive files download automatically** - On a freshly synced machine,
+files can exist in name only (contents still in the cloud). Apps previously crashed with
+a cryptic "Invalid argument" error the moment they read one - now every app asks OneDrive
+to download the file and continues, or stops with clear instructions if OneDrive can't
+(applies to all 911/922 apps, FormingFinder included). Tip: right-clicking the Pilot
+Program folder and choosing "Always keep on this device" makes everything faster.
+
+**Cancel actually cancels** - Cancel now works even while an app is waiting at a console
+question, the button immediately shows "Cancelling..." so you know it registered, and a
+double-click can no longer accidentally start a brand-new run the instant the old one
+stops.
 
 ---
 

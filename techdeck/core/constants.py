@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.1"  # Hotfix: DXF Quoting frozen-build launch (plugin_window hiddenimport), refused-start run-state unwind, OneDrive root auto-discovery, ship-readiness build gate
+APP_VERSION = "0.8.6.2"  # Hotfix: OneDrive cloud-file auto-download across all apps (Hard Rule 13), Cancel works at prompts + click feedback + double-click guard
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

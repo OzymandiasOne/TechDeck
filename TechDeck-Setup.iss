@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.1 - Hotfix: DXF Quoting frozen-build launch fix, stuck-Cancel unwind, ship-readiness gate
+; Version 0.8.6.2 - Hotfix: OneDrive cloud-file auto-download across all apps, Cancel at prompts + double-click guard
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.1"
+#define MyAppVersion "0.8.6.2"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
