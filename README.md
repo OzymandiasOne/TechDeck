@@ -8,6 +8,13 @@ the `.exe`.
 
 ## What's New in v0.8.6.1
 
+**911/922 apps find their folders on every machine** - On a fresh install, the batch
+apps only looked for the Electric Boat ASA Docs library under two fixed OneDrive folder
+names, so machines whose OneDrive named it differently got "Could not locate" errors and
+had to set each app's directory by hand. TechDeck now discovers the library wherever
+OneDrive put it - tenant-name variants, "Add shortcut to My files" layouts, and relocated
+OneDrive folders all resolve automatically. Manually set directories still win.
+
 **Customer DXF Quoting launches again** - The v0.8.6 build was missing a component the
 DXF viewer needs on a freshly updated machine, so it failed with "missing dependency"
 before it could open. The component now ships with the app.
