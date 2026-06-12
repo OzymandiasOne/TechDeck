@@ -30,6 +30,12 @@ correctly on first open.
 the A-Frame Prototype completed. Fixed, and the game now reports any future fault in
 its own log instead of silently freezing.
 
+**New: Generate Debug Report** - Settings > Help & Feedback now has a one-click debug
+report. If something misbehaves on your machine, click it and send the file it saves to
+your Desktop to the maintainer - it captures TechDeck's version, folder discovery, app
+validation results, and logs from your machine (no production documents), which is
+usually enough to pinpoint a problem without back-and-forth.
+
 **Customer DXF Quoting launches again** - The v0.8.6 build was missing a component the
 DXF viewer needs on a freshly updated machine, so it failed with "missing dependency"
 before it could open. The component now ships with the app.
