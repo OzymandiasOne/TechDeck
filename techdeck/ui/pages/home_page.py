@@ -1299,28 +1299,39 @@ class HomePage(QWidget, ThemeAware):
             'on_input_idle': self._input_idle_callback,
         }
         self._set_button_cancel_mode()
-        self._start_next_plugin()
+        if not self._start_next_plugin():
+            # Nothing could start (e.g. every queued plugin failed validation)
+            # — unwind immediately so the button doesn't stick on Cancel.
+            self._plugins_all_done.emit()
 
     def _start_next_plugin(self) -> bool:
         """Start the next queued plugin. Returns True if a plugin was started."""
-        if not self._plugin_queue:
-            return False
+        while self._plugin_queue:
+            tile_id = self._plugin_queue.pop(0)
+            plugin = self.plugin_executor.plugin_loader.get_plugin(tile_id)
+            plugin_timeout = getattr(plugin, "timeout", None) if plugin else None
 
-        tile_id = self._plugin_queue.pop(0)
-        plugin = self.plugin_executor.plugin_loader.get_plugin(tile_id)
-        plugin_timeout = getattr(plugin, "timeout", None) if plugin else None
+            self.plugin_status_updated.emit(tile_id, PluginCard.STATUS_RUNNING)
 
-        self.plugin_status_updated.emit(tile_id, PluginCard.STATUS_RUNNING)
+            started = self.plugin_executor.execute_plugin(
+                tile_id,
+                params=self._plugin_params,
+                log_callback=lambda msg, tid=tile_id: self._log_buffer.put((tid, msg)),
+                progress_callback=lambda prog, tid=tile_id: self.plugin_progress.emit(tid, prog),
+                completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
+                timeout=plugin_timeout
+            )
+            if started:
+                return True
 
-        self.plugin_executor.execute_plugin(
-            tile_id,
-            params=self._plugin_params,
-            log_callback=lambda msg, tid=tile_id: self._log_buffer.put((tid, msg)),
-            progress_callback=lambda prog, tid=tile_id: self.plugin_progress.emit(tid, prog),
-            completion_callback=lambda result, tid=tile_id: self._on_plugin_complete(tid, result),
-            timeout=plugin_timeout
-        )
-        return True
+            # The executor refused to start (e.g. validation failed) and will
+            # never fire the completion callback, so unwind here — otherwise
+            # the run sticks in Cancel mode with nothing to cancel and the
+            # user can't start anything else (bit customer_dxf_quoting when a
+            # frozen build was missing a hiddenimport).
+            self.plugin_status_updated.emit(tile_id, PluginCard.STATUS_ERROR)
+            self.plugin_completed.emit(tile_id)
+        return False
 
     def _remove_missing_plugin(self, tile_id: str):
         """Remove a missing plugin from the current kit and refresh the grid."""
@@ -1474,7 +1485,8 @@ class HomePage(QWidget, ThemeAware):
             name = plugin.name if plugin else next_tile
             self._console_log(f"[RESUMED] Continuing with {name}.")
             self._set_button_cancel_mode()
-            self._start_next_plugin()
+            if not self._start_next_plugin():
+                self._plugins_all_done.emit()
             return
         if self._paused:
             # Paused flag set but queue is empty — clean up the inconsistency.
@@ -1664,7 +1676,8 @@ class HomePage(QWidget, ThemeAware):
             f"(shared state restored)."
         )
         self._set_button_cancel_mode()
-        self._start_next_plugin()
+        if not self._start_next_plugin():
+            self._plugins_all_done.emit()
 
     def _set_button_cancel_mode(self):
         """Switch the Run Selected button to Cancel (red) while plugins run."""

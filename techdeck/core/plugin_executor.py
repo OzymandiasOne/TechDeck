@@ -180,6 +180,17 @@ class PluginExecutor:
         if not is_valid:
             if log_callback:
                 log_callback(f"Plugin validation failed: {error_msg}")
+            # Record an ERROR result so callers that read get_result() after a
+            # failed start (e.g. the shell's completion handler) see this
+            # failure instead of a stale result from a previous run.
+            with self._lock:
+                self.results[plugin_id] = PluginResult(
+                    plugin_id=plugin_id,
+                    status=PluginStatus.ERROR,
+                    message=f"Validation failed: {error_msg}",
+                    error=error_msg,
+                )
+            get_run_logger().error("RUN REFUSED %s: %s", plugin_id, error_msg)
             return False
         
         # PHASE 2: Determine effective timeout
