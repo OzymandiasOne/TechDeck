@@ -64,8 +64,20 @@ if ($missingFiles.Count -gt 0) {
 }
 Write-Host "  [OK] All required source files present" -ForegroundColor Green
 
-# Step 3: Run PyInstaller
-Write-Host "`n[3/6] Running PyInstaller..." -ForegroundColor Yellow
+# Step 3: Ship-readiness gate - every plugin import must exist in the frozen
+# bundle (hiddenimports / app import graph), manifests must be valid, and every
+# plugin must load through PluginLoader. Catches works-in-dev-only failures
+# BEFORE they ship (e.g. the v0.8.6 plugin_window miss).
+Write-Host "`n[3/7] Running ship-readiness check..." -ForegroundColor Yellow
+python tools\check_ship_readiness.py --load
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [FAIL] Ship-readiness check failed - fix the errors above before building" -ForegroundColor Red
+    exit 1
+}
+Write-Host "  [OK] Ship-readiness check passed" -ForegroundColor Green
+
+# Step 4: Run PyInstaller
+Write-Host "`n[4/7] Running PyInstaller..." -ForegroundColor Yellow
 Write-Host "  This may take 2-5 minutes..." -ForegroundColor Gray
 
 pyinstaller TechDeck.spec --clean 2>&1 | Out-Null
@@ -76,8 +88,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] PyInstaller completed successfully" -ForegroundColor Green
 
-# Step 4: Verify build output
-Write-Host "`n[4/6] Verifying build output..." -ForegroundColor Yellow
+# Step 5: Verify build output
+Write-Host "`n[5/7] Verifying build output..." -ForegroundColor Yellow
 
 $exePath = "dist\TechDeck\TechDeck.exe"
 if (-not (Test-Path $exePath)) {
@@ -120,9 +132,9 @@ Write-Host "  [OK] All critical assets included" -ForegroundColor Green
 $assetCount = (Get-ChildItem -Path "dist\TechDeck\_internal\assets" -Recurse -File).Count
 Write-Host "  [OK] Total assets bundled: $assetCount files" -ForegroundColor Green
 
-# Step 5: Build Inno Setup installer
+# Step 6: Build Inno Setup installer
 if (-not $SkipInstaller) {
-    Write-Host "`n[5/6] Building Inno Setup installer..." -ForegroundColor Yellow
+    Write-Host "`n[6/7] Building Inno Setup installer..." -ForegroundColor Yellow
 
     $isccPaths = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -155,11 +167,11 @@ if (-not $SkipInstaller) {
         Write-Host "  [WARN] Inno Setup not found - skipping installer" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "`n[5/6] Skipping installer build" -ForegroundColor Gray
+    Write-Host "`n[6/7] Skipping installer build" -ForegroundColor Gray
 }
 
-# Step 6: Summary
-Write-Host "`n[6/6] Build Summary" -ForegroundColor Yellow
+# Step 7: Summary
+Write-Host "`n[7/7] Build Summary" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Version: v$version" -ForegroundColor Green
 Write-Host "  Executable: $exePath ($exeSize MB)" -ForegroundColor Green
