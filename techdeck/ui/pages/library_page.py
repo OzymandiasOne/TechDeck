@@ -38,6 +38,11 @@ class FlowLayout(QLayout):
 
     def addItem(self, item):
         self._items.append(item)
+        # Mark the layout dirty so the next show/activate lays the new item
+        # out. Without this, items added while the page is hidden (startup
+        # warmup rebuild) can keep their default geometry — every card stacks
+        # at the same spot and only the last-added one is visible.
+        self.invalidate()
 
     def count(self):
         return len(self._items)
@@ -49,7 +54,9 @@ class FlowLayout(QLayout):
 
     def takeAt(self, index):
         if 0 <= index < len(self._items):
-            return self._items.pop(index)
+            item = self._items.pop(index)
+            self.invalidate()
+            return item
         return None
 
     def expandingDirections(self):
@@ -736,6 +743,13 @@ class LibraryPage(QWidget, ThemeAware):
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
 
+        # Re-read the live plugin list on every build — never trust the
+        # __init__-time capture. If the loader's contents change after this
+        # page is constructed, a stale snapshot silently shrinks the library
+        # to just the current kit's tiles.
+        self.available_plugins = list(self.plugin_loader.plugins.values())
+        self.available_tiles = [p.id for p in self.available_plugins]
+
         # Combine available tiles + missing tiles from profile
         all_tile_ids = list(set(self.available_tiles) | current_profile_tiles)
 
@@ -790,6 +804,26 @@ class LibraryPage(QWidget, ThemeAware):
                 card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
                 self._missing_tile_widgets.append(card)
                 self.tile_grid.addWidget(card)
+
+        # Schedule a fresh geometry pass — the grid is rebuilt while this page
+        # is hidden (init + startup warmup), and the first show must not reuse
+        # stale card geometry.
+        self.tile_grid.invalidate()
+        self._tile_container.updateGeometry()
+
+    def showEvent(self, event):
+        """Force the flow layout to run with real geometry on every show.
+
+        The grid is (re)built while the page is hidden, and on some machines
+        the first show never triggered a layout pass — every card kept its
+        default position, painting stacked with only the last-added card
+        visible ("library shows one app until you cycle kits", seen on
+        colleague machines in v0.8.6). A kit cycle fixed it only because it
+        rebuilt the grid while the page was visible; do the layout pass
+        deterministically here instead."""
+        super().showEvent(event)
+        self.tile_grid.invalidate()
+        self.tile_grid.activate()
 
     def _on_tile_toggled_card(self, tile_id: str, checked: bool):
         """Handle card selection toggle."""
