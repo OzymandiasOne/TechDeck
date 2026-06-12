@@ -13,7 +13,18 @@ apps only looked for the Electric Boat ASA Docs library under two fixed OneDrive
 names, so machines whose OneDrive named it differently got "Could not locate" errors and
 had to set each app's directory by hand. TechDeck now discovers the library wherever
 OneDrive put it - tenant-name variants, "Add shortcut to My files" layouts, and relocated
-OneDrive folders all resolve automatically. Manually set directories still win.
+OneDrive folders all resolve automatically. Manually set directories still win - and a
+directory set for ONE app now helps every other app (and Report Feedback) find the
+library too.
+
+**Report Feedback works on every machine** - The feedback workbook lookup uses the same
+folder discovery as the apps, so machines that previously showed "Workbook Not Found"
+(even with the SharePoint library synced) now find it - and any manually set app
+directory is used as a hint as well.
+
+**Library shows every app again** - On some machines the Library page came up showing
+only a single app card until you cycled through kits; all installed apps now lay out
+correctly on first open.
 
 **Customer DXF Quoting launches again** - The v0.8.6 build was missing a component the
 DXF viewer needs on a freshly updated machine, so it failed with "missing dependency"
