@@ -181,6 +181,25 @@ class SettingsPage(QWidget, ThemeAware):
         fb_section.addWidget(self.fb_btn)
         layout.addLayout(fb_section)
 
+        # ── Diagnostics ──
+        diag_section = self._create_section("Diagnostics")
+        diag_desc = QLabel(
+            "If something isn't working on this machine, generate a debug "
+            "report and send the file to the maintainer (Teams or email). It "
+            "contains TechDeck's own version, configuration, folder-discovery "
+            "and log information from this machine — no production documents."
+        )
+        diag_desc.setStyleSheet("color: #888; font-size: 12px;")
+        diag_desc.setWordWrap(True)
+        diag_section.addWidget(diag_desc)
+
+        debug_btn = QPushButton("Generate Debug Report")
+        debug_btn.setMinimumHeight(36)
+        debug_btn.setMaximumWidth(220)
+        debug_btn.clicked.connect(self._generate_debug_report)
+        diag_section.addWidget(debug_btn)
+        layout.addLayout(diag_section)
+
         # ── About ──
         from techdeck.core.constants import APP_VERSION, APP_RELEASE_NAME
         about_section = self._create_section("About TechDeck")
@@ -207,6 +226,37 @@ class SettingsPage(QWidget, ThemeAware):
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
         dlg = FeedbackDialog(parent=self.window())
         dlg.exec()
+
+    def _generate_debug_report(self):
+        """Run every diagnostic collector and write the report file, then show
+        the user where it landed and open Explorer with it selected. Loading
+        all plugins for validation takes a second or two — show a busy cursor."""
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from PySide6.QtCore import Qt
+        from techdeck.core.debug_report import generate_debug_report
+
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            report_path = generate_debug_report(main_window=self.window())
+        except Exception as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(
+                self, "Debug Report",
+                f"Could not write the debug report:\n{exc}"
+            )
+            return
+        QApplication.restoreOverrideCursor()
+
+        try:
+            import subprocess
+            subprocess.Popen(["explorer", "/select,", str(report_path)])
+        except Exception:
+            pass
+        QMessageBox.information(
+            self, "Debug Report",
+            f"Debug report saved to:\n{report_path}\n\n"
+            "Send this file to the TechDeck maintainer (Teams or email)."
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # PLUGIN TAB (unchanged logic, just reformatted)
