@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -445,3 +446,77 @@ def save_pdf_atomic(doc, dest_path: Path) -> None:
         tmp_path = Path(tmp.name)
     doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
     os.replace(str(tmp_path), str(dest_path))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OneDrive cloud-placeholder resilience
+#
+# On a Files-On-Demand tree, a file can EXIST (metadata is local — .exists(),
+# globs, and size checks all pass) while its CONTENT is cloud-only. If the
+# OneDrive client can't download it on demand, reads fail — openpyxl/zipfile
+# raise OSError [Errno 22] "Invalid argument" on a workbook that is plainly
+# sitting right there. Bit FormingFinder on a freshly-synced machine (the
+# Batch 481 PO workbook, v0.8.6.1 debug report NRAPINI-LT).
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CLOUD_ATTRS = (
+    0x00001000  # FILE_ATTRIBUTE_OFFLINE
+    | 0x00040000  # FILE_ATTRIBUTE_RECALL_ON_OPEN
+    | 0x00400000  # FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+)
+
+
+def is_cloud_placeholder(path) -> bool:
+    """True if `path` is a OneDrive cloud-only / recall-on-access placeholder."""
+    try:
+        attrs = os.stat(path).st_file_attributes
+    except (OSError, AttributeError):
+        return False
+    return bool(attrs & _CLOUD_ATTRS)
+
+
+def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) -> None:
+    """Force OneDrive to download a cloud-only file by reading it end to end.
+
+    Raises RuntimeError with user-actionable instructions if the content
+    still can't be pulled (OneDrive client stopped, signed out, or offline).
+    """
+    path = Path(path)
+    last_err = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with open(path, "rb") as fh:
+                while fh.read(1024 * 1024):
+                    pass
+            return
+        except OSError as exc:
+            last_err = exc
+            if log:
+                log(f"OneDrive download attempt {attempt}/{attempts} failed: {exc}")
+            time.sleep(delay)
+    raise RuntimeError(
+        f"'{path.name}' is a OneDrive cloud-only file and Windows could not "
+        f"download it. Make sure OneDrive is running and signed in, then try "
+        f"again. For reliability, right-click the folder in File Explorer and "
+        f"choose 'Always keep on this device'.\n  File: {path}"
+    ) from last_err
+
+
+def load_workbook_resilient(path, log=None, **kwargs):
+    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders.
+
+    A dehydrated workbook fails inside zipfile with OSError [Errno 22] even
+    though the path exists. When that happens and the file looks like a
+    placeholder, force-download it and retry once; otherwise re-raise the
+    original error. Use this for ANY workbook under the OneDrive tree
+    (Hard Rule 13)."""
+    import openpyxl
+    try:
+        return openpyxl.load_workbook(path, **kwargs)
+    except OSError:
+        if not is_cloud_placeholder(path):
+            raise
+        if log:
+            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
+        hydrate_cloud_file(path, log=log)
+        return openpyxl.load_workbook(path, **kwargs)

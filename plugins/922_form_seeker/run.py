@@ -93,7 +93,10 @@ def _find_organizer_workbook(doc_folder: Path, batch_no: str) -> Optional[Path]:
 def _load_po_lookup(po_path: Path, log) -> dict:
     """Return {dypn_casefold: row metadata}. Bend rows preferred over non-bend
     when the same DYPN appears on multiple rows."""
-    wb = openpyxl.load_workbook(po_path, data_only=True)
+    # Resilient load: on a fresh Files-On-Demand sync the PO workbook can be a
+    # cloud-only placeholder — a plain load_workbook dies in zipfile with
+    # OSError [Errno 22] even though the file exists (bit NRAPINI-LT, Batch 481).
+    wb = sdk.load_workbook_resilient(po_path, log=log, data_only=True)
     if 'PO' not in wb.sheetnames:
         log("PO workbook: 'PO' sheet not found.")
         wb.close()
