@@ -12,8 +12,9 @@ the `.exe`.
 layer (no Apply button), WELD layers are recognized and measured (excluded from the
 default cut total, with their own subtotal), and a new **Export DXF** button saves a copy
 of the drawing with your reassignments written back — geometry untouched, missing layers
-added to the file's layer table. The part view fits centered with breathing room, and
-overlapping dimension labels now stack cleanly.
+added to the file's layer table. The part view fits centered with breathing room,
+overlapping dimension labels now stack cleanly, and the tile icon is redrawn as proper
+blueprint linework.
 
 **Report Feedback fixed for everyone** - The feedback workbook is now located the same
 way the apps find their folders, so it works no matter how OneDrive named the synced

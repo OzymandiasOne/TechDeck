@@ -1772,22 +1772,22 @@ _BLUEPRINT_GRID = [
     "....aaaaaaaaaaaaaaaaaaaaaaaa....",
     "....aabbbbbbbbbbbbbbbbbbbbaa....",
     "....aabbbbbbbbbbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeebbbbbbbbbbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
-    "....aabbeeeeeeeeeeeeeebbbbaa....",
+    "....aabbbeeeeeeebbbbbbbbbbaa....",
+    "....aabbbebbbbbebbeeeeeebbaa....",
+    "....aabbbebeebbebbbbbbbbbbaa....",
+    "....aabbbebeebbebbeeeebbbbaa....",
+    "....aabbbebbbbbebbbbbbbbbbaa....",
+    "....aabbbebbbbbebbbbbbbbbbaa....",
+    "....aabbbebbbbbebbbbbbbbbbaa....",
+    "....aabbbebbbbbeeeeeeeeebbaa....",
+    "....aabbbebbbbbbbbbbbbbebbaa....",
+    "....aabbbebbbbbbbbbeebbebbaa....",
+    "....aabbbebbbbbbbbbeebbebbaa....",
+    "....aabbbebbbbbbbbbbbbbebbaa....",
+    "....aabbbeeeeeeeeeeeeeeebbaa....",
     "....aabbbbbbbbbbbbbbbbbbbbaa....",
-    "....aabbbbbbbbbbbbbbbbbbbbaa....",
-    "....aabbddddddddddddddbbbbaa....",
-    "....aabbddddddddddddddbbbbaa....",
+    "....aabbbdbbbbbbbbbbbbbdbbaa....",
+    "....aabbbdddddddddddddddbbaa....",
     "....aabbbbbbbbbbbbbbbbbbbbaa....",
     "....aabbbbbbbbbbbbbbbbbbbbaa....",
     "....aaaaaaaaaaaaaaaaaaaaaaaa....",
@@ -1798,9 +1798,10 @@ _BLUEPRINT_GRID = [
     "................................",
 ]
 # Blueprint sheet for Customer DXF Quoting: dark-blue border, blueprint-blue
-# paper, solid white L-shaped flat pattern (sheet-metal part), yellow
-# dimension line underneath. Fixed palette — this icon is NOT theme-recolored
-# (it lives in a pack set, not the pixel-32 set).
+# paper, and the L-shaped flat pattern drawn as white LINEWORK (outline, two
+# drilled holes, dashed bend line at the leg/foot junction) like a real
+# blueprint, with a yellow dimension line + end ticks underneath. Fixed
+# palette — this icon is NOT theme-recolored (pack set, not the pixel-32 set).
 _BLUEPRINT_TONES = {"a": "#085295", "b": "#26659F", "d": "#FCC201", "e": "#E6E5E5"}
 
 def blueprint(d):           # customer dxf quoting
