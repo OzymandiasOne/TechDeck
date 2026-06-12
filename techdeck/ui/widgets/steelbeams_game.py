@@ -192,6 +192,7 @@ class SteelBeamsGame(QWidget):
 
         self._flags         = set()
         self._tick_count    = 0
+        self._tick_errors   = 0
 
         self._build_ui()
         self._update_ui()
@@ -367,9 +368,13 @@ class SteelBeamsGame(QWidget):
         bup = QPushButton("+"); bup.setFixedSize(26, 26); bup.clicked.connect(self._af_price_up)
         pr.addWidget(self._af_price_lbl); pr.addWidget(bdn); pr.addWidget(bup); pr.addStretch()
         left.addLayout(pr)
-        self._af_demand  = self._ml("Demand:   0.00 / sec")
+        # _lbl suffix matters: plain `self._af_demand` would shadow the
+        # _af_demand() METHOD with a QLabel — the first tick after A-Frames
+        # unlock then raises "'QLabel' object is not callable" forever and the
+        # game visibly freezes (bit us in v0.8.6).
+        self._af_demand_lbl  = self._ml("Demand:   0.00 / sec")
         self._af_revenue = self._ml("Revenue:  $0.00 / sec")
-        left.addWidget(self._af_demand); left.addWidget(self._af_revenue)
+        left.addWidget(self._af_demand_lbl); left.addWidget(self._af_revenue)
         left.addStretch()
         root.addLayout(left, stretch=1)
 
@@ -487,6 +492,30 @@ class SteelBeamsGame(QWidget):
         return self.rep_total - (self.developers + self.servers - FREE)
 
     def _tick(self):
+        """Timer slot. Guards the real tick: PySide6 swallows exceptions that
+        escape a slot, so an unguarded fault here re-raises identically every
+        100 ms — the game visibly freezes with no error anywhere (the frozen
+        exe has no console). Report the first failure into the game's own log
+        and the persistent run log, then keep ticking."""
+        try:
+            self._tick_inner()
+        except Exception:
+            self._tick_errors += 1
+            if self._tick_errors == 1:
+                import traceback
+                tb = traceback.format_exc()
+                try:
+                    from techdeck.core.plugin_executor import get_run_logger
+                    get_run_logger().error("STEELBEAMS tick error\n%s", tb)
+                except Exception:
+                    pass
+                try:
+                    last = tb.strip().splitlines()[-1]
+                    self._log(f"[!] Game error (reported, attempting to continue): {last}")
+                except Exception:
+                    pass
+
+    def _tick_inner(self):
         dt = self.TICK_DT
         self._tick_count += 1
 
@@ -924,7 +953,7 @@ class SteelBeamsGame(QWidget):
         self._af_made.setText(   f"Total Made:   {self.af_made:,}")
         self._af_sold.setText(   f"Total Sold:   {self.af_sold:,}")
         self._af_price_lbl.setText(f"Price: ${self.af_price:.2f}")
-        self._af_demand.setText( f"Demand:   {ad:.2f} / sec")
+        self._af_demand_lbl.setText(f"Demand:   {ad:.2f} / sec")
         self._af_revenue.setText(f"Revenue:  ${ad * self.af_price:.2f} / sec")
         self._af_fab_status.setText(
             f"A-Frame Fabs: {self.af_fabs}    Output: {af_out:.1f} / sec"
