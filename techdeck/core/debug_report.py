@@ -278,9 +278,16 @@ def _collect_ui_probe(main_window) -> list[str]:
             lines.append(f"Library: {grid.count()} layout item(s), "
                          f"{len(widgets)} widget(s), "
                          f"{len(positions)} distinct position(s), "
-                         f"container {container.width()}x{container.height()}")
+                         f"container {container.width()}x{container.height()}, "
+                         f"visible={lib.isVisible()}")
             if widgets and len(positions) <= 2:
-                lines.append("  WARNING: cards appear stacked (layout never ran)")
+                if lib.isVisible():
+                    lines.append("  WARNING: cards appear stacked while the page "
+                                 "is SHOWING (layout bug)")
+                else:
+                    lines.append("  note: cards not yet laid out - normal while "
+                                 "the Library page hasn't been shown; showEvent "
+                                 "lays out on first open")
             lines.append(f"Library sort mode: {lib.settings.get_library_sort_mode()}")
         except Exception as exc:
             lines.append(f"Library probe failed: {exc}")
