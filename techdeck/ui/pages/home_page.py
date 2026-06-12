@@ -1244,11 +1244,27 @@ class HomePage(QWidget, ThemeAware):
             self._plugin_queue.clear()
             self._shelve_after_current = False
             self.plugin_executor.cancel_all()
+            console = (self._plugin_params or {}).get('console') if hasattr(self, '_plugin_params') else None
+            # A plugin blocked at a console prompt never polls cancel_event —
+            # abort the input too, or Cancel does nothing until the prompt is
+            # answered (bit FormingFinder at its batch prompt, FTOURIGNY-LT).
+            if console is not None and getattr(console, 'waiting_for_input', False):
+                try:
+                    console.abort_input(reason="cancelled")
+                except Exception:
+                    pass
             # Give immediate feedback — cancellation is cooperative, so the active
             # plugin may take a moment to notice the flag and stop.
-            console = (self._plugin_params or {}).get('console') if hasattr(self, '_plugin_params') else None
             if console is not None:
                 console.append_system("Cancelling run — waiting for the current step to stop...")
+            # Acknowledge the click on the button itself and swallow further
+            # clicks until the run actually reports completion. Without this a
+            # double-click's second press could land on the freshly-restored
+            # Run Selected button and instantly start a NEW run (FTOURIGNY-LT:
+            # run #2 started 32ms after run #1's cancel completed).
+            if hasattr(self, 'run_btn') and self.run_btn:
+                self.run_btn.setText("Cancelling...")
+                self.run_btn.setEnabled(False)
             return  # button resets when the last plugin reports completion
 
         if not self.selected_tiles:
@@ -1719,8 +1735,17 @@ class HomePage(QWidget, ThemeAware):
         if not hasattr(self, 'run_btn') or not self.run_btn:
             return
         self.run_btn.setText("Run Selected")
-        has_selection = len(self.selected_tiles) > 0
-        self.run_btn.setEnabled(has_selection)
+        # Cooldown before accepting clicks again: a double-clicked Cancel's
+        # second press must not land on the restored Run Selected button and
+        # start a brand-new run (FTOURIGNY-LT: 32ms between cancel completion
+        # and the accidental restart).
+        self.run_btn.setEnabled(False)
+
+        def _reenable():
+            if (not self._is_running and hasattr(self, 'run_btn')
+                    and self.run_btn is not None):
+                self.run_btn.setEnabled(len(self.selected_tiles) > 0)
+        QTimer.singleShot(400, _reenable)
         self.run_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {theme.accent};
