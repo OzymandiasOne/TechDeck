@@ -185,28 +185,28 @@ class FidgetSpinnerWindow(QWidget):
 
     @staticmethod
     def _theme_colors() -> dict:
-        """A colour set drawn entirely from the active theme palette so the spinner
-        fits the theme: the three lobes run from the primary accent through a blend
-        to the secondary (CTA) accent, the hub is the pressed accent, the bearing
-        rings are the text colour, and the outline is a darkened accent."""
+        """A colour set drawn from the active theme palette so the spinner fits the
+        theme: the hub/arms are the accent, the three wings are all one uniform
+        colour — the accent's complement (hue + 180, same saturation/value) — and
+        the bearing rings are the text colour over a darkened-accent outline."""
         try:
             from techdeck.ui.theme_manager import get_theme_manager
             pal = get_theme_manager().get_current_palette()
-            accent, accent2 = QColor(pal.accent), QColor(pal.accent_two)
+            accent = QColor(pal.accent)
             hub, ring = QColor(pal.accent_pressed), QColor(pal.text)
         except Exception:
-            accent, accent2 = QColor(0x28, 0x78, 0xA8), QColor(0xF5, 0xC5, 0x18)
+            accent = QColor(0x28, 0x78, 0xA8)
             hub, ring = accent.darker(130), QColor(245, 246, 238)
 
-        def blend(a, b, t):
-            return QColor(round(a.red() + (b.red() - a.red()) * t),
-                          round(a.green() + (b.green() - a.green()) * t),
-                          round(a.blue() + (b.blue() - a.blue()) * t))
+        h, s, v, a = accent.getHsv()
+        if h < 0:                       # achromatic accent -> give it a hue first
+            h, s = 200, 140
+        comp = QColor.fromHsv((h + 180) % 360, s, v, a)
 
         return {
             "outline": accent.darker(300),
             "hub": hub,
-            "lobes": [accent, blend(accent, accent2, 0.5), accent2],
+            "lobes": [comp, comp, comp],
             "ring": ring,
         }
 
