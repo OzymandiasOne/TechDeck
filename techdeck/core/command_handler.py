@@ -66,6 +66,7 @@ class CommandHandler:
         self._jack_cancel = threading.Event()  # set to fold/abort an active game
 
         self._rogue_player = None  # kept alive here to prevent GC
+        self._spinner = None       # /fidget window; /clear closes it
 
         # Command registry. Theme switching deliberately is NOT here —
         # the only way to change theme is via Settings → Personalization
@@ -246,6 +247,8 @@ class CommandHandler:
 
     def _cmd_fidget(self, args: str):
         from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
+        # Only ever one spinner — re-running /fidget replaces it.
+        self._stop_spinner()
         spinner = FidgetSpinnerWindow()
         # Center on screen
         from PySide6.QtWidgets import QApplication
@@ -257,7 +260,7 @@ class CommandHandler:
         spinner.show()
         # Keep alive (store on handler to prevent GC)
         self._spinner = spinner
-        self.console.append_system("Double-click the spinner to close it.")
+        self.console.append_system("Give it a spin. Type /clear to put it away.")
 
     # ------------------------------------------------------------------ #
     #  /rave
@@ -422,12 +425,22 @@ class CommandHandler:
     # ------------------------------------------------------------------ #
 
     def stop_session_effects(self):
-        """End in-console easter-egg sessions on /clear or the Clear button:
-        fold blackjack, end /rave, dismiss /friend. The fidget spinner and the
-        Steel Beams game are separate windows, left to be closed manually."""
+        """End easter-egg sessions on /clear or the Clear button: fold blackjack,
+        end /rave, dismiss /friend, and put the fidget spinner away. The Steel
+        Beams game is a separate window, left to be closed manually."""
         self._stop_jack()
         self._stop_rave(announce=False)
         self._stop_moth()
+        self._stop_spinner()
+
+    def _stop_spinner(self):
+        """Close the /fidget spinner window if one is open (used by /clear)."""
+        if self._spinner is not None:
+            try:
+                self._spinner.close()
+            except Exception:
+                pass
+            self._spinner = None
 
     def _stop_jack(self):
         """Fold an in-progress blackjack hand and end the game."""

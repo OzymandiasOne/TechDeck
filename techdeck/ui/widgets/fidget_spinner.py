@@ -1,37 +1,133 @@
 """
 TechDeck Fidget Spinner
-A standalone window with a chrome fidget spinner drawn entirely in QPainter.
-Click anywhere on the spinner to add angular velocity.
+
+A standalone, frameless, always-on-top fidget spinner drawn as PIXEL ART in the
+same two-tone, theme-coloured style as the moth and the tile icons: a body tone
+(the theme accent) plus an auto-traced darker outline, with the bearing holes
+punched clean through.
+
+The shape is generated procedurally (a centre hub, three arms, three lobes, all
+ONE connected piece so the "wings" are attached to the body) and rendered to a
+pixmap once; spinning just rotates that pixmap with smoothing OFF so the pixels
+stay hard-edged at every angle.
+
+  - Click anywhere on it to add spin (and drag to move it).
+  - It does NOT close on double-click (that fought with clicking to spin);
+    `/clear` puts it away (see CommandHandler.stop_session_effects).
 """
 
 import math
+
 from PySide6.QtWidgets import QWidget
-from PySide6.QtCore import Qt, QTimer, QPointF, QRectF
-from PySide6.QtGui import (
-    QPainter, QColor, QBrush, QPen, QRadialGradient, QLinearGradient,
-    QPainterPath,
-)
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QPainter, QColor, QPixmap
+
+
+# Pixel grid: each cell is CELL px. GRID is sized so the spinner's content
+# radius (lobe distance + lobe radius + 1 outline cell) fits with a 1-cell
+# margin, which is also the rotation radius — so nothing clips as it spins.
+GRID = 43
+CELL = 7
+_CENTER = GRID / 2.0
+
+# Geometry, in grid cells.
+_HUB_R = 6.5          # centre hub radius
+_HUB_HOLE = 3.0       # centre bearing hole
+_LOBE_DIST = 13.5     # hub centre -> lobe centre
+_LOBE_R = 6.0         # lobe radius
+_LOBE_HOLE = 3.0      # lobe bearing hole
+_ARM_HW = 3.5         # half-width of each arm (connects hub to lobe)
+_LOBE_ANGLES_DEG = (-90.0, 30.0, 150.0)   # one lobe up, two below; 120 apart
+
+
+def _seg_dist(px, py, ax, ay, bx, by):
+    """Distance from point P to segment AB (for the connecting arms)."""
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    if l2 == 0.0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _build_spinner_cats():
+    """Build the spinner as a GRID x GRID category map: 0 empty, 1 body, 2 outline.
+
+    A cell is BODY if it lies in the hub, in any lobe, or under any arm, AND is
+    not inside a bearing hole. Every empty cell touching a body cell becomes
+    OUTLINE — which traces the outer silhouette AND rings each punched hole."""
+    lobes = [(_CENTER + _LOBE_DIST * math.cos(math.radians(a)),
+              _CENTER + _LOBE_DIST * math.sin(math.radians(a)))
+             for a in _LOBE_ANGLES_DEG]
+
+    solid = [[False] * GRID for _ in range(GRID)]
+    for gy in range(GRID):
+        for gx in range(GRID):
+            px, py = gx + 0.5, gy + 0.5
+            s = math.hypot(px - _CENTER, py - _CENTER) <= _HUB_R
+            for lx, ly in lobes:
+                if math.hypot(px - lx, py - ly) <= _LOBE_R:
+                    s = True
+                if _seg_dist(px, py, _CENTER, _CENTER, lx, ly) <= _ARM_HW:
+                    s = True
+            # Punch the bearing holes back out.
+            if math.hypot(px - _CENTER, py - _CENTER) <= _HUB_HOLE:
+                s = False
+            for lx, ly in lobes:
+                if math.hypot(px - lx, py - ly) <= _LOBE_HOLE:
+                    s = False
+            solid[gy][gx] = s
+
+    cats = [[1 if solid[gy][gx] else 0 for gx in range(GRID)] for gy in range(GRID)]
+    for gy in range(GRID):
+        for gx in range(GRID):
+            if solid[gy][gx]:
+                continue
+            if any(0 <= gy + dy < GRID and 0 <= gx + dx < GRID and solid[gy + dy][gx + dx]
+                   for dy in (-1, 0, 1) for dx in (-1, 0, 1) if dx or dy):
+                cats[gy][gx] = 2
+    return cats
+
+
+# Built once at import; theme colour is applied per-instance when rendering.
+_SPINNER_CATS = _build_spinner_cats()
+
+
+def _render_spinner_pixmap(body: QColor, outline: QColor) -> QPixmap:
+    """Render the category map to a pixmap (body + outline tones, holes clear)."""
+    pm = QPixmap(GRID * CELL, GRID * CELL)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setPen(Qt.PenStyle.NoPen)
+    for gy in range(GRID):
+        for gx in range(GRID):
+            cat = _SPINNER_CATS[gy][gx]
+            if cat == 0:
+                continue
+            p.fillRect(gx * CELL, gy * CELL, CELL, CELL,
+                       body if cat == 1 else outline)
+    p.end()
+    return pm
 
 
 class FidgetSpinnerWindow(QWidget):
-    """
-    Frameless, always-on-top fidget spinner.
-    Three rounded chrome lobes 120 degrees apart around a center bearing.
-    Click to add velocity; friction = 0.995 per frame at 60fps.
-    """
+    """Frameless, always-on-top pixel-art tri-spinner. Click to add spin, drag to
+    move. Closed via /clear (no double-click-to-close)."""
 
-    WINDOW_SIZE = 300
-    LOBE_RADIUS = 90     # distance from center to lobe center
-    LOBE_SIZE = 70       # width/height of each lobe ellipse
-    BEARING_RADIUS = 22  # center hub
+    WINDOW_SIZE = GRID * CELL
 
-    FRICTION = 0.995
-    CLICK_IMPULSE = 2.5  # radians/sec added per click
+    FRICTION = 0.995      # per ~60fps frame
+    CLICK_IMPULSE = 2.5   # radians/sec added per click
 
-    def __init__(self, parent=None):
+    def __init__(self, body_color: QColor | None = None,
+                 outline_color: QColor | None = None, parent=None):
         super().__init__(parent)
         self._angle = 0.0      # radians
         self._velocity = 1.0   # radians/sec
+
+        if body_color is None or outline_color is None:
+            body_color, outline_color = self._theme_colors()
+        self._pixmap = _render_spinner_pixmap(body_color, outline_color)
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -47,8 +143,18 @@ class FidgetSpinnerWindow(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
-        # For dragging the window
         self._drag_pos = None
+
+    @staticmethod
+    def _theme_colors() -> tuple[QColor, QColor]:
+        """Body = theme accent, outline = a darker accent — matching the moth."""
+        try:
+            from techdeck.ui.theme_manager import get_theme_manager
+            pal = get_theme_manager().get_current_palette()
+            body = QColor(pal.accent)
+            return body, body.darker(260)
+        except Exception:
+            return QColor(200, 205, 218), QColor(70, 72, 85)  # chrome fallback
 
     def _tick(self):
         self._velocity *= self.FRICTION
@@ -69,79 +175,13 @@ class FidgetSpinnerWindow(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
 
-    def mouseDoubleClickEvent(self, event):
-        self.close()
-
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        cx = self.WINDOW_SIZE / 2
-        cy = self.WINDOW_SIZE / 2
-
-        # Draw the three lobes
-        for i in range(3):
-            lobe_angle = self._angle + i * (2 * math.pi / 3)
-            lx = cx + self.LOBE_RADIUS * math.cos(lobe_angle)
-            ly = cy + self.LOBE_RADIUS * math.sin(lobe_angle)
-            self._draw_lobe(painter, lx, ly, lobe_angle)
-
-        # Draw center bearing
-        self._draw_bearing(painter, cx, cy)
-
+        # Smoothing OFF keeps the pixels hard-edged at every rotation angle.
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        painter.translate(self.WINDOW_SIZE / 2.0, self.WINDOW_SIZE / 2.0)
+        painter.rotate(math.degrees(self._angle))
+        painter.drawPixmap(-self._pixmap.width() // 2,
+                           -self._pixmap.height() // 2, self._pixmap)
         painter.end()
-
-    def _draw_lobe(self, painter: QPainter, cx: float, cy: float, angle: float):
-        s = self.LOBE_SIZE
-        half = s / 2
-
-        # Chrome gradient — light source from top-left
-        grad = QRadialGradient(QPointF(cx - half * 0.3, cy - half * 0.3), s * 0.8)
-        grad.setColorAt(0.0, QColor(240, 240, 248))   # near-white highlight
-        grad.setColorAt(0.35, QColor(180, 185, 200))  # mid chrome
-        grad.setColorAt(0.7, QColor(110, 115, 130))   # darker chrome
-        grad.setColorAt(1.0, QColor(70, 72, 85))      # shadow edge
-
-        painter.save()
-        painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor(55, 57, 70), 1.5))
-        rect = QRectF(cx - half, cy - half, s, s)
-        painter.drawEllipse(rect)
-
-        # Specular highlight — small bright oval
-        hi_grad = QRadialGradient(QPointF(cx - half * 0.25, cy - half * 0.3), half * 0.5)
-        hi_grad.setColorAt(0.0, QColor(255, 255, 255, 180))
-        hi_grad.setColorAt(1.0, QColor(255, 255, 255, 0))
-        painter.setBrush(QBrush(hi_grad))
-        painter.setPen(Qt.PenStyle.NoPen)
-        hi_w, hi_h = s * 0.35, s * 0.25
-        painter.drawEllipse(QRectF(cx - hi_w / 2 - half * 0.1, cy - hi_h / 2 - half * 0.2, hi_w, hi_h))
-
-        painter.restore()
-
-    def _draw_bearing(self, painter: QPainter, cx: float, cy: float):
-        r = self.BEARING_RADIUS
-
-        # Outer ring
-        outer_grad = QRadialGradient(QPointF(cx - r * 0.3, cy - r * 0.3), r * 1.4)
-        outer_grad.setColorAt(0.0, QColor(210, 215, 225))
-        outer_grad.setColorAt(0.5, QColor(140, 145, 158))
-        outer_grad.setColorAt(1.0, QColor(80, 82, 95))
-        painter.setBrush(QBrush(outer_grad))
-        painter.setPen(QPen(QColor(50, 52, 65), 1.5))
-        painter.drawEllipse(QPointF(cx, cy), r, r)
-
-        # Inner ring (darker recess)
-        inner_r = r * 0.55
-        inner_grad = QRadialGradient(QPointF(cx + inner_r * 0.2, cy + inner_r * 0.2), inner_r * 1.2)
-        inner_grad.setColorAt(0.0, QColor(60, 62, 75))
-        inner_grad.setColorAt(0.6, QColor(95, 98, 112))
-        inner_grad.setColorAt(1.0, QColor(150, 153, 168))
-        painter.setBrush(QBrush(inner_grad))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(cx, cy), inner_r, inner_r)
-
-        # Center dot
-        dot_r = inner_r * 0.35
-        painter.setBrush(QBrush(QColor(40, 42, 55)))
-        painter.drawEllipse(QPointF(cx, cy), dot_r, dot_r)
