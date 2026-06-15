@@ -186,27 +186,23 @@ class FidgetSpinnerWindow(QWidget):
     @staticmethod
     def _theme_colors() -> dict:
         """A colour set drawn from the active theme palette so the spinner fits the
-        theme: the hub/arms are the accent, the three wings are all one uniform
-        colour — the accent's complement (hue + 180, same saturation/value) — and
-        the bearing rings are the text colour over a darkened-accent outline."""
+        theme: the hub/arms are the primary `accent`, the three wings are all one
+        uniform colour — the secondary `accent_two` (the CTA slot, which is where
+        cyberpunk's red/pink lives) — and the bearing rings are the text colour
+        over a darkened-accent outline."""
         try:
             from techdeck.ui.theme_manager import get_theme_manager
             pal = get_theme_manager().get_current_palette()
-            accent = QColor(pal.accent)
+            accent, wings = QColor(pal.accent), QColor(pal.accent_two)
             hub, ring = QColor(pal.accent_pressed), QColor(pal.text)
         except Exception:
-            accent = QColor(0x28, 0x78, 0xA8)
+            accent, wings = QColor(0x28, 0x78, 0xA8), QColor(0xF5, 0xC5, 0x18)
             hub, ring = accent.darker(130), QColor(245, 246, 238)
-
-        h, s, v, a = accent.getHsv()
-        if h < 0:                       # achromatic accent -> give it a hue first
-            h, s = 200, 140
-        comp = QColor.fromHsv((h + 180) % 360, s, v, a)
 
         return {
             "outline": accent.darker(300),
             "hub": hub,
-            "lobes": [comp, comp, comp],
+            "lobes": [wings, wings, wings],
             "ring": ring,
         }
 
