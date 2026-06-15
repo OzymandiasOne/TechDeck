@@ -1,6 +1,6 @@
-"""Live preview for the /fidget spinner so you can redesign it fast.
+"""Live preview for the /fidget spinner so you can redesign its pixel art fast.
 
-Edit the geometry constants (or _theme_colors) in
+Edit the SPINNER_ART grid (or _theme_colors) in
 techdeck/ui/widgets/fidget_spinner.py, then RE-RUN this script to see the result
 spinning — no need to launch the whole app.
 
