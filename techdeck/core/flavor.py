@@ -324,34 +324,29 @@ def generate_haiku() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Moth musings — quiet reflections drawn from Japanese philosophy/aesthetics,
-# shown by /friend in the gaps between haiku. Pre-wrapped to keep the bubble tidy.
+# Moth musings - first-person reflections of someone meeting Miyamoto Musashi's
+# ideas for the first time and questioning themselves (Dokkodo / Book of Five
+# Rings), shown by /friend in the gaps between haiku. Pre-wrapped (\n only) to
+# keep the bubble tidy; no em-dashes by design.
 # ---------------------------------------------------------------------------
 
 _MUSINGS = [
-    "Nothing is ever truly finished;\nit is only set down for now.",
-    "You are a brief, bright thing,\nand so is all that you love.",
-    "To be here at all\nis the rarest kind of luck.",
-    "Everything that begins\nis already learning how to end.",
-    "Meaning is never found;\nit is quietly made, then released.",
-    "Even the longest life\nis a single afternoon of light.",
-    "We are the universe pausing,\nfor a moment, to wonder at itself.",
-    "What you are so afraid to lose\nwas always only borrowed.",
-    "The self you guard so closely\nwas never quite there.",
-    "Stillness, too, is a kind of music,\nif you are quiet enough to hear it.",
-    "The river is in no hurry,\nand yet it always finds the sea.",
-    "Snow softens every sharp edge\nit chooses to settle upon.",
-    "The moon asks nothing\nof the night that it lights.",
-    "A single blossom holds\nthe whole of spring within it.",
-    "The mountains keep their silence\nand outlast all of our small worries.",
-    "Morning fog erases the world,\nand then gives it gently back.",
-    "Each leaf lets go of the branch\nwithout any complaint.",
-    "Starlight still reaches us\nfrom suns that died long ago.",
-    "The tide returns to the shore\nwhether or not anyone is watching.",
-    "Rain writes its brief, perfect script\nacross the surface of still water.",
-    "The dawn arrives in silence\nand asks for no thanks.",
-    "The bamboo bends in the storm,\nbut it does not break.",
-    "The still pond holds\nthe whole of the evening sky.",
+    "If I could meet the person I was yesterday,\nwhat would it mean to have surpassed him?\nAnd is that the only contest worth entering,\nthe one where my opponent is already gone?",
+    "What if I did only what was useful?\nCould I bear the austerity of that,\nor do I secretly need my wasted motions\nto feel free?",
+    "Why do I keep watching for the prize\nat the end of the road,\nwhen everything I wanted was supposed\nto happen in the walking?\nWas the training the means,\nor the thing itself all along?",
+    "Can one thing, truly seen, contain ten thousand?\nOr do I flatter myself that a single fact\nopens onto the whole,\nwhen perhaps the world is simply large\nand I am only hungry for patterns?",
+    "What is it the eye cannot see,\nand how would I know I had perceived it?\nIs there a sight beneath sight,\nor only the eye learning to slow down?",
+    "If I accepted each thing exactly as it is,\nwould that be wisdom, or surrender?\nWhere is the line between acceptance\nand quietly giving up every wish\nto make things better?",
+    "Why does the thousand-mile road frighten me\nas a whole, when no single step in it\nhas ever been beyond me?\nIs distance only ever\nthe imagination's despair?",
+    "What would I have to become\nto regret nothing I had done?\nIs that peace, or the dimming\nof the conscience that regret\nwas meant to keep awake?",
+    "Can I think lightly of myself\nand deeply of the world\nwithout the first souring into self-contempt?\nWhich weighs more,\nand why have I had the scale upside down?",
+    "I have feared endings my whole life.\nBut what if the only thing worth fearing\nwas the wrong turn taken long before the end,\nand the ending itself were neutral,\neven kind?",
+    "If I held no preference in anything,\nwould I be free, or simply absent?\nIs there a way to want nothing\nthat is not also a way to be no one?",
+    "What is the blade I keep carrying\nthat I no longer need?\nAnd why is the weight I refuse to set down\nalways the one I mistake for myself?",
+    "Why do I trust the large and famous thing\nmore than the small one in front of me,\nas if size were the same as truth?",
+    "What I practice alone, in the quiet,\nis that who I actually am?\nAnd when the storm comes,\nwill it reveal me,\nor only what I rehearsed?",
+    "Can I depend on no one's hand\nand still honour every god?\nOr is the refusal to lean\nits own kind of arrogance,\ndressed up as strength?",
+    "If it came to it, the body or the honour,\nam I sure I know which one I am?\nHave I ever truly been tested,\nor only imagined the answer\nI would give?",
 ]
 
 
