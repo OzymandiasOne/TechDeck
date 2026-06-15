@@ -276,6 +276,12 @@ class SpeechBubble(QWidget):
         self._reveal_timer.timeout.connect(self._reveal_step)
         self._reveal_timer.start()
 
+    def type_ms(self) -> int:
+        """How long the typewriter reveal takes to fully render the text (ms).
+        Callers scale how long the bubble lingers so long musings finish typing
+        with read time to spare, instead of vanishing mid-sentence."""
+        return self.REVEAL_MS * self._total
+
     def set_tail(self, corner: str):
         """Which corner the tail leaves from: bl/br = bubble above the moth,
         tl/tr = below; l/r picks the near side."""
@@ -425,7 +431,8 @@ class MothWidget(QWidget):
     HAIKU_FIRST_MIN_MS, HAIKU_FIRST_MAX_MS = 20_000, 50_000  # first haiku within a minute
     SPEAK_EVERY_MS = 200_000                  # then it speaks every ~3.3 min...
     HAIKU_EVERY_SPEAKS = 3                     # ...every 3rd is a haiku (~10 min apart)
-    HAIKU_VISIBLE_MS = 13_000                 # how long a bubble lingers
+    HAIKU_VISIBLE_MS = 13_000                 # floor: how long a (short) bubble lingers
+    READ_LINGER_MS = 7_000                    # read time held AFTER the text finishes typing
 
     def __init__(self, color: QColor | None = None, outline: QColor | None = None,
                  frames=None, parent=None):
@@ -689,7 +696,11 @@ class MothWidget(QWidget):
         self._bubble.show()
         self._bubble.move(pos)
         self._bubble.raise_()
-        self._bubble_hide.start(self.HAIKU_VISIBLE_MS)
+        # Linger scales with length: let the text fully type, then hold long
+        # enough to read it (floor at HAIKU_VISIBLE_MS so short haikus are
+        # unchanged). The flat 13s vanished long musings mid-sentence.
+        linger = max(self.HAIKU_VISIBLE_MS, self._bubble.type_ms() + self.READ_LINGER_MS)
+        self._bubble_hide.start(linger)
         if not self._speak_timer.isActive():
             self._speak_timer.start()
 
