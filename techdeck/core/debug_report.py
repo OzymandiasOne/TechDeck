@@ -17,11 +17,20 @@ blind at least once:
                         (the v0.8.6 plugin_window missing-hiddenimport class)
   Import probe        - is every critical module present in this frozen bundle?
   Settings snapshot   - kits, sort modes, per-app directory overrides
-  Log tails           - plugin_runs.log (run history, tick-guard reports)
+  Log tails           - plugin_runs.log (run history, tick-guard reports) +
+                        plugin_detail.log (every line a plugin printed, so a
+                        run that reported OK but logged a silent in-run warning
+                        is diagnosable — the 911-Setup blank-forecast class)
   Live UI probe       - library/home grid geometry (the stacked-card class)
 
 Rules: read-only, never raises (every section is individually guarded), no
 document contents — only paths, names, sizes, and TechDeck's own state.
+
+MAINTENANCE PRACTICE: whenever a colleague's debug report turns out to be
+MISSING the data needed to diagnose their issue, improve the debugger (here, and
+persist the data if it isn't already on disk) so the NEXT report captures it
+automatically — don't just ask them to reproduce. This file should accrete a new
+collector every time we have to debug blind.
 """
 
 from __future__ import annotations
@@ -249,6 +258,18 @@ def _collect_logs() -> list[str]:
             lines.extend(tail)
         except OSError as exc:
             lines.append(f"plugin_runs.log unreadable: {exc}")
+    # The detail log carries every line a plugin printed (the full console
+    # output), so in-run warnings on a run that still reported OK -- e.g. a
+    # silent forecast/lookup miss -- are diagnosable from the report.
+    detail_log = log_dir / "plugin_detail.log"
+    if detail_log.is_file():
+        try:
+            tail = detail_log.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
+            lines.append("")
+            lines.append(f"--- plugin_detail.log (last {len(tail)} lines) ---")
+            lines.extend(tail)
+        except OSError as exc:
+            lines.append(f"plugin_detail.log unreadable: {exc}")
     return lines
 
 

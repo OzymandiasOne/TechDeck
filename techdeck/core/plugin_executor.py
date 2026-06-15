@@ -85,6 +85,43 @@ def get_run_logger() -> logging.Logger:
     return logger
 
 
+_detail_logger: Optional[logging.Logger] = None
+
+
+def get_detail_logger() -> logging.Logger:
+    """Return the shared plugin DETAIL logger, configuring a rotating file handler
+    on first use. Writes every line a plugin emits (the full console output) to
+    %LOCALAPPDATA%/TechDeck/logs/plugin_detail.log, so failures that only surface
+    as in-run warnings (e.g. 911 Setup logging 'No forecast rows found for nest X'
+    while the run still reports OK) can be diagnosed from a debug report after the
+    fact — plugin_runs.log keeps only the START/OK/ERROR summary. Never raises."""
+    global _detail_logger
+    if _detail_logger is not None:
+        return _detail_logger
+
+    logger = logging.getLogger('techdeck.plugin_detail')
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    if not logger.handlers:
+        try:
+            log_dir = _run_log_dir()
+            log_dir.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                log_dir / 'plugin_detail.log',
+                maxBytes=2_000_000,
+                backupCount=3,
+                encoding='utf-8',
+            )
+            handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+            logger.addHandler(handler)
+        except Exception:
+            logger.addHandler(logging.NullHandler())
+
+    _detail_logger = logger
+    return logger
+
+
 class PluginStatus(Enum):
     """Plugin execution status."""
     PENDING = "pending"
@@ -399,6 +436,10 @@ class PluginExecutor:
         # Create wrapped callbacks that are thread-safe
         def safe_log(message: str):
             self._touch_activity(plugin_id)
+            try:
+                get_detail_logger().info("%s | %s", plugin_id, message)
+            except Exception:
+                pass  # detail logging must never break a run
             if log_callback:
                 try:
                     log_callback(message)
@@ -574,6 +615,10 @@ class PluginExecutor:
         
         def safe_log(message: str):
             self._touch_activity(plugin_id)
+            try:
+                get_detail_logger().info("%s | %s", plugin_id, message)
+            except Exception:
+                pass  # detail logging must never break a run
             if log_callback:
                 try:
                     log_callback(message)
