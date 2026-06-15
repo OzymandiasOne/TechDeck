@@ -634,28 +634,75 @@ def _fill_nest_part_rows(nest_ws, num_parts: int):
 # Step 5: Working Forecast List -> NEST cols A-C
 # ---------------------------------------------------------------------------
 
-def _copy_forecast_rows(forecast_wb, nest_number: str) -> list:
-    """
-    In the '911 Forecast' sheet, find all rows where column G == nest_number.
-    Return list of (A, B, C) tuples for those rows.
+def _nest_matches(cell_val, target_upper: str) -> bool:
+    """True if a forecast 'Nest' cell equals the batch-list nest. Compares as
+    upper/stripped strings AND as integers, so a nest stored as a number
+    (503712, or even 503712.0 on some machines) matches the string '503712'."""
+    if cell_val is None:
+        return False
+    if str(cell_val).strip().upper() == target_upper:
+        return True
+    a, b = _as_int(cell_val), _as_int(target_upper)
+    return a is not None and a == b
 
-    Note: column G stores some nests as int (e.g. 503627) and some as str
-    (e.g. "9FANDR"), while nest_number is always a str coming from the
-    BATCH LIST reader. Normalize both sides before comparing so int-stored
-    nests match correctly.
-    """
-    ws = forecast_wb["911 Forecast"]
+
+def _locate_forecast(forecast_wb, log):
+    """Find the 911 forecast sheet, its header row, the 'Nest' match column, and
+    the PO/Line/Batch output columns -- all by HEADER NAME (Hard Rules 1 & 2),
+    never a fixed index, so an inserted/moved column can't silently break the
+    lookup. Returns (ws, header_row, nest_col, (po, line, batch)). Raises a clear
+    error if the sheet or the 'Nest' column is absent -- failing loudly beats
+    silently leaving every nest's columns A-C blank."""
+    ws = None
+    for name in forecast_wb.sheetnames:
+        if name.strip().lower() == "911 forecast":
+            ws = forecast_wb[name]
+            break
+    if ws is None:                       # tolerate a renamed-but-recognizable sheet
+        for name in forecast_wb.sheetnames:
+            low = name.lower()
+            if "911" in low and "forecast" in low:
+                ws = forecast_wb[name]
+                break
+    if ws is None:
+        raise RuntimeError(
+            "Could not find a '911 Forecast' sheet in the Working Forecast List. "
+            f"Sheets present: {forecast_wb.sheetnames}")
+
+    header_row = nest_col = None
+    for r in range(1, min(ws.max_row, 8) + 1):
+        col = _find_header_col(ws, "Nest", r)
+        if col is not None:
+            header_row, nest_col = r, col
+            break
+    if nest_col is None:
+        raise RuntimeError(
+            f"Could not find a 'Nest' column header in the '{ws.title}' sheet of "
+            "the Working Forecast List (looked in the first 8 rows).")
+
+    po = _find_header_col(ws, "PO", header_row) or 1
+    line = _find_header_col(ws, "Line", header_row) or 2
+    batch = _find_header_col_prefix(ws, "Batch", header_row) or 3
+    log(f"  Forecast lookup: sheet '{ws.title}', nest column "
+        f"{get_column_letter(nest_col)} (headers in row {header_row}); A/B/C <- "
+        f"{get_column_letter(po)}/{get_column_letter(line)}/{get_column_letter(batch)}.")
+    return ws, header_row, nest_col, (po, line, batch)
+
+
+def _copy_forecast_rows(ws, header_row: int, nest_col: int,
+                        out_cols: tuple, nest_number: str) -> list:
+    """All (PO, Line, Batch) tuples whose 'Nest' cell matches nest_number, read
+    from the header-located columns (see _locate_forecast). Tolerant of nests
+    stored as int/str/float. These land in NEST cols A/B/C."""
     target = str(nest_number).strip().upper()
+    po, line, batch = out_cols
     rows = []
-    for row in range(2, ws.max_row + 1):
-        g_val = ws.cell(row, 7).value
-        if g_val is None:
-            continue
-        if str(g_val).strip().upper() == target:
+    for row in range(header_row + 1, ws.max_row + 1):
+        if _nest_matches(ws.cell(row, nest_col).value, target):
             rows.append((
-                ws.cell(row, 1).value,
-                ws.cell(row, 2).value,
-                ws.cell(row, 3).value,
+                ws.cell(row, po).value,
+                ws.cell(row, line).value,
+                ws.cell(row, batch).value,
             ))
     return rows
 
@@ -1354,6 +1401,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     log("Loading 911 Forecast sheet...")
     forecast_wb = load_workbook(forecast_copy, data_only=True)
+    # Locate the forecast columns once, by header name (Hard Rules 1 & 2).
+    forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols = \
+        _locate_forecast(forecast_wb, log)
 
     progress_callback(25)
     if cancel_event.is_set():
@@ -1367,6 +1417,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     qty_mismatches = []   # (nest, dypn, wo, batch qty, packet qty)
     qty_unverified = []   # (nest, dypn, wo, batch qty) -- not in packet summary
+    missing_forecast = []  # nests with no forecast row (cols A-C left blank)
     total_nests = len(nest_numbers)
     for nest_idx, nest in enumerate(nest_numbers):
         if cancel_event.is_set():
@@ -1382,9 +1433,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
         # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------
         log(f"  [Step 5] Extracting forecast rows for {nest}...")
-        forecast_rows = _copy_forecast_rows(forecast_wb, nest)
+        forecast_rows = _copy_forecast_rows(
+            forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols, nest)
         if not forecast_rows:
-            log(f"  WARNING: No forecast rows found for nest {nest} in column G.")
+            missing_forecast.append(nest)
+            log(f"  WARNING: No forecast rows found for nest {nest} in the "
+                f"'{forecast_ws.title}' sheet (column "
+                f"{get_column_letter(forecast_nest_col)}).")
         else:
             log(f"  Found {len(forecast_rows)} forecast rows.")
             _paste_forecast_into_nest(nest_ws, forecast_rows)
@@ -1473,6 +1528,25 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # Cleanup
     # ------------------------------------------------------------------ #
     forecast_wb.close()
+
+    # ------------------------------------------------------------------ #
+    # Forecast-coverage summary -- a missing forecast row leaves NEST cols
+    # A-C blank, which previously looked like a clean run. Surface it loudly
+    # and actionably so it can't be mistaken for success.
+    # ------------------------------------------------------------------ #
+    if missing_forecast:
+        log(f"\n{'!'*50}")
+        log(f"FORECAST DATA MISSING -- NEST columns A-C left BLANK for "
+            f"{len(missing_forecast)} of {total_nests} nest(s):")
+        log(f"  {', '.join(missing_forecast)}")
+        log(f"These nests were not found in the Working Forecast List's "
+            f"'{forecast_ws.title}' sheet. Most often the forecast is out of "
+            "date or not fully synced on this machine.")
+        log("FIX: in OneDrive, right-click the 'Forecast and Inventory Reports' "
+            "folder -> 'Always keep on this device', let it finish syncing, then "
+            "re-run 911 Setup. (If these nests have not been added to the "
+            "forecast yet, add them there first.)")
+        log(f"{'!'*50}")
 
     # ------------------------------------------------------------------ #
     # QTY verification summary -- repeated at the end so warnings that
