@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.2 - Hotfix: OneDrive cloud-file auto-download across all apps, Cancel at prompts + double-click guard
+; Version 0.8.6.3 - Fix: feedback workbook discovery across OneDrive sync layouts; console polish
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.2"
+#define MyAppVersion "0.8.6.3"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

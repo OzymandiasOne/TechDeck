@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.2"  # Hotfix: OneDrive cloud-file auto-download across all apps (Hard Rule 13), Cancel works at prompts + click feedback + double-click guard
+APP_VERSION = "0.8.6.3"  # Fixes: feedback workbook found across all OneDrive sync layouts; 911 Setup warns loudly on missing/unsynced forecast data + header-driven forecast lookup; console polish (moth musings, 4-arm fidget spinner); debug report now captures full plugin output
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

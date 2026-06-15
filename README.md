@@ -1,8 +1,29 @@
-# TechDeck v0.8.6.2 - Hotfix: OneDrive Cloud Files & Cancel Reliability
+# TechDeck v0.8.6.3 - Feedback Submission Fix
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.3
+
+**Feedback submission works on every OneDrive setup** - Submitting a suggestion
+(Settings > Help & Feedback) could fail with "Workbook Not Found" on machines that
+synced the QTDR library directly instead of the whole SharePoint site. TechDeck now
+locates the shared suggestions workbook across every sync layout, so feedback saves
+reliably. The batch apps also auto-detect a directly-synced library now, without a
+manual folder setting.
+
+**911 Setup flags missing forecast data** - If a nest isn't found in the Working Forecast
+List (most often because the forecast is out of date or not fully synced on that machine),
+911 Setup previously left columns A-C blank and still reported success. It now ends with a
+clear warning listing those nests and how to fix it, and locates the forecast columns by
+header so a reordered sheet can't silently break the lookup.
+
+**Console polish** - The hidden `/friend` companion's musings were rewritten, and the
+`/fidget` spinner was remade as a clean, theme-coloured, symmetric pixel-art spinner that
+`/clear` puts away.
 
 ---
 
