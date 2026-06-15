@@ -185,25 +185,29 @@ class FidgetSpinnerWindow(QWidget):
 
     @staticmethod
     def _theme_colors() -> dict:
-        """A colour set derived from the theme accent: hub (slightly darker), three
-        lobes tinted to three hues of the accent, a dark outline, bright rings."""
+        """A colour set drawn entirely from the active theme palette so the spinner
+        fits the theme: the three lobes run from the primary accent through a blend
+        to the secondary (CTA) accent, the hub is the pressed accent, the bearing
+        rings are the text colour, and the outline is a darkened accent."""
         try:
             from techdeck.ui.theme_manager import get_theme_manager
-            accent = QColor(get_theme_manager().get_current_palette().accent)
+            pal = get_theme_manager().get_current_palette()
+            accent, accent2 = QColor(pal.accent), QColor(pal.accent_two)
+            hub, ring = QColor(pal.accent_pressed), QColor(pal.text)
         except Exception:
-            accent = QColor(0xF5, 0xC5, 0x18)  # amber fallback
-        h, s, v, a = accent.getHsv()
-        if h < 0:                       # achromatic accent -> give it a hue to tint
-            h, s = 40, 140
+            accent, accent2 = QColor(0x28, 0x78, 0xA8), QColor(0xF5, 0xC5, 0x18)
+            hub, ring = accent.darker(130), QColor(245, 246, 238)
 
-        def hue(dh):
-            return QColor.fromHsv((h + dh) % 360, s, v, a)
+        def blend(a, b, t):
+            return QColor(round(a.red() + (b.red() - a.red()) * t),
+                          round(a.green() + (b.green() - a.green()) * t),
+                          round(a.blue() + (b.blue() - a.blue()) * t))
 
         return {
             "outline": accent.darker(300),
-            "hub": accent.darker(125),
-            "lobes": [hue(0), hue(50), hue(-50)],
-            "ring": QColor(245, 246, 238),
+            "hub": hub,
+            "lobes": [accent, blend(accent, accent2, 0.5), accent2],
+            "ring": ring,
         }
 
     def _tick(self):
