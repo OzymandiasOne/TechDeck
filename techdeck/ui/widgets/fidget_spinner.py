@@ -1,31 +1,24 @@
 """
 TechDeck Fidget Spinner
 
-A standalone, frameless, always-on-top fidget spinner drawn as HAND-EDITABLE
-PIXEL ART, exactly like the moth (`MOTH_FRAMES`): edit the `SPINNER_ART` grid
-below cell by cell. Colours come from the active theme palette so it fits the
-theme. The grid is rendered to a pixmap once; spinning just rotates that pixmap
-with smoothing OFF, so the pixels stay hard-edged at every angle.
+A standalone, frameless, always-on-top fidget spinner drawn as PIXEL ART in the
+moth's theme-coloured style. The shape is generated procedurally — a centre hub,
+N arms, N lobes, all ONE connected piece — and rendered to a pixmap once;
+spinning just rotates that pixmap with smoothing OFF so the pixels stay
+hard-edged at every angle.
 
-Editing the art — each cell is one character:
-    .  transparent (a dark OUTLINE is auto-traced around every filled cell,
-       and around the bearing holes, just like the moth's silhouette outline)
-    B  body  -> theme accent        (the hub + the arms)
-    W  wing  -> theme accent_two     (the three lobes / "wings")
-    R  ring  -> theme text           (the bright bearing rings)
-    H  highlight -> a light accent   (optional shading; place by hand)
-    o  outline tone                  (optional hand-drawn dark detail)
+It has FOUR arms at 0/90/180/270 degrees. On a square pixel grid a 4-fold shape
+is perfectly symmetric (a 90-degree rotation maps cells exactly onto cells),
+which 3 arms can never be.
 
-The spinner rotates about the GRID CENTRE, so keep the hub centred and keep all
-art within the inscribed circle (radius = half the grid) or it clips as it
-spins. A square grid keeps the centre easy to find.
+Reshape it by editing the geometry constants below (all in grid cells). Bump
+GRID for more resolution; keep the content radius (_LOBE_DIST + _LOBE_R + 1)
+inside GRID/2 so nothing clips as it spins. Preview edits without launching the
+app via `python tools/preview_spinner.py`.
 
   - Click anywhere on it to add spin (and drag to move it).
   - It does NOT close on double-click (that fought with clicking to spin);
     `/clear` puts it away (see CommandHandler.stop_session_effects).
-
-Tip: preview edits without launching the whole app with
-`python tools/preview_spinner.py`.
 """
 
 import math
@@ -35,87 +28,127 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QColor, QPixmap
 
 
-# ── Hand-editable pixel art (legend in the module docstring above) ───────────
-SPINNER_ART = [
-    ".................................",
-    "................W................",
-    "..............WWRWW..............",
-    ".............WRRRRRW.............",
-    "............WRR...RRW............",
-    "............WR.....RW............",
-    "............WR.....RW............",
-    "............WRR...RRW............",
-    ".............WRRRRRW.............",
-    ".............WWRRRWW.............",
-    "..............BWWWB..............",
-    "..............BBBBB..............",
-    ".............BBBBBBB.............",
-    "............BBRRRRRBB............",
-    "............BRR...RRB............",
-    "............BR.....RB............",
-    "...........BBR.....RBB...........",
-    "......WWWBBBBR.....RBBBBWWW......",
-    "....WWRRRWWBBRR...RRBBWWRRRWW....",
-    "...WWRR.RRWWBBRRRRRBBWWRR.RRWW...",
-    "...WRR...RRWBBBBBBBBBWRR...RRW...",
-    "...WR.....RWB...B...BWR.....RW...",
-    "...WR.....RW.........WR.....RW...",
-    "...WRR...RRW.........WRR...RRW...",
-    "....WRRRRRW...........WRRRRRW....",
-    ".....WWWWW.............WWWWW.....",
-    ".................................",
-    ".................................",
-    ".................................",
-    ".................................",
-    ".................................",
-    ".................................",
-    ".................................",
-]
+# Pixel grid: each cell is CELL px. GRID is sized so the content radius fits with
+# a margin (also the rotation radius, so nothing clips while it spins).
+GRID = 51
+CELL = 6
+_CENTER = GRID / 2.0
 
-CELL = 9                                 # px per art cell
-_ART_H = len(SPINNER_ART)
-_ART_W = max(len(r) for r in SPINNER_ART)
+# Geometry, in grid cells.
+_HUB_R = 7.5          # centre hub radius
+_HUB_HOLE = 3.5       # centre bearing hole
+_LOBE_DIST = 16.0     # hub centre -> lobe centre
+_LOBE_R = 7.0         # lobe radius
+_LOBE_HOLE = 3.5      # lobe bearing hole
+_ARM_HW = 4.0         # half-width of each arm (connects hub to lobe)
+_RING_W = 1.8         # bright bearing ring just outside each hole
+_LOBE_ANGLES_DEG = (-90.0, 0.0, 90.0, 180.0)   # four arms, 90 apart -> symmetric
+
+# base codes: 0 empty, 1 hub/arm, 2 wing (lobe). deco codes: 0 none,
+# 1 outline (on empty), 2 bearing ring, 3 highlight bevel.
+_HUB, _WING = 1, 2
+_OUTLINE, _RING, _HILITE = 1, 2, 3
+
+
+def _seg_dist(px, py, ax, ay, bx, by):
+    """Distance from point P to segment AB (for the connecting arms)."""
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    if l2 == 0.0:
+        return math.hypot(px - ax, py - ay)
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+
+
+def _build_spinner_grids():
+    """Build (base, deco) grids: hub/arm vs wing for each solid cell, plus the
+    outline (traced around the silhouette and every hole), the bright ring just
+    outside each hole, and a highlight bevel on cells against the outer rim."""
+    lobes = [(_CENTER + _LOBE_DIST * math.cos(math.radians(a)),
+              _CENTER + _LOBE_DIST * math.sin(math.radians(a)))
+             for a in _LOBE_ANGLES_DEG]
+    holes = [(_CENTER, _CENTER, _HUB_HOLE)] + [(lx, ly, _LOBE_HOLE) for lx, ly in lobes]
+
+    base = [[0] * GRID for _ in range(GRID)]
+    for gy in range(GRID):
+        for gx in range(GRID):
+            px, py = gx + 0.5, gy + 0.5
+            if any(math.hypot(px - hx, py - hy) <= hr for hx, hy, hr in holes):
+                continue  # bearing hole -> empty
+            if any(math.hypot(px - lx, py - ly) <= _LOBE_R for lx, ly in lobes):
+                base[gy][gx] = _WING
+            elif (math.hypot(px - _CENTER, py - _CENTER) <= _HUB_R or
+                  any(_seg_dist(px, py, _CENTER, _CENTER, lx, ly) <= _ARM_HW
+                      for lx, ly in lobes)):
+                base[gy][gx] = _HUB
+
+    solid = lambda gx, gy: 0 <= gx < GRID and 0 <= gy < GRID and base[gy][gx] != 0
+
+    # Flood the outer (background) empties from the border, so the highlight bevel
+    # only lights the OUTER rim, not the inner bearing-hole rims.
+    outer = [[False] * GRID for _ in range(GRID)]
+    stack = [(x, y) for x in range(GRID) for y in (0, GRID - 1) if base[y][x] == 0]
+    stack += [(x, y) for y in range(GRID) for x in (0, GRID - 1) if base[y][x] == 0]
+    while stack:
+        gx, gy = stack.pop()
+        if outer[gy][gx]:
+            continue
+        outer[gy][gx] = True
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = gx + dx, gy + dy
+            if 0 <= nx < GRID and 0 <= ny < GRID and not outer[ny][nx] and base[ny][nx] == 0:
+                stack.append((nx, ny))
+
+    deco = [[0] * GRID for _ in range(GRID)]
+    for gy in range(GRID):
+        for gx in range(GRID):
+            px, py = gx + 0.5, gy + 0.5
+            if base[gy][gx] == 0:
+                if any(solid(gx + dx, gy + dy)
+                       for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy):
+                    deco[gy][gx] = _OUTLINE
+                continue
+            if (outer[gy - 1][gx] or outer[gy][gx - 1] or outer[gy - 1][gx - 1]):
+                deco[gy][gx] = _HILITE
+            elif any(hr < math.hypot(px - hx, py - hy) <= hr + _RING_W
+                     for hx, hy, hr in holes):
+                deco[gy][gx] = _RING
+    return base, deco
+
+
+# Built once at import; theme colour is applied per-instance when rendering.
+_SPINNER_BASE, _SPINNER_DECO = _build_spinner_grids()
 
 
 def _render_spinner_pixmap(colors: dict) -> QPixmap:
-    """Render SPINNER_ART to a pixmap: auto-trace a dark outline around the art
-    (and the holes), then paint each cell in its themed colour."""
-    cmap = {"B": colors["body"], "W": colors["wing"], "R": colors["ring"],
-            "H": colors["highlight"], "o": colors["outline"]}
-    rows = SPINNER_ART
-
-    def filled(x, y):
-        return 0 <= y < _ART_H and 0 <= x < len(rows[y]) and rows[y][x] != "."
-
-    pm = QPixmap(_ART_W * CELL, _ART_H * CELL)
+    """Render the (base, deco) grids to a pixmap using the colour set."""
+    part = {_HUB: colors["hub"], _WING: colors["wing"]}
+    pm = QPixmap(GRID * CELL, GRID * CELL)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
     p.setPen(Qt.PenStyle.NoPen)
-    # Outline pass: every empty cell touching a filled cell (silhouette + holes).
-    for y in range(_ART_H):
-        for x in range(_ART_W):
-            if filled(x, y):
+    for gy in range(GRID):
+        for gx in range(GRID):
+            b, d = _SPINNER_BASE[gy][gx], _SPINNER_DECO[gy][gx]
+            if b == 0:
+                if d == _OUTLINE:
+                    p.fillRect(gx * CELL, gy * CELL, CELL, CELL, colors["outline"])
                 continue
-            if any(filled(x + dx, y + dy)
-                   for dx in (-1, 0, 1) for dy in (-1, 0, 1) if dx or dy):
-                p.fillRect(x * CELL, y * CELL, CELL, CELL, colors["outline"])
-    # Body pass: each art cell in its colour.
-    for y in range(_ART_H):
-        row = rows[y]
-        for x in range(len(row)):
-            ch = row[x]
-            if ch == ".":
-                continue
-            p.fillRect(x * CELL, y * CELL, CELL, CELL, cmap.get(ch, colors["body"]))
+            col = part[b]
+            if d == _HILITE:
+                col = col.lighter(155)
+            elif d == _RING:
+                col = colors["ring"]
+            p.fillRect(gx * CELL, gy * CELL, CELL, CELL, col)
     p.end()
     return pm
 
 
 class FidgetSpinnerWindow(QWidget):
-    """Frameless, always-on-top pixel-art tri-spinner. Click to add spin, drag to
+    """Frameless, always-on-top pixel-art spinner. Click to add spin, drag to
     move. Closed via /clear (no double-click-to-close)."""
 
-    WINDOW_SIZE = max(_ART_H, _ART_W) * CELL
+    WINDOW_SIZE = GRID * CELL
 
     FRICTION = 0.9985     # per ~60fps frame — low, so a flick keeps it spinning
     CLICK_IMPULSE = 3.0   # radians/sec added per click
@@ -144,24 +177,19 @@ class FidgetSpinnerWindow(QWidget):
 
     @staticmethod
     def _theme_colors() -> dict:
-        """Colours from the active theme palette so the spinner fits the theme:
-        body (hub/arms) = primary accent, wings = secondary accent_two (the CTA
-        slot — where cyberpunk's red/pink lives), bearing rings = text, outline =
-        a darkened accent, highlight = a lighter accent_two."""
+        """The original theme-palette colour set: hub/arms = pressed accent, wings
+        = secondary accent_two (the CTA slot — where cyberpunk's red/pink lives),
+        bearing rings = text, outline = a darkened accent. The highlight bevel is
+        a lighter shade of each part, computed at render time."""
         try:
             from techdeck.ui.theme_manager import get_theme_manager
             pal = get_theme_manager().get_current_palette()
-            body, wing = QColor(pal.accent), QColor(pal.accent_two)
-            ring = QColor(pal.text)
+            hub, wing = QColor(pal.accent_pressed), QColor(pal.accent_two)
+            ring, outline = QColor(pal.text), QColor(pal.accent).darker(300)
         except Exception:
-            body, wing, ring = QColor(0x28, 0x78, 0xA8), QColor(0xF5, 0xA6, 0x23), QColor(0xEC, 0xEC, 0xEC)
-        return {
-            "body": body,
-            "wing": wing,
-            "ring": ring,
-            "outline": body.darker(300),
-            "highlight": wing.lighter(150),
-        }
+            hub, wing = QColor(0x1F, 0x67, 0x90), QColor(0xF5, 0xC5, 0x18)
+            ring, outline = QColor(0xEC, 0xEC, 0xEC), QColor(0x10, 0x28, 0x38)
+        return {"hub": hub, "wing": wing, "ring": ring, "outline": outline}
 
     def _tick(self):
         self._velocity *= self.FRICTION
