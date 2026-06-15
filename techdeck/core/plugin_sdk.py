@@ -155,13 +155,89 @@ def resolve_under_pilot_program(*parts: str) -> Optional[Path]:
     return None
 
 
+def library_roots(library_tail: str) -> list[Path]:
+    """All EXISTING on-disk roots of a SharePoint QTDR library, regardless of how
+    OneDrive synced it, de-duplicated. ``library_tail`` is the canonical library
+    folder name, e.g. ``"922 QTDR Production Packages"``.
+
+    pilot_program_roots() only covers the WHOLE-SITE sync layout
+    (``<site>/Pilot Program/<library>``). But a colleague can instead sync a
+    single document library directly, which OneDrive names ``<site> - <library>``
+    (e.g. ``Communication site - 922 QTDR Production Packages``) with NO
+    'Pilot Program' parent — so the canonical-name lookup misses it, and any
+    consumer without a manual override (notably the feedback writer) can't find
+    files in it. This covers both layouts plus saved per-app overrides."""
+    out: list[Path] = []
+    seen: set[str] = set()
+    tail_cf = library_tail.casefold()
+
+    def add(p: Path) -> None:
+        try:
+            if not p.is_dir():
+                return
+        except OSError:
+            return
+        key = str(p).casefold()
+        if key not in seen:
+            seen.add(key)
+            out.append(p)
+
+    # 1) Saved per-app base_path overrides whose folder IS this library (the
+    #    override value itself is the library root — covers the 'Communication
+    #    site - <library>' direct-sync naming a user pointed an app at).
+    try:
+        from techdeck.core.settings import SettingsManager
+        per_plugin = SettingsManager().data.get("plugin_settings", {})
+        for conf in per_plugin.values():
+            if not isinstance(conf, dict):
+                continue
+            for key in ("base_path", "base_directory"):
+                raw = str(conf.get(key) or "").strip()
+                if raw and Path(raw).name.casefold().endswith(tail_cf):
+                    add(Path(raw).expanduser())
+    except Exception:
+        pass
+
+    # 2) Whole-site sync: <pilot program root>/<library>.
+    for root in pilot_program_roots():
+        add(root / library_tail)
+
+    # 3) Direct single-library sync: '<site> - <library>' under the home dir, a
+    #    tenant sync folder, or a personal 'OneDrive - <tenant>'. Shallow globs
+    #    with a fixed tail (no ** walks), so cheap even on OneDrive.
+    home = Path.home()
+    od = os.environ.get("ONEDRIVE") or os.environ.get("OneDrive")
+    containers = [home, *home.glob("OneDrive - *")]
+    if od:
+        containers += [Path(od), Path(od).parent]
+    try:
+        for container in containers:
+            for hit in container.glob(f"*{library_tail}"):      # <container>/<site> - <library>
+                add(hit)
+            for hit in container.glob(f"*/*{library_tail}"):    # <container>/<tenant>/<site> - <library>
+                add(hit)
+    except OSError:
+        pass
+
+    return out
+
+
 def _resolve_root(override: str, *parts: str) -> Optional[Path]:
     """Shared override-or-autodiscover logic. A non-empty override always wins
     (returned even if it doesn't exist, so the caller can show a precise
-    error). Otherwise auto-discover under the Pilot Program roots."""
+    error). Otherwise auto-discover under the Pilot Program roots, and — for a
+    single-segment library — fall back to library_roots() so a directly-synced
+    'Communication site - <library>' is found even without a manual override."""
     if override and override.strip():
         return Path(override.strip()).expanduser()
-    return resolve_under_pilot_program(*parts)
+    hit = resolve_under_pilot_program(*parts)
+    if hit is not None:
+        return hit
+    if len(parts) == 1:                       # single library folder
+        roots = library_roots(parts[0])
+        if roots:
+            return roots[0]
+    return None
 
 
 def resolve_922_root(override: str = "") -> Optional[Path]:

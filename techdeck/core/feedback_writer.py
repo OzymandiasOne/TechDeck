@@ -36,30 +36,48 @@ logger = logging.getLogger(__name__)
 # Path resolution
 # ---------------------------------------------------------------------------
 
-# Workbook location relative to the Pilot Program root. The root itself is
-# resolved via plugin_sdk.pilot_program_roots(), which tries every OneDrive
-# folder-name variant ('American Steel & Alum', 'OneDrive - American Steel &
-# Alum', and the ONEDRIVE env var). The old code hardcoded ONE variant under
-# Path.home(), which broke on machines where OneDrive named the folder
-# differently — the exact problem the SDK resolver exists to solve (and why
-# the plugins never hit this).
-_FEEDBACK_REL = ("922 QTDR Production Packages", "Notes")
+# The workbook lives in the 'Notes' subfolder of the 922 QTDR library. We find
+# that library via plugin_sdk.library_roots(), which covers EVERY way OneDrive
+# may have synced it: the whole-site 'Pilot Program' layout, a directly-synced
+# single library named 'Communication site - 922 QTDR Production Packages', and
+# any folder a user pointed a 922 app at in Settings > Apps. The old code only
+# reconstructed '<pilot root>/922 QTDR Production Packages/Notes', so a machine
+# that synced the library directly (no 'Pilot Program' parent) never found the
+# workbook and feedback submission failed — the bug this resolves.
+_FEEDBACK_LIBRARY = "922 QTDR Production Packages"
+_FEEDBACK_SUBDIR = "Notes"
 _FEEDBACK_FILENAME = "TechDeck_Suggestions.xlsx"
 _FEEDBACK_SHEET_NAME = "Feedback"
 
 
-def feedback_file_path() -> Optional[Path]:
-    """First EXISTING candidate for the shared feedback workbook across all
-    OneDrive folder-name variants, or None if it isn't synced anywhere."""
-    from techdeck.core import plugin_sdk as sdk
-    return sdk.resolve_under_pilot_program(*_FEEDBACK_REL, _FEEDBACK_FILENAME)
-
-
 def feedback_candidate_paths() -> list:
-    """Every location we look for the workbook (for error messages)."""
+    """Every location we look for the workbook (also used for error messages)."""
     from techdeck.core import plugin_sdk as sdk
-    return [root.joinpath(*_FEEDBACK_REL, _FEEDBACK_FILENAME)
-            for root in sdk.pilot_program_roots()]
+    return [root / _FEEDBACK_SUBDIR / _FEEDBACK_FILENAME
+            for root in sdk.library_roots(_FEEDBACK_LIBRARY)]
+
+
+def feedback_file_path() -> Optional[Path]:
+    """First EXISTING candidate for the shared feedback workbook across every
+    OneDrive sync layout, or None if it isn't synced anywhere."""
+    for candidate in feedback_candidate_paths():
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _expected_locations() -> list:
+    """Representative paths where the workbook SHOULD live (existing or not) —
+    for the not-found error message, since feedback_candidate_paths() only lists
+    libraries that actually exist on disk (none, when nothing is synced)."""
+    from techdeck.core import plugin_sdk as sdk
+    out = [root / _FEEDBACK_LIBRARY / _FEEDBACK_SUBDIR / _FEEDBACK_FILENAME
+           for root in sdk.pilot_program_roots()]
+    # The directly-synced single-library layout, too.
+    out.append(Path.home() / "American Steel & Alum"
+               / f"Communication site - {_FEEDBACK_LIBRARY}"
+               / _FEEDBACK_SUBDIR / _FEEDBACK_FILENAME)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -131,14 +149,14 @@ def submit_feedback(suggestion: str, which_feature: str) -> Path:
     path = feedback_file_path()
 
     if path is None:
-        tried = "\n".join(f"  {p}" for p in feedback_candidate_paths())
+        tried = "\n".join(f"  {p}" for p in _expected_locations())
         raise FileNotFoundError(
             f"{_FEEDBACK_FILENAME} was not found in any OneDrive location. "
-            f"Checked:\n{tried}\n\n"
-            "Make sure the 'Communication site - Electric Boat ASA Docs' "
-            "SharePoint library is synced to OneDrive on this machine, and "
-            "that the workbook exists under "
-            "922 QTDR Production Packages\\Notes."
+            f"Expected it in one of:\n{tried}\n\n"
+            "Make sure the '922 QTDR Production Packages' SharePoint library is "
+            "synced to OneDrive on this machine (either via the whole "
+            "'Communication site - Electric Boat ASA Docs' site, or the library "
+            "synced directly), with the workbook under its Notes folder."
         )
 
     # Match the existing schema: A=Suggestion, B=Which Feature, C=Date Logged,
