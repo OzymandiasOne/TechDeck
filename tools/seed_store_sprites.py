@@ -81,6 +81,23 @@ def to_tdart(g, palette):
     return {"palette": palette, "rows": ["".join(row) for row in g]}
 
 
+def outline(g, fill_chars, oc):
+    """Trace `oc` into every transparent cell 4-adjacent to a `fill_chars` cell."""
+    H, W = len(g), len(g[0])
+    adds = []
+    for y in range(H):
+        for x in range(W):
+            if g[y][x] != ".":
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < W and 0 <= ny < H and g[ny][nx] in fill_chars:
+                    adds.append((x, y))
+                    break
+    for x, y in adds:
+        g[y][x] = oc
+
+
 # ── Beyblade (Dragoon) — 4-blade metallic spinner, fixed palette ─────────────
 def beyblade():
     N = 43
@@ -148,91 +165,117 @@ def shuriken():
 
 # ── NES cartridge — STEEL TUBE OP, fixed palette ─────────────────────────────
 def cartridge():
-    W, H = 40, 44
+    # Authentic NES cartridge: beveled top, chamfered bottom corners, a ridged
+    # grip band down the left, and a clean label panel on the right. The label
+    # carries a generic NES layout (red header / sky / footer) as a canvas to
+    # repaint in the editor.
+    W, H = 42, 48
     pal = {
-        "k": "#2a2a2e", "g": "#b9bcc4", "d": "#7e828c", "l": "#e8e2d0",
-        "h": "#d8402e", "b": "#2f6bd0", "s": "#aeb4be", "w": "#ffffff",
-        "t": "#1a1a1e", "y": "#f4c430",
+        "k": "#3a3a40",   # outline
+        "g": "#bcbfc6",   # body grey (front face)
+        "d": "#9aa0a8",   # ridges / mid shade
+        "e": "#82868e",   # deepest shade
+        "l": "#f2efe6",   # label off-white
+        "h": "#d8402e",   # label red header
+        "b": "#7fc7e8",   # label sky (placeholder art)
+        "t": "#3a3a40",   # label footer text
+        "w": "#ffffff",
     }
     g = blank(W, H)
-    # body
-    fill_rect(g, 5, 4, 34, 40, "g")
-    fill_rect(g, 5, 4, 34, 4, "d")          # top edge
-    fill_rect(g, 33, 4, 34, 40, "d")        # right shade
-    fill_rect(g, 5, 39, 34, 40, "d")        # bottom shade
-    # top ridges (cart grip)
-    for x in range(8, 32, 3):
-        fill_rect(g, x, 5, x, 8, "d")
-    # outline
-    for x in range(5, 35):
-        put(g, x, 3, "k"); put(g, x, 41, "k")
-    for y in range(3, 42):
-        put(g, 4, y, "k"); put(g, 35, y, "k")
-    # label
-    fill_rect(g, 9, 12, 30, 36, "l")
-    for x in range(9, 31):
-        put(g, x, 11, "k"); put(g, x, 37, "k")
-    for y in range(11, 38):
-        put(g, 8, y, "k"); put(g, 31, y, "k")
-    fill_rect(g, 9, 12, 30, 16, "h")        # red header
-    # title art: steel tube on blue
-    fill_rect(g, 10, 18, 29, 31, "b")
-    fill_ellipse(g, 20, 24, 9, 3, "s")      # tube body
-    fill_ellipse(g, 20, 24, 9, 3, "s")
-    fill_rect(g, 11, 24, 29, 26, "s")
-    fill_ellipse(g, 12, 25, 2.4, 3, "d")    # tube end (hole)
-    fill_ellipse(g, 12, 25, 1.4, 2, "k")
-    put(g, 16, 22, "w"); put(g, 22, 22, "w")  # highlight glints
-    # footer text bar
-    fill_rect(g, 10, 33, 29, 35, "t")
-    for x in range(12, 28, 2):
-        put(g, x, 34, "y")
+    # outer silhouette: beveled top corners + chamfered bottom corners
+    fill_poly(g, [(7, 2), (35, 2), (39, 6), (39, 38), (34, 45),
+                  (8, 45), (3, 38), (3, 6)], "k")          # outline
+    fill_poly(g, [(7, 3), (35, 3), (38, 7), (38, 38), (33, 44),
+                  (9, 44), (4, 38), (4, 7)], "g")          # grey face
+    # top lid seam
+    fill_rect(g, 5, 9, 37, 9, "d")
+    # right-edge shading
+    for y in range(8, 38):
+        put(g, 37, y, "d")
+    # left ridged grip band
+    for x in range(7, 18, 2):
+        for y in range(12, 40):
+            if g[y][x] != ".":
+                g[y][x] = "d"
+    fill_rect(g, 18, 12, 18, 39, "e")        # band divider
+    # label panel (right side)
+    lx0, ly0, lx1, ly1 = 20, 7, 36, 35
+    fill_rect(g, lx0 - 1, ly0 - 1, lx1 + 1, ly1 + 1, "k")  # border
+    fill_rect(g, lx0, ly0, lx1, ly1, "l")
+    for rx, ry in [(lx0, ly0), (lx1, ly0), (lx0, ly1), (lx1, ly1)]:
+        g[ry][rx] = "g"                       # round the label corners
+    fill_rect(g, lx0, ly0, lx1, ly0 + 4, "h")        # red header
+    fill_rect(g, lx0, ly0 + 5, lx1, ly1 - 5, "b")    # sky middle (canvas)
+    fill_rect(g, lx0, ly1 - 4, lx1, ly1, "l")        # footer
+    fill_rect(g, lx0 + 1, ly1 - 2, lx1 - 1, ly1 - 2, "t")  # footer text line
+    # bottom-center thumb-notch detail
+    fill_poly(g, [(19, 44), (23, 44), (21, 46)], "e")
     return to_tdart(g, pal)
 
 
 # ── Woogy (UFO50) salesman — fixed palette ───────────────────────────────────
 def woogy():
+    # Garlic-bulb body (lumpy lobed top + curled sprout), vertical streak
+    # texture, wide outlined eyes, brown almond mouth, candy-stripe legs, gold
+    # sparkles — matching the WOOGY card. Refine the rest in the editor.
     W, H = 44, 58
+    cx = 22
     pal = {
-        "k": "#0c160c", "g": "#3f7a3a", "G": "#2c5a2a", "l": "#5fae50",
-        "w": "#f4f4ec", "p": "#14140e", "m": "#6b4a2c", "M": "#4a3220",
+        "k": "#0c160c", "g": "#4a8a3f", "G": "#2f5e2a", "l": "#6fbf5c",
+        "w": "#f4f4ec", "p": "#14140e", "m": "#7a5230", "M": "#4a3220",
         "r": "#d23a3a", "i": "#ffffff", "y": "#f4c430",
     }
     g = blank(W, H)
-    cx = 22
-    # silhouette (black) then green inset = clean 1px outline
-    fill_poly(g, [(22, 2), (12, 22), (32, 22)], "k")     # pointed crown
-    fill_ellipse(g, cx, 34, 17, 22, "k")
-    fill_poly(g, [(22, 4), (14, 22), (30, 22)], "g")
-    fill_ellipse(g, cx, 34, 16, 21, "g")
-    # shading
+
+    # ── body: overlapping lobes form a lumpy garlic bulb ──
+    fill_ellipse(g, cx, 36, 16, 19, "g")          # main mass
+    fill_ellipse(g, cx, 20, 9, 9, "g")            # center top bump
+    fill_ellipse(g, cx - 9, 24, 6.5, 8, "g")      # left bump
+    fill_ellipse(g, cx + 9, 24, 6.5, 8, "g")      # right bump
+    # curled sprout
+    for (sx, sy) in [(22, 4), (22, 6), (23, 8), (24, 10), (23, 12),
+                     (21, 13), (20, 11), (21, 9)]:
+        fill_circle(g, sx, sy, 1.4, "g")
+
+    # ── texture: vertical crevices (dark) + left highlight ──
     for y in range(H):
         for x in range(W):
-            if g[y][x] == "g" and (x - cx) - (34 - y) > 9:
+            if g[y][x] != "g":
+                continue
+            # crevices between lobes
+            if x in (cx - 4, cx + 4) and 12 < y < 30:
                 g[y][x] = "G"
-            elif g[y][x] == "g" and (cx - x) - (34 - y) > 11:
-                g[y][x] = "l"
-    # eyes
-    fill_circle(g, 14, 24, 5, "k")
-    fill_circle(g, 30, 24, 5, "k")
-    fill_circle(g, 14, 24, 4.2, "w")
-    fill_circle(g, 30, 24, 4.2, "w")
-    fill_circle(g, 15, 22, 1.8, "p")     # pupils up/out
-    fill_circle(g, 31, 22, 1.8, "p")
-    # mouth (brown lens with white oval)
-    fill_ellipse(g, cx, 40, 12, 4.5, "M")
-    fill_ellipse(g, cx, 39, 11, 3.5, "m")
-    fill_ellipse(g, cx, 39, 4.5, 2.2, "i")
-    # candy-stripe base
-    base_y0, base_y1 = 48, 53
-    for x in range(10, 35):
-        if g[base_y0][x] in ("g", "G", "l", "k") or g[base_y1][x] in ("g", "G", "l", "k"):
-            col = "r" if ((x - 10) // 2) % 2 == 0 else "w"
-            for y in range(base_y0, base_y1 + 1):
-                if g[y][x] != ".":
+            elif (x - cx) % 6 == 0 and y > 30:
+                g[y][x] = "G"
+            elif (cx - x) > 6 and (y - 30) > (cx - x):
+                g[y][x] = "l"           # lower-left sheen
+
+    outline(g, ("g", "G", "l"), "k")    # clean silhouette outline
+
+    # ── eyes (wide, outlined, looking up/out) ──
+    for ex, pdx in ((cx - 8, 1), (cx + 8, 1)):
+        fill_circle(g, ex, 26, 5.4, "k")
+        fill_circle(g, ex, 26, 4.4, "w")
+        fill_circle(g, ex + pdx, 24, 2.0, "p")
+        put(g, ex + pdx - 1, 23, "i")   # catchlight
+
+    # ── brown almond mouth with white blob ──
+    fill_ellipse(g, cx, 42, 12, 4.6, "k")
+    fill_ellipse(g, cx, 42, 11, 3.7, "M")
+    fill_ellipse(g, cx, 41, 10, 2.8, "m")
+    fill_ellipse(g, cx, 41, 4.2, 2.0, "i")
+
+    # ── two candy-stripe legs ──
+    for lx0 in (cx - 8, cx + 2):
+        for x in range(lx0, lx0 + 6):
+            col = "r" if (x - lx0) % 2 == 0 else "w"
+            for y in range(50, 56):
+                if (x - (lx0 + 2.5)) ** 2 / 9 + (y - 52) ** 2 / 16 <= 1.2:
                     g[y][x] = col
-    # gold flecks
-    for fx, fy in [(9, 16), (34, 18), (11, 42), (33, 40), (22, 10)]:
+    outline(g, ("r", "w"), "k")
+
+    # ── gold sparkles ──
+    for fx, fy in [(8, 18), (35, 20), (10, 44), (34, 42), (cx, 8), (37, 33)]:
         put(g, fx, fy, "y")
     return to_tdart(g, pal)
 
