@@ -28,10 +28,38 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # Dev/IDE and stdlib never imported by the app or any plugin.
+        'tkinter', 'Pythonwin', 'pydoc_data',
+        # Qt modules NOT imported anywhere in techdeck/ or plugins/ (verified by
+        # grep: only QtCharts/QtCore/QtGui/QtMultimedia/QtSvg/QtWidgets are used).
+        # Excluding the bindings stops PyInstaller pulling these large, unused
+        # stacks (WebEngine/Quick/Qml/3D, etc.).
+        # HARD RULE 8 CAVEAT: if a future plugin imports one of these, REMOVE it
+        # from this list or the frozen build will ImportError.
+        'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
+        'PySide6.QtWebEngineQuick', 'PySide6.QtWebChannel', 'PySide6.QtWebSockets',
+        'PySide6.QtQuick', 'PySide6.QtQuick3D', 'PySide6.QtQuickWidgets',
+        'PySide6.QtQml', 'PySide6.QtQmlModels',
+        'PySide6.Qt3DCore', 'PySide6.Qt3DRender', 'PySide6.Qt3DExtras',
+        'PySide6.Qt3DInput', 'PySide6.Qt3DAnimation', 'PySide6.Qt3DLogic',
+        'PySide6.QtDataVisualization', 'PySide6.QtDesigner', 'PySide6.QtUiTools',
+        'PySide6.QtTest', 'PySide6.QtSql', 'PySide6.QtBluetooth',
+        'PySide6.QtNfc', 'PySide6.QtPositioning', 'PySide6.QtSensors',
+        'PySide6.QtSerialPort', 'PySide6.QtSerialBus', 'PySide6.QtScxml',
+        'PySide6.QtRemoteObjects', 'PySide6.QtTextToSpeech',
+        'PySide6.QtPdf', 'PySide6.QtPdfWidgets',
+    ],
     noarchive=False,
     optimize=0,
 )
+
+# ── Size trimming ────────────────────────────────────────────────────────────
+# English-only app: drop Qt's bundled translation catalogs (~6 MB of .qm files).
+a.datas = [d for d in a.datas
+           if 'translations' not in d[0].replace('\\', '/').lower()
+           or 'pyside6' not in d[0].replace('\\', '/').lower()]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
