@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QMessageBox, QButtonGroup, QFrame,
 )
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QPainter, QColor, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPixmap, QImage
 
 from techdeck.ui import pixel_art
 
@@ -47,6 +47,89 @@ _DEFAULT_PALETTE = {
     "b": "#3f6fd8", "y": "#f4c430", "c": "#3fd0d8", "p": "#7b4fff",
     "s": "#b8c0cc",
 }
+
+
+# ── Image → .tdart import ────────────────────────────────────────────────────
+def detect_pixel_scale(img: QImage) -> int:
+    """Guess how many real pixels make up one art pixel in `img`. Integer-scaled
+    pixel art has solid NxN blocks, so the GCD of colour-run lengths (sampled
+    across rows and columns) is that block size. Returns 1 for native art."""
+    from math import gcd
+    from functools import reduce
+    w, h = img.width(), img.height()
+    if w == 0 or h == 0:
+        return 1
+    runs = []
+    for y in range(0, h, max(1, h // 40)):
+        start, prev = 0, img.pixel(0, y)
+        for x in range(1, w):
+            p = img.pixel(x, y)
+            if p != prev:
+                runs.append(x - start)
+                start, prev = x, p
+        runs.append(w - start)
+    for x in range(0, w, max(1, w // 40)):
+        start, prev = 0, img.pixel(x, 0)
+        for y in range(1, h):
+            p = img.pixel(x, y)
+            if p != prev:
+                runs.append(y - start)
+                start, prev = y, p
+        runs.append(h - start)
+    runs = [r for r in runs if r > 0]
+    return max(1, reduce(gcd, runs)) if runs else 1
+
+
+def image_to_tdart(img: QImage, block: int):
+    """Downsample `img` by `block` (sampling each block's centre) into a
+    {palette, rows} sprite. Alpha < 128 becomes transparent. If the image has
+    more colours than the palette can hold, channels are quantized until they
+    fit. Returns (data, note)."""
+    img = img.convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = img.width(), img.height()
+    nw, nh = max(1, w // block), max(1, h // block)
+
+    grid = []
+    opaque = set()
+    for by in range(nh):
+        row = []
+        for bx in range(nw):
+            px = min(w - 1, bx * block + block // 2)
+            py = min(h - 1, by * block + block // 2)
+            c = img.pixelColor(px, py)
+            row.append((c.red(), c.green(), c.blue(), c.alpha()))
+            if c.alpha() >= 128:
+                opaque.add((c.red(), c.green(), c.blue()))
+        grid.append(row)
+
+    def q(rgb, s):
+        return (rgb[0] // s * s, rgb[1] // s * s, rgb[2] // s * s)
+
+    step = 1
+    while len({q(c, step) for c in opaque}) > len(_CHAR_POOL) and step < 64:
+        step *= 2
+
+    palette, color_to_char, chars = {}, {}, iter(_CHAR_POOL)
+    rows = []
+    for row in grid:
+        out = []
+        for (r, g, b, a) in row:
+            if a < 128:
+                out.append(".")
+                continue
+            key = q((r, g, b), step)
+            ch = color_to_char.get(key)
+            if ch is None:
+                ch = next(chars, None)
+                if ch is None:
+                    out.append(".")
+                    continue
+                color_to_char[key] = ch
+                palette[ch] = "#%02x%02x%02x" % key
+            out.append(ch)
+        rows.append("".join(out))
+    note = f"quantized (step {step})" if step > 1 else ""
+    return {"palette": palette, "rows": rows}, note
 
 
 class Canvas(QWidget):
@@ -291,6 +374,7 @@ class Editor(QMainWindow):
         for label, slot, sc in [
             ("New", self.new_file, "Ctrl+N"),
             ("Open...", self.open_file, "Ctrl+O"),
+            ("Import Image...", self.import_image, "Ctrl+I"),
             ("Save", self.save_file, "Ctrl+S"),
             ("Save As...", self.save_file_as, "Ctrl+Shift+S"),
             ("Copy as Python", self.copy_python, None),
@@ -457,6 +541,46 @@ class Editor(QMainWindow):
         self.path = path
         self._rebuild_swatches()
         self._mark_clean()
+
+    def import_image(self):
+        """Bring in a PNG/JPEG of pixel art: auto-detect its pixel block size,
+        downsample so 1 source pixel = 1 editor cell, and build a palette."""
+        if not self._confirm_discard():
+            return
+        fn, _ = QFileDialog.getOpenFileName(
+            self, "Import pixel-art image", str(self._assets_dir()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if not fn:
+            return
+        img = QImage(fn)
+        if img.isNull():
+            QMessageBox.critical(self, "Import failed", "Could not read that image.")
+            return
+        detected = detect_pixel_scale(img)
+        block, ok = QInputDialog.getInt(
+            self, "Pixel size",
+            "How many real pixels = one art pixel?\n(auto-detected; adjust if needed)",
+            detected, 1, 256)
+        if not ok:
+            return
+        nw, nh = max(1, img.width() // block), max(1, img.height() // block)
+        if nw > 256 or nh > 256:
+            r = QMessageBox.question(
+                self, "Large canvas",
+                f"This will create a {nw}x{nh} grid, which is big and slow to edit.\n"
+                "Continue? (A larger pixel size makes it smaller.)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if r != QMessageBox.StandardButton.Yes:
+                return
+        data, note = image_to_tdart(img, block)
+        self.canvas.load(data)
+        self._rebuild_swatches()
+        self.path = None
+        self._mark_clean()
+        w, h = self.canvas.grid_size()
+        self.statusBar().showMessage(
+            f"Imported {w}x{h}, {len(self.canvas.palette)} colors"
+            + (f" — {note}" if note else "") + ". Save As .tdart to keep it.")
 
     def save_file(self):
         if self.path is None:
