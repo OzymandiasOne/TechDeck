@@ -180,6 +180,34 @@ class Canvas(QWidget):
         self._resize_to_grid()
         self.update()
 
+    def reduce_duplicate_lines(self):
+        """Collapse runs of identical ADJACENT rows and columns into one each.
+        Losslessly de-scales an over-large import (where each art pixel is an
+        NxN block of identical cells) back toward native resolution without any
+        resampling/distortion. Returns (old, new) sizes."""
+        old = self.grid_size()
+        rows = ["".join(r) for r in self.rows]
+        kept_rows = []
+        for r in rows:
+            if not kept_rows or kept_rows[-1] != r:
+                kept_rows.append(r)
+        if kept_rows:
+            h = len(kept_rows)
+            w = len(kept_rows[0])
+            kept_cols, prev = [], None
+            for x in range(w):
+                col = tuple(kept_rows[y][x] for y in range(h))
+                if col != prev:
+                    kept_cols.append(x)
+                    prev = col
+            self.rows = [[kept_rows[y][x] for x in kept_cols] for y in range(h)]
+        else:
+            self.rows = []
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+        return old, self.grid_size()
+
     def resize_grid(self, nw, nh):
         """Resample the art to nw x nh by nearest-neighbour. Reuses the existing
         palette (no new colours). Downscaling loses detail (expected)."""
@@ -412,7 +440,8 @@ class Editor(QMainWindow):
         editm.addAction("Undo", self.canvas.undo).setShortcut("Ctrl+Z")
         editm.addAction("Redo", self.canvas.redo).setShortcut("Ctrl+Y")
         editm.addSeparator()
-        editm.addAction("Resize Canvas...", self.resize_canvas).setShortcut("Ctrl+R")
+        editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
+        editm.addAction("Reduce duplicate lines", self.reduce_lines)
 
     def _build_sidebar(self):
         side = QFrame()
@@ -541,6 +570,16 @@ class Editor(QMainWindow):
         if nw != nh and self.canvas.symmetry:
             self.sym_btn.setChecked(False)   # 4-fold needs a square canvas
         self.statusBar().showMessage(f"Resized to {nw}x{nh}")
+
+    def reduce_lines(self):
+        self.canvas.push_undo()
+        (ow, oh), (nw, nh) = self.canvas.reduce_duplicate_lines()
+        if nw != nh and self.canvas.symmetry:
+            self.sym_btn.setChecked(False)
+        if (ow, oh) == (nw, nh):
+            self.statusBar().showMessage("No duplicate adjacent lines to remove")
+        else:
+            self.statusBar().showMessage(f"Reduced {ow}x{oh} -> {nw}x{nh} (no distortion)")
 
     def _toggle_grid(self):
         self.canvas.show_grid = not self.canvas.show_grid
