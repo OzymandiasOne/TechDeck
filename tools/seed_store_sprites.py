@@ -289,6 +289,42 @@ def woogy():
     return to_tdart(g, pal)
 
 
+# ── Woogy's Emporium scene: wall backdrop + shop counter ─────────────────────
+def emporium_background():
+    """Tan shop wall with faint shelf lines. Sits behind Woogy and the tiles."""
+    W, H = 128, 100
+    pal = {"w": "#c49a78", "d": "#a87f5f", "h": "#d8b08c", "s": "#9a6f50"}
+    g = blank(W, H)
+    fill_rect(g, 0, 0, W - 1, H - 1, "w")
+    for y in (16, 32, 48):                 # faint horizontal shelves
+        fill_rect(g, 0, y, W - 1, y, "s")
+        fill_rect(g, 0, y + 1, W - 1, y + 1, "h")
+    fill_rect(g, 0, H - 18, W - 1, H - 1, "d")   # slightly darker base of wall
+    return to_tdart(g, pal)
+
+
+def emporium_counter():
+    """Maroon shop counter with a black outline and a lighter top surface.
+    Drawn as its own layer so it composites in FRONT of Woogy."""
+    W, H = 128, 54
+    pal = {"m": "#8e1f2e", "l": "#a83242", "s": "#6e1622", "k": "#140b0e"}
+    g = blank(W, H)
+    fill_rect(g, 3, 6, W - 4, 12, "l")          # counter top surface
+    fill_rect(g, 4, 13, W - 5, H - 2, "m")      # front face
+    fill_rect(g, 4, H - 6, W - 5, H - 2, "s")   # base shadow
+    for x in (34, 64, 94):                       # front panel seams
+        fill_rect(g, x, 13, x, H - 3, "s")
+    # outline
+    for x in range(3, W - 3):
+        put(g, x, 5, "k")
+        put(g, x, 12, "k")
+        put(g, x, H - 1, "k")
+    for y in range(5, H):
+        put(g, 3, y, "k")
+        put(g, W - 4, y, "k")
+    return to_tdart(g, pal)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     sprites = {
@@ -296,6 +332,8 @@ def main():
         "spinner_shuriken.tdart": shuriken(),
         "cartridge_steeltube.tdart": cartridge(),
         "woogy.tdart": woogy(),
+        "emporium_background.tdart": emporium_background(),
+        "emporium_counter.tdart": emporium_counter(),
     }
     for name, data in sprites.items():
         pixel_art.save(OUT / name, data)
