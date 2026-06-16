@@ -5,7 +5,7 @@ User profile information and access status.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox
+    QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox, QTabWidget
 )
 from PySide6.QtCore import Qt
 import os
@@ -136,10 +136,18 @@ class AccountPage(QWidget, ThemeAware):
 
         scroll.setWidget(content)
 
+        # Tabbed: account info + the ticket redemption counter.
+        from techdeck.ui.pages.emporium_page import EmporiumPage
+        tabs = QTabWidget()
+        tabs.addTab(scroll, "My Account")
+        self.emporium = EmporiumPage(self.settings)
+        tabs.addTab(self.emporium, "Ticket Counter")
+        tabs.currentChanged.connect(lambda _i: self.emporium.refresh())
+
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(scroll)
+        main_layout.addWidget(tabs)
 
         # Load initial data
         self._load_user_data()
@@ -218,3 +226,5 @@ class AccountPage(QWidget, ThemeAware):
     def refresh(self):
         """Refresh the page data."""
         self._load_user_data()
+        if hasattr(self, "emporium"):
+            self.emporium.refresh()
