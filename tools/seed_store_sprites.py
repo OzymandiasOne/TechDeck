@@ -326,6 +326,10 @@ def emporium_counter():
 
 
 def main():
+    # SAFETY: these are SEED sprites. Once a .tdart exists it may have been
+    # hand-edited in the pixel editor, so we NEVER overwrite an existing file.
+    # Pass --force to regenerate (which clobbers edits) or delete the file first.
+    force = "--force" in sys.argv
     OUT.mkdir(parents=True, exist_ok=True)
     sprites = {
         "spinner_beyblade.tdart": beyblade(),
@@ -336,7 +340,11 @@ def main():
         "emporium_counter.tdart": emporium_counter(),
     }
     for name, data in sprites.items():
-        pixel_art.save(OUT / name, data)
+        dest = OUT / name
+        if dest.exists() and not force:
+            print(f"skip {name} (already exists; --force to overwrite)")
+            continue
+        pixel_art.save(dest, data)
         w, h = pixel_art.dimensions(data)
         print(f"wrote {name}  ({w}x{h}, {len(data['palette'])} colors)")
 
