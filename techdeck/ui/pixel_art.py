@@ -150,3 +150,44 @@ def render(data: dict, scale: int = 1,
 def render_file(path, **kwargs) -> QPixmap:
     """Convenience: load a .tdart and render it."""
     return render(load(path), **kwargs)
+
+
+# ── 4-fold symmetry (spinners) ───────────────────────────────────────────────
+def enforce_4fold(rows):
+    """Return rows made perfectly 4-fold symmetric: for every cell, take the
+    value of its 90-degree-rotation orbit member nearest the TOP (then nearest
+    the centre column). That stamps the TOP arm into all four quadrants, so a
+    spinner is symmetric and dead-centred by construction — you author only the
+    top arm and the other three are generated. Requires a SQUARE grid (true
+    centre); a non-square grid is returned padded-unchanged. Palette-agnostic:
+    operates on raw characters, so it works for any .tdart spinner.
+    """
+    h = len(rows)
+    w = max((len(r) for r in rows), default=0)
+    g = [r.ljust(w, ".") for r in rows]
+    if w != h or h == 0:
+        return g
+    cx = (w - 1) / 2.0
+
+    def source(x, y):
+        pts = [(x, y)]
+        px, py = x, y
+        for _ in range(3):
+            px, py = w - 1 - py, px          # 90 deg: (x,y) -> (w-1-y, x)
+            pts.append((px, py))
+        return min(pts, key=lambda p: (p[1], abs(p[0] - cx)))   # most-north/central
+
+    out = []
+    for y in range(h):
+        row = []
+        for x in range(w):
+            sx, sy = source(x, y)
+            row.append(g[sy][sx])
+        out.append("".join(row))
+    return out
+
+
+def enforce_4fold_data(data: dict) -> dict:
+    """Same as enforce_4fold but on a {palette, rows} sprite dict."""
+    data = normalize(data)
+    return {"palette": dict(data["palette"]), "rows": enforce_4fold(data["rows"])}

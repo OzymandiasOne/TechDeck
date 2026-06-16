@@ -81,6 +81,15 @@ def to_tdart(g, palette):
     return {"palette": palette, "rows": ["".join(row) for row in g]}
 
 
+def to_spinner_tdart(g, palette):
+    """Like to_tdart but force perfect 4-fold symmetry: only the TOP arm of the
+    grid is kept, rotated into all four quadrants. Guarantees a dead-centred,
+    symmetric spinner regardless of drawing drift (and matches how the spinner
+    renders variants at runtime)."""
+    rows = pixel_art.enforce_4fold(["".join(row) for row in g])
+    return {"palette": palette, "rows": rows}
+
+
 def outline(g, fill_chars, oc):
     """Trace `oc` into every transparent cell 4-adjacent to a `fill_chars` cell."""
     H, W = len(g), len(g[0])
@@ -134,7 +143,7 @@ def beyblade():
     fill_circle(g, c, c, 3, "g")
     put(g, c, c, "k")
     put(g, c - 1, c - 1, "w")
-    return to_tdart(g, pal)
+    return to_spinner_tdart(g, pal)
 
 
 # ── Naruto shuriken — 4-point matte-black throwing star, fixed palette ───────
@@ -160,7 +169,7 @@ def shuriken():
     # tip highlights
     put(g, c, c - 18, "w")
     put(g, c + 18, c, "w")
-    return to_tdart(g, pal)
+    return to_spinner_tdart(g, pal)
 
 
 # ── NES cartridge — STEEL TUBE OP, fixed palette ─────────────────────────────

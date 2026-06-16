@@ -88,35 +88,9 @@ SPINNER_ART = [
 ]
 
 
-def _enforce_4fold(rows):
-    """Return rows made perfectly 4-fold symmetric by taking, for every cell, the
-    value of its 90-degree-rotation orbit member nearest the TOP (then nearest
-    the centre column). That stamps the top arm into all four. Needs a square
-    grid; non-square is returned unchanged (padded)."""
-    h = len(rows)
-    w = max((len(r) for r in rows), default=0)
-    g = [r.ljust(w, ".") for r in rows]
-    if w != h or h == 0:
-        return g
-    cx = (w - 1) / 2.0
-
-    def source(x, y):
-        pts = [(x, y)]
-        px, py = x, y
-        for _ in range(3):
-            px, py = w - 1 - py, px          # 90 deg: (x,y) -> (w-1-y, x)
-            pts.append((px, py))
-        return min(pts, key=lambda p: (p[1], abs(p[0] - cx)))   # most-north, most-central
-
-    out = []
-    for y in range(h):
-        row = []
-        for x in range(w):
-            sx, sy = source(x, y)
-            row.append(g[sy][sx])
-        out.append("".join(row))
-    return out
-
+# 4-fold symmetry now lives in techdeck.ui.pixel_art (shared with .tdart
+# spinner variants); see enforce_4fold there.
+from techdeck.ui.pixel_art import enforce_4fold as _enforce_4fold
 
 # The symmetric grid actually rendered (top arm rotated into all four).
 _ART = _enforce_4fold(SPINNER_ART)
