@@ -289,39 +289,74 @@ def woogy():
     return to_tdart(g, pal)
 
 
-# ── Woogy's Emporium scene: wall backdrop + shop counter ─────────────────────
+# ── Woogy's Emporium scene: arcade prize-counter backdrop + kiosk ────────────
+# Palette/aesthetic per UFO50-style arcade UIs: deep indigo wall, bright
+# cyan/teal ornate frames, magenta + red panels, orange accents, black outlines.
+def _frame(g, x0, y0, x1, y1, outer, inner, fill):
+    """Draw a 2px ornate frame (outer + inner border colours) with `fill` inside."""
+    fill_rect(g, x0, y0, x1, y1, outer)
+    fill_rect(g, x0 + 1, y0 + 1, x1 - 1, y1 - 1, inner)
+    fill_rect(g, x0 + 2, y0 + 2, x1 - 2, y1 - 2, fill)
+
+
 def emporium_background():
-    """Tan shop wall with faint shelf lines. Sits behind Woogy and the tiles."""
+    """Arcade prize-counter wall: deep indigo with a diagonal lattice, a cyan +
+    magenta banner trim up top, and a purple counter-zone band at the bottom."""
     W, H = 128, 100
-    pal = {"w": "#c49a78", "d": "#a87f5f", "h": "#d8b08c", "s": "#9a6f50"}
+    pal = {
+        "d": "#272273", "b": "#3b34c0", "p": "#5a2aa0", "m": "#cf3597",
+        "c": "#37c9da", "k": "#140f3a", "o": "#e8841f", "y": "#f4c430",
+    }
     g = blank(W, H)
-    fill_rect(g, 0, 0, W - 1, H - 1, "w")
-    for y in (16, 32, 48):                 # faint horizontal shelves
-        fill_rect(g, 0, y, W - 1, y, "s")
-        fill_rect(g, 0, y + 1, W - 1, y + 1, "h")
-    fill_rect(g, 0, H - 18, W - 1, H - 1, "d")   # slightly darker base of wall
+    fill_rect(g, 0, 0, W - 1, H - 1, "d")
+    # diagonal lattice wallpaper
+    for y in range(H):
+        for x in range(W):
+            if (x + y) % 12 == 0:
+                g[y][x] = "b"
+    # arcade banner trim near the top (cyan over magenta)
+    fill_rect(g, 0, 9, W - 1, 10, "c")
+    fill_rect(g, 0, 11, W - 1, 12, "m")
+    # hanging prize baubles
+    for cx in (20, 50, 80, 110):
+        put(g, cx, 13, "k")
+        fill_circle(g, cx, 16, 2, "o")
+        put(g, cx, 16, "y")
+    # purple counter-zone band at the bottom, capped with a cyan ledge
+    fill_rect(g, 0, H - 24, W - 1, H - 1, "p")
+    fill_rect(g, 0, H - 24, W - 1, H - 23, "c")
+    fill_rect(g, 0, H - 22, W - 1, H - 22, "k")
     return to_tdart(g, pal)
 
 
 def emporium_counter():
-    """Maroon shop counter with a black outline and a lighter top surface.
-    Drawn as its own layer so it composites in FRONT of Woogy."""
-    W, H = 128, 54
-    pal = {"m": "#8e1f2e", "l": "#a83242", "s": "#6e1622", "k": "#140b0e"}
+    """Arcade redemption kiosk: glowing cyan top ledge, red front face with
+    magenta/cyan ornate prize-slot frames and orange trim. Front layer over Woogy."""
+    W, H = 128, 58
+    pal = {
+        "r": "#c42a34", "R": "#8e1c24", "c": "#37c9da", "C": "#1f8e9c",
+        "m": "#cf3597", "k": "#140f1a", "o": "#e8841f", "y": "#f4c430",
+        "d": "#2a0f1c", "w": "#f0f0ff",
+    }
     g = blank(W, H)
-    fill_rect(g, 3, 6, W - 4, 12, "l")          # counter top surface
-    fill_rect(g, 4, 13, W - 5, H - 2, "m")      # front face
-    fill_rect(g, 4, H - 6, W - 5, H - 2, "s")   # base shadow
-    for x in (34, 64, 94):                       # front panel seams
-        fill_rect(g, x, 13, x, H - 3, "s")
+    # glowing cyan top ledge
+    fill_rect(g, 2, 4, W - 3, 9, "c")
+    fill_rect(g, 2, 9, W - 3, 9, "C")
+    # red front face + darker base
+    fill_rect(g, 3, 10, W - 4, H - 2, "r")
+    fill_rect(g, 3, H - 7, W - 4, H - 2, "R")
+    # orange accent strip under the ledge
+    fill_rect(g, 3, 11, W - 4, 12, "o")
+    # three ornate prize-slot frames (magenta outer, cyan inner, dark interior)
+    for px in (10, 49, 88):
+        _frame(g, px, 17, px + 30, H - 9, "m", "c", "d")
     # outline
-    for x in range(3, W - 3):
-        put(g, x, 5, "k")
-        put(g, x, 12, "k")
+    for x in range(2, W - 2):
+        put(g, x, 3, "k")
         put(g, x, H - 1, "k")
-    for y in range(5, H):
-        put(g, 3, y, "k")
-        put(g, W - 4, y, "k")
+    for y in range(3, H):
+        put(g, 2, y, "k")
+        put(g, W - 3, y, "k")
     return to_tdart(g, pal)
 
 
