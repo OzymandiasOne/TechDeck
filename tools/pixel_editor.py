@@ -180,6 +180,22 @@ class Canvas(QWidget):
         self._resize_to_grid()
         self.update()
 
+    def resize_grid(self, nw, nh):
+        """Resample the art to nw x nh by nearest-neighbour. Reuses the existing
+        palette (no new colours). Downscaling loses detail (expected)."""
+        w, h = self.grid_size()
+        if w == 0 or h == 0 or (nw == w and nh == h):
+            return
+        new = []
+        for ty in range(nh):
+            sy = min(h - 1, ty * h // nh)
+            new.append([self.rows[sy][min(w - 1, tx * w // nw)]
+                        for tx in range(nw)])
+        self.rows = new
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+
     # ---- undo / redo (stroke-level) -----------------------------------------
     def _snapshot(self):
         return [r[:] for r in self.rows]
@@ -395,6 +411,8 @@ class Editor(QMainWindow):
         editm = bar.addMenu("&Edit")
         editm.addAction("Undo", self.canvas.undo).setShortcut("Ctrl+Z")
         editm.addAction("Redo", self.canvas.redo).setShortcut("Ctrl+Y")
+        editm.addSeparator()
+        editm.addAction("Resize Canvas...", self.resize_canvas).setShortcut("Ctrl+R")
 
     def _build_sidebar(self):
         side = QFrame()
@@ -509,6 +527,20 @@ class Editor(QMainWindow):
         if self.canvas.tool in ("eraser", "eyedropper"):
             self._select_tool("pencil")
         self._rebuild_swatches()
+
+    def resize_canvas(self):
+        w, h = self.canvas.grid_size()
+        nw, ok = QInputDialog.getInt(self, "Resize", "New width (cells):", w, 1, 256)
+        if not ok:
+            return
+        nh, ok = QInputDialog.getInt(self, "Resize", "New height (cells):", h, 1, 256)
+        if not ok or (nw, nh) == (w, h):
+            return
+        self.canvas.push_undo()
+        self.canvas.resize_grid(nw, nh)
+        if nw != nh and self.canvas.symmetry:
+            self.sym_btn.setChecked(False)   # 4-fold needs a square canvas
+        self.statusBar().showMessage(f"Resized to {nw}x{nh}")
 
     def _toggle_grid(self):
         self.canvas.show_grid = not self.canvas.show_grid
