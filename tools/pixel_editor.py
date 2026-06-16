@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QFileDialog, QColorDialog, QInputDialog,
     QScrollArea, QMessageBox, QButtonGroup, QFrame, QSpinBox,
+    QDialog, QDialogButtonBox, QFormLayout,
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPainter, QColor, QPixmap, QImage
@@ -224,6 +225,22 @@ class Canvas(QWidget):
         self.update()
         self.modified.emit()
 
+    def pad_grid(self, top, bottom, left, right):
+        """Grow the canvas by adding transparent rows/columns on each side WITHOUT
+        scaling the existing art — room for details that overflow the edges."""
+        if top == bottom == left == right == 0:
+            return
+        w, _ = self.grid_size()
+        nw = w + left + right
+        new = [["."] * nw for _ in range(top)]
+        for r in self.rows:
+            new.append(["."] * left + list(r) + ["."] * right)
+        new += [["."] * nw for _ in range(bottom)]
+        self.rows = new
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+
     # ---- undo / redo (stroke-level) -----------------------------------------
     def _snapshot(self):
         return [r[:] for r in self.rows]
@@ -336,6 +353,15 @@ class Canvas(QWidget):
                 and self.tool in ("pencil", "eraser"):
             self._paint(cell)
 
+    def wheelEvent(self, evt):
+        # Ctrl + wheel zooms; a plain wheel falls through to the scroll area.
+        if evt.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            step = 2 if evt.angleDelta().y() > 0 else -2
+            self.set_zoom(self.cell_px + step)
+            evt.accept()
+        else:
+            evt.ignore()
+
     def _sym_cells(self, x, y):
         """The cell plus its 90/180/270 rotation partners when 4-fold symmetry
         is on (square grids only) — so painting one arm fills all four."""
@@ -401,15 +427,15 @@ class Editor(QMainWindow):
         self.canvas.cell_hovered.connect(self._on_hover)
         self.canvas.color_picked.connect(lambda ch: self._select_char(ch))
 
-        scroll = QScrollArea()
-        scroll.setWidget(self.canvas)
-        scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scroll.setStyleSheet("background:#1e1e1e;")
+        self.scroll = QScrollArea()
+        self.scroll.setWidget(self.canvas)
+        self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.scroll.setStyleSheet("background:#1e1e1e;")
 
         root = QWidget()
         row = QHBoxLayout(root)
         row.addWidget(self._build_sidebar())
-        row.addWidget(scroll, 1)
+        row.addWidget(self.scroll, 1)
         self.setCentralWidget(root)
 
         self._build_menu()
@@ -442,6 +468,7 @@ class Editor(QMainWindow):
         editm.addSeparator()
         editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
         editm.addAction("Reduce duplicate lines", self.reduce_lines)
+        editm.addAction("Add lines (expand canvas)...", self.expand_canvas)
 
     def _build_sidebar(self):
         side = QFrame()
@@ -571,6 +598,35 @@ class Editor(QMainWindow):
             self.sym_btn.setChecked(False)   # 4-fold needs a square canvas
         self.statusBar().showMessage(f"Resized to {nw}x{nh}")
 
+    def expand_canvas(self):
+        """Add transparent rows/columns on chosen sides (no scaling)."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Add lines (expand canvas)")
+        form = QFormLayout(dlg)
+        spins = {}
+        for side in ("Top", "Bottom", "Left", "Right"):
+            sp = QSpinBox()
+            sp.setRange(0, 256)
+            sp.setSuffix(" px")
+            spins[side] = sp
+            form.addRow(side, sp)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
+                              | QDialogButtonBox.StandardButton.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        form.addRow(bb)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        t, b, l, r = (spins[s].value() for s in ("Top", "Bottom", "Left", "Right"))
+        if t == b == l == r == 0:
+            return
+        self.canvas.push_undo()
+        self.canvas.pad_grid(t, b, l, r)
+        if self.canvas.symmetry and self.canvas.grid_size()[0] != self.canvas.grid_size()[1]:
+            self.sym_btn.setChecked(False)
+        w, h = self.canvas.grid_size()
+        self.statusBar().showMessage(f"Expanded to {w}x{h}")
+
     def reduce_lines(self):
         self.canvas.push_undo()
         (ow, oh), (nw, nh) = self.canvas.reduce_duplicate_lines()
@@ -596,11 +652,19 @@ class Editor(QMainWindow):
         self.canvas.update()
 
     def add_color(self):
-        c = QColorDialog.getColor(parent=self, title="Add palette color")
+        # DontUseNativeDialog: the native Windows colour picker leaves the
+        # canvas QScrollArea in a stale state (scrollbar breaks until a manual
+        # window resize). Qt's own dialog avoids that.
+        c = QColorDialog.getColor(
+            parent=self, title="Add palette color",
+            options=QColorDialog.ColorDialogOption.DontUseNativeDialog)
         if c.isValid():
             ch = self.canvas.add_color(c.name())
             if ch:
                 self._select_char(ch)
+        # Belt-and-suspenders: force the scroll area to recompute its scrollbars.
+        self.canvas.updateGeometry()
+        self.scroll.updateGeometry()
 
     def new_file(self):
         if not self._confirm_discard():
