@@ -911,6 +911,27 @@ class MainWindow(QMainWindow):
             y = avail.top() + (avail.height() - h) // 2
             self.move(x, y)
 
+    def nativeEvent(self, eventType, message):
+        """Easter egg: left-clicking the TechDeck icon in the native Windows
+        title bar (the system-menu icon, top-left of the frame) pops a hidden
+        photo instead of opening the system menu. Only the left single-click is
+        repurposed -- double-click-to-close, right-click title menu, and
+        Alt+Space all still work normally.
+        """
+        if eventType == "windows_generic_MSG":
+            try:
+                import ctypes.wintypes
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                WM_NCLBUTTONDOWN = 0x00A1
+                HTSYSMENU = 3
+                if msg.message == WM_NCLBUTTONDOWN and msg.wParam == HTSYSMENU:
+                    from techdeck.ui.widgets.pickle_egg import show_pickle_egg
+                    show_pickle_egg(self)
+                    return True, 0
+            except Exception:
+                pass  # never let an egg break native event handling
+        return super().nativeEvent(eventType, message)
+
     def changeEvent(self, event):
         """Watch for window-state changes so a maximize/restore that
         leaves the title bar off-screen gets corrected on the next tick.
