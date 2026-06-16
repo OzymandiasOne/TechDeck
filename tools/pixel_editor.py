@@ -61,6 +61,7 @@ class Canvas(QWidget):
         self.setMouseTracking(True)
         self.cell_px = 16
         self.show_grid = True
+        self.symmetry = False     # 4-fold rotational mirror for spinners
         self.tool = "pencil"
         self.active_char = "k"
         self.palette = dict(_DEFAULT_PALETTE)
@@ -207,11 +208,28 @@ class Canvas(QWidget):
                 and self.tool in ("pencil", "eraser"):
             self._paint(cell)
 
+    def _sym_cells(self, x, y):
+        """The cell plus its 90/180/270 rotation partners when 4-fold symmetry
+        is on (square grids only) — so painting one arm fills all four."""
+        cells = [(x, y)]
+        if self.symmetry:
+            w, h = self.grid_size()
+            if w == h:
+                px, py = x, y
+                for _ in range(3):
+                    px, py = w - 1 - py, px      # 90 deg: (x,y) -> (w-1-y, x)
+                    cells.append((px, py))
+        return cells
+
     def _paint(self, cell):
-        x, y = cell
         new = "." if self.tool == "eraser" else self.active_char
-        if self.rows[y][x] != new:
-            self.rows[y][x] = new
+        w, h = self.grid_size()
+        changed = False
+        for x, y in self._sym_cells(*cell):
+            if 0 <= x < w and 0 <= y < h and self.rows[y][x] != new:
+                self.rows[y][x] = new
+                changed = True
+        if changed:
             self.update()
             self.modified.emit()
 
@@ -332,6 +350,13 @@ class Editor(QMainWindow):
         grid.clicked.connect(self._toggle_grid)
         v.addWidget(grid)
 
+        self.sym_btn = QPushButton("Symmetry: Off")
+        self.sym_btn.setCheckable(True)
+        self.sym_btn.setToolTip("4-fold rotation: paint one arm, all four mirror "
+                                "(for spinners). Square grids only.")
+        self.sym_btn.toggled.connect(self._toggle_symmetry)
+        v.addWidget(self.sym_btn)
+
         v.addStretch()
         return side
 
@@ -383,6 +408,16 @@ class Editor(QMainWindow):
 
     def _toggle_grid(self):
         self.canvas.show_grid = not self.canvas.show_grid
+        self.canvas.update()
+
+    def _toggle_symmetry(self, on):
+        w, h = self.canvas.grid_size()
+        if on and w != h:
+            self.sym_btn.setChecked(False)
+            self.statusBar().showMessage("4-fold symmetry needs a square canvas")
+            return
+        self.canvas.symmetry = on
+        self.sym_btn.setText("Symmetry: 4-fold" if on else "Symmetry: Off")
         self.canvas.update()
 
     def add_color(self):
