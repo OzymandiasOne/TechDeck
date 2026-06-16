@@ -251,14 +251,15 @@ class Editor(QMainWindow):
 
         v.addWidget(self._heading("Tools"))
         self.tool_group = QButtonGroup(self)
+        self.tool_buttons = {}
         for name in ("pencil", "eraser", "fill", "eyedropper"):
             b = QPushButton(name.capitalize())
             b.setCheckable(True)
-            b.clicked.connect(lambda _c, n=name: self._set_tool(n))
+            b.clicked.connect(lambda _c, n=name: self._select_tool(n))
             self.tool_group.addButton(b)
+            self.tool_buttons[name] = b
             v.addWidget(b)
-            if name == "pencil":
-                b.setChecked(True)
+        self.tool_buttons["pencil"].setChecked(True)
 
         v.addWidget(self._heading("Palette"))
         self.swatch_box = QVBoxLayout()
@@ -313,16 +314,21 @@ class Editor(QMainWindow):
         return "#000000" if lum > 140 else "#ffffff"
 
     # ---- actions -------------------------------------------------------------
-    def _set_tool(self, name):
+    def _select_tool(self, name):
+        """Single source of truth for the active tool: sets it on the canvas
+        AND syncs the toolbar button (by identity, not by label)."""
         self.canvas.tool = name
+        btn = self.tool_buttons.get(name)
+        if btn is not None and not btn.isChecked():
+            btn.setChecked(True)
         self.statusBar().showMessage(f"Tool: {name}")
 
     def _select_char(self, ch):
         self.canvas.active_char = ch
-        if self.canvas.tool == "eraser":
-            self._set_tool("pencil")
-            for b in self.tool_group.buttons():
-                b.setChecked(b.text().lower() == "pencil")
+        # Picking a color means you want to draw with it, so leave any
+        # non-painting tool (eraser/eyedropper) and return to the pencil.
+        if self.canvas.tool in ("eraser", "eyedropper"):
+            self._select_tool("pencil")
         self._rebuild_swatches()
 
     def _toggle_grid(self):
