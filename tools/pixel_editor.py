@@ -65,6 +65,8 @@ class Canvas(QWidget):
         self.active_char = "k"
         self.palette = dict(_DEFAULT_PALETTE)
         self.rows = [["." for _ in range(w)] for _ in range(h)]
+        self._undo = []
+        self._redo = []
         self._resize_to_grid()
 
     # ---- model ---------------------------------------------------------------
@@ -73,6 +75,8 @@ class Canvas(QWidget):
 
     def new_grid(self, w, h):
         self.rows = [["." for _ in range(w)] for _ in range(h)]
+        self._undo.clear()
+        self._redo.clear()
         self._resize_to_grid()
         self.update()
         self.modified.emit()
@@ -86,8 +90,39 @@ class Canvas(QWidget):
         # Make sure the active char still exists.
         if self.active_char not in self.palette:
             self.active_char = next(iter(self.palette), "k")
+        self._undo.clear()
+        self._redo.clear()
         self._resize_to_grid()
         self.update()
+
+    # ---- undo / redo (stroke-level) -----------------------------------------
+    def _snapshot(self):
+        return [r[:] for r in self.rows]
+
+    def push_undo(self):
+        """Record the current grid before a modifying stroke begins."""
+        self._undo.append(self._snapshot())
+        if len(self._undo) > 200:
+            self._undo.pop(0)
+        self._redo.clear()
+
+    def undo(self):
+        if not self._undo:
+            return
+        self._redo.append(self._snapshot())
+        self.rows = self._undo.pop()
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+
+    def redo(self):
+        if not self._redo:
+            return
+        self._undo.append(self._snapshot())
+        self.rows = self._redo.pop()
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
 
     def export(self):
         return {
@@ -157,6 +192,8 @@ class Canvas(QWidget):
                 self.active_char = ch
                 self.color_picked.emit(ch)
             return
+        # Snapshot once at the start of a modifying stroke (drag = one undo).
+        self.push_undo()
         if self.tool == "fill":
             self._flood(cell)
             return
@@ -244,6 +281,10 @@ class Editor(QMainWindow):
             if sc:
                 act.setShortcut(sc)
 
+        editm = bar.addMenu("&Edit")
+        editm.addAction("Undo", self.canvas.undo).setShortcut("Ctrl+Z")
+        editm.addAction("Redo", self.canvas.redo).setShortcut("Ctrl+Y")
+
     def _build_sidebar(self):
         side = QFrame()
         side.setFixedWidth(190)
@@ -260,6 +301,15 @@ class Editor(QMainWindow):
             self.tool_buttons[name] = b
             v.addWidget(b)
         self.tool_buttons["pencil"].setChecked(True)
+
+        urow = QHBoxLayout()
+        undo_btn = QPushButton("Undo")
+        redo_btn = QPushButton("Redo")
+        undo_btn.clicked.connect(self.canvas.undo)
+        redo_btn.clicked.connect(self.canvas.redo)
+        urow.addWidget(undo_btn)
+        urow.addWidget(redo_btn)
+        v.addLayout(urow)
 
         v.addWidget(self._heading("Palette"))
         self.swatch_box = QVBoxLayout()
