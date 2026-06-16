@@ -133,6 +133,27 @@ def _render_spinner_pixmap(colors: dict) -> QPixmap:
     return pm
 
 
+def _render_variant_pixmap(variant: str):
+    """Render an equipped store spinner from assets/sprites/<variant>.tdart using
+    its OWN fixed palette (not the theme), forced 4-fold symmetric. Returns None
+    if it can't be loaded so the caller falls back to the default spinner."""
+    import sys
+    from pathlib import Path
+    from techdeck.ui import pixel_art
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets" / "sprites"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets" / "sprites"
+    fn = base / f"{variant}.tdart"
+    if not fn.exists():
+        return None
+    try:
+        data = pixel_art.enforce_4fold_data(pixel_art.load(fn))
+        return pixel_art.render(data, scale=CELL)
+    except Exception:
+        return None
+
+
 class FidgetSpinnerWindow(QWidget):
     """Frameless, always-on-top pixel-art four-arm spinner. Click to add spin,
     drag to move. Closed via /clear (no double-click-to-close)."""
@@ -142,11 +163,16 @@ class FidgetSpinnerWindow(QWidget):
     FRICTION = 0.9985     # per ~60fps frame — low, so a flick keeps it spinning
     CLICK_IMPULSE = 3.0   # radians/sec added per click
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, variant=None):
         super().__init__(parent)
         self._angle = 0.0      # radians
         self._velocity = 1.0   # radians/sec
-        self._pixmap = _render_spinner_pixmap(self._theme_colors())
+        # An equipped store variant (e.g. "spinner_beyblade") renders from its
+        # own .tdart with its own fixed palette; otherwise the default themed
+        # spinner is used.
+        self._pixmap = _render_variant_pixmap(variant) if variant else None
+        if self._pixmap is None:
+            self._pixmap = _render_spinner_pixmap(self._theme_colors())
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -154,7 +180,8 @@ class FidgetSpinnerWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(self.WINDOW_SIZE, self.WINDOW_SIZE)
+        size = max(self._pixmap.width(), self._pixmap.height())
+        self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._timer = QTimer(self)

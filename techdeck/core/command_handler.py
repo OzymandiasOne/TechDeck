@@ -249,7 +249,8 @@ class CommandHandler:
         from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
         # Only ever one spinner — re-running /fidget replaces it.
         self._stop_spinner()
-        spinner = FidgetSpinnerWindow()
+        # Use the spinner skin equipped at Woogy's Emporium, if any.
+        spinner = FidgetSpinnerWindow(variant=self.settings.get_equipped_spinner())
         # Center on screen
         from PySide6.QtWidgets import QApplication
         screen = QApplication.primaryScreen().geometry()
