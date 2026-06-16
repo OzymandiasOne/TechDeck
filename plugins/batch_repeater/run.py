@@ -285,7 +285,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         
         progress = base_progress + int((idx / total_orders) * progress_range)
         progress_callback(progress)
-        
+
+        # Locating a batch may walk the whole '1 - Completed' archive (slow on a
+        # large OneDrive tree); announce it first so the walk doesn't look frozen.
+        log(f"[{idx + 1}/{total_orders}] Locating Batch {source_po} for {order}...")
         batch_root = find_batch_root(source_po, base_path, completed_root, cancel_event)
         
         if not batch_root:

@@ -178,15 +178,19 @@ def _load_po_lookup(po_path: Path, log) -> dict:
 
 # Method 1 ---------------------------------------------------------------------
 
-def _method1(batch_path: Path, batch_no: str, cancel_event=None) -> dict[str, dict]:
+def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=None) -> dict[str, dict]:
     """Recursively scan for PDFs with 'PLT F' in the filename (case-sensitive)."""
     found: dict[str, dict] = {}
     # Poll cancel_event during the rglob walk — over a OneDrive batch tree this
     # single call can run for a long time, and without the check a Cancel click
-    # can't interrupt it (the worker thread is stuck in this loop).
+    # can't interrupt it (the worker thread is stuck in this loop). Emit a
+    # heartbeat every ~500 files so the walk doesn't look frozen (a silent
+    # full-tree rglob is what made LST Organizer look hung).
     for i, pdf in enumerate(batch_path.rglob("*.pdf")):
         if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
             break
+        if i and i % 500 == 0:
+            log(f"  Method 1: scanned {i} PDFs so far...")
         if "PLT F" not in pdf.name:
             continue
         if _is_skipped(pdf, batch_path, batch_no):
@@ -491,7 +495,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # Method 1
     log("Method 1: scanning filenames for 'PLT F'...")
-    m1 = _method1(batch_path, batch_no, cancel_event)
+    m1 = _method1(batch_path, batch_no, log, cancel_event)
     log(f"  Method 1 found: {len(m1)} DYPN(s)")
     progress_callback(25)
     if cancel_event.is_set():
