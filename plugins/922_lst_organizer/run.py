@@ -371,7 +371,9 @@ def _gather_and_copy(
     _ensure_dir(dest)
     seen_lower: Set[str] = set()  # case-insensitive guard during gather
 
-    for child in sorted(d for d in batch_path.iterdir() if d.is_dir()):
+    order_dirs = sorted(d for d in batch_path.iterdir() if d.is_dir())
+    total_dirs = len(order_dirs)
+    for idx, child in enumerate(order_dirs, 1):
         if cancel_event.is_set():
             break
         name = child.name
@@ -383,6 +385,7 @@ def _gather_and_copy(
         if len(name.split("-")) >= 3:
             orders.add(name)
 
+        log(f"  Scanning order folder {idx}/{total_dirs}: {name}")
         lsts, src = _find_lsts_for_order(child, cancel_event)
         debug_fp.write(
             json.dumps({"event": "order_probe", "dir": str(child), "source": src, "count": len(lsts)}) + "\n"
