@@ -360,6 +360,35 @@ def emporium_counter():
     return to_tdart(g, pal)
 
 
+def arcade_cabinet():
+    """Upright arcade cabinet for the Emporium back wall. The screen area
+    (native x9..29, y14..28) is left dark and animated by the page at runtime."""
+    W, H = 40, 64
+    pal = {
+        "k": "#120f2a", "b": "#2b2680", "B": "#1c1850", "c": "#37c9da",
+        "m": "#cf3597", "o": "#e8841f", "y": "#f4c430", "s": "#0a0a18",
+        "w": "#f0f0ff", "r": "#c42a34",
+    }
+    g = blank(W, H)
+    fill_rect(g, 5, 8, 34, 62, "b")           # body
+    fill_rect(g, 5, 8, 9, 62, "B")            # left shade
+    fill_rect(g, 4, 2, 35, 9, "m")            # marquee
+    fill_rect(g, 6, 3, 33, 7, "k")            # marquee sign
+    for x in range(9, 31, 3):                  # marquee blips (page blinks these)
+        put(g, x, 5, "c")
+    fill_rect(g, 7, 12, 32, 30, "c")          # screen bezel
+    fill_rect(g, 9, 14, 30, 28, "s")          # screen (animated overlay)
+    fill_poly(g, [(6, 32), (33, 32), (35, 41), (4, 41)], "B")   # control panel
+    for i, bx in enumerate((12, 18, 24)):     # buttons
+        fill_circle(g, bx, 37, 1.6, ("r", "y", "o")[i])
+    fill_rect(g, 28, 35, 30, 38, "w")         # joystick ball
+    fill_rect(g, 18, 45, 22, 47, "k")         # coin slot
+    put(g, 20, 46, "y")
+    fill_rect(g, 5, 60, 34, 62, "B")          # base
+    outline(g, ("b", "B", "m", "c", "s", "o", "y", "r", "w"), "k")
+    return to_tdart(g, pal)
+
+
 def main():
     # SAFETY: these are SEED sprites. Once a .tdart exists it may have been
     # hand-edited in the pixel editor, so we NEVER overwrite an existing file.
@@ -373,6 +402,7 @@ def main():
         "woogy.tdart": woogy(),
         "emporium_background.tdart": emporium_background(),
         "emporium_counter.tdart": emporium_counter(),
+        "arcade_cabinet.tdart": arcade_cabinet(),
     }
     for name, data in sprites.items():
         dest = OUT / name
