@@ -605,6 +605,52 @@ class SettingsManager:
         self.data["settings"]["blackjack_bankroll"] = max(0, amount)
         self.save()
 
+    # ========== Tickets / Woogy's Emporium ==========
+
+    def get_tickets(self) -> int:
+        """Tickets the user has earned (spent at Woogy's Emporium)."""
+        return int(self.data.get("settings", {}).get("tickets", 0))
+
+    def add_tickets(self, amount: int) -> int:
+        """Award tickets; returns the new balance."""
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        bal = max(0, self.get_tickets() + int(amount))
+        self.data["settings"]["tickets"] = bal
+        self.save()
+        return bal
+
+    def spend_tickets(self, amount: int) -> bool:
+        """Deduct tickets if affordable. Returns True on success."""
+        amount = int(amount)
+        if amount < 0 or self.get_tickets() < amount:
+            return False
+        self.data.setdefault("settings", {})["tickets"] = self.get_tickets() - amount
+        self.save()
+        return True
+
+    def get_unlocked_items(self) -> list:
+        """IDs of catalog items the user has purchased."""
+        return list(self.data.get("settings", {}).get("unlocked_items", []))
+
+    def is_unlocked(self, item_id: str) -> bool:
+        return item_id in self.get_unlocked_items()
+
+    def unlock_item(self, item_id: str) -> None:
+        items = self.get_unlocked_items()
+        if item_id not in items:
+            items.append(item_id)
+            self.data.setdefault("settings", {})["unlocked_items"] = items
+            self.save()
+
+    def get_equipped_spinner(self) -> Optional[str]:
+        """Item id of the equipped fidget-spinner skin, or None for default."""
+        return self.data.get("settings", {}).get("equipped_spinner")
+
+    def set_equipped_spinner(self, item_id: Optional[str]) -> None:
+        self.data.setdefault("settings", {})["equipped_spinner"] = item_id
+        self.save()
+
     # ========== Shelf (Phase D — single-slot snapshot of a paused/queued run) ==========
 
     def get_shelf(self) -> Optional[Dict[str, Any]]:

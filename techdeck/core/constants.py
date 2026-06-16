@@ -33,6 +33,10 @@ CONSOLE_MAX_HEIGHT = 400
 TILE_MIN_WIDTH = 150
 TILE_MIN_HEIGHT = 120
 
+# Tickets (Woogy's Emporium economy)
+TICKETS_PER_RUN = 5        # earned per successful plugin run
+TICKETS_PER_FEEDBACK = 25  # earned for submitting feedback
+
 # Logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"  # ISO 8601 UTC

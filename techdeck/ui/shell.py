@@ -19,7 +19,9 @@ from PySide6.QtCore import Qt, QTimer, Signal, QPropertyAnimation, QEasingCurve,
 from PySide6.QtGui import QIcon
 
 from techdeck.core.settings import SettingsManager
-from techdeck.core.constants import WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION
+from techdeck.core.constants import (
+    WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION, TICKETS_PER_RUN,
+)
 from techdeck.ui.theme import generate_stylesheet, get_current_palette
 from techdeck.ui.widgets.sidebar import Sidebar
 from techdeck.ui.pages.home_page import HomePage, HOME_TILE_H
@@ -525,6 +527,9 @@ class MainWindow(QMainWindow):
         if result:
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
+                # Reward tickets for a successful run (spendable at Woogy's Emporium).
+                bal = self.settings.add_tickets(TICKETS_PER_RUN)
+                self.console.append_game(f"🎟 +{TICKETS_PER_RUN} tickets (balance: {bal})")
                 # GUI plugins (requires_main_thread) call params['on_success'] themselves
                 # at a meaningful moment. Suppress the auto sound for them.
                 if not getattr(plugin, 'requires_main_thread', False):

@@ -47,8 +47,9 @@ class FeedbackDialog(QDialog):
         "Other",
     ]
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings=None):
         super().__init__(parent)
+        self.settings = settings   # SettingsManager, for the ticket reward
 
         self.setWindowTitle("Report Feedback")
         self.setModal(True)
@@ -242,8 +243,14 @@ class FeedbackDialog(QDialog):
             )
             return
 
+        reward = ""
+        if self.settings is not None:
+            from techdeck.core.constants import TICKETS_PER_FEEDBACK
+            bal = self.settings.add_tickets(TICKETS_PER_FEEDBACK)
+            reward = (f"\n\nYou earned {TICKETS_PER_FEEDBACK} tickets for the "
+                      f"feedback (balance: {bal}) - spend them at Woogy's Emporium.")
         QMessageBox.information(
             self, "Feedback Submitted",
-            f"Thanks - your suggestion was saved to {path.name}."
+            f"Thanks - your suggestion was saved to {path.name}.{reward}"
         )
         self.accept()

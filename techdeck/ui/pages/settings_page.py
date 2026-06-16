@@ -224,7 +224,7 @@ class SettingsPage(QWidget, ThemeAware):
     def _open_feedback_dialog(self):
         """Open the Report Feedback modal from inside Settings."""
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
-        dlg = FeedbackDialog(parent=self.window())
+        dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
         dlg.exec()
 
     def _generate_debug_report(self):
