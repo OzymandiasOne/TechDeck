@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QFileDialog, QColorDialog, QInputDialog,
-    QScrollArea, QMessageBox, QButtonGroup, QFrame,
+    QScrollArea, QMessageBox, QButtonGroup, QFrame, QSpinBox,
 )
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPainter, QColor, QPixmap, QImage
@@ -145,6 +145,7 @@ class Canvas(QWidget):
         self.cell_px = 16
         self.show_grid = True
         self.symmetry = False     # 4-fold rotational mirror for spinners
+        self.brush_size = 1       # N x N pencil/eraser block
         self.tool = "pencil"
         self.active_char = "k"
         self.palette = dict(_DEFAULT_PALETTE)
@@ -304,14 +305,22 @@ class Canvas(QWidget):
                     cells.append((px, py))
         return cells
 
+    def _brush_cells(self, x, y):
+        """The N x N block of cells the brush covers, centred on (x, y)."""
+        n = self.brush_size
+        off = n // 2
+        return [(x - off + dx, y - off + dy)
+                for dy in range(n) for dx in range(n)]
+
     def _paint(self, cell):
         new = "." if self.tool == "eraser" else self.active_char
         w, h = self.grid_size()
         changed = False
-        for x, y in self._sym_cells(*cell):
-            if 0 <= x < w and 0 <= y < h and self.rows[y][x] != new:
-                self.rows[y][x] = new
-                changed = True
+        for bx, by in self._brush_cells(*cell):
+            for x, y in self._sym_cells(bx, by):
+                if 0 <= x < w and 0 <= y < h and self.rows[y][x] != new:
+                    self.rows[y][x] = new
+                    changed = True
         if changed:
             self.update()
             self.modified.emit()
@@ -412,6 +421,17 @@ class Editor(QMainWindow):
         urow.addWidget(undo_btn)
         urow.addWidget(redo_btn)
         v.addLayout(urow)
+
+        brow = QHBoxLayout()
+        brow.addWidget(QLabel("Brush"))
+        self.brush_spin = QSpinBox()
+        self.brush_spin.setRange(1, 16)
+        self.brush_spin.setValue(self.canvas.brush_size)
+        self.brush_spin.setSuffix(" px")
+        self.brush_spin.valueChanged.connect(
+            lambda n: setattr(self.canvas, "brush_size", n))
+        brow.addWidget(self.brush_spin)
+        v.addLayout(brow)
 
         v.addWidget(self._heading("Palette"))
         self.swatch_box = QVBoxLayout()
