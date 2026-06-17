@@ -85,6 +85,7 @@ class CommandHandler:
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
+            '/tickets': self._cmd_tickets,
         }
 
     def handle_command(self, command_text: str) -> None:
@@ -121,6 +122,7 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /jack            - Play blackjack against Sal\n"
             "  /friend          - Summon a little friend\n"
+            "  /tickets [N]     - Show/grant Woogy's Emporium tickets (test)\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -236,6 +238,45 @@ class CommandHandler:
         while lines and lines[-1] == "":
             lines.pop()
         self.console.append_system("\n".join(lines))
+
+    # ------------------------------------------------------------------ #
+    #  /tickets — grant/set Woogy's Emporium tickets (for testing purchases)
+    # ------------------------------------------------------------------ #
+
+    def _cmd_tickets(self, args: str):
+        """`/tickets` shows the balance; `/tickets 100` grants (or removes with a
+        negative N); `/tickets set 500` sets an exact balance. Handy for testing
+        the Emporium without grinding runs."""
+        s = self.settings
+        arg = args.strip().lower()
+        if arg == "":
+            self.console.append_system(f"You have {s.get_tickets()} tickets.")
+            return
+        parts = arg.split()
+        try:
+            if parts[0] == "set":
+                target = int(parts[1])
+                s.add_tickets(target - s.get_tickets())
+                self.console.append_game(f"🎟 Tickets set to {s.get_tickets()}.")
+            else:
+                n = int(parts[0])
+                bal = s.add_tickets(n)
+                self.console.append_game(
+                    f"🎟 {'+' if n >= 0 else ''}{n} tickets (balance: {bal}).")
+        except (ValueError, IndexError):
+            self.console.append_error("Usage: /tickets [N | set N]")
+            return
+        self._refresh_emporium()
+
+    def _refresh_emporium(self):
+        """Repaint the Ticket Counter so a balance change shows immediately."""
+        mw = self.main_window
+        try:
+            ap = getattr(mw, "account_page", None)
+            if ap is not None and hasattr(ap, "emporium"):
+                ap.emporium.refresh()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     #  /fidget

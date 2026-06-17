@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox,
 )
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
-from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap
+from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap, QImage
 
 from techdeck.ui import pixel_art
 from techdeck.ui.sprite_font import font as _sf
@@ -46,6 +46,11 @@ EMP = {
     "wall": "#272273", "bulb_on": "#fff07a", "bulb_off": "#6a5a1a",
     "dialogue": "#0a0a12", "dialogue_text": "#f4f4ec", "btn_text": "#ffffff",
     "tile_text": "#f0f0ff", "shadow": "#05030f",
+    # BUY button: lit (affordable) vs dim (can't afford yet)
+    "buy_lit_edge": "#ffb14a", "buy_dim": "#46202a", "buy_dim_edge": "#6e3038",
+    "buy_dim_text": "#9c8088",
+    # purchased/owned look
+    "tile_dim": "#6a6488", "sold_band": "#0a060f",
 }
 
 CATALOG = [
@@ -89,6 +94,22 @@ def _trim_v(pm):
     if top == 0 and bot == h - 1:
         return pm
     return pm.copy(0, top, w, bot - top + 1)
+
+
+def _greyed(pm):
+    """A desaturated, dimmed copy of a pixmap — the 'already bought' look."""
+    if pm is None:
+        return None
+    img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.alpha() == 0:
+                continue
+            g = int(0.30 * c.red() + 0.59 * c.green() + 0.11 * c.blue())
+            g = min(255, int(g * 0.55 + 45))   # desaturate + dim
+            img.setPixelColor(x, y, QColor(g, g, g, int(c.alpha() * 0.85)))
+    return QPixmap.fromImage(img)
 
 
 def _load_art(name):
@@ -137,42 +158,80 @@ def _marquee(p, rect, phase):
                    QColor(EMP["bulb_on"] if on else EMP["bulb_off"]))
 
 
-class StoreTile(QFrame):
-    """One purchasable tile drawn as a pixel-art box: icon + name + button."""
+class _SoldStamp(QWidget):
+    """A diagonal 'SOLD' banner drawn ON TOP of a purchased tile (the icon and
+    name underneath are greyed by the tile)."""
 
-    SIZE = 150
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        w, h = self.width() - 5, self.height() - 5   # stay within the card
+        txt = _trim_v(_sf().render("SOLD", 4, "#ffffff"))
+        p.translate(w / 2, h / 2)
+        p.rotate(-28)
+        band = txt.height() + 14
+        p.fillRect(-w, -band // 2, 2 * w, band, QColor(10, 6, 15, 175))
+        p.fillRect(-w, -band // 2, 2 * w, 3, QColor(EMP["buy"]))
+        p.fillRect(-w, band // 2 - 3, 2 * w, 3, QColor(EMP["buy"]))
+        p.drawPixmap(-txt.width() // 2, -txt.height() // 2, txt)
+        p.end()
+
+
+class StoreTile(QFrame):
+    """One purchasable tile drawn as a pixel-art box: icon + name + button. All
+    tiles are a fixed size so the grid is uniform; the icon is centred with equal
+    spacing to the button above and the name below."""
+
+    SIZE = 150          # width
+    HEIGHT = 216        # uniform height (so 1-line and 3-line names match)
+    GAP = 16            # equal gap above/below the icon
+    NAME_H = 52         # reserves up to 3 wrapped lines @ scale 2
+    NAME_W = 126
 
     def __init__(self, item, page):
         super().__init__()
         self.item = item
         self.page = page
-        self.setFixedWidth(self.SIZE)
+        self.owned = False
+        self.setFixedSize(self.SIZE, self.HEIGHT)
         self.setStyleSheet("StoreTile { background: transparent; }")
+
+        self._icon_norm = _load_pixmap(item["sprite"], 72)
+        self._icon_grey = _greyed(self._icon_norm)
+
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 10)
-        lay.setSpacing(3)
+        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setSpacing(0)
 
         self.action_btn = QPushButton()
         self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.action_btn.setFixedHeight(30)
         self.action_btn.clicked.connect(self._on_action)
+
+        self.icon = QLabel()
+        self.icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon.setStyleSheet("background: transparent; border: none;")
+        self.icon.setFixedHeight(76)
+
+        self.name = QLabel()
+        self.name.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.name.setStyleSheet("background: transparent; border: none;")
+        self.name.setFixedHeight(self.NAME_H)
+
+        lay.addStretch(1)
         lay.addWidget(self.action_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addSpacing(self.GAP)
+        lay.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addSpacing(self.GAP)
+        lay.addWidget(self.name, 0, Qt.AlignmentFlag.AlignHCenter)
+        lay.addStretch(1)
 
-        icon = QLabel()
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        pix = _load_pixmap(item["sprite"], 72)
-        if pix is not None:
-            icon.setPixmap(pix)
-        icon.setStyleSheet("background: transparent; border: none;")
-        icon.setFixedHeight(76)
-        lay.addWidget(icon)
-
-        name = QLabel()
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setStyleSheet("background: transparent; border: none;")
-        name.setPixmap(_sf().render_wrapped(item["name"].upper(), 2,
-                                            EMP["tile_text"], max_width=126))
-        lay.addWidget(name, 0, Qt.AlignmentFlag.AlignHCenter)
-        lay.addStretch()
+        self.stamp = _SoldStamp(self)
+        self.stamp.setGeometry(0, 0, self.SIZE, self.HEIGHT)
         self.refresh()
 
     def paintEvent(self, _e):
@@ -186,10 +245,10 @@ class StoreTile(QFrame):
     def _btn_qss(self, bg, edge):
         return (f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
                 f"border-radius:5px; padding:3px 10px; }}"
-                f"QPushButton:disabled {{ background:#3a3560; border-color:#3a3560; }}")
+                f"QPushButton:disabled {{ background:#37335a; border-color:#4a466e; }}")
 
-    def _set_btn(self, label, bg, edge, enabled):
-        pm = _sf().render(label, 2, EMP["btn_text"])
+    def _set_btn(self, label, bg, edge, enabled, text=None):
+        pm = _sf().render(label, 2, text or EMP["btn_text"])
         self.action_btn.setText("")
         self.action_btn.setIcon(QIcon(pm))
         self.action_btn.setIconSize(pm.size())
@@ -198,15 +257,40 @@ class StoreTile(QFrame):
 
     def refresh(self):
         s = self.page.settings
-        if not s.is_unlocked(self.item["id"]):
-            self._set_btn(f"BUY {self.item['cost']}", EMP["buy"],
-                          EMP["buy_edge"], s.get_tickets() >= self.item["cost"])
+        self.owned = s.is_unlocked(self.item["id"])
+        # icon + name dim when owned
+        pm = self._icon_grey if self.owned else self._icon_norm
+        if pm is not None:
+            self.icon.setPixmap(pm)
+        self.name.setPixmap(_sf().render_wrapped(
+            self.item["name"].upper(), 2,
+            EMP["tile_dim"] if self.owned else EMP["tile_text"],
+            max_width=self.NAME_W))
+
+        if not self.owned:
+            affordable = s.get_tickets() >= self.item["cost"]
+            label = f"BUY {self.item['cost']}"
+            if affordable:   # lit
+                self._set_btn(label, EMP["buy"], EMP["buy_lit_edge"], True)
+            else:            # dim until you can afford it
+                self._set_btn(label, EMP["buy_dim"], EMP["buy_dim_edge"], True,
+                              text=EMP["buy_dim_text"])
         elif self.item["kind"] == "spinner":
             equipped = s.get_equipped_spinner() == self.item["id"]
             self._set_btn("EQUIPPED" if equipped else "EQUIP",
-                          EMP["equip"], "#7af0a0", not equipped)
+                          EMP["owned"], EMP["owned"], False)
         else:
-            self._set_btn("OWNED", EMP["owned"], "#b97fe0", False)
+            self._set_btn("OWNED", EMP["owned"], EMP["owned"], False)
+
+        self.stamp.setVisible(self.owned)
+        self.stamp.raise_()
+        self.update()
+
+    def mousePressEvent(self, e):
+        # Owned spinners stay equippable: clicking the SOLD tile (re)equips it.
+        if self.owned and self.item["kind"] == "spinner":
+            self.page.handle_tile_action(self.item)
+        super().mousePressEvent(e)
 
     def _on_action(self):
         self.page.handle_tile_action(self.item)
