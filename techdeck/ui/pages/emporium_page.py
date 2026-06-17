@@ -23,7 +23,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFrame, QMessageBox,
+    QFrame, QDialog,
 )
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap, QImage
@@ -94,6 +94,15 @@ def _trim_v(pm):
     if top == 0 and bot == h - 1:
         return pm
     return pm.copy(0, top, w, bot - top + 1)
+
+
+def _ascii(s):
+    """Map the few smart-punctuation chars we use to ASCII the sprite font has
+    glyphs for, then drop anything else (em-dash etc. has no glyph)."""
+    for a, b in (("—", "-"), ("–", "-"), ("’", "'"),
+                 ("‘", "'"), ("“", '"'), ("”", '"')):
+        s = s.replace(a, b)
+    return s.encode("ascii", "ignore").decode()
 
 
 def _greyed(pm):
@@ -179,6 +188,73 @@ class _SoldStamp(QWidget):
         p.fillRect(-w, band // 2 - 3, 2 * w, 3, QColor(EMP["buy"]))
         p.drawPixmap(-txt.width() // 2, -txt.height() // 2, txt)
         p.end()
+
+
+class PixelDialog(QDialog):
+    """A small frameless pixel-art message box — a dialogue bubble with text in
+    the UFO50 sprite font and a pixel OK button. Used instead of QMessageBox so
+    the arcade aesthetic isn't broken. Call PixelDialog.show_message(...)."""
+
+    WIDTH = 440
+
+    def __init__(self, parent, title, body, ok_label="OK"):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setModal(True)
+        self._bubble = _load_art("bubble_dialogue.tdart")
+
+        pad = 24
+        inner = self.WIDTH - 2 * pad
+        self._title_pm = (_trim_v(_sf().render(_ascii(title).upper(), 3, EMP["neon_on"]))
+                          if title else None)
+        self._body_pm = _sf().render_wrapped(_ascii(body).upper(), 2,
+                                             EMP["dialogue_text"], max_width=inner)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(pad, pad, pad, 18)
+        lay.setSpacing(0)
+        self._title_gap = 12
+        text_h = self._body_pm.height()
+        if self._title_pm is not None:
+            text_h += self._title_pm.height() + self._title_gap
+        lay.addSpacing(text_h)
+        lay.addSpacing(16)
+        btn = QPushButton()
+        bpm = _sf().render(ok_label, 2, EMP["btn_text"])
+        btn.setIcon(QIcon(bpm)); btn.setIconSize(bpm.size()); btn.setText("")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedHeight(30)
+        btn.setStyleSheet(
+            f"QPushButton {{ background:{EMP['buy']}; border:2px solid "
+            f"{EMP['buy_lit_edge']}; border-radius:5px; padding:3px 18px; }}")
+        btn.clicked.connect(self.accept)
+        row = QHBoxLayout()
+        row.addStretch(); row.addWidget(btn); row.addStretch()
+        lay.addLayout(row)
+        self.setFixedWidth(self.WIDTH)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        _draw_bubble(p, self.rect().adjusted(0, 0, -1, -1), self._bubble,
+                     shadow=EMP["shadow"])
+        y = 24
+        if self._title_pm is not None:
+            p.drawPixmap((self.width() - self._title_pm.width()) // 2, y, self._title_pm)
+            y += self._title_pm.height() + self._title_gap
+        p.drawPixmap((self.width() - self._body_pm.width()) // 2, y, self._body_pm)
+        p.end()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        par = self.parent()
+        if par is not None:
+            c = par.window().geometry().center()
+            self.move(c.x() - self.width() // 2, c.y() - self.height() // 2)
+
+    @classmethod
+    def show_message(cls, parent, title, body, ok_label="OK"):
+        cls(parent, title, body, ok_label).exec()
 
 
 class StoreTile(QFrame):
@@ -400,22 +476,22 @@ class EmporiumPage(QWidget):
         s = self.settings
         if not s.is_unlocked(item["id"]):
             if not s.spend_tickets(item["cost"]):
-                QMessageBox.information(
+                PixelDialog.show_message(
                     self, "Not enough tickets",
-                    f"\"{item['name']}\" costs {item['cost']} tickets. "
-                    f"You have {s.get_tickets()}. Run more apps to earn more!")
+                    f"{item['name']} costs {item['cost']} tickets. You have "
+                    f"{s.get_tickets()}. Run more apps to earn more!")
                 return
             s.unlock_item(item["id"])
             if item["kind"] == "spinner":
                 s.set_equipped_spinner(item["id"])
-                msg = (f"Woogy slides \"{item['name']}\" across the counter. "
-                       "It's equipped — pop it with /fidget!")
+                msg = (f"Woogy slides {item['name']} across the counter. It's "
+                       "equipped! Pop it with /fidget, or switch in My Stuff.")
             elif item["kind"] == "game":
-                msg = (f"\"{item['name']}\" is yours! Find it in your Library "
+                msg = (f"{item['name']} is yours! Find it in your Library "
                        "(Games) and add it to a kit to play.")
             else:
-                msg = f"Woogy slides \"{item['name']}\" across the counter. Enjoy!"
-            QMessageBox.information(self, "Woogy's Emporium", msg)
+                msg = f"Woogy slides {item['name']} across the counter. Enjoy!"
+            PixelDialog.show_message(self, "Sold!", msg)
         elif item["kind"] == "spinner":
             s.set_equipped_spinner(item["id"])
         self.refresh()

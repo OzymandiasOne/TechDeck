@@ -136,13 +136,18 @@ class AccountPage(QWidget, ThemeAware):
 
         scroll.setWidget(content)
 
-        # Tabbed: account info + the ticket redemption counter.
+        # Tabbed: account info + the ticket redemption counter + the locker.
         from techdeck.ui.pages.emporium_page import EmporiumPage
+        from techdeck.ui.pages.mystuff_page import MyStuffPage
         tabs = QTabWidget()
         tabs.addTab(scroll, "My Account")
         self.emporium = EmporiumPage(self.settings)
         tabs.addTab(self.emporium, "Ticket Counter")
-        tabs.currentChanged.connect(lambda _i: self.emporium.refresh())
+        self.my_stuff = MyStuffPage(self.settings)
+        tabs.addTab(self.my_stuff, "My Stuff")
+        # A purchase on one tab changes ownership/balance the other reflects, so
+        # refresh whichever tab is being shown.
+        tabs.currentChanged.connect(self._on_tab_changed)
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -223,8 +228,17 @@ class AccountPage(QWidget, ThemeAware):
             "Your profile information has been saved."
         )
     
+    def _on_tab_changed(self, _i):
+        """Keep the Emporium + My Stuff in sync as ownership/balance change."""
+        if hasattr(self, "emporium"):
+            self.emporium.refresh()
+        if hasattr(self, "my_stuff"):
+            self.my_stuff.refresh()
+
     def refresh(self):
         """Refresh the page data."""
         self._load_user_data()
         if hasattr(self, "emporium"):
             self.emporium.refresh()
+        if hasattr(self, "my_stuff"):
+            self.my_stuff.refresh()
