@@ -16,6 +16,8 @@ a = Analysis(
         # "No module named 'techdeck.core.plugin_window'" (bit customer_dxf_quoting).
         'techdeck.core.plugin_sdk',
         'techdeck.core.plugin_window',
+        # Only imported by the steeltube_game plugin's run.py (loads at runtime).
+        'techdeck.ui.widgets.steelbeams_game',
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
         'PySide6.QtCharts',
         'openpyxl', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',

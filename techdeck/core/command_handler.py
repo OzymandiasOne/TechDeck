@@ -37,7 +37,6 @@ class CommandHandler:
         /jack           - Play blackjack in the console
         /roguemode      - Open Rogue Mode focus music player
         /friend         - Summon a little friend (moth/butterfly) with haiku + musings
-        /steelbeams     - Open the Steel Tube Operation game
 
     Theme switching is handled via Settings → Personalization → Theme,
     not the console. Kit/tile/guide commands have been retired in
@@ -51,7 +50,6 @@ class CommandHandler:
         self.main_window = main_window
 
         # Runtime state
-        self._steelbeams_window = None
         self._rave_timer = None
         self._rave_step = 0
         self._rave_gifs = []     # list of QWidget overlay windows
@@ -84,7 +82,6 @@ class CommandHandler:
             '/shelve': self._cmd_shelve,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
-            '/steelbeams': self._cmd_steelbeams,
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
@@ -122,7 +119,6 @@ class CommandHandler:
             "  /roguemode       - Open Rogue Mode focus music player\n"
             "\n"
             "  /fidget          - Pop out a fidget spinner\n"
-            "  /steelbeams      - Launch Steel Tube Operation\n"
             "  /jack            - Play blackjack against Sal\n"
             "  /friend          - Summon a little friend\n"
             "\n"
@@ -280,19 +276,6 @@ class CommandHandler:
             f'font-family: Consolas, monospace; font-size: 10pt;">'
             f'{flower}&nbsp;&nbsp;Crab Dancing...</span>'
         )
-
-    # ------------------------------------------------------------------ #
-    #  /steelbeams
-    # ------------------------------------------------------------------ #
-
-    def _cmd_steelbeams(self, args: str):
-        from techdeck.ui.widgets.steelbeams_game import SteelBeamsGame
-        if self._steelbeams_window is not None and self._steelbeams_window.isVisible():
-            self._steelbeams_window.raise_()
-            self._steelbeams_window.activateWindow()
-            return
-        self._steelbeams_window = SteelBeamsGame()
-        self._steelbeams_window.show()
 
     def _cmd_rave(self, args: str):
         from PySide6.QtWidgets import QApplication, QLabel, QWidget

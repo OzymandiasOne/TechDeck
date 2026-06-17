@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 FAMILY_911 = "911"
 FAMILY_922 = "922"
 FAMILY_OTHER = "other"
-VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER}
+FAMILY_GAMES = "Games"   # purchasable mini-games (Woogy's Emporium)
+VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES}
 
 
 def _infer_family_from_id(plugin_id: str) -> str:
@@ -66,6 +67,7 @@ class Plugin:
     requires_main_thread: bool = False
     timeout: Optional[int] = None  # Per-plugin timeout override (None = use executor default)
     family: str = FAMILY_OTHER
+    locked: bool = False  # purchasable: hidden in the Library until is_unlocked(id)
 
 class PluginLoader:
     """
@@ -204,6 +206,7 @@ class PluginLoader:
                     requires_main_thread=metadata.get('requires_main_thread', False),
                     timeout=metadata.get('timeout', None),
                     family=family,
+                    locked=metadata.get('locked', False),
                 )
                 
                 # Check for duplicate plugin IDs

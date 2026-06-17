@@ -84,7 +84,8 @@ _FAMILY_COLORS = {
 }
 
 # Suffixes we treat as "this `icon` value is a file, not an emoji".
-_IMAGE_EXTS = {".png", ".svg", ".jpg", ".jpeg", ".ico", ".webp", ".bmp"}
+# .tdart is TechDeck's own pixel-art format (rendered via pixel_art).
+_IMAGE_EXTS = {".png", ".svg", ".jpg", ".jpeg", ".ico", ".webp", ".bmp", ".tdart"}
 
 # Render at this multiple of the requested logical size, then tag the pixmap
 # with the matching device-pixel-ratio so generated icons stay crisp on HiDPI.
@@ -144,6 +145,20 @@ def _load_icon_file(plugin, size: int) -> QPixmap | None:
     path = Path(getattr(plugin, "path", ".")) / icon
     if not path.exists():
         return None
+    # TechDeck pixel-art icons (.tdart) render via pixel_art at integer scale,
+    # then scale to the requested size with nearest-neighbour (stay crisp).
+    if path.suffix.lower() == ".tdart":
+        try:
+            from techdeck.ui import pixel_art
+            data = pixel_art.load(path)
+            w, h = pixel_art.dimensions(data)
+            pm = pixel_art.render(data, scale=max(1, size // max(w, h, 1)))
+            if pm.isNull():
+                return None
+            return pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                             Qt.TransformationMode.FastTransformation)
+        except Exception:
+            return None
     # QIcon handles both raster (.png/.jpg/...) and .svg (via the qsvg image
     # plugin, bundled by the PyInstaller PySide6 hook).
     pm = QIcon(str(path)).pixmap(QSize(size, size))

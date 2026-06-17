@@ -747,7 +747,14 @@ class LibraryPage(QWidget, ThemeAware):
         # __init__-time capture. If the loader's contents change after this
         # page is constructed, a stale snapshot silently shrinks the library
         # to just the current kit's tiles.
-        self.available_plugins = list(self.plugin_loader.plugins.values())
+        # Hide purchasable ("locked") plugins until they're unlocked at Woogy's
+        # Emporium. This is the source-agnostic gate: any plugin (bundled now, or
+        # downloaded later) with locked=true stays hidden until is_unlocked(id).
+        self.available_plugins = [
+            p for p in self.plugin_loader.plugins.values()
+            if not (getattr(p, "locked", False)
+                    and not self.settings.is_unlocked(p.id))
+        ]
         self.available_tiles = [p.id for p in self.available_plugins]
 
         # Combine available tiles + missing tiles from profile

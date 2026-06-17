@@ -271,9 +271,14 @@ class EmporiumPage(QWidget):
             s.unlock_item(item["id"])
             if item["kind"] == "spinner":
                 s.set_equipped_spinner(item["id"])
-            QMessageBox.information(
-                self, "Woogy's Emporium",
-                f"Woogy slides \"{item['name']}\" across the counter. Enjoy!")
+                msg = (f"Woogy slides \"{item['name']}\" across the counter. "
+                       "It's equipped — pop it with /fidget!")
+            elif item["kind"] == "game":
+                msg = (f"\"{item['name']}\" is yours! Find it in your Library "
+                       "(Games) and add it to a kit to play.")
+            else:
+                msg = f"Woogy slides \"{item['name']}\" across the counter. Enjoy!"
+            QMessageBox.information(self, "Woogy's Emporium", msg)
         elif item["kind"] == "spinner":
             s.set_equipped_spinner(item["id"])
         self.refresh()

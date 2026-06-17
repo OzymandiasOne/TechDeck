@@ -1,0 +1,12 @@
+{
+  "id": "steeltube_game",
+  "name": "Steel Tube Op",
+  "description": "Steel Tube Operation - an arcade mini-game. Unlocked at Woogy's Emporium.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "Games",
+  "icon": "icon.tdart",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "locked": true
+}
