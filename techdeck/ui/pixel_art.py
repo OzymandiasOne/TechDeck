@@ -42,7 +42,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtGui import QPixmap, QColor, QPainter
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRect
 
 
 TRANSPARENT_CHARS = {".", " ", ""}
@@ -150,6 +150,60 @@ def render(data: dict, scale: int = 1,
 def render_file(path, **kwargs) -> QPixmap:
     """Convenience: load a .tdart and render it."""
     return render(load(path), **kwargs)
+
+
+# ── 9-slice (resizable panels / word bubbles) ─────────────────────────────────
+def render_nine_slice(data, target_w: int, target_h: int,
+                      margins=None) -> QPixmap:
+    """Stretch a small sprite to (target_w, target_h) as a 9-slice: the four
+    corners are kept 1:1 (crisp), the four edges stretch along one axis, and the
+    centre fills the rest. One source cell == one target pixel, so a hand-drawn
+    bubble renders at the same fidelity as the old procedural panels.
+
+    `margins` = (left, top, right, bottom) source cells that stay un-stretched.
+    When omitted it's auto-derived as (dim-1)//2 per side, leaving a 1-2px centre
+    strip — so an odd/even square bubble drawn in the editor "just works" with no
+    metadata to lose on save.
+    """
+    data = normalize(data)
+    w, h = dimensions(data)
+    src = render(data, scale=1)
+    if w == 0 or h == 0:
+        out = QPixmap(max(target_w, 1), max(target_h, 1))
+        out.fill(Qt.GlobalColor.transparent)
+        return out
+    if margins is None:
+        ml = mr = (w - 1) // 2
+        mt = mb = (h - 1) // 2
+    else:
+        ml, mt, mr, mb = margins
+    # Never let the corners overlap the (possibly tiny) target.
+    ml = min(ml, target_w // 2); mr = min(mr, target_w - ml)
+    mt = min(mt, target_h // 2); mb = min(mb, target_h - mt)
+
+    xs_src = [0, ml, w - mr, w]
+    ys_src = [0, mt, h - mb, h]
+    xs_dst = [0, ml, target_w - mr, target_w]
+    ys_dst = [0, mt, target_h - mb, target_h]
+
+    out = QPixmap(max(target_w, 1), max(target_h, 1))
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+    try:
+        for iy in range(3):
+            for ix in range(3):
+                sw_ = xs_src[ix + 1] - xs_src[ix]
+                sh_ = ys_src[iy + 1] - ys_src[iy]
+                dw_ = xs_dst[ix + 1] - xs_dst[ix]
+                dh_ = ys_dst[iy + 1] - ys_dst[iy]
+                if sw_ <= 0 or sh_ <= 0 or dw_ <= 0 or dh_ <= 0:
+                    continue
+                p.drawPixmap(QRect(xs_dst[ix], ys_dst[iy], dw_, dh_), src,
+                             QRect(xs_src[ix], ys_src[iy], sw_, sh_))
+    finally:
+        p.end()
+    return out
 
 
 # ── 4-fold symmetry (spinners) ───────────────────────────────────────────────

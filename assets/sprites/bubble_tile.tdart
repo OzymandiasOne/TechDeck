@@ -1,0 +1,22 @@
+{
+  "format": "tdart",
+  "version": 1,
+  "palette": {"k": "#0c0a1e", "f": "#1c1850", "b": "#37c9da", "h": "#9af6ff", "l": "#1f6e78"},
+  "rows": [
+    "...kkkkkkkkk...",
+    ".kkbbhhhhhbbkk.",
+    ".bbbbbbbbbbbbb.",
+    "kbbfffffffffbbk",
+    "kbbfffffffffbbk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "kbbfffffffffbbk",
+    "kbbfffffffffbbk",
+    ".bbbbbbbbbbbbb.",
+    ".kkbblllllbbkk.",
+    "...kkkkkkkkk..."
+  ]
+}

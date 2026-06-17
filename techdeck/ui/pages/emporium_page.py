@@ -9,7 +9,11 @@ sign, animated cabinet screen) and a typewriter dialogue box.
 
 ALL text uses the UFO50 sprite font (techdeck.ui.sprite_font), rendered to
 tinted pixmaps — labels/buttons carry pixmaps, painted text blits directly.
-Chrome (sign, balance, tiles, dialogue) is drawn as chunky pixel-art panels.
+Chrome (sign, balance, tiles, dialogue) is drawn from editable 9-slice
+word-bubble sprites (assets/sprites/bubble_*.tdart, authored by
+tools/generate_bubbles.py) via pixel_art.render_nine_slice + _draw_bubble:
+corners stay crisp, the middle stretches to any size, and a soft drop shadow is
+taken from the bubble's own silhouette. Repaint them in the pixel editor.
 """
 
 import math
@@ -22,7 +26,7 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox,
 )
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
-from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon
+from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap
 
 from techdeck.ui import pixel_art
 from techdeck.ui.sprite_font import font as _sf
@@ -41,12 +45,7 @@ EMP = {
     "equip": "#2bb04a", "owned": "#7a3fb0", "screen": "#0a0a18",
     "wall": "#272273", "bulb_on": "#fff07a", "bulb_off": "#6a5a1a",
     "dialogue": "#0a0a12", "dialogue_text": "#f4f4ec", "btn_text": "#ffffff",
-    "tile_text": "#f0f0ff",
-    # bevel + depth tones (light = top-left, dark = bottom-right)
-    "cyan_hi": "#9af6ff", "cyan_lo": "#1f6e78",
-    "mag_hi": "#f2a0d8", "mag_lo": "#7a1f5a",
-    "gold_hi": "#ffe9a0", "gold_lo": "#9a7a1a",
-    "white": "#f4f4ec", "shadow": "#05030f",
+    "tile_text": "#f0f0ff", "shadow": "#05030f",
 }
 
 CATALOG = [
@@ -69,68 +68,36 @@ def _load_pixmap(name: str, target: int):
     return pixel_art.render(data, scale=scale)
 
 
-def _round_prof(r):
-    """Pixel-art quarter-circle corner: the inset (in px) for each of the top
-    `r` rows (mirrored top/bottom). Trailing zeros are harmless."""
-    c = r - 0.5
-    prof = []
-    for y in range(r):
-        ins = r
-        for x in range(r):
-            if (c - x) ** 2 + (c - y) ** 2 <= r * r:
-                ins = x
-                break
-        prof.append(ins)
-    return prof
+def _load_art(name):
+    """Load a .tdart sprite dict (for 9-slice bubbles); None if missing."""
+    try:
+        return pixel_art.load(_sprites_dir() / name)
+    except Exception:
+        return None
 
 
-def _round_fill(p, x, y, w, h, prof, color):
-    """Fill a rounded-corner rectangle one scanline at a time (crisp, no AA)."""
-    if w <= 0 or h <= 0:
+def _draw_bubble(p, rect, sprite, *, shadow=None, offset=(3, 4), alpha=0.45):
+    """Render a 9-slice word-bubble sprite to fit `rect` (corners crisp, middle
+    stretched), under an optional soft drop shadow taken from the bubble's own
+    silhouette — so the shadow always matches whatever the .tdart is repainted
+    to. Bubbles are authored by tools/generate_bubbles.py and editable in the
+    pixel editor."""
+    if sprite is None:
         return
-    col = QColor(color)
-    n = len(prof)
-    for row in range(h):
-        if row < n:
-            ins = prof[row]
-        elif row >= h - n:
-            ins = prof[h - 1 - row]
-        else:
-            ins = 0
-        if w - 2 * ins > 0:
-            p.fillRect(x + ins, y + row, w - 2 * ins, 1, col)
-
-
-def _panel(p, rect, *, fill, border, outline="#0c0a1e", hi=None, lo=None,
-           radius=4, thickness=2, shadow=None):
-    """SNES-style rounded panel: a crisp dark silhouette, a colored border with
-    an optional top-left highlight / bottom-right shadow bevel for depth, a
-    filled interior, and an optional drop shadow to lift it off the background."""
-    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
-    prof = _round_prof(radius)
+    pix = pixel_art.render_nine_slice(sprite, rect.width(), rect.height())
     if shadow is not None:
-        sc = QColor(shadow)
-        sc.setAlpha(115)
-        _round_fill(p, x + 3, y + 4, w, h, prof, sc)
-    ox = 0
-    if outline is not None:
-        _round_fill(p, x, y, w, h, prof, outline)
-        ox = 1
-    _round_fill(p, x + ox, y + ox, w - 2 * ox, h - 2 * ox,
-                [max(0, v - ox) for v in prof], border)
-    t = ox + thickness
-    _round_fill(p, x + t, y + t, w - 2 * t, h - 2 * t,
-                [max(0, v - t) for v in prof], fill)
-    # bevel along the straight edges (skip the rounded corners)
-    bw = max(1, thickness - 1)
-    if hi is not None:
-        hc = QColor(hi)
-        p.fillRect(x + radius, y + ox, w - 2 * radius, bw, hc)
-        p.fillRect(x + ox, y + radius, bw, h - 2 * radius, hc)
-    if lo is not None:
-        lc = QColor(lo)
-        p.fillRect(x + radius, y + h - ox - bw, w - 2 * radius, bw, lc)
-        p.fillRect(x + w - ox - bw, y + radius, bw, h - 2 * radius, lc)
+        sh = QPixmap(pix.size())
+        sh.fill(Qt.GlobalColor.transparent)
+        qp = QPainter(sh)
+        qp.drawPixmap(0, 0, pix)
+        qp.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        qp.fillRect(sh.rect(), QColor(shadow))
+        qp.end()
+        prev = p.opacity()
+        p.setOpacity(alpha)
+        p.drawPixmap(rect.x() + offset[0], rect.y() + offset[1], sh)
+        p.setOpacity(prev)
+    p.drawPixmap(rect.x(), rect.y(), pix)
 
 
 def _marquee(p, rect, phase):
@@ -189,10 +156,8 @@ class StoreTile(QFrame):
         p = QPainter(self)
         # Inset so the drop shadow has room — makes the card read as raised,
         # sitting on top of the banner/wall rather than blending into it.
-        _panel(p, self.rect().adjusted(0, 0, -5, -5),
-               fill=EMP["tile_bg"], border=EMP["frame_a"],
-               hi=EMP["cyan_hi"], lo=EMP["cyan_lo"], radius=5, thickness=2,
-               shadow=EMP["shadow"])
+        _draw_bubble(p, self.rect().adjusted(0, 0, -5, -5),
+                     self.page._bubbles["tile"], shadow=EMP["shadow"])
         p.end()
 
     def _btn_qss(self, bg, edge):
@@ -239,6 +204,13 @@ class EmporiumPage(QWidget):
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
         self._woogy = _load_pixmap("woogy.tdart", 230)
         self._cabinet = _load_pixmap("arcade_cabinet.tdart", 64)
+        # 9-slice word-bubble panels (editable .tdart; see tools/generate_bubbles.py)
+        self._bubbles = {
+            "tile": _load_art("bubble_tile.tdart"),
+            "banner": _load_art("bubble_banner.tdart"),
+            "balance": _load_art("bubble_balance.tdart"),
+            "dialogue": _load_art("bubble_dialogue.tdart"),
+        }
         # Pre-render the neon sign (bright + dim) once.
         self._sign_on = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_on"])
         self._sign_off = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_off"])
@@ -355,13 +327,11 @@ class EmporiumPage(QWidget):
         if self._counter is not None:
             ch = int(h * 0.30)
             p.drawPixmap(QRect(0, h - ch, w, ch), self._counter)
-        _panel(p, self.banner.geometry(), fill=EMP["panel"],
-               border=EMP["frame_b"], hi=EMP["mag_hi"], lo=EMP["mag_lo"],
-               radius=5, shadow=EMP["shadow"])
+        _draw_bubble(p, self.banner.geometry(), self._bubbles["banner"],
+                     shadow=EMP["shadow"])
         _marquee(p, self.banner.geometry(), self._phase)
-        _panel(p, self.balance_lbl.geometry(), fill=EMP["panel"],
-               border=EMP["ticket"], hi=EMP["gold_hi"], lo=EMP["gold_lo"],
-               radius=5, shadow=EMP["shadow"])
+        _draw_bubble(p, self.balance_lbl.geometry(), self._bubbles["balance"],
+                     shadow=EMP["shadow"])
         self._draw_dialogue(p, w, h)
         p.end()
 
@@ -401,9 +371,7 @@ class EmporiumPage(QWidget):
     def _draw_dialogue(self, p, w, h):
         rect = QRect(40, h - 104, 380, 78)
         # UFO50-style: black box, thick white rounded border, soft drop shadow.
-        _panel(p, rect, fill=EMP["dialogue"], border=EMP["white"],
-               outline="#0c0a1e", lo="#c4c4d0", radius=6, thickness=3,
-               shadow=EMP["shadow"])
+        _draw_bubble(p, rect, self._bubbles["dialogue"], shadow=EMP["shadow"])
         text_pm = _sf().render_wrapped(self.DIALOGUE[:self._reveal], 3,
                                        EMP["dialogue_text"], max_width=rect.width() - 28)
         p.drawPixmap(rect.x() + 14, rect.y() + 12, text_pm)
