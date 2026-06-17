@@ -49,11 +49,11 @@ EMP = {
 }
 
 CATALOG = [
-    {"id": "spinner_beyblade", "name": "Beyblade Spinner",
+    {"id": "spinner_beyblade", "name": "Beyblade",
      "sprite": "spinner_beyblade.tdart", "cost": 60, "kind": "spinner"},
-    {"id": "spinner_shuriken", "name": "Shuriken Spinner",
+    {"id": "spinner_shuriken", "name": "Shuriken",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
-    {"id": "steeltube_game", "name": "Steel Tube Op",
+    {"id": "steeltube_game", "name": "ASA: The Video Game",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
 ]
 
@@ -66,6 +66,29 @@ def _load_pixmap(name: str, target: int):
     w, h = pixel_art.dimensions(data)
     scale = max(1, math.ceil(target / max(w, h, 1)))
     return pixel_art.render(data, scale=scale)
+
+
+def _trim_v(pm):
+    """Crop fully-transparent rows off the top/bottom of a text pixmap. The
+    sprite font renders into a fixed 8px cell, so the letter ink sits low in the
+    pixmap; trimming lets AlignCenter actually centre the visible text."""
+    img = pm.toImage()
+    w, h = img.width(), img.height()
+    if w == 0 or h == 0:
+        return pm
+
+    def row_empty(y):
+        return all((img.pixel(x, y) >> 24) == 0 for x in range(w))
+
+    top = 0
+    while top < h and row_empty(top):
+        top += 1
+    bot = h - 1
+    while bot > top and row_empty(bot):
+        bot -= 1
+    if top == 0 and bot == h - 1:
+        return pm
+    return pm.copy(0, top, w, bot - top + 1)
 
 
 def _load_art(name):
@@ -212,8 +235,8 @@ class EmporiumPage(QWidget):
             "dialogue": _load_art("bubble_dialogue.tdart"),
         }
         # Pre-render the neon sign (bright + dim) once.
-        self._sign_on = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_on"])
-        self._sign_off = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_off"])
+        self._sign_on = _trim_v(_sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_on"]))
+        self._sign_off = _trim_v(_sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_off"]))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
@@ -261,7 +284,8 @@ class EmporiumPage(QWidget):
         self.banner.setPixmap(self._sign_on if bright else self._sign_off)
 
     def refresh(self):
-        bal = _sf().render(f"{self.settings.get_tickets()} TIX", 3, EMP["ticket"])
+        bal = _trim_v(_sf().render(f"{self.settings.get_tickets()} TICKETS", 3,
+                                   EMP["ticket"]))
         self.balance_lbl.setFixedSize(max(150, bal.width() + 28),
                                       self._sign_on.height() + 18)
         self.balance_lbl.setPixmap(bal)
