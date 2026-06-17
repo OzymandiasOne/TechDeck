@@ -361,32 +361,14 @@ def emporium_counter():
 
 
 def arcade_cabinet():
-    """Upright arcade cabinet for the Emporium back wall. The screen area
-    (native x9..29, y14..28) is left dark and animated by the page at runtime."""
-    W, H = 40, 64
-    pal = {
-        "k": "#120f2a", "b": "#2b2680", "B": "#1c1850", "c": "#37c9da",
-        "m": "#cf3597", "o": "#e8841f", "y": "#f4c430", "s": "#0a0a18",
-        "w": "#f0f0ff", "r": "#c42a34",
-    }
-    g = blank(W, H)
-    fill_rect(g, 5, 8, 34, 62, "b")           # body
-    fill_rect(g, 5, 8, 9, 62, "B")            # left shade
-    fill_rect(g, 4, 2, 35, 9, "m")            # marquee
-    fill_rect(g, 6, 3, 33, 7, "k")            # marquee sign
-    for x in range(9, 31, 3):                  # marquee blips (page blinks these)
-        put(g, x, 5, "c")
-    fill_rect(g, 7, 12, 32, 30, "c")          # screen bezel
-    fill_rect(g, 9, 14, 30, 28, "s")          # screen (animated overlay)
-    fill_poly(g, [(6, 32), (33, 32), (35, 41), (4, 41)], "B")   # control panel
-    for i, bx in enumerate((12, 18, 24)):     # buttons
-        fill_circle(g, bx, 37, 1.6, ("r", "y", "o")[i])
-    fill_rect(g, 28, 35, 30, 38, "w")         # joystick ball
-    fill_rect(g, 18, 45, 22, 47, "k")         # coin slot
-    put(g, 20, 46, "y")
-    fill_rect(g, 5, 60, 34, 62, "B")          # base
-    outline(g, ("b", "B", "m", "c", "s", "o", "y", "r", "w"), "k")
-    return to_tdart(g, pal)
+    """Upright arcade cabinet for the Emporium back wall — gold side rails, a blue
+    "ARCADE" marquee, a gold-framed screen (native x13..34, y21..40, left dark and
+    animated by the page at runtime), an angled control deck, and a coin door.
+
+    The geometry lives in tools/generate_arcade_cabinet.py (single source of
+    truth); this just delegates so the seed roster stays in sync."""
+    from tools.generate_arcade_cabinet import build
+    return build()
 
 
 def main():

@@ -301,16 +301,24 @@ class EmporiumPage(QWidget):
         self._draw_dialogue(p, w, h)
         p.end()
 
+    # Native cabinet metrics (cells) — kept in sync with the .tdart art built by
+    # tools/generate_arcade_cabinet.py (W x H = 48 x 76).
+    _CAB_W, _CAB_H = 48, 76
+    _SCREEN = (13, 21, 22, 20)        # x, y, w, h of the animated screen face
+    _MARQUEE_BULBS = (range(8, 41, 4), 3)   # bulb x-cells, row
+
     def _draw_cabinet(self, p, w, h):
         pix = self._cabinet
         if pix is None:
             return
-        scale = max(2, round(0.40 * h / 64))
-        cw, ch = 40 * scale, 64 * scale
+        scale = max(2, round(0.40 * h / self._CAB_H))
+        cw, ch = self._CAB_W * scale, self._CAB_H * scale
         cx = w - cw - 24
         cy = max((h - int(h * 0.30)) - ch + 10 * scale, int(0.08 * h))
         p.drawPixmap(QRect(cx, cy, cw, ch), pix)
-        sx, sy, sw, sh = cx + 9 * scale, cy + 14 * scale, 22 * scale, 15 * scale
+        scol, srow, scells_w, scells_h = self._SCREEN
+        sx, sy = cx + scol * scale, cy + srow * scale
+        sw, sh = scells_w * scale, scells_h * scale
         p.fillRect(sx, sy, sw, sh, QColor(EMP["screen"]))
         bars = ["#37c9da", "#cf3597", "#3b34c0", "#e8841f"]
         bh = max(1, sh // 4)
@@ -320,9 +328,10 @@ class EmporiumPage(QWidget):
             p.fillRect(sx, sy + i * bh, sw, bh, c)
         by = sy + (self._phase * scale) % max(1, sh)
         p.fillRect(sx, by, sw, max(1, scale), QColor("#f0f0ff"))
-        for j, mx in enumerate(range(9, 31, 3)):
+        bulb_xs, bulb_row = self._MARQUEE_BULBS
+        for j, mx in enumerate(bulb_xs):
             on = (self._phase + j) % 3 != 0
-            p.fillRect(cx + mx * scale, cy + 5 * scale, scale, scale,
+            p.fillRect(cx + mx * scale, cy + bulb_row * scale, scale, scale,
                        QColor("#7ef9ff" if on else "#1a4a52"))
 
     def _draw_dialogue(self, p, w, h):
