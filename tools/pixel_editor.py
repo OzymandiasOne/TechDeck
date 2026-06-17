@@ -508,11 +508,31 @@ class Editor(QMainWindow):
         v.addLayout(brow)
 
         v.addWidget(self._heading("Palette"))
-        self.swatch_box = QVBoxLayout()
-        v.addLayout(self.swatch_box)
-        add = QPushButton("+ Add Color")
+        # The swatches live in their OWN scroll area: a sprite imported from an
+        # image can have dozens of colours, and stacking that many buttons
+        # straight into the sidebar used to push the window taller than the
+        # screen (hiding the canvas scrollbars + the buttons below).
+        self.swatch_host = QWidget()
+        self.swatch_box = QVBoxLayout(self.swatch_host)
+        self.swatch_box.setContentsMargins(0, 0, 0, 0)
+        self.swatch_box.setSpacing(3)
+        pal_scroll = QScrollArea()
+        pal_scroll.setWidgetResizable(True)
+        pal_scroll.setWidget(self.swatch_host)
+        pal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        pal_scroll.setMinimumHeight(120)
+        pal_scroll.setStyleSheet("QScrollArea { border: none; }")
+        v.addWidget(pal_scroll, 1)   # absorbs spare space; scrolls when crowded
+        prow = QHBoxLayout()
+        add = QPushButton("+ Add")
         add.clicked.connect(self.add_color)
-        v.addWidget(add)
+        editb = QPushButton("Edit")
+        editb.setToolTip("Change the hex value of the selected palette color "
+                         "(recolors every pixel using it)")
+        editb.clicked.connect(self.edit_color)
+        prow.addWidget(add)
+        prow.addWidget(editb)
+        v.addLayout(prow)
 
         v.addWidget(self._heading("View"))
         zrow = QHBoxLayout()
@@ -534,8 +554,6 @@ class Editor(QMainWindow):
                                 "(for spinners). Square grids only.")
         self.sym_btn.toggled.connect(self._toggle_symmetry)
         v.addWidget(self.sym_btn)
-
-        v.addStretch()
         return side
 
     def _heading(self, text):
@@ -663,6 +681,26 @@ class Editor(QMainWindow):
             if ch:
                 self._select_char(ch)
         # Belt-and-suspenders: force the scroll area to recompute its scrollbars.
+        self.canvas.updateGeometry()
+        self.scroll.updateGeometry()
+
+    def edit_color(self):
+        """Recolor the SELECTED palette entry: pick a new hex and every pixel
+        using that char repaints to it (the char/cells are untouched)."""
+        ch = self.canvas.active_char
+        cur = self.canvas.palette.get(ch)
+        if cur is None:
+            self.statusBar().showMessage("Select a palette color first")
+            return
+        c = QColorDialog.getColor(
+            QColor(cur), self, f"Edit color '{ch}'",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog)
+        if c.isValid() and c.name().lower() != cur.lower():
+            self.canvas.palette[ch] = c.name()
+            self.canvas.update()
+            self._rebuild_swatches()
+            self._on_modified()
+            self.statusBar().showMessage(f"Recolored '{ch}' -> {c.name()}")
         self.canvas.updateGeometry()
         self.scroll.updateGeometry()
 
