@@ -2,13 +2,13 @@
 Woogy's Emporium — the ticket redemption counter.
 
 A pixel-art arcade prize-counter scene (wall + kiosk + Woogy + an animated
-arcade cabinet, all .tdart sprites) with a grid of purchasable tiles laid over
-it. Earn tickets by running apps / sending feedback; spend them here. This page
-has its OWN fixed arcade palette and does NOT follow the user's theme, and adds
-a little motion (flickering neon sign, animated cabinet screen, twinkles) so it
-feels like a real arcade.
+arcade cabinet) with a grid of purchasable tiles laid over it. Earn tickets by
+running apps / sending feedback; spend them here. Fixed arcade palette (does NOT
+follow the user theme), with motion (marquee chase lights + neon flicker on the
+sign, animated cabinet screen) and a typewriter dialogue box.
 
-Sprites live in assets/sprites/*.tdart and are editable in tools/pixel_editor.py.
+Chrome (sign, balance, tiles, dialogue) is drawn as chunky pixel-art panels in
+code; the scene sprites are editable .tdart in assets/sprites/.
 """
 
 import math
@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox,
 )
 from PySide6.QtCore import Qt, QRect, QTimer
-from PySide6.QtGui import QPainter, QColor
+from PySide6.QtGui import QPainter, QColor, QFont, QPolygon
+from PySide6.QtCore import QPoint
 
 from techdeck.ui import pixel_art
 
@@ -33,7 +34,6 @@ def _sprites_dir() -> Path:
 
 
 def _arcade_family() -> str:
-    """The bundled chunky retro font (Bokutoh EB), for arcade text."""
     try:
         from techdeck.ui.widgets.moth_widget import haiku_font
         return haiku_font(12).family()
@@ -41,13 +41,13 @@ def _arcade_family() -> str:
         return ""
 
 
-# Fixed arcade palette — independent of the active theme.
 EMP = {
-    "banner": "#3a1640", "neon_on": "#7ef9ff", "neon_off": "#2b6b73",
-    "border_on": "#ff4fd0", "border_off": "#5a1f4a", "ticket": "#f4c430",
-    "tile_bg": "#1c1850", "tile_border": "#37c9da", "tile_text": "#f0f0ff",
-    "buy": "#c42a34", "buy_edge": "#ff7a3f", "equip": "#2bb04a",
-    "owned": "#7a3fb0", "screen": "#0a0a18", "wall": "#272273",
+    "panel": "#2a1644", "neon_on": "#7ef9ff", "neon_off": "#2b6b73",
+    "frame_a": "#37c9da", "frame_b": "#cf3597", "ticket": "#f4c430",
+    "tile_bg": "#1c1850", "buy": "#c42a34", "buy_edge": "#ff7a3f",
+    "equip": "#2bb04a", "owned": "#7a3fb0", "screen": "#0a0a18",
+    "wall": "#272273", "bulb_on": "#fff07a", "bulb_off": "#6a5a1a",
+    "dialogue": "#101018", "dialogue_text": "#f4f4ec",
 }
 
 CATALOG = [
@@ -70,10 +70,35 @@ def _load_pixmap(name: str, target: int):
     return pixel_art.render(data, scale=scale)
 
 
-class StoreTile(QFrame):
-    """One purchasable tile, arcade-styled: icon + name + Buy/Equip/Owned."""
+def _pixel_panel(p, rect, fill, c_outer, c_inner):
+    """Chunky 2-tone pixel-art border around a filled rect (no anti-aliasing)."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    p.fillRect(x, y, w, h, QColor(fill))
+    o, i = QColor(c_outer), QColor(c_inner)
+    p.fillRect(x, y, w, 2, o); p.fillRect(x, y + h - 2, w, 2, o)
+    p.fillRect(x, y, 2, h, o); p.fillRect(x + w - 2, y, 2, h, o)
+    p.fillRect(x + 2, y + 2, w - 4, 2, i); p.fillRect(x + 2, y + h - 4, w - 4, 2, i)
+    p.fillRect(x + 2, y + 2, 2, h - 4, i); p.fillRect(x + w - 4, y + 2, 2, h - 4, i)
 
-    SIZE = 140  # matches HomePage HOME_TILE_W/H
+
+def _marquee(p, rect, phase):
+    """Chasing marquee bulbs evenly spaced just inside the rect perimeter."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    pts, step = [], 13
+    for bx in range(x + 7, x + w - 6, step):
+        pts.append((bx, y + 4)); pts.append((bx, y + h - 5))
+    for by in range(y + 12, y + h - 10, step):
+        pts.append((x + 4, by)); pts.append((x + w - 5, by))
+    for idx, (bx, by) in enumerate(pts):
+        on = (idx - phase) % 3 == 0       # chase
+        p.fillRect(bx - 1, by - 1, 3, 3,
+                   QColor(EMP["bulb_on"] if on else EMP["bulb_off"]))
+
+
+class StoreTile(QFrame):
+    """One purchasable tile drawn as a pixel-art box: icon + name + button."""
+
+    SIZE = 150
 
     def __init__(self, item, page):
         super().__init__()
@@ -81,17 +106,15 @@ class StoreTile(QFrame):
         self.page = page
         fam = page.family
         self.setFixedWidth(self.SIZE)
-        self.setStyleSheet(
-            f"StoreTile {{ background:{EMP['tile_bg']}; "
-            f"border:2px solid {EMP['tile_border']}; border-radius:8px; }}")
+        self.setStyleSheet("StoreTile { background: transparent; }")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 6, 8, 8)
-        lay.setSpacing(2)
+        lay.setContentsMargins(10, 8, 10, 10)
+        lay.setSpacing(3)
 
         self.action_btn = QPushButton()
         self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.action_btn.clicked.connect(self._on_action)
-        lay.addWidget(self.action_btn, 0, Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self.action_btn, 0, Qt.AlignmentFlag.AlignHCenter)
 
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -106,24 +129,28 @@ class StoreTile(QFrame):
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name.setWordWrap(True)
         name.setStyleSheet(
-            f"color:{EMP['tile_text']}; font-family:'{fam}'; font-size:12px; "
+            f"color:#f0f0ff; font-family:'{fam}'; font-size:12px; "
             "background: transparent; border: none;")
         lay.addWidget(name)
         lay.addStretch()
         self.refresh()
 
-    def _btn_qss(self, bg, edge, fg="#ffffff"):
-        fam = self.page.family
-        return (f"QPushButton {{ background:{bg}; color:{fg}; "
-                f"border:2px solid {edge}; border-radius:4px; padding:2px 8px; "
-                f"font-family:'{fam}'; font-weight:700; }}"
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        _pixel_panel(p, self.rect().adjusted(0, 0, -1, -1),
+                     EMP["tile_bg"], EMP["frame_a"], EMP["frame_b"])
+        p.end()
+
+    def _btn_qss(self, bg, edge):
+        return (f"QPushButton {{ background:{bg}; color:#fff; "
+                f"border:2px solid {edge}; border-radius:0px; padding:2px 10px; "
+                f"font-family:'{self.page.family}'; font-weight:700; }}"
                 f"QPushButton:disabled {{ background:#3a3560; color:#9a96c0; "
                 f"border-color:#3a3560; }}")
 
     def refresh(self):
         s = self.page.settings
-        owned = s.is_unlocked(self.item["id"])
-        if not owned:
+        if not s.is_unlocked(self.item["id"]):
             self.action_btn.setText(f"BUY  {self.item['cost']} TIX")
             self.action_btn.setEnabled(s.get_tickets() >= self.item["cost"])
             self.action_btn.setStyleSheet(self._btn_qss(EMP["buy"], EMP["buy_edge"]))
@@ -142,13 +169,16 @@ class StoreTile(QFrame):
 
 
 class EmporiumPage(QWidget):
-    """The redemption-counter scene + the catalog grid, with light animation."""
+    """The redemption-counter scene + the catalog grid, with arcade animation."""
+
+    DIALOGUE = "WOOGY: WHAT'LL IT BE, FELLAS?"
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
         self.family = _arcade_family()
         self._phase = 0
+        self._reveal = 0
         self._neon_bright = True
         self._bg = _load_pixmap("emporium_background.tdart", 128)
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
@@ -161,17 +191,19 @@ class EmporiumPage(QWidget):
 
         bar = QHBoxLayout()
         self.banner = QLabel("WOOGY'S EMPORIUM")
-        self.banner.setStyleSheet(self._banner_qss(True))
+        self.banner.setFixedSize(372, 52)
+        self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bar.addWidget(self.banner)
         bar.addStretch()
         self.balance_lbl = QLabel()
+        self.balance_lbl.setFixedSize(132, 48)
+        self.balance_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.balance_lbl.setStyleSheet(
-            f"background:{EMP['banner']}; color:{EMP['ticket']}; "
-            f"font-family:'{self.family}'; font-size:18px; font-weight:800; "
-            f"padding:8px 16px; border:3px solid {EMP['border_off']}; "
-            "border-radius:6px;")
+            f"background: transparent; border: none; color:{EMP['ticket']}; "
+            f"font-family:'{self.family}'; font-size:18px; font-weight:800;")
         bar.addWidget(self.balance_lbl)
         root.addLayout(bar)
+        self._set_banner_bright(True)
 
         grid_host = QWidget()
         grid_host.setStyleSheet("background: transparent;")
@@ -191,17 +223,16 @@ class EmporiumPage(QWidget):
         root.addStretch()
 
         self._timer = QTimer(self)
-        self._timer.setInterval(150)
+        self._timer.setInterval(120)
         self._timer.timeout.connect(self._tick)
         self.refresh()
 
-    def _banner_qss(self, bright):
-        return (f"background:{EMP['banner']}; "
-                f"color:{EMP['neon_on'] if bright else EMP['neon_off']}; "
-                f"font-family:'{self.family}'; font-size:24px; font-weight:800; "
-                f"padding:8px 20px; border-radius:6px; "
-                f"border:3px solid "
-                f"{EMP['border_on'] if bright else EMP['border_off']};")
+    def _set_banner_bright(self, bright):
+        self._neon_bright = bright
+        self.banner.setStyleSheet(
+            f"background: transparent; border: none; "
+            f"color:{EMP['neon_on'] if bright else EMP['neon_off']}; "
+            f"font-family:'{self.family}'; font-size:22px; font-weight:800;")
 
     def refresh(self):
         self.balance_lbl.setText(f"{self.settings.get_tickets()} TIX")
@@ -211,6 +242,7 @@ class EmporiumPage(QWidget):
     # ---- animation -----------------------------------------------------------
     def showEvent(self, e):
         super().showEvent(e)
+        self._reveal = 0
         self._timer.start()
 
     def hideEvent(self, e):
@@ -219,11 +251,11 @@ class EmporiumPage(QWidget):
 
     def _tick(self):
         self._phase += 1
-        # Neon flicker: mostly on, brief random dips.
+        if self._reveal < len(self.DIALOGUE):
+            self._reveal = min(len(self.DIALOGUE), self._reveal + 2)
         bright = random.random() > 0.12
         if bright != self._neon_bright:
-            self._neon_bright = bright
-            self.banner.setStyleSheet(self._banner_qss(bright))
+            self._set_banner_bright(bright)
         self.update()
 
     # ---- purchase / equip ----------------------------------------------------
@@ -253,7 +285,6 @@ class EmporiumPage(QWidget):
         p.fillRect(self.rect(), QColor(EMP["wall"]))
         if self._bg is not None:
             p.drawPixmap(QRect(0, 0, w, h), self._bg)
-        self._draw_twinkles(p, w, h)
         self._draw_cabinet(p, w, h)
         if self._woogy is not None:
             ww, wh = self._woogy.width(), self._woogy.height()
@@ -262,14 +293,14 @@ class EmporiumPage(QWidget):
         if self._counter is not None:
             ch = int(h * 0.30)
             p.drawPixmap(QRect(0, h - ch, w, ch), self._counter)
-        self._draw_speech(p, w, h)
+        # chrome panels behind the text widgets
+        _pixel_panel(p, self.banner.geometry(), EMP["panel"],
+                     EMP["frame_b"], EMP["frame_a"])
+        _marquee(p, self.banner.geometry(), self._phase)
+        _pixel_panel(p, self.balance_lbl.geometry(), EMP["panel"],
+                     EMP["frame_a"], EMP["frame_b"])
+        self._draw_dialogue(p, w, h)
         p.end()
-
-    def _draw_twinkles(self, p, w, h):
-        for i, (fx, fy) in enumerate([(0.10, 0.28), (0.90, 0.50),
-                                      (0.58, 0.16), (0.30, 0.60)]):
-            if (self._phase + i * 2) % 6 < 3:
-                p.fillRect(int(fx * w), int(fy * h), 3, 3, QColor(EMP["ticket"]))
 
     def _draw_cabinet(self, p, w, h):
         pix = self._cabinet
@@ -280,7 +311,6 @@ class EmporiumPage(QWidget):
         cx = w - cw - 24
         cy = max((h - int(h * 0.30)) - ch + 10 * scale, int(0.08 * h))
         p.drawPixmap(QRect(cx, cy, cw, ch), pix)
-        # animated screen (attract mode): cycling translucent bars + scanline
         sx, sy, sw, sh = cx + 9 * scale, cy + 14 * scale, 22 * scale, 15 * scale
         p.fillRect(sx, sy, sw, sh, QColor(EMP["screen"]))
         bars = ["#37c9da", "#cf3597", "#3b34c0", "#e8841f"]
@@ -291,22 +321,28 @@ class EmporiumPage(QWidget):
             p.fillRect(sx, sy + i * bh, sw, bh, c)
         by = sy + (self._phase * scale) % max(1, sh)
         p.fillRect(sx, by, sw, max(1, scale), QColor("#f0f0ff"))
-        # blinking marquee blips
         for j, mx in enumerate(range(9, 31, 3)):
             on = (self._phase + j) % 3 != 0
             p.fillRect(cx + mx * scale, cy + 5 * scale, scale, scale,
                        QColor("#7ef9ff" if on else "#1a4a52"))
 
-    def _draw_speech(self, p, w, h):
-        bw, bh = 360, 70
-        x, y = 40, h - 96
-        p.fillRect(x, y, bw, bh, QColor("#101014"))
-        p.setPen(QColor("#f4f4ec"))
-        from PySide6.QtGui import QFont
+    def _draw_dialogue(self, p, w, h):
+        rect = QRect(40, h - 104, 380, 78)
+        _pixel_panel(p, rect, EMP["dialogue"], EMP["frame_a"], EMP["frame_b"])
         f = QFont(self.family) if self.family else QFont()
         f.setPointSize(12)
         f.setBold(True)
         p.setFont(f)
-        p.drawText(QRect(x + 14, y, bw - 24, bh),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                   "WOOGY: WHAT'LL IT BE, FELLAS?")
+        p.setPen(QColor(EMP["dialogue_text"]))
+        p.drawText(rect.adjusted(14, 10, -14, -10),
+                   Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+                   | Qt.TextFlag.TextWordWrap,
+                   self.DIALOGUE[:self._reveal])
+        # blinking down-arrow once fully revealed
+        if self._reveal >= len(self.DIALOGUE) and (self._phase // 3) % 2 == 0:
+            ax, ay = rect.center().x(), rect.bottom() - 12
+            tri = QPolygon([QPoint(ax - 5, ay), QPoint(ax + 5, ay),
+                            QPoint(ax, ay + 6)])
+            p.setBrush(QColor(EMP["neon_on"]))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawPolygon(tri)
