@@ -7,8 +7,9 @@ running apps / sending feedback; spend them here. Fixed arcade palette (does NOT
 follow the user theme), with motion (marquee chase lights + neon flicker on the
 sign, animated cabinet screen) and a typewriter dialogue box.
 
-Chrome (sign, balance, tiles, dialogue) is drawn as chunky pixel-art panels in
-code; the scene sprites are editable .tdart in assets/sprites/.
+ALL text uses the UFO50 sprite font (techdeck.ui.sprite_font), rendered to
+tinted pixmaps — labels/buttons carry pixmaps, painted text blits directly.
+Chrome (sign, balance, tiles, dialogue) is drawn as chunky pixel-art panels.
 """
 
 import math
@@ -20,11 +21,11 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QMessageBox,
 )
-from PySide6.QtCore import Qt, QRect, QTimer
-from PySide6.QtGui import QPainter, QColor, QFont, QPolygon
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import Qt, QRect, QTimer, QPoint
+from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon
 
 from techdeck.ui import pixel_art
+from techdeck.ui.sprite_font import font as _sf
 
 
 def _sprites_dir() -> Path:
@@ -33,21 +34,14 @@ def _sprites_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "assets" / "sprites"
 
 
-def _arcade_family() -> str:
-    try:
-        from techdeck.ui.widgets.moth_widget import haiku_font
-        return haiku_font(12).family()
-    except Exception:
-        return ""
-
-
 EMP = {
     "panel": "#2a1644", "neon_on": "#7ef9ff", "neon_off": "#2b6b73",
     "frame_a": "#37c9da", "frame_b": "#cf3597", "ticket": "#f4c430",
     "tile_bg": "#1c1850", "buy": "#c42a34", "buy_edge": "#ff7a3f",
     "equip": "#2bb04a", "owned": "#7a3fb0", "screen": "#0a0a18",
     "wall": "#272273", "bulb_on": "#fff07a", "bulb_off": "#6a5a1a",
-    "dialogue": "#101018", "dialogue_text": "#f4f4ec",
+    "dialogue": "#101018", "dialogue_text": "#f4f4ec", "btn_text": "#ffffff",
+    "tile_text": "#f0f0ff",
 }
 
 CATALOG = [
@@ -90,7 +84,7 @@ def _marquee(p, rect, phase):
     for by in range(y + 12, y + h - 10, step):
         pts.append((x + 4, by)); pts.append((x + w - 5, by))
     for idx, (bx, by) in enumerate(pts):
-        on = (idx - phase) % 3 == 0       # chase
+        on = (idx - phase) % 3 == 0
         p.fillRect(bx - 1, by - 1, 3, 3,
                    QColor(EMP["bulb_on"] if on else EMP["bulb_off"]))
 
@@ -104,7 +98,6 @@ class StoreTile(QFrame):
         super().__init__()
         self.item = item
         self.page = page
-        fam = page.family
         self.setFixedWidth(self.SIZE)
         self.setStyleSheet("StoreTile { background: transparent; }")
         lay = QVBoxLayout(self)
@@ -125,13 +118,12 @@ class StoreTile(QFrame):
         icon.setFixedHeight(76)
         lay.addWidget(icon)
 
-        name = QLabel(item["name"])
+        name = QLabel()
         name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setWordWrap(True)
-        name.setStyleSheet(
-            f"color:#f0f0ff; font-family:'{fam}'; font-size:12px; "
-            "background: transparent; border: none;")
-        lay.addWidget(name)
+        name.setStyleSheet("background: transparent; border: none;")
+        name.setPixmap(_sf().render_wrapped(item["name"].upper(), 2,
+                                            EMP["tile_text"], max_width=126))
+        lay.addWidget(name, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addStretch()
         self.refresh()
 
@@ -142,27 +134,29 @@ class StoreTile(QFrame):
         p.end()
 
     def _btn_qss(self, bg, edge):
-        return (f"QPushButton {{ background:{bg}; color:#fff; "
-                f"border:2px solid {edge}; border-radius:0px; padding:2px 10px; "
-                f"font-family:'{self.page.family}'; font-weight:700; }}"
-                f"QPushButton:disabled {{ background:#3a3560; color:#9a96c0; "
-                f"border-color:#3a3560; }}")
+        return (f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
+                f"border-radius:0px; padding:3px 10px; }}"
+                f"QPushButton:disabled {{ background:#3a3560; border-color:#3a3560; }}")
+
+    def _set_btn(self, label, bg, edge, enabled):
+        pm = _sf().render(label, 2, EMP["btn_text"])
+        self.action_btn.setText("")
+        self.action_btn.setIcon(QIcon(pm))
+        self.action_btn.setIconSize(pm.size())
+        self.action_btn.setEnabled(enabled)
+        self.action_btn.setStyleSheet(self._btn_qss(bg, edge))
 
     def refresh(self):
         s = self.page.settings
         if not s.is_unlocked(self.item["id"]):
-            self.action_btn.setText(f"BUY  {self.item['cost']} TIX")
-            self.action_btn.setEnabled(s.get_tickets() >= self.item["cost"])
-            self.action_btn.setStyleSheet(self._btn_qss(EMP["buy"], EMP["buy_edge"]))
+            self._set_btn(f"BUY {self.item['cost']}", EMP["buy"],
+                          EMP["buy_edge"], s.get_tickets() >= self.item["cost"])
         elif self.item["kind"] == "spinner":
             equipped = s.get_equipped_spinner() == self.item["id"]
-            self.action_btn.setText("EQUIPPED" if equipped else "EQUIP")
-            self.action_btn.setEnabled(not equipped)
-            self.action_btn.setStyleSheet(self._btn_qss(EMP["equip"], "#7af0a0"))
+            self._set_btn("EQUIPPED" if equipped else "EQUIP",
+                          EMP["equip"], "#7af0a0", not equipped)
         else:
-            self.action_btn.setText("OWNED")
-            self.action_btn.setEnabled(False)
-            self.action_btn.setStyleSheet(self._btn_qss(EMP["owned"], "#b97fe0"))
+            self._set_btn("OWNED", EMP["owned"], "#b97fe0", False)
 
     def _on_action(self):
         self.page.handle_tile_action(self.item)
@@ -176,7 +170,6 @@ class EmporiumPage(QWidget):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.family = _arcade_family()
         self._phase = 0
         self._reveal = 0
         self._neon_bright = True
@@ -184,23 +177,25 @@ class EmporiumPage(QWidget):
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
         self._woogy = _load_pixmap("woogy.tdart", 230)
         self._cabinet = _load_pixmap("arcade_cabinet.tdart", 64)
+        # Pre-render the neon sign (bright + dim) once.
+        self._sign_on = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_on"])
+        self._sign_off = _sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_off"])
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
 
         bar = QHBoxLayout()
-        self.banner = QLabel("WOOGY'S EMPORIUM")
-        self.banner.setFixedSize(372, 52)
+        self.banner = QLabel()
         self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.banner.setStyleSheet("background: transparent; border: none;")
+        self.banner.setFixedSize(self._sign_on.width() + 44, self._sign_on.height() + 22)
         bar.addWidget(self.banner)
         bar.addStretch()
         self.balance_lbl = QLabel()
-        self.balance_lbl.setFixedSize(132, 48)
         self.balance_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.balance_lbl.setStyleSheet(
-            f"background: transparent; border: none; color:{EMP['ticket']}; "
-            f"font-family:'{self.family}'; font-size:18px; font-weight:800;")
+        self.balance_lbl.setStyleSheet("background: transparent; border: none;")
+        self.balance_lbl.setFixedSize(150, self._sign_on.height() + 18)
         bar.addWidget(self.balance_lbl)
         root.addLayout(bar)
         self._set_banner_bright(True)
@@ -229,13 +224,13 @@ class EmporiumPage(QWidget):
 
     def _set_banner_bright(self, bright):
         self._neon_bright = bright
-        self.banner.setStyleSheet(
-            f"background: transparent; border: none; "
-            f"color:{EMP['neon_on'] if bright else EMP['neon_off']}; "
-            f"font-family:'{self.family}'; font-size:22px; font-weight:800;")
+        self.banner.setPixmap(self._sign_on if bright else self._sign_off)
 
     def refresh(self):
-        self.balance_lbl.setText(f"{self.settings.get_tickets()} TIX")
+        bal = _sf().render(f"{self.settings.get_tickets()} TIX", 3, EMP["ticket"])
+        self.balance_lbl.setFixedSize(max(150, bal.width() + 28),
+                                      self._sign_on.height() + 18)
+        self.balance_lbl.setPixmap(bal)
         for t in self.tiles:
             t.refresh()
 
@@ -298,7 +293,6 @@ class EmporiumPage(QWidget):
         if self._counter is not None:
             ch = int(h * 0.30)
             p.drawPixmap(QRect(0, h - ch, w, ch), self._counter)
-        # chrome panels behind the text widgets
         _pixel_panel(p, self.banner.geometry(), EMP["panel"],
                      EMP["frame_b"], EMP["frame_a"])
         _marquee(p, self.banner.geometry(), self._phase)
@@ -334,20 +328,12 @@ class EmporiumPage(QWidget):
     def _draw_dialogue(self, p, w, h):
         rect = QRect(40, h - 104, 380, 78)
         _pixel_panel(p, rect, EMP["dialogue"], EMP["frame_a"], EMP["frame_b"])
-        f = QFont(self.family) if self.family else QFont()
-        f.setPointSize(12)
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QColor(EMP["dialogue_text"]))
-        p.drawText(rect.adjusted(14, 10, -14, -10),
-                   Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
-                   | Qt.TextFlag.TextWordWrap,
-                   self.DIALOGUE[:self._reveal])
-        # blinking down-arrow once fully revealed
+        text_pm = _sf().render_wrapped(self.DIALOGUE[:self._reveal], 3,
+                                       EMP["dialogue_text"], max_width=rect.width() - 28)
+        p.drawPixmap(rect.x() + 14, rect.y() + 12, text_pm)
         if self._reveal >= len(self.DIALOGUE) and (self._phase // 3) % 2 == 0:
             ax, ay = rect.center().x(), rect.bottom() - 12
-            tri = QPolygon([QPoint(ax - 5, ay), QPoint(ax + 5, ay),
-                            QPoint(ax, ay + 6)])
+            tri = QPolygon([QPoint(ax - 5, ay), QPoint(ax + 5, ay), QPoint(ax, ay + 6)])
             p.setBrush(QColor(EMP["neon_on"]))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawPolygon(tri)
