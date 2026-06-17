@@ -3,20 +3,20 @@
   "version": 1,
   "palette": {"k": "#0c0a1e", "f": "#2a1644", "b": "#cf3597", "h": "#f2a0d8", "l": "#7a1f5a"},
   "rows": [
-    "...kkkkkkkkk...",
-    ".kkbbhhhhhbbkk.",
-    ".bbbbbbbbbbbbb.",
-    "kbbfffffffffbbk",
-    "kbbfffffffffbbk",
+    "..kkkkkkkkkkk..",
+    ".khhhhhhhhhhhk.",
+    "khbbbbbbbbbbblk",
     "khbfffffffffblk",
     "khbfffffffffblk",
     "khbfffffffffblk",
     "khbfffffffffblk",
     "khbfffffffffblk",
-    "kbbfffffffffbbk",
-    "kbbfffffffffbbk",
-    ".bbbbbbbbbbbbb.",
-    ".kkbblllllbbkk.",
-    "...kkkkkkkkk..."
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbfffffffffblk",
+    "khbbbbbbbbbbblk",
+    ".klllllllllllk.",
+    "..kkkkkkkkkkk.."
   ]
 }
