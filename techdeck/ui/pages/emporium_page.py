@@ -421,13 +421,13 @@ class EmporiumPage(QWidget):
     # falls back to GENERIC_COMMENT for anything not listed.
     WOOGY_COMMENTS = {
         "spinner_beyblade":
-            "WOOGY: A BEYBLADE! GO ON, LET IT RIP. I'LL CHEER FROM BACK HERE.",
+            "WOOGY: A BEYBLADE! GO ON, LET IT RIP. OH, UM, HAVE A GOOD DAY.",
         "spinner_shuriken":
             "WOOGY: A SHURIKEN! SO SHARP, SO COOL. PLEASE DON'T POKE OL' WOOGY.",
         "steeltube_game":
-            "WOOGY: OOH, MY FAVORITE! 400 HOURS LOGGED AND I STILL STINK AT IT.",
+            "WOOGY: WOOGY DON'T KNOW HOW TO PLAY THIS GAME, WOOGY JUST CLICK BUTTONS.",
     }
-    GENERIC_COMMENT = "WOOGY: A FINE PICK! YOU'VE GOT GOOD TASTE, FRIEND."
+    GENERIC_COMMENT = "WOOGY: V-VERY GOOD! WOOGY APPROVES."
 
     # How Woogy fetches each family of item (the SOLD! box flavor). Keyed by the
     # item's "kind"; "{name}" is filled in. Falls back to GRAB_DEFAULT.
@@ -436,7 +436,7 @@ class EmporiumPage(QWidget):
                     "little test-spin that nearly takes his eye out, and sets it "
                     "down still humming."),
         "game": ("Woogy heaves the {name} cartridge out of the locked glass case, "
-                 "huffs the dust off it, and slides it over with a proud grin."),
+                 "blows the dust off it, and slides it over with a proud grin."),
     }
     GRAB_DEFAULT = ("Woogy grabs the {name} off the shelf with effort and wobbles "
                     "back to the counter. He slides it towards you with a huff.")
