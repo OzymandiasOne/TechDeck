@@ -1432,8 +1432,14 @@ class HomePage(QWidget, ThemeAware):
 
     def _check_run_complete(self):
         """Called on the main thread via queued signal when no more plugins remain."""
-        self._set_button_run_mode()
-        self.all_plugins_done.emit()
+        # all_plugins_done is the ONLY thing that stops the shell's run spinner.
+        # Restoring the button must never be able to strand the spinner, so emit
+        # the completion signal even if _set_button_run_mode raises (a botched
+        # refactor once left a NameError there, spinning "Galvanizing..." forever).
+        try:
+            self._set_button_run_mode()
+        finally:
+            self.all_plugins_done.emit()
 
     # ─── Pause / Resume (Phase C) ─────────────────────────────────────
 
@@ -1765,5 +1771,5 @@ class HomePage(QWidget, ThemeAware):
                 opacity: 0.5;
             }}
         """)
-        if has_selection and hasattr(self, '_btn_pulse') and self._btn_pulse:
+        if len(self.selected_tiles) > 0 and hasattr(self, '_btn_pulse') and self._btn_pulse:
             self._btn_pulse.start()
