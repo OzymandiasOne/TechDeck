@@ -511,7 +511,10 @@ class EmporiumPage(QWidget):
     def _set_dialogue(self, text):
         """Point Woogy's bubble at `text`, wrapped into pages, typed from the top."""
         self._dialogue = text
-        self._lines = _sf().wrap_lines(text, 3, self.DIALOGUE_W - 28)
+        # Reserve room for the "..." continuation marker so it never spills past
+        # the right edge when appended to a near-full line on a non-final page.
+        avail = self.DIALOGUE_W - 28 - _sf().text_width("...", 3)
+        self._lines = _sf().wrap_lines(text, 3, avail)
         self._page = 0
         self._reveal = 0
 
