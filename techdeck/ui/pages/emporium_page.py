@@ -415,13 +415,28 @@ class StoreTile(QFrame):
 class EmporiumPage(QWidget):
     """The redemption-counter scene + the catalog grid, with arcade animation."""
 
-    DIALOGUE = "WOOGY: WHAT'LL IT BE, FELLAS?"
+    DEFAULT_DIALOGUE = "WOOGY: WHAT'LL IT BE, FELLAS?"
+
+    # A little something Woogy says for every item he rings up. Keyed by item id;
+    # falls back to GENERIC_COMMENT for anything not listed.
+    WOOGY_COMMENTS = {
+        "spinner_beyblade":
+            "WOOGY: A BEYBLADE! GO ON, LET IT RIP. I'LL CHEER FROM BACK HERE.",
+        "spinner_shuriken":
+            "WOOGY: A SHURIKEN! SO SHARP, SO COOL. PLEASE DON'T POKE OL' WOOGY.",
+        "steeltube_game":
+            "WOOGY: OOH, MY FAVORITE! 400 HOURS LOGGED AND I STILL STINK AT IT.",
+    }
+    GENERIC_COMMENT = "WOOGY: A FINE PICK! YOU'VE GOT GOOD TASTE, FRIEND."
+
+    DIALOGUE_W = 380        # word-bubble width (px); height is fixed at 78
+    LINES_PER_PAGE = 2      # lines that fit in the bubble before it paginates
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
         self._phase = 0
-        self._reveal = 0
+        self._set_dialogue(self.DEFAULT_DIALOGUE)
         self._neon_bright = True
         self._bg = _load_pixmap("emporium_background.tdart", 128)
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
@@ -479,6 +494,27 @@ class EmporiumPage(QWidget):
         self._timer.timeout.connect(self._tick)
         self.refresh()
 
+    # ---- Woogy's word bubble (paginated typewriter) --------------------------
+    def _set_dialogue(self, text):
+        """Point Woogy's bubble at `text`, wrapped into pages, typed from the top."""
+        self._dialogue = text
+        self._lines = _sf().wrap_lines(text, 3, self.DIALOGUE_W - 28)
+        self._page = 0
+        self._reveal = 0
+
+    def _dialogue_rect(self):
+        return QRect(40, self.height() - 104, self.DIALOGUE_W, 78)
+
+    def _page_lines(self):
+        lpp = self.LINES_PER_PAGE
+        return self._lines[self._page * lpp: self._page * lpp + lpp]
+
+    def _page_chars(self):
+        return sum(len(ln) for ln in self._page_lines())
+
+    def _has_more_pages(self):
+        return (self._page + 1) * self.LINES_PER_PAGE < len(self._lines)
+
     def _set_banner_bright(self, bright):
         self._neon_bright = bright
         self.banner.setPixmap(self._sign_on if bright else self._sign_off)
@@ -495,7 +531,7 @@ class EmporiumPage(QWidget):
     # ---- animation -----------------------------------------------------------
     def showEvent(self, e):
         super().showEvent(e)
-        self._reveal = 0
+        self._set_dialogue(self.DEFAULT_DIALOGUE)
         self._timer.start()
 
     def hideEvent(self, e):
@@ -504,12 +540,25 @@ class EmporiumPage(QWidget):
 
     def _tick(self):
         self._phase += 1
-        if self._reveal < len(self.DIALOGUE):
-            self._reveal = min(len(self.DIALOGUE), self._reveal + 2)
+        page_chars = self._page_chars()
+        if self._reveal < page_chars:
+            self._reveal = min(page_chars, self._reveal + 2)
         bright = random.random() > 0.12
         if bright != self._neon_bright:
             self._set_banner_bright(bright)
         self.update()
+
+    def mousePressEvent(self, e):
+        # Click the bubble to fast-forward the typewriter, then to page through
+        # the rest of Woogy's comment.
+        if self._dialogue_rect().contains(e.position().toPoint()):
+            if self._reveal < self._page_chars():
+                self._reveal = self._page_chars()
+            elif self._has_more_pages():
+                self._page += 1
+                self._reveal = 0
+            self.update()
+        super().mousePressEvent(e)
 
     # ---- purchase / equip ----------------------------------------------------
     def handle_tile_action(self, item):
@@ -522,16 +571,22 @@ class EmporiumPage(QWidget):
                     f"{s.get_tickets()}. Run more apps to earn more!")
                 return
             s.unlock_item(item["id"])
+            grab = (f"Woogy grabs the {item['name']} off the shelf with effort "
+                    "and wobbles back to the counter. He slides it towards you "
+                    "with a huff.")
             if item["kind"] == "spinner":
                 s.set_equipped_spinner(item["id"])
-                msg = (f"Woogy slides {item['name']} across the counter. It's "
-                       "equipped! Pop it with /fidget, or switch in My Stuff.")
+                instr = "It's equipped! Pop it with /fidget, or switch in My Stuff."
             elif item["kind"] == "game":
-                msg = (f"{item['name']} is yours! Find it in your Library "
-                       "(Games) and add it to a kit to play.")
+                instr = ("Find it in your Library (Games) and add it to a kit "
+                         "to play.")
             else:
-                msg = f"Woogy slides {item['name']} across the counter. Enjoy!"
-            PixelDialog.show_message(self, "Sold!", msg)
+                instr = "Enjoy!"
+            PixelDialog.show_message(self, "Sold!", f"{grab} {instr}")
+            # Once the SOLD! box is dismissed, Woogy pipes up in his word bubble
+            # with a comment for this item (paginated + typed from the top).
+            self._set_dialogue(
+                self.WOOGY_COMMENTS.get(item["id"], self.GENERIC_COMMENT))
         elif item["kind"] == "spinner":
             s.set_equipped_spinner(item["id"])
         self.refresh()
@@ -593,13 +648,24 @@ class EmporiumPage(QWidget):
                        QColor("#7ef9ff" if on else "#1a4a52"))
 
     def _draw_dialogue(self, p, w, h):
-        rect = QRect(40, h - 104, 380, 78)
+        rect = self._dialogue_rect()
         # UFO50-style: black box, thick white rounded border, soft drop shadow.
         _draw_bubble(p, rect, self._bubbles["dialogue"], shadow=EMP["shadow"])
-        text_pm = _sf().render_wrapped(self.DIALOGUE[:self._reveal], 3,
-                                       EMP["dialogue_text"], max_width=rect.width() - 28)
+        # Reveal the current page's lines char-by-char (typewriter).
+        lines = self._page_lines()
+        r = self._reveal
+        shown = []
+        for ln in lines:
+            shown.append(ln[:max(0, min(len(ln), r))])
+            r -= len(ln)
+        fully = self._reveal >= self._page_chars()
+        has_more = self._has_more_pages()
+        # When there's more to read, mark it with "..." and the blink-y down arrow.
+        if fully and has_more and shown:
+            shown[-1] = shown[-1] + "..."
+        text_pm = _sf().render_lines(shown or [""], 3, EMP["dialogue_text"])
         p.drawPixmap(rect.x() + 14, rect.y() + 12, text_pm)
-        if self._reveal >= len(self.DIALOGUE) and (self._phase // 3) % 2 == 0:
+        if fully and has_more and (self._phase // 3) % 2 == 0:
             ax, ay = rect.center().x(), rect.bottom() - 12
             tri = QPolygon([QPoint(ax - 5, ay), QPoint(ax + 5, ay), QPoint(ax, ay + 6)])
             p.setBrush(QColor(EMP["neon_on"]))

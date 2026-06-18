@@ -85,9 +85,8 @@ class SpriteFont:
         return pm
 
 
-    def render_wrapped(self, text: str, scale: int = 3, color: str = "#ffffff",
-                       max_width: int = 9999) -> QPixmap:
-        """Render word-wrapped, horizontally-centred lines stacked vertically."""
+    def wrap_lines(self, text: str, scale: int = 3, max_width: int = 9999) -> list:
+        """Word-wrap `text` into a list of lines that each fit within max_width."""
         lines, cur = [], ""
         for word in text.split(" "):
             trial = (cur + " " + word).strip()
@@ -98,6 +97,10 @@ class SpriteFont:
                 cur = word
         if cur:
             lines.append(cur)
+        return lines or [""]
+
+    def render_lines(self, lines, scale: int = 3, color: str = "#ffffff") -> QPixmap:
+        """Render pre-wrapped lines, horizontally-centred and stacked vertically."""
         pms = [self.render(ln, scale, color) for ln in lines] or [self.render("", scale, color)]
         gap = scale
         W = max(p.width() for p in pms)
@@ -111,6 +114,11 @@ class SpriteFont:
             y += pm.height() + gap
         p.end()
         return out
+
+    def render_wrapped(self, text: str, scale: int = 3, color: str = "#ffffff",
+                       max_width: int = 9999) -> QPixmap:
+        """Render word-wrapped, horizontally-centred lines stacked vertically."""
+        return self.render_lines(self.wrap_lines(text, scale, max_width), scale, color)
 
 
 _DEFAULT: SpriteFont | None = None
