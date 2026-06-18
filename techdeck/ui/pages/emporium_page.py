@@ -429,8 +429,21 @@ class EmporiumPage(QWidget):
     }
     GENERIC_COMMENT = "WOOGY: A FINE PICK! YOU'VE GOT GOOD TASTE, FRIEND."
 
-    DIALOGUE_W = 380        # word-bubble width (px); height is fixed at 78
-    LINES_PER_PAGE = 2      # lines that fit in the bubble before it paginates
+    # How Woogy fetches each family of item (the SOLD! box flavor). Keyed by the
+    # item's "kind"; "{name}" is filled in. Falls back to GRAB_DEFAULT.
+    GRAB_DESCRIPTIONS = {
+        "spinner": ("Woogy plucks the {name} from a high shelf, gives it a wary "
+                    "little test-spin that nearly takes his eye out, and sets it "
+                    "down still humming."),
+        "game": ("Woogy heaves the {name} cartridge out of the locked glass case, "
+                 "huffs the dust off it, and slides it over with a proud grin."),
+    }
+    GRAB_DEFAULT = ("Woogy grabs the {name} off the shelf with effort and wobbles "
+                    "back to the counter. He slides it towards you with a huff.")
+
+    DIALOGUE_W = 440        # word-bubble width (px)
+    DIALOGUE_H = 104        # word-bubble height (px)
+    LINES_PER_PAGE = 3      # lines that fit in the bubble before it paginates
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -503,7 +516,8 @@ class EmporiumPage(QWidget):
         self._reveal = 0
 
     def _dialogue_rect(self):
-        return QRect(40, self.height() - 104, self.DIALOGUE_W, 78)
+        return QRect(40, self.height() - (self.DIALOGUE_H + 26),
+                     self.DIALOGUE_W, self.DIALOGUE_H)
 
     def _page_lines(self):
         lpp = self.LINES_PER_PAGE
@@ -571,9 +585,8 @@ class EmporiumPage(QWidget):
                     f"{s.get_tickets()}. Run more apps to earn more!")
                 return
             s.unlock_item(item["id"])
-            grab = (f"Woogy grabs the {item['name']} off the shelf with effort "
-                    "and wobbles back to the counter. He slides it towards you "
-                    "with a huff.")
+            grab = self.GRAB_DESCRIPTIONS.get(item["kind"], self.GRAB_DEFAULT).format(
+                name=item["name"])
             if item["kind"] == "spinner":
                 s.set_equipped_spinner(item["id"])
                 instr = "It's equipped! Pop it with /fidget, or switch in My Stuff."
