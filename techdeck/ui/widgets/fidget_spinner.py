@@ -168,7 +168,7 @@ class FidgetSpinnerWindow(QWidget):
     # BACKWARD (wagon-wheel strobe), and at 90 deg/frame it looks frozen — that's
     # the "locks up and slows down" on rapid clicks. Cap the velocity so a frame
     # never rotates far enough to alias; the spin stays fast but always forward.
-    MAX_VELOCITY = math.radians(40) / FRAME   # ~6.9 rev/s, comfortably under 45/frame
+    MAX_VELOCITY = math.radians(44) / FRAME   # ~7.6 rev/s, just under the 45/frame strobe
 
     def __init__(self, parent=None, variant=None):
         super().__init__(parent)
