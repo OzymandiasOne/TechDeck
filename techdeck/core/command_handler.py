@@ -80,6 +80,7 @@ class CommandHandler:
             '/pause': self._cmd_pause,
             '/resume': self._cmd_resume,
             '/shelve': self._cmd_shelve,
+            '/shelf': self._cmd_shelf,
             '/fidget': self._cmd_fidget,
             '/rave': self._cmd_rave,
             '/jack': self._cmd_jack,
@@ -115,8 +116,8 @@ class CommandHandler:
             "  /pause           - Pause the current run at its input prompt\n"
             "  /resume          - Resume a paused run (or load the shelved one)\n"
             "  /shelve          - Save the rest of the run to disk for later\n"
-            "  /shelve view     - Show what's currently on the shelf\n"
-            "  /shelve clear    - Drop the shelf entry\n"
+            "  /shelf view      - Show what's currently on the shelf\n"
+            "  /shelf clear     - Drop the shelf entry\n"
             "  /roguemode       - Open Rogue Mode focus music player\n"
             "\n"
             "  /fidget          - Pop out a fidget spinner\n"
@@ -177,11 +178,8 @@ class CommandHandler:
         home.resume_run()
 
     def _cmd_shelve(self, args: str):
-        """Single-slot shelve. Subcommands:
-          /shelve         — save the remaining queue (+ shared state) to disk
-          /shelve view    — print the current shelf
-          /shelve clear   — drop the shelf entry
-        """
+        """Save the remaining queue (+ shared state) to disk (single slot).
+        Inspecting/dropping the shelf lives under /shelf (view, clear)."""
         home = self._home_page()
         if home is None:
             self.console.append_error("Home page not available.")
@@ -189,14 +187,35 @@ class CommandHandler:
         sub = args.strip().lower()
         if sub == "":
             home.shelve_run()
-        elif sub == "view":
+        elif sub in ("view", "clear"):
+            self.console.append_error(
+                f"That's now /shelf {sub} (the shelf you inspect, not the verb)."
+            )
+        else:
+            self.console.append_error(
+                f"Unknown /shelve subcommand: '{sub}'. Use /shelve to stash a "
+                f"run, or /shelf view / /shelf clear to inspect the shelf."
+            )
+
+    def _cmd_shelf(self, args: str):
+        """Inspect the single-slot shelf. Subcommands:
+          /shelf view    — print the current shelf
+          /shelf clear   — drop the shelf entry
+        Bare /shelf defaults to view.
+        """
+        home = self._home_page()
+        if home is None:
+            self.console.append_error("Home page not available.")
+            return
+        sub = args.strip().lower()
+        if sub in ("", "view"):
             home.view_shelf()
         elif sub == "clear":
             home.clear_shelf()
         else:
             self.console.append_error(
-                f"Unknown /shelve subcommand: '{sub}'. "
-                f"Use /shelve, /shelve view, or /shelve clear."
+                f"Unknown /shelf subcommand: '{sub}'. Use /shelf view or "
+                f"/shelf clear."
             )
 
     def _home_page(self):

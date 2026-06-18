@@ -1644,7 +1644,7 @@ class HomePage(QWidget, ThemeAware):
         if not available:
             self._console_log(
                 "Shelved plugins are all missing from disk; cannot resume. "
-                "Use /shelve clear to drop the entry."
+                "Use /shelf clear to drop the entry."
             )
             return
         if missing:
