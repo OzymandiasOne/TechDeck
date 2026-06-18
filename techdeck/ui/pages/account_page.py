@@ -139,20 +139,23 @@ class AccountPage(QWidget, ThemeAware):
         # Tabbed: account info + the ticket redemption counter + the locker.
         from techdeck.ui.pages.emporium_page import EmporiumPage
         from techdeck.ui.pages.mystuff_page import MyStuffPage
-        tabs = QTabWidget()
-        tabs.addTab(scroll, "My Account")
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.tabBar().setDrawBase(False)
+        self.tabs.tabBar().setExpanding(False)
+        self.tabs.addTab(scroll, "My Account")
         self.emporium = EmporiumPage(self.settings)
-        tabs.addTab(self.emporium, "Ticket Counter")
+        self.tabs.addTab(self.emporium, "Ticket Counter")
         self.my_stuff = MyStuffPage(self.settings)
-        tabs.addTab(self.my_stuff, "My Stuff")
+        self.tabs.addTab(self.my_stuff, "My Stuff")
         # A purchase on one tab changes ownership/balance the other reflects, so
         # refresh whichever tab is being shown.
-        tabs.currentChanged.connect(self._on_tab_changed)
+        self.tabs.currentChanged.connect(self._on_tab_changed)
 
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.addWidget(tabs)
+        main_layout.addWidget(self.tabs)
 
         # Load initial data
         self._load_user_data()
@@ -163,6 +166,41 @@ class AccountPage(QWidget, ThemeAware):
 
     def apply_theme(self):
         self._apply_status_style()
+        self._style_tabs()
+
+    def _style_tabs(self):
+        """Clearly mark the active tab: inactive tabs use the surface fill +
+        muted text; the selected tab takes the accent colour and an accent
+        underline so it's obvious which page you're on."""
+        if not hasattr(self, "tabs"):
+            return
+        t = self.get_current_palette()
+        self.tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background-color: {t.background};
+            }}
+            QTabBar::tab {{
+                background-color: {t.surface};
+                color: {t.text_secondary};
+                font-weight: bold;
+                padding: 8px 18px;
+                margin-right: 3px;
+                border: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                border-bottom: 3px solid transparent;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {t.background};
+                color: {t.accent};
+                border-bottom: 3px solid {t.accent};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {t.surface_hover};
+                color: {t.text};
+            }}
+        """)
 
     def _apply_status_style(self):
         """Style the 'Active' status label with a green that has real luminance
