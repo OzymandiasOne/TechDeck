@@ -51,6 +51,8 @@ EMP = {
     "buy_dim_text": "#9c8088",
     # purchased/owned look
     "tile_dim": "#6a6488", "sold_band": "#0a060f",
+    # default inset ring that frames every item tile (store + My Stuff)
+    "ring": "#2bb04a",
 }
 
 CATALOG = [
@@ -151,6 +153,38 @@ def _draw_bubble(p, rect, sprite, *, shadow=None, offset=(3, 4), alpha=0.45):
         p.drawPixmap(rect.x() + offset[0], rect.y() + offset[1], sh)
         p.setOpacity(prev)
     p.drawPixmap(rect.x(), rect.y(), pix)
+
+
+def _tile_ring(p, rect, color, inset=4, thick=2):
+    """The crisp inset rectangular ring that frames every item tile (store + My
+    Stuff). Drawn just inside the bubble border for a clean arcade-cabinet look."""
+    x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
+    c = QColor(color)
+    p.fillRect(x + inset, y + inset, w - 2 * inset, thick, c)
+    p.fillRect(x + inset, y + h - inset - thick, w - 2 * inset, thick, c)
+    p.fillRect(x + inset, y + inset, thick, h - 2 * inset, c)
+    p.fillRect(x + w - inset - thick, y + inset, thick, h - 2 * inset, c)
+
+
+def _equipped_badge(p, rect):
+    """The 'this one is equipped' marker: a gold star medallion in the
+    bottom-right corner (clear of the wide action button up top). Distinct from
+    the default tile ring (which now frames every tile)."""
+    cx = rect.x() + rect.width() - 17
+    cy = rect.y() + rect.height() - 17
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(QColor("#0c0a1e"))
+    p.drawEllipse(QPoint(cx, cy), 12, 12)
+    p.setBrush(QColor(EMP["equip"]))
+    p.drawEllipse(QPoint(cx, cy), 10, 10)
+    pts = []
+    for i in range(10):
+        r = 8 if i % 2 == 0 else 3.4
+        a = -math.pi / 2 + i * math.pi / 5
+        pts.append(QPoint(int(round(cx + r * math.cos(a))),
+                          int(round(cy + r * math.sin(a)))))
+    p.setBrush(QColor(EMP["ticket"]))
+    p.drawPolygon(QPolygon(pts))
 
 
 def _marquee(p, rect, phase):
@@ -273,6 +307,7 @@ class StoreTile(QFrame):
         self.item = item
         self.page = page
         self.owned = False
+        self.equipped = False
         self.setFixedSize(self.SIZE, self.HEIGHT)
         self.setStyleSheet("StoreTile { background: transparent; }")
 
@@ -314,8 +349,11 @@ class StoreTile(QFrame):
         p = QPainter(self)
         # Inset so the drop shadow has room — makes the card read as raised,
         # sitting on top of the banner/wall rather than blending into it.
-        _draw_bubble(p, self.rect().adjusted(0, 0, -5, -5),
-                     self.page._bubbles["tile"], shadow=EMP["shadow"])
+        rect = self.rect().adjusted(0, 0, -5, -5)
+        _draw_bubble(p, rect, self.page._bubbles["tile"], shadow=EMP["shadow"])
+        _tile_ring(p, rect, EMP["ring"])
+        if self.equipped:
+            _equipped_badge(p, rect)
         p.end()
 
     def _btn_qss(self, bg, edge):
@@ -334,6 +372,8 @@ class StoreTile(QFrame):
     def refresh(self):
         s = self.page.settings
         self.owned = s.is_unlocked(self.item["id"])
+        self.equipped = (self.owned and self.item["kind"] == "spinner"
+                         and s.get_equipped_spinner() == self.item["id"])
         # icon + name dim when owned
         pm = self._icon_grey if self.owned else self._icon_norm
         if pm is not None:

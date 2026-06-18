@@ -22,6 +22,7 @@ from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.pages.emporium_page import (
     EMP, CATALOG, _draw_bubble, _load_pixmap, _load_art, _trim_v, PixelDialog,
+    _tile_ring, _equipped_badge,
 )
 
 # Default (themed) spinner thumbnail — drawn in EMP colours so the card matches
@@ -102,14 +103,9 @@ class InventoryTile(QFrame):
         p = QPainter(self)
         rect = self.rect().adjusted(0, 0, -5, -5)
         _draw_bubble(p, rect, self.page._bubbles["tile"], shadow=EMP["shadow"])
-        if self.equipped:   # green "active" ring just inside the card
-            x, y, w, h = rect.x(), rect.y(), rect.width(), rect.height()
-            g = QColor(EMP["equip"])
-            for (rx, ry, rw, rh) in ((x + 4, y + 4, w - 8, 2),
-                                     (x + 4, y + h - 6, w - 8, 2),
-                                     (x + 4, y + 4, 2, h - 8),
-                                     (x + w - 6, y + 4, 2, h - 8)):
-                p.fillRect(rx, ry, rw, rh, g)
+        _tile_ring(p, rect, EMP["ring"])     # the ring now frames every tile
+        if self.equipped:                    # equipped -> gold star badge
+            _equipped_badge(p, rect)
         p.end()
 
     def _btn_qss(self, bg, edge):
@@ -245,8 +241,6 @@ class MyStuffPage(QWidget):
         if owned_games:
             self._vbox.addWidget(self._section_header("Games"))
             self._vbox.addWidget(self._grid(owned_games))
-            self._vbox.addWidget(self._hint(
-                "Launch games from the Library (Games family)."))
 
         # Future: a "Friends" section (summoned with /friend) slots in here.
         self._vbox.addStretch(1)
