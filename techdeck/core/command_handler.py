@@ -87,6 +87,7 @@ class CommandHandler:
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
             '/tickets': self._cmd_tickets,
+            '/reset': self._cmd_reset,
         }
 
     def handle_command(self, command_text: str) -> None:
@@ -124,6 +125,7 @@ class CommandHandler:
             "  /jack            - Play blackjack against Sal\n"
             "  /friend          - Summon a little friend\n"
             "  /tickets [N]     - Show/grant Woogy's Emporium tickets (test)\n"
+            "  /reset store     - Clear all Emporium purchases (test)\n"
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -287,13 +289,35 @@ class CommandHandler:
             return
         self._refresh_emporium()
 
+    def _cmd_reset(self, args: str):
+        """`/reset store` wipes all Emporium purchases (unlocked items + equipped
+        spinner, re-locking purchasable plugins). Tickets are left alone. Testing
+        aid for replaying the store."""
+        sub = args.strip().lower()
+        if sub != "store":
+            self.console.append_error("Usage: /reset store")
+            return
+        self.settings.reset_store()
+        self._refresh_emporium()
+        # Re-lock any purchasable plugins (e.g. the game) in the Library too.
+        try:
+            lib = getattr(self.main_window, "library_page", None)
+            if lib is not None:
+                lib.refresh()
+        except Exception:
+            pass
+        self.console.append_game(
+            "🧹 Store reset — all purchases cleared. Tickets untouched.")
+
     def _refresh_emporium(self):
-        """Repaint the Ticket Counter so a balance change shows immediately."""
+        """Repaint the Ticket Counter (and My Stuff) so changes show immediately."""
         mw = self.main_window
         try:
             ap = getattr(mw, "account_page", None)
             if ap is not None and hasattr(ap, "emporium"):
                 ap.emporium.refresh()
+            if ap is not None and hasattr(ap, "my_stuff"):
+                ap.my_stuff.refresh()
         except Exception:
             pass
 

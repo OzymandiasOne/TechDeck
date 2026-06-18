@@ -643,6 +643,14 @@ class SettingsManager:
             self.data.setdefault("settings", {})["unlocked_items"] = items
             self.save()
 
+    def reset_store(self) -> None:
+        """Wipe all Emporium purchases: clear unlocked items + equipped spinner
+        (re-locks purchasable plugins). Tickets are left untouched."""
+        s = self.data.setdefault("settings", {})
+        s["unlocked_items"] = []
+        s["equipped_spinner"] = None
+        self.save()
+
     def get_equipped_spinner(self) -> Optional[str]:
         """Item id of the equipped fidget-spinner skin, or None for default."""
         return self.data.get("settings", {}).get("equipped_spinner")
