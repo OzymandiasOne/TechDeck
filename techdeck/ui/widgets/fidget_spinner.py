@@ -160,8 +160,15 @@ class FidgetSpinnerWindow(QWidget):
 
     WINDOW_SIZE = max(_ART_H, _ART_W) * CELL
 
+    FRAME = 0.016         # seconds per tick (~60fps)
     FRICTION = 0.9985     # per ~60fps frame — low, so a flick keeps it spinning
     CLICK_IMPULSE = 3.0   # radians/sec added per click
+    # The art is 4-fold symmetric, so it looks identical every 90 deg. Once the
+    # per-frame rotation reaches ~45 deg the eye reads each step as going
+    # BACKWARD (wagon-wheel strobe), and at 90 deg/frame it looks frozen — that's
+    # the "locks up and slows down" on rapid clicks. Cap the velocity so a frame
+    # never rotates far enough to alias; the spin stays fast but always forward.
+    MAX_VELOCITY = math.radians(40) / FRAME   # ~6.9 rev/s, comfortably under 45/frame
 
     def __init__(self, parent=None, variant=None):
         super().__init__(parent)
@@ -215,12 +222,14 @@ class FidgetSpinnerWindow(QWidget):
 
     def _tick(self):
         self._velocity *= self.FRICTION
-        self._angle += self._velocity * 0.016  # 16ms frame
+        self._angle += self._velocity * self.FRAME
         self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._velocity += self.CLICK_IMPULSE
+            # Clamp so it never spins fast enough to strobe/alias backward.
+            self._velocity = min(self._velocity + self.CLICK_IMPULSE,
+                                 self.MAX_VELOCITY)
             self._drag_pos = event.globalPosition().toPoint()
 
     def mouseMoveEvent(self, event):
