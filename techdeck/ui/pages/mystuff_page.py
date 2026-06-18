@@ -21,7 +21,7 @@ from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap
 
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.pages.emporium_page import (
-    EMP, CATALOG, _draw_bubble, _load_pixmap, _load_art, _trim_v, PixelDialog,
+    EMP, CATALOG, _draw_bubble, _load_pixmap, _load_art, _trim_v,
     _tile_ring, _equipped_badge,
 )
 
@@ -254,10 +254,6 @@ class MyStuffPage(QWidget):
         self.settings.set_equipped_spinner(item["id"])
         for t in self.tiles:
             t.refresh()
-        name = item["name"]
-        PixelDialog.show_message(
-            self, "Equipped!",
-            f"{name} is now your fidget spinner. Pop it any time with /fidget.")
 
     # ---- background ----------------------------------------------------------
     def paintEvent(self, _evt):
