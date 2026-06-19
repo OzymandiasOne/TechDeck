@@ -498,6 +498,51 @@ class StoreTile(QFrame):
         self.page.handle_tile_action(self.item)
 
 
+class ShopWindow(QFrame):
+    """A floating pixel-art panel inside the Emporium that shows one category's
+    merchandise. It has a top-right X to close, and floats over the scene so it
+    cleanly overlaps Woogy; closing it reveals him again. Drawn as a 9-slice
+    word-bubble so it matches the arcade chrome."""
+
+    def __init__(self, page, content):
+        super().__init__(page)
+        self.page = page
+        self._bubble = _load_art("bubble_dialogue.tdart")
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(20, 16, 20, 18)
+        v.setSpacing(10)
+
+        header = QHBoxLayout()
+        self.title_lbl = QLabel()
+        self.title_lbl.setStyleSheet("background: transparent; border: none;")
+        header.addWidget(self.title_lbl)
+        header.addStretch()
+        self.close_btn = QPushButton()
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setFixedSize(28, 28)
+        xpm = _sf().render("X", 3, EMP["btn_text"])
+        self.close_btn.setIcon(QIcon(xpm)); self.close_btn.setIconSize(xpm.size())
+        self.close_btn.setStyleSheet(
+            f"QPushButton {{ background:{EMP['buy']}; border:2px solid "
+            f"{EMP['buy_lit_edge']}; border-radius:5px; }}")
+        self.close_btn.clicked.connect(page._close_window)
+        header.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        v.addLayout(header)
+        v.addWidget(content, 1)
+        self.hide()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        _draw_bubble(p, self.rect().adjusted(0, 0, -1, -1), self._bubble,
+                     shadow=EMP["shadow"])
+        p.end()
+
+    def set_title(self, text):
+        self.title_lbl.setPixmap(
+            _trim_v(_sf().render(text.upper(), 4, EMP["neon_on"])))
+
+
 class EmporiumPage(QWidget):
     """The redemption-counter scene + the catalog grid, with arcade animation."""
 
@@ -538,7 +583,7 @@ class EmporiumPage(QWidget):
     CATEGORIES = [("friends", "Friends"), ("toys", "Toys"),
                   ("decorations", "Decorations")]
     DEFAULT_CATEGORY = "toys"
-    GRID_COLS = 5
+    GRID_COLS = 4
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -580,8 +625,10 @@ class EmporiumPage(QWidget):
         root.addLayout(bar)
         self._set_banner_bright(True)
 
-        # --- category bar (segmented; sits clear of Woogy, who stays bottom) ----
+        # --- category bar: each button OPENS a floating shop window over the
+        # scene (closable via its X), rather than filtering an inline grid -------
         self._category = self.DEFAULT_CATEGORY
+        self._open_category = None
         cat_bar = QHBoxLayout()
         cat_bar.setSpacing(8)
         self.cat_buttons = {}
@@ -630,10 +677,10 @@ class EmporiumPage(QWidget):
         self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.scroll.viewport().setStyleSheet("background: transparent;")
         self.scroll.setWidget(host)
-        root.addWidget(self.scroll, 1)
+        # The grid/scroll lives inside a floating, closable window over the scene.
+        self.shop_window = ShopWindow(self, self.scroll)
         root.addStretch()
         self._style_category_buttons()
-        self._populate_grid()
 
         self._timer = QTimer(self)
         self._timer.setInterval(120)
@@ -678,22 +725,59 @@ class EmporiumPage(QWidget):
         for t in self.tiles:
             t.refresh()
 
-    # ---- categories ----------------------------------------------------------
+    # ---- categories (each opens a floating window over the scene) -------------
     def _select_category(self, cat_id):
+        # Clicking the already-open category closes its window again (toggle).
+        if self._open_category == cat_id and self.shop_window.isVisible():
+            self._close_window()
+            return
         self._category = cat_id
-        self._style_category_buttons()
+        self._open_category = cat_id
         self._populate_grid()
+        self.shop_window.set_title(dict(self.CATEGORIES)[cat_id])
+        self.shop_window.show()
+        self.shop_window.raise_()
+        self._position_shop_window()
+        self._style_category_buttons()
+
+    def _close_window(self):
+        """Close the shop window, revealing Woogy underneath."""
+        self.shop_window.hide()
+        self._open_category = None
+        self._style_category_buttons()
 
     def _style_category_buttons(self):
-        """The selected category lights up like a BUY button; the rest sit dim."""
+        """The category whose window is open lights up like a BUY button; the
+        rest sit dim. Nothing is lit while the window is closed."""
         for cid, btn in self.cat_buttons.items():
-            sel = (cid == self._category)
+            sel = (cid == self._open_category)
             btn.setChecked(sel)
             bg, edge = ((EMP["buy"], EMP["buy_lit_edge"]) if sel
                         else (EMP["tile_bg"], EMP["neon_off"]))
             btn.setStyleSheet(
                 f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
                 f"border-radius:5px; padding:3px 14px; }}")
+
+    def _position_shop_window(self):
+        """Centre the floating window below the category bar, spanning down over
+        Woogy (it floats on top of him)."""
+        if not self.shop_window.isVisible():
+            return
+        cat_btns = list(self.cat_buttons.values())
+        top = (cat_btns[0].geometry().bottom() if cat_btns else 90) + 12
+        cols = self.GRID_COLS
+        inner_w = cols * StoreTile.SIZE + (cols - 1) * 12
+        ww = min(self.width() - 40, inner_w + 76)
+        # Height fits the content, up to 2 rows (more than that scrolls).
+        n = sum(1 for t in self.tiles if t.item.get("category") == self._category)
+        if n:
+            vis_rows = min(2, math.ceil(n / cols))
+            content_h = vis_rows * StoreTile.HEIGHT + (vis_rows - 1) * 12
+        else:
+            content_h = 80   # just the COMING SOON plate
+        wh = min(self.height() - top - 24, 64 + content_h + 34)
+        x = (self.width() - ww) // 2
+        self.shop_window.setGeometry(x, top, ww, max(200, wh))
 
     def _populate_grid(self):
         """Lay out only the tiles in the active category; an empty category shows
@@ -713,11 +797,9 @@ class EmporiumPage(QWidget):
         self._coming_soon.setVisible(not matching)
 
     def resizeEvent(self, e):
-        # Cap the scrollable merchandise area to the upper portion of the page so
-        # tiles stay clear of Woogy + his dialogue (painted at the bottom).
+        # Keep the floating shop window centred/sized as the page resizes.
         super().resizeEvent(e)
-        if hasattr(self, "scroll"):
-            self.scroll.setMaximumHeight(max(240, int(self.height() * 0.44)))
+        self._position_shop_window()
 
     # ---- animation -----------------------------------------------------------
     def showEvent(self, e):
