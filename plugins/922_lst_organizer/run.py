@@ -371,17 +371,25 @@ def _gather_and_copy(
     _ensure_dir(dest)
     seen_lower: Set[str] = set()  # case-insensitive guard during gather
 
-    order_dirs = sorted(d for d in batch_path.iterdir() if d.is_dir())
+    # Exclude the batch's own system folders so the progress count reflects the
+    # real order folders only (else the denominator is inflated by the always-
+    # present "Batch N - Documentation" and "Repeat Batches" dirs).
+    doc_name = f"batch {batch_num} - documentation"
+    all_dirs = sorted(d for d in batch_path.iterdir() if d.is_dir())
+    order_dirs = []
+    for d in all_dirs:
+        low = d.name.strip().lower()
+        if low == "repeat batches":
+            debug_fp.write(json.dumps({"event": "skip_repeat_batches", "dir": str(d)}) + "\n")
+            continue
+        if low == doc_name:
+            continue
+        order_dirs.append(d)
     total_dirs = len(order_dirs)
     for idx, child in enumerate(order_dirs, 1):
         if cancel_event.is_set():
             break
         name = child.name
-        if name == f"Batch {batch_num} - Documentation":
-            continue
-        if name.strip().lower() == "repeat batches":
-            debug_fp.write(json.dumps({"event": "skip_repeat_batches", "dir": str(child)}) + "\n")
-            continue
         if len(name.split("-")) >= 3:
             orders.add(name)
 

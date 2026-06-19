@@ -264,10 +264,14 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log("Operation cancelled")
         return
 
-    # Collect all order subfolders to process
+    # Collect all order subfolders to process. Exclude the batch's system
+    # folders ("Batch N - Documentation" and "Repeat Batches") so the count
+    # reflects real orders only and we don't warn on a non-order folder.
     subfolders = [
         sub for sub in batch_path.iterdir()
-        if sub.is_dir() and not sub.name.endswith("- Documentation")
+        if sub.is_dir()
+        and not sub.name.endswith("- Documentation")
+        and sub.name.strip().casefold() != "repeat batches"
     ]
 
     total = len(subfolders)
