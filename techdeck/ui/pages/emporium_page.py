@@ -23,7 +23,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QFrame, QDialog,
+    QFrame, QDialog, QScrollArea,
 )
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap, QImage
@@ -55,12 +55,15 @@ EMP = {
     "ring": "#2bb04a",
 }
 
+# Every item carries a "category" so the store can group merchandise. New items
+# just append here with a category and flow into the right tab automatically.
+# Categories with no items render a "COMING SOON" plate (see EmporiumPage.CATEGORIES).
 CATALOG = [
-    {"id": "spinner_beyblade", "name": "Beyblade",
+    {"id": "spinner_beyblade", "name": "Beyblade", "category": "toys",
      "sprite": "spinner_beyblade.tdart", "cost": 60, "kind": "spinner"},
-    {"id": "spinner_shuriken", "name": "Shuriken",
+    {"id": "spinner_shuriken", "name": "Shuriken", "category": "toys",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
-    {"id": "steeltube_game", "name": "ASA: The Video Game",
+    {"id": "steeltube_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
 ]
 
@@ -445,6 +448,15 @@ class EmporiumPage(QWidget):
     DIALOGUE_H = 104        # word-bubble height (px)
     LINES_PER_PAGE = 3      # lines that fit in the bubble before it paginates
 
+    # Store categories (id, label), shown as a segmented bar above the grid. Each
+    # CATALOG item's "category" routes it to one of these. Empty ones show
+    # "COMING SOON". Default to a category that actually has stock so the store
+    # isn't empty on open.
+    CATEGORIES = [("friends", "Friends"), ("toys", "Toys"),
+                  ("decorations", "Decorations")]
+    DEFAULT_CATEGORY = "toys"
+    GRID_COLS = 5
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
@@ -485,22 +497,60 @@ class EmporiumPage(QWidget):
         root.addLayout(bar)
         self._set_banner_bright(True)
 
-        grid_host = QWidget()
-        grid_host.setStyleSheet("background: transparent;")
-        self.grid = QGridLayout(grid_host)
+        # --- category bar (segmented; sits clear of Woogy, who stays bottom) ----
+        self._category = self.DEFAULT_CATEGORY
+        cat_bar = QHBoxLayout()
+        cat_bar.setSpacing(8)
+        self.cat_buttons = {}
+        for cat_id, label in self.CATEGORIES:
+            btn = QPushButton()
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setCheckable(True)
+            btn.setFixedHeight(28)
+            pm = _sf().render(label.upper(), 2, EMP["btn_text"])
+            btn.setIcon(QIcon(pm)); btn.setIconSize(pm.size()); btn.setText("")
+            btn.clicked.connect(lambda _=False, c=cat_id: self._select_category(c))
+            self.cat_buttons[cat_id] = btn
+            cat_bar.addWidget(btn)
+        cat_bar.addStretch()
+        root.addLayout(cat_bar)
+
+        # --- merchandise grid, in a vertical scroll area (the "scroll wheel") ---
+        self.tiles = [StoreTile(item, self) for item in CATALOG]
+        self.grid_host = QWidget()
+        self.grid_host.setStyleSheet("background: transparent;")
+        self.grid = QGridLayout(self.grid_host)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setHorizontalSpacing(12)
         self.grid.setVerticalSpacing(12)
-        self.tiles = []
-        cols = 5
-        for i, item in enumerate(CATALOG):
-            tile = StoreTile(item, self)
-            self.tiles.append(tile)
-            self.grid.addWidget(tile, i // cols, i % cols,
-                                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.grid.setColumnStretch(cols, 1)
-        root.addWidget(grid_host, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._coming_soon = QLabel()
+        self._coming_soon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._coming_soon.setStyleSheet("background: transparent; border: none;")
+        self._coming_soon.setPixmap(_trim_v(_sf().render("COMING SOON", 4, EMP["neon_off"])))
+        self._coming_soon.hide()
+
+        host = QWidget()
+        host.setStyleSheet("background: transparent;")
+        host_v = QVBoxLayout(host)
+        host_v.setContentsMargins(0, 0, 0, 0)
+        host_v.setSpacing(0)
+        host_v.addSpacing(8)
+        host_v.addWidget(self._coming_soon, 0, Qt.AlignmentFlag.AlignHCenter)
+        host_v.addWidget(self.grid_host, 0, Qt.AlignmentFlag.AlignTop)
+        host_v.addStretch()
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.scroll.viewport().setStyleSheet("background: transparent;")
+        self.scroll.setWidget(host)
+        root.addWidget(self.scroll, 1)
         root.addStretch()
+        self._style_category_buttons()
+        self._populate_grid()
 
         self._timer = QTimer(self)
         self._timer.setInterval(120)
@@ -544,6 +594,47 @@ class EmporiumPage(QWidget):
         self.balance_lbl.setPixmap(bal)
         for t in self.tiles:
             t.refresh()
+
+    # ---- categories ----------------------------------------------------------
+    def _select_category(self, cat_id):
+        self._category = cat_id
+        self._style_category_buttons()
+        self._populate_grid()
+
+    def _style_category_buttons(self):
+        """The selected category lights up like a BUY button; the rest sit dim."""
+        for cid, btn in self.cat_buttons.items():
+            sel = (cid == self._category)
+            btn.setChecked(sel)
+            bg, edge = ((EMP["buy"], EMP["buy_lit_edge"]) if sel
+                        else (EMP["tile_bg"], EMP["neon_off"]))
+            btn.setStyleSheet(
+                f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
+                f"border-radius:5px; padding:3px 14px; }}")
+
+    def _populate_grid(self):
+        """Lay out only the tiles in the active category; an empty category shows
+        the COMING SOON plate instead."""
+        for t in self.tiles:
+            self.grid.removeWidget(t)
+            t.hide()
+        matching = [t for t in self.tiles
+                    if t.item.get("category") == self._category]
+        cols = self.GRID_COLS
+        for i, t in enumerate(matching):
+            self.grid.addWidget(t, i // cols, i % cols,
+                                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            t.show()
+        self.grid.setColumnStretch(cols, 1)
+        self.grid_host.setVisible(bool(matching))
+        self._coming_soon.setVisible(not matching)
+
+    def resizeEvent(self, e):
+        # Cap the scrollable merchandise area to the upper portion of the page so
+        # tiles stay clear of Woogy + his dialogue (painted at the bottom).
+        super().resizeEvent(e)
+        if hasattr(self, "scroll"):
+            self.scroll.setMaximumHeight(max(240, int(self.height() * 0.44)))
 
     # ---- animation -----------------------------------------------------------
     def showEvent(self, e):
