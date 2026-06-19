@@ -118,7 +118,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     
     # === ASK FOR BATCH FOLDER NAME ===
     log("Input required from user...")
-    batch_name_input = get_console_input(
+    batch_name_input = sdk.request_batch_number(
         params,
         "Enter batch number or full folder name (e.g., '429' or 'Batch 429')"
     )

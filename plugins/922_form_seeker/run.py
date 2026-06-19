@@ -439,12 +439,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log("Starting 922 FormingFinder...")
     progress_callback(0)
 
-    if console and hasattr(console, 'request_input'):
-        raw = console.request_input(
-            'Enter batch number (e.g. "473", "Batch 473", "PO #473"):'
-        )
-    else:
-        raw = input('Enter batch number: ')
+    raw = sdk.request_batch_number(
+        params, 'Enter batch number (e.g. "473", "Batch 473", "PO #473"):'
+    )
 
     batch_no = sdk.parse_922_batch(raw or '')
     if not batch_no:

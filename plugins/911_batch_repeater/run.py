@@ -214,12 +214,9 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     # Step 1 - Prompt for batch number
     # ------------------------------------------------------------------ #
-    if console is not None:
-        batch_number = console.request_input(
-            "Enter Batch Number (e.g. V072, S045):"
-        ).strip().upper()
-    else:
-        batch_number = input("Enter Batch Number (e.g. V072, S045): ").strip().upper()
+    batch_number = sdk.request_batch_number(
+        params, "Enter Batch Number (e.g. V072, S045):"
+    ).strip().upper()
 
     if not batch_number:
         log("No batch number entered - aborting.")

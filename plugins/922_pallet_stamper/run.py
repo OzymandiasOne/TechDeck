@@ -207,8 +207,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log("Verify OneDrive is synced, or set Base Directory in plugin settings.")
         raise ValueError("922 QTDR Production Packages root not found")
 
-    # Prompt for batch number via console
-    raw_input = get_console_input(
+    # Prompt for batch number via console (family-shared cache aware)
+    raw_input = sdk.request_batch_number(
         params,
         'Enter batch number (e.g. "401", "Batch 401", "PO 401"):'
     )

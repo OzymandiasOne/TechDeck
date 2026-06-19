@@ -1214,7 +1214,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     console = params.get("console")
     if console and hasattr(console, "request_input"):
-        raw = console.request_input("Enter Batch Number (e.g. V060, V086):")
+        raw = sdk.request_batch_number(params, "Enter Batch Number (e.g. V060, V086):")
     else:
         raw = params.get("batch_number", "")
 
