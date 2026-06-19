@@ -1425,8 +1425,16 @@ class HomePage(QWidget, ThemeAware):
                 "[SHELF] Run finished before any plugin remained — nothing to save."
             )
 
-        # Kick off the next plugin; if nothing started, the whole run is done
-        started_another = self._start_next_plugin()
+        # Kick off the next plugin; if nothing started, the whole run is done.
+        # _plugins_all_done is the ONLY thing that stops the shell's run spinner
+        # (see _check_run_complete), so an exception while starting the next
+        # plugin must never skip the terminal emit — otherwise the spinner spins
+        # forever after the run is effectively over.
+        try:
+            started_another = self._start_next_plugin()
+        except Exception as exc:
+            self._console_log(f"[ERROR] Could not start the next plugin: {exc}")
+            started_another = False
         if not started_another:
             self._plugins_all_done.emit()
 

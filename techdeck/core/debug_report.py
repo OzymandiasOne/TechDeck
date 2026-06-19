@@ -321,6 +321,34 @@ def _collect_ui_probe(main_window) -> list[str]:
     console = getattr(main_window, "console", None)
     if console is not None:
         lines.append(f"Console: waiting_for_input={getattr(console, 'waiting_for_input', '?')}")
+
+    # Run-spinner state (the "Simmering..." console busy indicator). Only
+    # _on_all_plugins_done stops it, so if the timer is still active while no
+    # plugin is running and the run isn't paused, the spinner is stranded.
+    timer = getattr(main_window, "_plugin_spinner_timer", None)
+    if timer is not None:
+        try:
+            timer_active = timer.isActive()
+            phase = getattr(main_window, "_spinner_phase", "?")
+            label = getattr(console, "_spinner_label", None) if console is not None else None
+            label_visible = label.isVisible() if label is not None else "?"
+            label_text = label.text() if label is not None else "?"
+            lines.append(f"Run spinner: timer_active={timer_active}, "
+                         f"phase={phase}, label_visible={label_visible}")
+            lines.append(f"  label_text={label_text!r}")
+            active = []
+            if executor is not None:
+                try:
+                    active = executor.get_active_plugins()
+                except Exception:
+                    active = []
+            paused = bool(getattr(home, "_paused", False)) if home is not None else False
+            if timer_active and not active and not paused:
+                lines.append("  WARNING: run spinner is ACTIVE but no plugin is "
+                             "running and the run is not paused - spinner stranded "
+                             "(all_plugins_done never reached the shell)")
+        except Exception as exc:
+            lines.append(f"Run spinner probe failed: {exc}")
     return lines
 
 
