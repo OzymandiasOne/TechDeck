@@ -33,6 +33,11 @@ Checks (E = error, fails the build; W = warning):
           (Qt submodules are independent binaries - QtCharts lesson)
         - other third-party: the top-level package must be reachable or listed
   E7  TechDeck.spec datas must include ('plugins','plugins') and ('assets','assets')
+  E8  a batch-number prompt must go through sdk.request_batch_number (the
+      family-shared cache), never raw input()/console.request_input/
+      get_console_input - otherwise the next same-family plugin in a multi-run
+      re-prompts instead of reusing the answer (bit FormingFinder->Kitting,
+      v0.8.6.3). Escape hatch for a deliberately non-shared prompt: request_text.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -64,6 +69,61 @@ SUBMODULE_STRICT = {"PySide6", "PyQt5", "PyQt6"}
 GUI_TOPLEVELS = {"PySide6", "PyQt5", "PyQt6"}
 
 USER_PATH_RE = re.compile(r"[A-Za-z]:\\+Users\\+(?!Public)[A-Za-z0-9_.\- ]+", re.IGNORECASE)
+
+# A prompt asking for a batch number must use sdk.request_batch_number so the
+# answer populates the family-shared cache (E8). These are the bypass call
+# targets; request_batch_number / request_text are intentionally NOT here.
+BATCH_BYPASS_CALLS = {"input", "request_input", "get_console_input"}
+BATCH_PROMPT_RE = re.compile(r"batch\s*number", re.IGNORECASE)
+
+
+def _is_main_guard(node: ast.AST) -> bool:
+    """True for an `if __name__ == "__main__":` statement."""
+    if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+        return False
+    left = node.test.left
+    return isinstance(left, ast.Name) and left.id == "__name__"
+
+
+def _iter_calls_skipping_main(tree: ast.AST):
+    """Yield Call nodes, but prune `if __name__ == '__main__'` subtrees.
+
+    Those blocks are standalone-test harnesses that legitimately use raw
+    input(); only the real plugin flow (run() and its helpers) must use the SDK.
+    """
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        if _is_main_guard(node):
+            continue  # skip the whole test-harness block
+        if isinstance(node, ast.Call):
+            yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def find_bypassed_batch_prompts(tree: ast.AST) -> list[str]:
+    """Return prompt strings for batch-number prompts that bypass the SDK.
+
+    Flags a call to input()/console.request_input()/get_console_input() whose
+    string arguments mention a "batch number" - those should route through
+    sdk.request_batch_number for family-shared caching.
+    """
+    hits: list[str] = []
+    for node in _iter_calls_skipping_main(tree):
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            name = func.attr
+        elif isinstance(func, ast.Name):
+            name = func.id
+        else:
+            continue
+        if name not in BATCH_BYPASS_CALLS:
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
+                    and BATCH_PROMPT_RE.search(arg.value):
+                hits.append(arg.value)
+    return hits
 
 
 def stdlib_names() -> set[str]:
@@ -273,10 +333,20 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
 
         # --- syntax (E4)
         try:
-            compile(py_file.read_text(encoding="utf-8"), str(py_file), "exec")
+            src = py_file.read_text(encoding="utf-8")
+            tree = compile(src, str(py_file), "exec", ast.PyCF_ONLY_AST)
         except SyntaxError as exc:
             errors.append(f"{pid}: {rel} does not compile: {exc}")
             continue
+
+        # --- batch prompt must use the SDK (E8)
+        for prompt in find_bypassed_batch_prompts(tree):
+            errors.append(
+                f"{pid}: {rel} prompts for a batch number ({prompt!r}) via raw "
+                f"input/request_input - use sdk.request_batch_number so the "
+                f"answer is reused by same-family plugins in a multi-run "
+                f"(use sdk.request_text if a non-shared prompt is intended)"
+            )
 
         fp, tp, rel_count = extract_imports(py_file, "", module_map)
 
