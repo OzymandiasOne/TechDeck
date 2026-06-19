@@ -87,6 +87,8 @@ class GardenScene(QWidget):
         # transparent corners). Equippable; defaults to sLibraryBG_4.
         self._bg_name = None
         self._background = None
+        self._bg_scaled = None        # cache: wallpaper pre-scaled to the blit factor
+        self._bg_scaled_key = None
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
@@ -164,11 +166,11 @@ class GardenScene(QWidget):
     # ---- rendering -----------------------------------------------------------
     def _compose_native(self) -> QPixmap:
         """Draw every layer at native 384x216 into one buffer."""
+        # Transparent base: the island's see-through corners let the tiled
+        # wallpaper (painted across the whole widget in paintEvent) show through.
         buf = QPixmap(NATIVE_W, NATIVE_H)
-        buf.fill(QColor("#1b1b2a"))
+        buf.fill(Qt.GlobalColor.transparent)
         p = QPainter(buf)
-        if self._background is not None:
-            p.drawPixmap(0, 0, self._background)
         if self._bg is not None:
             p.drawPixmap(0, 0, self._bg)
         if 0 <= self._tree_stage < len(self._tree) and self._tree[self._tree_stage]:
@@ -185,15 +187,38 @@ class GardenScene(QWidget):
         p.end()
         return buf
 
+    def _scaled_background(self, scale):
+        """Wallpaper pre-scaled by the blit factor (nearest-neighbour), cached.
+        Used as the repeating tile that fills the whole window."""
+        if self._background is None:
+            return None
+        key = (self._bg_name, scale)
+        if self._bg_scaled_key != key:
+            self._bg_scaled = self._background.scaled(
+                self._background.width() * scale, self._background.height() * scale,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.FastTransformation)
+            self._bg_scaled_key = key
+        return self._bg_scaled
+
     def paintEvent(self, _e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#12121c"))
         # Largest integer scale that fits, centred.
         self._scale = max(1, min(self.width() // NATIVE_W, self.height() // NATIVE_H))
         dw, dh = NATIVE_W * self._scale, NATIVE_H * self._scale
         self._origin = QPoint((self.width() - dw) // 2, (self.height() - dh) // 2)
         # Pixel-perfect: no smoothing.
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        # Tile the wallpaper across the ENTIRE window (it repeats behind the
+        # diorama and shows through the island's transparent corners), aligned so
+        # a tile boundary lands on the diorama origin.
+        tile = self._scaled_background(self._scale)
+        if tile is not None and tile.width() > 0 and tile.height() > 0:
+            sx = (-self._origin.x()) % tile.width()
+            sy = (-self._origin.y()) % tile.height()
+            p.drawTiledPixmap(self.rect(), tile, QPoint(sx, sy))
+        else:
+            p.fillRect(self.rect(), QColor("#12121c"))
         p.drawPixmap(QRect(self._origin.x(), self._origin.y(), dw, dh),
                      self._compose_native())
         p.end()
