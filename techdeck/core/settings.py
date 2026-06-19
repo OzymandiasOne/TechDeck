@@ -645,10 +645,12 @@ class SettingsManager:
 
     def reset_store(self) -> None:
         """Wipe all Emporium purchases: clear unlocked items + equipped spinner
-        (re-locks purchasable plugins). Tickets are left untouched."""
+        + equipped background (re-locks purchasable plugins, reverts the My House
+        wallpaper to default). Tickets are left untouched."""
         s = self.data.setdefault("settings", {})
         s["unlocked_items"] = []
         s["equipped_spinner"] = None
+        s["equipped_background"] = None
         self.save()
 
     def get_equipped_spinner(self) -> Optional[str]:
@@ -657,6 +659,19 @@ class SettingsManager:
 
     def set_equipped_spinner(self, item_id: Optional[str]) -> None:
         self.data.setdefault("settings", {})["equipped_spinner"] = item_id
+        self.save()
+
+    # The My House / Garden background wallpaper. Stored as the sprite FILENAME
+    # (matches the catalog item's "sprite"); defaults to the red-check backdrop.
+    DEFAULT_BACKGROUND = "sLibraryBG_4.png"
+
+    def get_equipped_background(self) -> str:
+        """Filename of the equipped My House background; defaults to sLibraryBG_4."""
+        return (self.data.get("settings", {}).get("equipped_background")
+                or self.DEFAULT_BACKGROUND)
+
+    def set_equipped_background(self, name: Optional[str]) -> None:
+        self.data.setdefault("settings", {})["equipped_background"] = name
         self.save()
 
     # ========== Shelf (Phase D — single-slot snapshot of a paused/queued run) ==========

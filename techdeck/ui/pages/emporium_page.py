@@ -38,6 +38,12 @@ def _sprites_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "assets" / "sprites"
 
 
+def _garden_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / "assets" / "garden"
+    return Path(__file__).resolve().parents[3] / "assets" / "garden"
+
+
 EMP = {
     "panel": "#2a1644", "neon_on": "#7ef9ff", "neon_off": "#2b6b73",
     "frame_a": "#37c9da", "frame_b": "#cf3597", "ticket": "#f4c430",
@@ -65,10 +71,79 @@ CATALOG = [
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
     {"id": "steeltube_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
+
+    # --- Decorations: furniture for My House (kind "furniture"; PNG sprites). ---
+    # Bought items are recorded as owned; placement into rooms is the next pass.
+    {"id": "deco_rug", "name": "Rug", "category": "decorations",
+     "sprite": "sPet_ItemRug_0.png", "cost": 25, "kind": "furniture"},
+    {"id": "deco_plant", "name": "Plant", "category": "decorations",
+     "sprite": "sPet_ItemPlant_0.png", "cost": 25, "kind": "furniture"},
+    {"id": "deco_lamp", "name": "Lamp", "category": "decorations",
+     "sprite": "sPet_ItemLamp_0.png", "cost": 25, "kind": "furniture"},
+    {"id": "deco_toilet", "name": "Toilet", "category": "decorations",
+     "sprite": "sPet_ItemToilet_0.png", "cost": 30, "kind": "furniture"},
+    {"id": "deco_mirror", "name": "Mirror", "category": "decorations",
+     "sprite": "sPet_ItemMirror_0.png", "cost": 30, "kind": "furniture"},
+    {"id": "deco_hatrack", "name": "Hat Rack", "category": "decorations",
+     "sprite": "sPet_ItemHatrack_0.png", "cost": 30, "kind": "furniture"},
+    {"id": "deco_phone", "name": "Telephone", "category": "decorations",
+     "sprite": "sPet_ItemPhone_0.png", "cost": 35, "kind": "furniture"},
+    {"id": "deco_painting", "name": "Painting", "category": "decorations",
+     "sprite": "sPet_ItemPainting_0.png", "cost": 35, "kind": "furniture"},
+    {"id": "deco_couch", "name": "Couch", "category": "decorations",
+     "sprite": "sPet_ItemCouch_0.png", "cost": 40, "kind": "furniture"},
+    {"id": "deco_books", "name": "Bookshelf", "category": "decorations",
+     "sprite": "sPet_ItemBooks_0.png", "cost": 40, "kind": "furniture"},
+    {"id": "deco_desk", "name": "Desk", "category": "decorations",
+     "sprite": "sPet_ItemDesk_0.png", "cost": 45, "kind": "furniture"},
+    {"id": "deco_tub", "name": "Bathtub", "category": "decorations",
+     "sprite": "sPet_ItemTub_0.png", "cost": 45, "kind": "furniture"},
+    {"id": "deco_bed", "name": "Bed", "category": "decorations",
+     "sprite": "sPet_ItemBed_0.png", "cost": 50, "kind": "furniture"},
+    {"id": "deco_guitar", "name": "Guitar", "category": "decorations",
+     "sprite": "sPet_ItemGuitar_0.png", "cost": 50, "kind": "furniture"},
+    {"id": "deco_fridge", "name": "Fridge", "category": "decorations",
+     "sprite": "sPet_ItemFridge_0.png", "cost": 55, "kind": "furniture"},
+    {"id": "deco_stove", "name": "Stove", "category": "decorations",
+     "sprite": "sPet_ItemStove_0.png", "cost": 55, "kind": "furniture"},
+    {"id": "deco_tv", "name": "TV", "category": "decorations",
+     "sprite": "sPet_ItemTV_0.png", "cost": 60, "kind": "furniture"},
+    {"id": "deco_telescope", "name": "Telescope", "category": "decorations",
+     "sprite": "sPet_ItemTelescope_0.png", "cost": 70, "kind": "furniture"},
+    {"id": "deco_hottub", "name": "Hot Tub", "category": "decorations",
+     "sprite": "sPet_ItemHotTub_0.png", "cost": 80, "kind": "furniture"},
+    {"id": "deco_trophy", "name": "Trophy", "category": "decorations",
+     "sprite": "sPet_ItemTrophy_0.png", "cost": 100, "kind": "furniture"},
+
+    # --- Decorations: backgrounds (equippable My House wallpaper). sLibraryBG_4
+    # is the free default; these are the alternates. Equip by buying / re-clicking.
+    {"id": "bg_blue_stripes", "name": "Blue Stripes", "category": "decorations",
+     "sprite": "sLibraryBG_5.png", "cost": 60, "kind": "background"},
+    {"id": "bg_gold_stripes", "name": "Gold Stripes", "category": "decorations",
+     "sprite": "sLibraryBG_6.png", "cost": 60, "kind": "background"},
+    {"id": "bg_starry_night", "name": "Starry Night", "category": "decorations",
+     "sprite": "sLibraryBG_7.png", "cost": 90, "kind": "background"},
+    {"id": "bg_fireworks", "name": "Fireworks", "category": "decorations",
+     "sprite": "sLibraryBG_8.png", "cost": 120, "kind": "background"},
+    {"id": "bg_bubblegum", "name": "Bubblegum", "category": "decorations",
+     "sprite": "sLibraryBG_9.png", "cost": 90, "kind": "background"},
 ]
 
 
 def _load_pixmap(name: str, target: int):
+    # PNG sprites (Garden furniture + backgrounds) load straight from assets/garden;
+    # .tdart sprites go through pixel_art.
+    if name.lower().endswith(".png"):
+        pm = QPixmap(str(_garden_dir() / name))
+        if pm.isNull():
+            return None
+        w, h = pm.width(), pm.height()
+        if max(w, h) >= 200:   # a full 384x216 background -> small thumbnail swatch
+            return pm.scaledToWidth(112, Qt.TransformationMode.SmoothTransformation)
+        scale = max(1, round(target / max(w, h, 1)))   # tiny furniture -> upscale crisp
+        return pm.scaled(w * scale, h * scale,
+                         Qt.AspectRatioMode.IgnoreAspectRatio,
+                         Qt.TransformationMode.FastTransformation)
     try:
         data = pixel_art.load(_sprites_dir() / name)
     except Exception:
@@ -372,11 +447,19 @@ class StoreTile(QFrame):
         self.action_btn.setEnabled(enabled)
         self.action_btn.setStyleSheet(self._btn_qss(bg, edge))
 
+    def _is_equipped(self, s):
+        """Is this item the currently-equipped one (spinners + backgrounds)?"""
+        k = self.item["kind"]
+        if k == "spinner":
+            return s.get_equipped_spinner() == self.item["id"]
+        if k == "background":
+            return s.get_equipped_background() == self.item["sprite"]
+        return False
+
     def refresh(self):
         s = self.page.settings
         self.owned = s.is_unlocked(self.item["id"])
-        self.equipped = (self.owned and self.item["kind"] == "spinner"
-                         and s.get_equipped_spinner() == self.item["id"])
+        self.equipped = self.owned and self._is_equipped(s)
         # icon + name dim when owned
         pm = self._icon_grey if self.owned else self._icon_norm
         if pm is not None:
@@ -394,9 +477,8 @@ class StoreTile(QFrame):
             else:            # dim until you can afford it
                 self._set_btn(label, EMP["buy_dim"], EMP["buy_dim_edge"], True,
                               text=EMP["buy_dim_text"])
-        elif self.item["kind"] == "spinner":
-            equipped = s.get_equipped_spinner() == self.item["id"]
-            self._set_btn("EQUIPPED" if equipped else "EQUIP",
+        elif self.item["kind"] in ("spinner", "background"):
+            self._set_btn("EQUIPPED" if self.equipped else "EQUIP",
                           EMP["owned"], EMP["owned"], False)
         else:
             self._set_btn("OWNED", EMP["owned"], EMP["owned"], False)
@@ -406,8 +488,9 @@ class StoreTile(QFrame):
         self.update()
 
     def mousePressEvent(self, e):
-        # Owned spinners stay equippable: clicking the SOLD tile (re)equips it.
-        if self.owned and self.item["kind"] == "spinner":
+        # Owned spinners/backgrounds stay equippable: clicking the SOLD tile
+        # (re)equips it.
+        if self.owned and self.item["kind"] in ("spinner", "background"):
             self.page.handle_tile_action(self.item)
         super().mousePressEvent(e)
 
@@ -684,6 +767,13 @@ class EmporiumPage(QWidget):
             if item["kind"] == "spinner":
                 s.set_equipped_spinner(item["id"])
                 instr = "It's equipped! Pop it with /fidget, or switch in My Stuff."
+            elif item["kind"] == "background":
+                s.set_equipped_background(item["sprite"])
+                instr = ("It's now your My House wallpaper! Re-click any owned "
+                         "background here to switch.")
+            elif item["kind"] == "furniture":
+                instr = ("It's added to your collection - arranging furniture in "
+                         "your house is coming soon.")
             elif item["kind"] == "game":
                 instr = ("Find it in your Library (Games) and add it to a kit "
                          "to play.")
@@ -696,6 +786,8 @@ class EmporiumPage(QWidget):
                 self.WOOGY_COMMENTS.get(item["id"], self.GENERIC_COMMENT))
         elif item["kind"] == "spinner":
             s.set_equipped_spinner(item["id"])
+        elif item["kind"] == "background":
+            s.set_equipped_background(item["sprite"])
         self.refresh()
 
     # ---- the pixel-art scene -------------------------------------------------

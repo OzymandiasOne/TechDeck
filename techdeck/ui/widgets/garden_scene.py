@@ -83,6 +83,11 @@ class GardenScene(QWidget):
         d = _garden_dir()
         self._bg = self._load(d / "sPet_BG_0.png")
         self._facade = self._load(d / "sPet_HouseFG_0.png")
+        # The wallpaper behind the floating yard/house island (shows through BG_0's
+        # transparent corners). Equippable; defaults to sLibraryBG_4.
+        self._bg_name = None
+        self._background = None
+        self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
         self._furniture = [(self._load(d / name), x, y) for name, x, y in FURNITURE]
@@ -105,6 +110,17 @@ class GardenScene(QWidget):
     def _load(path: Path):
         pm = QPixmap(str(path))
         return None if pm.isNull() else pm
+
+    def _load_background(self) -> bool:
+        """(Re)load the equipped wallpaper. Returns True if it changed."""
+        name = "sLibraryBG_4.png"
+        if self.settings is not None and hasattr(self.settings, "get_equipped_background"):
+            name = self.settings.get_equipped_background()
+        if name == self._bg_name:
+            return False
+        self._bg_name = name
+        self._background = self._load(_garden_dir() / name)
+        return True
 
     # ---- lifecycle (only animate while the tab is visible) -------------------
     def showEvent(self, e):
@@ -151,6 +167,8 @@ class GardenScene(QWidget):
         buf = QPixmap(NATIVE_W, NATIVE_H)
         buf.fill(QColor("#1b1b2a"))
         p = QPainter(buf)
+        if self._background is not None:
+            p.drawPixmap(0, 0, self._background)
         if self._bg is not None:
             p.drawPixmap(0, 0, self._bg)
         if 0 <= self._tree_stage < len(self._tree) and self._tree[self._tree_stage]:
@@ -181,5 +199,6 @@ class GardenScene(QWidget):
         p.end()
 
     def refresh(self):
-        """Re-read owned furniture etc. (placeholder until purchase-driven)."""
+        """Re-read the equipped wallpaper (+ owned furniture, once purchase-driven)."""
+        self._load_background()
         self.update()
