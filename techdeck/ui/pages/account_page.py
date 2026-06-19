@@ -139,6 +139,7 @@ class AccountPage(QWidget, ThemeAware):
         # Tabbed: account info + the ticket redemption counter + the locker.
         from techdeck.ui.pages.emporium_page import EmporiumPage
         from techdeck.ui.pages.mystuff_page import MyStuffPage
+        from techdeck.ui.widgets.garden_scene import GardenScene
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.tabBar().setDrawBase(False)
@@ -148,6 +149,8 @@ class AccountPage(QWidget, ThemeAware):
         self.tabs.addTab(self.emporium, "Ticket Counter")
         self.my_stuff = MyStuffPage(self.settings)
         self.tabs.addTab(self.my_stuff, "My Stuff")
+        self.my_house = GardenScene(self.settings)
+        self.tabs.addTab(self.my_house, "My House")
         # A purchase on one tab changes ownership/balance the other reflects, so
         # refresh whichever tab is being shown.
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -272,6 +275,8 @@ class AccountPage(QWidget, ThemeAware):
             self.emporium.refresh()
         if hasattr(self, "my_stuff"):
             self.my_stuff.refresh()
+        if hasattr(self, "my_house"):
+            self.my_house.refresh()
 
     def refresh(self):
         """Refresh the page data."""
@@ -280,3 +285,5 @@ class AccountPage(QWidget, ThemeAware):
             self.emporium.refresh()
         if hasattr(self, "my_stuff"):
             self.my_stuff.refresh()
+        if hasattr(self, "my_house"):
+            self.my_house.refresh()
