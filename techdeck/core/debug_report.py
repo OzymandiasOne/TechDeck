@@ -16,6 +16,10 @@ blind at least once:
   Plugin validation   - does every installed plugin load ON THIS MACHINE?
                         (the v0.8.6 plugin_window missing-hiddenimport class)
   Import probe        - is every critical module present in this frozen bundle?
+  Connectivity        - can THIS machine reach a cloud MQTT broker? Seeds the
+                        "who's online + nudge" firewall question per-machine,
+                        since colleagues can't run a probe script themselves —
+                        only the exe. 8883=native MQTT, 8884=WSS fallback.
   Settings snapshot   - kits, sort modes, per-app directory overrides
   Log tails           - plugin_runs.log (run history, tick-guard reports) +
                         plugin_detail.log (every line a plugin printed, so a
@@ -66,6 +70,22 @@ _IMPORT_PROBES = [
 ]
 
 _REDACT_MARKERS = ("api_key", "token", "password", "secret")
+
+# Cloud endpoints the connectivity collector probes. Answers whether a future
+# "who's online + nudge" feature could reach a cloud MQTT broker from THIS
+# machine's network — validated per-machine because end users can only run the
+# packaged exe, not a standalone probe script. A raw TCP+TLS connect is the
+# right test: native MQTT (8883) needs direct TCP egress, so a proxy-only
+# machine correctly shows BLOCK here and would need the WSS-over-443 path.
+#   (label, host, port, note)
+_CONNECTIVITY_TARGETS = [
+    ("Generic HTTPS 443",      "www.cloudflare.com",      443, "non-GitHub HTTPS egress"),
+    ("MQTT/TLS 8883 (HiveMQ)", "broker.hivemq.com",      8883, "native MQTT broker"),
+    ("MQTT/TLS 8883 (EMQX)",   "broker.emqx.io",         8883, "native MQTT broker"),
+    ("MQTT/WSS 8884 (HiveMQ)", "broker.hivemq.com",      8884, "MQTT-over-WSS fallback"),
+    ("GitHub Pages 443",       "ozymandiasone.github.io", 443, "control (updater path)"),
+]
+_CONNECTIVITY_TIMEOUT = 4.0
 
 
 def _redact(obj):
@@ -373,6 +393,61 @@ def _collect_disk() -> list[str]:
     return lines
 
 
+def _probe_endpoint(host: str, port: int, timeout: float) -> tuple:
+    """TCP-connect (+ TLS handshake) to one endpoint. Returns
+    (ok, latency_ms_or_None, detail). Never raises."""
+    import socket as _socket
+    import ssl as _ssl
+    import time as _time
+    start = _time.time()
+    try:
+        with _socket.create_connection((host, port), timeout=timeout) as sock:
+            ms = (_time.time() - start) * 1000.0
+            # A firewall doing TLS inspection can accept the TCP connect but
+            # break the handshake — so verify TLS too, not just the socket.
+            try:
+                ctx = _ssl.create_default_context()
+                with ctx.wrap_socket(sock, server_hostname=host):
+                    return True, ms, "TCP+TLS ok"
+            except Exception as exc:  # noqa: BLE001
+                return True, ms, f"TCP ok, TLS failed ({type(exc).__name__})"
+    except Exception as exc:  # noqa: BLE001
+        return False, None, type(exc).__name__
+
+
+def _collect_connectivity() -> list[str]:
+    """Can this machine reach a cloud MQTT broker? Every probe runs in parallel
+    so a fully-blocked network costs ~one timeout total, not one per target —
+    this collector runs on the UI thread when the user clicks Generate Report."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    targets = _CONNECTIVITY_TARGETS
+    started = time.time()
+    submitted = []
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        for label, host, port, note in targets:
+            fut = pool.submit(_probe_endpoint, host, port, _CONNECTIVITY_TIMEOUT)
+            submitted.append((label, note, fut))
+        results = []
+        for label, note, fut in submitted:
+            try:
+                ok, ms, detail = fut.result(timeout=_CONNECTIVITY_TIMEOUT + 2)
+            except Exception as exc:  # noqa: BLE001
+                ok, ms, detail = False, None, f"probe error: {type(exc).__name__}"
+            results.append((label, note, ok, ms, detail))
+    lines = []
+    for label, note, ok, ms, detail in results:
+        status = "OPEN " if ok else "BLOCK"
+        lat = f"{ms:6.0f} ms" if ms is not None else "   -- "
+        lines.append(f"  [{status}] {label:<26} {lat}  {detail:<28} ({note})")
+    lines.append("")
+    lines.append(f"Probed {len(targets)} endpoint(s) in {time.time() - started:.1f}s "
+                 f"({_CONNECTIVITY_TIMEOUT:.0f}s timeout each, run in parallel).")
+    lines.append("Reading: 8883 OPEN -> native MQTT works (simplest); 8883 BLOCK "
+                 "but 443 OPEN -> use MQTT-over-WSS on 443.")
+    return lines
+
+
 # ------------------------------------------------------------------ assembly
 
 def generate_debug_report(main_window=None) -> Path:
@@ -398,6 +473,7 @@ def generate_debug_report(main_window=None) -> Path:
     section("ONEDRIVE / LIBRARY DISCOVERY", _collect_onedrive_discovery)
     section("PLUGINS (validated on this machine)", _collect_plugins)
     section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
+    section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
     section("SETTINGS SNAPSHOT", _collect_settings)
     section("DISK / PERMISSIONS", _collect_disk)
     section("LIVE UI PROBE", lambda: _collect_ui_probe(main_window))
