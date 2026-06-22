@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QGridLayout,
     QFrame, QScrollArea,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QImage
 
 from techdeck.ui.sprite_font import font as _sf
@@ -69,6 +69,40 @@ def _default_spinner_icon(target=72):
                          Qt.TransformationMode.FastTransformation)
     except Exception:
         return None
+
+
+class _HeaderBox(QWidget):
+    """A full-width, opaque STICKY header. It paints the wall across its width (so
+    it's invisible against the page wall) with the MY STUFF box on the left, and
+    sits above the scroll — so locker content cleanly disappears under it as you
+    scroll, instead of tiles overlapping/peeking beside the box. Sized to leave
+    the vertical scrollbar exposed so it still starts at the top."""
+
+    box_w = 0
+    box_h = 0
+
+    def __init__(self, page, title_pm):
+        super().__init__(page)
+        self.page = page
+        self._title = title_pm
+        self.box_w = title_pm.width() + 44
+        self.box_h = title_pm.height() + 22
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        wall = self.page._wall
+        if wall is not None:
+            # Continue the page's wall tiling in phase, so it reads as one wall.
+            p.drawTiledPixmap(self.rect(), wall,
+                              QPoint(self.x() % wall.width(), self.y() % wall.height()))
+        else:
+            p.fillRect(self.rect(), QColor(_WALL_BASE))
+        box = QRect(16, 0, self.box_w, self.box_h)
+        _draw_bubble(p, box.adjusted(0, 0, -1, -1),
+                     self.page._bubbles["banner"], shadow=EMP["shadow"])
+        p.drawPixmap(box.x() + (self.box_w - self._title.width()) // 2,
+                     box.y() + (self.box_h - self._title.height()) // 2, self._title)
+        p.end()
 
 
 class InventoryTile(QFrame):
@@ -197,11 +231,8 @@ class MyStuffPage(QWidget):
         root.setSpacing(0)
 
         self._banner_h = self._title.height() + 22
-        self.banner = QLabel(self)          # floating child, not in the layout
-        self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.banner.setStyleSheet("background: transparent; border: none;")
-        self.banner.setFixedSize(self._title.width() + 44, self._banner_h)
-        self.banner.setPixmap(self._title)
+        # Opaque sticky header floating over the top-left of the scroll.
+        self.banner = _HeaderBox(self, self._title)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -320,9 +351,11 @@ class MyStuffPage(QWidget):
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
-        # Keep the MY STUFF box floating at the top-left, its top aligned with
-        # the scroll's top (root top margin) so the scrollbar lines up with it.
-        self.banner.move(16, 14)
+        # Full-width sticky header at the scroll's top, but stop short of the
+        # vertical scrollbar so it stays exposed and starts at the top too.
+        sb_w = self.scroll.verticalScrollBar().sizeHint().width()
+        self.banner.setGeometry(0, 14, max(self.banner.box_w + 16, self.width() - sb_w),
+                                self.banner.box_h)
         self.banner.raise_()
 
     # ---- background ----------------------------------------------------------
@@ -330,9 +363,8 @@ class MyStuffPage(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(_WALL_BASE))
         # Tiled diagonal wall fills the whole page and repeats as the locker
-        # scrolls — no more solid "floor" band at the bottom.
+        # scrolls — no more solid "floor" band at the bottom. (The MY STUFF box
+        # paints itself as an opaque sticky header — see _HeaderBox.)
         if self._wall is not None:
             p.drawTiledPixmap(self.rect(), self._wall)
-        _draw_bubble(p, self.banner.geometry(), self._bubbles["banner"],
-                     shadow=EMP["shadow"])
         p.end()
