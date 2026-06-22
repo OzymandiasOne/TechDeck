@@ -17,13 +17,35 @@ from PySide6.QtWidgets import (
     QFrame, QScrollArea,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap
+from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QImage
 
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.pages.emporium_page import (
     EMP, CATALOG, _draw_bubble, _load_pixmap, _load_art, _trim_v,
     _tile_ring, _equipped_badge,
 )
+
+# The diagonal-stripe wall, as a SEAMLESS tile so it fills the whole page (and
+# repeats as the locker scrolls) instead of the old stretched art whose solid
+# "floor" band showed through the bottom. Colours sampled from the Emporium wall.
+_WALL_BASE = EMP["wall"]      # "#272273"
+_WALL_STRIPE = "#3b34c0"
+
+
+def _wall_tile(scale=8):
+    """A P*scale square that tiles seamlessly: a 1px diagonal line every P px.
+    ((x+y) % P) is phase-stable across tile borders, so drawTiledPixmap is gapless."""
+    P, lw = 12, 1
+    img = QImage(P, P, QImage.Format.Format_RGB32)
+    img.fill(QColor(_WALL_BASE))
+    stripe = QColor(_WALL_STRIPE)
+    for y in range(P):
+        for x in range(P):
+            if (x + y) % P < lw:
+                img.setPixelColor(x, y, stripe)
+    return QPixmap.fromImage(img).scaled(
+        P * scale, P * scale, Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.FastTransformation)
 
 # Default (themed) spinner thumbnail — drawn in EMP colours so the card matches
 # the arcade palette even though /fidget recolours it to the live theme.
@@ -152,7 +174,7 @@ class MyStuffPage(QWidget):
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self._bg = _load_pixmap("emporium_background.tdart", 128)
+        self._wall = _wall_tile()
         self._bubbles = {"tile": _load_art("bubble_tile.tdart"),
                          "banner": _load_art("bubble_banner.tdart")}
         self._title = _trim_v(_sf().render("MY STUFF", 4, EMP["neon_on"]))
@@ -242,7 +264,27 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._section_header("Games"))
             self._vbox.addWidget(self._grid(owned_games))
 
-        # Future: a "Friends" section (summoned with /friend) slots in here.
+        owned_furniture = [c for c in CATALOG
+                           if c["kind"] == "furniture" and s.is_unlocked(c["id"])]
+        owned_friends = [c for c in CATALOG
+                         if c["kind"] == "friends" and s.is_unlocked(c["id"])]
+
+        # Furniture (decorations you've bought for My House).
+        self._vbox.addWidget(self._section_header("Furniture"))
+        if owned_furniture:
+            self._vbox.addWidget(self._grid(owned_furniture))
+        else:
+            self._vbox.addWidget(self._hint(
+                "Buy furniture at Woogy's Emporium (Decorations) to fill your house."))
+
+        # Friends (none yet — the category is Coming Soon at Woogy's).
+        self._vbox.addWidget(self._section_header("Friends"))
+        if owned_friends:
+            self._vbox.addWidget(self._grid(owned_friends))
+        else:
+            self._vbox.addWidget(self._hint(
+                "Friends are coming soon to Woogy's Emporium!"))
+
         self._vbox.addStretch(1)
 
     def refresh(self):
@@ -258,11 +300,11 @@ class MyStuffPage(QWidget):
     # ---- background ----------------------------------------------------------
     def paintEvent(self, _evt):
         p = QPainter(self)
-        w, h = self.width(), self.height()
-        p.fillRect(self.rect(), QColor(EMP["wall"]))
-        if self._bg is not None:
-            from PySide6.QtCore import QRect
-            p.drawPixmap(QRect(0, 0, w, h), self._bg)
+        p.fillRect(self.rect(), QColor(_WALL_BASE))
+        # Tiled diagonal wall fills the whole page and repeats as the locker
+        # scrolls — no more solid "floor" band at the bottom.
+        if self._wall is not None:
+            p.drawTiledPixmap(self.rect(), self._wall)
         _draw_bubble(p, self.banner.geometry(), self._bubbles["banner"],
                      shadow=EMP["shadow"])
         p.end()
