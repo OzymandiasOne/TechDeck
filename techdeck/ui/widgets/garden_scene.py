@@ -102,6 +102,11 @@ class GardenScene(QWidget):
         for c in CATALOG:
             if c.get("kind") == "background":
                 self._bg_names[c["sprite"]] = c["name"]
+        # Fixed name-slot width (widest name) so the arrows stay locked in place
+        # regardless of the current background's name length.
+        self._name_slot_w = max(
+            (_sf().render(n.upper(), 3, "#ffffff").width()
+             for n in self._bg_names.values()), default=80)
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
@@ -179,14 +184,16 @@ class GardenScene(QWidget):
             return None
         aw = ah = 34
         gap = 12
-        name_w = self._name_pm.width()
-        total = aw + gap + name_w + gap + aw
+        slot = self._name_slot_w          # fixed -> arrows never move
+        total = aw + gap + slot + gap + aw
         x0 = (self.width() - total) // 2
         y = 14
         left = QRect(x0, y, aw, ah)
-        name_x = x0 + aw + gap
-        right = QRect(name_x + name_w + gap, y, aw, ah)
+        slot_x = x0 + aw + gap
+        right = QRect(slot_x + slot + gap, y, aw, ah)
         pill = QRect(x0 - 12, y - 6, total + 24, ah + 12)
+        # Name centred within its fixed slot.
+        name_x = slot_x + (slot - self._name_pm.width()) // 2
         return left, right, name_x, y, ah, pill
 
     # ---- lifecycle (only animate while the tab is visible) -------------------
