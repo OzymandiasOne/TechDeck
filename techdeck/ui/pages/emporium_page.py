@@ -127,6 +127,14 @@ CATALOG = [
      "sprite": "sLibraryBG_8.png", "cost": 120, "kind": "background"},
     {"id": "bg_bubblegum", "name": "Bubblegum", "category": "decorations",
      "sprite": "sLibraryBG_9.png", "cost": 90, "kind": "background"},
+    {"id": "bg_orange_stripes", "name": "Orange Stripes", "category": "decorations",
+     "sprite": "sLibraryBG_0.png", "cost": 60, "kind": "background"},
+    {"id": "bg_green_stripes", "name": "Green Stripes", "category": "decorations",
+     "sprite": "sLibraryBG_1.png", "cost": 60, "kind": "background"},
+    {"id": "bg_teal_check", "name": "Teal Check", "category": "decorations",
+     "sprite": "sLibraryBG_2.png", "cost": 70, "kind": "background"},
+    {"id": "bg_blue_check", "name": "Blue Check", "category": "decorations",
+     "sprite": "sLibraryBG_3.png", "cost": 70, "kind": "background"},
 ]
 
 
