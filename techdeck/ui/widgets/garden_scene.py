@@ -29,7 +29,9 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QWidget, QSizePolicy
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
-from PySide6.QtGui import QPainter, QPixmap, QColor
+from PySide6.QtGui import QPainter, QPixmap, QColor, QPolygon
+
+from techdeck.ui.sprite_font import font as _sf
 
 
 # Native UFO50 canvas the whole scene is authored against.
@@ -83,12 +85,23 @@ class GardenScene(QWidget):
         d = _garden_dir()
         self._bg = self._load(d / "sPet_BG_0.png")
         self._facade = self._load(d / "sPet_HouseFG_0.png")
+        # Background-switcher arrow sprites (white = best contrast on the dark
+        # pill), pre-scaled crisp. Fall back to drawn triangles if missing.
+        self._arrow_l = self._scaled_arrow(self._load(d / "ui_arrow_left.png"))
+        self._arrow_r = self._scaled_arrow(self._load(d / "ui_arrow_right.png"))
         # The wallpaper behind the floating yard/house island (shows through BG_0's
         # transparent corners). Equippable; defaults to sLibraryBG_4.
         self._bg_name = None
         self._background = None
         self._bg_scaled = None        # cache: wallpaper pre-scaled to the blit factor
         self._bg_scaled_key = None
+        self._name_pm = None          # current background's name, sprite-font pixmap
+        # Friendly names for the background switcher (default + catalog backgrounds).
+        from techdeck.ui.pages.emporium_page import CATALOG
+        self._bg_names = {"sLibraryBG_4.png": "Red Check"}
+        for c in CATALOG:
+            if c.get("kind") == "background":
+                self._bg_names[c["sprite"]] = c["name"]
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
@@ -113,6 +126,16 @@ class GardenScene(QWidget):
         pm = QPixmap(str(path))
         return None if pm.isNull() else pm
 
+    @staticmethod
+    def _scaled_arrow(pm):
+        """Integer-scale a tiny arrow sprite up to ~22px tall, crisp."""
+        if pm is None:
+            return None
+        scale = max(1, round(22 / pm.height()))
+        return pm.scaled(pm.width() * scale, pm.height() * scale,
+                         Qt.AspectRatioMode.IgnoreAspectRatio,
+                         Qt.TransformationMode.FastTransformation)
+
     def _load_background(self) -> bool:
         """(Re)load the equipped wallpaper. Returns True if it changed."""
         name = "sLibraryBG_4.png"
@@ -122,7 +145,49 @@ class GardenScene(QWidget):
             return False
         self._bg_name = name
         self._background = self._load(_garden_dir() / name)
+        self._name_pm = _sf().render(self._bg_names.get(name, "?").upper(), 3, "#ffffff")
         return True
+
+    # ---- background switcher -------------------------------------------------
+    def _owned_backgrounds(self):
+        """Sprite filenames of the backgrounds the player can switch between:
+        the free default plus any bought at Woogy's."""
+        from techdeck.ui.pages.emporium_page import CATALOG
+        owned = ["sLibraryBG_4.png"]
+        if self.settings is not None:
+            for c in CATALOG:
+                if (c.get("kind") == "background"
+                        and self.settings.is_unlocked(c["id"])):
+                    owned.append(c["sprite"])
+        return owned
+
+    def _switch_bg(self, delta):
+        owned = self._owned_backgrounds()
+        if len(owned) <= 1:
+            return
+        cur = self._bg_name if self._bg_name in owned else owned[0]
+        nxt = owned[(owned.index(cur) + delta) % len(owned)]
+        if self.settings is not None and hasattr(self.settings, "set_equipped_background"):
+            self.settings.set_equipped_background(nxt)
+        self._load_background()
+        self.update()
+
+    def _switcher_layout(self):
+        """Rects for the top background switcher (◀ name ▶), or None when the
+        player owns only the default (nothing to switch between)."""
+        if self._name_pm is None or len(self._owned_backgrounds()) <= 1:
+            return None
+        aw = ah = 34
+        gap = 12
+        name_w = self._name_pm.width()
+        total = aw + gap + name_w + gap + aw
+        x0 = (self.width() - total) // 2
+        y = 14
+        left = QRect(x0, y, aw, ah)
+        name_x = x0 + aw + gap
+        right = QRect(name_x + name_w + gap, y, aw, ah)
+        pill = QRect(x0 - 12, y - 6, total + 24, ah + 12)
+        return left, right, name_x, y, ah, pill
 
     # ---- lifecycle (only animate while the tab is visible) -------------------
     def showEvent(self, e):
@@ -155,6 +220,17 @@ class GardenScene(QWidget):
 
     # ---- input ---------------------------------------------------------------
     def mousePressEvent(self, e):
+        pos = e.position().toPoint()
+        # Background switcher arrows take priority over the house toggle.
+        sw = self._switcher_layout()
+        if sw is not None:
+            left, right = sw[0], sw[1]
+            if left.contains(pos):
+                self._switch_bg(-1)
+                return
+            if right.contains(pos):
+                self._switch_bg(+1)
+                return
         # Map the click back into native coords and toggle if it hit the house.
         if self._scale > 0:
             nx = (e.position().x() - self._origin.x()) / self._scale
@@ -221,7 +297,41 @@ class GardenScene(QWidget):
             p.fillRect(self.rect(), QColor("#12121c"))
         p.drawPixmap(QRect(self._origin.x(), self._origin.y(), dw, dh),
                      self._compose_native())
+        self._draw_switcher(p)
         p.end()
+
+    def _draw_switcher(self, p):
+        sw = self._switcher_layout()
+        if sw is None:
+            return
+        left, right, name_x, y, ah, pill = sw
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 160))
+        p.drawRoundedRect(pill, 9, 9)
+        self._draw_arrow(p, left, self._arrow_l, -1)
+        self._draw_arrow(p, right, self._arrow_r, +1)
+        p.drawPixmap(name_x, y + (ah - self._name_pm.height()) // 2, self._name_pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+    def _draw_arrow(self, p, rect, pm, d):
+        """Draw the arrow sprite centred in its button (triangle fallback)."""
+        if pm is not None:
+            p.drawPixmap(rect.center().x() - pm.width() // 2,
+                         rect.center().y() - pm.height() // 2, pm)
+        else:
+            self._draw_tri(p, rect, d)
+
+    @staticmethod
+    def _draw_tri(p, rect, d):
+        cx, cy = rect.center().x(), rect.center().y()
+        s = 8
+        if d < 0:   # left-pointing
+            pts = [QPoint(cx + 4, cy - s), QPoint(cx + 4, cy + s), QPoint(cx - 5, cy)]
+        else:       # right-pointing
+            pts = [QPoint(cx - 4, cy - s), QPoint(cx - 4, cy + s), QPoint(cx + 5, cy)]
+        p.setBrush(QColor("#ffffff"))
+        p.drawPolygon(QPolygon(pts))
 
     def refresh(self):
         """Re-read the equipped wallpaper (+ owned furniture, once purchase-driven)."""
