@@ -56,31 +56,34 @@ TREE_STAGE_FULL = 5
 # unowned ones are absent. First-pass coords (floors: attic ~y70, upper ~y86,
 # middle ~y124, ground ~y160) — tune visually.
 PLACEMENT = {
+    # House interior spans native x~177-334. Left rooms x~186-256, right rooms
+    # x~264-322. Floor bases (item bottom): attic ~66, upper ~86, middle ~126,
+    # ground ~164. Matches the completed-house reference (garden7).
     # Attic
-    "deco_trophy":    (288, 54),
-    "deco_telescope": (312, 40),
+    "deco_trophy":    (228, 50),
+    "deco_telescope": (250, 36),
     # Upper floor — bathroom (left), bedroom (right)
-    "deco_toilet":    (220, 54),
-    "deco_tub":       (242, 54),
-    "deco_bed":       (300, 54),
-    "deco_lamp":      (340, 54),
-    "deco_mirror":    (320, 54),
+    "deco_toilet":    (196, 54),
+    "deco_tub":       (218, 54),
+    "deco_bed":       (268, 54),
+    "deco_lamp":      (292, 54),
+    "deco_mirror":    (304, 54),
     # Middle floor — study (left), living (right)
-    "deco_books":     (220, 92),
-    "deco_desk":      (248, 92),
-    "deco_painting":  (224, 96),
-    "deco_phone":     (276, 92),
-    "deco_tv":        (326, 100),
+    "deco_books":     (188, 94),
+    "deco_desk":      (212, 94),
+    "deco_phone":     (240, 94),
+    "deco_painting":  (192, 98),
+    "deco_tv":        (274, 102),
+    "deco_guitar":    (308, 110),
     # Ground floor — kitchen (left), den (right)
-    "deco_fridge":    (222, 128),
-    "deco_stove":     (246, 128),
-    "deco_couch":     (300, 144),
-    "deco_rug":       (308, 128),
-    "deco_plant":     (342, 128),
-    "deco_hatrack":   (330, 136),
-    "deco_guitar":    (350, 144),
+    "deco_fridge":    (190, 132),
+    "deco_stove":     (216, 132),
+    "deco_rug":       (272, 134),
+    "deco_couch":     (270, 148),
+    "deco_hatrack":   (290, 140),
+    "deco_plant":     (304, 132),
     # Yard
-    "deco_hottub":    (120, 179),
+    "deco_hottub":    (118, 179),
 }
 
 _TICK_MS = 16
