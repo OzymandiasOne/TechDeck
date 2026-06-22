@@ -523,9 +523,9 @@ class ShopWindow(QFrame):
         self.close_btn.setFixedSize(28, 28)
         xpm = _sf().render("X", 3, EMP["btn_text"])
         self.close_btn.setIcon(QIcon(xpm)); self.close_btn.setIconSize(xpm.size())
+        # Transparent: just the X glyph, no button chrome, over the panel.
         self.close_btn.setStyleSheet(
-            f"QPushButton {{ background:{EMP['buy']}; border:2px solid "
-            f"{EMP['buy_lit_edge']}; border-radius:5px; }}")
+            "QPushButton { background: transparent; border: none; }")
         self.close_btn.clicked.connect(page._close_window)
         header.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignTop)
         v.addLayout(header)
