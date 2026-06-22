@@ -585,6 +585,12 @@ class EmporiumPage(QWidget):
     DEFAULT_CATEGORY = "toys"
     GRID_COLS = 4
 
+    # The scene is tuned for a roughly square window (default content ~1.1:1). A
+    # very wide window (fullscreen) would stretch the wall/counter/Woogy, so we
+    # cap the scene to this width:height ratio and centre it, letterboxing the
+    # sides with the wall colour instead of stretching.
+    DESIGN_RATIO = 1.25
+
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
@@ -609,6 +615,7 @@ class EmporiumPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
         root.setSpacing(10)
+        self._root = root   # margins re-inset to the stage on resize
 
         bar = QHBoxLayout()
         self.banner = QLabel()
@@ -699,7 +706,8 @@ class EmporiumPage(QWidget):
         self._reveal = 0
 
     def _dialogue_rect(self):
-        return QRect(40, self.height() - (self.DIALOGUE_H + 26),
+        sx, _ = self._stage()
+        return QRect(sx + 40, self.height() - (self.DIALOGUE_H + 26),
                      self.DIALOGUE_W, self.DIALOGUE_H)
 
     def _page_lines(self):
@@ -758,16 +766,24 @@ class EmporiumPage(QWidget):
                 f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
                 f"border-radius:5px; padding:3px 14px; }}")
 
+    def _stage(self):
+        """(x, width) of the scene area: capped to DESIGN_RATIO and centred so a
+        wide window letterboxes instead of stretching. Full height is used."""
+        w, h = self.width(), self.height()
+        sw = min(w, int(h * self.DESIGN_RATIO))
+        return (w - sw) // 2, sw
+
     def _position_shop_window(self):
         """Centre the floating window below the category bar, spanning down over
         Woogy (it floats on top of him)."""
         if not self.shop_window.isVisible():
             return
+        sx, sw = self._stage()
         cat_btns = list(self.cat_buttons.values())
         top = (cat_btns[0].geometry().bottom() if cat_btns else 90) + 12
         cols = self.GRID_COLS
         inner_w = cols * StoreTile.SIZE + (cols - 1) * 12
-        ww = min(self.width() - 40, inner_w + 76)
+        ww = min(sw - 40, inner_w + 76)
         # Height fits the content, up to 2 rows (more than that scrolls).
         n = sum(1 for t in self.tiles if t.item.get("category") == self._category)
         if n:
@@ -776,7 +792,7 @@ class EmporiumPage(QWidget):
         else:
             content_h = 80   # just the COMING SOON plate
         wh = min(self.height() - top - 24, 64 + content_h + 34)
-        x = (self.width() - ww) // 2
+        x = sx + (sw - ww) // 2
         self.shop_window.setGeometry(x, top, ww, max(200, wh))
 
     def _populate_grid(self):
@@ -797,8 +813,11 @@ class EmporiumPage(QWidget):
         self._coming_soon.setVisible(not matching)
 
     def resizeEvent(self, e):
-        # Keep the floating shop window centred/sized as the page resizes.
         super().resizeEvent(e)
+        # Inset the top-bar widgets (banner/balance/categories) to the stage so
+        # they stay with the centred scene instead of the window corners.
+        sx, _ = self._stage()
+        self._root.setContentsMargins(sx + 16, 14, sx + 16, 14)
         self._position_shop_window()
 
     # ---- animation -----------------------------------------------------------
@@ -875,25 +894,39 @@ class EmporiumPage(QWidget):
     # ---- the pixel-art scene -------------------------------------------------
     def paintEvent(self, _evt):
         p = QPainter(self)
-        w, h = self.width(), self.height()
+        h = self.height()
+        sx, sw = self._stage()
+        # Wall colour fills the whole window; the scene art is confined to the
+        # centred stage so wide windows letterbox instead of stretching.
         p.fillRect(self.rect(), QColor(EMP["wall"]))
         if self._bg is not None:
-            p.drawPixmap(QRect(0, 0, w, h), self._bg)
-        self._draw_cabinet(p, w, h)
+            p.drawPixmap(QRect(sx, 0, sw, h), self._bg)
+        self._draw_cabinet(p, sx, sw, h)
         if self._woogy is not None:
-            ww, wh = self._woogy.width(), self._woogy.height()
+            wpm = self._scaled_woogy(h)
+            ww, wh = wpm.width(), wpm.height()
             y = h - int(h * 0.30) - wh + 30
-            p.drawPixmap((w - ww) // 2, max(y, int(h * 0.32)), self._woogy)
+            p.drawPixmap(sx + (sw - ww) // 2, max(y, int(h * 0.32)), wpm)
         if self._counter is not None:
             ch = int(h * 0.30)
-            p.drawPixmap(QRect(0, h - ch, w, ch), self._counter)
+            p.drawPixmap(QRect(sx, h - ch, sw, ch), self._counter)
         _draw_bubble(p, self.banner.geometry(), self._bubbles["banner"],
                      shadow=EMP["shadow"])
         _marquee(p, self.banner.geometry(), self._phase)
         _draw_bubble(p, self.balance_lbl.geometry(), self._bubbles["balance"],
                      shadow=EMP["shadow"])
-        self._draw_dialogue(p, w, h)
+        self._draw_dialogue(p)
         p.end()
+
+    def _scaled_woogy(self, h):
+        """Woogy scaled proportionally to the scene height (cached per height) so
+        he keeps his designed size relative to the scene at any window size."""
+        target = max(120, int(0.31 * h))
+        if getattr(self, "_woogy_h", None) != target:
+            self._woogy_scaled = self._woogy.scaledToHeight(
+                target, Qt.TransformationMode.FastTransformation)
+            self._woogy_h = target
+        return self._woogy_scaled
 
     # Native cabinet metrics (cells) — kept in sync with the .tdart art built by
     # tools/generate_arcade_cabinet.py (W x H = 48 x 76).
@@ -901,13 +934,13 @@ class EmporiumPage(QWidget):
     _SCREEN = (13, 21, 22, 20)        # x, y, w, h of the animated screen face
     _MARQUEE_BULBS = (range(8, 41, 4), 3)   # bulb x-cells, row
 
-    def _draw_cabinet(self, p, w, h):
+    def _draw_cabinet(self, p, sx, sw, h):
         pix = self._cabinet
         if pix is None:
             return
         scale = max(2, round(0.40 * h / self._CAB_H))
         cw, ch = self._CAB_W * scale, self._CAB_H * scale
-        cx = w - cw - 24
+        cx = sx + sw - cw - 24
         cy = max((h - int(h * 0.30)) - ch + 10 * scale, int(0.08 * h))
         p.drawPixmap(QRect(cx, cy, cw, ch), pix)
         scol, srow, scells_w, scells_h = self._SCREEN
@@ -928,7 +961,7 @@ class EmporiumPage(QWidget):
             p.fillRect(cx + mx * scale, cy + bulb_row * scale, scale, scale,
                        QColor("#7ef9ff" if on else "#1a4a52"))
 
-    def _draw_dialogue(self, p, w, h):
+    def _draw_dialogue(self, p):
         rect = self._dialogue_rect()
         # UFO50-style: black box, thick white rounded border, soft drop shadow.
         _draw_bubble(p, rect, self._bubbles["dialogue"], shadow=EMP["shadow"])
