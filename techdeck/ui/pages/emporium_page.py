@@ -153,6 +153,23 @@ def _load_pixmap(name: str, target: int):
     return pixel_art.render(data, scale=scale)
 
 
+# The plain themed fidget spinner (EMP palette) — used as the Toys category icon.
+_DEFAULT_SPINNER_COLORS = {
+    "body": EMP["frame_a"], "wing": EMP["frame_b"], "ring": "#f0f0ff",
+    "highlight": "#ffffff", "outline": "#0c0a1e",
+}
+
+
+def _default_spinner_pixmap(target):
+    try:
+        from techdeck.ui.widgets.fidget_spinner import _render_spinner_pixmap
+        pm = _render_spinner_pixmap(_DEFAULT_SPINNER_COLORS)
+        return pm.scaled(target, target, Qt.AspectRatioMode.KeepAspectRatio,
+                         Qt.TransformationMode.FastTransformation)
+    except Exception:
+        return None
+
+
 def _trim_v(pm):
     """Crop fully-transparent rows off the top/bottom of a text pixmap. The
     sprite font renders into a fixed 8px cell, so the letter ink sits low in the
@@ -506,7 +523,7 @@ class CategoryBox(QFrame):
     MIN_W = 112
     HEIGHT = 112
 
-    def __init__(self, cat_id, label, icon_sprite, page, box_w):
+    def __init__(self, cat_id, label, icon_pm, page, box_w):
         super().__init__()
         self.cat_id = cat_id
         self.page = page
@@ -514,7 +531,7 @@ class CategoryBox(QFrame):
         self.setFixedSize(box_w, self.HEIGHT)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("CategoryBox { background: transparent; }")
-        self._icon = _load_pixmap(icon_sprite, 52) if icon_sprite else None
+        self._icon = icon_pm
         self._name_norm = _trim_v(_sf().render(label.upper(), 2, EMP["tile_text"]))
         self._name_sel = _trim_v(_sf().render(label.upper(), 2, EMP["neon_on"]))
 
@@ -529,12 +546,15 @@ class CategoryBox(QFrame):
         _draw_bubble(p, rect, self.page._bubbles["tile"], shadow=EMP["shadow"])
         _tile_ring(p, rect, EMP["buy_lit_edge"] if self.selected else EMP["ring"],
                    inset=4, thick=3 if self.selected else 2)
-        if self._icon is not None:
-            p.drawPixmap(rect.x() + (rect.width() - self._icon.width()) // 2,
-                         rect.y() + 16, self._icon)
         name = self._name_sel if self.selected else self._name_norm
-        p.drawPixmap(rect.x() + (rect.width() - name.width()) // 2,
-                     rect.y() + rect.height() - name.height() - 12, name)
+        name_y = rect.y() + rect.height() - name.height() - 12
+        if self._icon is not None:
+            # Vertically centre the icon in the space above the name.
+            top, bot = rect.y() + 8, name_y - 6
+            iy = top + max(0, (bot - top - self._icon.height()) // 2)
+            p.drawPixmap(rect.x() + (rect.width() - self._icon.width()) // 2,
+                         iy, self._icon)
+        p.drawPixmap(rect.x() + (rect.width() - name.width()) // 2, name_y, name)
         p.end()
 
     def mousePressEvent(self, e):
@@ -626,12 +646,6 @@ class EmporiumPage(QWidget):
     # isn't empty on open.
     CATEGORIES = [("friends", "Friends"), ("toys", "Toys"),
                   ("decorations", "Decorations")]
-    # Representative icon per category for the clickable category boxes.
-    CATEGORY_ICONS = {
-        "friends": "sPet_Buddy_0.png",          # the pet/critter
-        "toys": "spinner_beyblade.tdart",       # a toy spinner
-        "decorations": "sPet_ItemCouch_0.png",  # furniture
-    }
     DEFAULT_CATEGORY = "toys"
     GRID_COLS = 4
 
@@ -694,7 +708,7 @@ class EmporiumPage(QWidget):
                      for _, lbl in self.CATEGORIES)
         box_w = max(CategoryBox.MIN_W, name_w + 28)
         for cat_id, label in self.CATEGORIES:
-            box = CategoryBox(cat_id, label, self.CATEGORY_ICONS.get(cat_id),
+            box = CategoryBox(cat_id, label, self._category_icon(cat_id),
                               self, box_w)
             self.cat_buttons[cat_id] = box
             cat_bar.addWidget(box)
@@ -783,6 +797,15 @@ class EmporiumPage(QWidget):
             t.refresh()
 
     # ---- categories (each opens a floating window over the scene) -------------
+    def _category_icon(self, cat_id):
+        """Representative icon pixmap for a category box (size tuned per icon)."""
+        if cat_id == "toys":
+            return _default_spinner_pixmap(40)               # small, clears "TOYS"
+        if cat_id == "decorations":
+            return _load_pixmap("sPet_ItemCouch_0.png", 88)  # a little larger
+        # Friends — placeholder pet until the user supplies the icon they want.
+        return _load_pixmap("sPet_Buddy_0.png", 52)
+
     def _select_category(self, cat_id):
         # Clicking the already-open category closes its window again (toggle).
         if self._open_category == cat_id and self.shop_window.isVisible():
