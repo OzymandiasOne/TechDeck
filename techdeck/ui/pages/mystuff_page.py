@@ -56,6 +56,9 @@ _DEFAULT_SPINNER = {
 # The "use the plain themed spinner" entry — id None clears the equipped variant.
 DEFAULT_SPINNER_ITEM = {"id": None, "name": "Default", "kind": "spinner",
                         "sprite": None}
+# The free default wallpaper (sLibraryBG_4) — always available to re-equip.
+DEFAULT_BACKGROUND_ITEM = {"id": "bg_default", "name": "Red Check",
+                           "kind": "background", "sprite": "sLibraryBG_4.png"}
 
 
 def _default_spinner_icon(target=72):
@@ -143,12 +146,20 @@ class InventoryTile(QFrame):
         self.action_btn.setEnabled(enabled)
         self.action_btn.setStyleSheet(self._btn_qss(bg, edge))
 
+    def _is_equipped(self, s):
+        k = self.item["kind"]
+        if k == "spinner":
+            return (s.get_equipped_spinner() or None) == self.item["id"]
+        if k == "background":
+            return s.get_equipped_background() == self.item["sprite"]
+        return False
+
     def refresh(self):
         s = self.page.settings
         self.name.setPixmap(_sf().render_wrapped(self.item["name"].upper(), 2,
                                                 EMP["tile_text"], max_width=self.NAME_W))
-        if self.item["kind"] == "spinner":
-            self.equipped = (s.get_equipped_spinner() or None) == self.item["id"]
+        if self.item["kind"] in ("spinner", "background"):
+            self.equipped = self._is_equipped(s)
             if self.equipped:
                 self._set_btn("EQUIPPED", EMP["equip"], "#7af0a0", False)
             else:
@@ -159,12 +170,12 @@ class InventoryTile(QFrame):
         self.update()
 
     def mousePressEvent(self, e):
-        if self.item["kind"] == "spinner" and not self.equipped:
+        if self.item["kind"] in ("spinner", "background") and not self.equipped:
             self.page.equip(self.item)
         super().mousePressEvent(e)
 
     def _on_action(self):
-        if self.item["kind"] == "spinner" and not self.equipped:
+        if self.item["kind"] in ("spinner", "background") and not self.equipped:
             self.page.equip(self.item)
 
 
@@ -179,19 +190,18 @@ class MyStuffPage(QWidget):
                          "banner": _load_art("bubble_banner.tdart")}
         self._title = _trim_v(_sf().render("MY STUFF", 4, EMP["neon_on"]))
 
+        # Scroll fills the whole page so its scrollbar runs from the very top,
+        # aligned with the MY STUFF box; the banner floats over the top-left.
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 14, 16, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 14, 0, 0)
+        root.setSpacing(0)
 
-        self.banner = QLabel()
+        self._banner_h = self._title.height() + 22
+        self.banner = QLabel(self)          # floating child, not in the layout
         self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.banner.setStyleSheet("background: transparent; border: none;")
-        self.banner.setFixedSize(self._title.width() + 44, self._title.height() + 22)
+        self.banner.setFixedSize(self._title.width() + 44, self._banner_h)
         self.banner.setPixmap(self._title)
-        bar = QHBoxLayout()
-        bar.addWidget(self.banner)
-        bar.addStretch()
-        root.addLayout(bar)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -200,7 +210,8 @@ class MyStuffPage(QWidget):
         self._content = QWidget()
         self._content.setStyleSheet("background: transparent;")
         self._vbox = QVBoxLayout(self._content)
-        self._vbox.setContentsMargins(4, 4, 4, 4)
+        # Top margin clears the floating banner; sections start just below it.
+        self._vbox.setContentsMargins(20, self._banner_h + 18, 20, 14)
         self._vbox.setSpacing(10)
         self.scroll.setWidget(self._content)
         root.addWidget(self.scroll, 1)
@@ -277,6 +288,13 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._hint(
                 "Buy furniture at Woogy's Emporium (Decorations) to fill your house."))
 
+        # Backgrounds (the free default + any bought) — equip sets the My House
+        # wallpaper.
+        owned_backgrounds = [c for c in CATALOG
+                             if c["kind"] == "background" and s.is_unlocked(c["id"])]
+        self._vbox.addWidget(self._section_header("Backgrounds"))
+        self._vbox.addWidget(self._grid([DEFAULT_BACKGROUND_ITEM] + owned_backgrounds))
+
         # Friends (none yet — the category is Coming Soon at Woogy's).
         self._vbox.addWidget(self._section_header("Friends"))
         if owned_friends:
@@ -293,9 +311,19 @@ class MyStuffPage(QWidget):
 
     # ---- equip ---------------------------------------------------------------
     def equip(self, item):
-        self.settings.set_equipped_spinner(item["id"])
+        if item["kind"] == "background":
+            self.settings.set_equipped_background(item["sprite"])
+        else:
+            self.settings.set_equipped_spinner(item["id"])
         for t in self.tiles:
             t.refresh()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # Keep the MY STUFF box floating at the top-left, its top aligned with
+        # the scroll's top (root top margin) so the scrollbar lines up with it.
+        self.banner.move(16, 14)
+        self.banner.raise_()
 
     # ---- background ----------------------------------------------------------
     def paintEvent(self, _evt):
