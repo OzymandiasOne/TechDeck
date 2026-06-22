@@ -51,12 +51,37 @@ FACADE_LIFT = 216
 TREE_POS = (16, 7)
 TREE_STAGE_FULL = 5
 
-# Furniture placed into the interior rooms: (sprite filename, native_x, native_y),
-# y = top-left, positioned to sit on a floor band. Empty by design — a new house
-# starts bare and fills in as the player buys items at Woogy's (the next pass
-# wires this to owned items). Example of the format:
-#   ("sPet_ItemCouch_0.png", 300, 178)
-FURNITURE = []
+# Where each owned furniture item sits in the house, keyed by its Emporium
+# catalog id -> (native_x, native_y) top-left. Bought items appear at their spot;
+# unowned ones are absent. First-pass coords (floors: attic ~y70, upper ~y86,
+# middle ~y124, ground ~y160) — tune visually.
+PLACEMENT = {
+    # Attic
+    "deco_trophy":    (288, 54),
+    "deco_telescope": (312, 40),
+    # Upper floor — bathroom (left), bedroom (right)
+    "deco_toilet":    (220, 54),
+    "deco_tub":       (242, 54),
+    "deco_bed":       (300, 54),
+    "deco_lamp":      (340, 54),
+    "deco_mirror":    (320, 54),
+    # Middle floor — study (left), living (right)
+    "deco_books":     (220, 92),
+    "deco_desk":      (248, 92),
+    "deco_painting":  (224, 96),
+    "deco_phone":     (276, 92),
+    "deco_tv":        (326, 100),
+    # Ground floor — kitchen (left), den (right)
+    "deco_fridge":    (222, 128),
+    "deco_stove":     (246, 128),
+    "deco_couch":     (300, 144),
+    "deco_rug":       (308, 128),
+    "deco_plant":     (342, 128),
+    "deco_hatrack":   (330, 136),
+    "deco_guitar":    (350, 144),
+    # Yard
+    "deco_hottub":    (120, 179),
+}
 
 _TICK_MS = 16
 
@@ -110,7 +135,8 @@ class GardenScene(QWidget):
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
-        self._furniture = [(self._load(d / name), x, y) for name, x, y in FURNITURE]
+        self._furniture = []
+        self._load_furniture()
 
         # Reveal state: progress 0 = closed, 1 = fully open; animates toward target.
         self._open_progress = 0.0
@@ -340,7 +366,24 @@ class GardenScene(QWidget):
         p.setBrush(QColor("#ffffff"))
         p.drawPolygon(QPolygon(pts))
 
+    def _load_furniture(self):
+        """Build the list of placed furniture from the items the player owns."""
+        from techdeck.ui.pages.emporium_page import CATALOG
+        by_id = {c["id"]: c for c in CATALOG}
+        items = []
+        for item_id, (x, y) in PLACEMENT.items():
+            c = by_id.get(item_id)
+            if c is None or self.settings is None:
+                continue
+            if not self.settings.is_unlocked(item_id):
+                continue
+            pm = self._load(_garden_dir() / c["sprite"])
+            if pm is not None:
+                items.append((pm, x, y))
+        self._furniture = items
+
     def refresh(self):
-        """Re-read the equipped wallpaper (+ owned furniture, once purchase-driven)."""
+        """Re-read the equipped wallpaper + owned furniture (both can change)."""
         self._load_background()
+        self._load_furniture()
         self.update()
