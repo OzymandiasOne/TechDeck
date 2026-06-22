@@ -170,6 +170,23 @@ def _default_spinner_pixmap(target):
         return None
 
 
+def _brighten(pm, factor=1.3):
+    """Lighten a pixmap's colours (multiply RGB, clamped) — leaves alpha alone."""
+    if pm is None:
+        return None
+    img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.alpha() == 0:
+                continue
+            c.setRed(min(255, int(c.red() * factor)))
+            c.setGreen(min(255, int(c.green() * factor)))
+            c.setBlue(min(255, int(c.blue() * factor)))
+            img.setPixelColor(x, y, c)
+    return QPixmap.fromImage(img)
+
+
 def _trim_v(pm):
     """Crop fully-transparent rows off the top/bottom of a text pixmap. The
     sprite font renders into a fixed 8px cell, so the letter ink sits low in the
@@ -523,7 +540,7 @@ class CategoryBox(QFrame):
     MIN_W = 112
     HEIGHT = 112
 
-    def __init__(self, cat_id, label, icon_pm, page, box_w):
+    def __init__(self, cat_id, label, icon_pm, page, box_w, icon_dy=0):
         super().__init__()
         self.cat_id = cat_id
         self.page = page
@@ -532,6 +549,7 @@ class CategoryBox(QFrame):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet("CategoryBox { background: transparent; }")
         self._icon = icon_pm
+        self._icon_dy = icon_dy   # nudge the icon down within its box
         self._name_norm = _trim_v(_sf().render(label.upper(), 2, EMP["tile_text"]))
         self._name_sel = _trim_v(_sf().render(label.upper(), 2, EMP["neon_on"]))
 
@@ -551,7 +569,7 @@ class CategoryBox(QFrame):
         if self._icon is not None:
             # Vertically centre the icon in the space above the name.
             top, bot = rect.y() + 8, name_y - 6
-            iy = top + max(0, (bot - top - self._icon.height()) // 2)
+            iy = top + max(0, (bot - top - self._icon.height()) // 2) + self._icon_dy
             p.drawPixmap(rect.x() + (rect.width() - self._icon.width()) // 2,
                          iy, self._icon)
         p.drawPixmap(rect.x() + (rect.width() - name.width()) // 2, name_y, name)
@@ -709,7 +727,7 @@ class EmporiumPage(QWidget):
         box_w = max(CategoryBox.MIN_W, name_w + 28)
         for cat_id, label in self.CATEGORIES:
             box = CategoryBox(cat_id, label, self._category_icon(cat_id),
-                              self, box_w)
+                              self, box_w, icon_dy=(8 if cat_id == "decorations" else 0))
             self.cat_buttons[cat_id] = box
             cat_bar.addWidget(box)
         cat_bar.addStretch()
@@ -800,9 +818,9 @@ class EmporiumPage(QWidget):
     def _category_icon(self, cat_id):
         """Representative icon pixmap for a category box (size tuned per icon)."""
         if cat_id == "toys":
-            return _default_spinner_pixmap(40)               # small, clears "TOYS"
+            return _default_spinner_pixmap(48)               # slightly larger
         if cat_id == "decorations":
-            return _load_pixmap("sPet_ItemCouch_0.png", 88)  # a little larger
+            return _brighten(_load_pixmap("sPet_ItemCouch_0.png", 88), 1.3)
         return _load_pixmap("sPet_Buddy_4.png", 52)          # Friends = the pet
 
     def _select_category(self, cat_id):
