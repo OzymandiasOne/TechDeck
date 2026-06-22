@@ -803,8 +803,7 @@ class EmporiumPage(QWidget):
             return _default_spinner_pixmap(40)               # small, clears "TOYS"
         if cat_id == "decorations":
             return _load_pixmap("sPet_ItemCouch_0.png", 88)  # a little larger
-        # Friends — placeholder pet until the user supplies the icon they want.
-        return _load_pixmap("sPet_Buddy_0.png", 52)
+        return _load_pixmap("sPet_Buddy_4.png", 52)          # Friends = the pet
 
     def _select_category(self, cat_id):
         # Clicking the already-open category closes its window again (toggle).
