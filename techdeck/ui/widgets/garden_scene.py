@@ -56,34 +56,33 @@ TREE_STAGE_FULL = 5
 # unowned ones are absent. First-pass coords (floors: attic ~y70, upper ~y86,
 # middle ~y124, ground ~y160) — tune visually.
 PLACEMENT = {
-    # House interior spans native x~177-334. Left rooms x~186-256, right rooms
-    # x~264-322. Floor bases (item bottom): attic ~66, upper ~86, middle ~126,
-    # ground ~164. Matches the completed-house reference (garden7).
+    # Native (x,y) top-left per item, dialed in with tools/furniture_placer.py.
     # Attic
-    "deco_trophy":    (228, 50),
-    "deco_telescope": (250, 36),
-    # Upper floor — bathroom (left), bedroom (right)
-    "deco_toilet":    (196, 54),
-    "deco_tub":       (218, 54),
-    "deco_bed":       (268, 54),
-    "deco_lamp":      (292, 54),
-    "deco_mirror":    (304, 54),
-    # Middle floor — study (left), living (right)
-    "deco_books":     (188, 94),
+    "deco_trophy":    (238, 24),
+    # Upper floor
+    "deco_toilet":    (192, 48),
+    "deco_tub":       (225, 48),
+    "deco_bed":       (257, 47),
+    "deco_lamp":      (288, 48),
+    "deco_mirror":    (304, 48),
+    "deco_telescope": (320, 48),
+    # Middle floor
     "deco_desk":      (212, 94),
     "deco_phone":     (240, 94),
-    "deco_painting":  (192, 98),
-    "deco_tv":        (274, 102),
-    "deco_guitar":    (308, 110),
-    # Ground floor — kitchen (left), den (right)
-    "deco_fridge":    (190, 132),
-    "deco_stove":     (216, 132),
-    "deco_rug":       (272, 134),
-    "deco_couch":     (270, 148),
-    "deco_hatrack":   (290, 140),
-    "deco_plant":     (304, 132),
+    "deco_tv":        (288, 96),
+    "deco_guitar":    (320, 96),
+    # Lower floor
+    "deco_fridge":    (209, 128),
+    "deco_stove":     (224, 128),
+    "deco_painting":  (257, 128),
+    "deco_books":     (288, 128),
+    "deco_plant":     (305, 128),
+    # Ground floor
+    "deco_couch":     (256, 144),
+    "deco_rug":       (256, 144),
+    "deco_hatrack":   (320, 136),
     # Yard
-    "deco_hottub":    (118, 179),
+    "deco_hottub":    (145, 174),
 }
 
 _TICK_MS = 16
