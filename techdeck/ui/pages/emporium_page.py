@@ -498,6 +498,50 @@ class StoreTile(QFrame):
         self.page.handle_tile_action(self.item)
 
 
+class CategoryBox(QFrame):
+    """A clickable pixel-art box for a store category (representative icon +
+    name). The whole box opens that category's floating window; it lights up
+    (accent ring + neon name) while its window is open."""
+
+    MIN_W = 112
+    HEIGHT = 112
+
+    def __init__(self, cat_id, label, icon_sprite, page, box_w):
+        super().__init__()
+        self.cat_id = cat_id
+        self.page = page
+        self.selected = False
+        self.setFixedSize(box_w, self.HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet("CategoryBox { background: transparent; }")
+        self._icon = _load_pixmap(icon_sprite, 52) if icon_sprite else None
+        self._name_norm = _trim_v(_sf().render(label.upper(), 2, EMP["tile_text"]))
+        self._name_sel = _trim_v(_sf().render(label.upper(), 2, EMP["neon_on"]))
+
+    def set_selected(self, sel):
+        if sel != self.selected:
+            self.selected = sel
+            self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        rect = self.rect().adjusted(0, 0, -5, -5)
+        _draw_bubble(p, rect, self.page._bubbles["tile"], shadow=EMP["shadow"])
+        _tile_ring(p, rect, EMP["buy_lit_edge"] if self.selected else EMP["ring"],
+                   inset=4, thick=3 if self.selected else 2)
+        if self._icon is not None:
+            p.drawPixmap(rect.x() + (rect.width() - self._icon.width()) // 2,
+                         rect.y() + 16, self._icon)
+        name = self._name_sel if self.selected else self._name_norm
+        p.drawPixmap(rect.x() + (rect.width() - name.width()) // 2,
+                     rect.y() + rect.height() - name.height() - 12, name)
+        p.end()
+
+    def mousePressEvent(self, e):
+        self.page._select_category(self.cat_id)
+        super().mousePressEvent(e)
+
+
 class ShopWindow(QFrame):
     """A floating pixel-art panel inside the Emporium that shows one category's
     merchandise. It has a top-right X to close, and floats over the scene so it
@@ -582,6 +626,12 @@ class EmporiumPage(QWidget):
     # isn't empty on open.
     CATEGORIES = [("friends", "Friends"), ("toys", "Toys"),
                   ("decorations", "Decorations")]
+    # Representative icon per category for the clickable category boxes.
+    CATEGORY_ICONS = {
+        "friends": "sPet_Buddy_0.png",          # the pet/critter
+        "toys": "spinner_beyblade.tdart",       # a toy spinner
+        "decorations": "sPet_ItemCouch_0.png",  # furniture
+    }
     DEFAULT_CATEGORY = "toys"
     GRID_COLS = 4
 
@@ -637,18 +687,17 @@ class EmporiumPage(QWidget):
         self._category = self.DEFAULT_CATEGORY
         self._open_category = None
         cat_bar = QHBoxLayout()
-        cat_bar.setSpacing(8)
+        cat_bar.setSpacing(12)
         self.cat_buttons = {}
+        # Uniform box width that fits the longest category name (no clipping).
+        name_w = max(_sf().render(lbl.upper(), 2, EMP["tile_text"]).width()
+                     for _, lbl in self.CATEGORIES)
+        box_w = max(CategoryBox.MIN_W, name_w + 28)
         for cat_id, label in self.CATEGORIES:
-            btn = QPushButton()
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setCheckable(True)
-            btn.setFixedHeight(28)
-            pm = _sf().render(label.upper(), 2, EMP["btn_text"])
-            btn.setIcon(QIcon(pm)); btn.setIconSize(pm.size()); btn.setText("")
-            btn.clicked.connect(lambda _=False, c=cat_id: self._select_category(c))
-            self.cat_buttons[cat_id] = btn
-            cat_bar.addWidget(btn)
+            box = CategoryBox(cat_id, label, self.CATEGORY_ICONS.get(cat_id),
+                              self, box_w)
+            self.cat_buttons[cat_id] = box
+            cat_bar.addWidget(box)
         cat_bar.addStretch()
         root.addLayout(cat_bar)
 
@@ -755,16 +804,10 @@ class EmporiumPage(QWidget):
         self._style_category_buttons()
 
     def _style_category_buttons(self):
-        """The category whose window is open lights up like a BUY button; the
-        rest sit dim. Nothing is lit while the window is closed."""
-        for cid, btn in self.cat_buttons.items():
-            sel = (cid == self._open_category)
-            btn.setChecked(sel)
-            bg, edge = ((EMP["buy"], EMP["buy_lit_edge"]) if sel
-                        else (EMP["tile_bg"], EMP["neon_off"]))
-            btn.setStyleSheet(
-                f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
-                f"border-radius:5px; padding:3px 14px; }}")
+        """Light up (accent ring + neon name) the box whose window is open; the
+        rest sit normal. Nothing is lit while the window is closed."""
+        for cid, box in self.cat_buttons.items():
+            box.set_selected(cid == self._open_category)
 
     def _stage(self):
         """(x, width) of the scene area: capped to DESIGN_RATIO and centred so a
