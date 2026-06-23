@@ -95,7 +95,7 @@ class Gallery(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll)
         self.timer = QTimer(self)
-        self.timer.setInterval(120)
+        self.timer.setInterval(480)   # 4x slower than the original 120ms
         self.timer.timeout.connect(self._tick)
         self.timer.start()
 
