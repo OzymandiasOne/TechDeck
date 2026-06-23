@@ -47,6 +47,7 @@ class Item(QLabel):
         self.item_id = item_id
         self.nx, self.ny = nx, ny
         pm = QPixmap(str(GARDEN / sprite))
+        self.nw, self.nh = pm.width(), pm.height()   # native size, for clamping
         self.setPixmap(pm.scaled(pm.width() * SCALE, pm.height() * SCALE,
                                  Qt.AspectRatioMode.IgnoreAspectRatio,
                                  Qt.TransformationMode.FastTransformation))
@@ -60,8 +61,10 @@ class Item(QLabel):
         self.move(self.nx * SCALE, self.ny * SCALE)
 
     def set_native(self, nx, ny):
-        self.nx = max(0, min(NATIVE_W - 1, nx))
-        self.ny = max(0, min(NATIVE_H - 1, ny))
+        # Allow items to extend off any edge (large sprites like the tree need to
+        # sit partly off-screen); keep at least ~8px on-canvas so it stays grabbable.
+        self.nx = max(-self.nw + 8, min(NATIVE_W - 8, nx))
+        self.ny = max(-self.nh + 8, min(NATIVE_H - 8, ny))
         self.reposition()
         self.placer.show_status(self)
 
