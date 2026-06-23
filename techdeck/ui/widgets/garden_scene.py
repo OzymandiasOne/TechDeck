@@ -102,7 +102,7 @@ PLACEMENT = {
     # --- Exterior (drawn in FRONT of the facade; always visible — yard/roof) ---
     "deco_satellite": (312, 10),
     "deco_bird":      (286, 11),
-    "deco_butterfly": (176, 179),
+    "deco_butterfly": (176, 170),
     "deco_flower":    (32, 129),
     "deco_cattails":  (0, 160),
     "deco_watercan":  (200, 163),
@@ -143,9 +143,6 @@ FACADE_ATTACHED = {"deco_satellite"}   # the bird agent is handled separately
 
 # Agent behaviour tuning.
 AGENT_MS = 60                 # update tick (frame-rate independent via dt)
-BFLY_X, BFLY_Y = (40, 300), (178, 202)   # lawn region the butterfly wanders
-BFLY_SPEED = 26               # px/s drift
-BFLY_REST = (2.5, 7.0)        # seconds at rest between hops
 BIRD_SPEED = 55               # px/s in flight
 BIRD_PERCH = (12.0, 35.0)     # seconds perched before flying off
 BIRD_GONE = (5.0, 14.0)       # seconds off-screen before returning
@@ -538,10 +535,8 @@ class GardenScene(QWidget):
             frames = [self._load(d / f"sPet_ItemButterfly_{i}.png") for i in range(2)]
             frames = [f for f in frames if f is not None]
             if frames:
-                self._butterfly = {"x": float(x), "y": float(y), "tx": float(x),
-                                   "ty": float(y), "frames": frames, "idx": 1,
-                                   "state": "rest", "t": random.uniform(*BFLY_REST),
-                                   "flutter": 0.6}
+                self._butterfly = {"x": float(x), "y": float(y), "frames": frames,
+                                   "idx": 1, "flutter": 0.6}
         if self._owned("deco_bird") and "deco_bird" in PLACEMENT:
             x, y = PLACEMENT["deco_bird"]
             perch = self._load(d / "sPet_ItemBird_0.png")
@@ -565,32 +560,15 @@ class GardenScene(QWidget):
             self.update()
 
     def _update_butterfly(self, dt):
+        # Sits in one place: mostly folded upright (frame 1), opens its wings now
+        # and then for a little flutter.
         b = self._butterfly
-        b["t"] -= dt
-        if b["state"] == "rest":
-            # sits folded upright (frame 1); occasionally opens its wings briefly
-            b["flutter"] -= dt
-            if b["flutter"] <= 0:
-                if b["idx"] == 1:     # upright -> open briefly (a flutter)
-                    b["idx"], b["flutter"] = 0, random.uniform(0.10, 0.25)
-                else:                 # open -> fold back, sit a while
-                    b["idx"], b["flutter"] = 1, random.uniform(1.5, 4.0)
-            if b["t"] <= 0:           # hop to a new lawn spot
-                b["tx"] = random.uniform(*BFLY_X)
-                b["ty"] = random.uniform(*BFLY_Y)
-                b["state"] = "fly"
-        else:                        # flying: wings ALWAYS flap (never glide upright)
-            b["idx"] ^= 1            # alternate every tick while moving
-            dx, dy = b["tx"] - b["x"], b["ty"] - b["y"]
-            dist = math.hypot(dx, dy)
-            step = BFLY_SPEED * dt
-            if dist <= step:
-                b["x"], b["y"], b["state"] = b["tx"], b["ty"], "rest"
-                b["idx"] = 1         # settle folded upright (resting)
-                b["t"] = random.uniform(*BFLY_REST)
-            else:
-                b["x"] += dx / dist * step
-                b["y"] += dy / dist * step
+        b["flutter"] -= dt
+        if b["flutter"] <= 0:
+            if b["idx"] == 1:         # upright -> open briefly
+                b["idx"], b["flutter"] = 0, random.uniform(0.10, 0.25)
+            else:                     # open -> fold back, sit a while
+                b["idx"], b["flutter"] = 1, random.uniform(1.5, 4.0)
 
     def _update_bird(self, dt):
         bd = self._bird
