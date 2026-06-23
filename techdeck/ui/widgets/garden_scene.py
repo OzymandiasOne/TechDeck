@@ -39,6 +39,10 @@ from techdeck.ui.sprite_font import font as _sf
 # Native UFO50 canvas the whole scene is authored against.
 NATIVE_W, NATIVE_H = 384, 216
 
+# The diorama (land + house + sun/moon) is drawn this much larger than the integer
+# wallpaper scale, to fill more of the window. The wallpaper tiling is unaffected.
+DIORAMA_ZOOM = 1.2
+
 # House facade bounding box in native coords (the clickable "front" — the right
 # portion of the canvas; the left half is transparent yard). Used for hit-test.
 HOUSE_RECT = QRect(184, 6, 200, 204)
@@ -132,6 +136,10 @@ AMBIENT_ANIM = {
 
 # Items handled as moving "agents" (their own behaviour, not static placement).
 AGENTS = {"deco_bird", "deco_butterfly"}
+
+# Items mounted on the front wall / roof — they lift away with the facade and the
+# bird perches on it, so they move (and fade) with the facade when the house opens.
+FACADE_ATTACHED = {"deco_satellite"}   # the bird agent is handled separately
 
 # Agent behaviour tuning.
 AGENT_MS = 60                 # update tick (frame-rate independent via dt)
@@ -372,21 +380,32 @@ class GardenScene(QWidget):
             p.drawPixmap(tx, ty, self._tree[st])
         for rec in self._furniture:            # interior — behind the facade
             p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
-        if self._facade is not None:
-            eased = _ease_out_cubic(self._open_progress)
-            if eased < 1.0:
-                p.setOpacity(1.0 - eased)
-                p.drawPixmap(0, -int(FACADE_LIFT * eased), self._facade)
-                p.setOpacity(1.0)
-        for rec in self._furniture_ext:        # exterior — in front, always shown
-            p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
-        if self._butterfly is not None:        # moving agents, in front of everything
+        # The facade and anything mounted on it (satellite, perched bird) lift up
+        # and fade together when the house opens.
+        eased = _ease_out_cubic(self._open_progress)
+        facade_dy = -int(FACADE_LIFT * eased)
+        facade_op = 1.0 - eased
+        if self._facade is not None and facade_op > 0.0:
+            p.setOpacity(facade_op)
+            p.drawPixmap(0, facade_dy, self._facade)
+            p.setOpacity(1.0)
+        for rec in self._furniture_ext:        # exterior — in front
+            if rec["id"] in FACADE_ATTACHED:
+                if facade_op > 0.0:
+                    p.setOpacity(facade_op)
+                    p.drawPixmap(rec["x"], rec["y"] + facade_dy, rec["frames"][rec["idx"]])
+                    p.setOpacity(1.0)
+            else:
+                p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+        if self._butterfly is not None:        # butterfly stays on the lawn
             b = self._butterfly
             p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
-        if self._bird is not None:
+        if self._bird is not None and facade_op > 0.0:   # perches on the roof -> lifts with it
             bd = self._bird
             frame = bd["perch"] if bd["state"] == "perch" else bd["fly"][bd["fidx"]]
-            p.drawPixmap(int(bd["x"]), int(bd["y"]), frame)
+            p.setOpacity(facade_op)
+            p.drawPixmap(int(bd["x"]), int(bd["y"]) + facade_dy, frame)
+            p.setOpacity(1.0)
         p.end()
         return buf
 
@@ -406,20 +425,16 @@ class GardenScene(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        # Largest integer scale that fits, centred.
-        self._scale = max(1, min(self.width() // NATIVE_W, self.height() // NATIVE_H))
-        dw, dh = NATIVE_W * self._scale, NATIVE_H * self._scale
-        self._origin = QPoint((self.width() - dw) // 2, (self.height() - dh) // 2)
-        # Pixel-perfect: no smoothing.
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
-        # Tile the wallpaper across the ENTIRE window (it repeats behind the
-        # diorama and shows through the island's transparent corners), aligned so
-        # a tile boundary lands on the diorama origin.
-        tile = self._scaled_background(self._scale)
+        # Wallpaper tiles at the integer fit (crisp + unchanged); the diorama is
+        # blitted DIORAMA_ZOOM larger over it, centred.
+        wscale = max(1, min(self.width() // NATIVE_W, self.height() // NATIVE_H))
+        self._scale = wscale * DIORAMA_ZOOM            # diorama scale (for hit-test)
+        dw, dh = int(NATIVE_W * self._scale), int(NATIVE_H * self._scale)
+        self._origin = QPoint((self.width() - dw) // 2, (self.height() - dh) // 2)
+        tile = self._scaled_background(wscale)
         if tile is not None and tile.width() > 0 and tile.height() > 0:
-            sx = (-self._origin.x()) % tile.width()
-            sy = (-self._origin.y()) % tile.height()
-            p.drawTiledPixmap(self.rect(), tile, QPoint(sx, sy))
+            p.drawTiledPixmap(self.rect(), tile)
         else:
             p.fillRect(self.rect(), QColor("#12121c"))
         p.drawPixmap(QRect(self._origin.x(), self._origin.y(), dw, dh),
@@ -503,7 +518,7 @@ class GardenScene(QWidget):
                 frames = [pm] if pm is not None else []
             if not frames:
                 continue
-            rec = {"frames": frames, "x": x, "y": y,
+            rec = {"id": item_id, "frames": frames, "x": x, "y": y,
                    "anim": anim and len(frames) > 1, "idx": 0}
             (exterior if item_id in EXTERIOR else interior).append(rec)
         self._furniture = interior
@@ -524,7 +539,7 @@ class GardenScene(QWidget):
             frames = [f for f in frames if f is not None]
             if frames:
                 self._butterfly = {"x": float(x), "y": float(y), "tx": float(x),
-                                   "ty": float(y), "frames": frames, "idx": 0,
+                                   "ty": float(y), "frames": frames, "idx": 1,
                                    "state": "rest", "t": random.uniform(*BFLY_REST),
                                    "flutter": 0.6}
         if self._owned("deco_bird") and "deco_bird" in PLACEMENT:
@@ -553,30 +568,29 @@ class GardenScene(QWidget):
         b = self._butterfly
         b["t"] -= dt
         if b["state"] == "rest":
-            # mostly still, with occasional wing flutters
+            # sits folded upright (frame 1); occasionally opens its wings briefly
             b["flutter"] -= dt
             if b["flutter"] <= 0:
-                b["idx"] ^= 1
-                b["flutter"] = (random.uniform(0.12, 0.4) if random.random() < 0.35
-                                else random.uniform(1.0, 3.0))
+                if b["idx"] == 1:     # upright -> open briefly (a flutter)
+                    b["idx"], b["flutter"] = 0, random.uniform(0.10, 0.25)
+                else:                 # open -> fold back, sit a while
+                    b["idx"], b["flutter"] = 1, random.uniform(1.5, 4.0)
             if b["t"] <= 0:           # hop to a new lawn spot
                 b["tx"] = random.uniform(*BFLY_X)
                 b["ty"] = random.uniform(*BFLY_Y)
                 b["state"] = "fly"
-        else:                        # flying to the target, wings flapping
+        else:                        # flying: wings ALWAYS flap (never glide upright)
+            b["idx"] ^= 1            # alternate every tick while moving
             dx, dy = b["tx"] - b["x"], b["ty"] - b["y"]
             dist = math.hypot(dx, dy)
             step = BFLY_SPEED * dt
             if dist <= step:
                 b["x"], b["y"], b["state"] = b["tx"], b["ty"], "rest"
+                b["idx"] = 1         # settle folded upright (resting)
                 b["t"] = random.uniform(*BFLY_REST)
             else:
                 b["x"] += dx / dist * step
                 b["y"] += dy / dist * step
-            b["flutter"] -= dt
-            if b["flutter"] <= 0:
-                b["idx"] ^= 1
-                b["flutter"] = 0.12
 
     def _update_bird(self, dt):
         bd = self._bird
