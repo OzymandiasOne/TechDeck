@@ -158,6 +158,17 @@ CATALOG = [
      "sprite": "sPet_ItemButterfly_0.png", "cost": 25, "kind": "furniture"},
     {"id": "deco_sapling", "name": "Tree Sapling", "category": "decorations",
      "sprite": "sPet_Tree_5.png", "cost": 30, "kind": "tree"},
+    {"id": "deco_sun", "name": "Sun", "category": "decorations",
+     "sprite": "sPet_ItemSun_0.png", "cost": 40, "kind": "furniture"},
+    {"id": "deco_moon", "name": "Moon", "category": "decorations",
+     "sprite": "sPet_ItemSunMoon_0.png", "cost": 40, "kind": "furniture"},
+    # Owl + Monkey live in the tree — only sold once it's fully grown.
+    {"id": "deco_owl", "name": "Owl", "category": "decorations",
+     "sprite": "sPet_ItemOwl_0.png", "cost": 80, "kind": "furniture",
+     "requires": "tree_full"},
+    {"id": "deco_monkey", "name": "Monkey", "category": "decorations",
+     "sprite": "sPet_ItemMonkey_0.png", "cost": 100, "kind": "furniture",
+     "requires": "tree_full"},
 
     # --- Decorations: backgrounds (equippable My House wallpaper). sLibraryBG_4
     # is the free default; these are the alternates. Equip by buying / re-clicking.
@@ -932,6 +943,15 @@ class EmporiumPage(QWidget):
         x = sx + (sw - ww) // 2
         self.shop_window.setGeometry(x, top, ww, max(200, wh))
 
+    def _item_available(self, item):
+        """Is this item purchasable yet? Owned items always show; otherwise gate
+        items that 'require' a milestone (owl/monkey need a fully grown tree)."""
+        if self.settings.is_unlocked(item["id"]):
+            return True
+        if item.get("requires") == "tree_full":
+            return self.settings.get_tree_stage() >= self.settings.TREE_STAGES
+        return True
+
     def _populate_grid(self):
         """Lay out only the tiles in the active category; an empty category shows
         the COMING SOON plate instead."""
@@ -939,7 +959,8 @@ class EmporiumPage(QWidget):
             self.grid.removeWidget(t)
             t.hide()
         matching = [t for t in self.tiles
-                    if t.item.get("category") == self._category]
+                    if t.item.get("category") == self._category
+                    and self._item_available(t.item)]
         cols = self.GRID_COLS
         for i, t in enumerate(matching):
             self.grid.addWidget(t, i // cols, i % cols,
@@ -993,6 +1014,11 @@ class EmporiumPage(QWidget):
     def handle_tile_action(self, item):
         s = self.settings
         if not s.is_unlocked(item["id"]):
+            if not self._item_available(item):
+                PixelDialog.show_message(
+                    self, "Not yet",
+                    f"{item['name']} shows up once your tree is fully grown.")
+                return
             if not s.spend_tickets(item["cost"]):
                 PixelDialog.show_message(
                     self, "Not enough tickets",

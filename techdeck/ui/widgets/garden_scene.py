@@ -99,6 +99,10 @@ PLACEMENT = {
     "deco_lilypad":   (16, 176),
     "deco_jumprope":  (227, 179),
     "deco_anthill":   (256, 192),
+    "deco_sun":       (24, 14),
+    "deco_moon":      (320, 14),
+    "deco_owl":       (50, 30),
+    "deco_monkey":    (40, 70),
 }
 
 # Items that live OUTSIDE the house: drawn in front of the facade (so they show
@@ -107,10 +111,18 @@ PLACEMENT = {
 EXTERIOR = {
     "deco_satellite", "deco_bird", "deco_butterfly", "deco_flower", "deco_cattails",
     "deco_watercan", "deco_picnic", "deco_hottub", "deco_gardenplot", "deco_lilypad",
-    "deco_jumprope", "deco_anthill",
+    "deco_jumprope", "deco_anthill", "deco_sun", "deco_moon", "deco_owl", "deco_monkey",
+}
+
+# Items whose multi-frame sprite loops as a slow ambient animation (timer-driven).
+# (Pet-triggered "On" animations and bird/butterfly movement come with the pig.)
+AMBIENT_ANIM = {
+    "deco_sun", "deco_owl", "deco_monkey", "deco_anthill", "deco_butterfly",
+    "deco_lilypad",
 }
 
 _TICK_MS = 16
+_ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
 
 
 def _garden_dir() -> Path:
@@ -178,6 +190,9 @@ class GardenScene(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(_TICK_MS)
         self._timer.timeout.connect(self._tick)
+        self._anim_timer = QTimer(self)          # ambient item animations
+        self._anim_timer.setInterval(_ANIM_MS)
+        self._anim_timer.timeout.connect(self._anim_tick)
 
     # ---- assets --------------------------------------------------------------
     @staticmethod
@@ -253,11 +268,22 @@ class GardenScene(QWidget):
     # ---- lifecycle (only animate while the tab is visible) -------------------
     def showEvent(self, e):
         super().showEvent(e)
+        self._anim_timer.start()
         self.update()
 
     def hideEvent(self, e):
         super().hideEvent(e)
         self._timer.stop()
+        self._anim_timer.stop()
+
+    def _anim_tick(self):
+        changed = False
+        for rec in (*self._furniture, *self._furniture_ext):
+            if rec["anim"]:
+                rec["idx"] = (rec["idx"] + 1) % len(rec["frames"])
+                changed = True
+        if changed:
+            self.update()
 
     # ---- animation -----------------------------------------------------------
     def _tick(self):
@@ -312,18 +338,16 @@ class GardenScene(QWidget):
             p.drawPixmap(0, 0, self._bg)
         if 0 <= self._tree_stage < len(self._tree) and self._tree[self._tree_stage]:
             p.drawPixmap(TREE_POS[0], TREE_POS[1], self._tree[self._tree_stage])
-        for pm, x, y in self._furniture:       # interior — behind the facade
-            if pm is not None:
-                p.drawPixmap(x, y, pm)
+        for rec in self._furniture:            # interior — behind the facade
+            p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
         if self._facade is not None:
             eased = _ease_out_cubic(self._open_progress)
             if eased < 1.0:
                 p.setOpacity(1.0 - eased)
                 p.drawPixmap(0, -int(FACADE_LIFT * eased), self._facade)
                 p.setOpacity(1.0)
-        for pm, x, y in self._furniture_ext:   # exterior — in front, always shown
-            if pm is not None:
-                p.drawPixmap(x, y, pm)
+        for rec in self._furniture_ext:        # exterior — in front, always shown
+            p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
         p.end()
         return buf
 
@@ -397,9 +421,26 @@ class GardenScene(QWidget):
         p.setBrush(QColor("#ffffff"))
         p.drawPolygon(QPolygon(pts))
 
+    def _load_frames(self, sprite):
+        """Load an item's whole frame sequence (sPet_X_0.png, _1, _2, ...)."""
+        d = _garden_dir()
+        if sprite.endswith("_0.png"):
+            base = sprite[:-len("_0.png")]
+            frames, i = [], 0
+            while True:
+                pm = self._load(d / f"{base}_{i}.png")
+                if pm is None:
+                    break
+                frames.append(pm)
+                i += 1
+            if frames:
+                return frames
+        pm = self._load(d / sprite)
+        return [pm] if pm is not None else []
+
     def _load_furniture(self):
         """Build the placed-furniture lists (interior + exterior) from the items
-        the player owns."""
+        the player owns. Each record is {frames, x, y, anim, idx}."""
         from techdeck.ui.pages.emporium_page import CATALOG
         by_id = {c["id"]: c for c in CATALOG}
         interior, exterior = [], []
@@ -407,10 +448,17 @@ class GardenScene(QWidget):
             c = by_id.get(item_id)
             if c is None or self.settings is None or not self.settings.is_unlocked(item_id):
                 continue
-            pm = self._load(_garden_dir() / c["sprite"])
-            if pm is None:
+            anim = item_id in AMBIENT_ANIM
+            if anim:
+                frames = self._load_frames(c["sprite"])
+            else:
+                pm = self._load(_garden_dir() / c["sprite"])
+                frames = [pm] if pm is not None else []
+            if not frames:
                 continue
-            (exterior if item_id in EXTERIOR else interior).append((pm, x, y))
+            rec = {"frames": frames, "x": x, "y": y,
+                   "anim": anim and len(frames) > 1, "idx": 0}
+            (exterior if item_id in EXTERIOR else interior).append(rec)
         self._furniture = interior
         self._furniture_ext = exterior
 
