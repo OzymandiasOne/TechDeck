@@ -26,8 +26,9 @@ NATIVE_W, NATIVE_H = 384, 216
 SCALE = 3                       # bump to 4 if your screen is big enough
 BAR_H = 56
 
-from techdeck.ui.widgets.garden_scene import PLACEMENT, EXTERIOR, TREE_POS  # noqa: E402
-from techdeck.ui.pages.emporium_page import CATALOG                         # noqa: E402
+from techdeck.ui.widgets.garden_scene import (PLACEMENT, EXTERIOR, TREE_POS,   # noqa: E402
+                                              TREE_PLACEMENT)
+from techdeck.ui.pages.emporium_page import CATALOG                           # noqa: E402
 
 _CAT = {c["id"]: c for c in CATALOG}
 
@@ -94,13 +95,19 @@ class Placer(QWidget):
             NATIVE_W * SCALE, NATIVE_H * SCALE, Qt.AspectRatioMode.IgnoreAspectRatio,
             Qt.TransformationMode.FastTransformation)
         self.selected = None
-        self.mode = "interior"   # "interior" (open house) | "exterior" (closed + yard)
+        # "interior" (open house) | "exterior" (closed + yard) | "tree" (one stage)
+        self.mode = "interior"
+        self.tree_sel = 1        # which tree growth stage is being placed (1..5)
 
         self.items = []
         for item_id, (x, y) in PLACEMENT.items():
             if item_id in _CAT:
                 it = Item(self, item_id, _CAT[item_id]["sprite"], x, y)
                 self.items.append(it)
+        # One draggable widget per tree growth stage (1..5), aligned so they all
+        # share a root point. The full tree is drawn faint as a reference.
+        self.tree_items = [Item(self, f"tree_{n}", f"sPet_Tree_{n}.png",
+                                *TREE_PLACEMENT[n]) for n in range(1, 6)]
 
         self.status = QLabel("Drag a piece (or click it, then nudge with arrow keys).",
                              self)
@@ -124,6 +131,12 @@ class Placer(QWidget):
         if e.key() == Qt.Key.Key_Tab:
             self.toggle_mode()
             return
+        if self.mode == "tree" and e.key() in (Qt.Key.Key_BracketLeft,
+                                               Qt.Key.Key_BracketRight):
+            step = 1 if e.key() == Qt.Key.Key_BracketRight else -1
+            self.tree_sel = max(1, min(5, self.tree_sel + step))
+            self.apply_mode()
+            return
         if self.selected is None:
             return
         k = e.key()
@@ -133,16 +146,23 @@ class Placer(QWidget):
             self.selected.set_native(self.selected.nx + dx, self.selected.ny + dy)
 
     def toggle_mode(self):
-        self.mode = "exterior" if self.mode == "interior" else "interior"
+        order = ["interior", "exterior", "tree"]
+        self.mode = order[(order.index(self.mode) + 1) % len(order)]
         self.apply_mode()
 
     def apply_mode(self):
-        """Show only the items for the current view; exterior view also closes
-        the house (draws the facade) so roof/yard items sit in context."""
-        ext = self.mode == "exterior"
+        """Show only the items for the current view. Exterior closes the house
+        (facade); Tree shows one growth stage at a time over a faint full tree."""
+        m = self.mode
         for it in self.items:
-            it.setVisible((it.item_id in EXTERIOR) == ext)
-        self.mode_btn.setText(f"View: {'Exterior' if ext else 'Interior'}  (Tab)")
+            it.setVisible(m != "tree" and (it.item_id in EXTERIOR) == (m == "exterior"))
+        for i, it in enumerate(self.tree_items, start=1):
+            it.setVisible(m == "tree" and i == self.tree_sel)
+        if m == "tree":
+            self.mode_btn.setText(f"View: Tree {self.tree_sel}/5  ([ ])")
+        else:
+            self.mode_btn.setText(
+                f"View: {'Exterior' if m == 'exterior' else 'Interior'}  (Tab)")
         self.selected = None
         self.update()
 
@@ -152,11 +172,18 @@ class Placer(QWidget):
         p.drawTiledPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._wall)
         p.fillRect(0, NATIVE_H * SCALE, self.width(), BAR_H, QColor("#15151f"))
         p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._bg)
-        # full-grown tree so tree items (owl/monkey) can be placed on it
-        p.drawPixmap(TREE_POS[0] * SCALE, TREE_POS[1] * SCALE,
-                     self._tree.width() * SCALE, self._tree.height() * SCALE, self._tree)
-        if self.mode == "exterior":   # close the house so the facade/roof shows
-            p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._facade)
+        tw, th = self._tree.width() * SCALE, self._tree.height() * SCALE
+        tx, ty = TREE_POS[0] * SCALE, TREE_POS[1] * SCALE
+        if self.mode == "tree":
+            # faint full-grown tree as an alignment reference for each stage
+            p.setOpacity(0.30)
+            p.drawPixmap(tx, ty, tw, th, self._tree)
+            p.setOpacity(1.0)
+        else:
+            # solid full tree so furniture (owl/monkey) sits in context
+            p.drawPixmap(tx, ty, tw, th, self._tree)
+            if self.mode == "exterior":   # close the house so the facade/roof shows
+                p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._facade)
         p.end()
 
     def export(self):
@@ -164,9 +191,14 @@ class Placer(QWidget):
         for it in sorted(self.items, key=lambda i: i.item_id):
             lines.append(f'    "{it.item_id}": ({it.nx}, {it.ny}),')
         lines.append("}")
+        lines.append("")
+        lines.append("TREE_PLACEMENT = {")
+        for i, it in enumerate(self.tree_items, start=1):
+            lines.append(f"    {i}: ({it.nx}, {it.ny}),")
+        lines.append("}")
         out = ROOT / "tools" / "placement_export.py"
         out.write_text("\n".join(lines), encoding="utf-8")
-        self.status.setText(f"Exported {len(self.items)} items -> {out}")
+        self.status.setText(f"Exported {len(self.items)} items + tree -> {out}")
         print("\n".join(lines))
         print(f"\nWrote {out}")
 

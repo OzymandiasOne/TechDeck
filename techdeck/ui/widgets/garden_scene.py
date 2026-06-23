@@ -51,6 +51,11 @@ FACADE_LIFT = 216
 TREE_POS = (16, 7)
 TREE_STAGE_FULL = 5
 
+# Per-stage tree placement (native top-left), so every growth stage shares the
+# same root point as it grows in place. Seeded by aligning each sprite's base;
+# fine-tune in the placer's Tree view.
+TREE_PLACEMENT = {1: (18, 19), 2: (22, 18), 3: (18, 16), 4: (16, 14), 5: (16, 7)}
+
 # Where each owned furniture item sits in the house, keyed by its Emporium
 # catalog id -> (native_x, native_y) top-left. Bought items appear at their spot;
 # unowned ones are absent. First-pass coords (floors: attic ~y70, upper ~y86,
@@ -337,8 +342,10 @@ class GardenScene(QWidget):
         p = QPainter(buf)
         if self._bg is not None:
             p.drawPixmap(0, 0, self._bg)
-        if 0 <= self._tree_stage < len(self._tree) and self._tree[self._tree_stage]:
-            p.drawPixmap(TREE_POS[0], TREE_POS[1], self._tree[self._tree_stage])
+        st = self._tree_stage
+        if 1 <= st < len(self._tree) and self._tree[st] is not None:
+            tx, ty = TREE_PLACEMENT.get(st, TREE_POS)
+            p.drawPixmap(tx, ty, self._tree[st])
         for rec in self._furniture:            # interior — behind the facade
             p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
         if self._facade is not None:
