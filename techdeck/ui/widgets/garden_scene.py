@@ -57,51 +57,57 @@ TREE_STAGE_FULL = 5
 # middle ~y124, ground ~y160) — tune visually.
 PLACEMENT = {
     # Native (x,y) top-left per item, dialed in with tools/furniture_placer.py.
-    # Attic
-    "deco_trophy":    (238, 24),
-    # Upper floor
+    # --- Interior (drawn behind the facade; revealed when the house opens) ---
+    "deco_trophy":    (240, 24),
+    "deco_chest":     (209, 16),
+    "deco_boxes":     (288, 32),
+    "deco_cobweb":    (288, 16),
+    "deco_trapdoor":  (256, 16),
     "deco_toilet":    (192, 48),
     "deco_tub":       (225, 48),
     "deco_bed":       (257, 47),
     "deco_lamp":      (288, 48),
     "deco_mirror":    (304, 48),
     "deco_telescope": (320, 48),
-    # Middle floor
-    "deco_desk":      (212, 94),
-    "deco_phone":     (240, 94),
+    "deco_bike":      (225, 24),
+    "deco_phone":     (191, 95),
+    "deco_desk":      (224, 96),
+    "deco_computer":  (256, 96),
+    "deco_calendar":  (208, 80),
     "deco_tv":        (288, 96),
     "deco_guitar":    (320, 96),
-    # Lower floor
     "deco_fridge":    (209, 128),
     "deco_stove":     (224, 128),
+    "deco_blender":   (224, 128),
     "deco_painting":  (257, 128),
     "deco_books":     (288, 128),
     "deco_plant":     (305, 128),
-    # Ground floor
     "deco_couch":     (256, 144),
     "deco_rug":       (256, 144),
     "deco_hatrack":   (320, 136),
-    # Yard
+    "deco_easel":     (42, 148),
+    # --- Exterior (drawn in FRONT of the facade; always visible — yard/roof) ---
+    "deco_satellite": (342, 12),
+    "deco_bird":      (100, 54),
+    "deco_butterfly": (90, 86),
+    "deco_flower":    (32, 129),
+    "deco_cattails":  (0, 160),
+    "deco_watercan":  (200, 162),
+    "deco_picnic":    (56, 166),
     "deco_hottub":    (145, 174),
-    # More furniture — rough starting spots; reposition with the placer tool.
-    "deco_computer":  (215, 92),
-    "deco_blender":   (240, 128),
-    "deco_easel":     (228, 92),
-    "deco_calendar":  (205, 96),
-    "deco_chest":     (285, 56),
-    "deco_boxes":     (300, 60),
-    "deco_cobweb":    (310, 28),
-    "deco_trapdoor":  (240, 152),
-    "deco_picnic":    (90, 196),
-    "deco_watercan":  (162, 188),
-    "deco_bike":      (55, 178),
-    "deco_jumprope":  (110, 186),
-    "deco_gardenplot": (195, 196),
-    "deco_cattails":  (18, 168),
-    "deco_flower":    (45, 172),
-    "deco_lilypad":   (8, 200),
-    "deco_satellite": (300, 20),
-    "deco_bird":      (95, 50),
+    "deco_gardenplot": (320, 176),
+    "deco_lilypad":   (16, 176),
+    "deco_jumprope":  (227, 179),
+    "deco_anthill":   (160, 198),
+}
+
+# Items that live OUTSIDE the house: drawn in front of the facade (so they show
+# on the closed house too) and placed in the placer's exterior view, often
+# relative to the tree/hedge/roof.
+EXTERIOR = {
+    "deco_satellite", "deco_bird", "deco_butterfly", "deco_flower", "deco_cattails",
+    "deco_watercan", "deco_picnic", "deco_hottub", "deco_gardenplot", "deco_lilypad",
+    "deco_jumprope", "deco_anthill",
 }
 
 _TICK_MS = 16
@@ -156,7 +162,8 @@ class GardenScene(QWidget):
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
         self._tree_stage = TREE_STAGE_FULL
-        self._furniture = []
+        self._furniture = []          # interior — behind the facade
+        self._furniture_ext = []      # exterior — in front of the facade
         self._load_furniture()
 
         # Reveal state: progress 0 = closed, 1 = fully open; animates toward target.
@@ -305,7 +312,7 @@ class GardenScene(QWidget):
             p.drawPixmap(0, 0, self._bg)
         if 0 <= self._tree_stage < len(self._tree) and self._tree[self._tree_stage]:
             p.drawPixmap(TREE_POS[0], TREE_POS[1], self._tree[self._tree_stage])
-        for pm, x, y in self._furniture:
+        for pm, x, y in self._furniture:       # interior — behind the facade
             if pm is not None:
                 p.drawPixmap(x, y, pm)
         if self._facade is not None:
@@ -314,6 +321,9 @@ class GardenScene(QWidget):
                 p.setOpacity(1.0 - eased)
                 p.drawPixmap(0, -int(FACADE_LIFT * eased), self._facade)
                 p.setOpacity(1.0)
+        for pm, x, y in self._furniture_ext:   # exterior — in front, always shown
+            if pm is not None:
+                p.drawPixmap(x, y, pm)
         p.end()
         return buf
 
@@ -388,20 +398,21 @@ class GardenScene(QWidget):
         p.drawPolygon(QPolygon(pts))
 
     def _load_furniture(self):
-        """Build the list of placed furniture from the items the player owns."""
+        """Build the placed-furniture lists (interior + exterior) from the items
+        the player owns."""
         from techdeck.ui.pages.emporium_page import CATALOG
         by_id = {c["id"]: c for c in CATALOG}
-        items = []
+        interior, exterior = [], []
         for item_id, (x, y) in PLACEMENT.items():
             c = by_id.get(item_id)
-            if c is None or self.settings is None:
-                continue
-            if not self.settings.is_unlocked(item_id):
+            if c is None or self.settings is None or not self.settings.is_unlocked(item_id):
                 continue
             pm = self._load(_garden_dir() / c["sprite"])
-            if pm is not None:
-                items.append((pm, x, y))
-        self._furniture = items
+            if pm is None:
+                continue
+            (exterior if item_id in EXTERIOR else interior).append((pm, x, y))
+        self._furniture = interior
+        self._furniture_ext = exterior
 
     def refresh(self):
         """Re-read the equipped wallpaper + owned furniture (both can change)."""

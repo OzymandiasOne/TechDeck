@@ -26,8 +26,8 @@ NATIVE_W, NATIVE_H = 384, 216
 SCALE = 3                       # bump to 4 if your screen is big enough
 BAR_H = 56
 
-from techdeck.ui.widgets.garden_scene import PLACEMENT          # noqa: E402
-from techdeck.ui.pages.emporium_page import CATALOG             # noqa: E402
+from techdeck.ui.widgets.garden_scene import PLACEMENT, EXTERIOR  # noqa: E402
+from techdeck.ui.pages.emporium_page import CATALOG               # noqa: E402
 
 _CAT = {c["id"]: c for c in CATALOG}
 
@@ -88,32 +88,41 @@ class Placer(QWidget):
         self.setFixedSize(NATIVE_W * SCALE, NATIVE_H * SCALE + BAR_H)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._bg = QPixmap(str(GARDEN / "sPet_BG_0.png"))
+        self._facade = QPixmap(str(GARDEN / "sPet_HouseFG_0.png"))
         self._wall = QPixmap(str(GARDEN / "sLibraryBG_4.png")).scaled(
             NATIVE_W * SCALE, NATIVE_H * SCALE, Qt.AspectRatioMode.IgnoreAspectRatio,
             Qt.TransformationMode.FastTransformation)
         self.selected = None
+        self.mode = "interior"   # "interior" (open house) | "exterior" (closed + yard)
 
         self.items = []
         for item_id, (x, y) in PLACEMENT.items():
             if item_id in _CAT:
                 it = Item(self, item_id, _CAT[item_id]["sprite"], x, y)
-                it.show()
                 self.items.append(it)
 
         self.status = QLabel("Drag a piece (or click it, then nudge with arrow keys).",
                              self)
         self.status.setStyleSheet("color:#eee; font: 13px 'Consolas';")
-        self.status.setGeometry(10, NATIVE_H * SCALE + 8, NATIVE_W * SCALE - 180, 40)
+        self.status.setGeometry(10, NATIVE_H * SCALE + 8, NATIVE_W * SCALE - 320, 40)
+
+        self.mode_btn = QPushButton("View: Interior  (Tab)", self)
+        self.mode_btn.setGeometry(NATIVE_W * SCALE - 310, NATIVE_H * SCALE + 12, 145, 32)
+        self.mode_btn.clicked.connect(self.toggle_mode)
 
         btn = QPushButton("Export coords", self)
         btn.setGeometry(NATIVE_W * SCALE - 160, NATIVE_H * SCALE + 12, 150, 32)
         btn.clicked.connect(self.export)
+        self.apply_mode()
 
     def show_status(self, item):
         self.status.setText(f"{_name(item.item_id):<14} {item.item_id:<16} "
                             f"x={item.nx}  y={item.ny}")
 
     def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Tab:
+            self.toggle_mode()
+            return
         if self.selected is None:
             return
         k = e.key()
@@ -122,12 +131,28 @@ class Placer(QWidget):
         if dx or dy:
             self.selected.set_native(self.selected.nx + dx, self.selected.ny + dy)
 
+    def toggle_mode(self):
+        self.mode = "exterior" if self.mode == "interior" else "interior"
+        self.apply_mode()
+
+    def apply_mode(self):
+        """Show only the items for the current view; exterior view also closes
+        the house (draws the facade) so roof/yard items sit in context."""
+        ext = self.mode == "exterior"
+        for it in self.items:
+            it.setVisible((it.item_id in EXTERIOR) == ext)
+        self.mode_btn.setText(f"View: {'Exterior' if ext else 'Interior'}  (Tab)")
+        self.selected = None
+        self.update()
+
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
         p.drawTiledPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._wall)
         p.fillRect(0, NATIVE_H * SCALE, self.width(), BAR_H, QColor("#15151f"))
         p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._bg)
+        if self.mode == "exterior":   # close the house so the facade/roof shows
+            p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._facade)
         p.end()
 
     def export(self):

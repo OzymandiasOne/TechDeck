@@ -152,6 +152,10 @@ CATALOG = [
      "sprite": "sPet_ItemSatellite_0.png", "cost": 80, "kind": "furniture"},
     {"id": "deco_bird", "name": "Bird", "category": "decorations",
      "sprite": "sPet_ItemBird_0.png", "cost": 30, "kind": "furniture"},
+    {"id": "deco_anthill", "name": "Anthill", "category": "decorations",
+     "sprite": "sPet_ItemAnts_0.png", "cost": 15, "kind": "furniture"},
+    {"id": "deco_butterfly", "name": "Butterfly", "category": "decorations",
+     "sprite": "sPet_ItemButterfly_0.png", "cost": 25, "kind": "furniture"},
 
     # --- Decorations: backgrounds (equippable My House wallpaper). sLibraryBG_4
     # is the free default; these are the alternates. Equip by buying / re-clicking.
