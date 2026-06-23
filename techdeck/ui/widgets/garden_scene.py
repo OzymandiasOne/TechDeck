@@ -87,18 +87,18 @@ PLACEMENT = {
     "deco_hatrack":   (320, 136),
     "deco_easel":     (42, 148),
     # --- Exterior (drawn in FRONT of the facade; always visible — yard/roof) ---
-    "deco_satellite": (342, 12),
-    "deco_bird":      (100, 54),
-    "deco_butterfly": (90, 86),
+    "deco_satellite": (312, 10),
+    "deco_bird":      (286, 11),
+    "deco_butterfly": (169, 178),
     "deco_flower":    (32, 129),
     "deco_cattails":  (0, 160),
-    "deco_watercan":  (200, 162),
+    "deco_watercan":  (200, 163),
     "deco_picnic":    (56, 166),
     "deco_hottub":    (145, 174),
     "deco_gardenplot": (320, 176),
     "deco_lilypad":   (16, 176),
     "deco_jumprope":  (227, 179),
-    "deco_anthill":   (160, 198),
+    "deco_anthill":   (256, 192),
 }
 
 # Items that live OUTSIDE the house: drawn in front of the facade (so they show
