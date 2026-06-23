@@ -54,7 +54,7 @@ TREE_STAGE_FULL = 5
 # Per-stage tree placement (native top-left), so every growth stage shares the
 # same root point as it grows in place. Seeded by aligning each sprite's base;
 # fine-tune in the placer's Tree view.
-TREE_PLACEMENT = {1: (18, 19), 2: (22, 18), 3: (18, 16), 4: (16, 14), 5: (26, -8)}
+TREE_PLACEMENT = {1: (26, -12), 2: (30, -13), 3: (28, -6), 4: (28, -7), 5: (26, -8)}
 
 # Backgrounds that read as night — the moon shows instead of the sun.
 NIGHT_BACKGROUNDS = {"sLibraryBG_7.png"}   # Starry Night
