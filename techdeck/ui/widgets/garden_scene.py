@@ -85,11 +85,10 @@ PLACEMENT = {
     "deco_couch":     (256, 144),
     "deco_rug":       (256, 144),
     "deco_hatrack":   (320, 136),
-    "deco_easel":     (42, 148),
     # --- Exterior (drawn in FRONT of the facade; always visible — yard/roof) ---
     "deco_satellite": (312, 10),
     "deco_bird":      (286, 11),
-    "deco_butterfly": (169, 178),
+    "deco_butterfly": (176, 179),
     "deco_flower":    (32, 129),
     "deco_cattails":  (0, 160),
     "deco_watercan":  (200, 163),
@@ -99,10 +98,11 @@ PLACEMENT = {
     "deco_lilypad":   (16, 176),
     "deco_jumprope":  (227, 179),
     "deco_anthill":   (256, 192),
-    "deco_sun":       (24, 14),
-    "deco_moon":      (320, 14),
-    "deco_owl":       (50, 30),
-    "deco_monkey":    (40, 70),
+    "deco_easel":     (42, 148),
+    "deco_sun":       (14, 7),
+    "deco_moon":      (14, 7),
+    "deco_owl":       (41, 49),
+    "deco_monkey":    (45, 113),
 }
 
 # Items that live OUTSIDE the house: drawn in front of the facade (so they show
@@ -111,7 +111,8 @@ PLACEMENT = {
 EXTERIOR = {
     "deco_satellite", "deco_bird", "deco_butterfly", "deco_flower", "deco_cattails",
     "deco_watercan", "deco_picnic", "deco_hottub", "deco_gardenplot", "deco_lilypad",
-    "deco_jumprope", "deco_anthill", "deco_sun", "deco_moon", "deco_owl", "deco_monkey",
+    "deco_jumprope", "deco_anthill", "deco_easel", "deco_sun", "deco_moon",
+    "deco_owl", "deco_monkey",
 }
 
 # Items whose multi-frame sprite loops as a slow ambient animation (timer-driven).

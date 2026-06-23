@@ -26,8 +26,8 @@ NATIVE_W, NATIVE_H = 384, 216
 SCALE = 3                       # bump to 4 if your screen is big enough
 BAR_H = 56
 
-from techdeck.ui.widgets.garden_scene import PLACEMENT, EXTERIOR  # noqa: E402
-from techdeck.ui.pages.emporium_page import CATALOG               # noqa: E402
+from techdeck.ui.widgets.garden_scene import PLACEMENT, EXTERIOR, TREE_POS  # noqa: E402
+from techdeck.ui.pages.emporium_page import CATALOG                         # noqa: E402
 
 _CAT = {c["id"]: c for c in CATALOG}
 
@@ -89,6 +89,7 @@ class Placer(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._bg = QPixmap(str(GARDEN / "sPet_BG_0.png"))
         self._facade = QPixmap(str(GARDEN / "sPet_HouseFG_0.png"))
+        self._tree = QPixmap(str(GARDEN / "sPet_Tree_5.png"))   # full-grown
         self._wall = QPixmap(str(GARDEN / "sLibraryBG_4.png")).scaled(
             NATIVE_W * SCALE, NATIVE_H * SCALE, Qt.AspectRatioMode.IgnoreAspectRatio,
             Qt.TransformationMode.FastTransformation)
@@ -151,6 +152,9 @@ class Placer(QWidget):
         p.drawTiledPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._wall)
         p.fillRect(0, NATIVE_H * SCALE, self.width(), BAR_H, QColor("#15151f"))
         p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._bg)
+        # full-grown tree so tree items (owl/monkey) can be placed on it
+        p.drawPixmap(TREE_POS[0] * SCALE, TREE_POS[1] * SCALE,
+                     self._tree.width() * SCALE, self._tree.height() * SCALE, self._tree)
         if self.mode == "exterior":   # close the house so the facade/roof shows
             p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._facade)
         p.end()
