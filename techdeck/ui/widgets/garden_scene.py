@@ -24,6 +24,8 @@ first-pass estimates, easy to nudge. Later this becomes owned-item driven (buy a
 couch at Woogy's -> it appears in a room here).
 """
 
+import math
+import random
 import sys
 from pathlib import Path
 
@@ -124,11 +126,21 @@ EXTERIOR = {
 }
 
 # Items whose multi-frame sprite loops as a slow ambient animation (timer-driven).
-# (Pet-triggered "On" animations and bird/butterfly movement come with the pig.)
 AMBIENT_ANIM = {
-    "deco_sun", "deco_owl", "deco_monkey", "deco_anthill", "deco_butterfly",
-    "deco_lilypad",
+    "deco_sun", "deco_owl", "deco_monkey", "deco_anthill", "deco_lilypad",
 }
+
+# Items handled as moving "agents" (their own behaviour, not static placement).
+AGENTS = {"deco_bird", "deco_butterfly"}
+
+# Agent behaviour tuning.
+AGENT_MS = 60                 # update tick (frame-rate independent via dt)
+BFLY_X, BFLY_Y = (40, 300), (178, 202)   # lawn region the butterfly wanders
+BFLY_SPEED = 26               # px/s drift
+BFLY_REST = (2.5, 7.0)        # seconds at rest between hops
+BIRD_SPEED = 55               # px/s in flight
+BIRD_PERCH = (12.0, 35.0)     # seconds perched before flying off
+BIRD_GONE = (5.0, 14.0)       # seconds off-screen before returning
 
 _TICK_MS = 16
 _ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
@@ -186,6 +198,9 @@ class GardenScene(QWidget):
         self._furniture = []          # interior — behind the facade
         self._furniture_ext = []      # exterior — in front of the facade
         self._load_furniture()
+        self._bird = None             # moving agents
+        self._butterfly = None
+        self._load_agents()
 
         # Reveal state: progress 0 = closed, 1 = fully open; animates toward target.
         self._open_progress = 0.0
@@ -202,6 +217,9 @@ class GardenScene(QWidget):
         self._anim_timer = QTimer(self)          # ambient item animations
         self._anim_timer.setInterval(_ANIM_MS)
         self._anim_timer.timeout.connect(self._anim_tick)
+        self._agent_timer = QTimer(self)         # moving agents (bird/butterfly)
+        self._agent_timer.setInterval(AGENT_MS)
+        self._agent_timer.timeout.connect(self._agent_tick)
 
     # ---- assets --------------------------------------------------------------
     @staticmethod
@@ -279,12 +297,14 @@ class GardenScene(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self._anim_timer.start()
+        self._agent_timer.start()
         self.update()
 
     def hideEvent(self, e):
         super().hideEvent(e)
         self._timer.stop()
         self._anim_timer.stop()
+        self._agent_timer.stop()
 
     def _anim_tick(self):
         changed = False
@@ -360,6 +380,13 @@ class GardenScene(QWidget):
                 p.setOpacity(1.0)
         for rec in self._furniture_ext:        # exterior — in front, always shown
             p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+        if self._butterfly is not None:        # moving agents, in front of everything
+            b = self._butterfly
+            p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
+        if self._bird is not None:
+            bd = self._bird
+            frame = bd["perch"] if bd["state"] == "perch" else bd["fly"][bd["fidx"]]
+            p.drawPixmap(int(bd["x"]), int(bd["y"]), frame)
         p.end()
         return buf
 
@@ -460,6 +487,8 @@ class GardenScene(QWidget):
                  and self.settings.get_equipped_background() in NIGHT_BACKGROUNDS)
         interior, exterior = [], []
         for item_id, (x, y) in PLACEMENT.items():
+            if item_id in AGENTS:        # bird/butterfly handled as moving agents
+                continue
             c = by_id.get(item_id)
             if c is None or self.settings is None or not self.settings.is_unlocked(item_id):
                 continue
@@ -480,6 +509,110 @@ class GardenScene(QWidget):
         self._furniture = interior
         self._furniture_ext = exterior
 
+    # ---- moving agents (bird + butterfly) ------------------------------------
+    def _owned(self, item_id):
+        return self.settings is not None and self.settings.is_unlocked(item_id)
+
+    def _load_agents(self):
+        """Set up the bird + butterfly agents if owned, homed at their placements."""
+        d = _garden_dir()
+        self._butterfly = None
+        self._bird = None
+        if self._owned("deco_butterfly") and "deco_butterfly" in PLACEMENT:
+            x, y = PLACEMENT["deco_butterfly"]
+            frames = [self._load(d / f"sPet_ItemButterfly_{i}.png") for i in range(2)]
+            frames = [f for f in frames if f is not None]
+            if frames:
+                self._butterfly = {"x": float(x), "y": float(y), "tx": float(x),
+                                   "ty": float(y), "frames": frames, "idx": 0,
+                                   "state": "rest", "t": random.uniform(*BFLY_REST),
+                                   "flutter": 0.6}
+        if self._owned("deco_bird") and "deco_bird" in PLACEMENT:
+            x, y = PLACEMENT["deco_bird"]
+            perch = self._load(d / "sPet_ItemBird_0.png")
+            fly = [self._load(d / f"sPet_ItemBirdFly_{i}.png") for i in range(2)]
+            fly = [f for f in fly if f is not None]
+            if perch is not None and fly:
+                self._bird = {"x": float(x), "y": float(y), "hx": float(x),
+                              "hy": float(y), "tx": float(x), "ty": float(y),
+                              "perch": perch, "fly": fly, "fidx": 0, "state": "perch",
+                              "t": random.uniform(*BIRD_PERCH), "flap": 0.12}
+
+    def _agent_tick(self):
+        moved = False
+        if self._butterfly is not None:
+            self._update_butterfly(AGENT_MS / 1000.0)
+            moved = True
+        if self._bird is not None:
+            self._update_bird(AGENT_MS / 1000.0)
+            moved = True
+        if moved:
+            self.update()
+
+    def _update_butterfly(self, dt):
+        b = self._butterfly
+        b["t"] -= dt
+        if b["state"] == "rest":
+            # mostly still, with occasional wing flutters
+            b["flutter"] -= dt
+            if b["flutter"] <= 0:
+                b["idx"] ^= 1
+                b["flutter"] = (random.uniform(0.12, 0.4) if random.random() < 0.35
+                                else random.uniform(1.0, 3.0))
+            if b["t"] <= 0:           # hop to a new lawn spot
+                b["tx"] = random.uniform(*BFLY_X)
+                b["ty"] = random.uniform(*BFLY_Y)
+                b["state"] = "fly"
+        else:                        # flying to the target, wings flapping
+            dx, dy = b["tx"] - b["x"], b["ty"] - b["y"]
+            dist = math.hypot(dx, dy)
+            step = BFLY_SPEED * dt
+            if dist <= step:
+                b["x"], b["y"], b["state"] = b["tx"], b["ty"], "rest"
+                b["t"] = random.uniform(*BFLY_REST)
+            else:
+                b["x"] += dx / dist * step
+                b["y"] += dy / dist * step
+            b["flutter"] -= dt
+            if b["flutter"] <= 0:
+                b["idx"] ^= 1
+                b["flutter"] = 0.12
+
+    def _update_bird(self, dt):
+        bd = self._bird
+        bd["t"] -= dt
+        st = bd["state"]
+        if st == "perch":
+            if bd["t"] <= 0:         # take off, up and away
+                bd["state"] = "away"
+                bd["tx"] = bd["x"] + random.uniform(-30, 30)
+                bd["ty"] = -24.0
+            return
+        if st == "gone":
+            if bd["t"] <= 0:         # re-enter from the top, head home
+                bd["state"] = "return"
+                bd["x"] = bd["hx"] + random.uniform(-30, 30)
+                bd["y"] = -24.0
+            return
+        # away / return: move toward the target, wings flapping
+        tx, ty = (bd["tx"], bd["ty"]) if st == "away" else (bd["hx"], bd["hy"])
+        dx, dy = tx - bd["x"], ty - bd["y"]
+        dist = math.hypot(dx, dy)
+        step = BIRD_SPEED * dt
+        if dist <= step:
+            bd["x"], bd["y"] = tx, ty
+            if st == "away":
+                bd["state"], bd["t"] = "gone", random.uniform(*BIRD_GONE)
+            else:
+                bd["state"], bd["t"] = "perch", random.uniform(*BIRD_PERCH)
+        else:
+            bd["x"] += dx / dist * step
+            bd["y"] += dy / dist * step
+        bd["flap"] -= dt
+        if bd["flap"] <= 0:
+            bd["fidx"] ^= 1
+            bd["flap"] = 0.12
+
     def _tree_stage_from_settings(self):
         """Current tree growth stage (0 = none .. 5 = full). Falls back to full
         when there's no settings (tests)."""
@@ -488,8 +621,9 @@ class GardenScene(QWidget):
         return TREE_STAGE_FULL
 
     def refresh(self):
-        """Re-read the equipped wallpaper + owned furniture + tree growth."""
+        """Re-read the equipped wallpaper + owned furniture + agents + tree growth."""
         self._load_background()
         self._load_furniture()
+        self._load_agents()
         self._tree_stage = self._tree_stage_from_settings()
         self.update()
