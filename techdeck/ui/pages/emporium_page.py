@@ -156,6 +156,8 @@ CATALOG = [
      "sprite": "sPet_ItemAnts_0.png", "cost": 15, "kind": "furniture"},
     {"id": "deco_butterfly", "name": "Butterfly", "category": "decorations",
      "sprite": "sPet_ItemButterfly_0.png", "cost": 25, "kind": "furniture"},
+    {"id": "deco_sapling", "name": "Tree Sapling", "category": "decorations",
+     "sprite": "sPet_Tree_5.png", "cost": 30, "kind": "tree"},
 
     # --- Decorations: backgrounds (equippable My House wallpaper). sLibraryBG_4
     # is the free default; these are the alternates. Equip by buying / re-clicking.
@@ -190,6 +192,8 @@ def _load_pixmap(name: str, target: int):
         w, h = pm.width(), pm.height()
         if max(w, h) >= 200:   # a full 384x216 background -> small thumbnail swatch
             return pm.scaledToWidth(112, Qt.TransformationMode.SmoothTransformation)
+        if max(w, h) > target:  # bigger than the icon (e.g. the tree) -> fit by height
+            return pm.scaledToHeight(target, Qt.TransformationMode.SmoothTransformation)
         scale = max(1, round(target / max(w, h, 1)))   # tiny furniture -> upscale crisp
         return pm.scaled(w * scale, h * scale,
                          Qt.AspectRatioMode.IgnoreAspectRatio,
@@ -1005,9 +1009,12 @@ class EmporiumPage(QWidget):
                 s.set_equipped_background(item["sprite"])
                 instr = ("It's now your My House wallpaper! Re-click any owned "
                          "background here to switch.")
+            elif item["kind"] == "tree":
+                s.plant_tree()
+                instr = ("It's planted! Your tree grows a little with every plugin "
+                         "run - give it about a month to reach full size.")
             elif item["kind"] == "furniture":
-                instr = ("It's added to your collection - arranging furniture in "
-                         "your house is coming soon.")
+                instr = "It's added to your collection - see it in My House."
             elif item["kind"] == "game":
                 instr = ("Find it in your Library (Games) and add it to a kit "
                          "to play.")

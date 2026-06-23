@@ -161,7 +161,7 @@ class GardenScene(QWidget):
              for n in self._bg_names.values()), default=80)
         self._load_background()
         self._tree = [self._load(d / f"sPet_Tree_{i}.png") for i in range(6)]
-        self._tree_stage = TREE_STAGE_FULL
+        self._tree_stage = self._tree_stage_from_settings()
         self._furniture = []          # interior — behind the facade
         self._furniture_ext = []      # exterior — in front of the facade
         self._load_furniture()
@@ -414,8 +414,16 @@ class GardenScene(QWidget):
         self._furniture = interior
         self._furniture_ext = exterior
 
+    def _tree_stage_from_settings(self):
+        """Current tree growth stage (0 = none .. 5 = full). Falls back to full
+        when there's no settings (tests)."""
+        if self.settings is not None and hasattr(self.settings, "get_tree_stage"):
+            return self.settings.get_tree_stage()
+        return TREE_STAGE_FULL
+
     def refresh(self):
-        """Re-read the equipped wallpaper + owned furniture (both can change)."""
+        """Re-read the equipped wallpaper + owned furniture + tree growth."""
         self._load_background()
         self._load_furniture()
+        self._tree_stage = self._tree_stage_from_settings()
         self.update()

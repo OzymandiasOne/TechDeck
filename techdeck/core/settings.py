@@ -562,13 +562,39 @@ class SettingsManager:
         return self.data.get("plugin_stats", {}).get(plugin_id, {})
 
     def increment_plugin_runs(self, plugin_id: str) -> None:
-        """Record a successful run: bump run_count, reset consecutive_errors."""
+        """Record a successful run: bump run_count, reset consecutive_errors,
+        and bump the lifetime total (drives My House tree growth)."""
         if "plugin_stats" not in self.data:
             self.data["plugin_stats"] = {}
         stats = self.data["plugin_stats"].setdefault(plugin_id, {})
         stats["run_count"] = stats.get("run_count", 0) + 1
         stats["consecutive_errors"] = 0
+        self.data.setdefault("settings", {})["total_runs"] = self.get_total_runs() + 1
         self.save()
+
+    # ========== My House tree growth ==========
+    # The tree grows one stage per TREE_RUNS_PER_STAGE plugin runs since the
+    # sapling is planted: sapling (1) -> full grown (5) = 4 steps, ~a month of
+    # use at 50 runs/stage. Tunable here.
+    TREE_STAGES = 5
+    TREE_RUNS_PER_STAGE = 50
+
+    def get_total_runs(self) -> int:
+        """Lifetime successful plugin runs."""
+        return int(self.data.get("settings", {}).get("total_runs", 0))
+
+    def plant_tree(self) -> None:
+        """Stamp the planting moment (run count) so the sapling grows from now."""
+        self.data.setdefault("settings", {})["tree_planted_runs"] = self.get_total_runs()
+        self.save()
+
+    def get_tree_stage(self) -> int:
+        """0 = unplanted (no sapling owned); 1 = sapling ... 5 = full grown."""
+        if "deco_sapling" not in self.get_unlocked_items():
+            return 0
+        planted = int(self.data.get("settings", {}).get("tree_planted_runs", 0))
+        grown = max(0, self.get_total_runs() - planted) // self.TREE_RUNS_PER_STAGE
+        return min(self.TREE_STAGES, 1 + grown)
 
     def record_plugin_error(self, plugin_id: str) -> None:
         """Record a failed run: bump consecutive_errors."""
