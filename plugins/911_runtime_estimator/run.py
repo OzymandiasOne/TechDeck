@@ -69,7 +69,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -138,12 +138,36 @@ def _is_bevel(scope) -> bool:
     return scope is not None and "BEVEL" in str(scope).strip().upper()
 
 
+# Material-form tokens that mark a row as a structural shape (NOT a plate),
+# matched against the Description's LEADING form word. Real batch-list
+# descriptions lead with the stock form, e.g. 'ANGLE, HIGH STR, , STL, ...',
+# 'TUBE, SQUARE, ...', 'T-SECTION, ...', 'BAR, FLAT, ...', 'ROD, ROUND, ...'.
+# Shapes routinely carry a thickness token ('2.500 X 2.500 X 0.188 THK',
+# '0.500THK3.000W') in their description, so they MUST be classified by FORM,
+# not by whether a thickness/estimate was found.
+_NONPLATE_FORMS = ("ANGLE", "TUBE", "PIPE", "BAR", "ROD", "CHANNEL", "BEAM",
+                   "T-SECTION", "T SECTION", "I-SECTION", "I SECTION",
+                   "W-SECTION", "W SECTION", "SECTION")
+
+
 def _is_plate_row(row: dict) -> bool:
-    """True if a data row is a plate (vs a structural shape/bar/tube). A row is
-    a plate when its Description says PLATE, or when an estimate was computed
-    (a plate thickness was found). Non-plates — T-SECTION, BAR, TUBE, ANGLE,
-    etc. — have no plate thickness and land on the Non-Plates sheet."""
+    """True if a data row is a plate (vs a structural shape/bar/tube).
+
+    Classification is DESCRIPTION-driven, keyed on the leading material-form
+    token (the text before the first ',' or ';'):
+      * leading form is a known shape (ANGLE/TUBE/T-SECTION/BAR/ROD/...) -> NOT a
+        plate. This is the fix: shapes carry a thickness token in their
+        description (e.g. 'TUBE, SQUARE, ..., 0.188 THK') so the old
+        'estimate-was-computed' rule misfiled every dimensioned shape onto the
+        Plates sheet;
+      * description says PLATE -> plate;
+      * otherwise (blank/unknown description) fall back to 'an estimate was
+        computed' -- a nest-packet plate thickness implies a plate.
+    """
     desc = str(row.get("Description") or "").upper()
+    lead = re.split(r"[;,]", desc, maxsplit=1)[0].strip()
+    if any(lead.startswith(f) for f in _NONPLATE_FORMS):
+        return False
     if "PLATE" in desc:
         return True
     return row.get(EST_COL) is not None
