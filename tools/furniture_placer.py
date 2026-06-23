@@ -26,9 +26,9 @@ NATIVE_W, NATIVE_H = 384, 216
 SCALE = 3                       # bump to 4 if your screen is big enough
 BAR_H = 56
 
-from techdeck.ui.widgets.garden_scene import (PLACEMENT, EXTERIOR, TREE_POS,   # noqa: E402
+from techdeck.ui.widgets.garden_scene import (PLACEMENT, EXTERIOR,   # noqa: E402
                                               TREE_PLACEMENT)
-from techdeck.ui.pages.emporium_page import CATALOG                           # noqa: E402
+from techdeck.ui.pages.emporium_page import CATALOG                  # noqa: E402
 
 _CAT = {c["id"]: c for c in CATALOG}
 
@@ -97,7 +97,7 @@ class Placer(QWidget):
         self.selected = None
         # "interior" (open house) | "exterior" (closed + yard) | "tree" (one stage)
         self.mode = "interior"
-        self.tree_sel = 1        # which tree growth stage is being placed (1..5)
+        self.tree_sel = 5        # start on the full tree — place it first
 
         self.items = []
         for item_id, (x, y) in PLACEMENT.items():
@@ -173,15 +173,17 @@ class Placer(QWidget):
         p.fillRect(0, NATIVE_H * SCALE, self.width(), BAR_H, QColor("#15151f"))
         p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._bg)
         tw, th = self._tree.width() * SCALE, self._tree.height() * SCALE
-        tx, ty = TREE_POS[0] * SCALE, TREE_POS[1] * SCALE
+        # The full tree follows ITS OWN (stage-5) placement, so it's the live
+        # reference for the smaller stages and for tree-side furniture.
+        t5 = self.tree_items[4]
+        tx, ty = t5.nx * SCALE, t5.ny * SCALE
         if self.mode == "tree":
-            # faint full-grown tree as an alignment reference for each stage
-            p.setOpacity(0.30)
-            p.drawPixmap(tx, ty, tw, th, self._tree)
-            p.setOpacity(1.0)
+            if self.tree_sel != 5:   # ghost the placed full tree to align against
+                p.setOpacity(0.30)
+                p.drawPixmap(tx, ty, tw, th, self._tree)
+                p.setOpacity(1.0)
         else:
-            # solid full tree so furniture (owl/monkey) sits in context
-            p.drawPixmap(tx, ty, tw, th, self._tree)
+            p.drawPixmap(tx, ty, tw, th, self._tree)   # solid, for furniture context
             if self.mode == "exterior":   # close the house so the facade/roof shows
                 p.drawPixmap(0, 0, NATIVE_W * SCALE, NATIVE_H * SCALE, self._facade)
         p.end()
