@@ -41,7 +41,7 @@ NATIVE_W, NATIVE_H = 384, 216
 
 # The diorama (land + house + sun/moon) is drawn this much larger than the integer
 # wallpaper scale, to fill more of the window. The wallpaper tiling is unaffected.
-DIORAMA_ZOOM = 1.2
+DIORAMA_ZOOM = 1.12
 
 # House facade bounding box in native coords (the clickable "front" — the right
 # portion of the canvas; the left half is transparent yard). Used for hit-test.
