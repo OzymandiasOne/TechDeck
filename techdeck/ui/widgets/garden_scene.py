@@ -328,7 +328,9 @@ class GardenScene(QWidget):
             self._open_progress = self._open_target
             self._timer.stop()
             return
-        step = 0.06
+        # Slow reveal on click so the exterior front lingers. (The pig walking
+        # through the door later will use a faster step ~0.06.)
+        step = 0.025
         if self._open_progress < self._open_target:
             self._open_progress = min(self._open_target, self._open_progress + step)
         else:
@@ -536,7 +538,7 @@ class GardenScene(QWidget):
             frames = [f for f in frames if f is not None]
             if frames:
                 self._butterfly = {"x": float(x), "y": float(y), "frames": frames,
-                                   "idx": 1, "flutter": 0.6}
+                                   "idx": 0, "flutter": 0.6}
         if self._owned("deco_bird") and "deco_bird" in PLACEMENT:
             x, y = PLACEMENT["deco_bird"]
             perch = self._load(d / "sPet_ItemBird_0.png")
@@ -560,15 +562,15 @@ class GardenScene(QWidget):
             self.update()
 
     def _update_butterfly(self, dt):
-        # Sits in one place: mostly folded upright (frame 1), opens its wings now
-        # and then for a little flutter.
+        # Sits in one place: mostly wings DOWN (frame 0), opening up (frame 1) now
+        # and then for a brief flutter, always settling back down.
         b = self._butterfly
         b["flutter"] -= dt
         if b["flutter"] <= 0:
-            if b["idx"] == 1:         # upright -> open briefly
-                b["idx"], b["flutter"] = 0, random.uniform(0.10, 0.25)
-            else:                     # open -> fold back, sit a while
-                b["idx"], b["flutter"] = 1, random.uniform(1.5, 4.0)
+            if b["idx"] == 0:         # down -> flutter up briefly
+                b["idx"], b["flutter"] = 1, random.uniform(0.10, 0.25)
+            else:                     # up -> settle back down, sit a while
+                b["idx"], b["flutter"] = 0, random.uniform(1.5, 4.0)
 
     def _update_bird(self, dt):
         bd = self._bird
