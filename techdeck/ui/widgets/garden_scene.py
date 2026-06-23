@@ -54,7 +54,10 @@ TREE_STAGE_FULL = 5
 # Per-stage tree placement (native top-left), so every growth stage shares the
 # same root point as it grows in place. Seeded by aligning each sprite's base;
 # fine-tune in the placer's Tree view.
-TREE_PLACEMENT = {1: (18, 19), 2: (22, 18), 3: (18, 16), 4: (16, 14), 5: (16, 7)}
+TREE_PLACEMENT = {1: (18, 19), 2: (22, 18), 3: (18, 16), 4: (16, 14), 5: (26, -8)}
+
+# Backgrounds that read as night — the moon shows instead of the sun.
+NIGHT_BACKGROUNDS = {"sLibraryBG_7.png"}   # Starry Night
 
 # Where each owned furniture item sits in the house, keyed by its Emporium
 # catalog id -> (native_x, native_y) top-left. Bought items appear at their spot;
@@ -97,17 +100,17 @@ PLACEMENT = {
     "deco_flower":    (32, 129),
     "deco_cattails":  (0, 160),
     "deco_watercan":  (200, 163),
-    "deco_picnic":    (56, 166),
+    "deco_picnic":    (63, 166),
     "deco_hottub":    (145, 174),
     "deco_gardenplot": (320, 176),
     "deco_lilypad":   (16, 176),
     "deco_jumprope":  (227, 179),
     "deco_anthill":   (256, 192),
     "deco_easel":     (42, 148),
-    "deco_sun":       (14, 7),
-    "deco_moon":      (14, 7),
-    "deco_owl":       (41, 49),
-    "deco_monkey":    (45, 113),
+    "deco_sun":       (10, 8),
+    "deco_moon":      (9, 8),
+    "deco_owl":       (50, 16),
+    "deco_monkey":    (34, 86),
 }
 
 # Items that live OUTSIDE the house: drawn in front of the facade (so they show
@@ -250,6 +253,7 @@ class GardenScene(QWidget):
         if self.settings is not None and hasattr(self.settings, "set_equipped_background"):
             self.settings.set_equipped_background(nxt)
         self._load_background()
+        self._load_furniture()   # day/night swap (sun <-> moon) tracks the bg
         self.update()
 
     def _switcher_layout(self):
@@ -451,10 +455,16 @@ class GardenScene(QWidget):
         the player owns. Each record is {frames, x, y, anim, idx}."""
         from techdeck.ui.pages.emporium_page import CATALOG
         by_id = {c["id"]: c for c in CATALOG}
+        night = (self.settings is not None
+                 and hasattr(self.settings, "get_equipped_background")
+                 and self.settings.get_equipped_background() in NIGHT_BACKGROUNDS)
         interior, exterior = [], []
         for item_id, (x, y) in PLACEMENT.items():
             c = by_id.get(item_id)
             if c is None or self.settings is None or not self.settings.is_unlocked(item_id):
+                continue
+            # Day/night: the moon replaces the sun on starry backgrounds.
+            if (item_id == "deco_sun" and night) or (item_id == "deco_moon" and not night):
                 continue
             anim = item_id in AMBIENT_ANIM
             if anim:
