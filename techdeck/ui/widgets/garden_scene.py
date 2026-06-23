@@ -83,6 +83,25 @@ PLACEMENT = {
     "deco_hatrack":   (320, 136),
     # Yard
     "deco_hottub":    (145, 174),
+    # More furniture — rough starting spots; reposition with the placer tool.
+    "deco_computer":  (215, 92),
+    "deco_blender":   (240, 128),
+    "deco_easel":     (228, 92),
+    "deco_calendar":  (205, 96),
+    "deco_chest":     (285, 56),
+    "deco_boxes":     (300, 60),
+    "deco_cobweb":    (310, 28),
+    "deco_trapdoor":  (240, 152),
+    "deco_picnic":    (90, 196),
+    "deco_watercan":  (162, 188),
+    "deco_bike":      (55, 178),
+    "deco_jumprope":  (110, 186),
+    "deco_gardenplot": (195, 196),
+    "deco_cattails":  (18, 168),
+    "deco_flower":    (45, 172),
+    "deco_lilypad":   (8, 200),
+    "deco_satellite": (300, 20),
+    "deco_bird":      (95, 50),
 }
 
 _TICK_MS = 16
