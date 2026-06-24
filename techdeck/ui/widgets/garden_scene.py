@@ -181,7 +181,14 @@ BUDDY_INTERACT_CHANCE = 0.4   # odds an idle Buddy uses an item instead of strol
 # Where Buddy's interaction sprite is drawn (native top-left), per item. Items not
 # listed fall back to a computed default (centred over the item, feet at its base).
 # Dial these in with tools/animation_placer.py and paste the export back here.
-BUDDY_ACT_PLACEMENT = {}
+BUDDY_ACT_PLACEMENT = {
+    "deco_easel": (42, 156),
+    "deco_gardenplot": (331, 175),
+    "deco_hottub": (150, 164),
+    "deco_jumprope": (219, 163),
+    "deco_lilypad": (110, 163),
+    "deco_picnic": (79, 146),
+}
 
 _TICK_MS = 16
 _ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
