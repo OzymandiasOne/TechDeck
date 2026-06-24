@@ -575,6 +575,14 @@ class LibraryPage(QWidget, ThemeAware):
 
     def apply_theme(self):
         """Re-style every theme-sensitive surface owned by LibraryPage."""
+        # Games appear/disappear with the Professional theme; the per-tile filter
+        # only runs at build time, so rebuild the grid when professional toggles
+        # (guarded so the initial theme-apply doesn't pre-empt the first build).
+        prof = self.settings.is_professional()
+        if getattr(self, "_was_professional", None) != prof:
+            self._was_professional = prof
+            if getattr(self, "_grid_built", False):
+                self._build_tile_grid()
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
         theme_name = get_theme_manager().get_current_theme()
@@ -729,6 +737,7 @@ class LibraryPage(QWidget, ThemeAware):
     
     def _build_tile_grid(self):
         """Build the grid of available tiles + missing tiles from current profile."""
+        self._grid_built = True
         # Clear existing tiles
         self._missing_tile_widgets = []
         while self.tile_grid.count():
@@ -788,10 +797,15 @@ class LibraryPage(QWidget, ThemeAware):
 
         for tile_id in sorted(all_tile_ids, key=_sort_key):
             plugin = self.plugin_loader.get_plugin(tile_id)
-            
+
+            # Professional mode hides games even if one is saved in the profile
+            # (the available_plugins filter above only covers the unselected pool).
+            if prof and plugin and getattr(plugin, "family", "") == "Games":
+                continue
+
             # Check if this tile is selected in current profile
             is_selected = tile_id in current_profile_tiles
-            
+
             if plugin:
                 # PHASE 3: Use LibraryPluginCard instead of QPushButton
                 desc = plugin.description[:60] + "..." if len(plugin.description) > 60 else plugin.description
