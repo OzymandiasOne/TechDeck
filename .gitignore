@@ -30,11 +30,8 @@ dist/
 installer_output/
 *.spec.bak
 
-# Dev tools — the placers/editors/generators already committed stay tracked
-# (.gitignore can't untrack them); this ignores their scratch exports + any new
-# tools so they don't clutter `git status`. Use `git add -f tools/<file>` to
-# commit a genuinely new tool.
-tools/
+# Scratch buffer the placer/nav editor tools write for copy-paste back into source.
+tools/placement_export.py
 
 # Claude Code local state (ignore everything under .claude EXCEPT shared project skills)
 .claude/*
