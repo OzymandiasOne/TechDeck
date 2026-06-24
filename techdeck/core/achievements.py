@@ -27,6 +27,7 @@ class Achievement:
     reward: int                              # tickets awarded on claim
     target: int                              # metric value that completes it
     metric: Callable[["SettingsManager"], int]  # current progress value
+    difficulty: str = "bronze"               # bronze | silver | gold (trophy tint)
 
 
 # Order = display order. Grouped milestone -> family -> multitask -> house/shop.
@@ -34,46 +35,46 @@ ACHIEVEMENTS: List[Achievement] = [
     # ── Total runs ──────────────────────────────────────────────────────────
     Achievement("first_run", "First Contact",
                 "Run your first plugin.",
-                10, 1, lambda s: s.get_total_runs()),
+                10, 1, lambda s: s.get_total_runs(), "bronze"),
     Achievement("runs_25", "Getting the Hang of It",
                 "Run 25 plugins total.",
-                25, 25, lambda s: s.get_total_runs()),
+                25, 25, lambda s: s.get_total_runs(), "bronze"),
     Achievement("runs_100", "Centurion",
                 "Run 100 plugins total.",
-                50, 100, lambda s: s.get_total_runs()),
+                50, 100, lambda s: s.get_total_runs(), "silver"),
     Achievement("runs_250", "Workhorse",
                 "Run 250 plugins total.",
-                100, 250, lambda s: s.get_total_runs()),
+                100, 250, lambda s: s.get_total_runs(), "gold"),
     # ── Family ──────────────────────────────────────────────────────────────
     Achievement("runs_911_10", "911 Operator",
                 "Run 10 plugins from the 911 family.",
-                30, 10, lambda s: s.get_family_runs("911")),
+                30, 10, lambda s: s.get_family_runs("911"), "bronze"),
     Achievement("runs_911_50", "911 Veteran",
                 "Run 50 plugins from the 911 family.",
-                75, 50, lambda s: s.get_family_runs("911")),
+                75, 50, lambda s: s.get_family_runs("911"), "silver"),
     Achievement("runs_922_10", "922 Specialist",
                 "Run 10 plugins from the 922 family.",
-                30, 10, lambda s: s.get_family_runs("922")),
+                30, 10, lambda s: s.get_family_runs("922"), "bronze"),
     Achievement("runs_922_50", "922 Veteran",
                 "Run 50 plugins from the 922 family.",
-                75, 50, lambda s: s.get_family_runs("922")),
+                75, 50, lambda s: s.get_family_runs("922"), "silver"),
     # ── Multitasking ────────────────────────────────────────────────────────
     Achievement("batch_4", "Multitasker",
                 "Run 4 or more plugins at once.",
-                40, 4, lambda s: s.get_max_run_batch()),
+                40, 4, lambda s: s.get_max_run_batch(), "silver"),
     Achievement("batch_8", "Assembly Line",
                 "Run 8 or more plugins at once.",
-                80, 8, lambda s: s.get_max_run_batch()),
+                80, 8, lambda s: s.get_max_run_batch(), "gold"),
     # ── My House / Emporium ─────────────────────────────────────────────────
     Achievement("first_buy", "Big Spender",
                 "Buy your first item at Woogy's Emporium.",
-                15, 1, lambda s: len(s.get_unlocked_items())),
+                15, 1, lambda s: len(s.get_unlocked_items()), "bronze"),
     Achievement("green_thumb", "Green Thumb",
                 "Plant the tree in your yard.",
-                15, 1, lambda s: s.get_tree_stage()),
+                15, 1, lambda s: s.get_tree_stage(), "bronze"),
     Achievement("old_growth", "Old Growth",
                 "Grow your tree to full size.",
-                100, 5, lambda s: s.get_tree_stage()),
+                100, 5, lambda s: s.get_tree_stage(), "gold"),
 ]
 
 ACHIEVEMENTS_BY_ID = {a.id: a for a in ACHIEVEMENTS}

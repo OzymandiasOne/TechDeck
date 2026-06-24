@@ -13,15 +13,45 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 from PySide6.QtCore import Qt, QPoint, QRect
-from PySide6.QtGui import QPainter, QColor, QIcon
+from PySide6.QtGui import QPainter, QColor, QIcon, QImage, QPixmap
 
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.pages.emporium_page import (
-    EMP, _draw_bubble, _load_art, _trim_v, _tile_ring,
+    EMP, _draw_bubble, _load_art, _trim_v, _tile_ring, _garden_dir,
 )
 from techdeck.ui.pages.mystuff_page import _wall_tile, _WALL_BASE
 from techdeck.core import achievements as ACH
 from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_CLAIM
+
+
+# There is only one trophy sprite, so the three difficulty tiers are made by
+# recolouring it: each opaque pixel is tinted while keeping its original
+# brightness, so the highlights/shadows (and black outline) survive.
+_TROPHY_TINTS = {"bronze": (205, 127, 50), "silver": (200, 200, 210), "gold": (255, 205, 60)}
+_trophy_cache = {}
+
+
+def _trophy_icon(difficulty, size):
+    key = (difficulty, size)
+    if key in _trophy_cache:
+        return _trophy_cache[key]
+    img = QImage(str(_garden_dir() / "sPet_ItemTrophy_0.png"))
+    if img.isNull():
+        _trophy_cache[key] = None
+        return None
+    img = img.convertToFormat(QImage.Format.Format_ARGB32)
+    tr, tg, tb = _TROPHY_TINTS.get(difficulty, _TROPHY_TINTS["bronze"])
+    for y in range(img.height()):
+        for x in range(img.width()):
+            c = img.pixelColor(x, y)
+            if c.alpha() == 0:
+                continue
+            b = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255.0
+            b = b ** 0.75            # lift the midtones so it doesn't read too dark
+            img.setPixelColor(x, y, QColor(int(tr * b), int(tg * b), int(tb * b), c.alpha()))
+    pm = QPixmap.fromImage(img).scaledToHeight(size, Qt.TransformationMode.FastTransformation)
+    _trophy_cache[key] = pm
+    return pm
 
 
 class _AchHeader(QWidget):
@@ -82,6 +112,9 @@ class AchievementCard(QFrame):
         self.btn = QPushButton()
         self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn.setFixedHeight(34)
+        # No keyboard focus: claiming disables the button, and a focused-then-
+        # disabled child makes the QScrollArea chase the next focusable card.
+        self.btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn.clicked.connect(self._on_claim)
         lay.addWidget(self.btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -126,9 +159,17 @@ class AchievementCard(QFrame):
         ring = EMP["ticket"] if self._claimed else EMP["ring"]
         _tile_ring(p, rect, ring)
 
-        text_w = rect.width() - self.BTN_AREA
-        x = rect.x() + 16
-        # Title (top-left)
+        # Difficulty trophy on the left (bronze/silver/gold = how hard it is).
+        troph = _trophy_icon(self.ach.difficulty, 56)
+        icon_x = rect.x() + 16
+        tw = 0
+        if troph is not None:
+            p.drawPixmap(icon_x, rect.y() + (rect.height() - troph.height()) // 2, troph)
+            tw = troph.width()
+
+        x = icon_x + tw + 16
+        text_w = rect.width() - self.BTN_AREA - tw - 16
+        # Title (top-left of the text area)
         title_pm = _sf().render(self.ach.title.upper(), 3, EMP["tile_text"])
         p.drawPixmap(x, rect.y() + 12, title_pm)
         # Progress count (top-right of the text area)
