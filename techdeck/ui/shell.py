@@ -527,6 +527,8 @@ class MainWindow(QMainWindow):
         if result:
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
+                # Tally the run by family for the family achievements (911/922).
+                self.settings.record_family_run(getattr(plugin, "family", ""))
                 # Reward tickets for a successful run (spendable at Woogy's Emporium).
                 # Professional theme hides the playful ticket message (still earned).
                 bal = self.settings.add_tickets(TICKETS_PER_RUN)

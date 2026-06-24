@@ -136,9 +136,10 @@ class AccountPage(QWidget, ThemeAware):
 
         scroll.setWidget(content)
 
-        # Tabbed: account info + the ticket redemption counter + the locker.
+        # Tabbed: account info + ticket counter + locker + achievements + house.
         from techdeck.ui.pages.emporium_page import EmporiumPage
         from techdeck.ui.pages.mystuff_page import MyStuffPage
+        from techdeck.ui.pages.achievements_page import AchievementsPage
         from techdeck.ui.widgets.garden_scene import GardenScene
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -149,6 +150,10 @@ class AccountPage(QWidget, ThemeAware):
         self.tabs.addTab(self.emporium, "Ticket Counter")
         self.my_stuff = MyStuffPage(self.settings)
         self.tabs.addTab(self.my_stuff, "My Stuff")
+        # Claiming a reward changes the balance the Emporium shows, so refresh it.
+        self.achievements = AchievementsPage(
+            self.settings, on_claim=lambda: self.emporium.refresh())
+        self.tabs.addTab(self.achievements, "Achievements")
         self.my_house = GardenScene(self.settings)
         self.tabs.addTab(self.my_house, "My House")
         # A purchase on one tab changes ownership/balance the other reflects, so
@@ -174,13 +179,13 @@ class AccountPage(QWidget, ThemeAware):
 
     def _apply_professional(self):
         """Professional theme hides the playful tabs (Ticket Counter, My Stuff,
-        My House) so client demos show only the account info."""
+        Achievements, My House) so client demos show only the account info."""
         if not hasattr(self, "tabs"):
             return
         prof = self.settings.is_professional()
-        for i in (1, 2, 3):   # Ticket Counter, My Stuff, My House
+        for i in range(1, self.tabs.count()):   # everything except My Account
             self.tabs.setTabVisible(i, not prof)
-        if prof and self.tabs.currentIndex() in (1, 2, 3):
+        if prof and self.tabs.currentIndex() != 0:
             self.tabs.setCurrentIndex(0)
 
     def _style_tabs(self):
@@ -282,11 +287,16 @@ class AccountPage(QWidget, ThemeAware):
         )
     
     def _on_tab_changed(self, _i):
-        """Keep the Emporium + My Stuff in sync as ownership/balance change."""
+        """Keep the playful tabs in sync as ownership/balance/progress change,
+        and click the UFO50 tab-select sound."""
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_TAB
+        get_audio_manager().play(SOUND_UI_TAB)
         if hasattr(self, "emporium"):
             self.emporium.refresh()
         if hasattr(self, "my_stuff"):
             self.my_stuff.refresh()
+        if hasattr(self, "achievements"):
+            self.achievements.refresh()
         if hasattr(self, "my_house"):
             self.my_house.refresh()
 
@@ -297,5 +307,7 @@ class AccountPage(QWidget, ThemeAware):
             self.emporium.refresh()
         if hasattr(self, "my_stuff"):
             self.my_stuff.refresh()
+        if hasattr(self, "achievements"):
+            self.achievements.refresh()
         if hasattr(self, "my_house"):
             self.my_house.refresh()

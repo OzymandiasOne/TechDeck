@@ -675,6 +675,46 @@ class SettingsManager:
             self.data.setdefault("settings", {})["unlocked_items"] = items
             self.save()
 
+    # ========== Achievements ==========
+
+    def record_family_run(self, family: str) -> None:
+        """Tally a successful run by plugin family (drives family achievements)."""
+        if not family:
+            return
+        runs = self.data.setdefault("settings", {}).setdefault("family_runs", {})
+        runs[family] = int(runs.get(family, 0)) + 1
+        self.save()
+
+    def get_family_runs(self, family: str) -> int:
+        """Lifetime successful runs of plugins in the given family."""
+        return int(self.data.get("settings", {}).get("family_runs", {}).get(family, 0))
+
+    def record_run_batch(self, count: int) -> None:
+        """Remember the largest number of plugins ever launched together in one run."""
+        count = int(count)
+        if count > self.get_max_run_batch():
+            self.data.setdefault("settings", {})["max_run_batch"] = count
+            self.save()
+
+    def get_max_run_batch(self) -> int:
+        """Most plugins ever queued in a single multi-run."""
+        return int(self.data.get("settings", {}).get("max_run_batch", 0))
+
+    def get_claimed_achievements(self) -> list:
+        """IDs of achievements whose ticket reward has already been claimed."""
+        return list(self.data.get("settings", {}).get("claimed_achievements", []))
+
+    def is_achievement_claimed(self, achievement_id: str) -> bool:
+        return achievement_id in self.get_claimed_achievements()
+
+    def claim_achievement(self, achievement_id: str) -> None:
+        """Mark an achievement claimed so its reward can't be collected twice."""
+        claimed = self.get_claimed_achievements()
+        if achievement_id not in claimed:
+            claimed.append(achievement_id)
+            self.data.setdefault("settings", {})["claimed_achievements"] = claimed
+            self.save()
+
     def reset_store(self) -> None:
         """Wipe all Emporium purchases: clear unlocked items + equipped spinner
         + equipped background (re-locks purchasable plugins, reverts the My House

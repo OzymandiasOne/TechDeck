@@ -1300,6 +1300,8 @@ class HomePage(QWidget, ThemeAware):
         for tid in self.selected_tiles:
             if tid not in self._plugin_queue:
                 self._plugin_queue.append(tid)
+        # Remember the largest multi-run for the "run N at once" achievements.
+        self.settings.record_run_batch(len(self._plugin_queue))
         # Reset family-shared scratch state at the start of every multi-run.
         self._shared_state = {"911": {}, "922": {}, "other": {}}
         self._plugin_params = {
@@ -1328,6 +1330,11 @@ class HomePage(QWidget, ThemeAware):
             plugin_timeout = getattr(plugin, "timeout", None) if plugin else None
 
             self.plugin_status_updated.emit(tile_id, PluginCard.STATUS_RUNNING)
+
+            # Games get their own launch jingle (ASA: The Video Game, etc.).
+            if plugin is not None and getattr(plugin, "family", "") == "Games":
+                from techdeck.core.audio_manager import get_audio_manager, SOUND_GAME_START
+                get_audio_manager().play(SOUND_GAME_START)
 
             started = self.plugin_executor.execute_plugin(
                 tile_id,
