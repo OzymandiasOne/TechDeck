@@ -32,9 +32,12 @@ SOUND_GAME_START = "game_start"  # launching a game (ASA: The Video Game, etc.)
 # ── My House / Garden (UFO 50 "pet" SFX) ────────────────────────────────────
 SOUND_PET_DOOR_OPEN = "pet_door_open"    # facade lifts to reveal interior
 SOUND_PET_DOOR_CLOSE = "pet_door_close"  # facade drops back down
-SOUND_PET_VOICE = "pet_voice"            # Buddy's occasional ambient chirp
-SOUND_PET_JUMP = "pet_jump"              # (reserved) Buddy hop
-SOUND_PET_SPLASH = "pet_splash"          # (reserved) water interactions
+SOUND_PET_VOICE = "pet_voice"            # Buddy's chirp / tree-growth jingle
+SOUND_PET_JUMP = "pet_jump"              # Buddy jump-rope
+SOUND_PET_SPLASH = "pet_splash"          # Buddy hot-tub bath
+SOUND_PET_EAT = "pet_eat"                # Buddy picnic
+SOUND_PET_WATER = "pet_water"            # Buddy garden plot
+SOUND_PET_FISH = "pet_fish"              # Buddy fishing at the pond
 
 # Map sound IDs to filenames in assets/sounds/
 _SOUND_FILES: Dict[str, str] = {
@@ -59,6 +62,9 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_PET_VOICE: "sfx__petLx00.wav",
     SOUND_PET_JUMP: "sfx__petJump00.wav",
     SOUND_PET_SPLASH: "sfx__petSplash00.wav",
+    SOUND_PET_EAT: "sfx__petEat00.wav",
+    SOUND_PET_WATER: "sfx__petWater00.wav",
+    SOUND_PET_FISH: "sfx__petFishingStart00.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 

@@ -34,6 +34,11 @@ from PySide6.QtCore import Qt, QRect, QTimer, QPoint
 from PySide6.QtGui import QPainter, QPixmap, QColor, QPolygon
 
 from techdeck.ui.sprite_font import font as _sf
+from techdeck.core.audio_manager import (
+    get_audio_manager, SOUND_PET_DOOR_OPEN, SOUND_PET_DOOR_CLOSE, SOUND_PET_VOICE,
+    SOUND_UI_FILTER, SOUND_PET_SPLASH, SOUND_PET_EAT, SOUND_PET_WATER,
+    SOUND_PET_JUMP, SOUND_PET_FISH,
+)
 
 
 # Native UFO50 canvas the whole scene is authored against.
@@ -156,6 +161,22 @@ BUDDY_PAUSE = (1.5, 5.0)      # seconds idle between strolls
 BUDDY_WALK_LEFT = (8, 9, 10, 11)
 BUDDY_WALK_RIGHT = (12, 13, 14, 15)
 BUDDY_IDLE = 4                # front-facing standing frame
+
+# Items Buddy can use: id -> the matching Buddy animation (sPet_Buddy{anim}_*.png),
+# the sound to play when he starts, and how long (sec) the action lasts. He picks
+# one at random now and then (ambient), or the player can click an item to send
+# him to it. Only EXTERIOR yard items for now (he already roams the yard); indoor
+# interactions wait on the house-entry choreography.
+BUDDY_INTERACTIONS = {
+    "deco_hottub":     {"anim": "Bath",     "sound": SOUND_PET_SPLASH, "dur": (4.0, 7.0)},
+    "deco_picnic":     {"anim": "Eat",      "sound": SOUND_PET_EAT,    "dur": (3.0, 5.0)},
+    "deco_easel":      {"anim": "Paint",    "sound": None,             "dur": (4.0, 7.0)},
+    "deco_gardenplot": {"anim": "Harvest",  "sound": SOUND_PET_WATER,  "dur": (3.0, 6.0)},
+    "deco_jumprope":   {"anim": "JumpRope", "sound": SOUND_PET_JUMP,   "dur": (3.0, 6.0)},
+    "deco_lilypad":    {"anim": "Fish",     "sound": SOUND_PET_FISH,   "dur": (4.0, 7.0)},
+}
+BUDDY_ACT_FRAME_MS = 200      # ms per frame while performing an interaction
+BUDDY_INTERACT_CHANCE = 0.4   # odds an idle Buddy uses an item instead of strolling
 
 _TICK_MS = 16
 _ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
@@ -284,7 +305,6 @@ class GardenScene(QWidget):
             return
         cur = self._bg_name if self._bg_name in owned else owned[0]
         nxt = owned[(owned.index(cur) + delta) % len(owned)]
-        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_FILTER
         get_audio_manager().play(SOUND_UI_FILTER)
         if self.settings is not None and hasattr(self.settings, "set_equipped_background"):
             self.settings.set_equipped_background(nxt)
@@ -353,8 +373,6 @@ class GardenScene(QWidget):
     def toggle_house(self):
         opening = self._open_target <= 0.5
         self._open_target = 1.0 if opening else 0.0
-        from techdeck.core.audio_manager import (
-            get_audio_manager, SOUND_PET_DOOR_OPEN, SOUND_PET_DOOR_CLOSE)
         get_audio_manager().play(SOUND_PET_DOOR_OPEN if opening else SOUND_PET_DOOR_CLOSE)
         if not self._timer.isActive():
             self._timer.start()
@@ -372,10 +390,19 @@ class GardenScene(QWidget):
             if right.contains(pos):
                 self._switch_bg(+1)
                 return
-        # Map the click back into native coords and toggle if it hit the house.
+        # Map the click back into native coords.
         if self._scale > 0:
             nx = (e.position().x() - self._origin.x()) / self._scale
             ny = (e.position().y() - self._origin.y()) / self._scale
+            # Clicking an interactive yard item sends Buddy over to use it.
+            if self._buddy is not None:
+                for rec in self._interactive_recs():
+                    f = rec["frames"][0]
+                    if QRect(rec["x"], rec["y"], f.width(), f.height()).contains(
+                            int(nx), int(ny)):
+                        self._send_buddy_to(rec)
+                        super().mousePressEvent(e)
+                        return
             if HOUSE_RECT.contains(int(nx), int(ny)) or self._open_target > 0.5:
                 self.toggle_house()
         super().mousePressEvent(e)
@@ -413,14 +440,21 @@ class GardenScene(QWidget):
                     p.setOpacity(1.0)
             else:
                 p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
-        if self._buddy is not None:            # the pig strolls the yard
+        if self._buddy is not None:            # the pig strolls / uses items
             bu = self._buddy
-            if bu["state"] == "walk":
+            if bu["state"] == "act" and bu["act_frames"]:
+                # Interaction sprites are a different size — align feet (bottom-
+                # centre) to the walk-frame box so he doesn't jump on contact.
+                af = bu["act_frames"][bu["act_idx"] % len(bu["act_frames"])]
+                bw, bh = self._buddy_size()
+                ax = int(bu["x"]) + bw // 2 - af.width() // 2
+                ay = int(bu["y"]) + bh - af.height()
+                p.drawPixmap(ax, ay, af)
+            elif bu["state"] == "walk":
                 seq = BUDDY_WALK_LEFT if bu["facing"] == "left" else BUDDY_WALK_RIGHT
-                frame = bu["frames"][seq[bu["fidx"]]]
+                p.drawPixmap(int(bu["x"]), int(bu["y"]), bu["frames"][seq[bu["fidx"]]])
             else:
-                frame = bu["frames"][BUDDY_IDLE]
-            p.drawPixmap(int(bu["x"]), int(bu["y"]), frame)
+                p.drawPixmap(int(bu["x"]), int(bu["y"]), bu["frames"][BUDDY_IDLE])
         if self._butterfly is not None:        # butterfly stays on the lawn
             b = self._butterfly
             p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
@@ -559,13 +593,21 @@ class GardenScene(QWidget):
         self._butterfly = None
         self._bird = None
         self._buddy = None
+        self._buddy_acts = {}     # item id -> Buddy interaction frame sequence
         if self._owned("friend_buddy"):
             frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
             if all(f is not None for f in frames):
                 bx, by = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
                 self._buddy = {"x": bx, "y": by, "tx": bx, "ty": by, "frames": frames,
                                "state": "idle", "facing": "right", "fidx": 0, "wt": 0.0,
-                               "t": random.uniform(*BUDDY_PAUSE)}
+                               "t": random.uniform(*BUDDY_PAUSE), "pending": None,
+                               "act_frames": None, "act_idx": 0, "act_wt": 0.0,
+                               "act_t": 0.0}
+                # Preload the interaction animations (only for items he can own).
+                for iid, spec in BUDDY_INTERACTIONS.items():
+                    seq = self._load_frames(f"sPet_Buddy{spec['anim']}_0.png")
+                    if seq:
+                        self._buddy_acts[iid] = seq
         if self._owned("deco_butterfly") and "deco_butterfly" in PLACEMENT:
             x, y = PLACEMENT["deco_butterfly"]
             frames = [self._load(d / f"sPet_ItemButterfly_{i}.png") for i in range(2)]
@@ -644,30 +686,84 @@ class GardenScene(QWidget):
             bd["fidx"] ^= 1
             bd["flap"] = 0.12
 
+    def _buddy_size(self):
+        """Walk-frame size — the anchor box Buddy's other sprites align their feet to."""
+        f = self._buddy["frames"][0]
+        return f.width(), f.height()
+
+    def _interactive_recs(self):
+        """Placed exterior items Buddy currently knows how to use."""
+        return [r for r in self._furniture_ext
+                if r["id"] in BUDDY_INTERACTIONS and r["id"] in self._buddy_acts]
+
+    def _stand_pos(self, rec):
+        """Where Buddy stands to use an item: feet aligned to the item's base, centred."""
+        bw, bh = self._buddy_size()
+        item = rec["frames"][0]
+        return float(rec["x"] + item.width() // 2 - bw // 2), float(rec["y"] + item.height() - bh)
+
+    def _send_buddy_to(self, rec):
+        """Walk Buddy to an item, then perform its interaction on arrival."""
+        bu = self._buddy
+        bu["tx"], bu["ty"] = self._stand_pos(rec)
+        bu["pending"] = rec["id"]
+        bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+
+    def _start_act(self, iid):
+        bu = self._buddy
+        spec = BUDDY_INTERACTIONS[iid]
+        bu["state"] = "act"
+        bu["act_frames"] = self._buddy_acts.get(iid) or [bu["frames"][BUDDY_IDLE]]
+        bu["act_idx"], bu["act_wt"] = 0, BUDDY_ACT_FRAME_MS / 1000.0
+        bu["act_t"] = random.uniform(*spec["dur"])
+        bu["pending"] = None
+        if spec.get("sound"):
+            get_audio_manager().play(spec["sound"])
+
     def _update_buddy(self, dt):
         bu = self._buddy
         bu["t"] -= dt
-        if bu["state"] == "idle":
-            if bu["t"] <= 0:                    # pick a new spot and stroll there
-                bu["tx"] = random.uniform(*BUDDY_X)
-                bu["ty"] = random.uniform(*BUDDY_Y)
-                bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
-        else:                                  # walking toward the target
-            dx, dy = bu["tx"] - bu["x"], bu["ty"] - bu["y"]
-            dist = math.hypot(dx, dy)
-            step = BUDDY_SPEED * dt
-            if abs(dx) > 0.5:
-                bu["facing"] = "left" if dx < 0 else "right"
-            if dist <= step:
-                bu["x"], bu["y"], bu["state"] = bu["tx"], bu["ty"], "idle"
+        state = bu["state"]
+        if state == "act":                     # performing an interaction in place
+            bu["act_t"] -= dt
+            bu["act_wt"] -= dt
+            if bu["act_wt"] <= 0 and bu["act_frames"]:
+                bu["act_idx"] = (bu["act_idx"] + 1) % len(bu["act_frames"])
+                bu["act_wt"] = BUDDY_ACT_FRAME_MS / 1000.0
+            if bu["act_t"] <= 0:
+                bu["state"], bu["pending"] = "idle", None
                 bu["t"] = random.uniform(*BUDDY_PAUSE)
+            return
+        if state == "idle":
+            if bu["t"] <= 0:                    # use an item, or just stroll somewhere
+                recs = self._interactive_recs()
+                if recs and random.random() < BUDDY_INTERACT_CHANCE:
+                    self._send_buddy_to(random.choice(recs))
+                else:
+                    bu["tx"], bu["ty"] = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
+                    bu["pending"] = None
+                    bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+            return
+        # walking toward (tx, ty) — start an interaction on arrival if one is pending
+        dx, dy = bu["tx"] - bu["x"], bu["ty"] - bu["y"]
+        dist = math.hypot(dx, dy)
+        step = BUDDY_SPEED * dt
+        if abs(dx) > 0.5:
+            bu["facing"] = "left" if dx < 0 else "right"
+        if dist <= step:
+            bu["x"], bu["y"] = bu["tx"], bu["ty"]
+            if bu["pending"] is not None:
+                self._start_act(bu["pending"])
             else:
-                bu["x"] += dx / dist * step
-                bu["y"] += dy / dist * step
-                bu["wt"] -= dt
-                if bu["wt"] <= 0:              # advance the walk cycle
-                    bu["fidx"] = (bu["fidx"] + 1) % 4
-                    bu["wt"] = BUDDY_WALK_MS / 1000.0
+                bu["state"] = "idle"
+                bu["t"] = random.uniform(*BUDDY_PAUSE)
+        else:
+            bu["x"] += dx / dist * step
+            bu["y"] += dy / dist * step
+            bu["wt"] -= dt
+            if bu["wt"] <= 0:                  # advance the walk cycle
+                bu["fidx"] = (bu["fidx"] + 1) % 4
+                bu["wt"] = BUDDY_WALK_MS / 1000.0
 
     def _tree_stage_from_settings(self):
         """Current tree growth stage (0 = none .. 5 = full). Falls back to full
@@ -681,5 +777,10 @@ class GardenScene(QWidget):
         self._load_background()
         self._load_furniture()
         self._load_agents()
+        prev_stage = self._tree_stage
         self._tree_stage = self._tree_stage_from_settings()
+        # Chime when the tree has grown a stage since we last looked (and we're
+        # actually on-screen to see it).
+        if prev_stage is not None and self._tree_stage > prev_stage and self.isVisible():
+            get_audio_manager().play(SOUND_PET_VOICE)
         self.update()
