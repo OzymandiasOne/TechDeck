@@ -170,6 +170,18 @@ class AccountPage(QWidget, ThemeAware):
     def apply_theme(self):
         self._apply_status_style()
         self._style_tabs()
+        self._apply_professional()
+
+    def _apply_professional(self):
+        """Professional theme hides the playful tabs (Ticket Counter, My Stuff,
+        My House) so client demos show only the account info."""
+        if not hasattr(self, "tabs"):
+            return
+        prof = self.settings.is_professional()
+        for i in (1, 2, 3):   # Ticket Counter, My Stuff, My House
+            self.tabs.setTabVisible(i, not prof)
+        if prof and self.tabs.currentIndex() in (1, 2, 3):
+            self.tabs.setCurrentIndex(0)
 
     def _style_tabs(self):
         """Clearly mark the active tab: inactive tabs use the surface fill +

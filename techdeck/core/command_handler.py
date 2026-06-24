@@ -326,6 +326,9 @@ class CommandHandler:
     # ------------------------------------------------------------------ #
 
     def _cmd_fidget(self, args: str):
+        if self.settings.is_professional():
+            self.console.append_system("Not available in Professional mode.")
+            return
         from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
         # Only ever one spinner — re-running /fidget replaces it.
         self._stop_spinner()

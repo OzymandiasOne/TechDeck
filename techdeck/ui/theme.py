@@ -6,7 +6,7 @@ Supports built-in and user-defined custom themes.
 
 import json
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -316,6 +316,11 @@ QPushButton:hover {
     ),
 }
 
+# "Professional" = the light theme with the playful features hidden (for client
+# presentations). Identical palette to light; the gating lives in the UI, keyed
+# off settings.is_professional().
+THEMES["professional"] = replace(THEMES["light"])
+
 
 # ── Custom theme helpers ───────────────────────────────────────────────────────
 
@@ -362,7 +367,8 @@ def delete_custom_theme(name: str, custom_dir: Path) -> None:
 
 
 def is_builtin_theme(name: str) -> bool:
-    return name.lower() in ("dark", "light", "cherry_blossom", "blue", "cyberpunk", "matrix")
+    return name.lower() in ("dark", "light", "professional", "cherry_blossom",
+                            "blue", "cyberpunk", "matrix")
 
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────

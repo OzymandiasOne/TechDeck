@@ -451,6 +451,12 @@ class SettingsManager:
         self.data["settings"]["theme"] = theme_name
         self.save()
 
+    def is_professional(self) -> bool:
+        """Professional theme: the light look with the playful features (Ticket
+        Counter, My Stuff, My House, games, tickets, fidget) hidden — for client
+        presentations."""
+        return self.get_theme() == "professional"
+
     # Library page tile sort. "alphabetical" sorts by plugin display name;
     # "family" groups by 911 -> 922 -> other, alphabetical within each group.
     _LIBRARY_SORT_MODES = ("alphabetical", "family")

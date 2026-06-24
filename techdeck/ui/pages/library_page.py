@@ -750,10 +750,13 @@ class LibraryPage(QWidget, ThemeAware):
         # Hide purchasable ("locked") plugins until they're unlocked at Woogy's
         # Emporium. This is the source-agnostic gate: any plugin (bundled now, or
         # downloaded later) with locked=true stays hidden until is_unlocked(id).
+        # Professional theme also hides games (the playful "Games" family).
+        prof = self.settings.is_professional()
         self.available_plugins = [
             p for p in self.plugin_loader.plugins.values()
             if not (getattr(p, "locked", False)
                     and not self.settings.is_unlocked(p.id))
+            and not (prof and getattr(p, "family", "") == "Games")
         ]
         self.available_tiles = [p.id for p in self.available_plugins]
 

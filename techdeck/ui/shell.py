@@ -528,8 +528,10 @@ class MainWindow(QMainWindow):
             if result.status.value == "success":
                 self.console.append_system(f"✅ {plugin_name} completed successfully")
                 # Reward tickets for a successful run (spendable at Woogy's Emporium).
+                # Professional theme hides the playful ticket message (still earned).
                 bal = self.settings.add_tickets(TICKETS_PER_RUN)
-                self.console.append_game(f"🎟 +{TICKETS_PER_RUN} tickets (balance: {bal})")
+                if not self.settings.is_professional():
+                    self.console.append_game(f"🎟 +{TICKETS_PER_RUN} tickets (balance: {bal})")
                 # GUI plugins (requires_main_thread) call params['on_success'] themselves
                 # at a meaningful moment. Suppress the auto sound for them.
                 if not getattr(plugin, 'requires_main_thread', False):
