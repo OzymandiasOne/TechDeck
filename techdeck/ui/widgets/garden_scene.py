@@ -180,7 +180,8 @@ BUDDY_INTERACTIONS = {
     # --- Interior (Buddy enters the house and navigates the floors/stairs) ---
     "deco_tv":         {"anim": "TV",        "sound": SOUND_PET_TV,     "dur": (5.0, 9.0)},
     "deco_desk":       {"anim": "Desk",      "sound": SOUND_PET_DESK,   "dur": (4.0, 7.0)},
-    "deco_guitar":     {"anim": "Guitar",    "sound": SOUND_PET_GUITAR, "dur": (4.0, 7.0)},
+    "deco_guitar":     {"anim": "Guitar",    "sound": SOUND_PET_GUITAR, "dur": (4.0, 7.0),
+                        "hide_item": True},   # the guitar is part of the Buddy animation
     "deco_fridge":     {"anim": "Fridge",    "sound": SOUND_PET_FRIDGE, "dur": (3.0, 5.0)},
     "deco_books":      {"anim": "Read",      "sound": SOUND_PET_BOOK,   "dur": (5.0, 8.0)},
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
@@ -201,11 +202,11 @@ HOUSE_FLOORS = [
 # A staircase between floor i and i+1: Buddy walks to x_lo on the lower floor and
 # climbs to x_hi on the upper floor. One per gap (HOUSE_STAIRS[i] joins i and i+1).
 HOUSE_STAIRS = [
-    {"x_lo": 200, "x_hi": 200},   # ground -> living
-    {"x_lo": 313, "x_hi": 313},   # living -> bed/bath
-    {"x_lo": 216, "x_hi": 217},   # bed/bath -> attic
+    {"x_lo": 194, "x_hi": 194},   # ground -> living
+    {"x_lo": 306, "x_hi": 306},   # living -> bed/bath
+    {"x_lo": 210, "x_hi": 210},   # bed/bath -> attic
 ]
-HOUSE_DOOR_X = 312            # entry x (ground floor); Buddy enters/exits here
+HOUSE_DOOR_X = 311            # entry x (ground floor); Buddy enters/exits here
 BUDDY_DOOR_LAWN_Y = 176      # the lawn spot in front of the door he approaches
 
 # Where Buddy's interaction sprite is drawn (native top-left), per item. Items not
