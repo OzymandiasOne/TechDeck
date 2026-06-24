@@ -349,7 +349,11 @@ class GardenScene(QWidget):
         self.update()
 
     def toggle_house(self):
-        self._open_target = 0.0 if self._open_target > 0.5 else 1.0
+        opening = self._open_target <= 0.5
+        self._open_target = 1.0 if opening else 0.0
+        from techdeck.core.audio_manager import (
+            get_audio_manager, SOUND_PET_DOOR_OPEN, SOUND_PET_DOOR_CLOSE)
+        get_audio_manager().play(SOUND_PET_DOOR_OPEN if opening else SOUND_PET_DOOR_CLOSE)
         if not self._timer.isActive():
             self._timer.start()
 
@@ -655,6 +659,10 @@ class GardenScene(QWidget):
             if dist <= step:
                 bu["x"], bu["y"], bu["state"] = bu["tx"], bu["ty"], "idle"
                 bu["t"] = random.uniform(*BUDDY_PAUSE)
+                if random.random() < 0.16:      # occasional ambient chirp on arrival
+                    from techdeck.core.audio_manager import (
+                        get_audio_manager, SOUND_PET_VOICE)
+                    get_audio_manager().play(SOUND_PET_VOICE)
             else:
                 bu["x"] += dx / dist * step
                 bu["y"] += dy / dist * step

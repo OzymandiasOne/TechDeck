@@ -893,6 +893,8 @@ class EmporiumPage(QWidget):
         return _load_pixmap("sPet_Buddy_4.png", 52)          # Friends = the pet
 
     def _select_category(self, cat_id):
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_FILTER
+        get_audio_manager().play(SOUND_UI_FILTER)
         # Clicking the already-open category closes its window again (toggle).
         if self._open_category == cat_id and self.shop_window.isVisible():
             self._close_window()
@@ -1017,6 +1019,8 @@ class EmporiumPage(QWidget):
 
     # ---- purchase / equip ----------------------------------------------------
     def handle_tile_action(self, item):
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
+        get_audio_manager().play(SOUND_UI_SELECT)
         s = self.settings
         if not s.is_unlocked(item["id"]):
             if not self._item_available(item):

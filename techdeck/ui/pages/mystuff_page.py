@@ -343,6 +343,8 @@ class MyStuffPage(QWidget):
 
     # ---- equip ---------------------------------------------------------------
     def equip(self, item):
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
+        get_audio_manager().play(SOUND_UI_SELECT)
         if item["kind"] == "background":
             self.settings.set_equipped_background(item["sprite"])
         else:
