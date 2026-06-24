@@ -135,6 +135,10 @@ class InventoryTile(QFrame):
         self.action_btn = QPushButton()
         self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.action_btn.setFixedHeight(30)
+        # Don't take keyboard focus: equipping disables this button, and Qt would
+        # otherwise hand focus to the next focusable tile and the QScrollArea would
+        # auto-scroll to it (jumping the locker to the bottom on equip).
+        self.action_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.action_btn.clicked.connect(self._on_action)
 
         self.icon = QLabel()
