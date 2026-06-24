@@ -147,6 +147,16 @@ BIRD_SPEED = 55               # px/s in flight
 BIRD_PERCH = (12.0, 35.0)     # seconds perched before flying off
 BIRD_GONE = (5.0, 14.0)       # seconds off-screen before returning
 
+# Buddy the pig — always present, wanders the front yard. sPet_Buddy_* is a
+# 4-direction walk cycle (0-3 back, 4-7 front, 8-11 left, 12-15 right).
+BUDDY_SPEED = 22              # px/s walk
+BUDDY_WALK_MS = 150           # ms per walk frame
+BUDDY_X, BUDDY_Y = (135, 300), (170, 182)   # yard ground Buddy roams
+BUDDY_PAUSE = (1.5, 5.0)      # seconds idle between strolls
+BUDDY_WALK_LEFT = (8, 9, 10, 11)
+BUDDY_WALK_RIGHT = (12, 13, 14, 15)
+BUDDY_IDLE = 4                # front-facing standing frame
+
 _TICK_MS = 16
 _ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
 
@@ -205,6 +215,7 @@ class GardenScene(QWidget):
         self._load_furniture()
         self._bird = None             # moving agents
         self._butterfly = None
+        self._buddy = None            # the pig
         self._load_agents()
 
         # Reveal state: progress 0 = closed, 1 = fully open; animates toward target.
@@ -396,6 +407,14 @@ class GardenScene(QWidget):
                     p.setOpacity(1.0)
             else:
                 p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+        if self._buddy is not None:            # the pig strolls the yard
+            bu = self._buddy
+            if bu["state"] == "walk":
+                seq = BUDDY_WALK_LEFT if bu["facing"] == "left" else BUDDY_WALK_RIGHT
+                frame = bu["frames"][seq[bu["fidx"]]]
+            else:
+                frame = bu["frames"][BUDDY_IDLE]
+            p.drawPixmap(int(bu["x"]), int(bu["y"]), frame)
         if self._butterfly is not None:        # butterfly stays on the lawn
             b = self._butterfly
             p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
@@ -528,10 +547,19 @@ class GardenScene(QWidget):
         return self.settings is not None and self.settings.is_unlocked(item_id)
 
     def _load_agents(self):
-        """Set up the bird + butterfly agents if owned, homed at their placements."""
+        """Set up the moving agents: Buddy the pig (always), plus the bird +
+        butterfly if owned."""
         d = _garden_dir()
         self._butterfly = None
         self._bird = None
+        frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
+        if all(f is not None for f in frames):
+            bx, by = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
+            self._buddy = {"x": bx, "y": by, "tx": bx, "ty": by, "frames": frames,
+                           "state": "idle", "facing": "right", "fidx": 0, "wt": 0.0,
+                           "t": random.uniform(*BUDDY_PAUSE)}
+        else:
+            self._buddy = None
         if self._owned("deco_butterfly") and "deco_butterfly" in PLACEMENT:
             x, y = PLACEMENT["deco_butterfly"]
             frames = [self._load(d / f"sPet_ItemButterfly_{i}.png") for i in range(2)]
@@ -557,6 +585,9 @@ class GardenScene(QWidget):
             moved = True
         if self._bird is not None:
             self._update_bird(AGENT_MS / 1000.0)
+            moved = True
+        if self._buddy is not None:
+            self._update_buddy(AGENT_MS / 1000.0)
             moved = True
         if moved:
             self.update()
@@ -606,6 +637,31 @@ class GardenScene(QWidget):
         if bd["flap"] <= 0:
             bd["fidx"] ^= 1
             bd["flap"] = 0.12
+
+    def _update_buddy(self, dt):
+        bu = self._buddy
+        bu["t"] -= dt
+        if bu["state"] == "idle":
+            if bu["t"] <= 0:                    # pick a new spot and stroll there
+                bu["tx"] = random.uniform(*BUDDY_X)
+                bu["ty"] = random.uniform(*BUDDY_Y)
+                bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+        else:                                  # walking toward the target
+            dx, dy = bu["tx"] - bu["x"], bu["ty"] - bu["y"]
+            dist = math.hypot(dx, dy)
+            step = BUDDY_SPEED * dt
+            if abs(dx) > 0.5:
+                bu["facing"] = "left" if dx < 0 else "right"
+            if dist <= step:
+                bu["x"], bu["y"], bu["state"] = bu["tx"], bu["ty"], "idle"
+                bu["t"] = random.uniform(*BUDDY_PAUSE)
+            else:
+                bu["x"] += dx / dist * step
+                bu["y"] += dy / dist * step
+                bu["wt"] -= dt
+                if bu["wt"] <= 0:              # advance the walk cycle
+                    bu["fidx"] = (bu["fidx"] + 1) % 4
+                    bu["wt"] = BUDDY_WALK_MS / 1000.0
 
     def _tree_stage_from_settings(self):
         """Current tree growth stage (0 = none .. 5 = full). Falls back to full
