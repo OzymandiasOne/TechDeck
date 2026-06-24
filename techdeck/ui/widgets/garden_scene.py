@@ -178,6 +178,11 @@ BUDDY_INTERACTIONS = {
 BUDDY_ACT_FRAME_MS = 200      # ms per frame while performing an interaction
 BUDDY_INTERACT_CHANCE = 0.4   # odds an idle Buddy uses an item instead of strolling
 
+# Where Buddy's interaction sprite is drawn (native top-left), per item. Items not
+# listed fall back to a computed default (centred over the item, feet at its base).
+# Dial these in with tools/animation_placer.py and paste the export back here.
+BUDDY_ACT_PLACEMENT = {}
+
 _TICK_MS = 16
 _ANIM_MS = 360   # ambient animation frame rate (matches the gallery 3x speed)
 
@@ -201,7 +206,9 @@ class GardenScene(QWidget):
         self.settings = settings
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(NATIVE_W, NATIVE_H)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Hand cursor only over clickable things (set live in mouseMoveEvent).
+        self.setMouseTracking(True)
+        self._buddy_inside = False    # reserved: true once he enters the house
 
         d = _garden_dir()
         self._bg = self._load(d / "sPet_BG_0.png")
@@ -403,9 +410,39 @@ class GardenScene(QWidget):
                         self._send_buddy_to(rec)
                         super().mousePressEvent(e)
                         return
-            if HOUSE_RECT.contains(int(nx), int(ny)) or self._open_target > 0.5:
-                self.toggle_house()
+            if self._open_target > 0.5:
+                # House is open: any click that isn't on an item drops the front
+                # back down — unless Buddy is inside, then it stays open for him.
+                if not self._buddy_inside:
+                    self.toggle_house()
+            elif HOUSE_RECT.contains(int(nx), int(ny)):
+                self.toggle_house()        # closed: click the house to open it
         super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        """Show the hand cursor only over clickable things: the switcher arrows,
+        an interactive item, or the closed house."""
+        pos = e.position().toPoint()
+        pointer = False
+        sw = self._switcher_layout()
+        if sw is not None and (sw[0].contains(pos) or sw[1].contains(pos)):
+            pointer = True
+        elif self._scale > 0:
+            nx = (e.position().x() - self._origin.x()) / self._scale
+            ny = (e.position().y() - self._origin.y()) / self._scale
+            if self._buddy is not None:
+                for rec in self._interactive_recs():
+                    f = rec["frames"][0]
+                    if QRect(rec["x"], rec["y"], f.width(), f.height()).contains(
+                            int(nx), int(ny)):
+                        pointer = True
+                        break
+            if (not pointer and self._open_target <= 0.5
+                    and HOUSE_RECT.contains(int(nx), int(ny))):
+                pointer = True
+        self.setCursor(Qt.CursorShape.PointingHandCursor if pointer
+                       else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(e)
 
     # ---- rendering -----------------------------------------------------------
     def _compose_native(self) -> QPixmap:
@@ -443,13 +480,9 @@ class GardenScene(QWidget):
         if self._buddy is not None:            # the pig strolls / uses items
             bu = self._buddy
             if bu["state"] == "act" and bu["act_frames"]:
-                # Interaction sprites are a different size — align feet (bottom-
-                # centre) to the walk-frame box so he doesn't jump on contact.
+                # Drawn at the interaction's tuned position (set when he set off).
                 af = bu["act_frames"][bu["act_idx"] % len(bu["act_frames"])]
-                bw, bh = self._buddy_size()
-                ax = int(bu["x"]) + bw // 2 - af.width() // 2
-                ay = int(bu["y"]) + bh - af.height()
-                p.drawPixmap(ax, ay, af)
+                p.drawPixmap(bu["act_pos"][0], bu["act_pos"][1], af)
             elif bu["state"] == "walk":
                 seq = BUDDY_WALK_LEFT if bu["facing"] == "left" else BUDDY_WALK_RIGHT
                 p.drawPixmap(int(bu["x"]), int(bu["y"]), bu["frames"][seq[bu["fidx"]]])
@@ -602,7 +635,7 @@ class GardenScene(QWidget):
                                "state": "idle", "facing": "right", "fidx": 0, "wt": 0.0,
                                "t": random.uniform(*BUDDY_PAUSE), "pending": None,
                                "act_frames": None, "act_idx": 0, "act_wt": 0.0,
-                               "act_t": 0.0}
+                               "act_t": 0.0, "act_pos": (0, 0)}
                 # Preload the interaction animations (only for items he can own).
                 for iid, spec in BUDDY_INTERACTIONS.items():
                     seq = self._load_frames(f"sPet_Buddy{spec['anim']}_0.png")
@@ -696,16 +729,26 @@ class GardenScene(QWidget):
         return [r for r in self._furniture_ext
                 if r["id"] in BUDDY_INTERACTIONS and r["id"] in self._buddy_acts]
 
-    def _stand_pos(self, rec):
-        """Where Buddy stands to use an item: feet aligned to the item's base, centred."""
-        bw, bh = self._buddy_size()
+    def _act_pos(self, rec):
+        """Native top-left where the interaction sprite is drawn: the tuned override
+        if any, else centred over the item with its feet at the item's base."""
+        if rec["id"] in BUDDY_ACT_PLACEMENT:
+            return BUDDY_ACT_PLACEMENT[rec["id"]]
+        af = self._buddy_acts[rec["id"]][0]
         item = rec["frames"][0]
-        return float(rec["x"] + item.width() // 2 - bw // 2), float(rec["y"] + item.height() - bh)
+        return (rec["x"] + item.width() // 2 - af.width() // 2,
+                rec["y"] + item.height() - af.height())
 
     def _send_buddy_to(self, rec):
-        """Walk Buddy to an item, then perform its interaction on arrival."""
+        """Walk Buddy to an item, then perform its interaction on arrival. Stores the
+        interaction sprite's draw position and walks Buddy so his feet land there."""
         bu = self._buddy
-        bu["tx"], bu["ty"] = self._stand_pos(rec)
+        ax, ay = self._act_pos(rec)
+        bu["act_pos"] = (ax, ay)
+        af = self._buddy_acts[rec["id"]][0]
+        bw, bh = self._buddy_size()
+        bu["tx"] = float(ax + af.width() // 2 - bw // 2)
+        bu["ty"] = float(ay + af.height() - bh)
         bu["pending"] = rec["id"]
         bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
 
