@@ -192,19 +192,19 @@ BUDDY_INTERACT_CHANCE = 0.4   # odds an idle Buddy uses an item instead of strol
 # ---- Interior navigation graph (authored with tools/nav_editor.py) ----------
 # Walkable floors, GROUND FIRST -> attic last. Each: feet Y + walkable x-range.
 HOUSE_FLOORS = [
-    {"y": 160, "x0": 186, "x1": 320},   # ground (kitchen + door)
-    {"y": 124, "x0": 186, "x1": 320},   # living
-    {"y": 86,  "x0": 186, "x1": 320},   # bed/bath
-    {"y": 50,  "x0": 200, "x1": 312},   # attic
+    {"y": 163, "x0": 186, "x1": 320},   # ground (kitchen + door)
+    {"y": 122, "x0": 186, "x1": 320},   # living
+    {"y": 82,  "x0": 186, "x1": 320},   # bed/bath
+    {"y": 43,  "x0": 186, "x1": 320},   # attic
 ]
 # A staircase between floor i and i+1: Buddy walks to x_lo on the lower floor and
 # climbs to x_hi on the upper floor. One per gap (HOUSE_STAIRS[i] joins i and i+1).
 HOUSE_STAIRS = [
-    {"x_lo": 196, "x_hi": 208},   # ground -> living
-    {"x_lo": 300, "x_hi": 292},   # living -> bed/bath
-    {"x_lo": 208, "x_hi": 216},   # bed/bath -> attic
+    {"x_lo": 200, "x_hi": 200},   # ground -> living
+    {"x_lo": 313, "x_hi": 313},   # living -> bed/bath
+    {"x_lo": 216, "x_hi": 217},   # bed/bath -> attic
 ]
-HOUSE_DOOR_X = 305            # entry x (ground floor); Buddy enters/exits here
+HOUSE_DOOR_X = 312            # entry x (ground floor); Buddy enters/exits here
 BUDDY_DOOR_LAWN_Y = 176      # the lawn spot in front of the door he approaches
 
 # Where Buddy's interaction sprite is drawn (native top-left), per item. Items not
