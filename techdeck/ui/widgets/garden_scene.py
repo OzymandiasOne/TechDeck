@@ -211,12 +211,22 @@ BUDDY_DOOR_LAWN_Y = 176      # the lawn spot in front of the door he approaches
 # listed fall back to a computed default (centred over the item, feet at its base).
 # Dial these in with tools/animation_placer.py and paste the export back here.
 BUDDY_ACT_PLACEMENT = {
+    # Exterior
     "deco_easel": (42, 156),
     "deco_gardenplot": (331, 175),
     "deco_hottub": (150, 164),
     "deco_jumprope": (219, 163),
     "deco_lilypad": (110, 163),
     "deco_picnic": (79, 146),
+    # Interior
+    "deco_bed": (268, 50),
+    "deco_books": (265, 143),
+    "deco_desk": (231, 101),
+    "deco_fridge": (207, 142),
+    "deco_guitar": (308, 106),
+    "deco_stove": (231, 143),
+    "deco_telescope": (305, 65),
+    "deco_tv": (288, 104),
 }
 
 _TICK_MS = 16
@@ -930,7 +940,9 @@ class GardenScene(QWidget):
             bu["x"], bu["y"] = float(HOUSE_DOOR_X), self._floor_top(0)
             sx, sy = g["stand"]
             feet = sy + self._buddy_size()[1]
-            bu["path"] = self._interior_path(0, bu["x"], self._floor_for_y(feet), sx) + [(sx, sy)]
+            # End on the item's floor; the interaction sprite (drawn at its own tuned
+            # position) takes over from there, so no floating final step.
+            bu["path"] = self._interior_path(0, bu["x"], self._floor_for_y(feet), sx)
             g["phase"] = "inside"
             bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
             if not bu["path"]:
