@@ -38,6 +38,14 @@ SOUND_PET_SPLASH = "pet_splash"          # Buddy hot-tub bath
 SOUND_PET_EAT = "pet_eat"                # Buddy picnic
 SOUND_PET_WATER = "pet_water"            # Buddy garden plot
 SOUND_PET_FISH = "pet_fish"              # Buddy fishing at the pond
+# Interior interactions
+SOUND_PET_TV = "pet_tv"                  # Buddy watches TV
+SOUND_PET_DESK = "pet_desk"              # Buddy at the desk
+SOUND_PET_GUITAR = "pet_guitar"          # Buddy plays guitar
+SOUND_PET_FRIDGE = "pet_fridge"          # Buddy raids the fridge
+SOUND_PET_BOOK = "pet_book"              # Buddy reads
+SOUND_PET_COOK = "pet_cook"              # Buddy cooks at the stove
+SOUND_PET_SLEEP = "pet_sleep"            # Buddy sleeps in bed
 
 # Map sound IDs to filenames in assets/sounds/
 _SOUND_FILES: Dict[str, str] = {
@@ -65,6 +73,13 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_PET_EAT: "sfx__petEat00.wav",
     SOUND_PET_WATER: "sfx__petWater00.wav",
     SOUND_PET_FISH: "sfx__petFishingStart00.wav",
+    SOUND_PET_TV: "sfx__petTv00.wav",
+    SOUND_PET_DESK: "sfx__petDesk00.wav",
+    SOUND_PET_GUITAR: "sfx__petGuitar00.wav",
+    SOUND_PET_FRIDGE: "sfx__petFridge00.wav",
+    SOUND_PET_BOOK: "sfx__petBook00.wav",
+    SOUND_PET_COOK: "sfx__petCook00.wav",
+    SOUND_PET_SLEEP: "sfx__petFallAsleep00.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 
