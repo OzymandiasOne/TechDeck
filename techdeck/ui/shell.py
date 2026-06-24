@@ -437,10 +437,16 @@ class MainWindow(QMainWindow):
                 from PySide6.QtWidgets import QTabWidget
                 for tab_widget in page.findChildren(QTabWidget):
                     original = tab_widget.currentIndex()
+                    # Block currentChanged while cycling: this is just a paint
+                    # warm-up, not user navigation, so it must not fire tab-change
+                    # side effects (e.g. the Account tab-select sound — that was a
+                    # burst of clicks during the splash).
+                    tab_widget.blockSignals(True)
                     for t in range(tab_widget.count()):
                         tab_widget.setCurrentIndex(t)
                         QApplication.processEvents()
                     tab_widget.setCurrentIndex(original)
+                    tab_widget.blockSignals(False)
                     QApplication.processEvents()
 
         # Library has a refresh-on-show; do it once now.
