@@ -307,7 +307,8 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._grid(owned_games))
 
         owned_furniture = [c for c in CATALOG
-                           if c["kind"] == "furniture" and s.is_unlocked(c["id"])]
+                           if c["kind"] == "furniture" and s.is_unlocked(c["id"])
+                           and not c.get("hidden")]
         owned_friends = [c for c in CATALOG
                          if c["kind"] == "friends" and s.is_unlocked(c["id"])]
 

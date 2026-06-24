@@ -158,10 +158,14 @@ CATALOG = [
      "sprite": "sPet_ItemButterfly_0.png", "cost": 25, "kind": "furniture"},
     {"id": "deco_sapling", "name": "Tree Sapling", "category": "decorations",
      "sprite": "sPet_Tree_5.png", "cost": 30, "kind": "tree"},
+    # Buying the Sun also unlocks the Moon, which is hidden from the store + My
+    # Stuff so it's a surprise the player discovers on a night background.
     {"id": "deco_sun", "name": "Sun", "category": "decorations",
-     "sprite": "sPet_ItemSun_0.png", "cost": 40, "kind": "furniture"},
+     "sprite": "sPet_ItemSun_0.png", "cost": 40, "kind": "furniture",
+     "bundle": ["deco_moon"]},
     {"id": "deco_moon", "name": "Moon", "category": "decorations",
-     "sprite": "sPet_ItemSunMoon_0.png", "cost": 40, "kind": "furniture"},
+     "sprite": "sPet_ItemSunMoon_0.png", "cost": 40, "kind": "furniture",
+     "hidden": True},
     # Owl + Monkey live in the tree — only sold once it's fully grown.
     {"id": "deco_owl", "name": "Owl", "category": "decorations",
      "sprite": "sPet_ItemOwl_0.png", "cost": 80, "kind": "furniture",
@@ -960,6 +964,7 @@ class EmporiumPage(QWidget):
             t.hide()
         matching = [t for t in self.tiles
                     if t.item.get("category") == self._category
+                    and not t.item.get("hidden")
                     and self._item_available(t.item)]
         cols = self.GRID_COLS
         for i, t in enumerate(matching):
@@ -1026,6 +1031,8 @@ class EmporiumPage(QWidget):
                     f"{s.get_tickets()}. Run more apps to earn more!")
                 return
             s.unlock_item(item["id"])
+            for extra in item.get("bundle", []):   # e.g. Sun also unlocks the Moon
+                s.unlock_item(extra)
             grab = self.GRAB_DESCRIPTIONS.get(item["kind"], self.GRAB_DEFAULT).format(
                 name=item["name"])
             if item["kind"] == "spinner":
