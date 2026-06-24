@@ -174,7 +174,8 @@ BUDDY_INTERACTIONS = {
     # "deco_picnic" (Eat) disabled for now — left out of interactions on purpose.
     "deco_easel":      {"anim": "Paint",    "sound": None,             "dur": (4.0, 7.0)},
     "deco_gardenplot": {"anim": "Harvest",  "sound": SOUND_PET_WATER,  "dur": (3.0, 6.0)},
-    "deco_jumprope":   {"anim": "JumpRope", "sound": SOUND_PET_JUMP,   "dur": (3.0, 6.0)},
+    "deco_jumprope":   {"anim": "JumpRope", "sound": SOUND_PET_JUMP,   "dur": (3.0, 6.0),
+                        "hide_item": True},   # the rope is part of the Buddy animation
     "deco_lilypad":    {"anim": "Fish",     "sound": SOUND_PET_FISH,   "dur": (4.0, 7.0)},
     # --- Interior (Buddy enters the house and navigates the floors/stairs) ---
     "deco_tv":         {"anim": "TV",        "sound": SOUND_PET_TV,     "dur": (5.0, 9.0)},
@@ -254,7 +255,6 @@ class GardenScene(QWidget):
         self.setMinimumSize(NATIVE_W, NATIVE_H)
         # Hand cursor only over clickable things (set live in mouseMoveEvent).
         self.setMouseTracking(True)
-        self._buddy_inside = False    # reserved: true once he enters the house
 
         d = _garden_dir()
         self._bg = self._load(d / "sPet_BG_0.png")
@@ -457,7 +457,7 @@ class GardenScene(QWidget):
             if self._open_target > 0.5:
                 # House is open: any click that isn't on an item drops the front
                 # back down — unless Buddy is inside, then it stays open for him.
-                if not self._buddy_inside:
+                if not self._buddy_is_inside():
                     self.toggle_house()
             elif HOUSE_RECT.contains(int(nx), int(ny)):
                 self.toggle_house()        # closed: click the house to open it
@@ -523,8 +523,10 @@ class GardenScene(QWidget):
         if 1 <= st < len(self._tree) and self._tree[st] is not None:
             tx, ty = TREE_PLACEMENT.get(st, TREE_POS)
             p.drawPixmap(tx, ty, self._tree[st])
+        hidden = self._hidden_item()           # item Buddy is currently 'wearing'
         for rec in self._furniture:            # interior — behind the facade
-            p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+            if rec["id"] != hidden:
+                p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
         if self._buddy is not None and self._buddy["inside"]:
             self._draw_buddy(p)                # indoors — drawn among the interior
         # The facade and anything mounted on it (satellite, perched bird) lift up
@@ -542,7 +544,7 @@ class GardenScene(QWidget):
                     p.setOpacity(facade_op)
                     p.drawPixmap(rec["x"], rec["y"] + facade_dy, rec["frames"][rec["idx"]])
                     p.setOpacity(1.0)
-            else:
+            elif rec["id"] != hidden:
                 p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
         if self._buddy is not None and not self._buddy["inside"]:
             self._draw_buddy(p)                # out in the yard — drawn in front
@@ -684,7 +686,6 @@ class GardenScene(QWidget):
         self._butterfly = None
         self._bird = None
         self._buddy = None
-        self._buddy_inside = False    # a reset Buddy always starts out in the yard
         self._buddy_acts = {}         # item id -> Buddy interaction frame sequence
         if self._owned("friend_buddy"):
             frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
@@ -787,6 +788,19 @@ class GardenScene(QWidget):
     def _house_open(self):
         return self._open_target > 0.5
 
+    def _buddy_is_inside(self):
+        return self._buddy is not None and self._buddy["inside"]
+
+    def _hidden_item(self):
+        """The item id Buddy is currently 'wearing' (its sprite is part of his
+        interaction animation, e.g. the jump rope), so the placed item is hidden."""
+        bu = self._buddy
+        if bu is not None and bu["state"] == "act" and bu["goal"]:
+            iid = bu["goal"].get("id")
+            if iid and BUDDY_INTERACTIONS.get(iid, {}).get("hide_item"):
+                return iid
+        return None
+
     def _interactive_ext(self):
         """Placed yard items Buddy can use (always reachable — he roams the yard)."""
         return [r for r in self._furniture_ext
@@ -846,19 +860,37 @@ class GardenScene(QWidget):
 
     # ---- sending Buddy to an interaction -------------------------------------
     def _buddy_go_use(self, rec):
-        """Dispatch Buddy to use an item — straight across the yard for exterior
-        items, or in through the door and up the stairs for interior ones."""
+        """Dispatch Buddy to use an item, routing from wherever he currently is —
+        outside or already indoors — so re-targeting mid-trip doesn't teleport him
+        out to the lawn and back."""
         bu = self._buddy
         iid = rec["id"]
+        bh = self._buddy_size()[1]
         bu["act_pos"] = self._act_pos(rec)
-        stand = self._stand_pos(rec)
+        sx, sy = self._stand_pos(rec)
         if iid in EXTERIOR:
-            bu["goal"] = {"kind": "ext_act", "id": iid}
-            bu["path"] = [stand]
+            if bu["inside"]:
+                # leave the house first, then cross the yard to the item
+                cf = self._floor_for_y(bu["y"] + bh)
+                bu["goal"] = {"kind": "ext_act", "id": iid, "phase": "exiting", "stand": (sx, sy)}
+                bu["path"] = (self._interior_path(cf, bu["x"], 0, float(HOUSE_DOOR_X))
+                              + [(float(HOUSE_DOOR_X), self._floor_top(0))])
+            else:
+                bu["goal"] = {"kind": "ext_act", "id": iid, "phase": "go", "stand": (sx, sy)}
+                bu["path"] = [(sx, sy)]
         else:
-            bu["goal"] = {"kind": "int_act", "id": iid, "phase": "approach", "stand": stand}
-            bu["path"] = [(float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y))]
+            tf = self._floor_for_y(sy + bh)
+            if bu["inside"]:
+                # already indoors — walk straight to the new item via the stairs
+                cf = self._floor_for_y(bu["y"] + bh)
+                bu["goal"] = {"kind": "int_act", "id": iid, "phase": "inside", "stand": (sx, sy)}
+                bu["path"] = self._interior_path(cf, bu["x"], tf, sx)
+            else:
+                bu["goal"] = {"kind": "int_act", "id": iid, "phase": "approach", "stand": (sx, sy)}
+                bu["path"] = [(float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y))]
         bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+        if not bu["path"]:                       # already standing on the target
+            self._buddy_arrived()
 
     def _begin_act(self, iid):
         bu = self._buddy
@@ -929,14 +961,21 @@ class GardenScene(QWidget):
             bu["state"] = "idle"
             bu["t"] = random.uniform(*BUDDY_PAUSE)
             return
-        if g["kind"] == "ext_act":               # reached a yard item
-            self._begin_act(g["id"])
+        if g["kind"] == "ext_act":
+            if g.get("phase") == "exiting":      # was indoors -> step out, cross yard
+                get_audio_manager().play(SOUND_PET_DOOR_CLOSE)
+                bu["inside"] = False
+                bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y)
+                g["phase"] = "go"
+                bu["path"] = [g["stand"]]
+                bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+            else:                                # reached a yard item
+                self._begin_act(g["id"])
             return
         # interior interaction
         if g["phase"] == "approach":             # at the door on the lawn -> step inside
             get_audio_manager().play(SOUND_PET_DOOR_OPEN)
             bu["inside"] = True
-            self._buddy_inside = True
             bu["x"], bu["y"] = float(HOUSE_DOOR_X), self._floor_top(0)
             sx, sy = g["stand"]
             feet = sy + self._buddy_size()[1]
@@ -952,7 +991,6 @@ class GardenScene(QWidget):
         elif g["phase"] == "leaving":            # back at the indoor door -> step out
             get_audio_manager().play(SOUND_PET_DOOR_CLOSE)
             bu["inside"] = False
-            self._buddy_inside = False
             bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y)
             bu["goal"] = None
             bu["path"] = [(random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y))]
