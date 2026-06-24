@@ -284,6 +284,8 @@ class GardenScene(QWidget):
             return
         cur = self._bg_name if self._bg_name in owned else owned[0]
         nxt = owned[(owned.index(cur) + delta) % len(owned)]
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_FILTER
+        get_audio_manager().play(SOUND_UI_FILTER)
         if self.settings is not None and hasattr(self.settings, "set_equipped_background"):
             self.settings.set_equipped_background(nxt)
         self._load_background()
@@ -551,19 +553,19 @@ class GardenScene(QWidget):
         return self.settings is not None and self.settings.is_unlocked(item_id)
 
     def _load_agents(self):
-        """Set up the moving agents: Buddy the pig (always), plus the bird +
-        butterfly if owned."""
+        """Set up the moving agents: Buddy the pig (if bought at Woogy's), plus
+        the bird + butterfly if owned."""
         d = _garden_dir()
         self._butterfly = None
         self._bird = None
-        frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
-        if all(f is not None for f in frames):
-            bx, by = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
-            self._buddy = {"x": bx, "y": by, "tx": bx, "ty": by, "frames": frames,
-                           "state": "idle", "facing": "right", "fidx": 0, "wt": 0.0,
-                           "t": random.uniform(*BUDDY_PAUSE)}
-        else:
-            self._buddy = None
+        self._buddy = None
+        if self._owned("friend_buddy"):
+            frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
+            if all(f is not None for f in frames):
+                bx, by = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
+                self._buddy = {"x": bx, "y": by, "tx": bx, "ty": by, "frames": frames,
+                               "state": "idle", "facing": "right", "fidx": 0, "wt": 0.0,
+                               "t": random.uniform(*BUDDY_PAUSE)}
         if self._owned("deco_butterfly") and "deco_butterfly" in PLACEMENT:
             x, y = PLACEMENT["deco_butterfly"]
             frames = [self._load(d / f"sPet_ItemButterfly_{i}.png") for i in range(2)]
@@ -659,10 +661,6 @@ class GardenScene(QWidget):
             if dist <= step:
                 bu["x"], bu["y"], bu["state"] = bu["tx"], bu["ty"], "idle"
                 bu["t"] = random.uniform(*BUDDY_PAUSE)
-                if random.random() < 0.16:      # occasional ambient chirp on arrival
-                    from techdeck.core.audio_manager import (
-                        get_audio_manager, SOUND_PET_VOICE)
-                    get_audio_manager().play(SOUND_PET_VOICE)
             else:
                 bu["x"] += dx / dist * step
                 bu["y"] += dy / dist * step

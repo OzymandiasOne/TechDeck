@@ -72,6 +72,10 @@ CATALOG = [
     {"id": "steeltube_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
 
+    # --- Friends: companions for My House (kind "friends"; PNG sprites). ---
+    {"id": "friend_buddy", "name": "Buddy", "category": "friends",
+     "sprite": "sPet_Buddy_4.png", "cost": 120, "kind": "friends"},
+
     # --- Decorations: furniture for My House (kind "furniture"; PNG sprites). ---
     # Bought items are recorded as owned; placement into rooms is the next pass.
     {"id": "deco_rug", "name": "Rug", "category": "decorations",
@@ -708,6 +712,8 @@ class EmporiumPage(QWidget):
             "WOOGY: A SHURIKEN! SO SHARP, SO COOL. PLEASE DON'T POKE OL' WOOGY.",
         "steeltube_game":
             "WOOGY: WOOGY DON'T KNOW HOW TO PLAY THIS GAME, WOOGY JUST CLICK BUTTONS.",
+        "friend_buddy":
+            "WOOGY: BUDDY IS A GOOD PIG. TREAT HIM RIGHT AND HE'LL KEEP YOUR YARD COMPANY.",
     }
     GENERIC_COMMENT = "WOOGY: V-VERY GOOD! WOOGY APPROVES."
 
@@ -719,6 +725,8 @@ class EmporiumPage(QWidget):
                     "down still humming."),
         "game": ("Woogy heaves the {name} cartridge out of the locked glass case, "
                  "blows the dust off it, and slides it over with a proud grin."),
+        "friends": ("Woogy gives a sharp whistle and {name} trots out from the back, "
+                    "snuffling happily. Woogy pats him once and sends him your way."),
     }
     GRAB_DEFAULT = ("Woogy grabs the {name} off the shelf with effort and wobbles "
                     "back to the counter. He slides it towards you with a huff.")
@@ -1052,6 +1060,8 @@ class EmporiumPage(QWidget):
                          "run - give it about a month to reach full size.")
             elif item["kind"] == "furniture":
                 instr = "It's added to your collection - see it in My House."
+            elif item["kind"] == "friends":
+                instr = "He's moved into your yard - say hi over in My House!"
             elif item["kind"] == "game":
                 instr = ("Find it in your Library (Games) and add it to a kit "
                          "to play.")
