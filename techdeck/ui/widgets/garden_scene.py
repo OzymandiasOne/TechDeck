@@ -158,6 +158,7 @@ BIRD_GONE = (5.0, 14.0)       # seconds off-screen before returning
 BUDDY_SPEED = 22              # px/s walk
 BUDDY_WALK_MS = 150           # ms per walk frame
 BUDDY_X, BUDDY_Y = (135, 300), (170, 182)   # yard ground Buddy roams
+BUDDY_START = (262, 178)      # initial spawn — a clear patch of lawn (off the hot tub)
 BUDDY_PAUSE = (1.5, 5.0)      # seconds idle between strolls
 BUDDY_WALK_LEFT = (8, 9, 10, 11)
 BUDDY_WALK_RIGHT = (12, 13, 14, 15)
@@ -547,11 +548,11 @@ class GardenScene(QWidget):
                     p.setOpacity(1.0)
             elif rec["id"] != hidden:
                 p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
-        if self._buddy is not None and not self._buddy["inside"]:
-            self._draw_buddy(p)                # out in the yard — drawn in front
-        if self._butterfly is not None:        # butterfly stays on the lawn
+        if self._butterfly is not None:        # butterfly on the lawn — behind Buddy
             b = self._butterfly
             p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
+        if self._buddy is not None and not self._buddy["inside"]:
+            self._draw_buddy(p)                # out in the yard — in front of butterfly
         if self._bird is not None and facade_op > 0.0:   # perches on the roof -> lifts with it
             bd = self._bird
             frame = bd["perch"] if bd["state"] == "perch" else bd["fly"][bd["fidx"]]
@@ -691,8 +692,8 @@ class GardenScene(QWidget):
         if self._owned("friend_buddy"):
             frames = [self._load(d / f"sPet_Buddy_{i}.png") for i in range(16)]
             if all(f is not None for f in frames):
-                bx, by = random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y)
-                self._buddy = {"x": bx, "y": by, "frames": frames, "facing": "right",
+                bx, by = BUDDY_START
+                self._buddy = {"x": float(bx), "y": float(by), "frames": frames, "facing": "right",
                                "state": "idle", "fidx": 0, "wt": 0.0,
                                "t": random.uniform(*BUDDY_PAUSE), "inside": False,
                                "path": [], "goal": None, "act_frames": None,
