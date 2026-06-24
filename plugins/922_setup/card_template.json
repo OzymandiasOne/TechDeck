@@ -1,0 +1,15 @@
+{
+  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time.",
+  "plan": "D922 PIPELINE",
+  "title_format": "BATCH {batch}: {folder}",
+  "bucket_format": "BATCH {batch}",
+  "priority": "Medium",
+  "status": "Not started",
+  "checklist": [
+    "TL Print",
+    "Saw Print",
+    "Inspection Sheet",
+    "Program",
+    "Processing Completed"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "922_setup",
+  "name": "922 Setup",
+  "description": "Reads every order folder in a 922 batch and creates one Planner card per order (BATCH X: <folder>) in the D922 PIPELINE plan via a Power Automate webhook.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "922",
+  "requires_admin": false,
+  "timeout": 600,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "922 Production Packages Root",
+        "description": "Where 'Batch {N}' folders live. Leave blank to auto-detect '922 QTDR Production Packages' under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "webhook_url",
+        "type": "string",
+        "label": "Planner Webhook URL",
+        "description": "The Power Automate flow URL that creates the Planner cards. Get this from the flow's webhook/HTTP-request trigger. Leave blank to dry-run (build and preview the cards without posting).",
+        "placeholder": "https://prod-XX.westus.logic.azure.com:443/workflows/...",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "dry_run",
+        "type": "boolean",
+        "label": "Dry run (preview only)",
+        "description": "When on, build and log the cards and save a preview JSON, but do not post to the webhook. Forced on automatically when no webhook URL is set.",
+        "required": false,
+        "default": false
+      }
+    ]
+  }
+}

@@ -252,6 +252,7 @@ Explorer and on pinned shortcuts.
 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs 
 911 Batch Repeater | Finds and copies repeat parts (NC files + inspection PDFs) for 911 batches 
 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs; keeps MIL-SPEC and HULL pages 
+922 Setup | Reads a batch's order folders and creates one Planner card per order ("BATCH X: folder") in the D922 PIPELINE plan via a Power Automate webhook 
 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info 
 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
