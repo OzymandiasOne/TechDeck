@@ -8,7 +8,8 @@ Flow:
   2. Resolve the '922 QTDR Production Packages' root and locate 'Batch {n}'
      (same logic as every other 922 plugin).
   3. List the order folders directly under the batch folder, dropping the
-     'Batch {n} - Documentation' folder (and any temp/hidden entries).
+     'Batch {n} - Documentation' and 'REPEAT BATCHES' folders (and any
+     temp/hidden entries).
   4. Build one card per folder from card_template.json:
        title    = "BATCH {batch}: {folder}"
        bucket   = "BATCH {batch}"
@@ -39,9 +40,21 @@ except ModuleNotFoundError:
 
 VERSION = "1.0.0"
 
-# Folders that are never orders. The batch documentation folder is named
-# "Batch {n} - Documentation"; match it (and any documentation variant) loosely.
+# Folders that are never orders, so they never become cards:
+#   - "Batch {n} - Documentation" (matched loosely on "documentation")
+#   - "REPEAT BATCHES"
+# Both are matched case-insensitively.
 _DOC_RE = re.compile(r"documentation", re.IGNORECASE)
+_REPEAT_RE = re.compile(r"^\s*repeat\s+batches\s*$", re.IGNORECASE)
+
+
+def _ignored_reason(name: str) -> str | None:
+    """Why this folder is not an order, or None if it is one."""
+    if _DOC_RE.search(name):
+        return "documentation"
+    if _REPEAT_RE.match(name):
+        return "repeat batches"
+    return None
 
 
 def _load_template() -> dict:
@@ -57,7 +70,7 @@ def _is_order_folder(entry: Path) -> bool:
     name = entry.name
     if name.startswith(("~", ".", "$")):
         return False
-    if _DOC_RE.search(name):
+    if _ignored_reason(name):
         return False
     return True
 
@@ -156,13 +169,16 @@ def run(params: dict, progress_callback, cancel_event):
         if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
             log("Cancelled.")
             return
-        if entry.is_dir() and _DOC_RE.search(entry.name):
-            skipped.append(entry.name)
+        if not entry.is_dir():
+            continue
+        reason = _ignored_reason(entry.name)
+        if reason:
+            skipped.append(f"{entry.name} ({reason})")
         elif _is_order_folder(entry):
             folders.append(entry.name)
 
     if skipped:
-        log(f"Skipped (documentation): {', '.join(skipped)}")
+        log(f"Skipped: {', '.join(skipped)}")
     if not folders:
         log("ERROR: no order folders found in this batch.")
         return
