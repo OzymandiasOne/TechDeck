@@ -833,6 +833,7 @@ class HomePage(QWidget, ThemeAware):
         self.tile_cards = {}  # PHASE 3: Track card widgets by tile_id
         self._missing_tiles: dict = {}  # tile_id -> _MissingTile for tiles whose plugin folder is gone
         self._is_running = False  # True while any plugin is executing
+        self._restoring = False   # True during programmatic tile checks (no click sound)
 
         # Use the shared loader if MainWindow gave us one; otherwise scan now.
         if plugin_loader is None:
@@ -1165,8 +1166,11 @@ class HomePage(QWidget, ThemeAware):
         else:
             self.selected_tiles.discard(tile_id)
 
-        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
-        get_audio_manager().play(SOUND_CLICK)
+        # Only a genuine user click should click; programmatic restores (e.g.
+        # resuming a shelved run, which checks every queued tile) stay silent.
+        if not self._restoring:
+            from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+            get_audio_manager().play(SOUND_CLICK)
 
         if self._is_running:
             return  # don't disturb button state while plugins are running
@@ -1680,10 +1684,15 @@ class HomePage(QWidget, ThemeAware):
                 self._shared_state[fam].update(info)
 
         # Reflect the loaded queue in the UI so the user can see what will run.
-        for tid in available:
-            self.selected_tiles.add(tid)
-            if tid in self.tile_cards:
-                self.tile_cards[tid].set_checked(True)
+        # Programmatic — suppress the per-tile click sound (was a rapid-fire burst).
+        self._restoring = True
+        try:
+            for tid in available:
+                self.selected_tiles.add(tid)
+                if tid in self.tile_cards:
+                    self.tile_cards[tid].set_checked(True)
+        finally:
+            self._restoring = False
 
         # Find the console for plugin_params.
         console = None
