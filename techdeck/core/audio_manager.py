@@ -25,6 +25,7 @@ SOUND_RAVE_MUSIC = "rave_music"
 # ── My Account / Emporium UI (UFO 50 "library" SFX) ─────────────────────────
 SOUND_UI_TAB = "ui_tab"          # switching tabs (My Account tab bar)
 SOUND_UI_FILTER = "ui_filter"    # switching store category
+SOUND_UI_CLOSE = "ui_close"      # closing a store category window (the X)
 SOUND_UI_SELECT = "ui_select"    # selecting / buying anything
 SOUND_UI_CLAIM = "ui_claim"      # claiming achievement tickets
 SOUND_GAME_START = "game_start"  # launching a game (ASA: The Video Game, etc.)
@@ -61,6 +62,7 @@ _SOUND_FILES: Dict[str, str] = {
     # My Account UI
     SOUND_UI_TAB: "sfx__libPauseMenu00a.wav",
     SOUND_UI_FILTER: "sfx__libFilter00.wav",
+    SOUND_UI_CLOSE: "sfx__libPauseMenu00d.wav",
     SOUND_UI_SELECT: "sfx__libFavorite00a.wav",
     SOUND_UI_CLAIM: "sfx__libIntro00f.wav",
     SOUND_GAME_START: "sfx__libIntro00g.wav",

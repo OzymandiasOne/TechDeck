@@ -918,6 +918,8 @@ class EmporiumPage(QWidget):
 
     def _close_window(self):
         """Close the shop window, revealing Woogy underneath."""
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_CLOSE
+        get_audio_manager().play(SOUND_UI_CLOSE)
         self.shop_window.hide()
         self._open_category = None
         self._style_category_buttons()
