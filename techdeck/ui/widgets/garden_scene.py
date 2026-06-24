@@ -872,10 +872,8 @@ class GardenScene(QWidget):
         if iid in EXTERIOR:
             if bu["inside"]:
                 # leave the house first, then cross the yard to the item
-                cf = self._floor_for_y(bu["y"] + bh)
                 bu["goal"] = {"kind": "ext_act", "id": iid, "phase": "exiting", "stand": (sx, sy)}
-                bu["path"] = (self._interior_path(cf, bu["x"], 0, float(HOUSE_DOOR_X))
-                              + [(float(HOUSE_DOOR_X), self._floor_top(0))])
+                bu["path"] = self._path_to_door()
             else:
                 bu["goal"] = {"kind": "ext_act", "id": iid, "phase": "go", "stand": (sx, sy)}
                 bu["path"] = [(sx, sy)]
@@ -902,6 +900,37 @@ class GardenScene(QWidget):
         bu["act_t"] = random.uniform(*spec["dur"])
         if spec.get("sound"):
             get_audio_manager().play(spec["sound"])
+
+    def _current_floor(self):
+        return self._floor_for_y(self._buddy["y"] + self._buddy_size()[1])
+
+    def _path_to_door(self):
+        """Waypoints from Buddy's current floor down to the ground-floor door."""
+        bu = self._buddy
+        return (self._interior_path(self._current_floor(), bu["x"], 0, float(HOUSE_DOOR_X))
+                + [(float(HOUSE_DOOR_X), self._floor_top(0))])
+
+    def _step_outside(self):
+        """Cross the threshold back to the yard (door sfx + reposition)."""
+        bu = self._buddy
+        get_audio_manager().play(SOUND_PET_DOOR_CLOSE)
+        bu["inside"] = False
+        bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y)
+
+    def _buddy_wander_inside(self):
+        """Amble to a random spot on the current floor (stays indoors)."""
+        bu = self._buddy
+        fl = HOUSE_FLOORS[self._current_floor()]
+        bu["goal"] = None
+        bu["path"] = [(random.uniform(fl["x0"], fl["x1"]), self._floor_top(self._current_floor()))]
+        bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+
+    def _buddy_leave_house(self):
+        """Head down the stairs and out the front door."""
+        bu = self._buddy
+        bu["goal"] = {"kind": "leave"}
+        bu["path"] = self._path_to_door()
+        bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
 
     def _update_buddy(self, dt):
         bu = self._buddy
@@ -944,29 +973,45 @@ class GardenScene(QWidget):
                 bu["wt"] = BUDDY_WALK_MS / 1000.0
 
     def _buddy_decide(self):
-        """Idle Buddy: use a yard item, an indoor item (if the house is open), or stroll."""
+        """Idle Buddy picks his next move based on where he is. Indoors he does
+        another indoor item, potters around, or heads out — he never strolls to a
+        yard spot while inside (that would walk him through the walls). Outdoors he
+        uses a yard item (or an open-house indoor item) or strolls the lawn."""
         bu = self._buddy
-        usable = self._interactive_ext() + (self._interactive_int() if self._house_open() else [])
-        if usable and random.random() < BUDDY_INTERACT_CHANCE:
-            self._buddy_go_use(random.choice(usable))
+        if bu["inside"]:
+            indoor = self._interactive_int()
+            r = random.random()
+            if indoor and r < BUDDY_INTERACT_CHANCE:
+                self._buddy_go_use(random.choice(indoor))
+            elif r < 0.65:
+                self._buddy_wander_inside()
+            else:
+                self._buddy_leave_house()
         else:
-            bu["goal"] = None
-            bu["path"] = [(random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y))]
-            bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
+            usable = self._interactive_ext() + (self._interactive_int() if self._house_open() else [])
+            if usable and random.random() < BUDDY_INTERACT_CHANCE:
+                self._buddy_go_use(random.choice(usable))
+            else:
+                bu["goal"] = None
+                bu["path"] = [(random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y))]
+                bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
 
     def _buddy_arrived(self):
         """A walk finished — figure out the next phase from the current goal."""
         bu = self._buddy
         g = bu["goal"]
-        if g is None:                            # finished a stroll
+        if g is None:                            # finished a stroll / indoor amble
             bu["state"] = "idle"
+            bu["t"] = random.uniform(*BUDDY_PAUSE)
+            return
+        if g["kind"] == "leave":                 # reached the door from inside -> out
+            self._step_outside()
+            bu["goal"], bu["state"] = None, "idle"
             bu["t"] = random.uniform(*BUDDY_PAUSE)
             return
         if g["kind"] == "ext_act":
             if g.get("phase") == "exiting":      # was indoors -> step out, cross yard
-                get_audio_manager().play(SOUND_PET_DOOR_CLOSE)
-                bu["inside"] = False
-                bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y)
+                self._step_outside()
                 g["phase"] = "go"
                 bu["path"] = [g["stand"]]
                 bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
@@ -989,30 +1034,15 @@ class GardenScene(QWidget):
                 self._begin_act(g["id"])
         elif g["phase"] == "inside":             # reached the indoor item
             self._begin_act(g["id"])
-        elif g["phase"] == "leaving":            # back at the indoor door -> step out
-            get_audio_manager().play(SOUND_PET_DOOR_CLOSE)
-            bu["inside"] = False
-            bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(BUDDY_DOOR_LAWN_Y)
-            bu["goal"] = None
-            bu["path"] = [(random.uniform(*BUDDY_X), random.uniform(*BUDDY_Y))]
-            bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
 
     def _buddy_act_done(self):
-        """Interaction finished — exterior just idles; interior walks back out."""
+        """Interaction finished — go idle right where he is (indoors or out) and let
+        _buddy_decide choose the next thing, so he doesn't march out and back in
+        between two indoor tasks."""
         bu = self._buddy
-        g = bu["goal"]
-        if g and g["kind"] == "int_act":
-            cf = self._floor_for_y(bu["y"] + self._buddy_size()[1])
-            bu["path"] = (self._interior_path(cf, bu["x"], 0, float(HOUSE_DOOR_X))
-                          + [(float(HOUSE_DOOR_X), self._floor_top(0))])
-            g["phase"] = "leaving"
-            bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
-            if not bu["path"]:
-                self._buddy_arrived()
-        else:
-            bu["goal"] = None
-            bu["state"] = "idle"
-            bu["t"] = random.uniform(*BUDDY_PAUSE)
+        bu["goal"] = None
+        bu["state"] = "idle"
+        bu["t"] = random.uniform(*BUDDY_PAUSE)
 
     def _tree_stage_from_settings(self):
         """Current tree growth stage (0 = none .. 5 = full). Falls back to full
