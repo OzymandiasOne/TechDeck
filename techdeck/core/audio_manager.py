@@ -22,6 +22,20 @@ SOUND_CARD_DEAL = "card_deal"
 SOUND_CARD_DEALER_FINAL = "card_dealer_final"
 SOUND_RAVE_MUSIC = "rave_music"
 
+# ── My Account / Emporium UI (UFO 50 "library" SFX) ─────────────────────────
+SOUND_UI_TAB = "ui_tab"          # switching tabs (My Account tab bar)
+SOUND_UI_FILTER = "ui_filter"    # switching store category
+SOUND_UI_SELECT = "ui_select"    # selecting / buying anything
+SOUND_UI_CLAIM = "ui_claim"      # claiming achievement tickets
+SOUND_GAME_START = "game_start"  # launching a game (ASA: The Video Game, etc.)
+
+# ── My House / Garden (UFO 50 "pet" SFX) ────────────────────────────────────
+SOUND_PET_DOOR_OPEN = "pet_door_open"    # facade lifts to reveal interior
+SOUND_PET_DOOR_CLOSE = "pet_door_close"  # facade drops back down
+SOUND_PET_VOICE = "pet_voice"            # Buddy's occasional ambient chirp
+SOUND_PET_JUMP = "pet_jump"              # (reserved) Buddy hop
+SOUND_PET_SPLASH = "pet_splash"          # (reserved) water interactions
+
 # Map sound IDs to filenames in assets/sounds/
 _SOUND_FILES: Dict[str, str] = {
     SOUND_SUCCESS: "success.wav",
@@ -33,6 +47,18 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_CARD_DEAL: "UI_HighAndLow_Card_1.wav",
     SOUND_CARD_DEALER_FINAL: "UI_HighAndLow_Card_2.wav",
     SOUND_RAVE_MUSIC: "DaftPunkAlive2007.wav",
+    # My Account UI
+    SOUND_UI_TAB: "sfx__libPauseMenu00a.wav",
+    SOUND_UI_FILTER: "sfx__libFilter00.wav",
+    SOUND_UI_SELECT: "sfx__libFavorite00a.wav",
+    SOUND_UI_CLAIM: "sfx__libIntro00f.wav",
+    SOUND_GAME_START: "sfx__libIntro00g.wav",
+    # My House / Garden
+    SOUND_PET_DOOR_OPEN: "sfx__petDoor00a.wav",
+    SOUND_PET_DOOR_CLOSE: "sfx__petDoor00b.wav",
+    SOUND_PET_VOICE: "sfx__petLx00.wav",
+    SOUND_PET_JUMP: "sfx__petJump00.wav",
+    SOUND_PET_SPLASH: "sfx__petSplash00.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 
