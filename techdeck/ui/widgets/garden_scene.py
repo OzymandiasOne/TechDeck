@@ -805,26 +805,33 @@ class GardenScene(QWidget):
         return float(ax + af.width() // 2 - bw // 2), float(ay + af.height() - bh)
 
     # ---- interior navigation -------------------------------------------------
-    def _floor_for_y(self, y):
-        """Index of the floor whose feet-line is nearest y."""
+    # HOUSE_FLOORS[i]["y"] is the floor SURFACE — where Buddy's feet (the bottom of
+    # his sprite) rest. His position anchor is his top-left, so a floor's top-left
+    # y is the surface minus his sprite height.
+    def _floor_for_y(self, feet_y):
+        """Index of the floor whose surface (feet line) is nearest feet_y."""
         return min(range(len(HOUSE_FLOORS)),
-                   key=lambda i: abs(HOUSE_FLOORS[i]["y"] - y))
+                   key=lambda i: abs(HOUSE_FLOORS[i]["y"] - feet_y))
+
+    def _floor_top(self, i):
+        """Top-left y that lands Buddy's feet on floor i's surface."""
+        return float(HOUSE_FLOORS[i]["y"] - self._buddy_size()[1])
 
     def _interior_path(self, from_f, from_x, to_f, to_x):
-        """Waypoints from one floor to another, routed up/down the staircases."""
+        """Waypoints (top-left) from one floor to another, routed up/down the stairs."""
         pts, cur = [], from_f
         while cur != to_f:
             if to_f > cur:                       # climb: walk to stair base, go up
                 st = HOUSE_STAIRS[cur]
-                pts.append((float(st["x_lo"]), float(HOUSE_FLOORS[cur]["y"])))
-                pts.append((float(st["x_hi"]), float(HOUSE_FLOORS[cur + 1]["y"])))
+                pts.append((float(st["x_lo"]), self._floor_top(cur)))
+                pts.append((float(st["x_hi"]), self._floor_top(cur + 1)))
                 cur += 1
             else:                                # descend: walk to stair top, go down
                 st = HOUSE_STAIRS[cur - 1]
-                pts.append((float(st["x_hi"]), float(HOUSE_FLOORS[cur]["y"])))
-                pts.append((float(st["x_lo"]), float(HOUSE_FLOORS[cur - 1]["y"])))
+                pts.append((float(st["x_hi"]), self._floor_top(cur)))
+                pts.append((float(st["x_lo"]), self._floor_top(cur - 1)))
                 cur -= 1
-        pts.append((float(to_x), float(HOUSE_FLOORS[to_f]["y"])))
+        pts.append((float(to_x), self._floor_top(to_f)))
         return pts
 
     # ---- sending Buddy to an interaction -------------------------------------
@@ -920,9 +927,10 @@ class GardenScene(QWidget):
             get_audio_manager().play(SOUND_PET_DOOR_OPEN)
             bu["inside"] = True
             self._buddy_inside = True
-            bu["x"], bu["y"] = float(HOUSE_DOOR_X), float(HOUSE_FLOORS[0]["y"])
+            bu["x"], bu["y"] = float(HOUSE_DOOR_X), self._floor_top(0)
             sx, sy = g["stand"]
-            bu["path"] = self._interior_path(0, bu["x"], self._floor_for_y(sy), sx) + [(sx, sy)]
+            feet = sy + self._buddy_size()[1]
+            bu["path"] = self._interior_path(0, bu["x"], self._floor_for_y(feet), sx) + [(sx, sy)]
             g["phase"] = "inside"
             bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
             if not bu["path"]:
@@ -943,9 +951,9 @@ class GardenScene(QWidget):
         bu = self._buddy
         g = bu["goal"]
         if g and g["kind"] == "int_act":
-            cf = self._floor_for_y(bu["y"])
+            cf = self._floor_for_y(bu["y"] + self._buddy_size()[1])
             bu["path"] = (self._interior_path(cf, bu["x"], 0, float(HOUSE_DOOR_X))
-                          + [(float(HOUSE_DOOR_X), float(HOUSE_FLOORS[0]["y"]))])
+                          + [(float(HOUSE_DOOR_X), self._floor_top(0))])
             g["phase"] = "leaving"
             bu["state"], bu["fidx"], bu["wt"] = "walk", 0, 0.0
             if not bu["path"]:

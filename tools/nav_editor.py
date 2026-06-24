@@ -5,7 +5,8 @@ Run:  python tools/nav_editor.py
 
 Shows the OPEN house (cutaway interior, no facade) scaled up. Drag the handles to
 mark, in native pixels:
-  * FLOOR lines (one per storey, ground -> attic): drag to the floor Buddy walks on.
+  * FLOOR lines (one per storey, ground -> attic): drag to the floor SURFACE where
+    Buddy's feet rest (the very bottom of his sprite).
   * STAIR ends (a lower + upper dot per staircase): drop the lower dot at the foot
     of the stairs and the upper dot where they meet the next floor.
   * the DOOR (green dot): where Buddy enters/leaves on the ground floor.
