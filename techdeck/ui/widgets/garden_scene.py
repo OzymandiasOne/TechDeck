@@ -171,7 +171,7 @@ BUDDY_IDLE = 4                # front-facing standing frame
 BUDDY_INTERACTIONS = {
     # --- Exterior (Buddy already roams the yard) ---
     "deco_hottub":     {"anim": "Bath",     "sound": SOUND_PET_SPLASH, "dur": (4.0, 7.0)},
-    "deco_picnic":     {"anim": "Eat",      "sound": SOUND_PET_EAT,    "dur": (3.0, 5.0)},
+    # "deco_picnic" (Eat) disabled for now — left out of interactions on purpose.
     "deco_easel":      {"anim": "Paint",    "sound": None,             "dur": (4.0, 7.0)},
     "deco_gardenplot": {"anim": "Harvest",  "sound": SOUND_PET_WATER,  "dur": (3.0, 6.0)},
     "deco_jumprope":   {"anim": "JumpRope", "sound": SOUND_PET_JUMP,   "dur": (3.0, 6.0)},
