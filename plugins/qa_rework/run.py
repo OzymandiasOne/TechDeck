@@ -20,6 +20,7 @@ Design notes:
 """
 
 import datetime
+import json
 import random
 import re
 import time
@@ -42,7 +43,7 @@ from PySide6.QtWidgets import (
     QComboBox, QLineEdit, QPushButton, QLabel, QDateEdit, QDoubleSpinBox,
     QCheckBox, QFileDialog, QMessageBox, QFrame, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, QTimer
 from PySide6.QtGui import (
     QColor, QBrush, QPainter, QPdfWriter, QPageSize, QPageLayout, QFont,
 )
@@ -243,6 +244,34 @@ def append_record(path, record, log=print, attempts=12):
             last_err = e
             time.sleep(0.35 + random.random() * 0.5)
     raise last_err if last_err else RuntimeError("append failed")
+
+
+def ensure_seeded(path, log=print):
+    """First run only: if the shared workbook does not exist yet, create it from the
+    bundled seed data (the team's starting rework dataset) so the app opens with the
+    charts already populated. Never overwrites an existing log."""
+    path = Path(path)
+    if path.exists():
+        return
+    seed_file = Path(__file__).resolve().parent / "seed_data.json"
+    if not seed_file.exists():
+        return
+    try:
+        rows = json.loads(seed_file.read_text(encoding="utf-8"))
+    except Exception as e:
+        log(f"Could not read seed data: {e}")
+        return
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = SHEET_NAME
+    ws.append(HEADERS)
+    for r in rows:
+        batch, date_s, item, mat, recut, mode, comments = (list(r) + [""] * 7)[:7]
+        d = _as_date(date_s)
+        ws.append([batch, d, item, mat, recut, mode, comments])
+    wb.save(path)
+    log(f"Seeded {len(rows)} starting rows into {path.name}")
 
 
 # ---------------------------------------------------------------------------------
@@ -501,6 +530,7 @@ class QAReworkContent(QWidget):
         self.data_path = Path(data_path)
         self.log = log
         self.records = []
+        self._last_mtime = None
         self._palette = self._theme_palette()
 
         layout = QVBoxLayout(self)
@@ -513,6 +543,14 @@ class QAReworkContent(QWidget):
         tabs.currentChanged.connect(self._on_tab_changed)
 
         self.reload_records()
+
+        # "Live" feel: poll the shared file's mtime and auto-refresh when it changes,
+        # so entries from this laptop OR another writer flow into the charts on their
+        # own. The file is a local OneDrive cache, so the stat()+reload is cheap.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(8000)
+        self._poll_timer.timeout.connect(self._poll_file)
+        self._poll_timer.start()
 
     # ---- theme -----------------------------------------------------------------
     def _theme_palette(self):
@@ -700,6 +738,7 @@ class QAReworkContent(QWidget):
     def reload_records(self):
         try:
             self.records = load_records(self.data_path, log=self.log)
+            self._last_mtime = self._current_mtime()
         except Exception as e:
             self.records = []
             self.log(f"Could not read the log: {e}")
@@ -707,6 +746,19 @@ class QAReworkContent(QWidget):
                 self.chart_status.setText(f"Could not read the log: {e}")
         if hasattr(self, "chart_view"):
             self.render_chart()
+
+    def _current_mtime(self):
+        try:
+            return self.data_path.stat().st_mtime
+        except OSError:
+            return None
+
+    def _poll_file(self):
+        """Reload only when the shared workbook actually changed on disk."""
+        mtime = self._current_mtime()
+        if mtime is not None and mtime != self._last_mtime:
+            self.log("QA rework log changed on disk - refreshing charts.")
+            self.reload_records()
 
     # ---- rendering -------------------------------------------------------------
     def render_chart(self):
@@ -889,6 +941,10 @@ def run(params, progress_callback, cancel_event):
         log(f"Could not resolve the QA rework data folder: {e}")
         return
     log(f"QA Rework log file: {data_path}")
+    try:
+        ensure_seeded(data_path, log)
+    except Exception as e:
+        log(f"Seeding skipped: {e}")
 
     _window = PluginWindow("qa_rework", "QA Rework Tracker")
     content = QAReworkContent(data_path, log)

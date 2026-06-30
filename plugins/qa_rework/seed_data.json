@@ -1,0 +1,902 @@
+[
+[
+"100",
+"2026-04-01",
+"DYPN400",
+"ROD",
+"NO",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"100",
+"2026-04-02",
+"DYPN401",
+"TUBE",
+"NO",
+"Saw - Angle",
+""
+],
+[
+"100",
+"2026-04-03",
+"DYPN402",
+"PLATE",
+"YES",
+"Grind - Surface Finish",
+""
+],
+[
+"100",
+"2026-04-04",
+"DYPN403",
+"MISC.",
+"NO",
+"Scribe - Incorrect Information",
+"Issue with scribe - incorrect information"
+],
+[
+"101",
+"2026-04-05",
+"DYPN404",
+"LUG",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"101",
+"2026-04-06",
+"DYPN405",
+"LUG",
+"YES",
+"Form - Location",
+""
+],
+[
+"101",
+"2026-04-07",
+"DYPN406",
+"CLEVIS",
+"NO",
+"Other - Product Not Inspected",
+""
+],
+[
+"101",
+"2026-04-08",
+"DYPN407",
+"ROD",
+"NO",
+"Laser - Length",
+"Issue with laser - length"
+],
+[
+"102",
+"2026-04-09",
+"DYPN408",
+"LUG",
+"YES",
+"Laser - Blowout",
+"Issue with laser - blowout"
+],
+[
+"102",
+"2026-04-10",
+"DYPN409",
+"LUG",
+"YES",
+"Scribe - Incorrect Information",
+""
+],
+[
+"102",
+"2026-04-11",
+"DYPN410",
+"CLEVIS",
+"YES",
+"Other",
+"Issue with other"
+],
+[
+"102",
+"2026-04-12",
+"DYPN411",
+"TUBE",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"103",
+"2026-04-13",
+"DYPN412",
+"ROD",
+"NO",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"103",
+"2026-04-14",
+"DYPN413",
+"LUG",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"103",
+"2026-04-15",
+"DYPN414",
+"CLEVIS",
+"YES",
+"Form - Angle",
+""
+],
+[
+"103",
+"2026-04-16",
+"DYPN415",
+"CLEVIS",
+"NO",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"104",
+"2026-04-17",
+"DYPN416",
+"ROD",
+"YES",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"104",
+"2026-04-18",
+"DYPN417",
+"ROD",
+"YES",
+"Scribe - Incorrect Information",
+""
+],
+[
+"104",
+"2026-04-19",
+"DYPN418",
+"PLATE",
+"YES",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"104",
+"2026-04-20",
+"DYPN419",
+"MISC.",
+"NO",
+"Saw - Angle",
+"Issue with saw - angle"
+],
+[
+"105",
+"2026-04-21",
+"DYPN420",
+"PLATE",
+"NO",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"105",
+"2026-04-22",
+"DYPN421",
+"OTHER",
+"NO",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"105",
+"2026-04-23",
+"DYPN422",
+"ROD",
+"NO",
+"Other - Material Not Provided",
+"Issue with other - material not provided"
+],
+[
+"105",
+"2026-04-24",
+"DYPN423",
+"PLATE",
+"YES",
+"Form - Location",
+""
+],
+[
+"106",
+"2026-04-25",
+"DYPN424",
+"LUG",
+"YES",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"106",
+"2026-04-26",
+"DYPN425",
+"ROD",
+"YES",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"106",
+"2026-04-27",
+"DYPN426",
+"MISC.",
+"NO",
+"Scribe - Incorrect Information",
+""
+],
+[
+"106",
+"2026-04-28",
+"DYPN427",
+"LUG",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"107",
+"2026-04-29",
+"DYPN428",
+"ROD",
+"YES",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"107",
+"2026-04-30",
+"DYPN429",
+"LUG",
+"YES",
+"Grind - Surface Finish",
+""
+],
+[
+"107",
+"2026-05-01",
+"DYPN430",
+"TUBE",
+"YES",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"107",
+"2026-05-02",
+"DYPN431",
+"MISC.",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"108",
+"2026-05-03",
+"DYPN432",
+"LUG",
+"NO",
+"Laser - Length",
+""
+],
+[
+"108",
+"2026-05-04",
+"DYPN433",
+"PLATE",
+"NO",
+"Other - Product Not Inspected",
+"Issue with other - product not inspected"
+],
+[
+"108",
+"2026-05-05",
+"DYPN434",
+"OTHER",
+"YES",
+"Form - Angle",
+""
+],
+[
+"108",
+"2026-05-06",
+"DYPN435",
+"CLEVIS",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"109",
+"2026-05-07",
+"DYPN436",
+"ROD",
+"NO",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"109",
+"2026-05-08",
+"DYPN437",
+"TUBE",
+"YES",
+"Other",
+""
+],
+[
+"109",
+"2026-05-09",
+"DYPN438",
+"PLATE",
+"YES",
+"Scribe - Illegible",
+"Issue with scribe - illegible"
+],
+[
+"109",
+"2026-05-10",
+"DYPN439",
+"MISC.",
+"NO",
+"Laser - Blowout",
+"Issue with laser - blowout"
+],
+[
+"110",
+"2026-05-11",
+"DYPN440",
+"CLEVIS",
+"NO",
+"Grind - Angle",
+""
+],
+[
+"110",
+"2026-05-12",
+"DYPN441",
+"ROD",
+"YES",
+"Other - Product Not Inspected",
+""
+],
+[
+"110",
+"2026-05-13",
+"DYPN442",
+"OTHER",
+"YES",
+"Other - Product Not Inspected",
+"Issue with other - product not inspected"
+],
+[
+"110",
+"2026-05-14",
+"DYPN443",
+"CLEVIS",
+"NO",
+"Scribe - Incorrect Information",
+"Issue with scribe - incorrect information"
+],
+[
+"111",
+"2026-05-15",
+"DYPN444",
+"LUG",
+"YES",
+"Laser - Angle",
+""
+],
+[
+"111",
+"2026-05-16",
+"DYPN445",
+"ROD",
+"YES",
+"Scribe - Incorrect Information",
+""
+],
+[
+"111",
+"2026-05-17",
+"DYPN446",
+"CLEVIS",
+"YES",
+"Other - Product Damaged",
+""
+],
+[
+"111",
+"2026-05-18",
+"DYPN447",
+"CLEVIS",
+"NO",
+"Laser - Angle",
+"Issue with laser - angle"
+],
+[
+"112",
+"2026-05-19",
+"DYPN448",
+"LUG",
+"YES",
+"Grind - Angle",
+""
+],
+[
+"112",
+"2026-05-20",
+"DYPN449",
+"ROD",
+"YES",
+"Grind - Surface Finish",
+""
+],
+[
+"112",
+"2026-05-21",
+"DYPN450",
+"MISC.",
+"NO",
+"Saw - Length",
+"Issue with saw - length"
+],
+[
+"112",
+"2026-05-22",
+"DYPN451",
+"MISC.",
+"YES",
+"Saw - Angle",
+"Issue with saw - angle"
+],
+[
+"113",
+"2026-05-23",
+"DYPN452",
+"MISC.",
+"NO",
+"Laser - Blowout",
+""
+],
+[
+"113",
+"2026-05-24",
+"DYPN453",
+"MISC.",
+"YES",
+"Form - Location",
+""
+],
+[
+"113",
+"2026-05-25",
+"DYPN454",
+"ROD",
+"YES",
+"Scribe - Illegible",
+"Issue with scribe - illegible"
+],
+[
+"113",
+"2026-05-26",
+"DYPN455",
+"LUG",
+"YES",
+"Other",
+"Issue with other"
+],
+[
+"114",
+"2026-05-27",
+"DYPN456",
+"LUG",
+"NO",
+"Laser - Blowout",
+"Issue with laser - blowout"
+],
+[
+"114",
+"2026-05-28",
+"DYPN457",
+"LUG",
+"NO",
+"Grind - Surface Finish",
+""
+],
+[
+"114",
+"2026-05-29",
+"DYPN458",
+"ROD",
+"YES",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"114",
+"2026-05-30",
+"DYPN459",
+"ROD",
+"YES",
+"Laser - Length",
+"Issue with laser - length"
+],
+[
+"115",
+"2026-05-31",
+"DYPN460",
+"MISC.",
+"YES",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"115",
+"2026-06-01",
+"DYPN461",
+"PLATE",
+"YES",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"115",
+"2026-06-02",
+"DYPN462",
+"MISC.",
+"NO",
+"Scribe - Illegible",
+"Issue with scribe - illegible"
+],
+[
+"115",
+"2026-06-03",
+"DYPN463",
+"MISC.",
+"NO",
+"Other - Product Not Processed / Step(s) Skipped",
+"Issue with other - product not processed / step(s) skipped"
+],
+[
+"116",
+"2026-06-04",
+"DYPN464",
+"LUG",
+"NO",
+"Laser - Angle",
+"Issue with laser - angle"
+],
+[
+"116",
+"2026-06-05",
+"DYPN465",
+"TUBE",
+"YES",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"116",
+"2026-06-06",
+"DYPN466",
+"PLATE",
+"NO",
+"Grind - Surface Finish",
+""
+],
+[
+"116",
+"2026-06-07",
+"DYPN467",
+"OTHER",
+"NO",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"117",
+"2026-06-08",
+"DYPN468",
+"OTHER",
+"YES",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"117",
+"2026-06-09",
+"DYPN469",
+"TUBE",
+"NO",
+"Form - Location",
+""
+],
+[
+"117",
+"2026-06-10",
+"DYPN470",
+"ROD",
+"NO",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"117",
+"2026-06-11",
+"DYPN471",
+"ROD",
+"YES",
+"Form - Location",
+""
+],
+[
+"118",
+"2026-06-12",
+"DYPN472",
+"OTHER",
+"NO",
+"Form - Angle",
+"Issue with form - angle"
+],
+[
+"118",
+"2026-06-13",
+"DYPN473",
+"LUG",
+"NO",
+"Form - Angle",
+""
+],
+[
+"118",
+"2026-06-14",
+"DYPN474",
+"OTHER",
+"NO",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"118",
+"2026-06-15",
+"DYPN475",
+"PLATE",
+"YES",
+"Laser - Blowout",
+"Issue with laser - blowout"
+],
+[
+"119",
+"2026-06-16",
+"DYPN476",
+"TUBE",
+"YES",
+"Saw - Length",
+"Issue with saw - length"
+],
+[
+"119",
+"2026-06-17",
+"DYPN477",
+"ROD",
+"YES",
+"Scribe - Illegible",
+"Issue with scribe - illegible"
+],
+[
+"119",
+"2026-06-18",
+"DYPN478",
+"CLEVIS",
+"YES",
+"Other - Product Not Inspected",
+"Issue with other - product not inspected"
+],
+[
+"119",
+"2026-06-19",
+"DYPN479",
+"CLEVIS",
+"YES",
+"Form - Location",
+"Issue with form - location"
+],
+[
+"120",
+"2026-06-20",
+"DYPN480",
+"MISC.",
+"YES",
+"Saw - Angle",
+"Issue with saw - angle"
+],
+[
+"120",
+"2026-06-21",
+"DYPN481",
+"PLATE",
+"NO",
+"Other - Product Not Processed / Step(s) Skipped",
+""
+],
+[
+"120",
+"2026-06-22",
+"DYPN482",
+"MISC.",
+"YES",
+"Grind - Angle",
+"Issue with grind - angle"
+],
+[
+"120",
+"2026-06-23",
+"DYPN483",
+"MISC.",
+"NO",
+"Form - Angle",
+"Issue with grind - surface finish"
+],
+[
+"",
+"2026-06-24",
+"DYPN483",
+"MISC.",
+"NO",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Form - Location",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Grind - Angle",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Grind - Surface Finish",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Laser - Angle",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Laser - Blowout",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Laser - Length",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other - Material Not Provided",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other - Product Damaged",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other - Product Not Inspected",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other - Product Not Processed / Step(s) Skipped",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Saw - Angle",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Saw - Length",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Scribe - Illegible",
+"Issue with grind - surface finish"
+],
+[
+"121",
+"2026-06-24",
+"DYPN484",
+"ROD",
+"NO",
+"Other - Material Not Provided",
+"Issue with grind - surface finish"
+]
+]
