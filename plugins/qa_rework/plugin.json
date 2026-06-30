@@ -1,0 +1,24 @@
+{
+  "id": "qa_rework",
+  "name": "QA Rework Tracker",
+  "description": "Log QA rework events to a shared workbook and chart YTD / last-week performance for Gemba meetings (printable PDF).",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "other",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "timeout": 1800,
+  "settings": {
+    "fields": [
+      {
+        "key": "data_dir",
+        "type": "directory",
+        "label": "Shared data folder",
+        "description": "Folder that holds the shared QA rework log workbook. Leave blank to use a 'QA Rework Log' folder under the Pilot Program library (auto-created, synced to every laptop).",
+        "placeholder": "C:\\Users\\...\\QA Rework Log",
+        "required": false,
+        "default": ""
+      }
+    ]
+  }
+}
