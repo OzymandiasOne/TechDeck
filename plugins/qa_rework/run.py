@@ -1,6 +1,6 @@
 """
-QA Rework Tracker
-=================
+Gemba Analysis  (plugin id: qa_rework, family: QA)
+==================================================
 A GUI plugin for the QA team. Two jobs:
 
   1. Log Entry  - a quick form that appends one rework event as a row to a single
@@ -21,6 +21,7 @@ Design notes:
 
 import datetime
 import json
+import os
 import random
 import re
 import time
@@ -39,11 +40,11 @@ except ModuleNotFoundError:
 from techdeck.core.plugin_window import PluginWindow
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout, QTabWidget,
+    QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QComboBox, QLineEdit, QPushButton, QLabel, QDateEdit, QDoubleSpinBox,
-    QCheckBox, QFileDialog, QMessageBox, QFrame, QSizePolicy,
+    QCheckBox, QFileDialog, QFrame, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QDate, QTimer
+from PySide6.QtCore import Qt, QDate, QTimer, QPointF
 from PySide6.QtGui import (
     QColor, QBrush, QPainter, QPdfWriter, QPageSize, QPageLayout, QFont,
 )
@@ -485,11 +486,14 @@ def build_column(labels, totals, title, cycle, bg, text, bestfit=False):
 
 def build_stacked(labels, matrix, title, cycle, bg, text):
     series = QStackedBarSeries()
+    seg_colors = []
     for i, (name, values) in enumerate(matrix.items()):
         bs = QBarSet(str(name))
         for v in values:
             bs.append(float(v))
-        bs.setColor(QColor(cycle[i % len(cycle)]))
+        col = QColor(cycle[i % len(cycle)])
+        bs.setColor(col)
+        seg_colors.append(col)
         series.append(bs)
 
     chart = QChart()
@@ -509,9 +513,70 @@ def build_stacked(labels, matrix, title, cycle, bg, text):
     chart.addAxis(val_axis, Qt.AlignmentFlag.AlignLeft)
     series.attachAxis(val_axis)
 
-    chart.legend().setVisible(True)
+    chart.legend().setVisible(False)  # names are written on the segments instead
     _style_axes([cat_axis, val_axis], text)
+
+    # QtCharts only stamps @value on a bar, so to write the GROUP NAME on each
+    # segment we draw our own text in LabeledChartView.drawForeground, positioned
+    # via chart.mapToPosition at each segment's vertical midpoint. Stash the metadata
+    # on the chart's python wrapper for the view to read (we keep a ref so it lives).
+    chart._stacked_series = series
+    chart._stacked_names = list(matrix.keys())
+    chart._stacked_matrix = matrix
+    chart._stacked_colors = seg_colors
     return chart
+
+
+def _contrast_text(bg_color):
+    """Black or white, whichever reads better on bg_color (segment label color)."""
+    return QColor("#FFFFFF") if bg_color.lightness() < 140 else QColor("#111111")
+
+
+def _short(name, limit=20):
+    name = str(name)
+    return name if len(name) <= limit else name[:limit - 1] + "…"
+
+
+class LabeledChartView(QChartView):
+    """QChartView that writes the group name + count centered on each stacked
+    segment (drawn in drawForeground so it reflows on every resize / PDF render,
+    and works without a color-key legend). A no-op for non-stacked charts."""
+
+    def drawForeground(self, painter, rect):
+        super().drawForeground(painter, rect)
+        chart = self.chart()
+        names = getattr(chart, "_stacked_names", None)
+        matrix = getattr(chart, "_stacked_matrix", None)
+        series = getattr(chart, "_stacked_series", None)
+        colors = getattr(chart, "_stacked_colors", None)
+        if not names or not matrix or series is None:
+            return
+        n_buckets = len(next(iter(matrix.values()))) if matrix else 0
+        painter.save()
+        font = painter.font()
+        font.setPointSizeF(max(7.5, font.pointSizeF()))
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        for i in range(n_buckets):
+            cum = 0.0
+            for name, color in zip(names, colors):
+                val = matrix[name][i]
+                if val <= 0:
+                    cum += val
+                    continue
+                top = chart.mapToPosition(QPointF(i, cum + val), series)
+                bot = chart.mapToPosition(QPointF(i, cum), series)
+                cum += val
+                seg_px = abs(bot.y() - top.y())
+                if seg_px < fm.height() + 2:  # too thin to label legibly
+                    continue
+                cx = (top.x() + bot.x()) / 2.0
+                cy = (top.y() + bot.y()) / 2.0
+                txt = f"{_short(name)} ({int(val)})"
+                w = fm.horizontalAdvance(txt)
+                painter.setPen(_contrast_text(QColor(color)))
+                painter.drawText(QPointF(cx - w / 2.0, cy + fm.ascent() / 2.0), txt)
+        painter.restore()
 
 
 def empty_chart(message, bg, text):
@@ -522,58 +587,19 @@ def empty_chart(message, bg, text):
 
 
 # ---------------------------------------------------------------------------------
-# The window content (two tabs)
+# Log Rework dialog (the quick entry form; closes on submit)
 # ---------------------------------------------------------------------------------
-class QAReworkContent(QWidget):
+class LogReworkDialog(QDialog):
     def __init__(self, data_path, log=print, parent=None):
         super().__init__(parent)
         self.data_path = Path(data_path)
         self.log = log
-        self.records = []
-        self._last_mtime = None
-        self._palette = self._theme_palette()
+        self.setWindowTitle("Log Rework")
+        self.setMinimumWidth(440)
+        if parent is not None and parent.window() is not None:
+            self.setStyleSheet(parent.window().styleSheet())  # match the app theme
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        tabs = QTabWidget()
-        tabs.addTab(self._build_entry_tab(), "Log Entry")
-        tabs.addTab(self._build_charts_tab(), "Charts")
-        layout.addWidget(tabs)
-        self._tabs = tabs
-        tabs.currentChanged.connect(self._on_tab_changed)
-
-        self.reload_records()
-
-        # "Live" feel: poll the shared file's mtime and auto-refresh when it changes,
-        # so entries from this laptop OR another writer flow into the charts on their
-        # own. The file is a local OneDrive cache, so the stat()+reload is cheap.
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(8000)
-        self._poll_timer.timeout.connect(self._poll_file)
-        self._poll_timer.start()
-
-    # ---- theme -----------------------------------------------------------------
-    def _theme_palette(self):
-        try:
-            from techdeck.ui.theme_manager import get_theme_manager
-            return get_theme_manager().get_current_palette()
-        except Exception:
-            return None
-
-    def _screen_colors(self):
-        p = self._palette
-        if p is None:
-            return (PRINT_CYCLE, "#202020", "#EAEAEA")
-        cycle = [getattr(p, f) for f in
-                 ("accent", "accent_two", "success", "info", "warning", "error")
-                 if hasattr(p, f)] or PRINT_CYCLE
-        return (cycle, getattr(p, "surface", "#202020"),
-                getattr(p, "text", "#EAEAEA"))
-
-    # ---- entry tab -------------------------------------------------------------
-    def _build_entry_tab(self):
-        tab = QWidget()
-        outer = QVBoxLayout(tab)
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -605,25 +631,23 @@ class QAReworkContent(QWidget):
         form.addRow("Failure Category:", self.in_category)
         form.addRow("Failure Subcategory:", self.in_subcategory)
         form.addRow("Comments:", self.in_comments)
-        outer.addLayout(form)
+        layout.addLayout(form)
+
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
 
         btn_row = QHBoxLayout()
-        submit = QPushButton("Log Rework  ➜")
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        submit = QPushButton("Submit")
+        submit.setDefault(True)
         submit.clicked.connect(self._submit)
-        btn_row.addWidget(submit)
         btn_row.addStretch(1)
-        outer.addLayout(btn_row)
-
-        self.entry_status = QLabel("")
-        self.entry_status.setWordWrap(True)
-        outer.addWidget(self.entry_status)
-
-        self.file_label = QLabel(f"Logging to: {self.data_path}")
-        self.file_label.setWordWrap(True)
-        self.file_label.setStyleSheet("color: gray; font-size: 11px;")
-        outer.addStretch(1)
-        outer.addWidget(self.file_label)
-        return tab
+        btn_row.addWidget(cancel)
+        btn_row.addWidget(submit)
+        layout.addLayout(btn_row)
+        self.in_batch.setFocus()
 
     def _refresh_subcategories(self, category):
         self.in_subcategory.clear()
@@ -634,7 +658,8 @@ class QAReworkContent(QWidget):
         batch = self.in_batch.text().strip()
         item = self.in_item.text().strip()
         if not batch or not item:
-            self._set_status("Batch (PO) and Item Number are required.", ok=False)
+            self.status.setStyleSheet("color: #B23A48; font-weight: bold;")
+            self.status.setText("Batch (PO) and Item Number are required.")
             return
         category = self.in_category.currentText()
         sub = self.in_subcategory.currentData()
@@ -652,26 +677,70 @@ class QAReworkContent(QWidget):
         try:
             append_record(self.data_path, record, log=self.log)
         except Exception as e:
-            self._set_status(
-                f"Could not write to the log (it may be open in Excel). {e}", ok=False)
+            self.status.setStyleSheet("color: #B23A48; font-weight: bold;")
+            self.status.setText(
+                f"Could not write (the log may be open in Excel): {e}")
             return
         self.log(f"Logged {item}: {mode} (batch {batch})")
-        self._set_status(f"✓ Logged {item} — {mode}", ok=True)
-        # Keep batch + date for fast repeat entry; clear the rest.
-        self.in_item.clear()
-        self.in_comments.clear()
-        self.in_item.setFocus()
+        self.accept()   # closes the dialog; parent reloads + re-renders
+
+
+# ---------------------------------------------------------------------------------
+# The window content (charts dashboard — the only window)
+# ---------------------------------------------------------------------------------
+class QAReworkContent(QWidget):
+    def __init__(self, data_path, log=print, parent=None):
+        super().__init__(parent)
+        self.data_path = Path(data_path)
+        self.log = log
+        self.records = []
+        self._last_mtime = None
+        self._palette = self._theme_palette()
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        self._build_charts_ui(layout)
+
         self.reload_records()
 
-    def _set_status(self, msg, ok=True):
-        color = "#3E8E41" if ok else "#B23A48"
-        self.entry_status.setStyleSheet(f"color: {color}; font-weight: bold;")
-        self.entry_status.setText(msg)
+        # "Live" feel: poll the shared file's mtime and auto-refresh when it changes,
+        # so entries from this laptop OR another writer flow into the charts on their
+        # own. The file is a local OneDrive cache, so the stat()+reload is cheap.
+        self._poll_timer = QTimer(self)
+        self._poll_timer.setInterval(8000)
+        self._poll_timer.timeout.connect(self._poll_file)
+        self._poll_timer.start()
 
-    # ---- charts tab ------------------------------------------------------------
-    def _build_charts_tab(self):
-        tab = QWidget()
-        outer = QVBoxLayout(tab)
+    # ---- theme -----------------------------------------------------------------
+    def _theme_palette(self):
+        try:
+            from techdeck.ui.theme_manager import get_theme_manager
+            return get_theme_manager().get_current_palette()
+        except Exception:
+            return None
+
+    def _screen_colors(self):
+        p = self._palette
+        if p is None:
+            return (PRINT_CYCLE, "#202020", "#EAEAEA")
+        cycle = [getattr(p, f) for f in
+                 ("accent", "accent_two", "success", "info", "warning", "error")
+                 if hasattr(p, f)] or PRINT_CYCLE
+        return (cycle, getattr(p, "surface", "#202020"),
+                getattr(p, "text", "#EAEAEA"))
+
+    # ---- charts UI (the only window) -------------------------------------------
+    def _build_charts_ui(self, outer):
+        # Top action row: log an entry / open the raw log.
+        action_row = QHBoxLayout()
+        log_btn = QPushButton("➕  Log Rework")
+        log_btn.clicked.connect(self._open_log_dialog)
+        open_btn = QPushButton("📂  Open Rework Log")
+        open_btn.clicked.connect(self._open_rework_log)
+        action_row.addWidget(log_btn)
+        action_row.addWidget(open_btn)
+        action_row.addStretch(1)
+        outer.addLayout(action_row)
 
         controls = QGridLayout()
         self.c_type = QComboBox()
@@ -689,25 +758,29 @@ class QAReworkContent(QWidget):
         self.c_bestfit = QCheckBox("Best-fit line")
         self.c_bestfit.setChecked(True)
 
-        for w in (self.c_type, self.c_window, self.c_group, self.c_xaxis):
+        self.c_type.currentIndexChanged.connect(self._on_type_changed)
+        self.c_xaxis.currentIndexChanged.connect(self._on_type_changed)
+        for w in (self.c_window, self.c_group):
             w.currentIndexChanged.connect(self.render_chart)
         self.c_threshold.valueChanged.connect(self.render_chart)
         self.c_bestfit.stateChanged.connect(self.render_chart)
 
+        self.lbl_xaxis = QLabel("Column X:")
+        self.lbl_threshold = QLabel("Pie hide <")
         controls.addWidget(QLabel("Chart:"), 0, 0)
         controls.addWidget(self.c_type, 0, 1)
         controls.addWidget(QLabel("Time:"), 0, 2)
         controls.addWidget(self.c_window, 0, 3)
         controls.addWidget(QLabel("Group by:"), 0, 4)
         controls.addWidget(self.c_group, 0, 5)
-        controls.addWidget(QLabel("Column X:"), 1, 0)
+        controls.addWidget(self.lbl_xaxis, 1, 0)
         controls.addWidget(self.c_xaxis, 1, 1)
-        controls.addWidget(QLabel("Pie hide <"), 1, 2)
+        controls.addWidget(self.lbl_threshold, 1, 2)
         controls.addWidget(self.c_threshold, 1, 3)
         controls.addWidget(self.c_bestfit, 1, 4, 1, 2)
         outer.addLayout(controls)
 
-        self.chart_view = QChartView()
+        self.chart_view = LabeledChartView()
         self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.chart_view.setMinimumHeight(420)
         self.chart_view.setSizePolicy(QSizePolicy.Policy.Expanding,
@@ -729,11 +802,37 @@ class QAReworkContent(QWidget):
 
         self.chart_status = QLabel("")
         outer.addWidget(self.chart_status)
-        return tab
+        self._on_type_changed()
 
-    def _on_tab_changed(self, idx):
-        if self._tabs.tabText(idx) == "Charts":
-            self.render_chart()
+    def _on_type_changed(self, *_):
+        """Enable only the controls that apply to the current chart type, so it's
+        obvious which toggles do something (the By time/By group + best-fit options
+        only affect Column; the %-threshold only affects Pie)."""
+        ctype = self.c_type.currentText()
+        is_pie = ctype == "Pie"
+        is_col = ctype == "Column"
+        for w in (self.lbl_xaxis, self.c_xaxis):
+            w.setEnabled(is_col)
+        self.c_bestfit.setEnabled(is_col and
+                                  self.c_xaxis.currentText() != "By group")
+        for w in (self.lbl_threshold, self.c_threshold):
+            w.setEnabled(is_pie)
+        self.render_chart()
+
+    def _open_log_dialog(self):
+        dlg = LogReworkDialog(self.data_path, self.log, parent=self)
+        if dlg.exec():               # modal; True when an entry was submitted
+            self.reload_records()    # charts update immediately
+
+    def _open_rework_log(self):
+        try:
+            ensure_seeded(self.data_path, self.log)  # create if somehow missing
+            os.startfile(str(self.data_path))        # opens in Excel on Windows
+            self.chart_status.setText(
+                "Opened the rework log in Excel. Edits you save there refresh "
+                "the charts automatically.")
+        except Exception as e:
+            self.chart_status.setText(f"Could not open the log: {e}")
 
     def reload_records(self):
         try:
@@ -767,6 +866,7 @@ class QAReworkContent(QWidget):
         cycle, bg, text = self._screen_colors()
         chart = self._build_selected_chart(cycle, bg, text)
         old = self.chart_view.chart()
+        self._current_chart = chart  # keep a python ref so stacked metadata persists
         self.chart_view.setChart(chart)
         if old is not None:
             old.deleteLater()
@@ -913,7 +1013,8 @@ class QAReworkContent(QWidget):
             cy += each_h + gap
 
     def _render_chart_into(self, painter, chart, x, y, w, h):
-        view = QChartView(chart)
+        view = LabeledChartView()
+        view.setChart(chart)
         view.setRenderHint(QPainter.RenderHint.Antialiasing)
         view.setStyleSheet("background: white; border: none;")
         view.resize(w, h)
@@ -946,7 +1047,7 @@ def run(params, progress_callback, cancel_event):
     except Exception as e:
         log(f"Seeding skipped: {e}")
 
-    _window = PluginWindow("qa_rework", "QA Rework Tracker")
+    _window = PluginWindow("qa_rework", "Gemba Analysis")
     content = QAReworkContent(data_path, log)
     _window.set_content(content)
     _window.resize(1120, 780)

@@ -775,7 +775,7 @@ class LibraryPage(QWidget, ThemeAware):
         # Sort according to user-selected mode. "alphabetical" by display name,
         # "family" groups 911 -> 922 -> other (alphabetical within each group).
         sort_mode = self.settings.get_library_sort_mode()
-        _family_rank = {"911": 0, "922": 1, "other": 2}
+        _family_rank = {"911": 0, "922": 1, "QA": 2, "other": 3}
 
         def _name_no_family(name: str) -> str:
             # Drop a leading family number ("911 ", "922 ") so Alphabetical sorts

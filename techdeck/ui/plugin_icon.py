@@ -33,6 +33,7 @@ from PySide6.QtGui import (
 # That's how 922_form_seeker uses "futurama_bender" and customer_dxf_quoting
 # uses "blueprint".
 PLUGIN_ICON_KEYS = {
+    "922_setup":            "wall_e",
     "911_setup":            "microsoft_excel_2019",
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
@@ -48,6 +49,7 @@ PLUGIN_ICON_KEYS = {
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",
     "customer_dxf_quoting": "blueprint",
+    "qa_rework":            "magnifier",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
@@ -81,6 +83,7 @@ _FAMILY_COLORS = {
     "911": "#3B82F6",   # blue
     "922": "#F59E0B",   # amber
     "other": "#8B5CF6",  # violet
+    "QA": "#10B981",    # emerald
 }
 
 # Suffixes we treat as "this `icon` value is a file, not an emoji".

@@ -61,7 +61,7 @@ APP_PKG_DIR = REPO / "techdeck"
 SPEC_FILE = REPO / "TechDeck.spec"
 ENTRY_MODULE = "techdeck.__main__"
 
-VALID_FAMILIES = {"911", "922", "other", "Games"}
+VALID_FAMILIES = {"911", "922", "other", "Games", "QA"}
 # Packages whose submodules are independent compiled extensions: a plugin
 # importing PySide6.QtX needs THAT submodule bundled, not just "PySide6"
 # (this is how QtCharts went missing once).
@@ -317,7 +317,7 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
             errors.append(f"{pid}: plugin.json id '{mid}' does not match folder name")
         family = manifest.get("family")
         if family is not None and family not in VALID_FAMILIES:
-            errors.append(f"{pid}: invalid family '{family}' (must be 911/922/other/Games)")
+            errors.append(f"{pid}: invalid family '{family}' (must be 911/922/other/Games/QA)")
         timeout = manifest.get("timeout")
         if timeout is not None and (not isinstance(timeout, int) or timeout < 0):
             errors.append(f"{pid}: timeout must be a non-negative integer, got {timeout!r}")

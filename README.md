@@ -264,4 +264,4 @@ QR Code Generator | GUI plugin - dual-tab QR library and generator
 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer 
 911 Runtime Estimator | Reads each nest's packet PDF and batch list across a directory of orders, computes a plate-cutting time estimate, and writes one workbook with Plates and Non-Plates sheets (data table + nest summary each) 
 Customer DXF Quoting | Interactive DXF quoting viewer - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut 
-QA Rework Tracker | GUI plugin - logs QA rework events to one shared workbook and charts YTD / last-week performance (pie/column/stacked, best-fit line, %-threshold) with a one-click printable Gemba Pack PDF 
+Gemba Analysis | GUI plugin (QA family) - logs QA rework events to one shared workbook and charts YTD / last-week performance (pie/column/stacked, best-fit line, %-threshold) with a one-click printable Gemba Pack PDF 
