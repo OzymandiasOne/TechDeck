@@ -40,7 +40,7 @@ HOME_TILE_ICON = 64
 HOME_TILE_ICON_BOX = 72
 
 # Fixed family-tag colors for the Home tile corner badge.
-_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B"}
+_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B", "QA": "#10B981"}
 
 
 def _strip_family_prefix(name: str, family: str) -> str:
@@ -119,10 +119,10 @@ class PluginCard(QFrame, ThemeAware):
         layout.addWidget(self.name_label, 0)
         layout.addStretch()
 
-        # Family badge in the top-left corner ("911"/"922"; hidden for "other").
+        # Family badge in the top-left corner (911/922/QA; hidden for "other").
         # Absolutely-positioned child so it overlays the corner without affecting
         # the centered icon/name layout.
-        self.family_badge = QLabel(self._family if self._family in ("911", "922") else "", self)
+        self.family_badge = QLabel(self._family if self._family in _FAMILY_BADGE_COLORS else "", self)
         self.family_badge.move(7, 5)
         self.family_badge.setVisible(bool(self.family_badge.text()))
         self._style_family_badge()
