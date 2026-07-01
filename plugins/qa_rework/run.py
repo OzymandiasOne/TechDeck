@@ -42,11 +42,13 @@ from techdeck.core.plugin_window import PluginWindow
 from PySide6.QtWidgets import (
     QWidget, QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QGridLayout,
     QComboBox, QLineEdit, QPushButton, QLabel, QDateEdit, QDoubleSpinBox,
-    QCheckBox, QFileDialog, QFrame, QSizePolicy,
+    QCheckBox, QFileDialog, QFrame, QSizePolicy, QStackedWidget, QToolButton,
+    QButtonGroup,
 )
-from PySide6.QtCore import Qt, QDate, QTimer, QPointF
+from PySide6.QtCore import Qt, QDate, QTimer, QPointF, QSize
 from PySide6.QtGui import (
     QColor, QBrush, QPainter, QPdfWriter, QPageSize, QPageLayout, QFont,
+    QPixmap, QIcon, QPen,
 )
 from PySide6.QtCharts import (
     QChart, QChartView, QPieSeries, QBarSeries, QStackedBarSeries, QBarSet,
@@ -85,6 +87,25 @@ WINDOWS = [
     "Last business week (Mon-Fri)", "All time",
 ]
 DAY_WINDOWS = {"Last 7 days", "Last 10 days", "Last business week (Mon-Fri)"}
+
+CHART_TYPES = ["Pie", "Column", "Stacked column"]
+XAXIS_MODES = ["By time (month/day)", "By group"]
+
+# One config per graph. Defaults mirror the Gemba Pack so the 2x2 grid opens with a
+# useful board; each config is fully editable from the shared control row.
+def _default_graph_configs():
+    return [
+        {"type": "Column", "window": "Year-to-date", "group": "Failure category",
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+        {"type": "Pie", "window": "Year-to-date", "group": "Failure category",
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+        {"type": "Stacked column", "window": "Last business week (Mon-Fri)",
+         "group": "Failure mode (detailed)",
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+        {"type": "Pie", "window": "Last business week (Mon-Fri)",
+         "group": "Failure mode (detailed)",
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+    ]
 
 # Print palette for PDFs - white background + dark ink so Gemba printouts read well.
 PRINT_BG = "#FFFFFF"
@@ -697,6 +718,12 @@ class QAReworkContent(QWidget):
         self._last_mtime = None
         self._palette = self._theme_palette()
 
+        # Four independent graph configs; the shared control row edits the active one.
+        self.graph_configs = _default_graph_configs()
+        self.active_graph = 0
+        self._loading = False        # guard: True while syncing controls from a config
+        self._live_charts = []       # keep python refs so stacked metadata survives
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         self._build_charts_ui(layout)
@@ -729,9 +756,31 @@ class QAReworkContent(QWidget):
         return (cycle, getattr(p, "surface", "#202020"),
                 getattr(p, "text", "#EAEAEA"))
 
+    # ---- view-toggle icons (drawn in code so no asset files / .spec changes) ----
+    def _view_icon(self, kind, color):
+        pm = QPixmap(20, 20)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(QColor(color))
+        pen.setWidth(2)
+        p.setPen(pen)
+        if kind == "single":            # one monitor on a stand
+            p.drawRoundedRect(3, 3, 14, 10, 2, 2)
+            p.drawLine(10, 13, 10, 16)
+            p.drawLine(6, 17, 14, 17)
+        else:                            # 2x2 grid of screens
+            for rx, ry in ((3, 3), (11, 3), (3, 11), (11, 11)):
+                p.drawRoundedRect(rx, ry, 6, 6, 1, 1)
+        p.end()
+        return QIcon(pm)
+
     # ---- charts UI (the only window) -------------------------------------------
     def _build_charts_ui(self, outer):
-        # Top action row: log an entry / open the raw log.
+        _, _, icon_color = self._screen_colors()
+
+        # Top action row: log an entry / open the raw log, then the view toggle
+        # (single screen | multi screen) and the "which graph am I editing" picker.
         action_row = QHBoxLayout()
         log_btn = QPushButton("➕  Log Rework")
         log_btn.clicked.connect(self._open_log_dialog)
@@ -740,17 +789,46 @@ class QAReworkContent(QWidget):
         action_row.addWidget(log_btn)
         action_row.addWidget(open_btn)
         action_row.addStretch(1)
+
+        self.btn_single = QToolButton()
+        self.btn_single.setCheckable(True)
+        self.btn_single.setChecked(True)
+        self.btn_single.setIcon(self._view_icon("single", icon_color))
+        self.btn_single.setIconSize(QSize(20, 20))
+        self.btn_single.setToolTip("Single graph")
+        self.btn_multi = QToolButton()
+        self.btn_multi.setCheckable(True)
+        self.btn_multi.setIcon(self._view_icon("multi", icon_color))
+        self.btn_multi.setIconSize(QSize(20, 20))
+        self.btn_multi.setToolTip("Four graphs (2x2)")
+        self._view_group = QButtonGroup(self)
+        self._view_group.setExclusive(True)
+        self._view_group.addButton(self.btn_single, 0)
+        self._view_group.addButton(self.btn_multi, 1)
+        self._view_group.idToggled.connect(self._on_view_changed)
+        sep = QLabel("|")
+        sep.setEnabled(False)
+        action_row.addWidget(self.btn_single)
+        action_row.addWidget(sep)
+        action_row.addWidget(self.btn_multi)
+
+        action_row.addSpacing(16)
+        action_row.addWidget(QLabel("Graph:"))
+        self.c_graph = QComboBox()
+        self.c_graph.addItems(["Graph 1", "Graph 2", "Graph 3", "Graph 4"])
+        self.c_graph.currentIndexChanged.connect(self._on_graph_changed)
+        action_row.addWidget(self.c_graph)
         outer.addLayout(action_row)
 
         controls = QGridLayout()
         self.c_type = QComboBox()
-        self.c_type.addItems(["Pie", "Column", "Stacked column"])
+        self.c_type.addItems(CHART_TYPES)
         self.c_window = QComboBox()
         self.c_window.addItems(WINDOWS)
         self.c_group = QComboBox()
         self.c_group.addItems(GROUP_BY)
         self.c_xaxis = QComboBox()
-        self.c_xaxis.addItems(["By time (month/day)", "By group"])
+        self.c_xaxis.addItems(XAXIS_MODES)
         self.c_threshold = QDoubleSpinBox()
         self.c_threshold.setRange(0.0, 50.0)
         self.c_threshold.setValue(5.0)
@@ -758,12 +836,11 @@ class QAReworkContent(QWidget):
         self.c_bestfit = QCheckBox("Best-fit line")
         self.c_bestfit.setChecked(True)
 
-        self.c_type.currentIndexChanged.connect(self._on_type_changed)
-        self.c_xaxis.currentIndexChanged.connect(self._on_type_changed)
-        for w in (self.c_window, self.c_group):
-            w.currentIndexChanged.connect(self.render_chart)
-        self.c_threshold.valueChanged.connect(self.render_chart)
-        self.c_bestfit.stateChanged.connect(self.render_chart)
+        # Every control edits the ACTIVE graph's config, then re-renders.
+        for w in (self.c_type, self.c_window, self.c_group, self.c_xaxis):
+            w.currentIndexChanged.connect(self._on_controls_changed)
+        self.c_threshold.valueChanged.connect(self._on_controls_changed)
+        self.c_bestfit.stateChanged.connect(self._on_controls_changed)
 
         self.lbl_xaxis = QLabel("Column X:")
         self.lbl_threshold = QLabel("Pie hide <")
@@ -780,34 +857,97 @@ class QAReworkContent(QWidget):
         controls.addWidget(self.c_bestfit, 1, 4, 1, 2)
         outer.addLayout(controls)
 
-        self.chart_view = LabeledChartView()
-        self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.chart_view.setMinimumHeight(420)
-        self.chart_view.setSizePolicy(QSizePolicy.Policy.Expanding,
-                                      QSizePolicy.Policy.Expanding)
-        outer.addWidget(self.chart_view, 1)
+        # Page 0: the single active graph.  Page 1: a 2x2 grid of all four.
+        self.view_stack = QStackedWidget()
+
+        self.single_view = LabeledChartView()
+        self.single_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.single_view.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                       QSizePolicy.Policy.Expanding)
+        self.view_stack.addWidget(self.single_view)
+
+        grid_page = QWidget()
+        grid = QGridLayout(grid_page)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(8)
+        self.grid_views = []
+        for i in range(4):
+            v = LabeledChartView()
+            v.setRenderHint(QPainter.RenderHint.Antialiasing)
+            v.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            grid.addWidget(v, i // 2, i % 2)
+            self.grid_views.append(v)
+        self.view_stack.addWidget(grid_page)
+
+        self.view_stack.setMinimumHeight(440)
+        outer.addWidget(self.view_stack, 1)
 
         btn_row = QHBoxLayout()
         refresh = QPushButton("↻ Reload data")
         refresh.clicked.connect(self.reload_records)
-        export_one = QPushButton("Export this chart (PDF)")
-        export_one.clicked.connect(self._export_current)
+        self.export_view_btn = QPushButton("Export view (PDF)")
+        self.export_view_btn.clicked.connect(self._export_view)
         export_pack = QPushButton("Export Gemba Pack (PDF)")
         export_pack.clicked.connect(self._export_gemba_pack)
         btn_row.addWidget(refresh)
         btn_row.addStretch(1)
-        btn_row.addWidget(export_one)
+        btn_row.addWidget(self.export_view_btn)
         btn_row.addWidget(export_pack)
         outer.addLayout(btn_row)
 
         self.chart_status = QLabel("")
         outer.addWidget(self.chart_status)
-        self._on_type_changed()
 
-    def _on_type_changed(self, *_):
-        """Enable only the controls that apply to the current chart type, so it's
-        obvious which toggles do something (the By time/By group + best-fit options
-        only affect Column; the %-threshold only affects Pie)."""
+        self._config_to_controls()   # load Graph 1 into the controls + set enablement
+
+    # ---- config <-> controls sync ----------------------------------------------
+    def _current_config(self):
+        return self.graph_configs[self.active_graph]
+
+    def _config_to_controls(self):
+        """Load the active graph's config into the control row (no re-save churn)."""
+        self._loading = True
+        cfg = self._current_config()
+        self.c_type.setCurrentText(cfg["type"])
+        self.c_window.setCurrentText(cfg["window"])
+        self.c_group.setCurrentText(cfg["group"])
+        self.c_xaxis.setCurrentText(cfg["xaxis"])
+        self.c_threshold.setValue(cfg["threshold"])
+        self.c_bestfit.setChecked(cfg["bestfit"])
+        self._loading = False
+        self._update_control_enablement()
+
+    def _controls_to_config(self):
+        cfg = self._current_config()
+        cfg["type"] = self.c_type.currentText()
+        cfg["window"] = self.c_window.currentText()
+        cfg["group"] = self.c_group.currentText()
+        cfg["xaxis"] = self.c_xaxis.currentText()
+        cfg["threshold"] = self.c_threshold.value()
+        cfg["bestfit"] = self.c_bestfit.isChecked()
+
+    def _on_controls_changed(self, *_):
+        if self._loading:
+            return
+        self._controls_to_config()
+        self._update_control_enablement()
+        self.render_all()
+
+    def _on_graph_changed(self, idx):
+        self.active_graph = max(0, min(idx, len(self.graph_configs) - 1))
+        self._config_to_controls()
+        self.render_all()
+
+    def _on_view_changed(self, _id=None, _checked=None):
+        self.view_stack.setCurrentIndex(1 if self.btn_multi.isChecked() else 0)
+        self.export_view_btn.setText(
+            "Export 2x2 (PDF)" if self.btn_multi.isChecked() else "Export graph (PDF)")
+        self.render_all()
+
+    def _update_control_enablement(self):
+        """Enable only the controls that apply to the active graph's chart type, so
+        it's obvious which toggles do something (By time/By group + best-fit only
+        affect Column; the %-threshold only affects Pie)."""
         ctype = self.c_type.currentText()
         is_pie = ctype == "Pie"
         is_col = ctype == "Column"
@@ -817,7 +957,6 @@ class QAReworkContent(QWidget):
                                   self.c_xaxis.currentText() != "By group")
         for w in (self.lbl_threshold, self.c_threshold):
             w.setEnabled(is_pie)
-        self.render_chart()
 
     def _open_log_dialog(self):
         dlg = LogReworkDialog(self.data_path, self.log, parent=self)
@@ -843,8 +982,8 @@ class QAReworkContent(QWidget):
             self.log(f"Could not read the log: {e}")
             if hasattr(self, "chart_status"):
                 self.chart_status.setText(f"Could not read the log: {e}")
-        if hasattr(self, "chart_view"):
-            self.render_chart()
+        if hasattr(self, "view_stack"):
+            self.render_all()
 
     def _current_mtime(self):
         try:
@@ -860,31 +999,50 @@ class QAReworkContent(QWidget):
             self.reload_records()
 
     # ---- rendering -------------------------------------------------------------
-    def render_chart(self):
-        if not hasattr(self, "chart_view"):
+    def render_all(self):
+        """Render the active view: one chart in single mode, all four in 2x2 mode.
+        We hold python refs to the live charts so their stacked-label metadata is not
+        garbage-collected out from under the view."""
+        if not hasattr(self, "view_stack"):
             return
         cycle, bg, text = self._screen_colors()
-        chart = self._build_selected_chart(cycle, bg, text)
-        old = self.chart_view.chart()
-        self._current_chart = chart  # keep a python ref so stacked metadata persists
-        self.chart_view.setChart(chart)
-        if old is not None:
-            old.deleteLater()
-        n = len(filter_window(self.records, self.c_window.currentText()))
+        live = []
+        if self.btn_multi.isChecked():
+            for cfg, view in zip(self.graph_configs, self.grid_views):
+                chart = self._build_chart(cfg, cycle, bg, text)
+                self._swap_chart(view, chart)
+                live.append(chart)
+        else:
+            chart = self._build_chart(self._current_config(), cycle, bg, text)
+            self._swap_chart(self.single_view, chart)
+            live.append(chart)
+        self._live_charts = live
+
+        cfg = self._current_config()
+        n = len(filter_window(self.records, cfg["window"]))
+        scope = "4 graphs" if self.btn_multi.isChecked() else f"Graph {self.active_graph + 1}"
         self.chart_status.setText(
-            f"{n} rework events in '{self.c_window.currentText()}' "
+            f"{scope} · {n} rework events in '{cfg['window']}' "
             f"({len(self.records)} total logged).")
 
-    def _build_selected_chart(self, cycle, bg, text):
-        window = self.c_window.currentText()
-        group = self.c_group.currentText()
+    def _swap_chart(self, view, chart):
+        old = view.chart()
+        view.setChart(chart)
+        if old is not None:
+            old.deleteLater()
+
+    def _build_chart(self, cfg, cycle, bg, text):
+        """Build one QChart from a graph config dict (no widget reads, so it drives
+        the on-screen single/grid views AND the PDF exports identically)."""
+        window = cfg["window"]
+        group = cfg["group"]
         recs = filter_window(self.records, window)
         if not recs:
             return empty_chart("No data in this time window yet.", bg, text)
 
-        ctype = self.c_type.currentText()
+        ctype = cfg["type"]
         if ctype == "Pie":
-            items, total = pie_slices(counts_by(recs, group), self.c_threshold.value())
+            items, total = pie_slices(counts_by(recs, group), cfg["threshold"])
             return build_pie(items, total, f"{group} — {window}", cycle, bg, text)
 
         if ctype == "Stacked column":
@@ -894,7 +1052,7 @@ class QAReworkContent(QWidget):
                                  cycle, bg, text)
 
         # Column
-        if self.c_xaxis.currentText() == "By group":
+        if cfg["xaxis"] == "By group":
             counts = counts_by(recs, group)
             ordered = sorted(counts.items(), key=lambda kv: -kv[1])
             labels = [k for k, _ in ordered]
@@ -904,18 +1062,26 @@ class QAReworkContent(QWidget):
         labels, totals = bucket_totals(recs, window)
         return build_column(labels, totals, f"Reworks by "
                             f"{'day' if window in DAY_WINDOWS else 'month'} — {window}",
-                            cycle, bg, text, bestfit=self.c_bestfit.isChecked())
+                            cycle, bg, text, bestfit=cfg["bestfit"])
 
     # ---- PDF export ------------------------------------------------------------
-    def _export_current(self):
+    def _export_view(self):
+        """Export whatever is on screen: the single active graph, or the 2x2 board
+        as one landscape page. Charts are rebuilt with the white print palette."""
+        multi = self.btn_multi.isChecked()
+        default = "QA Rework 2x2.pdf" if multi else "QA Rework Chart.pdf"
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save chart as PDF",
-            str(Path.home() / "QA Rework Chart.pdf"), "PDF files (*.pdf)")
+            self, "Save view as PDF", str(Path.home() / default), "PDF files (*.pdf)")
         if not path:
             return
-        chart = self._build_selected_chart(PRINT_CYCLE, PRINT_BG, PRINT_TEXT)
+        cy, bg, tx = PRINT_CYCLE, PRINT_BG, PRINT_TEXT
         try:
-            self._write_pdf(path, [("", [chart])])
+            if multi:
+                charts = [self._build_chart(c, cy, bg, tx) for c in self.graph_configs]
+                self._write_pdf_grid(path, "QA Rework — Gemba Board", charts, cols=2)
+            else:
+                chart = self._build_chart(self._current_config(), cy, bg, tx)
+                self._write_pdf(path, [("", [chart])])
             self.chart_status.setText(f"Saved {path}")
         except Exception as e:
             self.chart_status.setText(f"Export failed: {e}")
@@ -980,6 +1146,52 @@ class QAReworkContent(QWidget):
                 self._paint_page(painter, writer, title, charts)
         finally:
             painter.end()
+
+    def _write_pdf_grid(self, path, title, charts, cols=2):
+        """Write all charts onto ONE landscape page in a `cols`-wide grid (used for
+        the 2x2 view export)."""
+        writer = QPdfWriter(str(path))
+        writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        writer.setPageOrientation(QPageLayout.Orientation.Landscape)
+        writer.setResolution(150)
+        painter = QPainter(writer)
+        try:
+            self._paint_grid_page(painter, title, charts, cols)
+        finally:
+            painter.end()
+
+    def _paint_grid_page(self, painter, title, charts, cols):
+        page = painter.viewport()
+        margin = int(min(page.width(), page.height()) * 0.04)
+        x = page.left() + margin
+        y = page.top() + margin
+        w = page.width() - 2 * margin
+        h = page.height() - 2 * margin
+
+        title_h = 0
+        if title:
+            font = QFont()
+            font.setBold(True)
+            font.setPointSize(16)
+            painter.setFont(font)
+            painter.setPen(QColor(PRINT_TEXT))
+            title_h = int(h * 0.06)
+            painter.drawText(x, y, w, title_h,
+                             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                             title)
+
+        charts = [c for c in charts if c is not None]
+        if not charts:
+            return
+        rows = (len(charts) + cols - 1) // cols
+        gap = margin // 2
+        cell_w = (w - gap * (cols - 1)) // cols
+        cell_h = (h - title_h - gap * (rows - 1)) // rows
+        for idx, chart in enumerate(charts):
+            r, c = divmod(idx, cols)
+            cx = x + c * (cell_w + gap)
+            cy = y + title_h + r * (cell_h + gap)
+            self._render_chart_into(painter, chart, cx, cy, cell_w, cell_h)
 
     def _paint_page(self, painter, writer, title, charts):
         page = painter.viewport()
