@@ -555,6 +555,16 @@ class LibraryPage(QWidget, ThemeAware):
         footer_layout.setContentsMargins(20, 10, 20, 10)
         footer_layout.setSpacing(12)
 
+        # Bottom-left: re-scan the plugins folder so apps added/removed on disk
+        # (and their icons) show up without restarting TechDeck.
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setMinimumHeight(36)
+        self.btn_refresh.setMinimumWidth(110)
+        self.btn_refresh.setToolTip(
+            "Re-scan the plugins folder to pick up apps you added or removed")
+        self.btn_refresh.clicked.connect(self._on_refresh)
+        footer_layout.addWidget(self.btn_refresh)
+
         footer_layout.addStretch()
 
         self.btn_open_plugins = QPushButton("Open Plugin Folder")
@@ -670,6 +680,7 @@ class LibraryPage(QWidget, ThemeAware):
         self.btn_create.setStyleSheet(surface_btn_style)
         self.btn_edit.setStyleSheet(surface_btn_style)
         self.btn_open_plugins.setStyleSheet(surface_btn_style)
+        self.btn_refresh.setStyleSheet(surface_btn_style)
 
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
@@ -949,6 +960,29 @@ class LibraryPage(QWidget, ThemeAware):
                         f"Profile renamed to '{new_name}'."
                     )
     
+    def _on_refresh(self):
+        """Re-scan the plugins folder and rebuild the grid so apps added or
+        removed on disk (and their icons) appear without restarting TechDeck.
+
+        The loader is shared with the rest of the app, so re-discovering here
+        also refreshes the pool the Home page reads next time it rebuilds."""
+        try:
+            self.plugin_loader.discover_plugins()
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Refresh Failed",
+                f"Could not re-scan the plugins folder:\n\n{e}")
+            return
+
+        self._build_tile_grid()
+        # The page is visible, so run the flow layout now — otherwise newly
+        # added cards keep default geometry until the next show (see showEvent).
+        self.tile_grid.invalidate()
+        self.tile_grid.activate()
+
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
+        get_audio_manager().play(SOUND_CLICK)
+
     def _open_plugin_folder(self):
         """Open the plugins directory in the system file explorer."""
         import subprocess
