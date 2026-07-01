@@ -353,7 +353,9 @@ def pie_slices(counts, threshold_pct):
             big[k] = v
     items = sorted(big.items(), key=lambda kv: -kv[1])
     if other:
-        items.append((f"Other (<{threshold_pct:g}%)", other))
+        # Avoid a literal '<' — QtCharts renders labels as rich text and treats it
+        # as an unclosed HTML tag, swallowing the rest of the label ("Other (").
+        items.append((f"Other (under {threshold_pct:g}%)", other))
     return items, total
 
 
