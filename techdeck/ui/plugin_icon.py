@@ -30,7 +30,7 @@ from PySide6.QtGui import (
 # (full-color art from tools/generate_pack_icons.py, under "TechDeck pack
 # pixel" / "Icons8 characters pixel" / "Icons socialmedia pixel"). Those are
 # NOT theme-recolored — they render in their native colors on every theme.
-# That's how 922_form_seeker uses "futurama_bender" and customer_dxf_quoting
+# That's how 922_formingfinder uses "futurama_bender" and customer_dxf_quoting
 # uses "blueprint".
 PLUGIN_ICON_KEYS = {
     "922_setup":            "wall_e",
@@ -41,16 +41,16 @@ PLUGIN_ICON_KEYS = {
     "911_sketch_extractor": "sym_picture",
     "911_runtime_estimator": "stopwatch",
     "922_pallet_stamper":   "stamp",
-    "922_form_seeker":      "futurama_bender",
+    "922_formingfinder":    "futurama_bender",
     "922_kitting":          "toolbox",
     "922_lst_organizer":    "sym_opened_folder",
     "922_runtime_genie":    "lamp",
-    "batch_repeater":       "copy",
+    "922_batch_repeater":   "copy",
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",
     "customer_dxf_quoting": "blueprint",
-    "qa_rework":            "magnifier",
-    "911_pricing_backup_splitter": "scrooge_mcduck",
+    "qa_gemba_analyzer":    "magnifier",
+    "911_sspo_invoicing_prep": "scrooge_mcduck",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a

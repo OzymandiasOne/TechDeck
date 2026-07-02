@@ -31,12 +31,20 @@ VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES, FAMILY_QA}
 
 
 def _infer_family_from_id(plugin_id: str) -> str:
-    """Prefix-based family fallback when plugin.json omits the family field."""
+    """Prefix-based family fallback when plugin.json omits the family field.
+
+    Naming convention (2026-07): plugin id = family-prefixed snake_case of the
+    Library name — `911_`/`922_`/`qa_`/`game_`; family-less plugins have no prefix.
+    """
     pid = plugin_id.lower()
     if pid.startswith("911_") or pid.startswith("911-"):
         return FAMILY_911
     if pid.startswith("922_") or pid.startswith("922-"):
         return FAMILY_922
+    if pid.startswith("qa_"):
+        return FAMILY_QA
+    if pid.startswith("game_"):
+        return FAMILY_GAMES
     return FAMILY_OTHER
 
 

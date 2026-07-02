@@ -1,6 +1,6 @@
 """
-911 SSPO Invoicing Prep  (plugin id: 911_pricing_backup_splitter, family: 911)
-==============================================================================
+911 SSPO Invoicing Prep  (plugin id: 911_sspo_invoicing_prep, family: 911)
+==========================================================================
 Takes a big SSPO pricing sheet (like "SSPO Pricing Back Up") and splits it into one
 workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back Up.xlsx", saved in a
 new folder next to the file the user picks.

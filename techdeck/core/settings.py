@@ -32,6 +32,14 @@ _PLUGIN_ID_RENAMES = {
     "911_repeater": "911_batch_repeater",  # id now matches its folder
     "911_linear_inch_calc": "911_runtime_estimator",  # renamed 2026-06-04
     "linear_inch_calculator": "customer_dxf_quoting",  # renamed 2026-06-10
+    # 2026-07-02 naming convention: id = family-prefixed snake_case of the
+    # Library name (911_/922_/qa_/game_; family-less plugins unprefixed).
+    "pricing_backup_splitter": "911_sspo_invoicing_prep",      # one-off drop-in copies
+    "911_pricing_backup_splitter": "911_sspo_invoicing_prep",  # brief interim id
+    "batch_repeater": "922_batch_repeater",
+    "922_form_seeker": "922_formingfinder",
+    "qa_rework": "qa_gemba_analyzer",
+    "steeltube_game": "game_asa_the_video_game",
 }
 
 
@@ -278,6 +286,18 @@ class SettingsManager:
                 if mapped not in new_tiles:
                     new_tiles.append(mapped)
             profile["tiles"] = new_tiles
+
+        # Rewrite Emporium purchases: locked plugins are unlocked by their
+        # plugin id, so a rename must carry the purchase over or the user
+        # loses a game they paid tickets for (preserve order, dedupe).
+        unlocked = self.data.get("settings", {}).get("unlocked_items")
+        if isinstance(unlocked, list):
+            new_unlocked: List[str] = []
+            for item in unlocked:
+                mapped = _PLUGIN_ID_RENAMES.get(item, item)
+                if mapped not in new_unlocked:
+                    new_unlocked.append(mapped)
+            self.data["settings"]["unlocked_items"] = new_unlocked
 
     # ========== Profile Management ==========
     

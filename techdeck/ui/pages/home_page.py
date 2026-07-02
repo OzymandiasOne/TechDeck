@@ -39,8 +39,9 @@ HOME_TILE_H = 140
 HOME_TILE_ICON = 64
 HOME_TILE_ICON_BOX = 72
 
-# Fixed family-tag colors for the Home tile corner badge.
-_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B", "QA": "#10B981"}
+# Fixed family-tag colors for the Home tile corner badge ("other" gets none).
+_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B", "QA": "#10B981",
+                        "Games": "#A855F7"}
 
 
 def _strip_family_prefix(name: str, family: str) -> str:
@@ -280,9 +281,10 @@ class PluginCard(QFrame, ThemeAware):
         """Style the corner family tag. Currently TEXT-ONLY: transparent chip
         background (blends with the tile in every state) and the text colored with
         the active theme's accent, so the tag matches each theme. `_FAMILY_BADGE_COLORS`
-        still gates which families get a tag (911/922 only); to bring a colored chip
-        back later, set `background-color` to that family color and text `#FFFFFF`."""
-        if self._family not in _FAMILY_BADGE_COLORS:   # 911 / 922 only
+        still gates which families get a tag (911/922/QA/Games — "other" gets none);
+        to bring a colored chip back later, set `background-color` to that family
+        color and text `#FFFFFF`."""
+        if self._family not in _FAMILY_BADGE_COLORS:   # "other" has no badge
             self.family_badge.setVisible(False)
             return
         self.family_badge.setStyleSheet(

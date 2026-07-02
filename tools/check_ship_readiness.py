@@ -21,7 +21,8 @@ good (CLAUDE.md Hard Rule 8).
 
 Checks (E = error, fails the build; W = warning):
   E1  plugin.json parses, is an object, id matches the folder name
-  E2  family, if present, is one of 911/922/other; timeout is a non-negative int
+  E2  family, if present, is one of 911/922/other/Games/QA; timeout is a
+      non-negative int
   E3  any plugin importing PySide6/PyQt must set requires_main_thread: true
   E4  every .py in the plugin compiles (syntax gate)
   E5  no relative imports in plugins (they are loaded as standalone modules)
@@ -38,6 +39,11 @@ Checks (E = error, fails the build; W = warning):
       get_console_input - otherwise the next same-family plugin in a multi-run
       re-prompts instead of reusing the answer (bit FormingFinder->Kitting,
       v0.8.6.3). Escape hatch for a deliberately non-shared prompt: request_text.
+  E9  naming convention (2026-07): the folder/id must be the snake_case slug of
+      the Library display name, family-prefixed - 911/922/QA names start with
+      their family ("911 Setup" -> 911_setup, "QA Gemba Analyzer" ->
+      qa_gemba_analyzer), Games ids get a "game_" prefix, and family-less
+      ("other") plugins are just the slug of their name.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -321,6 +327,21 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
         timeout = manifest.get("timeout")
         if timeout is not None and (not isinstance(timeout, int) or timeout < 0):
             errors.append(f"{pid}: timeout must be a non-negative integer, got {timeout!r}")
+
+        # --- naming convention (E9): id = family-prefixed slug of the name
+        name = manifest.get("name")
+        if isinstance(name, str) and name.strip() and family in VALID_FAMILIES:
+            if family in ("911", "922", "QA") and not name.startswith(family + " "):
+                errors.append(
+                    f"{pid}: Library name '{name}' must start with '{family} ' "
+                    f"(the Home tile strips the family prefix and shows the badge)")
+            slug = re.sub(r"_+", "_",
+                          re.sub(r"[^a-z0-9]+", "_", name.lower())).strip("_")
+            expected = f"game_{slug}" if family == "Games" else slug
+            if pid != expected:
+                errors.append(
+                    f"{pid}: folder/id must match the Library name per the naming "
+                    f"convention - expected '{expected}' for name '{name}'")
 
     run_file = plugin_dir / "run.py"
     if not run_file.is_file():

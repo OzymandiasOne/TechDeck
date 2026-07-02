@@ -3,7 +3,7 @@ Steel Tube Op — GUI game plugin.
 
 Launches the Steel Tube Operation arcade mini-game. It's a "Games"-family,
 purchasable plugin: the Library hides it until it's unlocked at Woogy's
-Emporium (gated on settings.is_unlocked("steeltube_game")). The game widget
+Emporium (gated on settings.is_unlocked("game_asa_the_video_game")). The game widget
 itself ships in the app bundle (techdeck.ui.widgets.steelbeams_game).
 """
 

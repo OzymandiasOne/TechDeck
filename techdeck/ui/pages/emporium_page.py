@@ -69,7 +69,7 @@ CATALOG = [
      "sprite": "spinner_beyblade.tdart", "cost": 60, "kind": "spinner"},
     {"id": "spinner_shuriken", "name": "Shuriken", "category": "toys",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
-    {"id": "steeltube_game", "name": "ASA: The Video Game", "category": "toys",
+    {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
 
     # --- Friends: companions for My House (kind "friends"; PNG sprites). ---
@@ -710,7 +710,7 @@ class EmporiumPage(QWidget):
             "WOOGY: A BEYBLADE! GO ON, LET IT RIP. OH, UM, HAVE A GOOD DAY.",
         "spinner_shuriken":
             "WOOGY: A SHURIKEN! SO SHARP, SO COOL. PLEASE DON'T POKE OL' WOOGY.",
-        "steeltube_game":
+        "game_asa_the_video_game":
             "WOOGY: WOOGY DON'T KNOW HOW TO PLAY THIS GAME, WOOGY JUST CLICK BUTTONS.",
         "friend_buddy":
             "WOOGY: BUDDY IS A GOOD PIG. TREAT HIM RIGHT AND HE'LL KEEP YOUR YARD COMPANY.",

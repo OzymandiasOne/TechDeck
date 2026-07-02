@@ -1,5 +1,5 @@
 {
-  "id": "911_pricing_backup_splitter",
+  "id": "911_sspo_invoicing_prep",
   "name": "911 SSPO Invoicing Prep",
   "description": "Splits a pricing sheet into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx') and fills each with an Invoice Supplement tab (PO/Line from the Working Forecast List).",
   "version": "2.0.0",

@@ -16,11 +16,11 @@ a = Analysis(
         # "No module named 'techdeck.core.plugin_window'" (bit customer_dxf_quoting).
         'techdeck.core.plugin_sdk',
         'techdeck.core.plugin_window',
-        # Only imported by the steeltube_game plugin's run.py (loads at runtime).
+        # Only imported by the game_asa_the_video_game plugin's run.py (loads at runtime).
         'techdeck.ui.widgets.steelbeams_game',
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
         'PySide6.QtCharts',
-        # openpyxl.drawing.image is only imported by 911_pricing_backup_splitter's run.py
+        # openpyxl.drawing.image is only imported by 911_sspo_invoicing_prep's run.py
         # (embeds the ASA logo on the Invoice Supplement tab).
         'openpyxl', 'openpyxl.drawing.image', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',
         'qrcode', 'qrcode.image', 'qrcode.image.base', 'qrcode.image.pure', 

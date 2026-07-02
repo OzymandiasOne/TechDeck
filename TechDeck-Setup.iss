@@ -69,6 +69,13 @@ Type: filesandordirs; Name: "{app}\plugins\part_sketch_extractor"
 Type: filesandordirs; Name: "{app}\plugins\po_packet_extractor"
 Type: filesandordirs; Name: "{app}\plugins\run_time_estimator"
 Type: filesandordirs; Name: "{app}\plugins\911_linear_inch_calc"
+; 2026-07 naming convention (id = family-prefixed snake_case of the Library name)
+Type: filesandordirs; Name: "{app}\plugins\pricing_backup_splitter"
+Type: filesandordirs; Name: "{app}\plugins\911_pricing_backup_splitter"
+Type: filesandordirs; Name: "{app}\plugins\batch_repeater"
+Type: filesandordirs; Name: "{app}\plugins\922_form_seeker"
+Type: filesandordirs; Name: "{app}\plugins\qa_rework"
+Type: filesandordirs; Name: "{app}\plugins\steeltube_game"
 
 [Dirs]
 ; Create %LOCALAPPDATA%\TechDeck directory structure with full user permissions
