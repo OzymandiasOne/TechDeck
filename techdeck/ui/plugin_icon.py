@@ -33,7 +33,7 @@ from PySide6.QtGui import (
 # That's how 922_formingfinder uses "futurama_bender" and customer_dxf_quoting
 # uses "blueprint".
 PLUGIN_ICON_KEYS = {
-    "922_setup":            "wall_e",
+    "922_setup":            "icons8-toolbox",
     "911_setup":            "microsoft_excel_2019",
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
