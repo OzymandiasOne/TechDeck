@@ -50,7 +50,7 @@ PLUGIN_ICON_KEYS = {
     "qr_code_generator":    "qr",
     "customer_dxf_quoting": "blueprint",
     "qa_rework":            "magnifier",
-    "pricing_backup_splitter": "scrooge_mcduck",
+    "911_pricing_backup_splitter": "scrooge_mcduck",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
