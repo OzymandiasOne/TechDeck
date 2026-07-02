@@ -494,6 +494,46 @@ class ConsoleWidget(QWidget, ThemeAware):
         else:
             self._sel_result = None
 
+    def request_directory(self, title: str = "Select Folder", start_dir: str = ""):
+        """Show the native pick-a-folder dialog and BLOCK until the user
+        chooses. Same worker-thread contract as request_selection. Returns the
+        picked path string, or None if the user cancelled.
+
+        Prefer this (via sdk.request_directory) over making users paste a
+        folder path into the console.
+        """
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_directory() cannot be called from main GUI thread"
+            )
+
+        self._dir_args = (str(title), str(start_dir or ""))
+        self._dir_result = None
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_directory_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._dir_result
+
+    @Slot()
+    def _directory_gui(self):
+        """GUI-thread half of request_directory: run the native folder dialog."""
+        from PySide6.QtWidgets import QFileDialog
+
+        title, start_dir = self._dir_args
+        path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
+        self._dir_result = path or None
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""

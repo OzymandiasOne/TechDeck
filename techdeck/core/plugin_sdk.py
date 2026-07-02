@@ -332,6 +332,24 @@ def request_text(params: dict, prompt: str) -> str:
     return input(prompt + " ")
 
 
+def request_directory(params: dict, title: str = "Select Folder",
+                      start_dir: str = "") -> Optional[str]:
+    """Ask the user to pick a folder via the native directory dialog (opened
+    on the GUI thread by the console), falling back to a pasted-path stdin
+    prompt when run standalone. Returns the chosen path string, or None if
+    the user cancelled / entered nothing.
+
+    Prefer this over making users paste folder paths through request_text —
+    per-run folders (a batch folder, a ROOT of orders) should be clicked,
+    not typed.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_directory"):
+        return console.request_directory(title, start_dir)
+    raw = input(f"{title} (paste path): ").strip().strip('"')
+    return raw or None
+
+
 def request_batch_number(params: dict, prompt: str) -> str:
     """Prompt for a batch number through the TechDeck console, falling back to
     stdin input() when run standalone (no console). Returns the raw string.

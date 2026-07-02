@@ -23,10 +23,11 @@ all are idempotent. Selected processes run in order, stopping if one fails:
                         extra files -> EXTRA subfolder), and prefix "(Nx) "
                         onto filenames of parts ordered more than once.
 
-Runtime inputs: the batch folder path (pasted), then the process picker
-(headless fallback: a text prompt, blank = all). The PO spreadsheet (the
-*PRICING* workbook with the PO-#### sheet) is discovered inside the batch
-folder; the batch number is derived from the PO sheet name.
+Runtime inputs: the batch folder (native pick-a-folder dialog via
+sdk.request_directory; headless fallback pastes a path), then the process
+picker (headless fallback: a text prompt, blank = all). The PO spreadsheet
+(the *PRICING* workbook with the PO-#### sheet) is discovered inside the
+batch folder; the batch number is derived from the PO sheet name.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
@@ -152,13 +153,25 @@ def _load_po_rows(pricing_path: Path, log):
 
 
 def _resolve_batch_context(params, cancel_event, log):
-    """Prompt for the batch folder, find the PO spreadsheet, derive the batch
-    number. Returns (batch_folder, pricing_path, batch, po_rows) - pricing may
-    be None (some modes can proceed without it)."""
-    raw = sdk.request_text(params, "Paste the batch folder path:")
+    """Pick the batch folder (native folder dialog; pasted path when headless),
+    find the PO spreadsheet, derive the batch number. Returns (batch_folder,
+    pricing_path, batch, po_rows) - pricing may be None (some modes can
+    proceed without it)."""
+    start_dir = ""
+    try:
+        roots = sdk.pilot_program_roots()
+        if roots:
+            start_dir = str(roots[0])
+    except Exception:
+        pass
+    raw = sdk.request_directory(params, "Select the 902 batch folder", start_dir)
     if cancel_event.is_set():
         return None, None, None, []
-    batch_folder = Path((raw or "").strip().strip('"'))
+    if not raw:
+        log("Folder selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+        return None, None, None, []
+    batch_folder = Path(raw.strip().strip('"'))
     if not batch_folder.is_dir():
         log(f"ERROR: batch folder not found: {batch_folder}")
         return None, None, None, []
