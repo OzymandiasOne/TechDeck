@@ -1,0 +1,33 @@
+{
+  "id": "pricing_backup_splitter",
+  "name": "911 SSPO Invoicing Prep",
+  "description": "Splits a pricing sheet into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx') and fills each with an Invoice Supplement tab (PO/Line from the Working Forecast List).",
+  "version": "2.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "timeout": 300,
+  "settings": {
+    "fields": [
+      {
+        "key": "forecast_dir",
+        "type": "directory",
+        "label": "Forecast and Inventory Reports Directory",
+        "description": "Path to the 'Forecast and Inventory Reports' folder containing 'Working Forecast List.xlsx' (used to look up PO / PO Line per nest). Leave blank to use the default OneDrive path.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\Forecast and Inventory Reports",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "forecast_filename",
+        "type": "string",
+        "label": "Working Forecast Filename",
+        "description": "Name of the forecast workbook inside the Forecast and Inventory Reports folder.",
+        "placeholder": "Working Forecast List.xlsx",
+        "required": false,
+        "default": "Working Forecast List.xlsx"
+      }
+    ]
+  }
+}

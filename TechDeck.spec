@@ -20,7 +20,9 @@ a = Analysis(
         'techdeck.ui.widgets.steelbeams_game',
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
         'PySide6.QtCharts',
-        'openpyxl', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',
+        # openpyxl.drawing.image is only imported by pricing_backup_splitter's run.py
+        # (embeds the ASA logo on the Invoice Supplement tab).
+        'openpyxl', 'openpyxl.drawing.image', 'pandas', 'fitz', 'pypdf', 'packaging', 'requests',
         'qrcode', 'qrcode.image', 'qrcode.image.base', 'qrcode.image.pure', 
         'qrcode.image.styledpil', 'qrcode.image.svg', 'qrcode.image.styles',
         'qrcode.image.styles.moduledrawers', 'qrcode.image.styles.colormasks',
