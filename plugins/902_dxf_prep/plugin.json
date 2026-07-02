@@ -1,0 +1,11 @@
+{
+  "id": "902_dxf_prep",
+  "name": "902 DXF Prep",
+  "description": "Batch DXF cleanup & prep for Boost 902 part files: builds the IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles files against the PO spreadsheet (extras moved to EXTRA, missing parts listed, (Nx) quantity prefixes).",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "902",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 1800
+}

@@ -51,6 +51,7 @@ PLUGIN_ICON_KEYS = {
     "customer_dxf_quoting": "blueprint",
     "qa_gemba_analyzer":    "magnifier",
     "911_sspo_invoicing_prep": "scrooge_mcduck",
+    "902_dxf_prep":         "ruler",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
@@ -81,6 +82,7 @@ def _current_theme_name() -> str:
 # Fixed, theme-independent family colors for the monogram fallback. Chosen to
 # read well on both the dark and light app backgrounds.
 _FAMILY_COLORS = {
+    "902": "#06B6D4",   # cyan
     "911": "#3B82F6",   # blue
     "922": "#F59E0B",   # amber
     "other": "#8B5CF6",  # violet
@@ -180,7 +182,7 @@ def _new_canvas(size: int) -> QPixmap:
 
 def _monogram_text(plugin) -> str:
     family = getattr(plugin, "family", "other")
-    if family in ("911", "922"):
+    if family in ("902", "911", "922"):
         return family
     name = (getattr(plugin, "name", "") or "?").strip()
     words = [w for w in name.split() if w]

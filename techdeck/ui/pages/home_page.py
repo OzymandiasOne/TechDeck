@@ -40,8 +40,8 @@ HOME_TILE_ICON = 64
 HOME_TILE_ICON_BOX = 72
 
 # Fixed family-tag colors for the Home tile corner badge ("other" gets none).
-_FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B", "QA": "#10B981",
-                        "Games": "#A855F7"}
+_FAMILY_BADGE_COLORS = {"902": "#06B6D4", "911": "#3B82F6", "922": "#F59E0B",
+                        "QA": "#10B981", "Games": "#A855F7"}
 
 
 def _strip_family_prefix(name: str, family: str) -> str:

@@ -22,12 +22,13 @@ logger = logging.getLogger(__name__)
 # Plugin family constants. Used to group related plugins for shared-state runs
 # (e.g. one batch number prompt carried across all 911 plugins in a multi-run)
 # and for the Library page "sort by family" mode.
+FAMILY_902 = "902"
 FAMILY_911 = "911"
 FAMILY_922 = "922"
 FAMILY_OTHER = "other"
 FAMILY_GAMES = "Games"   # purchasable mini-games (Woogy's Emporium)
 FAMILY_QA = "QA"         # quality-assurance tools (QA Gemba Analyzer, etc.)
-VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES, FAMILY_QA}
+VALID_FAMILIES = {FAMILY_902, FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES, FAMILY_QA}
 
 
 def _infer_family_from_id(plugin_id: str) -> str:
@@ -37,6 +38,8 @@ def _infer_family_from_id(plugin_id: str) -> str:
     Library name — `911_`/`922_`/`qa_`/`game_`; family-less plugins have no prefix.
     """
     pid = plugin_id.lower()
+    if pid.startswith("902_") or pid.startswith("902-"):
+        return FAMILY_902
     if pid.startswith("911_") or pid.startswith("911-"):
         return FAMILY_911
     if pid.startswith("922_") or pid.startswith("922-"):

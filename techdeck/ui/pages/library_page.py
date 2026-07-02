@@ -786,7 +786,7 @@ class LibraryPage(QWidget, ThemeAware):
         # Sort according to user-selected mode. "alphabetical" by display name,
         # "family" groups 911 -> 922 -> other (alphabetical within each group).
         sort_mode = self.settings.get_library_sort_mode()
-        _family_rank = {"911": 0, "922": 1, "QA": 2, "Games": 3, "other": 4}
+        _family_rank = {"902": 0, "911": 1, "922": 2, "QA": 3, "Games": 4, "other": 5}
 
         def _name_no_family(name: str) -> str:
             # Drop a leading family prefix ("911 ", "922 ", "qa ") so Alphabetical
@@ -802,7 +802,7 @@ class LibraryPage(QWidget, ThemeAware):
             if sort_mode == "family":
                 # Group 911 -> 922 -> other; alphabetical within each group.
                 family = (p.family if p else "other")
-                return (_family_rank.get(family, 4), name)
+                return (_family_rank.get(family, 5), name)
             # Flat A-Z by the descriptive name (family number ignored).
             return (_name_no_family(name),)
 
