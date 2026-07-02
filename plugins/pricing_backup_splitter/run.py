@@ -423,6 +423,11 @@ def run(params, progress_callback, cancel_event):
     progress_callback(100)
     log(f"Done. Wrote {len(written)} file(s), {total} data row(s) total.")
     log(f"Folder: {out_dir}")
+    # GUI plugins suppress the shell's auto success chime; fire it ourselves now
+    # that the files are actually written (the meaningful moment).
+    on_success = params.get("on_success")
+    if callable(on_success):
+        on_success()
     msg = (f"Done! Wrote {len(written)} back-up file(s) "
            f"({total} rows total) to:\n\n{out_dir}")
     if missing_po:

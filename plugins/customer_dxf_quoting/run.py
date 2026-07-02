@@ -552,10 +552,11 @@ class QuotingWindow(PluginWindow):
         return (name in cls.HIDDEN_BY_DEFAULT or name.startswith("BEND")
                 or name.startswith("WELD"))
 
-    def __init__(self, log=print):
+    def __init__(self, log=print, on_success=None):
         super().__init__("customer_dxf_quoting", "Customer DXF Quoting")
         self.resize(1320, 840)
         self._log = log
+        self._on_success = on_success  # success chime; fired on a successful DXF export
         self.entities = []
         self.layer_colors = {}
         self.items = []        # QGraphicsPathItem per entity
@@ -963,6 +964,8 @@ class QuotingWindow(PluginWindow):
                       if ent["layer"] != ent.get("orig_layer", ent["layer"]))
         self._log(f"Exported {Path(dest).name} "
                   f"({changed} reassigned line(s) written back)")
+        if callable(self._on_success):
+            self._on_success()
 
     def fit_view(self):
         if not self._geom_rect.isNull():
@@ -988,7 +991,7 @@ def run(params: dict, progress_callback, cancel_event):
     log("Opening Customer DXF Quoting...")
     progress_callback(10)
 
-    _window = QuotingWindow(log=log)
+    _window = QuotingWindow(log=log, on_success=params.get("on_success"))
     _window.show()
 
     default = (settings.get("default_dxf") or "").strip()

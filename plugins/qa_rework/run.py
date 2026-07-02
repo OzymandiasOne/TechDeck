@@ -712,10 +712,13 @@ class LogReworkDialog(QDialog):
 # The window content (charts dashboard — the only window)
 # ---------------------------------------------------------------------------------
 class QAReworkContent(QWidget):
-    def __init__(self, data_path, log=print, parent=None):
+    def __init__(self, data_path, log=print, on_success=None, parent=None):
         super().__init__(parent)
         self.data_path = Path(data_path)
         self.log = log
+        # Success chime; GUI plugins fire it themselves at meaningful moments
+        # (a rework logged, a PDF exported) instead of the shell's auto sound.
+        self._on_success = on_success
         self.records = []
         self._last_mtime = None
         self._palette = self._theme_palette()
@@ -964,6 +967,8 @@ class QAReworkContent(QWidget):
         dlg = LogReworkDialog(self.data_path, self.log, parent=self)
         if dlg.exec():               # modal; True when an entry was submitted
             self.reload_records()    # charts update immediately
+            if callable(self._on_success):
+                self._on_success()
 
     def _open_rework_log(self):
         try:
@@ -1085,6 +1090,8 @@ class QAReworkContent(QWidget):
                 chart = self._build_chart(self._current_config(), cy, bg, tx)
                 self._write_pdf(path, [("", [chart])])
             self.chart_status.setText(f"Saved {path}")
+            if callable(self._on_success):
+                self._on_success()
         except Exception as e:
             self.chart_status.setText(f"Export failed: {e}")
 
@@ -1101,6 +1108,8 @@ class QAReworkContent(QWidget):
             self._write_pdf(path, self._gemba_pages())
             self.chart_status.setText(f"Saved Gemba Pack: {path}")
             self.log(f"Exported Gemba Pack to {path}")
+            if callable(self._on_success):
+                self._on_success()
         except Exception as e:
             self.chart_status.setText(f"Export failed: {e}")
 
@@ -1262,7 +1271,8 @@ def run(params, progress_callback, cancel_event):
         log(f"Seeding skipped: {e}")
 
     _window = PluginWindow("qa_rework", "Gemba Analyzer")
-    content = QAReworkContent(data_path, log)
+    content = QAReworkContent(data_path, log,
+                              on_success=params.get("on_success"))
     _window.set_content(content)
     _window.resize(1120, 780)
     _window.show()
