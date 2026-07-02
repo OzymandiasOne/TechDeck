@@ -9,10 +9,12 @@ set; everything is selected by default, so an out-of-the-gate run walks the
 whole workflow back-to-back). Already-done processes are flagged in the picker;
 all are idempotent. Selected processes run in order, stopping if one fails:
 
-  1. SETUP            - create "BATCH# - IGES CONVERT", copy the .igs files
-                        into it, and build a standalone "BATCH# QTY.xlsx"
-                        (DYPN + QTY + NOTES, sorted, repeat groups boxed,
-                        multi-qty rows highlighted) from the PO spreadsheet.
+  1. SETUP            - copy any .igs files sitting in the selected folder
+                        into "BATCH# - IGES CONVERT" (skipped with a note if
+                        there are none), and build a standalone
+                        "BATCH# QTY.xlsx" (DYPN + QTY + NOTES, sorted, repeat
+                        groups boxed, multi-qty rows highlighted) from the PO
+                        spreadsheet.
   2. RENAME + SORT    - after the DXF export returns from the VM: strip
                         _FLAT-PATTERN#n / revision / trailing-number suffixes
                         from the DXF filenames, then split them into numbered
@@ -23,11 +25,14 @@ all are idempotent. Selected processes run in order, stopping if one fails:
                         extra files -> EXTRA subfolder), and prefix "(Nx) "
                         onto filenames of parts ordered more than once.
 
-Runtime inputs: the batch folder (native pick-a-folder dialog via
-sdk.request_directory; headless fallback pastes a path), then the process
-picker (headless fallback: a text prompt, blank = all). The PO spreadsheet
-(the *PRICING* workbook with the PO-#### sheet) is discovered inside the
-batch folder; the batch number is derived from the PO sheet name.
+Runtime inputs: the folder holding the part files - the SigmaNest DXF export,
+or the mixed EB folder with IGES + uncleaned DXFs side by side (native
+pick-a-folder dialog via sdk.request_directory; headless fallback pastes a
+path) - then the process picker (headless fallback: a text prompt, blank =
+all). The PO spreadsheet (the *PRICING* workbook with the PO-#### sheet) is
+discovered in the selected folder or its parent; its folder is the BATCH
+folder where the outputs (IGES CONVERT, QTY workbook, MISSING PARTS report)
+are written. The batch number derives from the PO sheet name.
 """
 
 from __future__ import annotations
@@ -45,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
@@ -164,40 +169,48 @@ def _resolve_batch_context(params, cancel_event, log):
             start_dir = str(roots[0])
     except Exception:
         pass
-    raw = sdk.request_directory(params, "Select the 902 batch folder", start_dir)
+    raw = sdk.request_directory(
+        params, "Select the folder with the part files (DXF / IGES)", start_dir)
     if cancel_event.is_set():
-        return None, None, None, []
+        return None, None, None, None, []
     if not raw:
         log("Folder selection cancelled - nothing was run.")
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
-        return None, None, None, []
-    batch_folder = Path(raw.strip().strip('"'))
-    if not batch_folder.is_dir():
-        log(f"ERROR: batch folder not found: {batch_folder}")
-        return None, None, None, []
-    log(f"Batch folder: {batch_folder}")
+        return None, None, None, None, []
+    work_folder = Path(raw.strip().strip('"'))
+    if not work_folder.is_dir():
+        log(f"ERROR: folder not found: {work_folder}")
+        return None, None, None, None, []
+    log(f"Working folder: {work_folder}")
 
-    pricing = _find_pricing_workbook(batch_folder, log)
-    if pricing is None and batch_folder.parent != batch_folder:
-        # The user may have pasted the DXF subfolder itself - look one level up.
-        pricing = _find_pricing_workbook(batch_folder.parent, log)
+    # The PO/pricing workbook anchors the BATCH folder: usually the selected
+    # folder's parent (the user selects the part-files folder inside the batch
+    # folder), sometimes the selected folder itself.
+    pricing = _find_pricing_workbook(work_folder, log)
+    if pricing is None and work_folder.parent != work_folder:
+        pricing = _find_pricing_workbook(work_folder.parent, log)
     batch, po_rows = (None, [])
     if pricing is None:
-        log("WARNING: no PO/pricing workbook (.xlsm/.xlsx) found in the batch folder.")
+        log("WARNING: no PO/pricing workbook (.xlsm/.xlsx) found in the selected "
+            "folder or its parent.")
     else:
         log(f"PO spreadsheet: {pricing.name}")
         batch, po_rows = _load_po_rows(pricing, log)
+    batch_root = pricing.parent if pricing is not None else work_folder
+    if batch_root != work_folder:
+        log(f"Batch folder (outputs go here): {batch_root}")
 
     if not batch:
-        # Try the folder name, then ask (a real batch number -> shared cache).
-        m = re.search(r"\b(\d{3,5})\b", batch_folder.name)
+        # Try the folder names, then ask (a real batch number -> shared cache).
+        m = (re.search(r"\b(\d{3,5})\b", work_folder.name)
+             or re.search(r"\b(\d{3,5})\b", batch_root.name))
         batch = m.group(1) if m else None
     if not batch:
         batch = sdk.request_batch_number(params, "Enter the 902 batch number:").strip()
         if cancel_event.is_set():
-            return None, None, None, []
+            return None, None, None, None, []
     log(f"Batch number: {batch}")
-    return batch_folder, pricing, batch, po_rows
+    return work_folder, batch_root, pricing, batch, po_rows
 
 
 def _find_dxf_folder(batch_folder: Path, batch: str, log) -> Path | None:
@@ -219,8 +232,9 @@ def _find_dxf_folder(batch_folder: Path, batch: str, log) -> Path | None:
         if "DXF" in name and "CONVERT" not in name:
             candidates.append(d)
     if not candidates:
-        log(f'ERROR: no DXF folder found. Expected "{batch} - DXF" inside the '
-            f"batch folder (or paste the DXF folder path directly).")
+        log(f"ERROR: no .dxf files in the selected folder (and no DXF subfolder "
+            f'like "{batch} - DXF" under it). Select the folder that holds the '
+            f"DXF part files.")
         return None
     exact = [d for d in candidates if d.name.upper().startswith(str(batch))]
     pick = sorted(exact or candidates)[0]
@@ -239,57 +253,43 @@ def _loose_dxfs(dxf_folder: Path) -> list[Path]:
 # Mode 1 - Setup: IGES CONVERT folder + QTY workbook
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _find_iges_source(batch_folder: Path, log) -> Path | None:
-    """Subfolder holding the source .igs/.iges files (e.g. IGES FILES-COMPLETE),
-    excluding our own "* - IGES CONVERT" output."""
-    best, best_count = None, 0
-    for d in batch_folder.iterdir():
-        if not d.is_dir() or d.name.upper().endswith("IGES CONVERT"):
-            continue
-        count = len({p for p in list(d.glob("*.igs")) + list(d.glob("*.iges"))})
-        if count > best_count:
-            best, best_count = d, count
-    if best is None:
-        log("ERROR: no subfolder with .igs/.iges files found in the batch folder.")
-        return None
-    log(f"IGES source: {best.name} ({best_count} .igs files)")
-    return best
-
-
-def _mode_setup(batch_folder: Path, pricing: Path | None, batch: str,
+def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
                 po_rows, log, progress_callback, cancel_event) -> bool:
-    # 1) BATCH# - IGES CONVERT + copy the .igs files
-    src = _find_iges_source(batch_folder, log)
-    if src is None:
-        return False
-    convert_dir = batch_folder / f"{batch} - IGES CONVERT"
-    convert_dir.mkdir(exist_ok=True)
-    log(f"Working folder: {convert_dir.name}")
+    # 1) BATCH# - IGES CONVERT: copy any .igs sitting in the selected folder
+    #    (mixed EB folders hold IGES + uncleaned DXFs side by side). No IGES
+    #    present is fine - a SigmaNest DXF export folder has none, and the QTY
+    #    sheet below is still worth building.
+    iges = sorted({p for p in list(work_folder.glob("*.igs"))
+                   + list(work_folder.glob("*.iges"))})
+    if not iges:
+        log("No .igs/.iges files in the selected folder - skipping the IGES copy.")
+    else:
+        convert_dir = batch_root / f"{batch} - IGES CONVERT"
+        convert_dir.mkdir(exist_ok=True)
+        log(f"IGES working folder: {convert_dir.name} ({len(iges)} .igs found)")
+        copied = skipped = 0
+        for i, p in enumerate(iges):
+            if cancel_event.is_set():
+                log("Cancelled.")
+                return False
+            dest = convert_dir / p.name
+            if dest.exists():
+                skipped += 1
+                continue
+            sdk.ensure_local(p, log=log)  # OneDrive placeholder-safe (Hard Rule 13)
+            shutil.copy2(p, dest)
+            copied += 1
+            if copied % 25 == 0:
+                log(f"  copied {copied}/{len(iges)}...")
+            progress_callback(5 + int(55 * (i + 1) / len(iges)))
+        log(f"Copied {copied} .igs file(s)" +
+            (f" ({skipped} already present, skipped)" if skipped else "") + ".")
 
-    iges = sorted({p for p in list(src.glob("*.igs")) + list(src.glob("*.iges"))})
-    copied = skipped = 0
-    for i, p in enumerate(iges):
-        if cancel_event.is_set():
-            log("Cancelled.")
-            return False
-        dest = convert_dir / p.name
-        if dest.exists():
-            skipped += 1
-            continue
-        sdk.ensure_local(p, log=log)  # OneDrive placeholder-safe (Hard Rule 13)
-        shutil.copy2(p, dest)
-        copied += 1
-        if copied % 25 == 0:
-            log(f"  copied {copied}/{len(iges)}...")
-        progress_callback(5 + int(55 * (i + 1) / max(len(iges), 1)))
-    log(f"Copied {copied} .igs file(s)" +
-        (f" ({skipped} already present, skipped)" if skipped else "") + ".")
-
-    # 2) QTY workbook
+    # 2) QTY workbook (written to the batch folder, next to the PO spreadsheet)
     if not po_rows:
         log("WARNING: no PO rows read - QTY workbook not built.")
-        return copied > 0
-    qty_path = batch_folder / f"{batch} QTY.xlsx"
+        return True
+    qty_path = batch_root / f"{batch} QTY.xlsx"
     if qty_path.exists():
         log(f"NOTE: {qty_path.name} already exists - leaving it untouched "
             f"(it may hold review notes). Delete it and rerun Setup to rebuild.")
@@ -425,7 +425,7 @@ def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event) ->
 # Mode 3 - Recombine + Verify
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _mode_recombine_verify(batch_folder: Path, dxf_folder: Path, batch: str,
+def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
                            po_rows, log, progress_callback, cancel_event) -> bool:
     # 1) Recombine: pull files out of numbered subfolders, drop empty ones.
     numbered = sorted((d for d in dxf_folder.iterdir()
@@ -525,7 +525,7 @@ def _mode_recombine_verify(batch_folder: Path, dxf_folder: Path, batch: str,
     progress_callback(80)
 
     # 5) Missing-parts text file + console summary.
-    report = batch_folder / f"{batch} - MISSING PARTS.txt"
+    report = batch_root / f"{batch} - MISSING PARTS.txt"
     lines = [f"BATCH {batch} - DXF RECONCILIATION",
              f"Matched: {matched}   Missing: {len(missing)}   Extra: {len(extras_moved)}",
              "",
@@ -565,22 +565,22 @@ STEP_LABELS = {
 }
 
 
-def _detect_done_steps(batch_folder: Path, batch: str) -> set[int]:
+def _detect_done_steps(work_folder: Path, batch_root: Path, batch: str) -> set[int]:
     """Which steps show an "already done" flag in the picker. Heuristic only -
     every step is idempotent, so re-running a flagged one is always safe."""
     done: set[int] = set()
-    if (batch_folder / f"{batch} - IGES CONVERT").is_dir():
+    if (batch_root / f"{batch} - IGES CONVERT").is_dir():
         done.add(1)
-    dxf = _find_dxf_folder(batch_folder, batch, lambda *_: None)
+    dxf = _find_dxf_folder(work_folder, batch, lambda *_: None)
     if dxf is not None and any(d.is_dir() and d.name.isdigit()
                                for d in dxf.iterdir()):
         done.add(2)
-    if (batch_folder / f"{batch} - MISSING PARTS.txt").exists():
+    if (batch_root / f"{batch} - MISSING PARTS.txt").exists():
         done.add(3)
     return done
 
 
-def _choose_steps(params, batch_folder: Path, batch: str,
+def _choose_steps(params, work_folder: Path, batch_root: Path, batch: str,
                   cancel_event, log) -> list[int] | None:
     """Pop the process picker (all checked by default) and return the chosen
     step numbers in run order; None = user cancelled. Headless fallback: a
@@ -588,7 +588,8 @@ def _choose_steps(params, batch_folder: Path, batch: str,
     console = params.get("console")
     if console is not None and hasattr(console, "request_selection"):
         labels = [STEP_LABELS[i] for i in (1, 2, 3)]
-        done = {STEP_LABELS[i] for i in _detect_done_steps(batch_folder, batch)}
+        done = {STEP_LABELS[i]
+                for i in _detect_done_steps(work_folder, batch_root, batch)}
         selection = console.request_selection(
             labels,
             done,
@@ -623,12 +624,13 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"902 DXF Prep v{VERSION}")
     log("=" * 60)
 
-    batch_folder, pricing, batch, po_rows = _resolve_batch_context(
+    work_folder, batch_root, pricing, batch, po_rows = _resolve_batch_context(
         params, cancel_event, log)
-    if batch_folder is None:
+    if work_folder is None:
         return
 
-    steps = _choose_steps(params, batch_folder, batch, cancel_event, log)
+    steps = _choose_steps(params, work_folder, batch_root, batch,
+                          cancel_event, log)
     if not steps:
         return
     log("Running: " + ",  ".join(STEP_LABELS[s] for s in steps))
@@ -644,18 +646,20 @@ def run(params: dict, progress_callback, cancel_event):
         log(f"--- {STEP_LABELS[step]} ---")
 
         if step == 1:
-            ok = _mode_setup(batch_folder, pricing, batch, po_rows,
+            ok = _mode_setup(work_folder, batch_root, batch, po_rows,
                              log, scaled, cancel_event)
         else:
-            dxf_folder = _find_dxf_folder(batch_folder, batch, log)
+            dxf_folder = _find_dxf_folder(work_folder, batch, log)
             if dxf_folder is None:
                 ok = False
             elif step == 2:
-                log(f"DXF folder: {dxf_folder}")
+                if dxf_folder != work_folder:
+                    log(f"DXF folder: {dxf_folder}")
                 ok = _mode_rename_sort(dxf_folder, log, scaled, cancel_event)
             else:
-                log(f"DXF folder: {dxf_folder}")
-                ok = _mode_recombine_verify(batch_folder, dxf_folder, batch,
+                if dxf_folder != work_folder:
+                    log(f"DXF folder: {dxf_folder}")
+                ok = _mode_recombine_verify(batch_root, dxf_folder, batch,
                                             po_rows, log, scaled, cancel_event)
 
         if cancel_event.is_set():
