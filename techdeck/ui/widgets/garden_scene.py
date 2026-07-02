@@ -140,6 +140,130 @@ AMBIENT_ANIM = {
     "deco_sun", "deco_owl", "deco_monkey", "deco_anthill", "deco_lilypad",
 }
 
+# Items with a hand-authored animation clip — an EXPLICIT, ordered frame list
+# rather than a plain sPet_X_0.png.._N.png run (the source rip interleaves
+# unrelated states, so we cherry-pick the frames that form the clip). The first
+# frame is the item's default/catalog still, so the static and animated forms
+# register identically. Trigger is orthogonal: a clip plays on the ambient timer
+# if the item is in AMBIENT_ANIM (e.g. the lily-pad frog), otherwise it's
+# BUDDY-TRIGGERED — playing while Buddy performs his interaction there (the item
+# is otherwise drawn as its still frame 0). Tuned/previewed with
+# tools/item_anim_placer.py.
+ITEM_ANIM_FRAMES = {
+    # Chest lid swinging open: closed still -> lid rising -> fully open.
+    "deco_chest": [
+        "sPet_ItemTrunk_0.png",
+        "sPet_ItemTrunkOn_6.png",
+        "sPet_ItemTrunkOn_7.png",
+        "sPet_ItemTrunkOn_8.png",
+        "sPet_ItemTrunkOn_9.png",
+    ],
+    # Bathtub filling: empty still -> water frames cycling.
+    "deco_tub": [
+        "sPet_ItemTub_0.png",
+        "sPet_ItemTubOn_0.png",
+        "sPet_ItemTubOn_1.png",
+    ],
+    # TV turning on: dark screen still -> lit screen frames flickering.
+    "deco_tv": [
+        "sPet_ItemTV_0.png",
+        "sPet_ItemTVOn_0.png",
+        "sPet_ItemTVOn_1.png",
+    ],
+    # Stove turning on: cold still -> burner-lit frames flickering.
+    "deco_stove": [
+        "sPet_ItemStove_0.png",
+        "sPet_ItemStoveOn_0.png",
+        "sPet_ItemStoveOn_1.png",
+    ],
+    # Telescope skyward zoom. The On frames live on a BIGGER 64x80 canvas than the
+    # 16x32 still (the zoom balloons up-and-right while the foot stays put), so the
+    # clip is drawn at ITEM_ANIM_PLACEMENT, not the item's PLACEMENT. Played as a
+    # ping-pong (see ITEM_ANIM_PINGPONG) then settling back to the still.
+    "deco_telescope": [
+        "sPet_ItemTelescopeOn_0.png",
+        "sPet_ItemTelescopeOn_1.png",
+        "sPet_ItemTelescopeOn_2.png",
+        "sPet_ItemTelescopeOn_3.png",
+        "sPet_ItemTelescopeOn_4.png",
+    ],
+    # Lily pad frog hopping off: frog sitting -> leap -> ripples settling on the
+    # empty pad. (The item's ambient idle is a separate Lily_0<->Lily_1 bob in
+    # AMBIENT_ANIM; this triggered clip is the frog leaving the water.)
+    "deco_lilypad": [
+        "sPet_ItemLily_0.png",
+        "sPet_ItemLily_1.png",
+        "sPet_ItemLilyHop_3.png",
+        "sPet_ItemLilyHop_4.png",
+        "sPet_ItemLilyHop_5.png",
+        "sPet_ItemLilyHop_6.png",
+        "sPet_ItemLilyHop_7.png",
+        "sPet_ItemLilyHop_8.png",
+        "sPet_ItemLilyHop_9.png",
+    ],
+    # Pink "Lx" computer booting: dark screen still -> lit screen frames.
+    "deco_computer": [
+        "sPet_ItemLx_0.png",
+        "sPet_ItemLxOn_0.png",
+        "sPet_ItemLxOn_1.png",
+    ],
+    # Desk computer booting: dark screen still -> lit screen frames.
+    "deco_desk": [
+        "sPet_ItemDesk_0.png",
+        "sPet_ItemDeskOn_0.png",
+        "sPet_ItemDeskOn_1.png",
+    ],
+    # Fridge opening: closed door still -> open (lit interior).
+    "deco_fridge": [
+        "sPet_ItemFridge_0.png",
+        "sPet_ItemFridgeOn_0.png",
+    ],
+    # Blender running: still -> blades whirring frames.
+    "deco_blender": [
+        "sPet_ItemBlender_0.png",
+        "sPet_ItemBlenderOn_0.png",
+        "sPet_ItemBlenderOn_1.png",
+        "sPet_ItemBlenderOn_2.png",
+        "sPet_ItemBlenderOn_3.png",
+    ],
+}
+
+# Clip-origin override (native top-left) for items whose animation canvas differs
+# from the base sprite, so the moving frames register against the still. Absent
+# items default to the item's PLACEMENT. Dialed in with tools/item_anim_placer.py.
+ITEM_ANIM_PLACEMENT = {
+    "deco_telescope": (320, 0),
+}
+
+# Clips that play forward then back to the first frame (0 1 2 3 4 3 2 1 0) instead
+# of looping, then revert to the still.
+ITEM_ANIM_PINGPONG = {"deco_telescope"}
+
+# Ping-pong clips that DWELL on their last (apex) frame this many seconds before
+# reversing — e.g. the telescope holds the fully-zoomed view a beat before pulling
+# back out. Absent ping-pong clips reverse immediately.
+ITEM_ANIM_PEAK_HOLD_S = {"deco_telescope": 2.5}
+
+# Clips that take over the view — the camera zooms/centres on Buddy while the clip
+# plays (handled at scene render time, not by the placer). Not yet wired in-scene.
+ITEM_ANIM_CENTER = {"deco_telescope"}
+
+# Triggered-clip playback style. HOLD items play frames 0..N-1 once and stay on the
+# last frame (a lid/door that opens and stays open); every other clip LOOPs its
+# "on" frames (1..N-1) while Buddy uses it. Either way it reverts to the still
+# (frame 0) when he leaves.
+ITEM_ANIM_HOLD = {"deco_chest", "deco_fridge"}
+ITEM_ANIM_FRAME_MS = 150       # ms per frame while a Buddy-triggered item clip plays
+
+# Lily-pad frog: it sits idle on the pad and hops off (to the empty pad) at most
+# ONCE per visit, after a long random wait — so the hop is a rare surprise, not a
+# constant loop. Once gone it stays gone until the user navigates away and back
+# (showEvent resets it). Frame layout of the deco_lilypad clip: 0 = sitting still
+# (idle), FROG_HOP_START.. = leap -> ripples -> empty pad (last frame held).
+FROG_HOP_START = 1             # first hop frame (frog leaps from its sitting pose)
+FROG_HOP_MS = 120              # ms/frame for the leap + ripples (snappy)
+FROG_HOP_DELAY_S = (20.0, 60.0)  # random idle wait before the single hop
+
 # Items handled as moving "agents" (their own behaviour, not static placement).
 AGENTS = {"deco_bird", "deco_butterfly"}
 
@@ -188,6 +312,13 @@ BUDDY_INTERACTIONS = {
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
     "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (6.0, 10.0)},
     "deco_telescope":  {"anim": "Telescope", "sound": None,             "dur": (4.0, 7.0)},
+    # Added with their item-clip animations. Chest has no Buddy pose ("Chest" has
+    # no sprite), so Buddy stands idle while the lid opens; the others reuse their
+    # purpose-built poses (BuddyBath/BuddyLX/BuddyBlend).
+    "deco_chest":      {"anim": "Chest",     "sound": None,             "dur": (3.0, 5.0)},
+    "deco_tub":        {"anim": "Bath",      "sound": SOUND_PET_SPLASH, "dur": (4.0, 7.0)},
+    "deco_computer":   {"anim": "LX",        "sound": SOUND_PET_DESK,   "dur": (4.0, 7.0)},
+    "deco_blender":    {"anim": "Blend",     "sound": SOUND_PET_COOK,   "dur": (3.0, 5.0)},
 }
 BUDDY_ACT_FRAME_MS = 200      # ms per frame while performing an interaction
 BUDDY_INTERACT_CHANCE = 0.4   # odds an idle Buddy uses an item instead of strolling
@@ -223,6 +354,7 @@ BUDDY_ACT_PLACEMENT = {
     "deco_picnic": (79, 146),
     # Interior
     "deco_bed": (268, 50),
+    "deco_chest": (226, 27),   # Buddy stands idle right of the chest (no pose); tune me
     "deco_books": (265, 143),
     "deco_desk": (231, 101),
     "deco_fridge": (207, 142),
@@ -389,6 +521,7 @@ class GardenScene(QWidget):
     # ---- lifecycle (only animate while the tab is visible) -------------------
     def showEvent(self, e):
         super().showEvent(e)
+        self._reset_frog()          # navigated back -> frog returns to its pad
         self._anim_timer.start()
         self._agent_timer.start()
         self.update()
@@ -512,6 +645,15 @@ class GardenScene(QWidget):
         else:
             p.drawPixmap(int(bu["x"]), int(bu["y"]), bu["frames"][BUDDY_IDLE])
 
+    def _item_draw(self, rec):
+        """(x, y, pixmap) args for p.drawPixmap: the playing clip frame at the clip
+        origin when a Buddy-triggered clip is active, else the still/ambient frame
+        at the item placement."""
+        ci = rec.get("clip_idx")
+        if ci is not None:
+            return rec["clip_xy"][0], rec["clip_xy"][1], rec["clip"][ci]
+        return rec["x"], rec["y"], rec["frames"][rec["idx"]]
+
     def _compose_native(self) -> QPixmap:
         """Draw every layer at native 384x216 into one buffer."""
         # Transparent base: the island's see-through corners let the tiled
@@ -528,7 +670,7 @@ class GardenScene(QWidget):
         hidden = self._hidden_item()           # item Buddy is currently 'wearing'
         for rec in self._furniture:            # interior — behind the facade
             if rec["id"] != hidden:
-                p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+                p.drawPixmap(*self._item_draw(rec))
         if self._buddy is not None and self._buddy["inside"]:
             self._draw_buddy(p)                # indoors — drawn among the interior
         # The facade and anything mounted on it (satellite, perched bird) lift up
@@ -547,7 +689,7 @@ class GardenScene(QWidget):
                     p.drawPixmap(rec["x"], rec["y"] + facade_dy, rec["frames"][rec["idx"]])
                     p.setOpacity(1.0)
             elif rec["id"] != hidden:
-                p.drawPixmap(rec["x"], rec["y"], rec["frames"][rec["idx"]])
+                p.drawPixmap(*self._item_draw(rec))
         if self._butterfly is not None:        # butterfly on the lawn — behind Buddy
             b = self._butterfly
             p.drawPixmap(int(b["x"]), int(b["y"]), b["frames"][b["idx"]])
@@ -645,6 +787,47 @@ class GardenScene(QWidget):
         pm = self._load(d / sprite)
         return [pm] if pm is not None else []
 
+    def _load_clip(self, names):
+        """Load an explicit, ordered ITEM_ANIM_FRAMES file list to pixmaps."""
+        d = _garden_dir()
+        return [pm for pm in (self._load(d / n) for n in names) if pm is not None]
+
+    def _attach_clip(self, rec, item_id, x, y):
+        """Give a furniture record a Buddy-TRIGGERED animation clip (plays while
+        Buddy uses the item, then reverts to the still). Skipped for ambient items
+        (their clip is the ambient loop) and for deferred center/zoom clips."""
+        if (item_id not in ITEM_ANIM_FRAMES or item_id in AMBIENT_ANIM
+                or item_id in ITEM_ANIM_CENTER):
+            return
+        clip = self._load_clip(ITEM_ANIM_FRAMES[item_id])
+        if len(clip) < 2:
+            return
+        rec["clip"] = clip
+        rec["clip_xy"] = ITEM_ANIM_PLACEMENT.get(item_id, (x, y))
+        rec["clip_mode"] = "hold" if item_id in ITEM_ANIM_HOLD else "loop"
+        rec["clip_idx"] = None        # None = idle (draw the still); int = playing
+        rec["clip_wt"] = 0.0
+
+    def _rec_by_id(self, item_id):
+        for rec in (*self._furniture, *self._furniture_ext):
+            if rec["id"] == item_id:
+                return rec
+        return None
+
+    def _advance_clip(self, rec, dt):
+        """Step a playing item clip by dt. HOLD freezes on the last frame; LOOP
+        cycles the 'on' frames (1..N-1) after the first pass."""
+        rec["clip_wt"] -= dt
+        if rec["clip_wt"] > 0:
+            return
+        rec["clip_wt"] += ITEM_ANIM_FRAME_MS / 1000.0
+        n = len(rec["clip"])
+        nxt = rec["clip_idx"] + 1
+        if rec["clip_mode"] == "hold":
+            rec["clip_idx"] = min(nxt, n - 1)
+        else:
+            rec["clip_idx"] = nxt if nxt < n else 1
+
     def _load_furniture(self):
         """Build the placed-furniture lists (interior + exterior) from the items
         the player owns. Each record is {frames, x, y, anim, idx}."""
@@ -654,6 +837,7 @@ class GardenScene(QWidget):
                  and hasattr(self.settings, "get_equipped_background")
                  and self.settings.get_equipped_background() in NIGHT_BACKGROUNDS)
         interior, exterior = [], []
+        self._frog = None            # the lily-pad rec, driven by its own state machine
         for item_id, (x, y) in PLACEMENT.items():
             if item_id in AGENTS:        # bird/butterfly handled as moving agents
                 continue
@@ -665,7 +849,12 @@ class GardenScene(QWidget):
                 continue
             anim = item_id in AMBIENT_ANIM
             if anim:
-                frames = self._load_frames(c["sprite"])
+                # An ambient item with a hand-authored clip loops THAT (e.g. the
+                # lily-pad frog hop); otherwise its plain _0.._N run.
+                if item_id in ITEM_ANIM_FRAMES:
+                    frames = self._load_clip(ITEM_ANIM_FRAMES[item_id])
+                else:
+                    frames = self._load_frames(c["sprite"])
             else:
                 pm = self._load(_garden_dir() / c["sprite"])
                 frames = [pm] if pm is not None else []
@@ -673,9 +862,55 @@ class GardenScene(QWidget):
                 continue
             rec = {"id": item_id, "frames": frames, "x": x, "y": y,
                    "anim": anim and len(frames) > 1, "idx": 0}
+            self._attach_clip(rec, item_id, x, y)
+            if item_id == "deco_lilypad":
+                self._init_frog(rec)
             (exterior if item_id in EXTERIOR else interior).append(rec)
         self._furniture = interior
         self._furniture_ext = exterior
+
+    def _init_frog(self, rec):
+        """Take the lily pad off the generic ambient loop and onto its own rare-hop
+        state machine (idle -> hop once -> gone; reset on showEvent)."""
+        rec["anim"] = False          # not the generic _anim_tick cycler
+        self._frog = rec
+        self._reset_frog()
+
+    def _reset_frog(self):
+        """Frog back on its pad, idle, with a fresh random wait before it hops.
+        Called when the scene is (re)shown — i.e. the user navigated back."""
+        rec = self._frog
+        if rec is None:
+            return
+        rec["idx"] = 0
+        rec["frog_state"] = "idle"
+        rec["frog_t"] = random.uniform(*FROG_HOP_DELAY_S)
+        rec["frog_wt"] = FROG_HOP_MS / 1000.0
+
+    def _update_frog(self, dt):
+        """Advance the frog. Returns True if its frame changed (needs repaint).
+        Idle: wait out frog_t, then leap. Hop: step to the empty pad and stay
+        'gone' (no loop) until _reset_frog."""
+        rec = self._frog
+        if rec is None or rec["frog_state"] == "gone":
+            return False
+        if rec["frog_state"] == "idle":
+            rec["frog_t"] -= dt
+            if rec["frog_t"] > 0:
+                return False
+            rec["frog_state"] = "hop"
+            rec["idx"] = FROG_HOP_START
+            rec["frog_wt"] = FROG_HOP_MS / 1000.0
+            return True
+        rec["frog_wt"] -= dt          # hopping
+        if rec["frog_wt"] > 0:
+            return False
+        rec["frog_wt"] = FROG_HOP_MS / 1000.0
+        if rec["idx"] < len(rec["frames"]) - 1:
+            rec["idx"] += 1
+        else:
+            rec["frog_state"] = "gone"   # landed on the empty pad; hold it
+        return True
 
     # ---- moving agents (bird + butterfly) ------------------------------------
     def _owned(self, item_id):
@@ -698,7 +933,7 @@ class GardenScene(QWidget):
                                "t": random.uniform(*BUDDY_PAUSE), "inside": False,
                                "path": [], "goal": None, "act_frames": None,
                                "act_idx": 0, "act_wt": 0.0, "act_t": 0.0,
-                               "act_pos": (0, 0)}
+                               "act_pos": (0, 0), "act_rec": None}
                 # Preload the interaction animations (only for items he can own).
                 for iid, spec in BUDDY_INTERACTIONS.items():
                     seq = self._load_frames(f"sPet_Buddy{spec['anim']}_0.png")
@@ -732,6 +967,8 @@ class GardenScene(QWidget):
             moved = True
         if self._buddy is not None:
             self._update_buddy(AGENT_MS / 1000.0)
+            moved = True
+        if self._update_frog(AGENT_MS / 1000.0):
             moved = True
         if moved:
             self.update()
@@ -803,22 +1040,38 @@ class GardenScene(QWidget):
                 return iid
         return None
 
+    def _can_use(self, r):
+        """Buddy can use a placed item if it's an interaction with either a Buddy
+        pose OR an item clip (a clip-only item, e.g. the chest, plays its own
+        animation while Buddy stands idle by it)."""
+        return r["id"] in BUDDY_INTERACTIONS and (r["id"] in self._buddy_acts
+                                                  or r.get("clip"))
+
     def _interactive_ext(self):
-        """Placed yard items Buddy can use (always reachable — he roams the yard)."""
+        """Placed yard items Buddy can use (always reachable — he roams the yard).
+        The garden plot's Harvest only counts once the tree is fully grown — no
+        sense harvesting an empty patch."""
         return [r for r in self._furniture_ext
-                if r["id"] in BUDDY_INTERACTIONS and r["id"] in self._buddy_acts]
+                if self._can_use(r)
+                and (r["id"] != "deco_gardenplot"
+                     or self._tree_stage >= TREE_STAGE_FULL)]
 
     def _interactive_int(self):
         """Placed indoor items Buddy can use (only while the house is open)."""
-        return [r for r in self._furniture
-                if r["id"] in BUDDY_INTERACTIONS and r["id"] in self._buddy_acts]
+        return [r for r in self._furniture if self._can_use(r)]
+
+    def _act_sprite0(self, rec):
+        """First frame of Buddy's interaction pose for an item, or his idle frame
+        for a clip-only item with no pose (the chest)."""
+        seq = self._buddy_acts.get(rec["id"])
+        return seq[0] if seq else self._buddy["frames"][BUDDY_IDLE]
 
     def _act_pos(self, rec):
         """Native top-left where the interaction sprite is drawn: the tuned override
         if any, else centred over the item with its feet at the item's base."""
         if rec["id"] in BUDDY_ACT_PLACEMENT:
             return BUDDY_ACT_PLACEMENT[rec["id"]]
-        af = self._buddy_acts[rec["id"]][0]
+        af = self._act_sprite0(rec)
         item = rec["frames"][0]
         return (rec["x"] + item.width() // 2 - af.width() // 2,
                 rec["y"] + item.height() - af.height())
@@ -826,7 +1079,7 @@ class GardenScene(QWidget):
     def _stand_pos(self, rec):
         """Where Buddy's feet end up to use an item (derived from the act sprite pos)."""
         ax, ay = self._act_pos(rec)
-        af = self._buddy_acts[rec["id"]][0]
+        af = self._act_sprite0(rec)
         bw, bh = self._buddy_size()
         return float(ax + af.width() // 2 - bw // 2), float(ay + af.height() - bh)
 
@@ -899,6 +1152,11 @@ class GardenScene(QWidget):
         bu["act_frames"] = self._buddy_acts.get(iid) or [bu["frames"][BUDDY_IDLE]]
         bu["act_idx"], bu["act_wt"] = 0, BUDDY_ACT_FRAME_MS / 1000.0
         bu["act_t"] = random.uniform(*spec["dur"])
+        # If the item has a triggered clip, start it playing from frame 0.
+        rec = self._rec_by_id(iid)
+        bu["act_rec"] = rec if (rec is not None and rec.get("clip")) else None
+        if bu["act_rec"] is not None:
+            rec["clip_idx"], rec["clip_wt"] = 0, ITEM_ANIM_FRAME_MS / 1000.0
         if spec.get("sound"):
             get_audio_manager().play(spec["sound"])
 
@@ -943,6 +1201,8 @@ class GardenScene(QWidget):
             if bu["act_wt"] <= 0 and bu["act_frames"]:
                 bu["act_idx"] = (bu["act_idx"] + 1) % len(bu["act_frames"])
                 bu["act_wt"] = BUDDY_ACT_FRAME_MS / 1000.0
+            if bu.get("act_rec") is not None:    # animate the item alongside Buddy
+                self._advance_clip(bu["act_rec"], dt)
             if bu["act_t"] <= 0:
                 self._buddy_act_done()
             return
@@ -1041,6 +1301,10 @@ class GardenScene(QWidget):
         _buddy_decide choose the next thing, so he doesn't march out and back in
         between two indoor tasks."""
         bu = self._buddy
+        rec = bu.get("act_rec")              # let the item settle back to its still
+        if rec is not None:
+            rec["clip_idx"] = None
+        bu["act_rec"] = None
         bu["goal"] = None
         bu["state"] = "idle"
         bu["t"] = random.uniform(*BUDDY_PAUSE)

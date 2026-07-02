@@ -39,8 +39,17 @@ from techdeck.ui.pages.emporium_page import CATALOG    # noqa: E402
 _CAT = {c["id"]: c for c in CATALOG}
 
 
-def _act_sprite(item_id):
-    return f"sPet_Buddy{BUDDY_INTERACTIONS[item_id]['anim']}_0.png"
+BUDDY_IDLE_SPRITE = "sPet_Buddy_4.png"   # front-facing idle (BUDDY_IDLE) fallback
+
+
+def _act_pixmap(item_id):
+    """Buddy's interaction pose sprite for an item, or his idle frame for a
+    clip-only item with no pose (e.g. the chest, anim 'Chest' has no sprite) —
+    mirrors how the scene falls back in _act_sprite0."""
+    pm = QPixmap(str(GARDEN / f"sPet_Buddy{BUDDY_INTERACTIONS[item_id]['anim']}_0.png"))
+    if pm.isNull():
+        pm = QPixmap(str(GARDEN / BUDDY_IDLE_SPRITE))
+    return pm
 
 
 def _default_pos(item_id, act_pm):
@@ -58,7 +67,7 @@ class Act(QLabel):
         self.placer = placer
         self.item_id = item_id
         self.interior = item_id not in EXTERIOR
-        pm = QPixmap(str(GARDEN / _act_sprite(item_id)))
+        pm = _act_pixmap(item_id)
         self.nw, self.nh = pm.width(), pm.height()
         nx, ny = BUDDY_ACT_PLACEMENT.get(item_id) or _default_pos(item_id, pm)
         self.nx, self.ny = nx, ny
