@@ -1287,7 +1287,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         selection = console.request_nest_selection(batch_number, all_nests, existing_nests)
         if selection is None:
             log("Nest selection cancelled -- nothing was run.")
-            progress_callback(100)
+            cancel_event.set()  # user cancel: don't count as a successful (ticket-earning) run
             return
         chosen = set(selection)
         nest_numbers = [n for n in all_nests if n in chosen]
@@ -1302,7 +1302,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     if not nest_numbers:
         log("No nests selected -- nothing to do.")
-        progress_callback(100)
+        cancel_event.set()  # nothing ran: don't count as a successful (ticket-earning) run
         return
 
     log(f"Running nests : {', '.join(nest_numbers)}")

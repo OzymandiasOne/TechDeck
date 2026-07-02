@@ -450,6 +450,50 @@ class ConsoleWidget(QWidget, ThemeAware):
         else:
             self._nest_sel_result = None
 
+    def request_selection(self, items, done_items=None, **kwargs):
+        """Show a generic "pick which items to run" dialog and BLOCK until submit.
+
+        Same worker-thread contract as request_nest_selection (the 911 picker is
+        a specialization of this). `items` is the list to display; `done_items`
+        are flagged as already done. `kwargs` are passed to SelectionDialog
+        (window_title, header, root_label, noun, done_label, subhead_prefix,
+        prompt_note, ...). Returns the chosen items, or None if cancelled.
+        """
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_selection() cannot be called from main GUI thread"
+            )
+
+        self._sel_args = (list(items), set(done_items or []), dict(kwargs))
+        self._sel_result = None
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_selection_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._sel_result
+
+    @Slot()
+    def _selection_gui(self):
+        """GUI-thread half of request_selection: run the modal dialog."""
+        from techdeck.ui.dialogs.selection_dialog import SelectionDialog
+
+        items, done_items, kwargs = self._sel_args
+        dlg = SelectionDialog(items, done_items, parent=self.window(), **kwargs)
+        if dlg.exec():
+            self._sel_result = dlg.selected()
+        else:
+            self._sel_result = None
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""

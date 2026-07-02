@@ -75,6 +75,19 @@ def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
     return None
 
 
+def dypn_of(folder_name: str) -> Optional[str]:
+    """DYPN = the order-folder name after the FIRST dash.
+
+    e.g. 'BK531539-R7211361-H3' -> 'r7211361-h3'. This is the same key used to
+    decide a folder is a repeat (the part number before the first dash changes
+    between batches; the DYPN suffix is what's shared). None if there's no dash.
+    Returned lower-cased for case-insensitive matching.
+    """
+    if "-" in folder_name:
+        return folder_name.split("-", 1)[1].strip().lower()
+    return None
+
+
 def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     """
     Main plugin execution function.
@@ -215,16 +228,14 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     new_po_col = po_columns[new_po_num]
     log(f"Using column '{new_po_col}'")
     
-    # Setup destination folders
+    # Setup destination folders. REPEAT BATCHES is created later, only after the
+    # user has chosen which repeats to pull (so a cancelled run leaves no folder).
     new_po_folder = base_path / actual_batch_name
     new_po_folder.mkdir(exist_ok=True)
     log(f"Created: {new_po_folder.name}")
-    
+
     repeat_batch_folder = new_po_folder / "REPEAT BATCHES"
-    repeat_batch_folder.mkdir(exist_ok=True)
-    log(f"Created: REPEAT BATCHES")
-    log("")
-    
+
     progress_callback(25)
     
     # Get unique orders
@@ -263,7 +274,53 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log("No repeat orders! All new!")
         progress_callback(100)
         return
-    
+
+    # ------------------------------------------------------------------ #
+    # Let the user choose which repeats to pull (911-Setup-style dialog).
+    # Orders whose folder already sits in REPEAT BATCHES are flagged
+    # "already pulled" so a re-run reads differently from a fresh run;
+    # re-running overwrites them. Selection happens up front -- nothing
+    # below copies until the user submits the dialog.
+    # ------------------------------------------------------------------ #
+    existing_repeat_dirs = []
+    if repeat_batch_folder.exists():
+        existing_repeat_dirs = [d.name for d in repeat_batch_folder.iterdir() if d.is_dir()]
+    done_orders = {
+        order for order in orders_to_copy
+        if any(order.lower() in name.lower() for name in existing_repeat_dirs)
+    }
+    if done_orders:
+        log(f"{len(done_orders)} repeat(s) already pulled in a prior run")
+
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_selection"):
+        ordered_orders = sorted(orders_to_copy.keys(), key=str.lower)
+        selection = console.request_selection(
+            ordered_orders,
+            done_orders,
+            window_title=f"922 Batch Repeater - {actual_batch_name}",
+            header="Select Repeats to Pull",
+            root_label=f"{actual_batch_name}  (all repeats)",
+            noun="repeat order",
+            done_label="already pulled",
+            subhead_prefix=f"{actual_batch_name} - ",
+            prompt_note="Check the repeats you want to pull.",
+        )
+        if selection is None:
+            log("Repeat selection cancelled -- nothing was pulled.")
+            cancel_event.set()  # user cancel: don't count as a successful (ticket-earning) run
+            return
+        chosen = set(selection)
+        orders_to_copy = {o: s for o, s in orders_to_copy.items() if o in chosen}
+        if not orders_to_copy:
+            log("No repeats selected -- nothing to do.")
+            cancel_event.set()
+            return
+        log(f"Pulling {len(orders_to_copy)} repeat(s)")
+
+    # Create the destination only now that we know there's something to pull.
+    repeat_batch_folder.mkdir(exist_ok=True)
+    log("Created: REPEAT BATCHES")
     log("")
     log("Copying order folders...")
     
@@ -271,6 +328,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     copied_count = 0
     not_found_count = 0
     error_count = 0
+    copied_repeats: list = []  # destination folders inside REPEAT BATCHES (for DYPN distribution below)
     
     total_orders = len(orders_to_copy)
     base_progress = 35
@@ -318,19 +376,92 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             shutil.copytree(found_folder, destination_folder, dirs_exist_ok=True)
             log(f"Copied {order} from Batch {source_po}")
             copied_count += 1
+            copied_repeats.append(destination_folder)
         except Exception as e:
             log(f"ERROR: Failed to copy {order}: {e}")
             error_count += 1
     
+    progress_callback(90)
+
+    # === Distribute CAD prints + binders into matching root order folders ===
+    # Each repeat shares a DYPN (folder name after the first dash) with one or
+    # more brand-new order folders sitting at the batch root. Copy the repeat's
+    # CAD-AND-SHOP-PRINTS folder and Binder*.pdf into EVERY root folder that
+    # shares its DYPN (e.g. repeat 'BK531539-R7211361-H3' feeds root folder
+    # 'BL416682-R7211361-H3').
+    distributed_count = 0
+    if copied_repeats and not cancel_event.is_set():
+        log("")
+        log("Distributing CAD prints + binders to matching root folders...")
+
+        # Map DYPN -> [root order folders] (direct children of the batch root,
+        # excluding REPEAT BATCHES and the batch Documentation folder).
+        root_by_dypn: Dict[str, list] = {}
+        try:
+            for entry in os.listdir(new_po_folder):
+                entry_path = new_po_folder / entry
+                if not entry_path.is_dir():
+                    continue
+                if entry == "REPEAT BATCHES" or "documentation" in entry.lower():
+                    continue
+                dypn = dypn_of(entry)
+                if dypn:
+                    root_by_dypn.setdefault(dypn, []).append(entry_path)
+        except (FileNotFoundError, PermissionError) as e:
+            log(f"WARNING: Could not scan batch root for matches: {e}")
+
+        for i, repeat_folder in enumerate(copied_repeats):
+            if cancel_event.is_set():
+                log("WARNING: Cancelled by user")
+                break
+
+            dypn = dypn_of(repeat_folder.name)
+            matches = root_by_dypn.get(dypn, []) if dypn else []
+            if not matches:
+                continue
+
+            # Locate the CAD folder and binder PDF inside the copied repeat.
+            cad_src = None
+            binder_src = None
+            try:
+                for child in repeat_folder.iterdir():
+                    if child.is_dir() and "cad" in child.name.lower():
+                        cad_src = child
+                    elif (child.is_file()
+                          and child.name.lower().startswith("binder")
+                          and child.suffix.lower() == ".pdf"):
+                        binder_src = child
+            except (FileNotFoundError, PermissionError) as e:
+                log(f"ERROR: Could not read {repeat_folder.name}: {e}")
+                error_count += 1
+                continue
+
+            if not cad_src and not binder_src:
+                continue
+
+            for dest_root in matches:
+                try:
+                    if cad_src:
+                        shutil.copytree(cad_src, dest_root / cad_src.name, dirs_exist_ok=True)
+                    if binder_src:
+                        sdk.ensure_local(binder_src, log)  # Hard Rule 13
+                        shutil.copy2(binder_src, dest_root / binder_src.name)
+                    log(f"  {repeat_folder.name} -> {dest_root.name}")
+                    distributed_count += 1
+                except Exception as e:
+                    log(f"ERROR: Failed {repeat_folder.name} -> {dest_root.name}: {e}")
+                    error_count += 1
+
     progress_callback(95)
-    
+
     # Summary
     log("")
     log("=" * 50)
     log("COPY SUMMARY")
     log("=" * 50)
     log(f"Successfully copied: {copied_count}")
-    
+    log(f"CAD/binder distributed to root folders: {distributed_count}")
+
     if not_found_count > 0:
         log(f"Not found: {not_found_count}")
     
