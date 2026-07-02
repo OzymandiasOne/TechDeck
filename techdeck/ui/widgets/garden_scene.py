@@ -354,13 +354,16 @@ BUDDY_ACT_PLACEMENT = {
     "deco_picnic": (79, 146),
     # Interior
     "deco_bed": (268, 50),
-    "deco_chest": (226, 27),   # Buddy stands idle right of the chest (no pose); tune me
+    "deco_blender": (232, 144),
     "deco_books": (265, 143),
+    "deco_chest": (205, 20),   # Buddy stands idle by the chest (anim has no pose sprite)
+    "deco_computer": (276, 107),
     "deco_desk": (231, 101),
-    "deco_fridge": (207, 142),
+    "deco_fridge": (209, 146),
     "deco_guitar": (308, 106),
     "deco_stove": (231, 143),
     "deco_telescope": (305, 65),
+    "deco_tub": (231, 51),
     "deco_tv": (288, 104),
 }
 
