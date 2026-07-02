@@ -659,9 +659,15 @@ class SettingsManager:
 
     # ========== Tickets / Woogy's Emporium ==========
 
+    # Fresh profiles (no "tickets" key yet) start with enough for exactly one
+    # toy at Woogy's Emporium (cheapest toy = Beyblade, 60) with a little left
+    # over. Existing balances are untouched - the default only applies while
+    # the key is absent; the first earn/spend persists a real value.
+    STARTING_TICKETS = 75
+
     def get_tickets(self) -> int:
         """Tickets the user has earned (spent at Woogy's Emporium)."""
-        return int(self.data.get("settings", {}).get("tickets", 0))
+        return int(self.data.get("settings", {}).get("tickets", self.STARTING_TICKETS))
 
     def add_tickets(self, amount: int) -> int:
         """Award tickets; returns the new balance."""

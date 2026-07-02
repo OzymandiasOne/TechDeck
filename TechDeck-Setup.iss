@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.3 - Fix: feedback workbook discovery across OneDrive sync layouts; console polish
+; Version 0.8.6.4 - Carrots & More Carrots: ticket economy + Emporium + My House/Garden; new plugins (922 Setup, QA Gemba Analyzer, 911 SSPO Invoicing Prep, 902 DXF Prep); folder pickers
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.3"
+#define MyAppVersion "0.8.6.4"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.3"  # Fixes: feedback workbook found across all OneDrive sync layouts; 911 Setup warns loudly on missing/unsynced forecast data + header-driven forecast lookup; console polish (moth musings, 4-arm fidget spinner); debug report now captures full plugin output
+APP_VERSION = "0.8.6.4"  # Carrots & More Carrots: ticket economy + Woogy's Emporium + My House/Garden + Achievements; new plugins 922 Setup, QA Gemba Analyzer, 911 SSPO Invoicing Prep, 902 DXF Prep (new 902 family); native folder pickers; Professional theme; smaller build
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

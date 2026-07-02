@@ -1,8 +1,51 @@
-# TechDeck v0.8.6.3 - Feedback Submission Fix
+# TechDeck v0.8.6.4 - Carrots & More Carrots
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.4
+
+**Four new apps**
+- **902 DXF Prep** - first app in the new 902 family: pick the folder holding a batch's
+  part files and run any/all of three processes (checkbox picker, all selected by
+  default): builds the IGES CONVERT folder + a formatted QTY spreadsheet from the PO,
+  cleans DXF filenames and sorts them into AutoCAD-sized folders of 25, then recombines
+  and reconciles everything against the PO (missing parts listed in a text report,
+  extra files moved to an EXTRA folder, quantity prefixes on multi-qty parts).
+- **922 Setup** - reads a batch's order folders and creates one Planner card per order
+  in the D922 PIPELINE plan automatically.
+- **QA Gemba Analyzer** - first app in the new QA family: log rework events to a shared
+  workbook and explore them in a chart dashboard (pie/column/stacked, time windows,
+  group-by toggles), with a one-click printable Gemba Pack PDF.
+- **911 SSPO Invoicing Prep** - splits an SSPO pricing sheet into one workbook per
+  Batch + Nest, each with a generated ASA Invoice Supplement tab (PO / PO Line filled
+  from the Working Forecast List automatically).
+
+**Tickets & Woogy's Emporium** - Successful runs and feedback submissions now earn
+tickets, spendable at Woogy's Emporium (My Account > Ticket Counter): fidget-spinner
+skins, furniture and decorations, backgrounds, a Friend, and a purchasable mini-game.
+Everyone starts with 75 tickets - enough for a first toy. A new Achievements tab awards
+bonus tickets for milestones.
+
+**My House (Garden)** - A new My Account tab: click the house to reveal the interior,
+furnish it with Emporium purchases (indoor + yard items), watch your tree grow with app
+usage, and meet Buddy - a purchasable pig who wanders the yard and uses your stuff.
+
+**Folder picking, not path pasting** - Apps that need a per-run folder (902 DXF Prep,
+911 Runtime Estimator) now open the standard Windows folder dialog instead of asking
+you to paste a path into the console.
+
+**Professional theme** - A clean light look that also hides the games and playful extras;
+made for running TechDeck in front of clients.
+
+**Fixes & polish** - 911 Runtime Estimator files structural shapes (tube/angle/bar) onto
+the Non-Plates sheet correctly; batch numbers asked once and shared across same-family
+apps in a multi-run; run-completion sounds for window apps fire at the real finish;
+LST Organizer / Pallet Stamper no longer count system folders; stuck run-spinner fixed;
+smaller installer (unused components trimmed).
 
 ---
 
