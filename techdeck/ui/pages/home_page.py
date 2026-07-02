@@ -44,8 +44,8 @@ _FAMILY_BADGE_COLORS = {"911": "#3B82F6", "922": "#F59E0B", "QA": "#10B981"}
 
 
 def _strip_family_prefix(name: str, family: str) -> str:
-    """Drop a leading "911 "/"922 " from a tile name (family shows as a badge)."""
-    if family in ("911", "922") and name.startswith(family + " "):
+    """Drop a leading "911 "/"922 "/"QA " from a tile name (family shows as a badge)."""
+    if family in _FAMILY_BADGE_COLORS and name.startswith(family + " "):
         return name[len(family) + 1:]
     return name
 

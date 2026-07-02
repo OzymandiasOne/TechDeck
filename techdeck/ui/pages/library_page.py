@@ -789,12 +789,12 @@ class LibraryPage(QWidget, ThemeAware):
         _family_rank = {"911": 0, "922": 1, "QA": 2, "other": 3}
 
         def _name_no_family(name: str) -> str:
-            # Drop a leading family number ("911 ", "922 ") so Alphabetical sorts
-            # by the descriptive part of the name. Without this it just mirrors
+            # Drop a leading family prefix ("911 ", "922 ", "qa ") so Alphabetical
+            # sorts by the descriptive part of the name. Without this it just mirrors
             # the By-Family grouping (names are family-prefixed), so the two modes
-            # would look identical.
+            # would look identical. (Names arrive lowercased from _sort_key.)
             head, _, rest = name.partition(" ")
-            return rest if head.isdigit() and rest else name
+            return rest if rest and (head.isdigit() or head == "qa") else name
 
         def _sort_key(tid: str):
             p = self.plugin_loader.get_plugin(tid)

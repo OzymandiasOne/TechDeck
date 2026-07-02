@@ -26,7 +26,7 @@ FAMILY_911 = "911"
 FAMILY_922 = "922"
 FAMILY_OTHER = "other"
 FAMILY_GAMES = "Games"   # purchasable mini-games (Woogy's Emporium)
-FAMILY_QA = "QA"         # quality-assurance tools (Gemba Analysis, etc.)
+FAMILY_QA = "QA"         # quality-assurance tools (QA Gemba Analyzer, etc.)
 VALID_FAMILIES = {FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES, FAMILY_QA}
 
 

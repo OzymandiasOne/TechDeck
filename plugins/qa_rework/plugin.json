@@ -1,6 +1,6 @@
 {
   "id": "qa_rework",
-  "name": "Gemba Analysis",
+  "name": "QA Gemba Analyzer",
   "description": "Log QA rework events to a shared workbook and chart YTD / last-week performance for Gemba meetings (printable PDF).",
   "version": "1.0.0",
   "author": "Anthony Sieben",

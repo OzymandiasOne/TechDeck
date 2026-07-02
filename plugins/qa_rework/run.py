@@ -1,6 +1,6 @@
 """
-Gemba Analysis  (plugin id: qa_rework, family: QA)
-==================================================
+QA Gemba Analyzer  (plugin id: qa_rework, family: QA)
+=====================================================
 A GUI plugin for the QA team. Two jobs:
 
   1. Log Entry  - a quick form that appends one rework event as a row to a single
@@ -1261,7 +1261,7 @@ def run(params, progress_callback, cancel_event):
     except Exception as e:
         log(f"Seeding skipped: {e}")
 
-    _window = PluginWindow("qa_rework", "Gemba Analysis")
+    _window = PluginWindow("qa_rework", "Gemba Analyzer")
     content = QAReworkContent(data_path, log)
     _window.set_content(content)
     _window.resize(1120, 780)
