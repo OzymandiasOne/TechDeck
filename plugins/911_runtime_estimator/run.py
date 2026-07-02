@@ -37,7 +37,7 @@ CALCULATION (per batch-list row; thickness drives the band):
 The bevel test is a CONTAINS check (real batch lists use compound scopes like
 'CUT/BEVEL'), case-insensitive.
 
-Prompts via console for the ROOT directory only (no pre-configured settings
+Prompts for the ROOT via the native folder dialog only (no pre-configured settings
 required). Optional 'output_dir' setting picks where the workbook is saved;
 blank saves it inside ROOT.
 """
@@ -69,7 +69,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -741,10 +741,22 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"911 Runtime Estimator v{VERSION}")
     log("=" * 60)
 
-    raw = sdk.request_text(params, "Paste the ROOT directory of order folders:")
+    start_dir = ""
+    try:
+        roots = sdk.pilot_program_roots()
+        if roots:
+            start_dir = str(roots[0])
+    except Exception:
+        pass
+    raw = sdk.request_directory(params, "Select the ROOT folder of order folders",
+                                start_dir)
     if cancel_event.is_set():
         return
-    root = Path((raw or "").strip().strip('"'))
+    if not raw:
+        log("Folder selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+        return
+    root = Path(raw.strip().strip('"'))
     if not root.exists() or not root.is_dir():
         log(f"ERROR: ROOT directory not found: {root}")
         return
