@@ -3,8 +3,11 @@
 
 Automates the SharePoint-side steps of the "Batch DXF Cleanup and Preparation
 for Boost 902-Part Files" SOP. The SigmaNest VM import/export and the AutoCAD
-Layer-12 macro stay manual; this plugin covers the bookends as three modes the
-user picks at runtime:
+Layer-12 macro stay manual; this plugin covers the bookends as three processes
+picked in a 911-Setup-style checkbox dialog (root "All processes" toggles the
+set; everything is selected by default, so an out-of-the-gate run walks the
+whole workflow back-to-back). Already-done processes are flagged in the picker;
+all are idempotent. Selected processes run in order, stopping if one fails:
 
   1. SETUP            - create "BATCH# - IGES CONVERT", copy the .igs files
                         into it, and build a standalone "BATCH# QTY.xlsx"
@@ -20,9 +23,10 @@ user picks at runtime:
                         extra files -> EXTRA subfolder), and prefix "(Nx) "
                         onto filenames of parts ordered more than once.
 
-Runtime inputs: the step number and the batch folder path (pasted). The PO
-spreadsheet (the *PRICING* workbook with the PO-#### sheet) is discovered
-inside the batch folder; the batch number is derived from the PO sheet name.
+Runtime inputs: the batch folder path (pasted), then the process picker
+(headless fallback: a text prompt, blank = all). The PO spreadsheet (the
+*PRICING* workbook with the PO-#### sheet) is discovered inside the batch
+folder; the batch number is derived from the PO sheet name.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
@@ -538,8 +542,66 @@ def _mode_recombine_verify(batch_folder: Path, dxf_folder: Path, batch: str,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Entry point
+# Process selection (911-Setup-style checkbox dialog) + entry point
 # ─────────────────────────────────────────────────────────────────────────────
+
+STEP_LABELS = {
+    1: "1. Setup  -  IGES CONVERT folder + QTY sheet",
+    2: "2. Rename + Sort  -  clean DXF names, split into folders of 25",
+    3: "3. Recombine + Verify  -  reconcile vs PO, EXTRA folder + missing list",
+}
+
+
+def _detect_done_steps(batch_folder: Path, batch: str) -> set[int]:
+    """Which steps show an "already done" flag in the picker. Heuristic only -
+    every step is idempotent, so re-running a flagged one is always safe."""
+    done: set[int] = set()
+    if (batch_folder / f"{batch} - IGES CONVERT").is_dir():
+        done.add(1)
+    dxf = _find_dxf_folder(batch_folder, batch, lambda *_: None)
+    if dxf is not None and any(d.is_dir() and d.name.isdigit()
+                               for d in dxf.iterdir()):
+        done.add(2)
+    if (batch_folder / f"{batch} - MISSING PARTS.txt").exists():
+        done.add(3)
+    return done
+
+
+def _choose_steps(params, batch_folder: Path, batch: str,
+                  cancel_event, log) -> list[int] | None:
+    """Pop the process picker (all checked by default) and return the chosen
+    step numbers in run order; None = user cancelled. Headless fallback: a
+    text prompt where blank means all."""
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_selection"):
+        labels = [STEP_LABELS[i] for i in (1, 2, 3)]
+        done = {STEP_LABELS[i] for i in _detect_done_steps(batch_folder, batch)}
+        selection = console.request_selection(
+            labels,
+            done,
+            window_title=f"902 DXF Prep - Batch {batch}",
+            header="Select Processes to Run",
+            root_label="All processes",
+            noun="process",
+            done_label="already done",
+            overwrite_note="all steps are safe to re-run",
+            prompt_note="Selected processes run in order, no breaks.",
+            subhead_prefix=f"Batch {batch} - ",
+            run_button_text="Run Selected",
+        )
+        if selection is None:
+            log("Process selection cancelled - nothing was run.")
+            cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+            return None
+        return sorted(int(label[0]) for label in selection)
+
+    raw = sdk.request_text(
+        params, "Steps to run (e.g. '1 2 3' or '2 3'; blank = all):").strip()
+    if cancel_event.is_set():
+        return None
+    picks = sorted({int(tok) for tok in re.findall(r"[123]", raw)}) or [1, 2, 3]
+    return picks
+
 
 def run(params: dict, progress_callback, cancel_event):
     log = params.get("log", print)
@@ -548,41 +610,52 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"902 DXF Prep v{VERSION}")
     log("=" * 60)
 
-    choice = sdk.request_text(
-        params,
-        "Which step?  1 = Setup (IGES CONVERT + QTY sheet)   "
-        "2 = Rename + Sort (after DXF export)   "
-        "3 = Recombine + Verify (reconcile vs PO)",
-    ).strip()
-    if cancel_event.is_set():
-        return
-    if choice not in ("1", "2", "3"):
-        log(f"ERROR: expected 1, 2 or 3 (got {choice!r}).")
-        return
-
     batch_folder, pricing, batch, po_rows = _resolve_batch_context(
         params, cancel_event, log)
     if batch_folder is None:
         return
-    progress_callback(5)
 
-    if choice == "1":
-        ok = _mode_setup(batch_folder, pricing, batch, po_rows,
-                         log, progress_callback, cancel_event)
-    else:
-        dxf_folder = _find_dxf_folder(batch_folder, batch, log)
-        if dxf_folder is None:
-            return
-        log(f"DXF folder: {dxf_folder}")
-        if choice == "2":
-            ok = _mode_rename_sort(dxf_folder, log, progress_callback, cancel_event)
+    steps = _choose_steps(params, batch_folder, batch, cancel_event, log)
+    if not steps:
+        return
+    log("Running: " + ",  ".join(STEP_LABELS[s] for s in steps))
+    progress_callback(3)
+
+    # Each selected step gets an equal slice of the progress bar; the step
+    # implementations report 0-100 internally and get rescaled here.
+    span = 95 // len(steps)
+    for n, step in enumerate(steps):
+        base = 3 + n * span
+        scaled = lambda p, b=base: progress_callback(b + p * span // 100)
+        log("")
+        log(f"--- {STEP_LABELS[step]} ---")
+
+        if step == 1:
+            ok = _mode_setup(batch_folder, pricing, batch, po_rows,
+                             log, scaled, cancel_event)
         else:
-            ok = _mode_recombine_verify(batch_folder, dxf_folder, batch, po_rows,
-                                        log, progress_callback, cancel_event)
+            dxf_folder = _find_dxf_folder(batch_folder, batch, log)
+            if dxf_folder is None:
+                ok = False
+            elif step == 2:
+                log(f"DXF folder: {dxf_folder}")
+                ok = _mode_rename_sort(dxf_folder, log, scaled, cancel_event)
+            else:
+                log(f"DXF folder: {dxf_folder}")
+                ok = _mode_recombine_verify(batch_folder, dxf_folder, batch,
+                                            po_rows, log, scaled, cancel_event)
 
-    if ok:
-        progress_callback(100)
-        log("\nDONE.")
+        if cancel_event.is_set():
+            return
+        if not ok:
+            remaining = [s for s in steps if s > step]
+            if remaining:
+                log(f"Stopping - step {step} did not complete, skipping "
+                    f"step(s) {', '.join(map(str, remaining))}.")
+            return
+
+    progress_callback(100)
+    log("\nDONE.")
 
 
 if __name__ == "__main__":
