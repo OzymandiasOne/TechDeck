@@ -1823,14 +1823,14 @@ _MR_BEANS_GRID = [
     "................................",
     "............ooooooooo...........",
     "..........oobbbbbbbbboo.........",
-    ".........owwwhbbbbbwwwbo........",
-    "........ohwkkhbbbbbkkwbbo.......",
-    ".......ohhwkkhbbbbbkkwbbbo......",
-    "......obbhwwwbbbbbbwwwbbbbo.....",
-    "......obbbbbbbbbbbbbbbbbbbo.....",
-    ".....obbbbbbbbbbbbbbbbbbbbbo....",
-    ".....obbbbbbbbbbbbbbbbbbbbbo....",
-    ".....obbbbbbbbbbbbbbbbbbbbbo....",
+    ".k.k.k...owwwhbbbbbwwwbo........",
+    "kwkwkwk.ohwkkhbbbbbkkwbbo.......",
+    "kwkwkwkohhwkkhbbbbbkkwbbbo......",
+    "kwwwwwkbbhwwwbbbbbbwwwbbbbo.....",
+    "kwwwwwkbbbbbbbbbbbbbbbbbbbo.....",
+    "kwwwwwkbbbbbbbbbbbbbbbbbbbbo....",
+    ".kwwwkbbbbbbbbbbbbbbbbbbbbbo....",
+    "..kkkobbbbbbbbbbbbbbbbbbbbbo....",
     ".....obbbbbbobbbbbbbobbbbbbo....",
     "......obbbbbbooooooobbbbbdo.....",
     "......obbbbbbbbbbbbbbbbbddo.....",
@@ -1844,8 +1844,6 @@ _MR_BEANS_GRID = [
     "................................",
 ]
 _MR_BEANS_TONES = {"b": "#D2622A", "d": "#A8431C", "g": "#3C3C48", "h": "#EE9257", "k": "#16161C", "o": "#5C2410", "r": "#C03434", "w": "#FFF4E6"}
-
-
 SETS = {
     "TechDeck pack pixel": {
         "mr_beans": (_MR_BEANS_GRID, _MR_BEANS_TONES),
