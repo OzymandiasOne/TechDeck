@@ -19,7 +19,10 @@ from pathlib import Path
 from techdeck.ui.theme import get_current_palette
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.plugin_icon import plugin_icon_pixmap
-from techdeck.ui.pages.home_page import TILE_W, TILE_H, TILE_ICON, TILE_ICON_BOX
+from techdeck.ui.pages.home_page import (
+    TILE_W, TILE_H, TILE_ICON, TILE_ICON_BOX,
+    _FAMILY_BADGE_COLORS, _strip_family_prefix,
+)
 
 
 class FlowLayout(QLayout):
@@ -287,7 +290,12 @@ class LibraryPluginCard(QFrame, ThemeAware):
         # without this the box picks up a dark fill that clashes when selected.
         self.icon_label.setStyleSheet("background: transparent;")
 
-        self.name_label = QLabel(getattr(plugin, "name", tile_id))
+        # Name without the family prefix — the family shows as a corner badge,
+        # matching Home ("911 Setup" → badge "911" + name "Setup"). The info
+        # popup keeps the full name for context.
+        self._family = getattr(plugin, "family", "other")
+        self.name_label = QLabel(
+            _strip_family_prefix(getattr(plugin, "name", tile_id), self._family))
         self.name_label.setWordWrap(True)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         name_font = QFont()
@@ -298,6 +306,15 @@ class LibraryPluginCard(QFrame, ThemeAware):
 
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
+
+        # Family badge in the top-left corner (matches Home; hidden for
+        # "other"). Absolutely-positioned child; the info "i" button owns the
+        # top-right corner, so the two never collide.
+        self.family_badge = QLabel(
+            self._family if self._family in _FAMILY_BADGE_COLORS else "", self)
+        self.family_badge.move(7, 5)
+        self.family_badge.setVisible(bool(self.family_badge.text()))
+        self._style_family_badge()
 
         # Corner "i" button → opens a window with the full description. It's a
         # child positioned absolutely in the top-right; because QPushButton
@@ -322,6 +339,20 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self._update_card_style()
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, TILE_ICON))
+        self._style_family_badge()
+
+    def _style_family_badge(self):
+        """Same look as Home's badge: text-only, colored with the theme accent.
+        `_FAMILY_BADGE_COLORS` gates which families get a tag ("other" gets none)."""
+        if self._family not in _FAMILY_BADGE_COLORS:
+            self.family_badge.setVisible(False)
+            return
+        self.family_badge.setStyleSheet(
+            f"QLabel {{ background-color: transparent; color: {self.theme.accent}; "
+            f"font-size: 8pt; font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
+        )
+        self.family_badge.adjustSize()
+        self.family_badge.raise_()
 
     def is_checked(self) -> bool:
         """Get checked state."""
