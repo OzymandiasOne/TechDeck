@@ -65,6 +65,7 @@ class CommandHandler:
 
         self._rogue_player = None  # kept alive here to prevent GC
         self._spinner = None       # /fidget window; /clear closes it
+        self._admin_mode = False   # /admin toggles; gates _ADMIN_COMMANDS
 
         # Command registry. Theme switching deliberately is NOT here —
         # the only way to change theme is via Settings → Personalization
@@ -86,16 +87,27 @@ class CommandHandler:
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
+            '/admin': self._cmd_admin,
             '/tickets': self._cmd_tickets,
             '/reset': self._cmd_reset,
         }
+
+    # Admin-gated commands: refused as unknown (and absent from /help) until
+    # admin mode is entered via /admin. Register future admin commands in the
+    # dict above, add them here, and list them in _ADMIN_HELP.
+    _ADMIN_COMMANDS = {'/tickets', '/reset'}
+    _ADMIN_HELP = (
+        "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
+        "  /reset store     - Clear all Emporium purchases"
+    )
 
     def handle_command(self, command_text: str) -> None:
         parts = command_text.strip().split(maxsplit=1)
         cmd = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
 
-        if cmd in self.commands:
+        if cmd in self.commands and not (
+                cmd in self._ADMIN_COMMANDS and not self._admin_mode):
             self.commands[cmd](args)
         else:
             self.console.append_error(f"Unknown command: {cmd}")
@@ -124,8 +136,14 @@ class CommandHandler:
             "  /fidget          - Pop out a fidget spinner\n"
             "  /jack            - Play blackjack against Sal\n"
             "  /friend          - Summon a little friend\n"
-            "  /tickets [N]     - Show/grant Woogy's Emporium tickets (test)\n"
-            "  /reset store     - Clear all Emporium purchases (test)\n"
+        )
+        if self._admin_mode:
+            help_text += (
+                "\n"
+                "  Admin (/admin toggles):\n"
+                + self._ADMIN_HELP + "\n"
+            )
+        help_text += (
             "\n"
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
@@ -259,6 +277,40 @@ class CommandHandler:
         while lines and lines[-1] == "":
             lines.pop()
         self.console.append_system("\n".join(lines))
+
+    # ------------------------------------------------------------------ #
+    #  /admin — toggle admin mode (reveals + enables the gated commands)
+    # ------------------------------------------------------------------ #
+
+    def _admin_authorized(self) -> bool:
+        """Dev mode (running from source) is always the maintainer's machine;
+        frozen builds require the ProgramData admin.config to grant the admin
+        role — colleagues can't write ProgramData without admin rights."""
+        if not getattr(sys, "frozen", False):
+            return True
+        try:
+            from techdeck.core.admin_config import AdminConfigManager
+            return AdminConfigManager().is_admin()
+        except Exception:
+            return False
+
+    def _cmd_admin(self, args: str):
+        """Toggle admin mode. While ON, admin-gated commands run and /help
+        grows an Admin section; while OFF they behave as unknown commands.
+        Session-scoped — always starts OFF."""
+        if not self._admin_authorized():
+            self.console.append_error(
+                "Admin mode requires authorization on this machine.")
+            return
+        self._admin_mode = not self._admin_mode
+        if self._admin_mode:
+            self.console.append_system(
+                "Admin mode ON. Admin commands:\n"
+                + self._ADMIN_HELP + "\n"
+                "Type /admin again to turn it off."
+            )
+        else:
+            self.console.append_system("Admin mode OFF.")
 
     # ------------------------------------------------------------------ #
     #  /tickets — grant/set Woogy's Emporium tickets (for testing purchases)
