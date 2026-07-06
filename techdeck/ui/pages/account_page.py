@@ -159,6 +159,10 @@ class AccountPage(QWidget, ThemeAware):
         # A purchase on one tab changes ownership/balance the other reflects, so
         # refresh whichever tab is being shown.
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        # Hidden tabs (the wide Emporium scene especially) must not lock the
+        # window's minimum width while another tab/page is showing.
+        from techdeck.ui.utils import limit_min_size_to_current_page
+        limit_min_size_to_current_page(self.tabs)
 
         # Main layout
         main_layout = QVBoxLayout(self)

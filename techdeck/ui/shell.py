@@ -412,7 +412,12 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.library_page)  # 1: Library
         self.page_stack.addWidget(self.settings_page) # 2: Settings
         self.page_stack.addWidget(self.account_page)  # 3: Account
-        
+
+        # Hidden pages must not lock the window's minimum width (Library's
+        # toolbar / the Emporium scene are wide; Home's grid reflows).
+        from techdeck.ui.utils import limit_min_size_to_current_page
+        limit_min_size_to_current_page(self.page_stack)
+
         main_layout.addWidget(self.page_stack, 1)
     
     def warmup_pages(self):

@@ -64,6 +64,10 @@ class SettingsPage(QWidget, ThemeAware):
         self.tabs.addTab(self._create_plugin_tab(),          "Apps")
         self.tabs.addTab(self._create_helpfeedback_tab(),    "Help && Feedback")
 
+        # Hidden tabs must not lock the window's minimum width.
+        from techdeck.ui.utils import limit_min_size_to_current_page
+        limit_min_size_to_current_page(self.tabs)
+
         layout.addWidget(self.tabs)
 
         # Subscribe to theme_changed; also applies the tab styling now.

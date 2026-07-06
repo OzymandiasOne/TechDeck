@@ -4,6 +4,42 @@ import re
 import hashlib
 import tempfile
 
+
+def limit_min_size_to_current_page(pages) -> None:
+    """Make only the CURRENT page of a QStackedWidget / QTabWidget contribute
+    to the minimum-size chain.
+
+    Qt computes a stack's minimumSizeHint as the max over ALL pages, hidden
+    ones included — so one wide page (the Library toolbar, the Emporium scene)
+    stops the whole window from being resized smaller even while Home is
+    showing, defeating the Home grid's column reflow. Hidden pages get an
+    Ignored size policy; a page's real policy is restored when it becomes
+    current (which lets Qt grow the window if that page genuinely needs more
+    room).
+
+    `pages` is any widget with count()/widget()/currentIndex() and a
+    currentChanged signal (QStackedWidget and QTabWidget both qualify).
+    """
+    from PySide6.QtWidgets import QSizePolicy
+
+    def _apply(current: int) -> None:
+        for i in range(pages.count()):
+            w = pages.widget(i)
+            if w is None:
+                continue
+            orig = getattr(w, "_orig_size_policy", None)
+            if orig is None:
+                orig = w.sizePolicy()
+                w._orig_size_policy = orig
+            if i == current:
+                w.setSizePolicy(orig)
+            else:
+                w.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                QSizePolicy.Policy.Ignored)
+
+    pages.currentChanged.connect(_apply)
+    _apply(pages.currentIndex())
+
 def make_tinted_svg_copy(src_svg_path: Path, color_hex: str) -> str:
     """
     Load an SVG file, replace any 'currentColor' (and explicit stroke/fill hex colors)

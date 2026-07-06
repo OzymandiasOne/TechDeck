@@ -131,6 +131,10 @@ class ConsoleWidget(QWidget, ThemeAware):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._console_page)
         self.stack.addWidget(self._dash_page)
+        # A populated (but hidden) Dashboard must not lock the window's
+        # minimum width — its charts carry real minimums (pie 380 + side 280).
+        from techdeck.ui.utils import limit_min_size_to_current_page
+        limit_min_size_to_current_page(self.stack)
 
         # The panel is the single bordered box the active tab connects to.
         # The text area inside is borderless so only the panel draws the box.
