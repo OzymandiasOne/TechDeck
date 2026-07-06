@@ -310,3 +310,4 @@ QR Code Generator | GUI plugin - dual-tab QR library and generator
 Customer DXF Quoting | Interactive DXF quoting viewer - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut 
 QA Gemba Analyzer | GUI plugin (QA family) - logs QA rework events to one shared workbook and charts YTD / last-week performance (pie/column/stacked, best-fit line, %-threshold) with a one-click printable Gemba Pack PDF 
 911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest, each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List) 
+911 Bean Counter | Consolidates a folder of filled NC-calc pricing sheets into one review list (DYPN, Total Bevels, Total Complex Bevels, Total Cut Lin per part + totals row), saved into that same folder named with the batch + nest number 

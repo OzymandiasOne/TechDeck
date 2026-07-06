@@ -1,0 +1,14 @@
+{
+  "id": "911_bean_counter",
+  "name": "911 Bean Counter",
+  "description": "Consolidates a folder of filled NC-calc spreadsheets (the 'NC style baked beans' DSTV/linear-inch pricing sheets) into one review list: DYPN, Total Bevels, Total Complex Bevels, and Total Cut Lin per part, with a grand-total row. Prompts for the folder (the one holding the NC files), plus batch + nest number for the output name, and saves the consolidated list into that same folder.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 600,
+  "settings": {
+    "fields": []
+  }
+}
