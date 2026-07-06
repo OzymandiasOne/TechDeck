@@ -1809,8 +1809,46 @@ def blueprint(d):           # customer dxf quoting
 
 
 # Output set -> {key: (grid, tones)}. Each grid is painted in its own colors.
+_MR_BEANS_GRID = [
+    "................................",
+    "..........kggkkkkkkkkk..........",
+    "..........kggkkkkkkkkk..........",
+    "..........kggkkkkkkkkk..........",
+    "..........kggkkkkkkkkk..........",
+    "..........rrrrrrrrrrrr..........",
+    "..........rrrrrrrrrrrr..........",
+    ".......kkkkkkkkkkkkkkkkkk.......",
+    ".......kkkkkkkkkkkkkkkkkk.......",
+    "................................",
+    "................................",
+    "............ooooooooo...........",
+    "..........oobbbbbbbbboo.........",
+    ".........owwwhbbbbbwwwbo........",
+    "........ohwkkhbbbbbkkwbbo.......",
+    ".......ohhwkkhbbbbbkkwbbbo......",
+    "......obbhwwwbbbbbbwwwbbbbo.....",
+    "......obbbbbbbbbbbbbbbbbbbo.....",
+    ".....obbbbbbbbbbbbbbbbbbbbbo....",
+    ".....obbbbbbbbbbbbbbbbbbbbbo....",
+    ".....obbbbbbbbbbbbbbbbbbbbbo....",
+    ".....obbbbbbobbbbbbbobbbbbbo....",
+    "......obbbbbbooooooobbbbbdo.....",
+    "......obbbbbbbbbbbbbbbbbddo.....",
+    ".......obbbbbbbbbbbbbbbddo......",
+    "........obbbbbbbbbbbbbddo.......",
+    ".........obbbbbbbbbbdddo........",
+    "..........oobbbbbbbbdoo.........",
+    "............ooooooooo...........",
+    "................................",
+    "................................",
+    "................................",
+]
+_MR_BEANS_TONES = {"b": "#D2622A", "d": "#A8431C", "g": "#3C3C48", "h": "#EE9257", "k": "#16161C", "o": "#5C2410", "r": "#C03434", "w": "#FFF4E6"}
+
+
 SETS = {
     "TechDeck pack pixel": {
+        "mr_beans": (_MR_BEANS_GRID, _MR_BEANS_TONES),
         "blueprint": (_BLUEPRINT_GRID, _BLUEPRINT_TONES),
     },
     "Icons socialmedia pixel": {
