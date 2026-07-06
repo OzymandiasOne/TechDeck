@@ -147,7 +147,12 @@ class AccountPage(QWidget, ThemeAware):
         self.tabs.tabBar().setExpanding(False)
         self.tabs.addTab(scroll, "My Account")
         self.emporium = EmporiumPage(self.settings)
-        self.tabs.addTab(self.emporium, "Ticket Counter")
+        # The Emporium scene never lays out below its design width; a smaller
+        # window crops it (drag bigger to reveal) instead of being forced to
+        # grow. 880 = the scene's natural minimum (banner + category boxes).
+        from techdeck.ui.widgets.cropped_page import CroppedPage
+        self.tabs.addTab(CroppedPage(self.emporium, design_width=880),
+                         "Ticket Counter")
         self.my_stuff = MyStuffPage(self.settings)
         self.tabs.addTab(self.my_stuff, "My Stuff")
         # Claiming a reward changes the balance the Emporium shows, so refresh it.

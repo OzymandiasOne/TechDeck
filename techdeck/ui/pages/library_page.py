@@ -6,7 +6,8 @@ Inline styling for reliable button appearance, rounded corners, and Open Plugin 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QPushButton, QScrollArea, QGridLayout, QLayout,
-    QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QFrame, QCheckBox
+    QMessageBox, QDialog, QLineEdit, QDialogButtonBox, QFrame, QCheckBox,
+    QSizePolicy
 )
 from PySide6.QtCore import Signal, Qt, QPoint, QRect, QSize
 from PySide6.QtGui import QFont
@@ -486,6 +487,12 @@ class LibraryPage(QWidget, ThemeAware):
         # ===== Header with Profile Controls =====
         self._header_container = QWidget()
         self._header_container.setFixedHeight(50)
+        # Ignored width: the toolbar's fixed-width controls must not floor the
+        # page (and with it the window) at ~840px — the tile grid reflows to
+        # any width. Squeezed below its natural width, the bar clips on the
+        # right instead.
+        self._header_container.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         header_layout = QHBoxLayout(self._header_container)
         header_layout.setContentsMargins(20, 8, 20, 8)
         header_layout.setSpacing(12)
@@ -551,6 +558,9 @@ class LibraryPage(QWidget, ThemeAware):
         # ===== Footer with Open Plugin Folder button =====
         self._footer_container = QWidget()
         self._footer_container.setFixedHeight(60)
+        # Same as the header: never floor the page's width.
+        self._footer_container.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         footer_layout = QHBoxLayout(self._footer_container)
         footer_layout.setContentsMargins(20, 10, 20, 10)
         footer_layout.setSpacing(12)
