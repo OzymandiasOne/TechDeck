@@ -110,6 +110,11 @@ class UpdateDialog(QDialog):
 
         layout.addStretch()
 
+        # Reopen note
+        reopen_note = QLabel("TechDeck will automatically reopen after installation.")
+        reopen_note.setStyleSheet(f"color: {t.text_secondary}; font-size: 11px;")
+        layout.addWidget(reopen_note)
+
         # Buttons
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
