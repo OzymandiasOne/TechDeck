@@ -241,6 +241,21 @@ class Canvas(QWidget):
         self.update()
         self.modified.emit()
 
+    def crop_grid(self, top, bottom, left, right) -> bool:
+        """Remove rows/columns from each side WITHOUT scaling — the inverse of
+        pad_grid. Whatever art sits on the removed lines is discarded. Refuses
+        a crop that would leave no cells (returns False)."""
+        if top == bottom == left == right == 0:
+            return True
+        w, h = self.grid_size()
+        if top + bottom >= h or left + right >= w:
+            return False
+        self.rows = [list(r)[left:w - right] for r in self.rows[top:h - bottom]]
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+        return True
+
     # ---- undo / redo (stroke-level) -----------------------------------------
     def _snapshot(self):
         return [r[:] for r in self.rows]
@@ -469,6 +484,7 @@ class Editor(QMainWindow):
         editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
         editm.addAction("Reduce duplicate lines", self.reduce_lines)
         editm.addAction("Add lines (expand canvas)...", self.expand_canvas)
+        editm.addAction("Remove lines (crop canvas)...", self.crop_canvas)
 
     def _build_sidebar(self):
         side = QFrame()
@@ -616,10 +632,11 @@ class Editor(QMainWindow):
             self.sym_btn.setChecked(False)   # 4-fold needs a square canvas
         self.statusBar().showMessage(f"Resized to {nw}x{nh}")
 
-    def expand_canvas(self):
-        """Add transparent rows/columns on chosen sides (no scaling)."""
+    def _ask_sides(self, title):
+        """Per-side line-count dialog shared by Add lines / Remove lines.
+        Returns (top, bottom, left, right) or None on cancel."""
         dlg = QDialog(self)
-        dlg.setWindowTitle("Add lines (expand canvas)")
+        dlg.setWindowTitle(title)
         form = QFormLayout(dlg)
         spins = {}
         for side in ("Top", "Bottom", "Left", "Right"):
@@ -634,16 +651,37 @@ class Editor(QMainWindow):
         bb.rejected.connect(dlg.reject)
         form.addRow(bb)
         if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
-        t, b, l, r = (spins[s].value() for s in ("Top", "Bottom", "Left", "Right"))
-        if t == b == l == r == 0:
+            return None
+        return tuple(spins[s].value() for s in ("Top", "Bottom", "Left", "Right"))
+
+    def expand_canvas(self):
+        """Add transparent rows/columns on chosen sides (no scaling)."""
+        sides = self._ask_sides("Add lines (expand canvas)")
+        if sides is None or sides == (0, 0, 0, 0):
             return
         self.canvas.push_undo()
-        self.canvas.pad_grid(t, b, l, r)
+        self.canvas.pad_grid(*sides)
         if self.canvas.symmetry and self.canvas.grid_size()[0] != self.canvas.grid_size()[1]:
             self.sym_btn.setChecked(False)
         w, h = self.canvas.grid_size()
         self.statusBar().showMessage(f"Expanded to {w}x{h}")
+
+    def crop_canvas(self):
+        """Remove rows/columns from chosen sides (no scaling) — the inverse of
+        Add lines. Art on the removed lines is discarded (undoable)."""
+        sides = self._ask_sides("Remove lines (crop canvas)")
+        if sides is None or sides == (0, 0, 0, 0):
+            return
+        self.canvas.push_undo()
+        if not self.canvas.crop_grid(*sides):
+            self.canvas._undo.pop()   # nothing changed; drop the snapshot
+            self.statusBar().showMessage(
+                "Crop refused - that would remove the whole canvas")
+            return
+        if self.canvas.symmetry and self.canvas.grid_size()[0] != self.canvas.grid_size()[1]:
+            self.sym_btn.setChecked(False)
+        w, h = self.canvas.grid_size()
+        self.statusBar().showMessage(f"Cropped to {w}x{h}")
 
     def reduce_lines(self):
         self.canvas.push_undo()
