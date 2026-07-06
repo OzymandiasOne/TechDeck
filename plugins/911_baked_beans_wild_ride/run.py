@@ -1,12 +1,20 @@
 """
-911 Bean Counter Plugin for TechDeck
-====================================
+911 Baked Beans Wild Ride Plugin for TechDeck
+=============================================
 
 Consolidates the per-part "NC style baked beans" calc workbooks (the
 DSTV/linear-inch pricing sheets Antonio & Scott J's template fills out from
 Vacam NC files) into ONE review list, so nobody has to open 60+ workbooks
-one at a time.
+one at a time. Named for Mr. Bones' Wild Ride (the RollerCoaster Tycoon
+greentext saga): rider thoughts mutter through the console during the run,
+and the finish line — 'Mr Beans says: "The ride never ends!"' — is CLICKABLE
+(console.append_link) and opens the bundled mr_beans_wild_ride.jpg, both
+halves of the original saga merged into one long image.
 
+  0. Opens a process picker (same SelectionDialog window as 911 Setup /
+     902 DXF Prep) with two stops on the ride: "Run NC Style Baked Beans
+     spreadsheet" — GREYED OUT, a teaser for when the manual-review workflow
+     is ironed out enough to automate — and the consolidation, checked.
   1. Prompts for the folder holding the filled calc sheets via the native
      folder dialog — the same folder that holds the NC files; the output is
      saved right back into it (per the requester: "output to the same folder
@@ -39,6 +47,7 @@ save the per-part workbooks. Blocked on the template's manual-review step
 from __future__ import annotations
 
 import datetime
+import random
 import re
 from pathlib import Path
 
@@ -54,7 +63,18 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
+
+# --- The ride ---------------------------------------------------------------
+STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
+STEP_CONSOLIDATE = "Consolidate output sheets into one review list"
+
+_THOUGHT_MAIN = 'Recent thoughts: "I want off BAKED BEANS WILD RIDE"'
+_THOUGHT_RARE = 'Recent thoughts: "I have the strangest feeling someone is watching me"'
+_FINALE = 'Mr Beans says: "The ride never ends!"'
+_RIDE_IMAGE = "mr_beans_wild_ride.jpg"   # bundled next to run.py
+_THOUGHT_EVERY = 3                        # emit a rider thought every N files
+_RARE_CHANCE = 0.25                       # odds a thought is the watching one
 
 # The three yellow totals, keyed in the requester's column order. Anchored so
 # "TOTAL Bevels" can never match "TOTAL Complex Bevels".
@@ -219,9 +239,39 @@ def _write_output(rows: list, out_path: Path, log) -> Path:
         return alt
 
 
+def _choose_process(params, log) -> bool:
+    """The boarding gate: a picker matching 911 Setup's window. Only the
+    consolidation is selectable — running the spreadsheet itself is shown
+    greyed out so users can see where the track is headed. Returns True to
+    proceed, False on cancel. Headless (no console) boards straight away."""
+    console = params.get("console")
+    if console is None or not hasattr(console, "request_selection"):
+        return True
+    picks = console.request_selection(
+        [STEP_RUN_SHEET, STEP_CONSOLIDATE],
+        None,
+        window_title="911 Baked Beans Wild Ride",
+        header="Select Processes to Run",
+        root_label="All processes",
+        noun="process",
+        prompt_note=("Running the spreadsheet itself is a future stop — "
+                     "coming once the manual review steps are ironed out."),
+        run_button_text="Board the Ride",
+        disabled_items={STEP_RUN_SHEET},
+        disabled_label="coming soon",
+    )
+    if picks is None or STEP_CONSOLIDATE not in picks:
+        log("Nobody boarded the ride.")
+        return False
+    return True
+
+
 def run(params: dict, progress_callback, cancel_event):
     log = params.get("log", print)
-    log(f"911 Bean Counter v{VERSION}")
+    log(f"911 Baked Beans Wild Ride v{VERSION}")
+
+    if not _choose_process(params, log):
+        return
 
     folder_str = sdk.request_directory(
         params, "Select the folder holding the filled NC calc spreadsheets")
@@ -248,13 +298,16 @@ def run(params: dict, progress_callback, cancel_event):
     if not candidates:
         log(f"No .xlsm/.xlsx calc sheets found in {folder}")
         return
-    log(f"Found {len(candidates)} workbook(s) in {folder.name} - consolidating...")
+    log(f"Found {len(candidates)} workbook(s) in {folder.name} - "
+        f"{len(candidates)} riders boarding...")
 
     rows, skipped = [], []
     for i, path in enumerate(candidates):
         if cancel_event is not None and cancel_event.is_set():
-            log("Cancelled.")
+            log("Cancelled. (Some of them even want to get off.)")
             return
+        if (i + 1) % _THOUGHT_EVERY == 0:
+            log(_THOUGHT_RARE if random.random() < _RARE_CHANCE else _THOUGHT_MAIN)
         wb = None
         try:
             wb = sdk.load_workbook_resilient(
@@ -294,3 +347,13 @@ def run(params: dict, progress_callback, cancel_event):
         log(f"[REVIEW] {flagged} row(s) flagged - see the Notes column.")
     for s in skipped:
         log(f"  [SKIPPED] {s}")
+
+    # The finish line. Clicking it opens the original Mr Bones' Wild Ride
+    # saga (bundled, both halves merged into one long jpg).
+    console = params.get("console")
+    ride_img = Path(__file__).resolve().parent / _RIDE_IMAGE
+    if (console is not None and hasattr(console, "append_link")
+            and ride_img.exists()):
+        console.append_link(_FINALE, str(ride_img))
+    else:
+        log(_FINALE)
