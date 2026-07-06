@@ -63,11 +63,17 @@ class SelectionDialog(QDialog):
                  prompt_note=None,
                  subhead_prefix="",
                  run_button_text="Run Selected",
-                 default_checked=True):
+                 default_checked=True,
+                 disabled_items=None,
+                 disabled_label="coming soon"):
         super().__init__(parent)
 
         self._items = list(items)
         self._done = set(done_items or [])
+        # Greyed-out, non-selectable rows — shown so users see what's planned
+        # (e.g. a future process) but can't check them; excluded from the root
+        # toggle, the count, and selected().
+        self._disabled = set(disabled_items or [])
         self._noun = noun
         self._done_label = done_label
         self._suppress = False  # guards itemChanged while we sync parent/children
@@ -124,12 +130,20 @@ class SelectionDialog(QDialog):
         for item in self._items:
             child = QTreeWidgetItem(self.root)
             label = item
-            if item in self._done:
+            if item in self._disabled:
+                label = f"{item}      - {disabled_label}"
+            elif item in self._done:
                 label = f"{item}      - {done_label}"
             child.setText(0, label)
             child.setData(0, self._ITEM_ROLE, item)
-            child.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            child.setCheckState(0, init_state)
+            if item in self._disabled:
+                # No ItemIsEnabled → Qt renders the row (and its checkbox)
+                # greyed and ignores clicks.
+                child.setFlags(Qt.ItemFlag.ItemIsUserCheckable)
+                child.setCheckState(0, Qt.CheckState.Unchecked)
+            else:
+                child.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+                child.setCheckState(0, init_state)
 
         self.tree.expandItem(self.root)
         self.tree.itemChanged.connect(self._on_item_changed)
@@ -169,19 +183,24 @@ class SelectionDialog(QDialog):
                 state = item.checkState(0)
                 if state != Qt.CheckState.PartiallyChecked:
                     for i in range(self.root.childCount()):
-                        self.root.child(i).setCheckState(0, state)
+                        child = self.root.child(i)
+                        if child.data(0, self._ITEM_ROLE) not in self._disabled:
+                            child.setCheckState(0, state)
             else:
                 self._sync_root_state()
         finally:
             self._suppress = False
         self._update_count()
 
+    def _enabled_children(self):
+        return [self.root.child(i) for i in range(self.root.childCount())
+                if self.root.child(i).data(0, self._ITEM_ROLE) not in self._disabled]
+
     def _sync_root_state(self):
-        total = self.root.childCount()
-        checked = sum(
-            1 for i in range(total)
-            if self.root.child(i).checkState(0) == Qt.CheckState.Checked
-        )
+        children = self._enabled_children()
+        total = len(children)
+        checked = sum(1 for c in children
+                      if c.checkState(0) == Qt.CheckState.Checked)
         if checked == 0:
             self.root.setCheckState(0, Qt.CheckState.Unchecked)
         elif checked == total:
@@ -191,7 +210,8 @@ class SelectionDialog(QDialog):
 
     def _update_count(self):
         picks = self.selected()
-        self.count_label.setText(f"{len(picks)} of {len(self._items)} selected")
+        selectable = len(self._items) - len(self._disabled & set(self._items))
+        self.count_label.setText(f"{len(picks)} of {selectable} selected")
         self.run_btn.setEnabled(len(picks) > 0)
 
     # --- result --------------------------------------------------------------

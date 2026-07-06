@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
     QLineEdit, QPushButton, QLabel, QTabBar, QStackedWidget, QFrame, QToolButton
 )
-from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer
-from PySide6.QtGui import QTextCursor, QFont
+from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer, QEvent, QUrl
+from PySide6.QtGui import QTextCursor, QFont, QDesktopServices
 import threading
 
 from techdeck.ui.widgets.dashboard import DashboardView
@@ -116,6 +116,11 @@ class ConsoleWidget(QWidget, ThemeAware):
         _font = QFont("Consolas", 10)
         _font.setStyleHint(QFont.StyleHint.Monospace)
         self.output.setFont(_font)
+        # Clickable lines (append_link): a read-only QTextEdit renders anchors
+        # but doesn't act on them, so watch the viewport for hover (hand
+        # cursor) and click (open the target).
+        self.output.viewport().installEventFilter(self)
+        self.output.viewport().setMouseTracking(True)
 
         self._console_page = QWidget()
         _cp = QVBoxLayout(self._console_page)
@@ -600,6 +605,45 @@ class ConsoleWidget(QWidget, ThemeAware):
             Qt.ConnectionType.QueuedConnection,
             Q_ARG(str, text),
         )
+
+    def append_link(self, text: str, target_path: str):
+        """Append a CLICKABLE line that opens `target_path` with its default
+        app (image viewer, Explorer, ...). Thread-safe — callable straight
+        from a plugin worker. The click handling lives in eventFilter (a
+        read-only QTextEdit renders anchors but doesn't act on them)."""
+        QMetaObject.invokeMethod(
+            self,
+            "_append_link_gui",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, text),
+            Q_ARG(str, target_path),
+        )
+
+    @Slot(str, str)
+    def _append_link_gui(self, text: str, target_path: str):
+        url = QUrl.fromLocalFile(target_path).toString()
+        self.output.append(
+            f'<a href="{url}" style="color: #F59E0B; font-weight: bold; '
+            f'text-decoration: underline;">{self._escape_html(text)}</a>'
+        )
+        self._scroll_to_bottom()
+
+    def eventFilter(self, obj, event):
+        """Hover/click handling for append_link anchors in the output view."""
+        if obj is self.output.viewport():
+            et = event.type()
+            if et == QEvent.Type.MouseMove:
+                anchor = self.output.anchorAt(event.position().toPoint())
+                self.output.viewport().setCursor(
+                    Qt.CursorShape.PointingHandCursor if anchor
+                    else Qt.CursorShape.IBeamCursor)
+            elif (et == QEvent.Type.MouseButtonRelease
+                    and event.button() == Qt.MouseButton.LeftButton):
+                anchor = self.output.anchorAt(event.position().toPoint())
+                if anchor:
+                    QDesktopServices.openUrl(QUrl(anchor))
+                    return True
+        return super().eventFilter(obj, event)
 
     def show_spinner(self, html: str):
         """Show the spinner label with the given HTML content."""
