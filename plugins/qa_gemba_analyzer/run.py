@@ -7,8 +7,13 @@ A GUI plugin for the QA team. Two jobs:
                   shared workbook (one flat sheet, no formulas/charts in the file).
   2. Charts     - reads that workbook back and renders pie / column / stacked-column
                   views with toggles (time window, group-by dimension, %-threshold,
-                  best-fit line), plus a one-click "Gemba Pack" PDF of the four
-                  standard meeting charts.
+                  best-fit line, include/hide missing-material events), plus a
+                  one-click "Gemba Pack" PDF of the four standard meeting charts.
+
+The MISSING MATERIAL? (Y/N) column marks reworks where the source material was never
+provided; it drives the per-graph "Include missing material" filter today and will
+feed a missing-materials email template later. A brand-new log starts EMPTY (headers
+only) - there is no seed data.
 
 Design notes:
   - Charts use the bundled PySide6.QtCharts (NOT matplotlib) so nothing new has to be
@@ -20,7 +25,6 @@ Design notes:
 """
 
 import datetime
-import json
 import os
 import random
 import re
@@ -65,7 +69,7 @@ DATA_FILENAME = "QA Rework Log.xlsx"
 SHEET_NAME = "Master Rework Log"
 HEADERS = [
     "BATCH (PO)", "DATE", "ITEM NUMBER (DYPN)", "SOURCE MATERIAL",
-    "RECUT? (Y/N)", "FAILURE MODE", "COMMENTS",
+    "RECUT? (Y/N)", "MISSING MATERIAL? (Y/N)", "FAILURE MODE", "COMMENTS",
 ]
 
 # Category -> subcategories. "" = the bare "Other" with no subcategory.
@@ -80,8 +84,10 @@ FAILURE_CATEGORIES = OrderedDict([
 ])
 MATERIALS = ["CLEVIS", "LUG", "MISC.", "PLATE", "ROD", "TUBE", "OTHER"]
 RECUT_OPTIONS = ["NO", "YES"]
+MISSING_OPTIONS = ["NO", "YES"]
 
-GROUP_BY = ["Failure category", "Failure mode (detailed)", "Material", "Recut"]
+GROUP_BY = ["Failure category", "Failure mode (detailed)", "Material", "Recut",
+            "Missing material"]
 WINDOWS = [
     "Year-to-date", "Last 7 days", "Last 10 days",
     "Last business week (Mon-Fri)", "All time",
@@ -96,15 +102,19 @@ XAXIS_MODES = ["By time (month/day)", "By group"]
 def _default_graph_configs():
     return [
         {"type": "Column", "window": "Year-to-date", "group": "Failure category",
-         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True,
+         "include_missing": True},
         {"type": "Pie", "window": "Year-to-date", "group": "Failure category",
-         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True,
+         "include_missing": True},
         {"type": "Stacked column", "window": "Last business week (Mon-Fri)",
          "group": "Failure mode (detailed)",
-         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True,
+         "include_missing": True},
         {"type": "Pie", "window": "Last business week (Mon-Fri)",
          "group": "Failure mode (detailed)",
-         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True},
+         "xaxis": "By time (month/day)", "threshold": 5.0, "bestfit": True,
+         "include_missing": True},
     ]
 
 # Print palette for PDFs - white background + dark ink so Gemba printouts read well.
@@ -205,6 +215,7 @@ def load_records(path, log=print):
             "item": _as_str(cell(row, "ITEM NUMBER (DYPN)")),
             "material": _as_str(cell(row, "SOURCE MATERIAL")).upper(),
             "recut": _as_str(cell(row, "RECUT? (Y/N)")).upper(),
+            "missing": _as_str(cell(row, "MISSING MATERIAL? (Y/N)")).upper() or "NO",
             "mode": mode,
             "category": cat,
             "subcategory": sub,
@@ -235,15 +246,35 @@ def _as_date(v):
     return None
 
 
+def _locate_headers(ws):
+    """Find the header row in the first 10 rows and map normalized header name ->
+    1-based column. Falls back to row 1 (Hard Rule: columns by NAME, never index)."""
+    wanted = {_norm(h) for h in HEADERS}
+    for row in ws.iter_rows(min_row=1, max_row=10):
+        hits = {_norm(c.value): c.column for c in row if c.value is not None}
+        if len(wanted & set(hits)) >= 4:
+            return row[0].row, hits
+    return 1, {_norm(c.value): c.column for c in ws[1] if c.value is not None}
+
+
 def append_record(path, record, log=print, attempts=12):
-    """Append one row. Open->append->save->close fast; retry if the file is briefly
-    locked (someone has it open in Excel, OneDrive mid-sync, or a concurrent write)."""
+    """Append one row, writing each value under its NAMED header. A header the
+    sheet lacks (e.g. MISSING MATERIAL on a log created before that column existed)
+    is added to the header row, so older files self-migrate on first write.
+    Open->append->save->close fast; retry if the file is briefly locked (someone
+    has it open in Excel, OneDrive mid-sync, or a concurrent write)."""
     import openpyxl
     path = Path(path)
-    ordered = [
-        record["batch"], record["date"], record["item"], record["material"],
-        record["recut"], record["mode"], record["comments"],
-    ]
+    values = {
+        "BATCH (PO)": record["batch"],
+        "DATE": record["date"],
+        "ITEM NUMBER (DYPN)": record["item"],
+        "SOURCE MATERIAL": record["material"],
+        "RECUT? (Y/N)": record["recut"],
+        "MISSING MATERIAL? (Y/N)": record["missing"],
+        "FAILURE MODE": record["mode"],
+        "COMMENTS": record["comments"],
+    }
     last_err = None
     for attempt in range(attempts):
         try:
@@ -255,7 +286,15 @@ def append_record(path, record, log=print, attempts=12):
                 ws = wb.active
                 ws.title = SHEET_NAME
                 ws.append(HEADERS)
-            ws.append(ordered)
+            header_row, col = _locate_headers(ws)
+            row_i = ws.max_row + 1
+            for header in HEADERS:
+                j = col.get(_norm(header))
+                if j is None:            # pre-existing log without this column
+                    j = (max(col.values()) if col else 0) + 1
+                    ws.cell(row=header_row, column=j, value=header)
+                    col[_norm(header)] = j
+                ws.cell(row=row_i, column=j, value=values.get(header, ""))
             wb.save(path)
             try:
                 wb.close()
@@ -268,32 +307,20 @@ def append_record(path, record, log=print, attempts=12):
     raise last_err if last_err else RuntimeError("append failed")
 
 
-def ensure_seeded(path, log=print):
-    """First run only: if the shared workbook does not exist yet, create it from the
-    bundled seed data (the team's starting rework dataset) so the app opens with the
-    charts already populated. Never overwrites an existing log."""
+def ensure_log_exists(path, log=print):
+    """First run only: if the shared workbook does not exist yet, create it empty
+    (headers only) so 'Open Rework Log' always has a file to open. Never touches
+    an existing log."""
     path = Path(path)
     if path.exists():
-        return
-    seed_file = Path(__file__).resolve().parent / "seed_data.json"
-    if not seed_file.exists():
-        return
-    try:
-        rows = json.loads(seed_file.read_text(encoding="utf-8"))
-    except Exception as e:
-        log(f"Could not read seed data: {e}")
         return
     import openpyxl
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = SHEET_NAME
     ws.append(HEADERS)
-    for r in rows:
-        batch, date_s, item, mat, recut, mode, comments = (list(r) + [""] * 7)[:7]
-        d = _as_date(date_s)
-        ws.append([batch, d, item, mat, recut, mode, comments])
     wb.save(path)
-    log(f"Seeded {len(rows)} starting rows into {path.name}")
+    log(f"Created a new empty rework log: {path.name}")
 
 
 # ---------------------------------------------------------------------------------
@@ -332,6 +359,8 @@ def dimension_key(rec, dim):
         return rec["material"] or "(blank)"
     if dim == "Recut":
         return rec["recut"] or "(blank)"
+    if dim == "Missing material":
+        return rec["missing"] or "NO"
     return "(blank)"
 
 
@@ -638,6 +667,8 @@ class LogReworkDialog(QDialog):
         self.in_material.addItems(MATERIALS)
         self.in_recut = QComboBox()
         self.in_recut.addItems(RECUT_OPTIONS)
+        self.in_missing = QComboBox()
+        self.in_missing.addItems(MISSING_OPTIONS)
         self.in_category = QComboBox()
         self.in_category.addItems(list(FAILURE_CATEGORIES.keys()))
         self.in_subcategory = QComboBox()
@@ -651,6 +682,7 @@ class LogReworkDialog(QDialog):
         form.addRow("Item Number (DYPN):", self.in_item)
         form.addRow("Source Material:", self.in_material)
         form.addRow("Recut?:", self.in_recut)
+        form.addRow("Missing Material?:", self.in_missing)
         form.addRow("Failure Category:", self.in_category)
         form.addRow("Failure Subcategory:", self.in_subcategory)
         form.addRow("Comments:", self.in_comments)
@@ -694,6 +726,7 @@ class LogReworkDialog(QDialog):
             "item": item,
             "material": self.in_material.currentText(),
             "recut": self.in_recut.currentText(),
+            "missing": self.in_missing.currentText(),
             "mode": mode,
             "comments": self.in_comments.text().strip(),
         }
@@ -840,12 +873,18 @@ class QAReworkContent(QWidget):
         self.c_threshold.setSuffix(" %")
         self.c_bestfit = QCheckBox("Best-fit line")
         self.c_bestfit.setChecked(True)
+        self.c_missing = QCheckBox("Include missing material")
+        self.c_missing.setChecked(True)
+        self.c_missing.setToolTip(
+            "Untick to hide rework events logged as Missing Material = YES "
+            "from this graph.")
 
         # Every control edits the ACTIVE graph's config, then re-renders.
         for w in (self.c_type, self.c_window, self.c_group, self.c_xaxis):
             w.currentIndexChanged.connect(self._on_controls_changed)
         self.c_threshold.valueChanged.connect(self._on_controls_changed)
         self.c_bestfit.stateChanged.connect(self._on_controls_changed)
+        self.c_missing.stateChanged.connect(self._on_controls_changed)
 
         self.lbl_xaxis = QLabel("Column X:")
         self.lbl_threshold = QLabel("Pie hide <")
@@ -859,7 +898,8 @@ class QAReworkContent(QWidget):
         controls.addWidget(self.c_xaxis, 1, 1)
         controls.addWidget(self.lbl_threshold, 1, 2)
         controls.addWidget(self.c_threshold, 1, 3)
-        controls.addWidget(self.c_bestfit, 1, 4, 1, 2)
+        controls.addWidget(self.c_bestfit, 1, 4)
+        controls.addWidget(self.c_missing, 1, 5)
         outer.addLayout(controls)
 
         # Page 0: the single active graph.  Page 1: a 2x2 grid of all four.
@@ -919,6 +959,7 @@ class QAReworkContent(QWidget):
         self.c_xaxis.setCurrentText(cfg["xaxis"])
         self.c_threshold.setValue(cfg["threshold"])
         self.c_bestfit.setChecked(cfg["bestfit"])
+        self.c_missing.setChecked(cfg.get("include_missing", True))
         self._loading = False
         self._update_control_enablement()
 
@@ -930,6 +971,7 @@ class QAReworkContent(QWidget):
         cfg["xaxis"] = self.c_xaxis.currentText()
         cfg["threshold"] = self.c_threshold.value()
         cfg["bestfit"] = self.c_bestfit.isChecked()
+        cfg["include_missing"] = self.c_missing.isChecked()
 
     def _on_controls_changed(self, *_):
         if self._loading:
@@ -972,7 +1014,7 @@ class QAReworkContent(QWidget):
 
     def _open_rework_log(self):
         try:
-            ensure_seeded(self.data_path, self.log)  # create if somehow missing
+            ensure_log_exists(self.data_path, self.log)  # create if somehow missing
             os.startfile(str(self.data_path))        # opens in Excel on Windows
             self.chart_status.setText(
                 "Opened the rework log in Excel. Edits you save there refresh "
@@ -1026,10 +1068,11 @@ class QAReworkContent(QWidget):
         self._live_charts = live
 
         cfg = self._current_config()
-        n = len(filter_window(self.records, cfg["window"]))
+        n = len(self._records_for(cfg))
         scope = "4 graphs" if self.btn_multi.isChecked() else f"Graph {self.active_graph + 1}"
+        hidden = "" if cfg.get("include_missing", True) else " · missing material hidden"
         self.chart_status.setText(
-            f"{scope} · {n} rework events in '{cfg['window']}' "
+            f"{scope} · {n} rework events in '{cfg['window']}'{hidden} "
             f"({len(self.records)} total logged).")
 
     def _swap_chart(self, view, chart):
@@ -1038,12 +1081,20 @@ class QAReworkContent(QWidget):
         if old is not None:
             old.deleteLater()
 
+    def _records_for(self, cfg):
+        """The records a graph config actually charts: its time window, minus
+        missing-material events when the graph's toggle hides them."""
+        recs = filter_window(self.records, cfg["window"])
+        if not cfg.get("include_missing", True):
+            recs = [r for r in recs if r.get("missing") != "YES"]
+        return recs
+
     def _build_chart(self, cfg, cycle, bg, text):
         """Build one QChart from a graph config dict (no widget reads, so it drives
         the on-screen single/grid views AND the PDF exports identically)."""
         window = cfg["window"]
         group = cfg["group"]
-        recs = filter_window(self.records, window)
+        recs = self._records_for(cfg)
         if not recs:
             return empty_chart("No data in this time window yet.", bg, text)
 
@@ -1266,9 +1317,9 @@ def run(params, progress_callback, cancel_event):
         return
     log(f"QA Rework log file: {data_path}")
     try:
-        ensure_seeded(data_path, log)
+        ensure_log_exists(data_path, log)
     except Exception as e:
-        log(f"Seeding skipped: {e}")
+        log(f"Could not create the empty log (will retry on first entry): {e}")
 
     _window = PluginWindow("qa_gemba_analyzer", "Gemba Analyzer")
     content = QAReworkContent(data_path, log,
