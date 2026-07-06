@@ -180,10 +180,20 @@ class IconEditor(Editor):
         iconm = self.menuBar().addMenu("&Icon")
         iconm.addAction("Open Icon from Scripts...",
                         self.open_icon).setShortcut("Ctrl+Shift+O")
-        iconm.addAction("Save Icon to Scripts...",
-                        self.save_icon).setShortcut("Ctrl+Shift+S")
+        # No shortcut: Ctrl+Shift+S is the inherited .tdart Save As, and plain
+        # Ctrl+S already routes here once an icon is open (see save_file).
+        iconm.addAction("Save Icon to Scripts...", self.save_icon)
         self.statusBar().showMessage(
             "Icon menu: open/save the tile icons that live in the generator scripts")
+
+    def save_file(self):
+        """Plain Save (Ctrl+S / File > Save): with an icon from the scripts
+        open, save THE ICON back to its script (dialog pre-filled — one OK
+        saves over what you opened) instead of forking a .tdart file. Untitled
+        or imported art still falls through to the .tdart save."""
+        if self.icon_key:
+            return self.save_icon()
+        return super().save_file()
 
     def open_icon(self):
         if not self._confirm_discard():
