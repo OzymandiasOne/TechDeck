@@ -566,6 +566,11 @@ class MainWindow(QMainWindow):
             elif result.status.value == "error":
                 self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
                 get_audio_manager().play(SOUND_ERROR)
+
+        # A plugin may defer a clickable line to be the run's last word
+        # (append_link(at_run_end=True) — Baked Beans Wild Ride's finale);
+        # print it after the completion/ticket/talkback messages above.
+        self.console.flush_pending_links()
     
     def _on_all_plugins_done(self):
         """Handle the end of a full run (all queued plugins finished or cancelled)."""

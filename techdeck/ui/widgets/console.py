@@ -171,6 +171,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         self.tab_bar.setCurrentIndex(_ci)
         self.stack.setCurrentWidget(self._console_page)
         self._pending_dashboard = None
+        self._pending_links = []   # append_link(at_run_end=True) holds lines here
 
         # ===== Spinner Label (hidden until an animation is active) =====
         self._spinner_label = QLabel()
@@ -606,7 +607,8 @@ class ConsoleWidget(QWidget, ThemeAware):
             Q_ARG(str, text),
         )
 
-    def append_link(self, text: str, target_path: str, prefix: str = ""):
+    def append_link(self, text: str, target_path: str, prefix: str = "",
+                    at_run_end: bool = False):
         """Append a CLICKABLE line that opens `target_path` with its default
         app (image viewer, Explorer, ...). Thread-safe — callable straight
         from a plugin worker. Styled like a normal output line: the optional
@@ -614,15 +616,31 @@ class ConsoleWidget(QWidget, ThemeAware):
         append_game and distinct from the plugin-output orange) and `text`
         as body-colored text, underlined to denote it's clickable.
         Click handling lives in eventFilter (a read-only QTextEdit renders
-        anchors but doesn't act on them)."""
+        anchors but doesn't act on them).
+
+        `at_run_end=True` defers the line: it's held until the shell calls
+        flush_pending_links() after the plugin's completion + ticket
+        messages, so the link can be the run's LAST printed line (a line
+        appended from run() otherwise races ahead of those)."""
+        slot = "_store_pending_link" if at_run_end else "_append_link_gui"
         QMetaObject.invokeMethod(
             self,
-            "_append_link_gui",
+            slot,
             Qt.ConnectionType.QueuedConnection,
             Q_ARG(str, text),
             Q_ARG(str, target_path),
             Q_ARG(str, prefix),
         )
+
+    @Slot(str, str, str)
+    def _store_pending_link(self, text: str, target_path: str, prefix: str):
+        self._pending_links.append((text, target_path, prefix))
+
+    def flush_pending_links(self):
+        """Print any deferred append_link lines (GUI thread; the shell calls
+        this at the end of its plugin-completed handler)."""
+        while self._pending_links:
+            self._append_link_gui(*self._pending_links.pop(0))
 
     @Slot(str, str, str)
     def _append_link_gui(self, text: str, target_path: str, prefix: str):

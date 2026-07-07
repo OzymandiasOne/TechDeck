@@ -66,7 +66,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.3"
+VERSION = "1.2.4"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -419,11 +419,17 @@ def run(params: dict, progress_callback, cancel_event):
     ride_img = Path(__file__).resolve().parent / _RIDE_IMAGE
     if (console is not None and hasattr(console, "append_link")
             and ride_img.exists()):
+        # Newest-first fallbacks: an older/still-running TechDeck's console
+        # may predate at_run_end (or prefix) - the finale must never fail
+        # the run.
         try:
-            console.append_link(_FINALE, str(ride_img), prefix=_FINALE_PREFIX)
+            console.append_link(_FINALE, str(ride_img),
+                                prefix=_FINALE_PREFIX, at_run_end=True)
         except TypeError:
-            # Console predates the prefix argument (an older/still-running
-            # TechDeck) - the finale must never fail the run.
-            console.append_link(f"{_FINALE_PREFIX} {_FINALE}", str(ride_img))
+            try:
+                console.append_link(_FINALE, str(ride_img),
+                                    prefix=_FINALE_PREFIX)
+            except TypeError:
+                console.append_link(f"{_FINALE_PREFIX} {_FINALE}", str(ride_img))
     else:
         log(f"{_FINALE_PREFIX} {_FINALE}")
