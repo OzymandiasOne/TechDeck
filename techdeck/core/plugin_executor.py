@@ -527,6 +527,12 @@ class PluginExecutor:
                 settings_manager.increment_plugin_runs(plugin_id)
                 safe_progress(100)
                 get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
+                try:
+                    from techdeck.core.usage_tracker import record_run
+                    record_run(plugin_id, plugin.name,
+                               getattr(plugin, 'family', 'other'), execution_time)
+                except Exception:
+                    pass  # telemetry must never affect a run
 
         except InputAborted as exc:
             # Plugin's request_input was aborted. reason="paused" → user (or
@@ -673,6 +679,12 @@ class PluginExecutor:
             settings_manager.increment_plugin_runs(plugin_id)
             safe_progress(100)
             get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
+            try:
+                from techdeck.core.usage_tracker import record_run
+                record_run(plugin_id, plugin.name,
+                           getattr(plugin, 'family', 'other'), execution_time)
+            except Exception:
+                pass  # telemetry must never affect a run
 
         except InputAborted as exc:
             execution_time = time.time() - start_time
