@@ -612,7 +612,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         from a plugin worker. Styled like a normal output line: the optional
         `prefix` renders as a bold channel tag (easter-egg purple, matching
         append_game and distinct from the plugin-output orange) and `text`
-        as regular body text — only the hover hand-cursor betrays the link.
+        as body-colored text, underlined to denote it's clickable.
         Click handling lives in eventFilter (a read-only QTextEdit renders
         anchors but doesn't act on them)."""
         QMetaObject.invokeMethod(
@@ -638,7 +638,7 @@ class ConsoleWidget(QWidget, ThemeAware):
                     f'{self._escape_html(prefix)}</span> ')
         self.output.append(
             lead + f'<a href="{url}" style="color: {body_color}; '
-            f'text-decoration: none;">{self._escape_html(text)}</a>'
+            f'text-decoration: underline;">{self._escape_html(text)}</a>'
         )
         self._scroll_to_bottom()
 
