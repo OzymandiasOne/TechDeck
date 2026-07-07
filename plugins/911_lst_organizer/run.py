@@ -53,7 +53,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
 NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
@@ -69,10 +69,12 @@ ARCHIVE_DIR_NAME = "02 - Complete Packages"
 
 def find_1d_pdf(folder: Path, batch: str, nest: str) -> Optional[Path]:
     """The 1D cutting diagram in `folder`: any *.pdf whose name contains '1D'
-    as a token-ish substring. Several matches -> prefer one naming the current
-    batch AND nest, else the newest."""
+    as a token-ish substring — but never the '1D POST' variant (a post-cut
+    revision of the diagram, not the pull list). Several matches -> prefer one
+    naming the current batch AND nest, else the newest."""
     cands = [p for p in folder.glob("*.pdf")
              if re.search(r"\b1D\b", p.stem, re.IGNORECASE)
+             and not re.search(r"\bPOST\b", p.stem, re.IGNORECASE)
              and not p.name.startswith("~$")]
     if not cands:
         return None
