@@ -67,6 +67,15 @@ _window = None
 # ---------------------------------------------------------------------------------
 DATA_FILENAME = "QA Rework Log.xlsx"
 SHEET_NAME = "Master Rework Log"
+# Default home of the shared workbook: the QA team's Gemba folder in the ASA
+# Quality Management System library (a DIFFERENT SharePoint site than the Pilot
+# Program). The OneDrive sync base varies per machine, so the library folder is
+# discovered via sdk.library_roots(), never hardcoded. Example on one laptop:
+#   C:\Users\<user>\American Steel & Alum\
+#     ASA Quality Management System - All Sites - Documents\
+#     Quality Assurance\South Portland\CI & Metrics\Gemba
+QMS_LIBRARY = "ASA Quality Management System - All Sites - Documents"
+GEMBA_SUBPATH = ("Quality Assurance", "South Portland", "CI & Metrics", "Gemba")
 HEADERS = [
     "BATCH (PO)", "DATE", "ITEM NUMBER (DYPN)", "SOURCE MATERIAL",
     "RECUT? (Y/N)", "MISSING MATERIAL? (Y/N)", "FAILURE MODE", "COMMENTS",
@@ -148,22 +157,27 @@ def compose_mode(category, subcategory):
 # Data layer
 # ---------------------------------------------------------------------------------
 def resolve_data_path(settings, log=print):
-    """Return the workbook path, creating its folder. Defaults to a 'QA Rework Log'
-    folder under the Pilot Program library so every laptop syncs to one file."""
+    """Return the workbook path, creating its folder. Defaults to the Gemba folder
+    in the QMS library (see QMS_LIBRARY/GEMBA_SUBPATH) so every laptop syncs to
+    one file; the data_dir setting overrides."""
     configured = ((settings or {}).get("data_dir") or "").strip()
     if configured:
         folder = Path(configured)
     else:
-        roots = []
         try:
-            roots = sdk.pilot_program_roots()
+            roots = sdk.library_roots(QMS_LIBRARY)
         except Exception:
             roots = []
-        if roots:
-            folder = Path(roots[0]) / "QA Rework Log"
-        else:
+        folder = next((r.joinpath(*GEMBA_SUBPATH) for r in roots
+                       if r.joinpath(*GEMBA_SUBPATH).is_dir()), None)
+        if folder is None and roots:
+            # Library is synced but the Gemba folder isn't there yet — create it
+            # under the first root (mkdir in a synced library syncs to SharePoint).
+            folder = Path(roots[0]).joinpath(*GEMBA_SUBPATH)
+        if folder is None:
             folder = Path.home() / "TechDeck QA Rework"
-            log(f"Pilot Program library not found; using local folder {folder}")
+            log("ASA Quality Management System library not found (is it synced "
+                f"in OneDrive?); using local folder {folder}")
     folder.mkdir(parents=True, exist_ok=True)
     return folder / DATA_FILENAME
 

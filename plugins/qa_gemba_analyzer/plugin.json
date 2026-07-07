@@ -14,8 +14,8 @@
         "key": "data_dir",
         "type": "directory",
         "label": "Shared data folder",
-        "description": "Folder that holds the shared QA rework log workbook. Leave blank to use a 'QA Rework Log' folder under the Pilot Program library (auto-created, synced to every laptop).",
-        "placeholder": "C:\\Users\\...\\QA Rework Log",
+        "description": "Folder that holds the shared QA rework log workbook. Leave blank to use the Gemba folder in the ASA Quality Management System library (Quality Assurance\\South Portland\\CI & Metrics\\Gemba - synced to every laptop that syncs that library).",
+        "placeholder": "C:\\Users\\...\\CI & Metrics\\Gemba",
         "required": false,
         "default": ""
       }
