@@ -8,8 +8,8 @@ Vacam NC files) into ONE review list, so nobody has to open 60+ workbooks
 one at a time. Named for Mr. Bones' Wild Ride (the RollerCoaster Tycoon
 greentext saga): quoted rider thoughts mutter through the console during the run,
 and the finish line — 'Mr Beans says: "The ride never ends!"' — is CLICKABLE
-(console.append_link) and opens the bundled mr_beans_wild_ride.jpg, both
-halves of the original saga merged into one long image.
+(console.append_link) and opens the bundled mr_bones_wild_ride.pdf, the
+original saga.
 
   0. Opens a process picker (same SelectionDialog window as 911 Setup /
      902 DXF Prep) with two stops on the ride: "Run NC Style Baked Beans
@@ -66,7 +66,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -76,7 +76,7 @@ _THOUGHT_MAIN = '"I want off BAKED BEANS WILD RIDE"'
 _THOUGHT_RARE = '"I have the strangest feeling someone is watching me"'
 _FINALE_PREFIX = "Mr Beans says:"   # bold channel-tag style (egg purple)
 _FINALE = '"The ride never ends!"'  # regular body text, but clickable
-_RIDE_IMAGE = "mr_beans_wild_ride.jpg"   # bundled next to run.py
+_RIDE_IMAGE = "mr_bones_wild_ride.pdf"   # the saga, bundled next to run.py
 _THOUGHT_EVERY = 3                        # emit a rider thought every N files
 _RARE_CHANCE = 0.125                      # odds a thought is the watching one
 
@@ -413,7 +413,7 @@ def run(params: dict, progress_callback, cancel_event):
         log(f"  [SKIPPED] {s}")
 
     # The finish line. Clicking it opens the original Mr Bones' Wild Ride
-    # saga (bundled, both halves merged into one long jpg).
+    # saga (bundled PDF, opened in the default viewer).
     console = params.get("console")
     ride_img = Path(__file__).resolve().parent / _RIDE_IMAGE
     if (console is not None and hasattr(console, "append_link")
