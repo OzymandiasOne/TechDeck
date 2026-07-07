@@ -31,12 +31,13 @@ original saga.
          by fixed cell address (Hard Rules 1-2) — the template's label wording
          already drifted between versions, so each value is the first numeric
          cell to the right of its matched label.
-  3. Writes "{batch} {nest} Consolidated NC Calcs.xlsx" into that folder —
-     batch/nest come FROM the sheets (single pair → its name; several →
-     "MULTI BATCH" / "{n} NESTS"; none anywhere → prompts as fallback). One
-     row per part: DYPN | Batch | Nest | Total Bevels | Total Complex Bevels
-     | Total Cut Lin | Notes, sorted batch → nest → DYPN (all natural order)
-     so each nest's parts sit together, with a live =SUM() totals row.
+  3. Writes "{batch} {nest} NC Baked Beans.xlsx" into that folder —
+     batch/nest come FROM the sheets (single pair → its name; up to 3 nests
+     listed "P07819+P07820", more → "{n} NESTS"; several batches → "MULTI
+     BATCH"; none anywhere → prompts as fallback). One row per part: DYPN |
+     Batch | Nest | Total Bevels | Total Complex Bevels | Total Cut Lin |
+     Notes, sorted batch → nest → DYPN (all natural order) so each nest's
+     parts sit together, with a live =SUM() totals row.
 
 Values come from openpyxl's CACHED formula results (data_only=True). A sheet
 that was never recalculated/saved in Excel has no cache — those rows are
@@ -66,7 +67,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.6"
+VERSION = "1.2.7"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -106,7 +107,9 @@ _SCAN_ROWS = 40
 _SCAN_COLS = 30
 _DYPN_SCAN_ROWS = 15
 
-_SKIP_NAME_HINT = "consolidated nc calcs"  # never re-ingest our own output
+# Never re-ingest our own output (current name + the pre-1.2.7 one, so a
+# folder holding an old consolidated list doesn't get scanned as a part).
+_SKIP_NAME_HINTS = ("nc baked beans", "consolidated nc calcs")
 
 
 def _find_summary_sheet(wb):
@@ -216,6 +219,17 @@ def _dypn_sort_key(dypn: str):
     if m:
         return (m.group(1), int(m.group(2)))
     return (dypn, -1)
+
+
+def _nest_name_part(nests: list) -> str:
+    """The nest half of the output filename. A batch often spans several
+    nests: list up to three ("P07819+P07820"), then fall back to a count so
+    the filename stays sane."""
+    if not nests:
+        return "NO NEST"
+    if len(nests) <= 3:
+        return "+".join(nests)
+    return f"{len(nests)} NESTS"
 
 
 def _write_output(rows: list, out_path: Path, log) -> Path:
@@ -332,7 +346,7 @@ def run(params: dict, progress_callback, cancel_event):
     candidates = sorted(
         p for pattern in ("*.xlsm", "*.xlsx") for p in folder.glob(pattern)
         if not p.name.startswith("~$")
-        and _SKIP_NAME_HINT not in p.name.lower()
+        and not any(h in p.name.lower() for h in _SKIP_NAME_HINTS)
     )
     if not candidates:
         log(f"No .xlsm/.xlsx calc sheets found in {folder}")
@@ -387,8 +401,7 @@ def run(params: dict, progress_callback, cancel_event):
     nests = sorted({r[2] for r in rows if r[2]}, key=_dypn_sort_key)
     if batches:
         bpart = batches[0] if len(batches) == 1 else "MULTI BATCH"
-        npart = ((nests[0] if len(nests) == 1 else f"{len(nests)} NESTS")
-                 if nests else "NO NEST")
+        npart = _nest_name_part(nests)
     else:
         log("No sheet declared a Batch/Nest - asking for the output name.")
         bpart = (sdk.request_batch_number(params, "Enter batch number:") or "").strip()
@@ -398,7 +411,7 @@ def run(params: dict, progress_callback, cancel_event):
             return
     safe = re.compile(r'[<>:"/\\|?*]')
     out_path = folder / (f"{safe.sub('_', bpart)} {safe.sub('_', npart)} "
-                         "Consolidated NC Calcs.xlsx")
+                         "NC Baked Beans.xlsx")
 
     # No explicit progress_callback(100) — the executor fires it on success,
     # and reporting it here too printed "Progress: 100%" twice.
