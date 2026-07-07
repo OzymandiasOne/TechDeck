@@ -521,8 +521,17 @@ class MainWindow(QMainWindow):
     
     def _on_plugin_progress(self, plugin_id: str, progress: int):
         """Handle plugin progress update."""
-        # Log progress milestones
+        # Log progress milestones ONCE each: the executor fires its own 100%
+        # on success (on top of any the plugin reported), and a long loop can
+        # map two iterations onto the same milestone int — either would print
+        # the same "Progress: N%" twice in a row. A new run starts from a
+        # lower value, so comparing against the last logged value is enough.
         if progress in [25, 50, 75, 100]:
+            if not hasattr(self, "_progress_logged"):
+                self._progress_logged = {}
+            if self._progress_logged.get(plugin_id) == progress:
+                return
+            self._progress_logged[plugin_id] = progress
             plugin = self.home_page.plugin_loader.get_plugin(plugin_id)
             plugin_name = plugin.name if plugin else plugin_id
             self.console.append_plugin_output(plugin_name, f"Progress: {progress}%")

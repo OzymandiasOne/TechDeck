@@ -66,7 +66,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.4"
+VERSION = "1.2.5"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -389,8 +389,6 @@ def run(params: dict, progress_callback, cancel_event):
         bpart = batches[0] if len(batches) == 1 else "MULTI BATCH"
         npart = ((nests[0] if len(nests) == 1 else f"{len(nests)} NESTS")
                  if nests else "NO NEST")
-        log(f"Batch/nest from the sheets: {', '.join(batches)} / "
-            f"{', '.join(nests) if nests else '(none)'}")
     else:
         log("No sheet declared a Batch/Nest - asking for the output name.")
         bpart = (sdk.request_batch_number(params, "Enter batch number:") or "").strip()
@@ -402,8 +400,9 @@ def run(params: dict, progress_callback, cancel_event):
     out_path = folder / (f"{safe.sub('_', bpart)} {safe.sub('_', npart)} "
                          "Consolidated NC Calcs.xlsx")
 
+    # No explicit progress_callback(100) — the executor fires it on success,
+    # and reporting it here too printed "Progress: 100%" twice.
     saved = _write_output(rows, out_path, log)
-    progress_callback(100)
 
     flagged = sum(1 for row in rows if row[4])
     log("")
