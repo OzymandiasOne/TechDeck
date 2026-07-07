@@ -2,7 +2,7 @@
   "id": "911_baked_beans_wild_ride",
   "name": "911 Baked Beans Wild Ride",
   "description": "Consolidates a folder of filled NC-calc spreadsheets (the 'NC style baked beans' DSTV/linear-inch pricing sheets) into one review list: DYPN, Batch, Nest, Total Bevels, Total Complex Bevels, and Total Cut Lin per part, sorted batch/nest/part with a grand-total row. Prompts only for the folder (the one holding the NC files) - batch + nest are read from each sheet's Batch/Nest cell and name the output, saved into that same folder. Running the Baked Beans spreadsheet itself is a future stop on the ride.",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

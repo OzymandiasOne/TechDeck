@@ -606,25 +606,39 @@ class ConsoleWidget(QWidget, ThemeAware):
             Q_ARG(str, text),
         )
 
-    def append_link(self, text: str, target_path: str):
+    def append_link(self, text: str, target_path: str, prefix: str = ""):
         """Append a CLICKABLE line that opens `target_path` with its default
         app (image viewer, Explorer, ...). Thread-safe — callable straight
-        from a plugin worker. The click handling lives in eventFilter (a
-        read-only QTextEdit renders anchors but doesn't act on them)."""
+        from a plugin worker. Styled like a normal output line: the optional
+        `prefix` renders as a bold channel tag (easter-egg purple, matching
+        append_game and distinct from the plugin-output orange) and `text`
+        as regular body text — only the hover hand-cursor betrays the link.
+        Click handling lives in eventFilter (a read-only QTextEdit renders
+        anchors but doesn't act on them)."""
         QMetaObject.invokeMethod(
             self,
             "_append_link_gui",
             Qt.ConnectionType.QueuedConnection,
             Q_ARG(str, text),
             Q_ARG(str, target_path),
+            Q_ARG(str, prefix),
         )
 
-    @Slot(str, str)
-    def _append_link_gui(self, text: str, target_path: str):
+    @Slot(str, str, str)
+    def _append_link_gui(self, text: str, target_path: str, prefix: str):
+        # Body text color = the active theme's text color, so the message half
+        # reads exactly like every other appended message (anchors otherwise
+        # render in Qt's default link blue).
+        from techdeck.ui.theme_manager import get_theme_manager
+        body_color = get_theme_manager().get_current_palette().text
         url = QUrl.fromLocalFile(target_path).toString()
+        lead = ""
+        if prefix:
+            lead = (f'<span style="color: #C084FC; font-weight: bold;">'
+                    f'{self._escape_html(prefix)}</span> ')
         self.output.append(
-            f'<a href="{url}" style="color: #F59E0B; font-weight: bold; '
-            f'text-decoration: underline;">{self._escape_html(text)}</a>'
+            lead + f'<a href="{url}" style="color: {body_color}; '
+            f'text-decoration: none;">{self._escape_html(text)}</a>'
         )
         self._scroll_to_bottom()
 

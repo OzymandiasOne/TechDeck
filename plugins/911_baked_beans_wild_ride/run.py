@@ -66,7 +66,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.1"
+VERSION = "1.2.2"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -74,7 +74,8 @@ STEP_CONSOLIDATE = "Consolidate output sheets into one review list"
 
 _THOUGHT_MAIN = '"I want off BAKED BEANS WILD RIDE"'
 _THOUGHT_RARE = '"I have the strangest feeling someone is watching me"'
-_FINALE = 'Mr Beans says: "The ride never ends!"'
+_FINALE_PREFIX = "Mr Beans says:"   # bold channel-tag style (egg purple)
+_FINALE = '"The ride never ends!"'  # regular body text, but clickable
 _RIDE_IMAGE = "mr_beans_wild_ride.jpg"   # bundled next to run.py
 _THOUGHT_EVERY = 3                        # emit a rider thought every N files
 _RARE_CHANCE = 0.125                      # odds a thought is the watching one
@@ -418,6 +419,6 @@ def run(params: dict, progress_callback, cancel_event):
     ride_img = Path(__file__).resolve().parent / _RIDE_IMAGE
     if (console is not None and hasattr(console, "append_link")
             and ride_img.exists()):
-        console.append_link(_FINALE, str(ride_img))
+        console.append_link(_FINALE, str(ride_img), prefix=_FINALE_PREFIX)
     else:
-        log(_FINALE)
+        log(f"{_FINALE_PREFIX} {_FINALE}")
