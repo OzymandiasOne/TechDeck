@@ -1,8 +1,30 @@
-# TechDeck v0.8.6.4 - Carrots & More Carrots
+# TechDeck v0.8.6.5 - Baked Beans & Gemba
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.5
+
+**New app: 911 Baked Beans Wild Ride** - Point it at a folder of filled "NC style baked
+beans" calc workbooks and it consolidates every part into one review list (DYPN, Batch,
+Nest, Total Bevels, Total Complex Bevels, Total Cut Lin) with live totals, sorted by
+batch/nest/part, saved into that same folder and named from the batch + nest the sheets
+themselves declare. Sheets that haven't been calculated yet are flagged instead of
+silently skipped. The folder is the only question it asks.
+
+**QA Gemba Analyzer** - Now tracks **Missing Material? (Y/N)** on every rework event,
+with a matching chart filter and group-by. The demo seed data is gone (the log starts
+empty and real), and the shared rework workbook now lives in the QA team's Gemba folder
+in the ASA Quality Management System library, found automatically on any machine that
+syncs it.
+
+**Library & window polish** - Library tiles now match Home (family badge in the corner,
+family prefix dropped from names); admin-only console commands are gated behind
+`/admin`; the window's minimum size follows only the page you're looking at, so Home
+and Library shrink properly and store pages can't force the window to grow.
 
 ---
 

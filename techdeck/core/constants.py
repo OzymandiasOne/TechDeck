@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.4"  # Carrots & More Carrots: ticket economy + Woogy's Emporium + My House/Garden + Achievements; new plugins 922 Setup, QA Gemba Analyzer, 911 SSPO Invoicing Prep, 902 DXF Prep (new 902 family); native folder pickers; Professional theme; smaller build
+APP_VERSION = "0.8.6.5"  # Baked Beans & Gemba: new 911 Baked Beans Wild Ride plugin (NC-calc consolidation); QA Gemba Analyzer missing-material tracking + QMS-library data home, seed data removed; Library family badges; /admin gate; window sizing fixes
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.4 - Carrots & More Carrots: ticket economy + Emporium + My House/Garden; new plugins (922 Setup, QA Gemba Analyzer, 911 SSPO Invoicing Prep, 902 DXF Prep); folder pickers
+; Version 0.8.6.5 - Baked Beans & Gemba: new 911 Baked Beans Wild Ride plugin; QA Gemba Analyzer missing-material tracking + QMS data home; Library family badges; window sizing fixes
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.4"
+#define MyAppVersion "0.8.6.5"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
