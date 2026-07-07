@@ -324,6 +324,7 @@ Explorer and on pinned shortcuts.
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
 Batch Repeater | Copies repeat orders from prior 922 batches 
 922 LST Organizer | Organizes .lst files by material type; outputs per-batch overview 
+911 LST Organizer | Gathers every .lst file in a 911 QTDR batch into a batch LST folder, maps each to the batch list for material analysis, and organizes by material type 
 911 PO PDF Extractor | Extracts PO data from PDFs into Excel 
 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation 
 QR Code Generator | GUI plugin - dual-tab QR library and generator 

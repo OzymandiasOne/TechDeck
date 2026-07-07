@@ -1,0 +1,41 @@
+{
+  "id": "911_lst_organizer",
+  "name": "911 LST Organizer",
+  "description": "Gather, organize, and track .lst files with tube material analysis from a 911 QTDR batch",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "icon": "📋",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to the '911 QTDR' folder. Leave blank to auto-discover from OneDrive.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
+        "required": false,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "dry_run",
+        "type": "boolean",
+        "label": "Dry Run (Plan Only)",
+        "description": "Preview what would happen without actually copying files",
+        "default": false
+      },
+      {
+        "key": "organize_by_material",
+        "type": "boolean",
+        "label": "Organize Files by Material",
+        "description": "Automatically sort .lst files into material-specific folders",
+        "default": true
+      }
+    ]
+  }
+}
