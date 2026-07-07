@@ -2,7 +2,7 @@
   "id": "911_runtime_estimator",
   "name": "911 Runtime Estimator",
   "description": "Scans a ROOT directory of order folders, reads each nest's work-package PDF (thickness, pieces, material, size, mil spec) and its batch list, computes a per-nest plate-cutting time estimate, and writes ONE consolidated Excel workbook: Plates and Non-Plates sheets, each a flat data table across all orders followed by a real, refreshable Excel PivotTable (nest -> Sum of Est Cut Hours, with grand total). Prompts for the ROOT directory at runtime.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

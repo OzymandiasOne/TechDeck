@@ -69,7 +69,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -383,6 +383,66 @@ def thickness_from_description(desc) -> Optional[float]:
 # Folder + batch-list resolution
 # ──────────────────────────────────────────────────────────────────────────
 
+def _looks_like_order(folder: Path) -> bool:
+    """True if `folder` is a single order/batch folder — it directly holds a
+    'CUI- TECH DATA READ ME' folder, a *BATCH*LIST*.xlsx, or the packet
+    folders themselves."""
+    try:
+        for sub in folder.iterdir():
+            name_up = sub.name.upper()
+            if sub.is_dir():
+                if "CUI" in name_up and "TECH" in name_up:
+                    return True
+                if name_up in ("NEST PACKAGES", "WPDD SKETCHES"):
+                    return True
+            elif (sub.suffix.lower() == ".xlsx" and "BATCH" in name_up
+                    and "LIST" in name_up and not sub.name.startswith("~$")):
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def discover_order_folders(root: Path, log) -> list:
+    """Collect the order folders under ROOT, tolerating a ROOT picked a level
+    (or several) too high.
+
+    Award folders and zip extractions add wrapper levels (e.g.
+    'Award 10\\1000129724 SSPO Award 10\\1000129724 SSPO Award 10\\{L028,...}').
+    The old ROOT.iterdir()-only discovery treated a wrapper as ONE order, then
+    the CUI/batch-list fallbacks silently processed a single arbitrary batch
+    list from somewhere inside it (bit A.T.'s Award 10 runs: 1 of 4 batches,
+    no packet PDFs, everything mis-filed). Now: a ROOT subfolder that doesn't
+    itself look like an order is descended into (depth-capped) until real
+    order folders are found; picking an order folder itself as ROOT works too.
+    """
+    if _looks_like_order(root):
+        log("ROOT is itself a single order folder.")
+        return [root]
+
+    found = []
+
+    def walk(folder: Path, depth: int) -> None:
+        try:
+            subs = sorted((d for d in folder.iterdir()
+                           if d.is_dir() and not d.name.startswith(".")),
+                          key=lambda p: p.name.upper())
+        except OSError:
+            return
+        for d in subs:
+            if _looks_like_order(d):
+                found.append(d)
+            elif depth < 4:
+                before = len(found)
+                walk(d, depth + 1)
+                if len(found) > before:
+                    log(f"  NOTE: '{d.name}' is a wrapper folder - using the "
+                        f"order folders inside it.")
+
+    walk(root, 1)
+    return found
+
+
 def find_cui_folder(order_folder: Path) -> Optional[Path]:
     """Locate the 'CUI- TECH DATA READ ME' folder (name varies in spacing/dash).
     Falls back to any subfolder that itself contains a NEST PACKAGES / WPDD
@@ -422,19 +482,28 @@ def find_pdf_folder(cui_folder: Path) -> Optional[Path]:
     return None
 
 
-def find_batch_list(cui_folder: Path) -> Optional[Path]:
+def find_batch_list(cui_folder: Path, log=None) -> Optional[Path]:
     """Glob for the '*BATCH*LIST*.xlsx' workbook, skipping Excel lock files."""
     candidates = [f for f in cui_folder.glob("*.xlsx")
                   if "BATCH" in f.name.upper() and "LIST" in f.name.upper()
                   and not f.name.startswith("~$")]
     if candidates:
         return candidates[0]
-    # Search one level down too.
-    for f in cui_folder.rglob("*.xlsx"):
-        if ("BATCH" in f.name.upper() and "LIST" in f.name.upper()
-                and not f.name.startswith("~$")):
-            return f
-    return None
+    # Deep fallback. Multiple hits at different depths is the wrong-ROOT
+    # signature (a wrapper folder holding several batches) — never silently
+    # pick one; take the shallowest and say so.
+    deep = [f for f in cui_folder.rglob("*.xlsx")
+            if "BATCH" in f.name.upper() and "LIST" in f.name.upper()
+            and not f.name.startswith("~$")]
+    if not deep:
+        return None
+    deep.sort(key=lambda f: (len(f.parts), str(f).upper()))
+    if len(deep) > 1 and log:
+        log(f"  WARNING: {len(deep)} BATCH LIST workbooks found under "
+            f"'{cui_folder.name}' - it looks like a wrapper of several "
+            f"batches, not one order. Using {deep[0].name}; check the ROOT "
+            f"you selected.")
+    return deep[0]
 
 
 def load_batch_rows(batch_list_path: Path):
@@ -762,11 +831,11 @@ def run(params: dict, progress_callback, cancel_event):
         return
     log(f"ROOT: {root}")
 
-    order_folders = sorted([d for d in root.iterdir() if d.is_dir()
-                            and not d.name.startswith(".")],
-                           key=lambda p: p.name.upper())
+    order_folders = discover_order_folders(root, log)
     if not order_folders:
-        log("ERROR: No order subfolders found under ROOT.")
+        log("ERROR: No order folders found under ROOT (no folder holding a "
+            "CUI- TECH DATA READ ME folder, a BATCH LIST workbook, or NEST "
+            "PACKAGES). Pick the folder whose subfolders are the orders.")
         return
     log(f"Found {len(order_folders)} order folder(s): "
         f"{', '.join(o.name for o in order_folders)}")
@@ -787,7 +856,7 @@ def run(params: dict, progress_callback, cancel_event):
 
         cui = find_cui_folder(order_folder)
         pdf_folder = find_pdf_folder(cui) if cui else None
-        batch_list = find_batch_list(cui) if cui else None
+        batch_list = find_batch_list(cui, log=log) if cui else None
 
         if batch_list is None:
             log(f"  WARNING: No BATCH LIST workbook found for {order} -- skipping.")
