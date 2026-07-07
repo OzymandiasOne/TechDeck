@@ -59,6 +59,13 @@ PLUGIN_ICON_KEYS = {
 # themed pixel-32 tile. Native colors, not theme-recolored.
 _PACK_SETS = ("TechDeck pack pixel", "Icons8 characters pixel", "Icons socialmedia pixel")
 
+# Pack icons that ship directional "eye follow" sprites alongside the base PNG
+# (<key>_<up|down|left|right|up_left|...>.png, generated with the base by
+# tools/generate_pack_icons.py). The Home tile animates these so the sprite's
+# pupils track the cursor; the base icon (looking straight at the camera) is
+# what every other surface shows.
+EYE_FOLLOW_KEYS = {"mr_beans"}
+
 # Themes that have a generated icon palette on disk. Custom user themes fall back
 # to the "dark" set.
 _PIXEL_THEMES = {"dark", "light", "cherry_blossom", "blue", "cyberpunk", "matrix"}
@@ -111,6 +118,30 @@ def _pack_icon_path(key: str) -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def eye_follow_key(plugin) -> str | None:
+    """This plugin's base pack-icon key if it ships eye-follow sprites, else None."""
+    key = PLUGIN_ICON_KEYS.get(getattr(plugin, "id", None))
+    return key if key in EYE_FOLLOW_KEYS else None
+
+
+def pack_icon_pixmap(key: str, size: int) -> QPixmap | None:
+    """Load a generated pack icon by raw key (native colors), or None if absent.
+
+    Same crisp nearest-neighbour scaling as the tile pipeline; used by the
+    eye-follow animation to load the directional sprite variants directly.
+    """
+    path = _pack_icon_path(key)
+    if path is None:
+        return None
+    pm = QPixmap(str(path))
+    if pm.isNull():
+        return None
+    if pm.width() != size or pm.height() != size:
+        pm = pm.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.FastTransformation)
+    return pm
 
 
 def _load_pixel_icon(plugin, size: int) -> QPixmap | None:

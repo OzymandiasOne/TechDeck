@@ -1826,8 +1826,8 @@ _MR_BEANS_GRID = [
     "........obdbbbbbbbbbbbbbo.......",
     "........obbdddbbbbbdddbbo.......",
     "........obhhhbbbbbbbbbdbbo......",
-    ".........hwkkhbbbbbwkkbbbo......",
-    "........hhkkkhbbbbbkkkbbbo......",
+    ".........hkkkhbbbbbkkkbbbo......",
+    "........hhkwkhbbbbbkwkbbbo......",
     "........ohkkkhbbbbbkkkbbbbo.....",
     ".......obhkkkhbbbbbkkkbbbbo.....",
     ".......obbhhhbbbbbbbbbbbbbbo....",
@@ -1844,6 +1844,32 @@ _MR_BEANS_GRID = [
     "............ooooooooo...........",
 ]
 _MR_BEANS_TONES = {"b": "#D2622A", "d": "#A8431C", "g": "#3C3C48", "h": "#EE9257", "k": "#16161C", "o": "#5C2410", "r": "#C03434", "w": "#FFF4E6"}
+
+# Mr Beans eye-follow variants: the Home tile swaps among these so the pupils
+# (the single "w" pixel per eye) track the cursor. The base grid above looks
+# straight at the camera; the 8 directional grids are DERIVED from it here so
+# _MR_BEANS_GRID stays the one hand-editable source (tools/icon_editor.py only
+# sees the base). If the face is ever redrawn, keep these eye-block constants
+# in sync: each eye is a 3-wide x 4-tall "k" block (rows 16-19).
+_MR_BEANS_EYE_COLS = (11, 20)                   # pupil center column of each eye
+_MR_BEANS_PUPIL_ROWS = {-1: 16, 0: 17, 1: 19}   # up / center / down row
+_MR_BEANS_LOOKS = {
+    "up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0),
+    "up_left": (-1, -1), "up_right": (1, -1),
+    "down_left": (-1, 1), "down_right": (1, 1),
+}
+
+
+def _mr_beans_looking(dx, dy):
+    """_MR_BEANS_GRID with both pupils moved by (dx, dy), each in -1/0/1."""
+    grid = [row.replace("w", "k") for row in _MR_BEANS_GRID]
+    row = list(grid[_MR_BEANS_PUPIL_ROWS[dy]])
+    for col in _MR_BEANS_EYE_COLS:
+        row[col + dx] = "w"
+    grid[_MR_BEANS_PUPIL_ROWS[dy]] = "".join(row)
+    return grid
+
+
 SETS = {
     "TechDeck pack pixel": {
         "mr_beans": (_MR_BEANS_GRID, _MR_BEANS_TONES),
@@ -1897,6 +1923,10 @@ SETS = {
         "woody_woodpecker": (_WOODY_WOODPECKER_GRID, _WOODY_WOODPECKER_TONES),
     },
 }
+SETS["TechDeck pack pixel"].update(
+    (f"mr_beans_{name}", (_mr_beans_looking(dx, dy), _MR_BEANS_TONES))
+    for name, (dx, dy) in _MR_BEANS_LOOKS.items()
+)
 
 
 def main():

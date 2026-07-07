@@ -13,8 +13,9 @@ from PySide6.QtCore import (
     QVariantAnimation, QSequentialAnimationGroup, QTimer,
     QPoint, QObject,
 )
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QCursor
 
+import math
 import queue as _queue
 
 from techdeck.core.settings import SettingsManager
@@ -23,7 +24,8 @@ from techdeck.core.plugin_executor import PluginExecutor, PluginResult
 from pathlib import Path
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.theme_aware import ThemeAware
-from techdeck.ui.plugin_icon import plugin_icon_pixmap
+from techdeck.ui.theme_manager import get_theme_manager
+from techdeck.ui.plugin_icon import plugin_icon_pixmap, eye_follow_key, pack_icon_pixmap
 
 # Windows-Settings-style tile geometry: a centered icon over the app name.
 # The Library keeps the compact, borderless tiles (TILE_*). The Home page uses
@@ -49,6 +51,63 @@ def _strip_family_prefix(name: str, family: str) -> str:
     if family in _FAMILY_BADGE_COLORS and name.startswith(family + " "):
         return name[len(family) + 1:]
     return name
+
+
+class _EyeFollow(QObject):
+    """Makes a tile icon's pupils track the cursor (Mr Beans on the Home grid).
+
+    Polls the global cursor while the icon is visible and swaps the label's
+    pixmap among the 9 directional pack sprites: <key>.png looks straight at
+    the camera (shown when the cursor is on/near the tile), <key>_<dir>.png
+    for the 8 compass directions. Sprites are cached at construction and the
+    label only repaints when the direction actually changes, so the steady
+    state is a no-op timer tick. Disabled while the professional theme is
+    active (playful features hide for client demos).
+    """
+
+    _DIRS = ("right", "down_right", "down", "down_left",
+             "left", "up_left", "up", "up_right")
+    _DEADZONE = 48   # px from the icon center inside which he makes eye contact
+
+    def __init__(self, label: QLabel, key: str, size: int):
+        super().__init__(label)
+        self._label = label
+        self._current = ""
+        self._pixmaps = {}
+        base = pack_icon_pixmap(key, size)
+        if base is None:
+            return  # art missing -> leave the static icon alone, no timer
+        self._pixmaps[""] = base
+        for d in self._DIRS:
+            pm = pack_icon_pixmap(f"{key}_{d}", size)
+            if pm is not None:
+                self._pixmaps[d] = pm
+        self._timer = QTimer(self)
+        self._timer.setInterval(90)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start()
+
+    def refresh(self):
+        """Forget the cached direction (the label's pixmap was reset externally)."""
+        self._current = ""
+
+    def _tick(self):
+        if not self._label.isVisible():
+            return
+        if get_theme_manager().get_current_theme() == "professional":
+            return  # apply_theme already reset the label to the static base icon
+        center = self._label.mapToGlobal(self._label.rect().center())
+        cur = QCursor.pos()
+        dx, dy = cur.x() - center.x(), cur.y() - center.y()
+        if dx * dx + dy * dy <= self._DEADZONE * self._DEADZONE:
+            d = ""
+        else:
+            # Screen y grows downward, so atan2(dy, dx) sweeps right -> down ->
+            # left -> up; eight 45-degree sectors centered on each direction.
+            d = self._DIRS[round(math.atan2(dy, dx) / (math.pi / 4)) % 8]
+        if d != self._current and d in self._pixmaps:
+            self._current = d
+            self._label.setPixmap(self._pixmaps[d])
 
 
 class PluginCard(QFrame, ThemeAware):
@@ -103,6 +162,10 @@ class PluginCard(QFrame, ThemeAware):
         self.icon_label.setPixmap(plugin_icon_pixmap(plugin, HOME_TILE_ICON))
         # Transparent so the solid card background shows through behind the icon.
         self.icon_label.setStyleSheet("#cardIcon { background: transparent; }")
+
+        # Icons with directional sprites (mr_beans) get cursor-tracking pupils.
+        key = eye_follow_key(plugin)
+        self._eye_follow = _EyeFollow(self.icon_label, key, HOME_TILE_ICON) if key else None
 
         # Name without the family prefix (the family shows as a corner badge).
         self._family = getattr(plugin, "family", "other")
@@ -216,6 +279,8 @@ class PluginCard(QFrame, ThemeAware):
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
         # Icons are theme-matched; swap to the new theme's variant.
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, HOME_TILE_ICON))
+        if self._eye_follow:
+            self._eye_follow.refresh()
         # Family tag text uses the theme accent, so re-style it on theme change.
         self._style_family_badge()
 
