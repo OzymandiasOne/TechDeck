@@ -544,6 +544,39 @@ class ConsoleWidget(QWidget, ThemeAware):
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 
+    def show_warning(self, title: str, text: str):
+        """Show a modal warning popup and BLOCK until the user acknowledges it.
+        Same worker-thread contract as request_selection/request_directory —
+        use for warnings that must not scroll past unseen (via
+        sdk.show_warning, which adds the headless fallback)."""
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "show_warning() cannot be called from main GUI thread"
+            )
+
+        self._warn_args = (str(title), str(text))
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_warning_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+    @Slot()
+    def _warning_gui(self):
+        """GUI-thread half of show_warning: run the modal message box."""
+        from PySide6.QtWidgets import QMessageBox
+
+        title, text = self._warn_args
+        QMessageBox.warning(self.window(), title, text)
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""

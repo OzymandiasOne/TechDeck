@@ -1,8 +1,8 @@
 {
   "id": "911_lst_organizer",
   "name": "911 LST Organizer",
-  "description": "Gather, organize, and track .lst files with tube material analysis from a 911 QTDR batch",
-  "version": "1.0.0",
+  "description": "Pulls the .lst files for the parts on a nest's 1D cutting diagram (cross-batch aware) into the nest's PRODUCTION PAPERWORK\\LST folder",
+  "version": "2.0.0",
   "author": "Anthony Sieben",
   "family": "911",
   "icon": "📋",
@@ -13,28 +13,17 @@
         "key": "base_path",
         "type": "directory",
         "label": "Base Directory",
-        "description": "Path to the '911 QTDR' folder. Leave blank to auto-discover from OneDrive.",
+        "description": "Path to the '911 QTDR' folder - only used as the folder dialog's starting point. Leave blank to auto-discover from OneDrive.",
         "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
         "required": false,
-        "default": "",
-        "validation": {
-          "pattern": ".*",
-          "message": "Please select a valid directory path"
-        }
+        "default": ""
       },
       {
         "key": "dry_run",
         "type": "boolean",
         "label": "Dry Run (Plan Only)",
-        "description": "Preview what would happen without actually copying files",
+        "description": "Preview what would be pulled without actually copying files",
         "default": false
-      },
-      {
-        "key": "organize_by_material",
-        "type": "boolean",
-        "label": "Organize Files by Material",
-        "description": "Automatically sort .lst files into material-specific folders",
-        "default": true
       }
     ]
   }

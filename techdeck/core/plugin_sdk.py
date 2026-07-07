@@ -350,6 +350,22 @@ def request_directory(params: dict, title: str = "Select Folder",
     return raw or None
 
 
+def show_warning(params: dict, title: str, text: str) -> None:
+    """Show a modal warning popup (console GUI thread) and block until the
+    user acknowledges it. Use for problems the user must see before moving
+    on — a console log line scrolls past unnoticed. Headless (or on an older
+    TechDeck without console.show_warning) it just logs the text."""
+    console = params.get("console")
+    if console is not None and hasattr(console, "show_warning"):
+        try:
+            console.show_warning(title, text)
+            return
+        except Exception:
+            pass
+    log = params.get("log", print)
+    log(f"WARNING [{title}]: {text}")
+
+
 def request_batch_number(params: dict, prompt: str) -> str:
     """Prompt for a batch number through the TechDeck console, falling back to
     stdin input() when run standalone (no console). Returns the raw string.
