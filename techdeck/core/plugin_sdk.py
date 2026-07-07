@@ -613,14 +613,21 @@ def load_workbook_resilient(path, log=None, **kwargs):
     """openpyxl.load_workbook that survives OneDrive cloud-only placeholders.
 
     A dehydrated workbook fails inside zipfile with OSError [Errno 22] even
-    though the path exists. When that happens and the file looks like a
-    placeholder, force-download it and retry once; otherwise re-raise the
-    original error. Use this for ANY workbook under the OneDrive tree
-    (Hard Rule 13)."""
+    though the path exists — and zipfile's end-of-central-directory reader
+    CATCHES that OSError itself and re-raises it as BadZipFile ("File is not
+    a zip file"), so the placeholder failure wears two disguises. Hydrate
+    placeholders up front (sequential read — the recall path OneDrive
+    actually honors; zipfile's backwards seek can stall the recall for 60s+
+    and then fail), and treat both exception types as the placeholder
+    signature on the retry. Bit 911 Setup as "File is not a zip file"
+    (v0.8.6.5, LAPTOP-1AMLBK7B). Use this for ANY workbook under the
+    OneDrive tree (Hard Rule 13)."""
     import openpyxl
+    import zipfile
+    ensure_local(path, log=log)
     try:
         return openpyxl.load_workbook(path, **kwargs)
-    except OSError:
+    except (OSError, zipfile.BadZipFile):
         if not is_cloud_placeholder(path):
             raise
         if log:
