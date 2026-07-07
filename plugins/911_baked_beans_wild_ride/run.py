@@ -6,7 +6,7 @@ Consolidates the per-part "NC style baked beans" calc workbooks (the
 DSTV/linear-inch pricing sheets Antonio & Scott J's template fills out from
 Vacam NC files) into ONE review list, so nobody has to open 60+ workbooks
 one at a time. Named for Mr. Bones' Wild Ride (the RollerCoaster Tycoon
-greentext saga): rider thoughts mutter through the console during the run,
+greentext saga): quoted rider thoughts mutter through the console during the run,
 and the finish line — 'Mr Beans says: "The ride never ends!"' — is CLICKABLE
 (console.append_link) and opens the bundled mr_beans_wild_ride.jpg, both
 halves of the original saga merged into one long image.
@@ -66,18 +66,18 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
 STEP_CONSOLIDATE = "Consolidate output sheets into one review list"
 
-_THOUGHT_MAIN = 'Recent thoughts: "I want off BAKED BEANS WILD RIDE"'
-_THOUGHT_RARE = 'Recent thoughts: "I have the strangest feeling someone is watching me"'
+_THOUGHT_MAIN = '"I want off BAKED BEANS WILD RIDE"'
+_THOUGHT_RARE = '"I have the strangest feeling someone is watching me"'
 _FINALE = 'Mr Beans says: "The ride never ends!"'
 _RIDE_IMAGE = "mr_beans_wild_ride.jpg"   # bundled next to run.py
 _THOUGHT_EVERY = 3                        # emit a rider thought every N files
-_RARE_CHANCE = 0.25                       # odds a thought is the watching one
+_RARE_CHANCE = 0.125                      # odds a thought is the watching one
 
 # The three yellow totals, keyed in the requester's column order. Anchored so
 # "TOTAL Bevels" can never match "TOTAL Complex Bevels".
