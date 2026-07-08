@@ -16,11 +16,12 @@ Stages (each is cumulative — everything before it is already unlocked):
     yard        fresh start (identical to the shipped plugin)
     tech        Tech Team + a fully-kitted yard, reputation to spend
     aframes     A-Frame division open, fabs running, steel stocked
-    market      ASA Stock Exchange, cash to trade
+    market      Trading Desk section revealed on the Tech Team tab, cash to trade
     drones      Drone Fleet, a few drones deployed
     space       ASA Space Division, orbital hardware in place
-    probes      Probe Program: probes launched, trust allocated, replicating
-    drift       Probes mid-drift — the drifter swarm + Combat Subroutines project
+    probes      Probe Program: the UI has TRANSFORMED to the 2-tab probe interface;
+                probes launched, trust allocated, replicating
+    drift       Probes mid-drift — the drifter swarm + the Combat button live
     converting  Universe 100% explored, the matter-conversion finale running
     ending      Straight to the end screen (rest / new universe)
 
@@ -141,14 +142,15 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
 
     if reached("probes"):
         _grant(g, "quantum")
-        _grant(g, "probe_program")
+        _grant(g, "probe_program")     # this TRANSFORMS the UI to the probe tabs
         g.servers = 40                 # big ops cap so probe launches don't starve
         g.probe_trust = 14
         g.money = 1e15
         g.ops = g._ops_cap
         for _ in range(6):
             g._launch_probe()
-        # A sensible starter allocation
+        # A sensible starter allocation (Speed/Exploration live on the Fleet tab,
+        # the rest on the Replication tab, but the pool is shared)
         for _ in range(5): g._alloc_change("replicate", +1)
         for _ in range(4): g._alloc_change("explore", +1)
         for _ in range(3): g._alloc_change("speed", +1)
@@ -184,10 +186,13 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
 
 
 def _focus_tab(g: SteelBeamsGame, stage: str) -> None:
+    # Market is a section on the Tech Team tab now, not a tab. From the probe
+    # act on, only the two probe tabs exist.
     tab = {
-        "tech": g._tech_tab, "aframes": g._aframe_tab, "market": g._market_tab,
-        "drones": g._drones_tab, "space": g._space_tab, "probes": g._probe_tab,
-        "drift": g._probe_tab, "converting": g._probe_tab, "ending": g._probe_tab,
+        "tech": g._tech_tab, "aframes": g._aframe_tab, "market": g._tech_tab,
+        "drones": g._drones_tab, "space": g._space_tab,
+        "probes": g._probe_fleet_tab, "drift": g._probe_dev_tab,
+        "converting": g._probe_fleet_tab, "ending": g._probe_dev_tab,
     }.get(stage)
     if tab is not None:
         # Guard: the tab only exists if its unlock ran (it always should have).

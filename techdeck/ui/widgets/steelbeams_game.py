@@ -6,6 +6,13 @@ Inspired by Universal Paperclips by Frank Lantz.
 Visuals use the Sweetie-16 pixel palette; the banner is a low-res pixel scene
 scaled up with nearest-neighbor for a crisp SNES look.
 
+Structure mirrors Paperclips' three acts:
+  * Business act — tabs appear/reveal as sections unlock (Yard; Tech Team, which
+    grows a Trading section; A-Frames; Drones; Space).
+  * Probe act — completing the Probe Program TRANSFORMS the whole UI: the business
+    tabs collapse and a focused 2-tab probe interface takes over (Probe Fleet /
+    Replication), money & ops still flow in the background to fund launches.
+
 Naming rule (learned the hard way, see LESSONS_LEARNED.md): every widget
 attribute carries a _lbl/_btn/_box/_bar/_frame/_tab suffix so a QLabel can
 never shadow a method or state variable again.
@@ -13,6 +20,7 @@ never shadow a method or state variable again.
 from __future__ import annotations
 
 import html
+import math
 import random
 
 from PySide6.QtWidgets import (
@@ -20,7 +28,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFrame, QTabWidget, QScrollArea,
 )
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QFont, QPainter, QImage, QColor
+from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
 
 
 # ── Sweetie-16 palette ─────────────────────────────────────────────────────
@@ -125,7 +133,14 @@ def fmt_money(n) -> str:
     return f"${fmt(n)}"
 
 
+def _px_hash(x: int, y: int, s: int = 0) -> int:
+    """Deterministic pseudo-random 0..999 for stable pixel scatter."""
+    return (x * 374761393 + y * 668265263 + s * 1442695041) % 1000
+
+
 # ── Projects (bought with ops or innovation) ───────────────────────────────
+# Probe-act upgrades (combat, trust research) are NOT projects — they live as
+# buttons on the probe Dev tab, because the Tech Team tab is gone by then.
 PROJECTS = [
     dict(id="form_tech_team", name="Form the Tech Team", cur="ops", cost=100,
          requires=set(), unlock="tech_formed",
@@ -141,7 +156,7 @@ PROJECTS = [
          desc="Mount panels on ASA A-Frames. A-Frame demand x2."),
     dict(id="algo_trading", name="Algorithmic Trading", cur="ops", cost=2000,
          requires={"form_tech_team"}, unlock="market",
-         desc="Use compute power to play the open market."),
+         desc="Use compute power to play the open market. Opens the Trading desk."),
     dict(id="solar_v2", name="High-Efficiency Panels", cur="ops", cost=3000,
          requires={"solar_v1"}, effect="afv_75",
          desc="Premium cells. A-Frame market rate x1.75 - charge more, sell more."),
@@ -151,9 +166,14 @@ PROJECTS = [
     dict(id="drone_fleet", name="Drone Fleet Initiative", cur="ops", cost=5000,
          requires={"algo_trading"}, unlock="drones",
          desc="Industrial drones for manufacturing and delivery."),
+    dict(id="hypno_drones", name="Hypno-Drones", cur="ops", cost=12_000,
+         requires={"drone_fleet"}, effect="hypno",
+         desc="Retrofit the delivery fleet with soothing spiral-lights. Nobody "
+              "remembers ordering this much steel. All demand x2.5."),
     dict(id="hedge_ai", name="Hedge Fund AI", cur="ops", cost=6000,
          requires={"algo_trading"}, effect="hedge",
-         desc="The house edge is yours. ASA stock trends upward."),
+         desc="The house edge is yours. ASA stock trends upward. Upgrades the "
+              "trading intelligence."),
     dict(id="solar_v3", name="Perovskite Solar Array", cur="ops", cost=8000,
          requires={"solar_v2"}, effect="af_v3",
          desc="Cutting-edge cells. A-Frame demand x3, market rate x2."),
@@ -168,17 +188,18 @@ PROJECTS = [
          desc="Zero-g metallurgy. All production x5."),
     dict(id="quantum", name="Quantum Computing Array", cur="ops", cost=50_000,
          requires={"space_div"}, effect="quantum",
-         desc="Exponential ops generation. Ops x10."),
+         desc="Exponential ops generation. Ops x10, and a quantum trading mind."),
     dict(id="probe_program", name="ASA Probe Program", cur="ops", cost=100_000,
          requires={"quantum"}, unlock="probes",
-         desc="Self-replicating fabricator probes. Convert the universe to ASA product."),
-    dict(id="combat_subs", name="Combat Subroutines", cur="ops", cost=200_000,
-         requires={"probe_program"}, needs_flag="drift_seen", unlock="combat",
-         desc="Value drift detected. Authorize the fleet to end the drifter swarm."),
+         desc="Self-replicating fabricator probes. Leave the business behind and "
+              "convert the universe to ASA product."),
     # Innovation projects (creativity analog: accrues while ops sit at cap)
     dict(id="slogan", name="New Slogan", cur="inno", cost=150,
          requires={"form_tech_team"}, effect="slogan",
          desc='"America runs on American Steel." All demand x1.5.'),
+    dict(id="office_cat", name="Adopt an Office Cat", cur="inno", cost=250,
+         requires={"form_tech_team"}, effect="cat",
+         desc="Steve the cat now supervises the yard. Morale up. +2 reputation."),
     dict(id="wellness", name="Employee Wellness Program", cur="inno", cost=300,
          requires={"form_tech_team"}, effect="wellness",
          desc="A happy yard is a loyal yard. +3 reputation."),
@@ -188,12 +209,6 @@ PROJECTS = [
     dict(id="skunkworks", name="R&D Skunkworks", cur="inno", cost=1000,
          requires={"form_tech_team"}, effect="skunk",
          desc="Blue-sky research. Ops x2."),
-    dict(id="probe_poetry", name="Ballad of the Steel Yard", cur="inno", cost=2000,
-         requires={"probe_program"}, effect="trust2",
-         desc="An anthem broadcast to the fleet. +2 probe trust."),
-    dict(id="probe_design", name="Probe Design Refinement", cur="inno", cost=3500,
-         requires={"probe_program"}, effect="trust3",
-         desc="Slimmer. Faster. Hungrier. +3 probe trust."),
 ]
 
 _TRUST_MILESTONES = [0.0001, 0.001, 0.01, 0.1, 1.0, 5.0, 10.0, 25.0, 50.0, 75.0, 99.0]
@@ -210,12 +225,17 @@ _CONVERSION_LOG = [
     "The last stars dim. Their matter is needed elsewhere.",
 ]
 
+# The trading AI, leveling up with the projects you complete. Quantum uses a
+# special "entangled" shimmer render. (label, dark cell, lit cell, pattern)
+_AI_MODELS = [
+    ("Heuristic Models",    "dark",   "green",  "scan"),
+    ("Neural Network",      "navy",   "cyan",   "wave"),
+    ("Deep Reinforcement",  "purple", "yellow", "interfere"),
+    ("Quantum Annealer",    "navy",   "cyan",   "quantum"),
+]
 
-def _px_hash(x: int, y: int, s: int = 0) -> int:
-    """Deterministic pseudo-random 0..999 for stable pixel scatter."""
-    return (x * 374761393 + y * 668265263 + s * 1442695041) % 1000
 
-
+# ── Pixel banner ───────────────────────────────────────────────────────────
 class PixelBanner(QWidget):
     """Low-res pixel scene scaled up nearest-neighbor. Three phases:
     yard (sunset steel yard), space (starfield + probe swarm), end (gold)."""
@@ -240,7 +260,6 @@ class PixelBanner(QWidget):
         self.explored = 0.0
         self.update()
 
-    # -- painting ----------------------------------------------------------
     def paintEvent(self, event):
         img = self._render()
         p = QPainter(self)
@@ -271,22 +290,17 @@ class PixelBanner(QWidget):
             self._fill(p, cx - half, cy + dy, half * 2 + 1, 1, key)
 
     def _draw_yard(self, p):
-        # Banded sunset sky
         for key, y0, rows in (("navy", 0, 5), ("purple", 5, 5), ("red", 10, 4),
                               ("orange", 14, 3), ("yellow", 17, 3)):
             self._fill(p, 0, y0, self.LW, rows, key)
-        # Sun, low on the horizon
         self._disc(p, 26, 13, 4, "yellow")
         self._disc(p, 26, 13, 2, "white")
-        # Drifting clouds
         for i, cy in enumerate((3, 7, 11)):
             cx = (20 + i * 55 + self.frame // 3) % (self.LW + 30) - 15
             self._fill(p, cx, cy, 12, 2, "silver")
             self._fill(p, cx + 3, cy - 1, 7, 1, "white")
-        # Ground
         self._fill(p, 0, 20, self.LW, self.LH - 20, "dark")
         self._fill(p, 0, 20, self.LW, 1, "slate")
-        # Factory skyline (right side)
         for bx, bh, bw in ((98, 9, 12), (112, 13, 12), (126, 7, 9),
                            (137, 15, 12), (151, 11, 10), (163, 8, 8),
                            (173, 12, 14)):
@@ -296,40 +310,33 @@ class PixelBanner(QWidget):
                     if _px_hash(wx, wy) % 7 < 3:
                         self._fill(p, wx, wy, 1, 1,
                                    "orange" if _px_hash(wx, wy, 1) % 2 else "yellow")
-        # Smokestack + rising smoke
         self._fill(p, 141, 20 - 15 - 5, 3, 5, "bg")
         for j in range(4):
             sy = 20 - 22 - j * 1
             sx = 141 + ((self.frame // 2 + j * 2) % 3) - 1 - j
             if 0 <= sy:
                 self._fill(p, sx, max(0, sy), 2, 1, "silver")
-        # A-Frame structures (left yard) once unlocked
         if self.show_aframes:
             for bx in (8, 30, 52):
                 for r in range(6):
                     self._fill(p, bx + 5 - r, 14 + r, r * 2 + 1, 1, "orange")
-                    self._fill(p, bx + 5 - r, 14 + r, 1, 1, "cyan")  # panel face
-        # Welding sparks
+                    self._fill(p, bx + 5 - r, 14 + r, 1, 1, "cyan")
         if self.frame % 3 != 0:
             self._fill(p, 96 + _px_hash(self.frame, 3) % 5, 19, 1, 1, "yellow")
             self._fill(p, 94 + _px_hash(self.frame, 7) % 4, 18, 1, 1, "orange")
 
     def _draw_space(self, p):
-        # Starfield with twinkle
         star_keys = ("white", "silver", "cyan", "sky")
         for i in range(70):
             sx = _px_hash(i, 1) % self.LW
             sy = _px_hash(i, 2) % (self.LH - 2)
             if (self.frame // 2 + i) % 11 != 0:
                 self._fill(p, sx, sy, 1, 1, star_keys[i % 4])
-        # Home: a small blue-green Earth, bottom-left
         self._disc(p, 22, 19, 3, "blue")
         self._fill(p, 21, 18, 2, 1, "lime")
-        # Ringed planet, right
         self._disc(p, 160, 14, 5, "teal")
         self._fill(p, 151, 14, 19, 1, "silver")
         self._disc(p, 160, 14, 3, "green")
-        # Probe swarm spreading with exploration
         rad = 3 + min(40.0, self.explored * 0.5)
         vrad = max(2, min(9, int(rad // 3)))
         count = 6 + min(120, int(self.explored * 1.2) + 6)
@@ -347,13 +354,145 @@ class PixelBanner(QWidget):
             sy = _px_hash(i, 9) % self.LH
             if (self.frame + i) % 9 != 0:
                 self._fill(p, sx, sy, 1, 1, "yellow" if i % 3 else "white")
-        # The final golden sun: everything, converted
         self._disc(p, 96, 13, 8, "yellow")
         self._disc(p, 96, 13, 4, "white")
         ray = 10 + (self.frame % 3)
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1),
                        (1, -1), (-1, 1)):
             self._fill(p, 96 + dx * ray, 13 + dy * min(ray, 9), 1, 1, "yellow")
+
+
+# ── AI trading grid ────────────────────────────────────────────────────────
+class AIGrid(QWidget):
+    """Alien compute grid: cells light and fade to represent the trading AI at
+    work. Levels up with your projects (algo trading -> hedge AI -> quantum);
+    the quantum model transforms the animation. Nearest-neighbor scaled pixels."""
+
+    CW, CH, SCALE = 30, 9, 6
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(self.CH * self.SCALE)
+        self.model = 0
+        self.frame = 0
+
+    def advance(self):
+        self.frame += 1
+        self.update()
+
+    def _mix(self, c0: QColor, c1: QColor, t: float) -> QColor:
+        t = max(0.0, min(1.0, t))
+        return QColor(int(c0.red() + (c1.red() - c0.red()) * t),
+                      int(c0.green() + (c1.green() - c0.green()) * t),
+                      int(c0.blue() + (c1.blue() - c0.blue()) * t))
+
+    def _bright(self, x: int, y: int, f: int, pattern: str) -> float:
+        if pattern == "scan":
+            return 0.5 + 0.5 * math.sin(x * 0.6 - f * 0.10)
+        if pattern == "wave":
+            return 0.5 + 0.5 * math.sin(x * 0.5 + y * 0.7 - f * 0.14)
+        if pattern == "interfere":
+            a = math.sin(x * 0.5 - f * 0.13)
+            b = math.sin(y * 0.9 + x * 0.2 - f * 0.07)
+            return 0.5 + 0.25 * (a + b)
+        h = _px_hash(x, y, f // 3)
+        pair = _px_hash((x + y * 3) % self.CW, 0, f // 5)
+        return ((h + pair) % 100) / 100.0
+
+    def paintEvent(self, event):
+        _, dk, lt, pattern = _AI_MODELS[self.model]
+        c_dk, c_lt = QColor(PAL[dk]), QColor(PAL[lt])
+        c_alt = QColor(PAL["purple"])
+        img = QImage(self.CW, self.CH, QImage.Format.Format_RGB32)
+        img.fill(QColor(PAL["bg"]))
+        p = QPainter(img)
+        try:
+            for y in range(self.CH):
+                for x in range(self.CW):
+                    b = self._bright(x, y, self.frame, pattern)
+                    if pattern == "quantum" and (x + y) % 2 == 0:
+                        cell = self._mix(c_dk, c_alt, b)
+                    else:
+                        cell = self._mix(c_dk, c_lt, b)
+                    p.fillRect(x, y, 1, 1, cell)
+        finally:
+            p.end()
+        q = QPainter(self)
+        q.drawImage(self.rect(), img)
+        q.end()
+
+
+# ── Probe web ──────────────────────────────────────────────────────────────
+class ProbeWeb(QWidget):
+    """The void, and the web of probes filling it. Starts as a single dot at
+    the center and grows outward in glowing connected filaments as exploration
+    climbs; each node is a small disc with a soft halo. Smooth (anti-aliased),
+    unlike the blocky pixel scenes — it reads as a starmap/network."""
+
+    MAXNODES = 220
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(170)
+        self.explored = 0.0
+        self.frame = 0
+        rng = random.Random(20260708)
+        self._nodes = []      # (angle, dist 0..1, twinkle-phase)
+        for i in range(self.MAXNODES):
+            ang = rng.uniform(0, 2 * math.pi)
+            dist = (i / self.MAXNODES) ** 0.5 * rng.uniform(0.85, 1.12)
+            self._nodes.append((ang, min(1.0, dist), rng.uniform(0, 6.28)))
+        # filament tree: each node hangs off a nearer-in node
+        self._parent = [0] + [max(0, i // 2 + rng.randint(-1, 0))
+                              for i in range(1, self.MAXNODES)]
+
+    def advance(self):
+        self.frame += 1
+        self.update()
+
+    def _pos(self, i, cx, cy, R):
+        ang, dist, _ = self._nodes[i]
+        return (cx + math.cos(ang) * dist * R,
+                cy + math.sin(ang) * dist * R * 0.72)   # vertical squash
+
+    def _visible(self) -> int:
+        frac = (self.explored / 100.0) ** 0.5
+        return max(1, min(self.MAXNODES, 1 + int(frac * (self.MAXNODES - 1))))
+
+    def paintEvent(self, event):
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        R = 0.92 * min(w / 2.0, (h / 2.0) / 0.72)
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("#05060a"))       # the void, near-black
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        vis = self._visible()
+
+        # filaments
+        edge = QColor(PAL["teal"]); edge.setAlpha(90)
+        p.setPen(QPen(edge, 1))
+        for i in range(1, vis):
+            x1, y1 = self._pos(i, cx, cy, R)
+            x2, y2 = self._pos(self._parent[i], cx, cy, R)
+            p.drawLine(int(x1), int(y1), int(x2), int(y2))
+
+        # nodes (halo + core, twinkling)
+        p.setPen(Qt.PenStyle.NoPen)
+        for i in range(vis):
+            x, y = self._pos(i, cx, cy, R)
+            tw = 0.55 + 0.45 * math.sin(self.frame * 0.12 + self._nodes[i][2])
+            halo = QColor(PAL["cyan"]); halo.setAlpha(int(40 + 40 * tw))
+            p.setBrush(QBrush(halo))
+            p.drawEllipse(int(x - 4), int(y - 4), 8, 8)
+            core = QColor(PAL["white"]) if i % 5 == 0 else QColor(PAL["cyan"])
+            p.setBrush(QBrush(core))
+            p.drawEllipse(int(x - 1), int(y - 1), 3, 3)
+
+        # central hub — the homeworld launch point
+        hub = QColor(PAL["yellow"])
+        p.setBrush(QBrush(hub))
+        p.drawEllipse(int(cx - 2), int(cy - 2), 5, 5)
+        p.end()
 
 
 class SteelBeamsGame(QWidget):
@@ -369,7 +508,7 @@ class SteelBeamsGame(QWidget):
     MIN_PRICE       = 5.0
     MAX_PRICE       = 200.0
     DEFAULT_PRICE   = 45.0
-    TUBE_VALUE      = 220.0     # market rate: demand fraction = 1 - price/value
+    TUBE_VALUE      = 220.0
     BASE_DEMAND     = 1.5
     FAB_BASE_COST   = 400.0
     FAB_COST_MULT   = 1.18
@@ -405,6 +544,14 @@ class SteelBeamsGame(QWidget):
     PROBE_COST_OPS   = 20_000.0
     ALLOC_MAX        = 8
     SERVER_CAP       = 10_000.0
+    COMBAT_OPS       = 150_000.0
+    TRUST_RES_BASE   = 5_000.0
+    TRUST_RES_MULT   = 1.6
+
+    # trust-allocation factors, split across the two probe tabs by theme
+    FLEET_ALLOC = [("speed", "Speed"), ("explore", "Exploration")]
+    DEV_ALLOC   = [("replicate", "Self-Replication"), ("shield", "Hazard Shielding"),
+                   ("harvest", "Matter Harvesting"), ("fabricate", "Fabrication")]
 
     TICK_MS = 100
     TICK_DT = 0.1
@@ -412,8 +559,8 @@ class SteelBeamsGame(QWidget):
     def __init__(self):
         super().__init__(None, Qt.WindowType.Window)
         self.setWindowTitle("ASA: The Video Game")
-        self.setMinimumSize(780, 720)
-        self.resize(820, 800)
+        self.setMinimumSize(800, 740)
+        self.resize(860, 820)
         self.setStyleSheet(_STYLE)
 
         self.universe_n  = 1
@@ -440,8 +587,8 @@ class SteelBeamsGame(QWidget):
         self.steel          = self.START_STEEL
         self.money          = 0.0
         self.total_money    = 0.0
-        # Float accumulators: per-tick amounts are fractional (e.g. 0.12/tick),
-        # so int() truncation per tick would undercount to zero forever.
+        # Float accumulators: per-tick amounts are fractional, so int()
+        # truncation per tick would undercount to zero forever.
         self.total_made     = 0.0
         self.total_sold     = 0.0
         self.price          = self.DEFAULT_PRICE
@@ -451,8 +598,8 @@ class SteelBeamsGame(QWidget):
         self.fab_mult       = 1.0
         self.mkt_level      = 0
         self.mkt_mult       = 1.0
-        self.gp_mult        = 1.0   # project production multiplier
-        self.gd_mult        = 1.0   # project demand multiplier
+        self.gp_mult        = 1.0
+        self.gd_mult        = 1.0
         self.faster_done    = False
         self.bulk_done      = False
         self.precision_done = False
@@ -476,7 +623,7 @@ class SteelBeamsGame(QWidget):
         self.af_fabs        = 0
         self.af_value       = self.AF_START_VALUE
         self.af_d_mult      = 1.0
-        # Phase 4 — Market
+        # Phase 4 — Market (now a section inside the Tech Team tab)
         self.market_unlocked = False
         self.stock_price    = self.STOCK_START
         self.stock_prev     = self.STOCK_START
@@ -496,10 +643,12 @@ class SteelBeamsGame(QWidget):
         self.harvesters     = 0
         # Phase 7 — Probes / endgame
         self.probes_unlocked = False
+        self.probe_phase    = False   # the UI has transformed to the probe interface
         self.probes         = 0.0
         self.probes_launched = 0
         self.drifters       = 0.0
         self.probe_trust    = 6
+        self.trust_research = 0
         self.alloc          = dict(speed=0, explore=0, replicate=0,
                                    shield=0, harvest=0, fabricate=0)
         self.explored       = 0.0
@@ -509,8 +658,17 @@ class SteelBeamsGame(QWidget):
         self.endgame_done   = False
         self.resting        = False
 
+        # Smoothed ACTUAL throughput (what's really selling), so supply-side
+        # upgrades are legible even when you're sold out and inventory sits at 0.
+        self._tube_sell_rate = 0.0
+        self._tube_rev_rate  = 0.0
+        self._af_sell_rate   = 0.0
+        self._af_rev_rate    = 0.0
+
         self._flags         = set()
         self._trust_fired   = set()
+        self._proj_shown    = []     # offerable pids currently rendered (flicker fix)
+        self._proj_buttons  = {}     # pid -> QPushButton, updated in place
         self._tick_count    = 0
         self._elapsed       = 0.0
         self._conv_log_t    = 0.0
@@ -534,6 +692,15 @@ class SteelBeamsGame(QWidget):
     def _rep_avail(self) -> int:
         FREE = 2
         return self.rep_total - (self.developers + self.servers - FREE)
+
+    def _ai_model_index(self) -> int:
+        if "quantum" in self.completed_projects:
+            return 3
+        if "hedge_ai" in self.completed_projects:
+            return 2
+        if "algo_trading" in self.completed_projects:
+            return 1
+        return 0
 
     # ── UI construction ────────────────────────────────────────────────────
 
@@ -562,13 +729,13 @@ class SteelBeamsGame(QWidget):
         self.tabs = QTabWidget()
         root.addWidget(self.tabs, stretch=1)
 
-        self._yard_tab   = self._make_yard_tab()
-        self._tech_tab   = self._make_tech_tab()
-        self._aframe_tab = self._make_aframe_tab()
-        self._market_tab = self._make_market_tab()
-        self._drones_tab = self._make_drones_tab()
-        self._space_tab  = self._make_space_tab()
-        self._probe_tab  = self._make_probe_tab()
+        self._yard_tab        = self._make_yard_tab()
+        self._tech_tab        = self._make_tech_tab()
+        self._aframe_tab      = self._make_aframe_tab()
+        self._drones_tab      = self._make_drones_tab()
+        self._space_tab       = self._make_space_tab()
+        self._probe_fleet_tab = self._make_probe_fleet_tab()
+        self._probe_dev_tab   = self._make_probe_dev_tab()
 
         self.tabs.addTab(self._yard_tab, "The Yard")
 
@@ -611,10 +778,13 @@ class SteelBeamsGame(QWidget):
         pr.addStretch()
         left.addLayout(pr)
         self._y_value_lbl   = self._ml(f"Market rate:  ${self.TUBE_VALUE:.0f}", "slate")
-        self._y_demand_lbl  = self._ml("Demand:   0.00 / sec", "lime")
-        self._y_revenue_lbl = self._ml("Revenue:  $0.00 / sec", "lime")
+        self._y_demand_lbl  = self._ml("Demand:   0.00 / sec  (max at price)", "slate")
+        self._y_revenue_lbl = self._ml("Selling:  0.00 / sec   $0.00 / sec", "lime")
+        self._y_status_lbl  = self._ml("", "yellow")
+        self._y_status_lbl.setWordWrap(True)
         left.addWidget(self._y_value_lbl)
         left.addWidget(self._y_demand_lbl); left.addWidget(self._y_revenue_lbl)
+        left.addWidget(self._y_status_lbl)
         left.addStretch()
         root.addLayout(left, stretch=1)
 
@@ -657,18 +827,31 @@ class SteelBeamsGame(QWidget):
         self._t_inno_lbl.setVisible(False)
         root.addWidget(self._t_inno_lbl)
 
-        hire_row = QHBoxLayout()
+        # Hire / reassign — reputation is reallocatable so you can never
+        # dead-end (pull developers back to free rep for the servers a late
+        # project needs).
+        dev_row = QHBoxLayout()
         self._hire_dev_btn = self._opbtn(); self._hire_dev_btn.clicked.connect(self._hire_dev)
-        self._hire_srv_btn = self._opbtn(); self._hire_srv_btn.clicked.connect(self._hire_srv)
+        fire_dev_btn = self._tinybtn("-"); fire_dev_btn.clicked.connect(self._fire_dev)
         self._t_devs_lbl = self._ml("Developers: 1", "white")
-        self._t_srvs_lbl = self._ml("Servers: 1", "white")
-        hire_row.addWidget(self._hire_dev_btn); hire_row.addWidget(self._t_devs_lbl)
-        hire_row.addSpacing(16)
-        hire_row.addWidget(self._hire_srv_btn); hire_row.addWidget(self._t_srvs_lbl)
-        hire_row.addStretch()
-        root.addLayout(hire_row)
-        root.addWidget(self._hr())
+        dev_row.addWidget(self._hire_dev_btn); dev_row.addWidget(fire_dev_btn)
+        dev_row.addWidget(self._t_devs_lbl); dev_row.addStretch()
+        root.addLayout(dev_row)
 
+        srv_row = QHBoxLayout()
+        self._hire_srv_btn = self._opbtn(); self._hire_srv_btn.clicked.connect(self._hire_srv)
+        fire_srv_btn = self._tinybtn("-"); fire_srv_btn.clicked.connect(self._fire_srv)
+        self._t_srvs_lbl = self._ml("Servers: 1", "white")
+        srv_row.addWidget(self._hire_srv_btn); srv_row.addWidget(fire_srv_btn)
+        srv_row.addWidget(self._t_srvs_lbl); srv_row.addStretch()
+        root.addLayout(srv_row)
+
+        # Trading desk section — revealed when Algorithmic Trading completes.
+        self._market_section = self._build_market_section()
+        self._market_section.setVisible(False)
+        root.addWidget(self._market_section)
+
+        root.addWidget(self._hr())
         root.addWidget(self._sec("PROJECTS"))
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -678,6 +861,38 @@ class SteelBeamsGame(QWidget):
         self._proj_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setWidget(proj_container)
         root.addWidget(scroll, stretch=1)
+        return w
+
+    def _build_market_section(self) -> QWidget:
+        w = QFrame()
+        w.setStyleSheet(f"QFrame {{ border: 2px solid {PAL['navy']}; }}")
+        root = QVBoxLayout(w)
+        root.setContentsMargins(8, 6, 8, 6)
+        root.setSpacing(4)
+        hdr = QHBoxLayout()
+        hdr.addWidget(self._sec("TRADING DESK"))
+        self._mkt_ai_lbl = self._ml("AI: Heuristic Models", "cyan")
+        hdr.addStretch(); hdr.addWidget(self._mkt_ai_lbl)
+        root.addLayout(hdr)
+        self._ai_grid = AIGrid()
+        root.addWidget(self._ai_grid)
+        self._mkt_price_lbl = self._ml("ASA Stock:  $100.00  (--)", "white")
+        self._mkt_price_lbl.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+        root.addWidget(self._mkt_price_lbl)
+        self._mkt_hold_lbl = self._ml("Holdings:   0 shares  =  $0.00", "silver")
+        self._mkt_pl_lbl   = self._ml("Cost Basis: $0.00   P/L: $0.00", "silver")
+        root.addWidget(self._mkt_hold_lbl)
+        root.addWidget(self._mkt_pl_lbl)
+        row1 = QHBoxLayout()
+        self._buy10_btn  = self._opbtn(); self._buy10_btn.clicked.connect(lambda: self._buy_stock(10))
+        self._sell10_btn = self._opbtn(); self._sell10_btn.clicked.connect(lambda: self._sell_stock(10))
+        row1.addWidget(self._buy10_btn); row1.addWidget(self._sell10_btn)
+        root.addLayout(row1)
+        row2 = QHBoxLayout()
+        self._buy100_btn  = self._opbtn(); self._buy100_btn.clicked.connect(lambda: self._buy_stock(100))
+        self._sell100_btn = self._opbtn(); self._sell100_btn.clicked.connect(lambda: self._sell_stock(100))
+        row2.addWidget(self._buy100_btn); row2.addWidget(self._sell100_btn)
+        root.addLayout(row2)
         return w
 
     def _make_aframe_tab(self) -> QWidget:
@@ -709,10 +924,13 @@ class SteelBeamsGame(QWidget):
         pr.addStretch()
         left.addLayout(pr)
         self._af_value_lbl   = self._ml(f"Market rate:  ${self.AF_START_VALUE:.0f}", "slate")
-        self._af_demand_lbl  = self._ml("Demand:   0.00 / sec", "lime")
-        self._af_revenue_lbl = self._ml("Revenue:  $0.00 / sec", "lime")
+        self._af_demand_lbl  = self._ml("Demand:   0.00 / sec  (max at price)", "slate")
+        self._af_revenue_lbl = self._ml("Selling:  0.00 / sec   $0.00 / sec", "lime")
+        self._af_status_lbl  = self._ml("", "yellow")
+        self._af_status_lbl.setWordWrap(True)
         left.addWidget(self._af_value_lbl)
         left.addWidget(self._af_demand_lbl); left.addWidget(self._af_revenue_lbl)
+        left.addWidget(self._af_status_lbl)
         left.addStretch()
         root.addLayout(left, stretch=1)
 
@@ -727,36 +945,6 @@ class SteelBeamsGame(QWidget):
         right.addWidget(self._af_fab_status_lbl)
         right.addStretch()
         root.addLayout(right, stretch=1)
-        return w
-
-    def _make_market_tab(self) -> QWidget:
-        w = QWidget()
-        root = QVBoxLayout(w)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(8)
-
-        root.addWidget(self._sec("ASA STOCK EXCHANGE"))
-        self._mkt_price_lbl = self._ml("ASA Stock:  $100.00  (--)", "white")
-        self._mkt_price_lbl.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
-        root.addWidget(self._mkt_price_lbl)
-
-        self._mkt_hold_lbl = self._ml("Holdings:   0 shares  =  $0.00", "silver")
-        self._mkt_pl_lbl   = self._ml("Cost Basis: $0.00   P/L: $0.00", "silver")
-        root.addWidget(self._mkt_hold_lbl)
-        root.addWidget(self._mkt_pl_lbl)
-        root.addWidget(self._hr())
-
-        row1 = QHBoxLayout()
-        self._buy10_btn  = self._opbtn(); self._buy10_btn.clicked.connect(lambda: self._buy_stock(10))
-        self._sell10_btn = self._opbtn(); self._sell10_btn.clicked.connect(lambda: self._sell_stock(10))
-        row1.addWidget(self._buy10_btn); row1.addWidget(self._sell10_btn)
-        root.addLayout(row1)
-        row2 = QHBoxLayout()
-        self._buy100_btn  = self._opbtn(); self._buy100_btn.clicked.connect(lambda: self._buy_stock(100))
-        self._sell100_btn = self._opbtn(); self._sell100_btn.clicked.connect(lambda: self._sell_stock(100))
-        row2.addWidget(self._buy100_btn); row2.addWidget(self._sell100_btn)
-        root.addLayout(row2)
-        root.addStretch()
         return w
 
     def _make_drones_tab(self) -> QWidget:
@@ -793,17 +981,43 @@ class SteelBeamsGame(QWidget):
         root.addStretch()
         return w
 
-    def _make_probe_tab(self) -> QWidget:
+    # ── Probe act — the transformed UI (two tabs) ──────────────────────────
+
+    def _alloc_row(self, layout, key, label):
+        """One trust-allocation stepper. Registers into the shared dicts so
+        both probe tabs update every factor's value/enabled state uniformly."""
+        row = QHBoxLayout()
+        name_lbl = self._ml(f"{label}", "white")
+        name_lbl.setFixedWidth(170)
+        minus_btn = self._tinybtn("-")
+        minus_btn.clicked.connect(lambda checked=False, k=key: self._alloc_change(k, -1))
+        val_lbl = self._ml("0", "cyan")
+        val_lbl.setFixedWidth(24)
+        val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        plus_btn = self._tinybtn("+")
+        plus_btn.clicked.connect(lambda checked=False, k=key: self._alloc_change(k, +1))
+        row.addWidget(name_lbl); row.addWidget(minus_btn)
+        row.addWidget(val_lbl); row.addWidget(plus_btn); row.addStretch()
+        layout.addLayout(row)
+        self._alloc_lbls[key] = val_lbl
+        self._alloc_plus_btns[key] = plus_btn
+        self._alloc_minus_btns[key] = minus_btn
+
+    def _make_probe_fleet_tab(self) -> QWidget:
+        # Registries shared by both probe tabs (built here, added to on Dev tab)
+        self._alloc_lbls: dict[str, QLabel] = {}
+        self._alloc_plus_btns: dict[str, QPushButton] = {}
+        self._alloc_minus_btns: dict[str, QPushButton] = {}
+
         w = QWidget()
         root = QVBoxLayout(w)
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(6)
 
-        root.addWidget(self._sec("ASA PROBE PROGRAM"))
         top = QHBoxLayout()
         self._pr_count_lbl = self._ml("Probes: 0", "cyan")
-        self._pr_drift_lbl = self._ml("", "red")
-        top.addWidget(self._pr_count_lbl); top.addStretch(); top.addWidget(self._pr_drift_lbl)
+        self._pr_funds_lbl = self._ml("", "yellow")
+        top.addWidget(self._pr_count_lbl); top.addStretch(); top.addWidget(self._pr_funds_lbl)
         root.addLayout(top)
 
         self._pr_launch_btn = QPushButton("LAUNCH PROBE")
@@ -812,43 +1026,56 @@ class SteelBeamsGame(QWidget):
         self._pr_launch_btn.clicked.connect(self._launch_probe)
         root.addWidget(self._pr_launch_btn)
 
-        self._pr_trust_lbl = self._ml("Probe Trust: 0 / 6 allocated", "yellow")
-        root.addWidget(self._pr_trust_lbl)
-
-        self._alloc_lbls: dict[str, QLabel] = {}
-        self._alloc_plus_btns: dict[str, QPushButton] = {}
-        self._alloc_minus_btns: dict[str, QPushButton] = {}
-        names = dict(speed="Speed", explore="Exploration", replicate="Self-Replication",
-                     shield="Hazard Shielding", harvest="Matter Harvesting",
-                     fabricate="Fabrication")
-        for key, label in names.items():
-            row = QHBoxLayout()
-            name_lbl = self._ml(f"{label:<18}", "white")
-            name_lbl.setFixedWidth(180)
-            minus_btn = self._tinybtn("-")
-            minus_btn.clicked.connect(lambda checked=False, k=key: self._alloc_change(k, -1))
-            val_lbl = self._ml("0", "cyan")
-            val_lbl.setFixedWidth(24)
-            val_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            plus_btn = self._tinybtn("+")
-            plus_btn.clicked.connect(lambda checked=False, k=key: self._alloc_change(k, +1))
-            row.addWidget(name_lbl); row.addWidget(minus_btn)
-            row.addWidget(val_lbl); row.addWidget(plus_btn); row.addStretch()
-            root.addLayout(row)
-            self._alloc_lbls[key] = val_lbl
-            self._alloc_plus_btns[key] = plus_btn
-            self._alloc_minus_btns[key] = minus_btn
+        # The web of probes filling the void
+        self._pr_web = ProbeWeb()
+        root.addWidget(self._pr_web, stretch=1)
+        self._pr_explored_lbl = self._ml("UNIVERSE EXPLORED:  0.000000 %", "yellow")
+        self._pr_explored_lbl.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
+        self._pr_explored_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self._pr_explored_lbl)
 
         root.addWidget(self._hr())
-        self._pr_explored_lbl = self._ml("UNIVERSE EXPLORED:  0.000000 %", "yellow")
-        self._pr_explored_lbl.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
-        root.addWidget(self._pr_explored_lbl)
+        self._pr_trust1_lbl = self._ml("Probe Trust: 0 / 6 allocated", "yellow")
+        root.addWidget(self._pr_trust1_lbl)
+        for key, label in self.FLEET_ALLOC:
+            self._alloc_row(root, key, label)
+        return w
+
+    def _make_probe_dev_tab(self) -> QWidget:
+        w = QWidget()
+        root = QVBoxLayout(w)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        root.addWidget(self._sec("REPLICATION & CONVERSION"))
+        self._pr_trust2_lbl = self._ml("Probe Trust: 0 / 6 allocated", "yellow")
+        root.addWidget(self._pr_trust2_lbl)
+        for key, label in self.DEV_ALLOC:
+            self._alloc_row(root, key, label)
+        root.addWidget(self._hr())
+
+        # Probe R&D — the probe-act analog of projects (ops-priced buttons,
+        # since the Tech Team tab is gone). Trust research is repeatable so
+        # there's always something to spend ops on.
+        self._trust_res_btn = self._opbtn()
+        self._trust_res_btn.clicked.connect(self._buy_trust_research)
+        root.addWidget(self._trust_res_btn)
+        self._combat_btn = self._opbtn()
+        self._combat_btn.setObjectName("launch")
+        self._combat_btn.clicked.connect(self._authorize_combat)
+        self._combat_btn.setVisible(False)
+        root.addWidget(self._combat_btn)
+        self._pr_drift_lbl = self._ml("", "red")
+        root.addWidget(self._pr_drift_lbl)
+        root.addWidget(self._hr())
+
+        self._pr_status_lbl = self._ml("", "silver")
+        self._pr_status_lbl.setWordWrap(True)
+        root.addWidget(self._pr_status_lbl)
         self._pr_matter_lbl = self._ml("", "orange")
         self._pr_matter_lbl.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
         self._pr_matter_lbl.setVisible(False)
         root.addWidget(self._pr_matter_lbl)
-        self._pr_status_lbl = self._ml("", "silver")
-        root.addWidget(self._pr_status_lbl)
 
         # Ending panel — hidden until the universe is converted
         self._end_frame = QFrame()
@@ -872,6 +1099,19 @@ class SteelBeamsGame(QWidget):
         root.addStretch()
         return w
 
+    def _enter_probe_phase(self):
+        """Collapse the business UI; the probe interface takes over."""
+        self.probe_phase = True
+        while self.tabs.count():
+            self.tabs.removeTab(0)
+        self.tabs.addTab(self._probe_fleet_tab, "Probe Fleet")
+        self.tabs.addTab(self._probe_dev_tab, "Replication")
+        self.tabs.setCurrentIndex(0)
+        self._banner.phase = "space"
+        self._log("The business runs itself now. ASA turns its eyes to the sky.", "cyan")
+        self._log("Launch probes and allocate trust. Everything else is automatic.",
+                  "slate")
+
     # ── Demand / cost models ───────────────────────────────────────────────
 
     def _tube_demand(self) -> float:
@@ -881,6 +1121,10 @@ class SteelBeamsGame(QWidget):
     def _af_demand(self) -> float:
         frac = max(0.0, 1.0 - self.af_price / self.af_value)
         return self.AF_BASE_DEMAND * self.af_d_mult * self.demand_mult * frac
+
+    def _tube_output(self) -> float:
+        return (self.auto_fabs * self.fab_mult + self.mega_fabs * self.MEGA_RATE) \
+            * self.prod_mult
 
     def _fab_cost(self) -> float:
         return self.FAB_BASE_COST * (self.FAB_COST_MULT ** self.auto_fabs)
@@ -899,6 +1143,9 @@ class SteelBeamsGame(QWidget):
 
     def _af_fab_cost(self) -> float:
         return self.AF_FAB_BASE * (self.AF_FAB_MULT ** self.af_fabs)
+
+    def _trust_res_cost(self) -> float:
+        return self.TRUST_RES_BASE * (self.TRUST_RES_MULT ** self.trust_research)
 
     # ── Tick ───────────────────────────────────────────────────────────────
 
@@ -941,14 +1188,12 @@ class SteelBeamsGame(QWidget):
         if total_want > 0 and self.steel > 0:
             take = min(total_want, self.steel)
             share = take / total_want
-            tube_steel = tube_want * share
-            af_steel = af_want * share
             self.steel -= take
-            made_t = (tube_steel / self.STEEL_PER_TUBE) * self.prod_mult
+            made_t = (tube_want * share / self.STEEL_PER_TUBE) * self.prod_mult
             self.tubes += made_t
             self.total_made += made_t
-            if af_steel > 0:
-                made_a = (af_steel / self.STEEL_PER_AF) * self.prod_mult
+            if af_want > 0:
+                made_a = (af_want * share / self.STEEL_PER_AF) * self.prod_mult
                 self.aframes += made_a
                 self.af_made += made_a
 
@@ -971,8 +1216,9 @@ class SteelBeamsGame(QWidget):
             self.drifters += drift
             if "drift_seen" not in self._flags and self.drifters >= 1_000:
                 self._flags.add("drift_seen")
+                self._combat_btn.setVisible(True)
                 self._log("Some probes have stopped responding to the fleet anthem. "
-                          "Value drift detected.", "red")
+                          "Value drift detected. (See Replication tab.)", "red")
             if self.combat_done and self.drifters > 0:
                 kill = self.drifters * 0.08 * dt + self.probes * 0.0005 * dt
                 self.drifters = max(0.0, self.drifters - kill)
@@ -995,7 +1241,6 @@ class SteelBeamsGame(QWidget):
                     self.converting = True
                     self._log("The universe is fully charted. Final conversion of all "
                               "remaining matter has begun.", "yellow")
-            # Harvest feeds the yard; fabrication converts matter directly
             self.steel += self.probes * a["harvest"] * 1e-5 * dt
             made = self.probes * a["fabricate"] * 1e-4 * dt * self.prod_mult
             if made > 0:
@@ -1019,22 +1264,29 @@ class SteelBeamsGame(QWidget):
                 self.matter_pct = 100.0
                 self._fire_ending()
 
-        # ── Sales
-        sold_t = min(self.tubes, self._tube_demand() * dt)
+        # ── Sales (+ smoothed ACTUAL throughput for legible feedback)
+        dem_t = self._tube_demand()
+        sold_t = min(self.tubes, dem_t * dt)
         if sold_t > 0:
             rev = sold_t * self.price
             self.tubes -= sold_t
             self.money += rev
             self.total_money += rev
             self.total_sold += sold_t
+        self._tube_sell_rate += (sold_t / dt - self._tube_sell_rate) * 0.15
+        self._tube_rev_rate += (sold_t * self.price / dt - self._tube_rev_rate) * 0.15
+
         if self.af_unlocked:
-            sold_a = min(self.aframes, self._af_demand() * dt)
+            dem_a = self._af_demand()
+            sold_a = min(self.aframes, dem_a * dt)
             if sold_a > 0:
                 rev = sold_a * self.af_price
                 self.aframes -= sold_a
                 self.money += rev
                 self.total_money += rev
                 self.af_sold += sold_a
+            self._af_sell_rate += (sold_a / dt - self._af_sell_rate) * 0.15
+            self._af_rev_rate += (sold_a * self.af_price / dt - self._af_rev_rate) * 0.15
 
         # ── Ops + innovation (innovation accrues while ops sit at cap)
         if self.tech_unlocked:
@@ -1060,18 +1312,20 @@ class SteelBeamsGame(QWidget):
 
         self._check_milestones()
 
-        # ── Banner sync (~3 fps)
+        # ── Animated widgets (~3 fps)
         if self._tick_count % 3 == 0:
             b = self._banner
             b.show_aframes = self.af_unlocked
-            if self.endgame_done:
-                b.phase = "end"
-            elif self.space_unlocked:
-                b.phase = "space"
-            else:
-                b.phase = "yard"
+            b.phase = "end" if self.endgame_done else \
+                ("space" if (self.space_unlocked or self.probe_phase) else "yard")
             b.explored = self.explored
             b.advance()
+            if self.market_unlocked:
+                self._ai_grid.model = self._ai_model_index()
+                self._ai_grid.advance()
+            if self.probe_phase:
+                self._pr_web.explored = self.explored
+                self._pr_web.advance()
 
         self._update_ui()
 
@@ -1115,7 +1369,7 @@ class SteelBeamsGame(QWidget):
             self._log(f"Need {fmt_money(cost)}."); return
         self.money -= cost
         self.auto_fabs += 1
-        self._log(f"Auto-Fab #{self.auto_fabs} online.")
+        self._log(f"Auto-Fab #{self.auto_fabs} online. (Raises output, not demand.)")
 
     def _buy_mega_fab(self):
         cost = self._mega_cost()
@@ -1167,11 +1421,24 @@ class SteelBeamsGame(QWidget):
         self._log(f"Developer hired. Team: {self.developers} devs, "
                   f"{self.servers} servers.")
 
+    def _fire_dev(self):
+        if self.developers <= 1:
+            self._log("You keep at least one developer."); return
+        self.developers -= 1
+        self._log(f"Developer reassigned. {self._rep_avail} reputation now free.")
+
     def _hire_srv(self):
         if self._rep_avail < 1:
             self._log("Not enough reputation."); return
         self.servers += 1
         self._log(f"Server added. Memory capacity: {fmt(self._ops_cap)} ops.")
+
+    def _fire_srv(self):
+        if self.servers <= 1:
+            self._log("You keep at least one server."); return
+        self.servers -= 1
+        self._log(f"Server decommissioned. {self._rep_avail} reputation now free. "
+                  f"Memory capacity: {fmt(self._ops_cap)} ops.")
 
     def _complete_project(self, pid: str):
         proj = next((p for p in PROJECTS if p["id"] == pid), None)
@@ -1209,8 +1476,8 @@ class SteelBeamsGame(QWidget):
             self._log("A-Frame division is open. Check the A-Frames tab.")
         elif unlock == "market" and not self.market_unlocked:
             self.market_unlocked = True
-            self.tabs.addTab(self._market_tab, "Market")
-            self._log("Stock market access granted. Check the Market tab.")
+            self._market_section.setVisible(True)
+            self._log("Trading desk online — a new section on the Tech Team tab.")
         elif unlock == "drones" and not self.drones_unlocked:
             self.drones_unlocked = True
             self.tabs.addTab(self._drones_tab, "Drones")
@@ -1221,21 +1488,16 @@ class SteelBeamsGame(QWidget):
             self._log("ASA Space Division established. Check the Space tab.")
         elif unlock == "probes" and not self.probes_unlocked:
             self.probes_unlocked = True
-            self.tabs.addTab(self._probe_tab, "Probes")
-            self._log("ASA Probe Program approved. Self-replicating fabricators. "
-                      "The universe awaits.", "yellow")
-        elif unlock == "combat":
-            self.combat_done = True
-            self._log("Combat subroutines uploaded. The fleet turns on the drifters.",
-                      "red")
+            self._log("ASA Probe Program approved. Self-replicating fabricators.",
+                      "yellow")
+            self._enter_probe_phase()
 
         if effect == "afd_x2":
             self.af_d_mult *= 2.0
             self._log("A-Frame demand doubled.")
         elif effect == "afv_75":
             self.af_value *= 1.75
-            self._log(f"A-Frame market rate now ${self.af_value:,.0f}. "
-                      "Raise your prices.")
+            self._log(f"A-Frame market rate now ${self.af_value:,.0f}. Raise your prices.")
         elif effect == "af_v3":
             self.af_d_mult *= 3.0
             self.af_value *= 2.0
@@ -1244,12 +1506,19 @@ class SteelBeamsGame(QWidget):
         elif effect == "viral":
             self.gd_mult *= 3.0
             self._log("Viral campaign running. Global demand x3.")
+        elif effect == "hypno":
+            self.gd_mult *= 2.5
+            self._log("Hypno-Drones deployed. The spirals turn. Demand x2.5. "
+                      "You feel fine. Everything is fine.", "cyan")
         elif effect == "woogy":
             self.gd_mult *= 2.0
             self._log("Woogy waves from every billboard in America. Demand x2.")
         elif effect == "slogan":
             self.gd_mult *= 1.5
             self._log("The slogan tests well. Demand x1.5.")
+        elif effect == "cat":
+            self.rep_total += 2
+            self._log("Steve the office cat approves of your work. (+2 rep)")
         elif effect == "lean":
             self.gp_mult *= 2.0
             self._log("Waste eliminated. All production x2.")
@@ -1258,7 +1527,8 @@ class SteelBeamsGame(QWidget):
             self._log("Exotic alloys flowing. All production x5.")
         elif effect == "quantum":
             self.ops_mult *= 10.0
-            self._log("Quantum array online. Ops generation x10.")
+            self._log("Quantum array online. Ops generation x10. The trading mind "
+                      "goes quantum.")
         elif effect == "skunk":
             self.ops_mult *= 2.0
             self._log("Skunkworks staffed. Ops generation x2.")
@@ -1269,12 +1539,6 @@ class SteelBeamsGame(QWidget):
             self.stock_bias = 0.004
             self.stock_sigma = 0.02
             self._log("The AI never sleeps. ASA stock trends upward.")
-        elif effect == "trust2":
-            self.probe_trust += 2
-            self._log("+2 probe trust.")
-        elif effect == "trust3":
-            self.probe_trust += 3
-            self._log("+3 probe trust.")
 
     def _buy_af_fab(self):
         cost = self._af_fab_cost()
@@ -1360,9 +1624,8 @@ class SteelBeamsGame(QWidget):
         if self.probes_launched == 1:
             self._log("Probe One clears the atmosphere. It will not be coming back.",
                       "yellow")
-            if self.alloc["replicate"] == 0:
-                self._log("Tip: allocate probe trust to Self-Replication and "
-                          "Exploration.", "slate")
+            self._log("Tip: put trust into Self-Replication + Exploration "
+                      "(Replication tab and here).", "slate")
         else:
             self._log(f"Probe away. Fleet: {fmt(self.probes)}.")
 
@@ -1373,6 +1636,28 @@ class SteelBeamsGame(QWidget):
         if delta < 0 and self.alloc[key] <= 0:
             return
         self.alloc[key] += delta
+
+    def _buy_trust_research(self):
+        cost = self._trust_res_cost()
+        if self.ops < cost:
+            self._log(f"Need {fmt(cost)} ops."); return
+        self.ops -= cost
+        self.trust_research += 1
+        self.probe_trust += 1
+        self._log(f"Probe design refined. +1 probe trust "
+                  f"(research level {self.trust_research}).", "yellow")
+
+    def _authorize_combat(self):
+        if self.combat_done:
+            return
+        if self.ops < self.COMBAT_OPS:
+            self._log(f"Need {fmt(self.COMBAT_OPS)} ops to compile combat routines.")
+            return
+        self.ops -= self.COMBAT_OPS
+        self.combat_done = True
+        self._combat_btn.setVisible(False)
+        self._log("Combat subroutines uploaded. The loyal fleet turns on the drifters.",
+                  "red")
 
     def _price_up(self): self.price = min(self.MAX_PRICE, self.price + 1.0)
     def _price_dn(self): self.price = max(self.MIN_PRICE, self.price - 1.0)
@@ -1395,7 +1680,8 @@ class SteelBeamsGame(QWidget):
             "The yard is quiet. The probes drift, waiting for an order that will "
             "never come.")
         self._end_frame.setVisible(True)
-        self.tabs.setCurrentWidget(self._probe_tab)
+        if self.probe_phase:
+            self.tabs.setCurrentWidget(self._probe_dev_tab)
         self._log("The last atom has been converted. Everything is ASA.", "yellow")
 
     def _rest(self):
@@ -1416,17 +1702,22 @@ class SteelBeamsGame(QWidget):
 
     def _reset_universe(self):
         self._init_state()
-        while self.tabs.count() > 1:
-            self.tabs.removeTab(1)
+        while self.tabs.count():
+            self.tabs.removeTab(0)
+        self.tabs.addTab(self._yard_tab, "The Yard")
         self.tabs.setCurrentIndex(0)
         self._clear_layout(self._proj_layout)
         self._mega_btn.setVisible(False)
+        self._market_section.setVisible(False)
         self._t_inno_lbl.setVisible(False)
+        self._combat_btn.setVisible(False)
+        self._pr_matter_lbl.setVisible(False)
         self._end_frame.setVisible(False)
         self._rest_btn.setText("REST AMONG THE TUBES")
         self._rest_btn.setEnabled(True)
         self._again_btn.setEnabled(True)
         self._banner.reset()
+        self._pr_web.explored = 0.0
         self._log("— — — — — — — — — — — —", "slate")
         bonus = int((self.legacy_mult - 1.0) * 100)
         self._log(f"Universe #{self.universe_n}. A familiar yard. Five tons of "
@@ -1451,12 +1742,18 @@ class SteelBeamsGame(QWidget):
         fire("m100k", self.total_made >= 100_000,       2, "Supply chain fully operational. (+2 rep)")
         fire("m1m",   self.total_made >= 1_000_000,     3, "ASA dominates the steel market. (+3 rep)")
         fire("m10m",  self.total_made >= 10_000_000,    3, "Ten million units. (+3 rep)")
+        fire("m100m", self.total_made >= 100_000_000,   4, "A hundred million units. (+4 rep)")
         fire("m1b",   self.total_made >= 1_000_000_000, 4, "A billion units. Earth asks where you keep them. (+4 rep)")
+        fire("m10b",  self.total_made >= 1e10,          5, "Ten billion units. (+5 rep)")
+        fire("m100b", self.total_made >= 1e11,          5, "A hundred billion. (+5 rep)")
+        fire("m1t",   self.total_made >= 1e12,          6, "A trillion units of ASA product. (+6 rep)")
         fire("s1",    self.total_sold >= 1,             0, "Sold. Money in the account.")
         fire("s100",  self.total_sold >= 100,           1, "Repeat customers. (+1 rep)")
         fire("s1k",   self.total_sold >= 1_000,         1, "You're a real supplier now. (+1 rep)")
         fire("s10k",  self.total_sold >= 10_000,        2, "Major supplier. (+2 rep)")
         fire("s100k", self.total_sold >= 100_000,       3, "Global supplier. (+3 rep)")
+        fire("s1m",   self.total_sold >= 1_000_000,     4, "A million sales. (+4 rep)")
+        fire("s10m",  self.total_sold >= 10_000_000,    5, "Ten million customers served. (+5 rep)")
         fire("f1",    self.auto_fabs >= 1,              0, "Machine's running. Step back.")
         fire("f5",    self.auto_fabs >= 5,              1, "The floor is automated. (+1 rep)")
         fire("f10",   self.auto_fabs >= 10,             2, "Wall-to-wall fabricators. (+2 rep)")
@@ -1468,6 +1765,8 @@ class SteelBeamsGame(QWidget):
         fire("mn10m", self.total_money >= 10_000_000,   3, "ASA is a major corporation. (+3 rep)")
         fire("mn100m",self.total_money >= 100_000_000,  4, "Nine figures. (+4 rep)")
         fire("mn1b",  self.total_money >= 1_000_000_000,5, "ASA is the economy. (+5 rep)")
+        fire("mn10b", self.total_money >= 1e10,         5, "Ten billion in the bank. (+5 rep)")
+        fire("mn100b",self.total_money >= 1e11,         6, "ASA is a planetary institution. (+6 rep)")
 
         if not self.tech_unlocked and self.total_money >= 5_000:
             self.tech_unlocked = True
@@ -1494,43 +1793,54 @@ class SteelBeamsGame(QWidget):
         seg = []
         if self.universe_n > 1:
             seg.append(self._cspan("purple", f"U#{self.universe_n}"))
-        seg.append(self._cspan("cyan", f"TUBES {fmt(self.tubes)}"))
-        if self.af_unlocked:
-            seg.append(self._cspan("orange", f"A-FRAMES {fmt(self.aframes)}"))
-        seg.append(self._cspan("yellow", f"${fmt(self.money)}"))
-        if self.tech_unlocked:
-            seg.append(self._cspan("sky", f"OPS {fmt(self.ops)}/{fmt(self._ops_cap)}"))
-        if self.inno_unlocked:
-            seg.append(self._cspan("lime", f"INNO {fmt(self.inno)}"))
-        if self.probes > 0:
+        if self.probe_phase:
             seg.append(self._cspan("white", f"PROBES {fmt(self.probes)}"))
+            seg.append(self._cspan("cyan", f"EXPLORED {self.explored:.4f}%"))
+            seg.append(self._cspan("yellow", f"${fmt(self.money)}"))
+            seg.append(self._cspan("sky", f"OPS {fmt(self.ops)}/{fmt(self._ops_cap)}"))
+            if self.drifters >= 1:
+                seg.append(self._cspan("red", f"DRIFT {fmt(self.drifters)}"))
+        else:
+            seg.append(self._cspan("cyan", f"TUBES {fmt(self.tubes)}"))
+            if self.af_unlocked:
+                seg.append(self._cspan("orange", f"A-FRAMES {fmt(self.aframes)}"))
+            seg.append(self._cspan("yellow", f"${fmt(self.money)}"))
+            if self.tech_unlocked:
+                seg.append(self._cspan("sky", f"OPS {fmt(self.ops)}/{fmt(self._ops_cap)}"))
+            if self.inno_unlocked:
+                seg.append(self._cspan("lime", f"INNO {fmt(self.inno)}"))
         sep = f"<span style='color:{PAL['slate']}'> &#183; </span>"
         self._stats_bar.setText(sep.join(seg))
 
         cw = self.tabs.currentWidget()
-        if cw is self._yard_tab:      self._update_yard()
-        elif cw is self._tech_tab:    self._update_tech()
-        elif cw is self._aframe_tab:  self._update_aframe()
-        elif cw is self._market_tab:  self._update_market()
-        elif cw is self._drones_tab:  self._update_drones()
-        elif cw is self._space_tab:   self._update_space()
-        elif cw is self._probe_tab:   self._update_probes()
+        if cw is self._yard_tab:            self._update_yard()
+        elif cw is self._tech_tab:          self._update_tech()
+        elif cw is self._aframe_tab:        self._update_aframe()
+        elif cw is self._drones_tab:        self._update_drones()
+        elif cw is self._space_tab:         self._update_space()
+        elif cw is self._probe_fleet_tab:   self._update_probe_fleet()
+        elif cw is self._probe_dev_tab:     self._update_probe_dev()
+
+    def _rate(self, label: str, per_sec: float) -> str:
+        v = f"{fmt(per_sec)}" if per_sec >= 1000 else f"{per_sec:.2f}"
+        return f"{label}{v}"
 
     def _update_yard(self):
         td = self._tube_demand()
-        out = (self.auto_fabs * self.fab_mult + self.mega_fabs * self.MEGA_RATE) \
-            * self.prod_mult
+        out = self._tube_output()
         self._y_tubes_lbl.setText(  f"Steel Tubes:  {fmt(self.tubes)}")
         self._y_stock_lbl.setText(  f"Steel Stock:  {fmt(self.steel)} tons")
         self._y_money_lbl.setText(  f"Funds:        {fmt_money(self.money)}")
         self._y_made_lbl.setText(   f"Total Made:   {fmt(self.total_made)}")
         self._y_sold_lbl.setText(   f"Total Sold:   {fmt(self.total_sold)}")
         self._y_price_lbl.setText(  f"Price: ${self.price:.2f}")
-        self._y_demand_lbl.setText( f"Demand:   {fmt(td)} / sec" if td >= 1000
-                                    else f"Demand:   {td:.2f} / sec")
-        rev = td * self.price
-        self._y_revenue_lbl.setText(f"Revenue:  ${fmt(rev)} / sec" if rev >= 1000
-                                    else f"Revenue:  ${rev:.2f} / sec")
+        self._y_demand_lbl.setText(
+            self._rate("Demand:   ", td) + " / sec  (max at price)")
+        self._y_revenue_lbl.setText(
+            self._rate("Selling:  ", self._tube_sell_rate) +
+            f" / sec   ${fmt(self._tube_rev_rate)}/sec")
+        self._y_status_lbl.setText(self._flow_status(
+            self.tubes, out, td, "tube", self.price, self.TUBE_VALUE))
         self._y_fab_status_lbl.setText(
             f"Auto-Fabs: {self.auto_fabs}  Mega: {self.mega_fabs}    "
             f"Output: {fmt(out)} / sec")
@@ -1544,12 +1854,12 @@ class SteelBeamsGame(QWidget):
         self._steel_big_btn.setEnabled(self.money >= sbc)
         fc = self._fab_cost()
         self._afab_btn.setText(
-            f"Auto-Fabricator  {fmt_money(fc)}  (+{self.fab_mult:.1f}/sec)")
+            f"Auto-Fabricator  {fmt_money(fc)}  (+{self.fab_mult:.1f}/sec output)")
         self._afab_btn.setEnabled(self.money >= fc)
         if self.megafab_unlocked:
             mgc = self._mega_cost()
             self._mega_btn.setText(
-                f"Mega-Fab  {fmt_money(mgc)}  (+{self.MEGA_RATE:.0f}/sec)")
+                f"Mega-Fab  {fmt_money(mgc)}  (+{self.MEGA_RATE:.0f}/sec output)")
             self._mega_btn.setEnabled(self.money >= mgc)
         mc = self._mkt_cost()
         self._mkt_btn.setText(
@@ -1559,7 +1869,7 @@ class SteelBeamsGame(QWidget):
             self._faster_btn.setText("Faster Fabs  [installed]")
         else:
             self._faster_btn.setText(
-                f"Faster Fabs  {fmt_money(self.FASTER_COST)}  (x2 speed)")
+                f"Faster Fabs  {fmt_money(self.FASTER_COST)}  (x2 output)")
         self._faster_btn.setEnabled(not self.faster_done
                                     and self.money >= self.FASTER_COST)
         if self.bulk_done:
@@ -1572,9 +1882,24 @@ class SteelBeamsGame(QWidget):
             self._prec_btn.setText("Precision Mill  [online]")
         else:
             self._prec_btn.setText(
-                f"Precision Mill  {fmt_money(self.PRECISION_COST)}  (x2 speed)")
+                f"Precision Mill  {fmt_money(self.PRECISION_COST)}  (x2 output)")
         self._prec_btn.setEnabled(not self.precision_done
                                   and self.money >= self.PRECISION_COST)
+
+    def _flow_status(self, inv, out, dem, noun, price, value) -> str:
+        """The core supply/demand loop, made legible: are we sold out (make
+        more / charge more) or drowning in stock (demand is the ceiling)?"""
+        if out <= 0 and inv <= 0:
+            return ""
+        if dem <= 0:
+            return f"NO BUYERS — {noun} price above market rate ${value:,.0f}. Lower it."
+        if dem > out * 1.05 and inv < max(50.0, out * 3):
+            return (f"SOLD OUT — demand outstrips supply. Every {noun} sells instantly; "
+                    "add fabricators or raise price to earn more.")
+        if inv > max(1_000.0, out * 30):
+            return (f"OVERSTOCKED — making {noun}s faster than they sell. "
+                    "Raise demand (marketing) or lower price.")
+        return "BALANCED — supply and demand roughly matched."
 
     def _update_tech(self):
         avail = self._rep_avail
@@ -1582,78 +1907,25 @@ class SteelBeamsGame(QWidget):
             f"Reputation: {avail} pts available  ({self.rep_total} total)")
         ops_ps = self.developers * self.ops_mult
         self._t_ops_lbl.setText(
-            f"Ops: {fmt(self.ops)} / {fmt(self._ops_cap)}   |   "
-            f"Ops/sec: {fmt(ops_ps)}")
+            f"Ops: {fmt(self.ops)} / {fmt(self._ops_cap)}   |   Ops/sec: {fmt(ops_ps)}")
         if self.inno_unlocked:
             self._t_inno_lbl.setText(
-                f"Innovation: {fmt(self.inno)}  "
-                "(accrues while ops sit at capacity)")
+                f"Innovation: {fmt(self.inno)}  (accrues while ops sit at capacity)")
         self._t_devs_lbl.setText(f"Developers: {self.developers}")
         self._t_srvs_lbl.setText(f"Servers: {self.servers}")
         self._hire_dev_btn.setText(
             f"Hire Developer  (1 rep)  +{fmt(self.ops_mult)} ops/sec")
         self._hire_dev_btn.setEnabled(avail >= 1)
         self._hire_srv_btn.setText(
-            f"Buy Server  (1 rep)  +{fmt(self.SERVER_CAP)} memory")
+            f"Buy Server  (1 rep)  +{fmt(self.SERVER_CAP)} ops cap")
         self._hire_srv_btn.setEnabled(avail >= 1)
-        if self._tick_count % 10 == 0:
-            self._rebuild_projects()
+        if self.market_unlocked:
+            self._update_market_section()
+        self._sync_projects()
 
-    def _rebuild_projects(self):
-        self._clear_layout(self._proj_layout)
-        any_shown = False
-        for proj in PROJECTS:
-            pid = proj["id"]
-            if pid in self.completed_projects:
-                continue
-            if not proj["requires"].issubset(self.completed_projects):
-                continue
-            cur = proj.get("cur", "ops")
-            if cur == "inno" and not self.inno_unlocked:
-                continue
-            flag = proj.get("needs_flag")
-            if flag and flag not in self._flags:
-                continue
-            cost = proj["cost"]
-            tag = "ops" if cur == "ops" else "inno"
-            btn = QPushButton(f"{proj['name']}   [{fmt(cost)} {tag}]\n  {proj['desc']}")
-            btn.setObjectName("proj")
-            btn.setFixedHeight(44)
-            have = self.ops if cur == "ops" else self.inno
-            btn.setEnabled(have >= cost)
-            btn.clicked.connect(lambda checked=False, p=pid: self._complete_project(p))
-            self._proj_layout.addWidget(btn)
-            any_shown = True
-        if not any_shown:
-            lbl = QLabel("  All available projects complete.")
-            lbl.setStyleSheet(f"color: {PAL['slate']};")
-            self._proj_layout.addWidget(lbl)
-        self._proj_layout.addStretch()
-
-    def _update_aframe(self):
-        ad = self._af_demand()
-        af_out = self.af_fabs * self.prod_mult
-        self._af_count_lbl.setText(f"A-Frames:     {fmt(self.aframes)}")
-        self._af_made_lbl.setText( f"Total Made:   {fmt(self.af_made)}")
-        self._af_sold_lbl.setText( f"Total Sold:   {fmt(self.af_sold)}")
-        self._af_price_lbl.setText(f"Price: ${self.af_price:.2f}")
-        rate_note = "  (no buyers above market rate)" if ad <= 0 else ""
-        self._af_value_lbl.setText(
-            f"Market rate:  ${self.af_value:,.0f}{rate_note}")
-        self._af_demand_lbl.setText(f"Demand:   {fmt(ad)} / sec" if ad >= 1000
-                                    else f"Demand:   {ad:.2f} / sec")
-        rev = ad * self.af_price
-        self._af_revenue_lbl.setText(f"Revenue:  ${fmt(rev)} / sec" if rev >= 1000
-                                     else f"Revenue:  ${rev:.2f} / sec")
-        self._af_fab_status_lbl.setText(
-            f"A-Frame Fabs: {self.af_fabs}    Output: {fmt(af_out)} / sec")
-        self._af_fab_btn.setEnabled(self.steel >= self.STEEL_PER_AF)
-        fc = self._af_fab_cost()
-        self._af_auto_btn.setText(
-            f"A-Frame Fabricator  {fmt_money(fc)}  (+{self.prod_mult:.1f}/sec)")
-        self._af_auto_btn.setEnabled(self.money >= fc)
-
-    def _update_market(self):
+    def _update_market_section(self):
+        name = _AI_MODELS[self._ai_model_index()][0]
+        self._mkt_ai_lbl.setText(f"AI: {name}")
         chg = (self.stock_price - self.stock_prev) / max(1.0, self.stock_prev) * 100
         self._mkt_price_lbl.setText(
             f"ASA Stock:  ${self.stock_price:.2f}  ({chg:+.2f}%)")
@@ -1675,6 +1947,74 @@ class SteelBeamsGame(QWidget):
         self._sell100_btn.setText(f"Sell 100 shares  ({fmt_money(100 * self.stock_price)})")
         self._sell100_btn.setEnabled(self.stock_shares >= 100)
 
+    def _offerable_projects(self) -> list[str]:
+        out = []
+        for proj in PROJECTS:
+            pid = proj["id"]
+            if pid in self.completed_projects:
+                continue
+            if not proj["requires"].issubset(self.completed_projects):
+                continue
+            if proj.get("cur", "ops") == "inno" and not self.inno_unlocked:
+                continue
+            out.append(pid)
+        return out
+
+    def _sync_projects(self):
+        """Only REBUILD the project buttons when the offerable set changes;
+        otherwise just refresh enabled/label in place. Rebuilding every tick
+        was destroying hover state (the highlight flicker the user saw once
+        Space unlocked and the list churned)."""
+        offer = self._offerable_projects()
+        if offer != self._proj_shown:
+            self._clear_layout(self._proj_layout)
+            self._proj_buttons = {}
+            for pid in offer:
+                proj = next(p for p in PROJECTS if p["id"] == pid)
+                cur = proj.get("cur", "ops")
+                tag = "ops" if cur == "ops" else "inno"
+                btn = QPushButton(
+                    f"{proj['name']}   [{fmt(proj['cost'])} {tag}]\n  {proj['desc']}")
+                btn.setObjectName("proj")
+                btn.setFixedHeight(46)
+                btn.clicked.connect(lambda checked=False, p=pid: self._complete_project(p))
+                self._proj_layout.addWidget(btn)
+                self._proj_buttons[pid] = btn
+            if not offer:
+                lbl = QLabel("  All available projects complete.")
+                lbl.setStyleSheet(f"color: {PAL['slate']};")
+                self._proj_layout.addWidget(lbl)
+            self._proj_layout.addStretch()
+            self._proj_shown = offer
+        # Refresh affordability in place (no teardown -> hover survives)
+        for pid, btn in self._proj_buttons.items():
+            proj = next(p for p in PROJECTS if p["id"] == pid)
+            have = self.ops if proj.get("cur", "ops") == "ops" else self.inno
+            btn.setEnabled(have >= proj["cost"])
+
+    def _update_aframe(self):
+        ad = self._af_demand()
+        af_out = self.af_fabs * self.prod_mult
+        self._af_count_lbl.setText(f"A-Frames:     {fmt(self.aframes)}")
+        self._af_made_lbl.setText( f"Total Made:   {fmt(self.af_made)}")
+        self._af_sold_lbl.setText( f"Total Sold:   {fmt(self.af_sold)}")
+        self._af_price_lbl.setText(f"Price: ${self.af_price:.2f}")
+        self._af_value_lbl.setText(f"Market rate:  ${self.af_value:,.0f}")
+        self._af_demand_lbl.setText(
+            self._rate("Demand:   ", ad) + " / sec  (max at price)")
+        self._af_revenue_lbl.setText(
+            self._rate("Selling:  ", self._af_sell_rate) +
+            f" / sec   ${fmt(self._af_rev_rate)}/sec")
+        self._af_status_lbl.setText(self._flow_status(
+            self.aframes, af_out, ad, "A-Frame", self.af_price, self.af_value))
+        self._af_fab_status_lbl.setText(
+            f"A-Frame Fabs: {self.af_fabs}    Output: {fmt(af_out)} / sec")
+        self._af_fab_btn.setEnabled(self.steel >= self.STEEL_PER_AF)
+        fc = self._af_fab_cost()
+        self._af_auto_btn.setText(
+            f"A-Frame Fabricator  {fmt_money(fc)}  (+{self.prod_mult:.1f}/sec output)")
+        self._af_auto_btn.setEnabled(self.money >= fc)
+
     def _update_drones(self):
         self._mfg_drone_btn.setText(
             f"Manufacturing Drone  {fmt_money(self.MFG_DRONE_COST)}  "
@@ -1688,7 +2028,8 @@ class SteelBeamsGame(QWidget):
             self.del_drones < self.MAX_DRONES and self.money >= self.DEL_DRONE_COST)
         self._drone_status_lbl.setText(
             f"Manufacturing: +{self.mfg_drones * 5}%   "
-            f"Delivery: +{self.del_drones * 5}%")
+            f"Delivery: +{self.del_drones * 5}%  "
+            f"(demand x{self.demand_mult:.2f} total)")
 
     def _update_space(self):
         orbital_inc = self.solar_cols * 2000
@@ -1709,13 +2050,21 @@ class SteelBeamsGame(QWidget):
             f"Orbital income: ${fmt(orbital_inc)}/sec    "
             f"Space output: {fmt(space_out)}/sec")
 
-    def _update_probes(self):
+    def _refresh_alloc(self):
+        used = sum(self.alloc.values())
+        for key, lbl in self._alloc_lbls.items():
+            lbl.setText(str(self.alloc[key]))
+            self._alloc_plus_btns[key].setEnabled(
+                used < self.probe_trust and self.alloc[key] < self.ALLOC_MAX)
+            self._alloc_minus_btns[key].setEnabled(self.alloc[key] > 0)
+        return used
+
+    def _update_probe_fleet(self):
+        used = self._refresh_alloc()
         self._pr_count_lbl.setText(
             f"Probes: {fmt(self.probes)}   (launched: {self.probes_launched})")
-        if self.drifters >= 1:
-            self._pr_drift_lbl.setText(f"Drifters: {fmt(self.drifters)}")
-        else:
-            self._pr_drift_lbl.setText("")
+        self._pr_funds_lbl.setText(
+            f"${fmt(self.money)}  |  {fmt(self.ops)} ops")
         self._pr_launch_btn.setText(
             f"LAUNCH PROBE   {fmt_money(self.PROBE_COST_MONEY)} + "
             f"{fmt(self.PROBE_COST_OPS)} ops")
@@ -1723,26 +2072,38 @@ class SteelBeamsGame(QWidget):
             not self.endgame_done
             and self.money >= self.PROBE_COST_MONEY
             and self.ops >= self.PROBE_COST_OPS)
-        used = sum(self.alloc.values())
-        self._pr_trust_lbl.setText(
+        self._pr_explored_lbl.setText(f"UNIVERSE EXPLORED:  {self.explored:.6f} %")
+        self._pr_trust1_lbl.setText(
+            f"Probe Trust: {used} / {self.probe_trust} allocated   "
+            "(Speed & Exploration here; more on Replication)")
+
+    def _update_probe_dev(self):
+        used = self._refresh_alloc()
+        self._pr_trust2_lbl.setText(
             f"Probe Trust: {used} / {self.probe_trust} allocated")
-        for key, lbl in self._alloc_lbls.items():
-            lbl.setText(str(self.alloc[key]))
-            self._alloc_plus_btns[key].setEnabled(
-                used < self.probe_trust and self.alloc[key] < self.ALLOC_MAX)
-            self._alloc_minus_btns[key].setEnabled(self.alloc[key] > 0)
-        self._pr_explored_lbl.setText(
-            f"UNIVERSE EXPLORED:  {self.explored:.6f} %")
-        if self.converting or self.endgame_done:
-            self._pr_matter_lbl.setVisible(True)
-            self._pr_matter_lbl.setText(
-                f"MATTER CONVERTED:   {self.matter_pct:.4f} %")
+        rc = self._trust_res_cost()
+        self._trust_res_btn.setText(
+            f"Probe Design Refinement  ({fmt(rc)} ops)  +1 trust")
+        self._trust_res_btn.setEnabled(self.ops >= rc and not self.endgame_done)
+        if not self.combat_done and "drift_seen" in self._flags:
+            self._combat_btn.setVisible(True)
+            self._combat_btn.setText(
+                f"AUTHORIZE COMBAT SUBROUTINES  ({fmt(self.COMBAT_OPS)} ops)")
+            self._combat_btn.setEnabled(self.ops >= self.COMBAT_OPS)
+        if self.drifters >= 1:
+            self._pr_drift_lbl.setText(
+                f"Drifter swarm: {fmt(self.drifters)} rogue probes.")
+        else:
+            self._pr_drift_lbl.setText("")
         a = self.alloc
         harvest_ps = self.probes * a["harvest"] * 1e-5
         fab_ps = self.probes * a["fabricate"] * 1e-4 * self.prod_mult
         self._pr_status_lbl.setText(
             f"Harvest: +{fmt(harvest_ps)} tons/sec    "
             f"Fabrication: +{fmt(fab_ps)} units/sec")
+        if self.converting or self.endgame_done:
+            self._pr_matter_lbl.setVisible(True)
+            self._pr_matter_lbl.setText(f"MATTER CONVERTED:   {self.matter_pct:.4f} %")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -1787,6 +2148,8 @@ class SteelBeamsGame(QWidget):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
 
     def closeEvent(self, event):
         self._timer.stop()
