@@ -448,15 +448,22 @@ def write_report(out_path, batch, nests, log):
         c.alignment = Alignment(horizontal="center", wrap_text=True)
         c.border = border
 
+    # Totals count EVERY part: where a part's thickness isn't in one chart (e.g. a
+    # thin part oxy can't cut), fall back to the other process's time so the nest
+    # and batch totals stay complete (and the batch total = sum of nest subtotals).
+    def _eff(p, primary, secondary):
+        v = p.get(primary)
+        return v if v is not None else p.get(secondary)
+
     r = 2
     batch_total = 0.0
     batch_plasma = batch_oxy = 0.0
     for nest, parts in nests:
         nest_total = sum(p["total"] for p in parts)
-        nest_plasma = sum(p["plasma_min"] for p in parts if p.get("plasma_min") is not None)
-        nest_oxy = sum(p["oxy_min"] for p in parts if p.get("oxy_min") is not None)
-        has_plasma = any(p.get("plasma_min") is not None for p in parts)
-        has_oxy = any(p.get("oxy_min") is not None for p in parts)
+        nest_plasma = sum(_eff(p, "plasma_min", "oxy_min") or 0.0 for p in parts)
+        nest_oxy = sum(_eff(p, "oxy_min", "plasma_min") or 0.0 for p in parts)
+        has_plasma = any(_eff(p, "plasma_min", "oxy_min") is not None for p in parts)
+        has_oxy = any(_eff(p, "oxy_min", "plasma_min") is not None for p in parts)
         for p in parts:
             ws.append([
                 batch, nest, p["part"], p["wo"], p["qty"],
@@ -493,7 +500,9 @@ def write_report(out_path, batch, nests, log):
     r += 1
 
     note = blank_row()
-    note[0] = f"Feed rates: {FEED_RATES_SOURCE}. Cut time = total linear inches / speed."
+    note[0] = (f"Feed rates: {FEED_RATES_SOURCE}. Cut time = total linear inches / speed. "
+               "Nest/batch totals include the other process's time for parts a chart "
+               "doesn't cover (e.g. thin plasma-only parts count in the Oxy total).")
     ws.append(note)
     ws[r][0].font = Font(italic=True, color="808080")
 
