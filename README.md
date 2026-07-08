@@ -331,7 +331,7 @@ Batch Repeater | Copies repeat orders from prior 922 batches
 QR Code Generator | GUI plugin - dual-tab QR library and generator 
 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer 
 911 Runtime Estimator | Reads each nest's packet PDF and batch list across a directory of orders, computes a plate-cutting time estimate, and writes one workbook with Plates and Non-Plates sheets (data table + nest summary each) 
-911 Linear Inches | Reads a batch's nest DXFs and package PDFs and computes the exact linear inches of cut per part, per nest, and per batch (part cut length from the DXF geometry, quantity from the nest summary), exported to one Excel report 
+911 Linear Inch CutTime | Reads a batch's nest DXFs and package PDFs and computes the exact linear inches of cut and plasma/oxy cut-time estimate per part, per nest, and per batch (part cut length from the DXF geometry, quantity from the nest summary, feed rate by thickness), exported to one Excel report 
 Customer DXF Quoting | Interactive DXF quoting viewer - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut 
 QA Gemba Analyzer | GUI plugin (QA family) - logs QA rework events to one shared workbook and charts YTD / last-week performance (pie/column/stacked, best-fit line, %-threshold) with a one-click printable Gemba Pack PDF 
 911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest, each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List) 

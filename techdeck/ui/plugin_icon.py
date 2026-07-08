@@ -54,7 +54,7 @@ PLUGIN_ICON_KEYS = {
     "911_sspo_invoicing_prep": "scrooge_mcduck",
     "902_dxf_prep":         "ruler",
     "911_baked_beans_wild_ride": "mr_beans",
-    "911_linear_inches":    "sonic_the_hedgehog",
+    "911_linear_inch_cuttime": "sonic_the_hedgehog",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a

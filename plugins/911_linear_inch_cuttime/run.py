@@ -1,5 +1,5 @@
 """
-911 Linear Inches plugin for TechDeck.
+911 Linear Inch CutTime plugin for TechDeck.
 
 Closed-loop cut-length + cut-time report for a 911 QTDR batch.
 
@@ -649,7 +649,7 @@ def run(params, progress_callback, cancel_event):
         log(f"{len(flags)} item(s) flagged for review:")
         for f in flags:
             log(f"  ! {f}")
-        sdk.show_warning(params, "911 Linear Inches - review needed",
+        sdk.show_warning(params, "911 Linear Inch CutTime - review needed",
                          "Report saved, but some items need a look:\n\n" +
                          "\n".join(f"- {f}" for f in flags[:20]) +
                          ("\n..." if len(flags) > 20 else ""))
