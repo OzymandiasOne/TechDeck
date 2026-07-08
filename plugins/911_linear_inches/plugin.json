@@ -6,7 +6,7 @@
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
-  "requires_main_thread": false,
+  "requires_main_thread": true,
   "timeout": 900,
   "settings": {
     "fields": [
