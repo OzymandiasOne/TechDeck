@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsRectItem, QGraphicsSimpleTextItem,
     QGraphicsItem, QSplitter, QFileDialog, QMessageBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QAbstractItemView, QGroupBox,
+    QDialog, QCheckBox, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QRectF, QRect, QTimer
 from PySide6.QtGui import QPen, QBrush, QColor, QPainter
@@ -57,11 +58,73 @@ _window = None  # module-level - prevents the window from being garbage collecte
 
 # Work order token embedded in DXF filenames + the summary table, e.g. "3X24-398".
 WO_RE = re.compile(r"\d[A-Z]\d+-\d+")
+# Part thickness on a PART SKETCH page, e.g. "0.250 THK" or "0.500 THICK".
+THK_RE = re.compile(r"([\d.]+)\s*(?:THK|THICK)", re.I)
 # Layers that are reference-only and never count as cut (matches customer_dxf_quoting).
 EXCLUDE_LAYERS = {"BOUNDING_BOX", "IGNORE"}
 # Entity types we do NOT measure; their presence means the length may be under-counted.
 UNSUPPORTED_FLAGGED = {"SPLINE", "ELLIPSE"}
 PART_GAP_IN = 0.5  # spacing left between packed parts (approx kerf/handling gap)
+
+# ---------------------------------------------------------------------------
+# Feed rates (cut speed, inches/min) by thickness - Part 1 cut-time estimate
+# ---------------------------------------------------------------------------
+# Copied from "ASA QFC Quoting.xlsm" > sheet "Plasma & Oxy Feed Rates"
+# ("Machine Cut Rates & Settings", last updated 2021-04-14). Speed is the DIVISOR:
+#   cut minutes = total linear inches / speed (IPM).
+# Thicknesses in BOTH tables (~0.5"-1.25") get two estimates (Plasma + Oxy).
+# TO UPDATE: replace the (thickness_in, speed_ipm) pairs below from that sheet's
+# Thickness (leftmost) + Speed (rightmost) columns - Plasma cols G/J, Oxy cols B/E.
+FEED_RATES_SOURCE = "ASA QFC Quoting.xlsm > Plasma & Oxy Feed Rates (rev 2021-04-14)"
+
+PLASMA_FEED = [  # (thickness in, speed IPM) - sheet rows 7-24
+    (0.048, 50), (0.063, 50), (0.105, 100), (0.125, 100), (0.135, 100),
+    (0.188, 100), (0.25, 90), (0.313, 90), (0.375, 80), (0.438, 70),
+    (0.5, 65), (0.625, 60), (0.75, 60), (0.875, 60), (0.938, 50),
+    (1.0, 40), (1.125, 35), (1.25, 30),
+]
+OXY_FEED = [  # (thickness in, speed IPM) - sheet rows 17-41
+    (0.5, 14), (0.625, 13), (0.75, 12), (0.875, 11), (1.0, 10), (1.125, 10),
+    (1.25, 10), (1.375, 9.75), (1.5, 9.5), (1.625, 9.5), (1.75, 9.5),
+    (2.0, 9.5), (2.25, 9.5), (2.5, 9.5), (2.75, 9.25), (3.0, 9.25),
+    (3.25, 9.0), (3.5, 8.5), (3.75, 8.5), (4.0, 8.5), (4.25, 8.0),
+    (4.5, 8.0), (5.0, 7.25), (5.5, 6.5), (6.0, 6.0),
+]
+
+
+def lookup_feed(table, thickness):
+    """(ipm, exact_bool) for a thickness, or None if outside the table's range."""
+    if thickness is None:
+        return None
+    tmin, tmax = table[0][0], table[-1][0]
+    if thickness < tmin - 1e-9 or thickness > tmax + 1e-9:
+        return None
+    best = min(table, key=lambda r: abs(r[0] - thickness))
+    return best[1], abs(best[0] - thickness) < 1e-6
+
+
+def fmt_hm(minutes):
+    """Minutes -> 'Hh MMm' (blank for None)."""
+    if minutes is None:
+        return ""
+    total = int(round(minutes))
+    return f"{total // 60}h {total % 60:02d}m"
+
+
+def part_cut_times(total_inches, thickness):
+    """Plasma/Oxy speeds + minutes for a part's total inches. None where the
+    thickness is outside that process's chart."""
+    out = {"plasma_ipm": None, "plasma_min": None, "plasma_exact": True,
+           "oxy_ipm": None, "oxy_min": None, "oxy_exact": True}
+    p = lookup_feed(PLASMA_FEED, thickness)
+    if p:
+        out["plasma_ipm"], out["plasma_exact"] = p
+        out["plasma_min"] = total_inches / p[0] if p[0] else None
+    o = lookup_feed(OXY_FEED, thickness)
+    if o:
+        out["oxy_ipm"], out["oxy_exact"] = o
+        out["oxy_min"] = total_inches / o[0] if o[0] else None
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +414,8 @@ def _plate_from_text(text):
 
 
 def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
-    """Return (summary {wo: (part, qty)}, plate (L, W) or None)."""
+    """Return (summary {wo: (part, qty)}, plate (L, W) or None,
+    thickness_by_wo {wo: in}, nest_thickness in or None)."""
     pdf = None
     if nest_pkg_dir:
         cands = glob.glob(os.path.join(nest_pkg_dir, f"{nest}.pdf")) + \
@@ -365,14 +429,14 @@ def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
             if cands:
                 pdf = cands[0]
     if pdf is None:
-        return {}, None
+        return {}, None, {}, None
     try:
         sdk.ensure_local(pdf, log=log)
         doc = fitz.open(pdf)
     except Exception as exc:
         log(f"  ! could not open package PDF for {nest}: {exc}")
-        return {}, None
-    summary, plate = {}, None
+        return {}, None, {}, None
+    summary, plate, thk_by_wo, nest_thk = {}, None, {}, None
     try:
         for page in doc:
             text = page.get_text()
@@ -387,9 +451,21 @@ def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
                         summary[tk] = (toks[i - 2], qty)
             if plate is None and "PLATE LENGTH" in text:
                 plate = _plate_from_text(text)
+            if "PART SKETCH" in text:
+                mm = WO_RE.search(text)
+                tk = THK_RE.search(text)
+                if mm and tk:
+                    try:
+                        val = float(tk.group(1))
+                    except ValueError:
+                        val = None
+                    if val is not None:
+                        thk_by_wo[mm.group(0)] = val
+                        if nest_thk is None:
+                            nest_thk = val
     finally:
         doc.close()
-    return summary, plate
+    return summary, plate, thk_by_wo, nest_thk
 
 
 # ---------------------------------------------------------------------------
@@ -463,39 +539,76 @@ def write_report(out_path, batch, nests, log):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Linear Inches"
-    header = ["Batch", "Nest", "Part Number", "Work Order", "Qty",
-              "Individual Linear Inches", "Total Linear Inches (Part x Qty)"]
+    header = ["Batch", "Nest", "Part Number", "Work Order", "Qty", "Thickness (in)",
+              "Individual Linear Inches", "Total Linear Inches (Part x Qty)",
+              "Plasma Speed (IPM)", "Plasma Cut Time", "Oxy Speed (IPM)", "Oxy Cut Time"]
+    NCOL = len(header)
+    LI_COL = 8            # "Total Linear Inches" column index (1-based)
     hf, hb = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="305496")
     nf, nb = Font(bold=True), PatternFill("solid", fgColor="D9E1F2")
     bf, bb = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F3864")
     thin = Side(style="thin", color="BBBBBB")
     border = Border(thin, thin, thin, thin)
 
+    def blank_row():
+        return [""] * NCOL
+
     ws.append(header)
     for c in ws[1]:
         c.font, c.fill = hf, hb
         c.alignment = Alignment(horizontal="center", wrap_text=True)
         c.border = border
+
     r = 2
     batch_total = 0.0
+    batch_plasma = batch_oxy = 0.0
     for nest, parts in nests:
         nest_total = sum(p["total"] for p in parts)
+        nest_plasma = sum(p["plasma_min"] for p in parts if p.get("plasma_min") is not None)
+        nest_oxy = sum(p["oxy_min"] for p in parts if p.get("oxy_min") is not None)
+        has_plasma = any(p.get("plasma_min") is not None for p in parts)
+        has_oxy = any(p.get("oxy_min") is not None for p in parts)
         for p in parts:
-            ws.append([batch, nest, p["part"], p["wo"], p["qty"],
-                       round(p["indiv"], 2), round(p["total"], 2)])
+            ws.append([
+                batch, nest, p["part"], p["wo"], p["qty"],
+                p.get("thickness"), round(p["indiv"], 2), round(p["total"], 2),
+                p.get("plasma_ipm") if p.get("plasma_ipm") is not None else "",
+                fmt_hm(p.get("plasma_min")),
+                p.get("oxy_ipm") if p.get("oxy_ipm") is not None else "",
+                fmt_hm(p.get("oxy_min")),
+            ])
             for c in ws[r]:
                 c.border = border
             r += 1
-        ws.append(["", "", "", "", f"NEST {nest} TOTAL", "", round(nest_total, 2)])
+        sub = blank_row()
+        sub[4] = f"NEST {nest} TOTAL"
+        sub[LI_COL - 1] = round(nest_total, 2)
+        sub[9] = fmt_hm(nest_plasma) if has_plasma else ""
+        sub[11] = fmt_hm(nest_oxy) if has_oxy else ""
+        ws.append(sub)
         for c in ws[r]:
             c.font, c.fill, c.border = nf, nb, border
         r += 1
         batch_total += nest_total
-    ws.append(["", "", "", "", f"BATCH {batch} TOTAL", "", round(batch_total, 2)])
+        batch_plasma += nest_plasma
+        batch_oxy += nest_oxy
+
+    tot = blank_row()
+    tot[4] = f"BATCH {batch} TOTAL"
+    tot[LI_COL - 1] = round(batch_total, 2)
+    tot[9] = fmt_hm(batch_plasma) if batch_plasma else ""
+    tot[11] = fmt_hm(batch_oxy) if batch_oxy else ""
+    ws.append(tot)
     for c in ws[r]:
         c.font, c.fill, c.border = bf, bb, border
+    r += 1
 
-    for i, w in enumerate([10, 12, 22, 13, 8, 16, 20], 1):
+    note = blank_row()
+    note[0] = f"Feed rates: {FEED_RATES_SOURCE}. Cut time = total linear inches / speed."
+    ws.append(note)
+    ws[r][0].font = Font(italic=True, color="808080")
+
+    for i, w in enumerate([10, 12, 22, 13, 6, 12, 16, 20, 16, 13, 16, 13], 1):
         ws.column_dimensions[chr(64 + i)].width = w
     ws.freeze_panes = "A2"
 
@@ -587,6 +700,7 @@ class NestLayoutWindow(PluginWindow):
         toolbar.addWidget(self.btn_fit)
         self.btn_report = QPushButton("Open Excel Report")
         self.btn_report.clicked.connect(self._open_report)
+        self.btn_report.setEnabled(bool(self._report_path))
         toolbar.addWidget(self.btn_report)
         toolbar.addSpacing(12)
         self.lbl_summary = QLabel("")
@@ -727,6 +841,30 @@ class NestLayoutWindow(PluginWindow):
 
 
 # ---------------------------------------------------------------------------
+# Launcher - choose which part(s) to run
+# ---------------------------------------------------------------------------
+
+class LauncherDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("911 Linear Inches")
+        self.setMinimumWidth(380)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Choose what to run, then pick the batch folder:"))
+        self.chk_part1 = QCheckBox("Part 1 - Linear inches + cut-time Excel report")
+        self.chk_part1.setChecked(True)
+        self.chk_part2 = QCheckBox("Part 2 - Nest layout viewer (simulated)")
+        self.chk_part2.setChecked(True)
+        lay.addWidget(self.chk_part1)
+        lay.addWidget(self.chk_part2)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Run")
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+
+# ---------------------------------------------------------------------------
 # Entry point (GUI plugin - runs on the Qt main thread)
 # ---------------------------------------------------------------------------
 
@@ -734,6 +872,16 @@ def run(params, progress_callback, cancel_event):
     global _window
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
+
+    dlg = LauncherDialog()
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        log("Cancelled.")
+        return
+    do_report = dlg.chk_part1.isChecked()
+    do_layout = dlg.chk_part2.isChecked()
+    if not (do_report or do_layout):
+        QMessageBox.information(None, "911 Linear Inches", "Nothing selected to run.")
+        return
 
     start = (settings.get("default_root") or "").strip()
     selected = QFileDialog.getExistingDirectory(
@@ -767,10 +915,11 @@ def run(params, progress_callback, cancel_event):
         nest = derive_nest(sub)
         if nest == sub:
             flags.append(f"{sub}: folder name is not the expected N<nest>S format")
-        summary, plate = read_nest_package(nest, nest_pkg_dir, batch_dir, log)
+        summary, plate, thk_by_wo, nest_thk = read_nest_package(
+            nest, nest_pkg_dir, batch_dir, log)
         if not summary:
             flags.append(f"{nest}: no SUMMARY OF NEST found - quantities unknown")
-        if plate is None:
+        if plate is None and do_layout:
             flags.append(f"{nest}: plate size not found - layout skipped")
 
         dxfs = sorted(glob.glob(os.path.join(iges_root, sub, "*.dxf")))
@@ -800,51 +949,84 @@ def run(params, progress_callback, cancel_event):
             if m["unit_note"]:
                 flags.append(f"{nest}/{fn}: {m['unit_note']}")
             indiv = m["linear_inches"]
-            parts.append({"part": part, "wo": wo, "qty": qty, "bbox": m["bbox"],
-                          "indiv": indiv, "total": indiv * qty})
-            log(f"  {nest}  {part}  WO {wo}  {indiv:.2f} in x {qty} = {indiv * qty:.2f} in")
+            total = indiv * qty
+            thickness = thk_by_wo.get(wo, nest_thk)
+            times = part_cut_times(total, thickness)
+            if thickness is None:
+                flags.append(f"{nest}/{fn}: thickness not found - no cut-time estimate")
+            elif times["plasma_min"] is None and times["oxy_min"] is None:
+                flags.append(f"{nest}/{fn}: thickness {thickness}\" outside both feed-rate "
+                             f"charts - no cut-time estimate")
+            else:
+                if times["plasma_ipm"] is not None and not times["plasma_exact"]:
+                    flags.append(f"{nest}/{fn}: thickness {thickness}\" not in Plasma chart - "
+                                 f"used nearest {times['plasma_ipm']} IPM")
+                if times["oxy_ipm"] is not None and not times["oxy_exact"]:
+                    flags.append(f"{nest}/{fn}: thickness {thickness}\" not in Oxy chart - "
+                                 f"used nearest {times['oxy_ipm']} IPM")
+            part = {"part": part, "wo": wo, "qty": qty, "bbox": m["bbox"],
+                    "indiv": indiv, "total": total, "thickness": thickness}
+            part.update(times)
+            parts.append(part)
+            log(f"  {nest}  {part['part']}  WO {wo}  {indiv:.2f} in x {qty} = {total:.2f} in"
+                f"  thk {thickness}  plasma {fmt_hm(times['plasma_min']) or '-'}"
+                f"  oxy {fmt_hm(times['oxy_min']) or '-'}")
         if parts:
             nests.append((nest, parts))
-            layout = build_nest_layout(nest, plate, parts)
-            if layout["overflow"]:
-                flags.append(f"{nest}: {len(layout['overflow'])} part(s) did not fit the "
-                             f"plate in the simulated layout")
-            layouts.append(layout)
+            if do_layout:
+                layout = build_nest_layout(nest, plate, parts)
+                if layout["overflow"]:
+                    flags.append(f"{nest}: {len(layout['overflow'])} part(s) did not fit the "
+                                 f"plate in the simulated layout")
+                layouts.append(layout)
 
     if not nests:
         QMessageBox.warning(None, "911 Linear Inches",
                             "No part DXFs could be measured. Check the folder selection.")
         return
 
-    progress_callback(92)
-    out_path = os.path.join(batch_dir, f"{batch} Linear Inches.xlsx")
-    saved_path, batch_total = write_report(out_path, batch, nests, log)
+    batch_total = sum(p["total"] for _, parts in nests for p in parts)
+    saved_path = None
+    if do_report:
+        progress_callback(92)
+        out_path = os.path.join(batch_dir, f"{batch} Linear Inches.xlsx")
+        saved_path, batch_total = write_report(out_path, batch, nests, log)
+        log(f"Report: {saved_path}")
+        console = params.get("console")
+        if console is not None and hasattr(console, "append_link"):
+            try:
+                console.append_link(os.path.basename(saved_path), saved_path,
+                                    prefix="REPORT", at_run_end=True)
+            except TypeError:
+                console.append_link(os.path.basename(saved_path), saved_path)
     log("")
     log(f"BATCH {batch} TOTAL = {batch_total:.2f} in = {batch_total / 12:.2f} ft")
-    log(f"Report: {saved_path}")
-
-    console = params.get("console")
-    if console is not None and hasattr(console, "append_link"):
-        try:
-            console.append_link(os.path.basename(saved_path), saved_path,
-                                prefix="REPORT", at_run_end=True)
-        except TypeError:
-            console.append_link(os.path.basename(saved_path), saved_path)
 
     progress_callback(97)
-    _window = NestLayoutWindow(batch, layouts, saved_path, log=log,
-                               on_success=params.get("on_success"))
-    _window.show()
-    _window.fire_success()
+    parent_for_msg = None
+    if do_layout:
+        _window = NestLayoutWindow(batch, layouts, saved_path, log=log,
+                                   on_success=params.get("on_success"))
+        _window.show()
+        _window.fire_success()
+        parent_for_msg = _window
+        log("Layout viewer opened.")
+    else:
+        on_success = params.get("on_success")
+        if callable(on_success):
+            on_success()
+        QMessageBox.information(
+            None, "911 Linear Inches",
+            f"Batch {batch}: {batch_total:.0f} in cut ({batch_total / 12:.1f} ft).\n\n"
+            f"Report saved to:\n{saved_path}")
 
     if flags:
         log("")
         log(f"{len(flags)} item(s) flagged for review:")
         for f in flags:
             log(f"  ! {f}")
-        QMessageBox.warning(_window, "911 Linear Inches - review needed",
-                            "Report saved, but some items need a look:\n\n" +
+        QMessageBox.warning(parent_for_msg, "911 Linear Inches - review needed",
+                            "Some items need a look:\n\n" +
                             "\n".join(f"- {f}" for f in flags[:20]) +
                             ("\n..." if len(flags) > 20 else ""))
     progress_callback(100)
-    log("Layout viewer opened.")
