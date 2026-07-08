@@ -1,24 +1,24 @@
 """
 TechDeck Feedback Writer
 ========================
-Appends a feedback row to the shared TechDeck_Suggestions.xlsx workbook in
-the OneDrive-synced SharePoint folder. Each Windows user gets the same target
-path resolved via Path.home(), so the file lands inside their own OneDrive
-cache and syncs up to SharePoint automatically.
+Delivers a feedback submission to the maintainer.
 
-Schema (matches the existing workbook):
+PRIMARY PATH — telemetry webhook (when TELEMETRY_WEBHOOK_URL is set): the
+submission POSTs to the maintainer's Power Automate flow, which appends it
+to a collection workbook in the maintainer's own OneDrive. Works for every
+user regardless of which SharePoint libraries their machine syncs — there
+is no SharePoint location all users share, which is why the webhook exists.
+See docs/USAGE_TELEMETRY.md for the flow recipe.
+
+LEGACY PATH (webhook not configured in this build): append a row to the
+shared TechDeck_Suggestions.xlsx workbook in the OneDrive-synced 922
+library. Schema (matches the existing workbook):
     Sheet:   "Feedback"
     Cols:    A=Suggestion, B=Which Feature?, C=Date Logged, D=Action Taken?
-
-Submissions write to the next empty row in the "Feedback" sheet. Column D
-(Action Taken?) is left blank for the maintainer to fill in during triage.
-
-Concurrent-write conflicts are tolerated: if two users save within the same
-OneDrive sync window, OneDrive will create a conflict copy alongside the
-original. The maintainer reviews and merges these manually.
-
-If the file is locked (open in Excel), the write retries a few times then
-surfaces a clear error.
+Concurrent-write conflicts are tolerated (rare at feedback volume): OneDrive
+creates a conflict copy the maintainer merges manually. If the file is
+locked (open in Excel), the write retries a few times then surfaces a clear
+error.
 """
 
 import logging
@@ -26,8 +26,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
-
-from openpyxl import load_workbook
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +90,11 @@ def _append_row_with_retry(path: Path, row: list, max_attempts: int = 4,
     or an OS sync). After max_attempts, re-raises the last error so the
     caller can show it to the user.
     """
+    from techdeck.core import plugin_sdk as sdk
     last_err: Optional[Exception] = None
     for attempt in range(1, max_attempts + 1):
         try:
-            wb = load_workbook(path)
+            wb = sdk.load_workbook_resilient(path)
             try:
                 if _FEEDBACK_SHEET_NAME not in wb.sheetnames:
                     raise ValueError(
@@ -127,25 +126,40 @@ def _append_row_with_retry(path: Path, row: list, max_attempts: int = 4,
 # Public API
 # ---------------------------------------------------------------------------
 
-def submit_feedback(suggestion: str, which_feature: str) -> Path:
+def submit_feedback(suggestion: str, which_feature: str) -> str:
     """
-    Append a feedback row to the shared workbook and return the path that
-    was written to.
+    Deliver a feedback submission and return a short human-readable phrase
+    describing where it went (dropped into the dialog's success message,
+    e.g. "sent to the TechDeck developer" / "saved to X.xlsx").
 
     Args:
-        suggestion: The user's suggestion or bug report text (col A).
-        which_feature: Which feature/plugin it relates to (col B).
+        suggestion: The user's suggestion or bug report text.
+        which_feature: Which feature/plugin it relates to.
 
-    The "Date Logged" column (C) is filled with today's date.
-    The "Action Taken?" column (D) is left blank for triage.
+    Webhook path raises:
+        RuntimeError: delivery failed (offline, flow down) — retryable.
 
-    Raises:
+    Legacy workbook path raises:
         FileNotFoundError: if the workbook does not exist (OneDrive not
             synced, or file was renamed/moved).
         PermissionError: if the file is locked and all retries failed.
         ValueError: if the workbook is missing the expected Feedback sheet.
         OSError: for other I/O problems.
     """
+    from techdeck.core.constants import TELEMETRY_WEBHOOK_URL
+    if TELEMETRY_WEBHOOK_URL:
+        from techdeck.core.usage_tracker import send_feedback_event
+        try:
+            send_feedback_event(suggestion, which_feature)
+        except Exception as e:
+            logger.warning(f"Feedback webhook delivery failed: {e}")
+            raise RuntimeError(
+                "Could not reach the feedback service. Check your network "
+                "connection and try again in a minute."
+            ) from e
+        logger.info("Feedback delivered via telemetry webhook")
+        return "sent to the TechDeck developer"
+
     path = feedback_file_path()
 
     if path is None:
@@ -170,4 +184,4 @@ def submit_feedback(suggestion: str, which_feature: str) -> Path:
 
     _append_row_with_retry(path, row)
     logger.info(f"Feedback row appended to {path}")
-    return path
+    return f"saved to {path.name}"

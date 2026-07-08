@@ -20,6 +20,10 @@ blind at least once:
                         "who's online + nudge" firewall question per-machine,
                         since colleagues can't run a probe script themselves —
                         only the exe. 8883=native MQTT, 8884=WSS fallback.
+  Usage telemetry     - the machine's FULL successful-run history (the local
+                        usage spool) + webhook delivery state. Doubles as the
+                        hand-carried delivery channel for usage data from
+                        machines whose webhook sends have never gone through.
   Settings snapshot   - kits, sort modes, per-app directory overrides
   Log tails           - plugin_runs.log (run history, tick-guard reports) +
                         plugin_detail.log (every line a plugin printed, so a
@@ -257,6 +261,39 @@ def _collect_settings() -> list[str]:
     return json.dumps(data, indent=2, default=str).splitlines()
 
 
+def _collect_usage() -> list[str]:
+    """The local usage spool — full contents, deliberately. A user's bug
+    report hand-delivers their machine's run history, covering machines
+    whose webhook sends never succeed (blocked network, URL not yet baked
+    into their build)."""
+    from techdeck.core import usage_tracker
+    status = usage_tracker.telemetry_status()
+    lines = [
+        f"Webhook configured: {status.get('webhook_configured')}",
+        f"Spool: {status.get('spool_path')}",
+        f"Rows: {status.get('rows')}  (sent: {status.get('sent')}, "
+        f"pending: {status.get('pending')})",
+    ]
+    if status.get("error"):
+        lines.append(f"Status error: {status['error']}")
+    spool = usage_tracker.spool_path()
+    if spool.is_file():
+        try:
+            body = spool.read_text(encoding="utf-8", errors="replace").splitlines()
+            cap = 4000
+            if len(body) > cap:
+                lines.append(f"--- usage_log.csv (last {cap} of {len(body)} lines) ---")
+                body = body[-cap:]
+            else:
+                lines.append(f"--- usage_log.csv (complete, {len(body)} lines) ---")
+            lines.extend(body)
+        except OSError as exc:
+            lines.append(f"usage_log.csv unreadable: {exc}")
+    else:
+        lines.append("usage_log.csv: <missing — no successful runs recorded yet>")
+    return lines
+
+
 def _collect_logs() -> list[str]:
     log_dir = _local_appdata() / "TechDeck" / "logs"
     lines = [f"Log dir: {log_dir}"]
@@ -474,6 +511,7 @@ def generate_debug_report(main_window=None) -> Path:
     section("PLUGINS (validated on this machine)", _collect_plugins)
     section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
     section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
+    section("USAGE TELEMETRY (successful-run history)", _collect_usage)
     section("SETTINGS SNAPSHOT", _collect_settings)
     section("DISK / PERMISSIONS", _collect_disk)
     section("LIVE UI PROBE", lambda: _collect_ui_probe(main_window))

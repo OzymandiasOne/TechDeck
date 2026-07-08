@@ -203,7 +203,7 @@ class FeedbackDialog(QDialog):
         self.submit_btn.setText("Submitting...")
 
         try:
-            path = submit_feedback(
+            destination = submit_feedback(
                 suggestion=suggestion,
                 which_feature=which_feature,
             )
@@ -251,6 +251,6 @@ class FeedbackDialog(QDialog):
                       f"feedback (balance: {bal}) - spend them at Woogy's Emporium.")
         QMessageBox.information(
             self, "Feedback Submitted",
-            f"Thanks - your suggestion was saved to {path.name}.{reward}"
+            f"Thanks - your suggestion was {destination}.{reward}"
         )
         self.accept()
