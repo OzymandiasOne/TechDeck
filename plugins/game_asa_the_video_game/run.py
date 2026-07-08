@@ -1,10 +1,12 @@
 """
-Steel Tube Op — GUI game plugin.
+ASA: The Video Game — GUI game plugin.
 
-Launches the Steel Tube Operation arcade mini-game. It's a "Games"-family,
-purchasable plugin: the Library hides it until it's unlocked at Woogy's
-Emporium (gated on settings.is_unlocked("game_asa_the_video_game")). The game widget
-itself ships in the app bundle (techdeck.ui.widgets.steelbeams_game).
+Launches the ASA incremental-strategy game (Universal Paperclips-style arc:
+the yard -> tech team -> A-Frames -> market -> drones -> space -> probes ->
+the whole universe). It's a "Games"-family, purchasable plugin: the Library
+hides it until it's unlocked at Woogy's Emporium (gated on
+settings.is_unlocked("game_asa_the_video_game")). The game widget itself
+ships in the app bundle (techdeck.ui.widgets.steelbeams_game).
 """
 
 _window = None  # module-level so Qt doesn't garbage-collect the window
@@ -28,5 +30,5 @@ def run(params, progress_callback, cancel_event):
     _window.show()
     _window.raise_()
     _window.activateWindow()
-    log("Steel Tube Operation launched — have fun!")
+    log("ASA: The Video Game launched — run the yard, take the universe.")
     progress_callback(100)
