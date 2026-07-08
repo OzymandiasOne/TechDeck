@@ -17,6 +17,7 @@ Stages (each is cumulative — everything before it is already unlocked):
     tech        Tech Team + a fully-kitted yard, reputation to spend
     aframes     A-Frame division open, fabs running, steel stocked
     market      Trading Desk section revealed on the Tech Team tab, cash to trade
+    power       Server Farm built + solar fields powering the AI day-trader
     drones      Drone Fleet, a few drones deployed
     space       ASA Space Division, orbital hardware in place
     probes      Probe Program: the UI has TRANSFORMED to the 2-tab probe interface;
@@ -44,15 +45,16 @@ from techdeck.ui.widgets.steelbeams_game import SteelBeamsGame, PROJECTS  # noqa
 
 
 STAGES = [
-    "yard", "tech", "aframes", "market", "drones",
+    "yard", "tech", "aframes", "market", "power", "drones",
     "space", "probes", "drift", "converting", "ending",
 ]
 
 # Comfortable "play from here" bankroll per stage.
 _MONEY = {
     "tech": 100_000, "aframes": 250_000, "market": 500_000,
-    "drones": 2_000_000, "space": 25_000_000, "probes": 100_000_000,
-    "drift": 100_000_000, "converting": 100_000_000, "ending": 0,
+    "power": 1_000_000, "drones": 2_000_000, "space": 25_000_000,
+    "probes": 100_000_000, "drift": 100_000_000, "converting": 100_000_000,
+    "ending": 0,
 }
 
 
@@ -125,6 +127,17 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
     if reached("market"):
         _grant(g, "algo_trading")
 
+    if reached("power"):
+        # Build the server farm (unlocks the power grid + solar dev) and lay down
+        # enough solar to run the AI day-trader.
+        g.money = 1e15
+        g._buy_server_farm()
+        g.panels += 500
+        g.aframes += 500
+        for _ in range(6):
+            g._build_solar_field()
+        g.power = g._power_max()
+
     if reached("drones"):
         _grant(g, "drone_fleet")
         g.money = 1e15
@@ -190,7 +203,7 @@ def _focus_tab(g: SteelBeamsGame, stage: str) -> None:
     # act on, only the two probe tabs exist.
     tab = {
         "tech": g._tech_tab, "aframes": g._aframe_tab, "market": g._tech_tab,
-        "drones": g._drones_tab, "space": g._space_tab,
+        "power": g._tech_tab, "drones": g._drones_tab, "space": g._space_tab,
         "probes": g._probe_fleet_tab, "drift": g._probe_dev_tab,
         "converting": g._probe_fleet_tab, "ending": g._probe_dev_tab,
     }.get(stage)

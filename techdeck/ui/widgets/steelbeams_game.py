@@ -535,6 +535,34 @@ class SteelBeamsGame(QWidget):
     MFG_DRONE_COST  = 5_000.0
     DEL_DRONE_COST  = 3_000.0
     MAX_DRONES      = 40
+    # Steel automation
+    AUTO_STEEL_COST  = 15_000.0
+    AUTO_STEEL_FLOOR = 400.0        # tons; auto-buy a bulk lot when steel drops below
+    # Solar development (A-Frames tab grows into it)
+    STEEL_PER_PANEL  = 0.3
+    PANEL_FAB_BASE   = 2_500.0
+    PANEL_FAB_MULT   = 1.20
+    FIELD_PANELS     = 25           # solar panels consumed per solar field
+    FIELD_AFRAMES    = 10           # A-frames consumed per solar field
+    # Power / server farm / AI day-trading
+    SERVER_FARM_BASE = 40_000.0
+    SERVER_FARM_MULT = 1.6
+    FIELDS_PER_SF    = 5.0          # solar fields for full recharge per server-farm level
+    RECHARGE_PER_FIELD = 14.0       # power/sec per effective solar field (max recharge/level = 70)
+    DRAIN_PER_SF     = 12.0         # power/sec drawn per server-farm level
+    QUANTUM_DRAIN    = 40.0         # extra draw once the quantum array is online
+    HYPNO_DRAIN      = 8.0          # wireless-charging the hypno-drone fleet
+    POWER_BANK_BASE  = 600.0
+    POWER_BANK_STEP  = 600.0        # +max power per energy-bank upgrade level
+    POWER_BANK_COST  = 20_000.0
+    POWER_BANK_CMULT = 1.55
+    RECHARGE_UP_STEP = 0.5          # recharge x(1 + level*step) per upgrade
+    RECHARGE_UP_COST = 20_000.0
+    RECHARGE_UP_CMULT= 1.55
+    DYSON_COST       = 5_000_000.0  # space-tier, solar-independent power source
+    DYSON_POWER      = 600.0        # power/sec each
+    # AI day-trading income ($/sec) by model tier (0 none .. 3 quantum), needs power
+    AI_RATE          = (0.0, 500.0, 2_500.0, 12_000.0, 60_000.0)
     # Phase 6 — Space
     SOLAR_COL_COST  = 50_000.0
     SPACE_FAB_COST  = 150_000.0
@@ -603,6 +631,8 @@ class SteelBeamsGame(QWidget):
         self.faster_done    = False
         self.bulk_done      = False
         self.precision_done = False
+        self.auto_steel     = False   # auto steel-buyer upgrade purchased
+        self.auto_steel_on  = True    # toggle
         # Phase 2 — Tech Team
         self.tech_unlocked  = False
         self.tech_formed    = False
@@ -623,6 +653,12 @@ class SteelBeamsGame(QWidget):
         self.af_fabs        = 0
         self.af_value       = self.AF_START_VALUE
         self.af_d_mult      = 1.0
+        # Solar development (grows the A-Frames tab; unlocked with the server farm)
+        self.solar_dev_unlocked = False
+        self.panels         = 0.0     # solar panel stockpile (feeds solar fields only)
+        self.panel_made     = 0.0
+        self.panel_fabs     = 0
+        self.solar_fields   = 0       # installed fields = the power generators
         # Phase 4 — Market (now a section inside the Tech Team tab)
         self.market_unlocked = False
         self.stock_price    = self.STOCK_START
@@ -632,6 +668,15 @@ class SteelBeamsGame(QWidget):
         self.stock_bias     = 0.001
         self.stock_sigma    = 0.025
         self._stock_tick    = 0
+        # Power / server farm / AI day-trading (unlocked by building the server farm)
+        self.power_unlocked = False
+        self.server_farm    = 0       # server-farm level (0 = not built)
+        self.power          = 0.0
+        self.bank_level     = 0       # energy-bank (max power) upgrade level
+        self.recharge_level = 0       # recharge-speed upgrade level
+        self.dyson          = 0       # Dyson spheres (space-tier power source)
+        self._brownout      = False   # power hit 0 -> AI stops trading
+        self._ai_trade_t    = 0.0     # flavor-log timer
         # Phase 5 — Drones
         self.drones_unlocked = False
         self.mfg_drones     = 0
@@ -701,6 +746,54 @@ class SteelBeamsGame(QWidget):
         if "algo_trading" in self.completed_projects:
             return 1
         return 0
+
+    # ── Power / solar economy ──────────────────────────────────────────────
+
+    def _power_max(self) -> float:
+        if not self.power_unlocked:
+            return 0.0
+        return self.POWER_BANK_BASE + self.bank_level * self.POWER_BANK_STEP
+
+    def _fields_target(self) -> float:
+        """Solar fields needed for MAX recharge at the current server-farm size.
+        Grows with the farm, so scaling up compute demands more solar."""
+        return max(1, self.server_farm) * self.FIELDS_PER_SF
+
+    def _recharge_rate(self) -> float:
+        """Power/sec in. Fields count linearly up to the target (extra fields are
+        wasted); a bank upgrade does NOT help here, so a bigger bank with the same
+        solar just takes longer to fill. Dyson spheres add solar-independent power."""
+        eff = min(self.solar_fields, self._fields_target())
+        solar = eff * self.RECHARGE_PER_FIELD * (1.0 + self.recharge_level * self.RECHARGE_UP_STEP)
+        return solar + self.dyson * self.DYSON_POWER
+
+    def _power_drain(self) -> float:
+        if self.server_farm <= 0:
+            return 0.0
+        d = self.server_farm * self.DRAIN_PER_SF
+        if "quantum" in self.completed_projects:
+            d += self.QUANTUM_DRAIN
+        if "hypno_drones" in self.completed_projects:
+            d += self.HYPNO_DRAIN
+        return d
+
+    def _server_farm_cost(self) -> float:
+        return self.SERVER_FARM_BASE * (self.SERVER_FARM_MULT ** self.server_farm)
+
+    def _bank_cost(self) -> float:
+        return self.POWER_BANK_COST * (self.POWER_BANK_CMULT ** self.bank_level)
+
+    def _recharge_cost(self) -> float:
+        return self.RECHARGE_UP_COST * (self.RECHARGE_UP_CMULT ** self.recharge_level)
+
+    def _panel_fab_cost(self) -> float:
+        return self.PANEL_FAB_BASE * (self.PANEL_FAB_MULT ** self.panel_fabs)
+
+    @property
+    def _ai_trading(self) -> bool:
+        """The AI day-trades only with a server farm built AND power to run on."""
+        return (self.power_unlocked and self.server_farm > 0
+                and not self._brownout and self._ai_model_index() > 0)
 
     # ── UI construction ────────────────────────────────────────────────────
 
@@ -794,13 +887,14 @@ class SteelBeamsGame(QWidget):
         right.addWidget(self._sec("PRODUCTION"))
         self._steel_btn     = self._opbtn(); self._steel_btn.clicked.connect(self._buy_steel)
         self._steel_big_btn = self._opbtn(); self._steel_big_btn.clicked.connect(self._buy_steel_big)
+        self._autosteel_btn = self._opbtn(); self._autosteel_btn.clicked.connect(self._buy_or_toggle_auto_steel)
         self._afab_btn      = self._opbtn(); self._afab_btn.clicked.connect(self._buy_auto_fab)
         self._mega_btn      = self._opbtn(); self._mega_btn.clicked.connect(self._buy_mega_fab)
         self._mkt_btn       = self._opbtn(); self._mkt_btn.clicked.connect(self._buy_marketing)
         self._faster_btn    = self._opbtn(); self._faster_btn.clicked.connect(self._buy_faster)
         self._bulk_btn      = self._opbtn(); self._bulk_btn.clicked.connect(self._buy_bulk)
         self._prec_btn      = self._opbtn(); self._prec_btn.clicked.connect(self._buy_precision)
-        for b in (self._steel_btn, self._steel_big_btn, self._afab_btn,
+        for b in (self._steel_btn, self._steel_big_btn, self._autosteel_btn, self._afab_btn,
                   self._mega_btn, self._mkt_btn, self._faster_btn,
                   self._bulk_btn, self._prec_btn):
             right.addWidget(b)
@@ -893,6 +987,23 @@ class SteelBeamsGame(QWidget):
         self._sell100_btn = self._opbtn(); self._sell100_btn.clicked.connect(lambda: self._sell_stock(100))
         row2.addWidget(self._buy100_btn); row2.addWidget(self._sell100_btn)
         root.addLayout(row2)
+
+        # Server Farm — build it to put the AI to work day-trading. It draws
+        # POWER, which the solar fields (A-Frames tab) must supply.
+        root.addWidget(self._hr())
+        root.addWidget(self._sec("SERVER FARM"))
+        self._server_farm_btn = self._opbtn(); self._server_farm_btn.clicked.connect(self._buy_server_farm)
+        root.addWidget(self._server_farm_btn)
+        self._power_lbl = self._ml("", "cyan")
+        self._power_lbl.setWordWrap(True)
+        root.addWidget(self._power_lbl)
+        self._ai_income_lbl = self._ml("", "lime")
+        root.addWidget(self._ai_income_lbl)
+        prow = QHBoxLayout()
+        self._bank_btn     = self._opbtn(); self._bank_btn.clicked.connect(self._buy_bank)
+        self._recharge_btn = self._opbtn(); self._recharge_btn.clicked.connect(self._buy_recharge)
+        prow.addWidget(self._bank_btn); prow.addWidget(self._recharge_btn)
+        root.addLayout(prow)
         return w
 
     def _make_aframe_tab(self) -> QWidget:
@@ -940,9 +1051,29 @@ class SteelBeamsGame(QWidget):
         right.addWidget(self._sec("A-FRAME PRODUCTION"))
         self._af_auto_btn = self._opbtn(); self._af_auto_btn.clicked.connect(self._buy_af_fab)
         right.addWidget(self._af_auto_btn)
-        right.addWidget(self._hr())
         self._af_fab_status_lbl = self._ml("A-Frame Fabs: 0    Output: 0.0 / sec", "silver")
         right.addWidget(self._af_fab_status_lbl)
+
+        # Solar section — revealed once the server farm creates a power demand.
+        self._solar_section = QWidget()
+        sol = QVBoxLayout(self._solar_section)
+        sol.setContentsMargins(0, 0, 0, 0)
+        sol.setSpacing(5)
+        sol.addWidget(self._hr())
+        sol.addWidget(self._sec("SOLAR DEVELOPMENT"))
+        self._panels_lbl = self._ml("Solar Panels: 0", "sky")
+        sol.addWidget(self._panels_lbl)
+        self._panel_fab_btn = self._opbtn(); self._panel_fab_btn.clicked.connect(self._fabricate_panel)
+        self._panel_auto_btn = self._opbtn(); self._panel_auto_btn.clicked.connect(self._buy_panel_fab)
+        self._field_btn = self._opbtn(); self._field_btn.clicked.connect(self._build_solar_field)
+        sol.addWidget(self._panel_fab_btn)
+        sol.addWidget(self._panel_auto_btn)
+        sol.addWidget(self._field_btn)
+        self._solar_status_lbl = self._ml("", "silver")
+        self._solar_status_lbl.setWordWrap(True)
+        sol.addWidget(self._solar_status_lbl)
+        self._solar_section.setVisible(False)
+        right.addWidget(self._solar_section)
         right.addStretch()
         root.addLayout(right, stretch=1)
         return w
@@ -972,9 +1103,12 @@ class SteelBeamsGame(QWidget):
         self._solar_col_btn = self._opbtn(); self._solar_col_btn.clicked.connect(self._buy_solar_col)
         self._space_fab_btn = self._opbtn(); self._space_fab_btn.clicked.connect(self._buy_space_fab)
         self._harvester_btn = self._opbtn(); self._harvester_btn.clicked.connect(self._buy_harvester)
+        self._dyson_btn     = self._opbtn(); self._dyson_btn.clicked.connect(self._buy_dyson)
         root.addWidget(self._solar_col_btn)
         root.addWidget(self._space_fab_btn)
         root.addWidget(self._harvester_btn)
+        root.addWidget(self._dyson_btn)
+        self._dyson_btn.setVisible(False)   # shown once the power grid exists
         root.addWidget(self._hr())
         self._space_status_lbl = self._ml("Orbital income: $0/sec    Space output: 0/sec", "silver")
         root.addWidget(self._space_status_lbl)
@@ -1179,12 +1313,20 @@ class SteelBeamsGame(QWidget):
         self._tick_count += 1
         self._elapsed += dt
 
-        # ── Production: tube fabs and A-frame fabs share the steel pile
-        # pro-rata, so A-frame fabs no longer starve behind the tube line.
+        # ── Auto steel-buyer: keep the pile topped up without manual clicking
+        if self.auto_steel and self.auto_steel_on and self.steel < self.AUTO_STEEL_FLOOR:
+            c = self._steel_big_cost()
+            if self.money >= c:
+                self.money -= c
+                self.steel += self.BIG_LOT_TONS
+
+        # ── Production: tube, A-frame and solar-panel fabs all draw from the one
+        # steel pile pro-rata, so no line starves behind another.
         tube_rate = self.auto_fabs * self.fab_mult + self.mega_fabs * self.MEGA_RATE
         tube_want = tube_rate * self.STEEL_PER_TUBE * dt
         af_want = (self.af_fabs * self.STEEL_PER_AF * dt) if self.af_unlocked else 0.0
-        total_want = tube_want + af_want
+        panel_want = (self.panel_fabs * self.STEEL_PER_PANEL * dt) if self.solar_dev_unlocked else 0.0
+        total_want = tube_want + af_want + panel_want
         if total_want > 0 and self.steel > 0:
             take = min(total_want, self.steel)
             share = take / total_want
@@ -1196,6 +1338,10 @@ class SteelBeamsGame(QWidget):
                 made_a = (af_want * share / self.STEEL_PER_AF) * self.prod_mult
                 self.aframes += made_a
                 self.af_made += made_a
+            if panel_want > 0:
+                made_p = (panel_want * share / self.STEEL_PER_PANEL) * self.prod_mult
+                self.panels += made_p
+                self.panel_made += made_p
 
         # ── Space production (no steel required)
         if self.space_unlocked:
@@ -1310,6 +1456,27 @@ class SteelBeamsGame(QWidget):
                 self.stock_price = max(1.0, min(50_000.0,
                                                 self.stock_price * (1 + change)))
 
+        # ── Power grid + AI day-trading
+        if self.power_unlocked and self.server_farm > 0:
+            net = (self._recharge_rate() - self._power_drain()) * dt
+            self.power = max(0.0, min(self._power_max(), self.power + net))
+            was_out = self._brownout
+            self._brownout = self.power <= 0.0
+            if self._brownout and not was_out:
+                self._log("BROWNOUT — the server farm lost power. The trading AI is "
+                          "offline. Build more solar fields.", "red")
+            elif was_out and not self._brownout:
+                self._log("Power restored. The trading AI is back online.", "lime")
+            if self._ai_trading:
+                inc = self.AI_RATE[self._ai_model_index()] * dt * self.legacy_mult
+                self.money += inc
+                self.total_money += inc
+                self._ai_trade_t += dt
+                if self._ai_trade_t >= 8.0:
+                    self._ai_trade_t = 0.0
+                    self._log(f"AI booked a day-trade. +{fmt_money(inc / dt * 8)} "
+                              "this cycle.", "lime")
+
         self._check_milestones()
 
         # ── Animated widgets (~3 fps)
@@ -1362,6 +1529,19 @@ class SteelBeamsGame(QWidget):
         self.money -= cost
         self.steel += self.BIG_LOT_TONS
         self._log(f"Purchased {self.BIG_LOT_TONS:,.0f} tons of steel. The yard groans.")
+
+    def _buy_or_toggle_auto_steel(self):
+        if not self.auto_steel:
+            if self.money < self.AUTO_STEEL_COST:
+                self._log(f"Need {fmt_money(self.AUTO_STEEL_COST)}."); return
+            self.money -= self.AUTO_STEEL_COST
+            self.auto_steel = True
+            self.auto_steel_on = True
+            self._log("Auto Steel-Buyer installed. It tops up the pile when it "
+                      "runs low.")
+        else:
+            self.auto_steel_on = not self.auto_steel_on
+            self._log(f"Auto Steel-Buyer {'ON' if self.auto_steel_on else 'OFF'}.")
 
     def _buy_auto_fab(self):
         cost = self._fab_cost()
@@ -1548,6 +1728,78 @@ class SteelBeamsGame(QWidget):
         self.af_fabs += 1
         self._log(f"A-Frame Fabricator #{self.af_fabs} online.")
 
+    # ── Solar development
+    def _fabricate_panel(self):
+        if self.steel < self.STEEL_PER_PANEL:
+            self._log("Not enough steel for a solar panel."); return
+        self.steel -= self.STEEL_PER_PANEL
+        self.panels += 1
+        self.panel_made += 1
+
+    def _buy_panel_fab(self):
+        cost = self._panel_fab_cost()
+        if self.money < cost:
+            self._log(f"Need {fmt_money(cost)}."); return
+        self.money -= cost
+        self.panel_fabs += 1
+        self._log(f"Solar Panel Fabricator #{self.panel_fabs} online.")
+
+    def _build_solar_field(self):
+        if self.panels < self.FIELD_PANELS or self.aframes < self.FIELD_AFRAMES:
+            self._log(f"A solar field needs {self.FIELD_PANELS} panels + "
+                      f"{self.FIELD_AFRAMES} A-frames."); return
+        self.panels -= self.FIELD_PANELS
+        self.aframes -= self.FIELD_AFRAMES
+        self.solar_fields += 1
+        self._log(f"Solar Field #{self.solar_fields} built. Feeding the grid.", "lime")
+
+    # ── Power / server farm
+    def _buy_server_farm(self):
+        cost = self._server_farm_cost()
+        if self.money < cost:
+            self._log(f"Need {fmt_money(cost)}."); return
+        self.money -= cost
+        self.server_farm += 1
+        if not self.power_unlocked:
+            self.power_unlocked = True
+            self.solar_dev_unlocked = True
+            self._solar_section.setVisible(True)
+            self._dyson_btn.setVisible(True)
+            self._log("Server Farm online. The trading AI now day-trades for you — "
+                      "but it draws POWER.", "yellow")
+            self._log("Build Solar Fields on the A-Frames tab to keep it running.",
+                      "cyan")
+        else:
+            self._log(f"Server Farm expanded to level {self.server_farm}. More AI "
+                      "throughput, more power draw.")
+
+    def _buy_bank(self):
+        cost = self._bank_cost()
+        if self.money < cost:
+            self._log(f"Need {fmt_money(cost)}."); return
+        self.money -= cost
+        self.bank_level += 1
+        self._log(f"Energy bank expanded. Max power {fmt(self._power_max())}. "
+                  "(Bigger bank, same solar = slower to fill.)")
+
+    def _buy_recharge(self):
+        cost = self._recharge_cost()
+        if self.money < cost:
+            self._log(f"Need {fmt_money(cost)}."); return
+        self.money -= cost
+        self.recharge_level += 1
+        self._log(f"Recharge controllers upgraded. Solar recharge x"
+                  f"{1 + self.recharge_level * self.RECHARGE_UP_STEP:.1f} "
+                  "(needs solar fields to matter).")
+
+    def _buy_dyson(self):
+        if self.money < self.DYSON_COST:
+            self._log(f"Need {fmt_money(self.DYSON_COST)}."); return
+        self.money -= self.DYSON_COST
+        self.dyson += 1
+        self._log(f"Dyson Sphere segment #{self.dyson} encircles the sun. "
+                  f"+{fmt(self.DYSON_POWER)} power/sec, no solar needed.", "yellow")
+
     def _buy_stock(self, n: int):
         cost = n * self.stock_price
         if self.money < cost:
@@ -1709,6 +1961,8 @@ class SteelBeamsGame(QWidget):
         self._clear_layout(self._proj_layout)
         self._mega_btn.setVisible(False)
         self._market_section.setVisible(False)
+        self._solar_section.setVisible(False)
+        self._dyson_btn.setVisible(False)
         self._t_inno_lbl.setVisible(False)
         self._combat_btn.setVisible(False)
         self._pr_matter_lbl.setVisible(False)
@@ -1809,6 +2063,9 @@ class SteelBeamsGame(QWidget):
                 seg.append(self._cspan("sky", f"OPS {fmt(self.ops)}/{fmt(self._ops_cap)}"))
             if self.inno_unlocked:
                 seg.append(self._cspan("lime", f"INNO {fmt(self.inno)}"))
+            if self.power_unlocked:
+                pk = "red" if self._brownout else "orange"
+                seg.append(self._cspan(pk, f"PWR {fmt(self.power)}/{fmt(self._power_max())}"))
         sep = f"<span style='color:{PAL['slate']}'> &#183; </span>"
         self._stats_bar.setText(sep.join(seg))
 
@@ -1852,6 +2109,15 @@ class SteelBeamsGame(QWidget):
         self._steel_big_btn.setText(
             f"Bulk Steel  {fmt_money(sbc)}  (+{self.BIG_LOT_TONS:,.0f} tons)")
         self._steel_big_btn.setEnabled(self.money >= sbc)
+        if not self.auto_steel:
+            self._autosteel_btn.setText(
+                f"Auto Steel-Buyer  {fmt_money(self.AUTO_STEEL_COST)}  (tops up steel)")
+            self._autosteel_btn.setEnabled(self.money >= self.AUTO_STEEL_COST)
+        else:
+            self._autosteel_btn.setText(
+                f"Auto Steel-Buyer  [{'ON' if self.auto_steel_on else 'OFF'}]  "
+                f"(refills below {self.AUTO_STEEL_FLOOR:.0f} t)")
+            self._autosteel_btn.setEnabled(True)
         fc = self._fab_cost()
         self._afab_btn.setText(
             f"Auto-Fabricator  {fmt_money(fc)}  (+{self.fab_mult:.1f}/sec output)")
@@ -1946,6 +2212,44 @@ class SteelBeamsGame(QWidget):
         self._buy100_btn.setEnabled(self.money >= 100 * self.stock_price)
         self._sell100_btn.setText(f"Sell 100 shares  ({fmt_money(100 * self.stock_price)})")
         self._sell100_btn.setEnabled(self.stock_shares >= 100)
+        # Server farm + power grid
+        sfc = self._server_farm_cost()
+        self._server_farm_btn.setText(
+            ("Build Server Farm" if self.server_farm == 0 else
+             f"Expand Server Farm (Lv {self.server_farm}->{self.server_farm + 1})")
+            + f"  {fmt_money(sfc)}")
+        self._server_farm_btn.setEnabled(self.money >= sfc)
+        if self.power_unlocked:
+            rr, dr = self._recharge_rate(), self._power_drain()
+            bal = rr - dr
+            state = "BROWNOUT" if self._brownout else ("charging" if bal >= 0 else "draining")
+            self._power_lbl.setText(
+                f"Power: {fmt(self.power)}/{fmt(self._power_max())}   "
+                f"in {fmt(rr)}/s - out {fmt(dr)}/s = {'+' if bal >= 0 else ''}{fmt(bal)}/s  "
+                f"[{state}]")
+            tier = self._ai_model_index()
+            if self._ai_trading:
+                self._ai_income_lbl.setText(
+                    f"AI trading ({_AI_MODELS[tier][0]}): "
+                    f"+{fmt_money(self.AI_RATE[tier] * self.legacy_mult)}/sec")
+            else:
+                self._ai_income_lbl.setText(
+                    "AI trading OFFLINE — no power." if self._brownout
+                    else "AI trading idle.")
+            bc = self._bank_cost()
+            self._bank_btn.setText(f"Energy Bank +{fmt(self.POWER_BANK_STEP)}  {fmt_money(bc)}")
+            self._bank_btn.setEnabled(self.money >= bc)
+            rc = self._recharge_cost()
+            self._recharge_btn.setText(
+                f"Recharge Speed x{1 + (self.recharge_level + 1) * self.RECHARGE_UP_STEP:.1f}"
+                f"  {fmt_money(rc)}")
+            self._recharge_btn.setEnabled(self.money >= rc)
+        else:
+            self._power_lbl.setText("Build the Server Farm to put the AI to work "
+                                    "day-trading (it will need power).")
+            self._ai_income_lbl.setText("")
+            self._bank_btn.setEnabled(False); self._bank_btn.setText("Energy Bank")
+            self._recharge_btn.setEnabled(False); self._recharge_btn.setText("Recharge Speed")
 
     def _offerable_projects(self) -> list[str]:
         out = []
@@ -2014,6 +2318,23 @@ class SteelBeamsGame(QWidget):
         self._af_auto_btn.setText(
             f"A-Frame Fabricator  {fmt_money(fc)}  (+{self.prod_mult:.1f}/sec output)")
         self._af_auto_btn.setEnabled(self.money >= fc)
+        if self.solar_dev_unlocked:
+            self._panels_lbl.setText(f"Solar Panels: {fmt(self.panels)}")
+            self._panel_fab_btn.setText("Fabricate Solar Panel  "
+                                        f"({self.STEEL_PER_PANEL:.1f} t steel)")
+            self._panel_fab_btn.setEnabled(self.steel >= self.STEEL_PER_PANEL)
+            pfc = self._panel_fab_cost()
+            self._panel_auto_btn.setText(
+                f"Solar Panel Fabricator  {fmt_money(pfc)}  ({self.panel_fabs})")
+            self._panel_auto_btn.setEnabled(self.money >= pfc)
+            self._field_btn.setText(
+                f"Build Solar Field  ({self.FIELD_PANELS} panels + "
+                f"{self.FIELD_AFRAMES} A-frames)   [{self.solar_fields} built]")
+            self._field_btn.setEnabled(self.panels >= self.FIELD_PANELS
+                                       and self.aframes >= self.FIELD_AFRAMES)
+            self._solar_status_lbl.setText(
+                f"Fields: {self.solar_fields}/{fmt(self._fields_target())} for max "
+                f"recharge  ({fmt(self._recharge_rate())} power/sec)")
 
     def _update_drones(self):
         self._mfg_drone_btn.setText(
@@ -2046,6 +2367,12 @@ class SteelBeamsGame(QWidget):
             f"Asteroid Harvester  {fmt_money(self.HARVESTER_COST)}  "
             f"({self.harvesters})  +300 tubes/sec  +60 A-frames/sec")
         self._harvester_btn.setEnabled(self.money >= self.HARVESTER_COST)
+        if self.power_unlocked:
+            self._dyson_btn.setVisible(True)
+            self._dyson_btn.setText(
+                f"Dyson Sphere  {fmt_money(self.DYSON_COST)}  "
+                f"({self.dyson})  +{fmt(self.DYSON_POWER)} power/sec")
+            self._dyson_btn.setEnabled(self.money >= self.DYSON_COST)
         self._space_status_lbl.setText(
             f"Orbital income: ${fmt(orbital_inc)}/sec    "
             f"Space output: {fmt(space_out)}/sec")
