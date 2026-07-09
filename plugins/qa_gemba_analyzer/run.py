@@ -70,8 +70,9 @@ SHEET_NAME = "Master Rework Log"
 # Default home of the shared workbook: the QA team's Gemba folder in the ASA
 # Quality Management System library (a DIFFERENT SharePoint site than the Pilot
 # Program). The OneDrive sync base varies per machine, so the library folder is
-# discovered via sdk.library_roots(), never hardcoded. Example on one laptop:
-#   C:\Users\<user>\American Steel & Alum\
+# discovered via sdk.library_roots(), never hardcoded. Example layout (the
+# <user> segment differs per machine, which is exactly why it's discovered):
+#   ~\<user>\American Steel & Alum\
 #     ASA Quality Management System - All Sites - Documents\
 #     Quality Assurance\South Portland\CI & Metrics\Gemba
 QMS_LIBRARY = "ASA Quality Management System - All Sites - Documents"
