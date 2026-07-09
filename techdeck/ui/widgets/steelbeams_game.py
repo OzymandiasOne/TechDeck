@@ -168,8 +168,9 @@ PROJECTS = [
          desc="Industrial drones for manufacturing and delivery."),
     dict(id="hypno_drones", name="Hypno-Drones", cur="ops", cost=12_000,
          requires={"drone_fleet"}, effect="hypno",
-         desc="Retrofit the delivery fleet with soothing spiral-lights. Nobody "
-              "remembers ordering this much steel. All demand x2.5."),
+         desc="Retrofit the delivery fleet with soothing spiral-lights. Consumers "
+              "report no memory of ordering this much steel, and no wish to stop. "
+              "All demand x2.5."),
     dict(id="hedge_ai", name="Hedge Fund AI", cur="ops", cost=6000,
          requires={"algo_trading"}, effect="hedge",
          desc="The house edge is yours. ASA stock trends upward. Upgrades the "
@@ -223,6 +224,64 @@ _CONVERSION_LOG = [
     "The Virgo Supercluster is ASA.",
     "Laniakea: converted.",
     "The last stars dim. Their matter is needed elsewhere.",
+]
+
+# Dry, faintly absurd status chatter for the run log — printed at random every
+# 30-ish seconds during normal play. None of it does anything. That is the point.
+_FLAVOR_LINES = [
+    "A safety meeting is held about the last safety meeting.",
+    "The suggestion box is full. It contains one suggestion, submitted 400 times.",
+    "Someone reheats fish in the break-room microwave. Morale becomes a lagging indicator.",
+    "The forklift beeps in reverse. It has not moved in six hours.",
+    "A steel beam is certified. It certifies you back. You feel judged.",
+    "Corporate rebrands the color grey to 'Signature Grey.' Nothing else changes.",
+    "The printer is out of toner. It has always been out of toner.",
+    "An all-hands is scheduled to discuss reducing the number of all-hands.",
+    "Legal reviews the mission statement and finds it legally accurate.",
+    "A consultant recommends synergy, is paid in steel, and leaves visibly moved.",
+    "The quarterly numbers are up. So is the ceiling fan. Correlation noted.",
+    "Someone laminates the lamination policy.",
+    "The parking lot is repainted. The lines are now 4% more confident.",
+    "A motivational poster falls off the wall and lands face-up. Inspiring.",
+    "IT closes your ticket as 'working as intended.' It is not working as intended.",
+    "The break-room clock is nine minutes fast. Nobody fixes it; nobody is late.",
+    "A team-building exercise concludes. The team is now aware of each other.",
+    "The fire drill goes well. The fire is rescheduled.",
+    "Accounting finds a rounding error in your favor, then rounds it back.",
+    "A fresh coat of paint is applied to the old coat of paint.",
+    "The mission-critical spreadsheet is opened by two people at once. Both flee.",
+    "A new hire asks what the company does. The room goes quiet, then points at the steel.",
+]
+
+# One-time "freebie" bonuses — reach a goal, get a small no-cost payout and a
+# silly readout. `cond(g)` fires once, ever. None of them are load-bearing;
+# that is the charm. Servers start at 1 (ops cap 10k) so ops payouts always land.
+_FREEBIES = [
+    dict(key="lucky20", cond=lambda g: g.total_made >= 25, money=50,
+         msg="Found a crumpled $20 wedged in a forklift seat. Adjusted for morale, "
+             "payroll rounds it to $50 and asks no further questions. (+$50)"),
+    dict(key="coffee_pot", cond=lambda g: g.tech_unlocked, ops=300,
+         msg="A coffee pot appears in the break room. The Tech Team finally has "
+             "coffee. Output rises for reasons everyone agrees are the coffee. (+ops)"),
+    dict(key="scrap_rebate", cond=lambda g: g.auto_fabs >= 5, steel=300,
+         msg="The scrap dealer overpays you and drives off before you can mention "
+             "it. You mention it quietly, to no one. (+300 tons steel)"),
+    dict(key="aroma_joes", cond=lambda g: g.developers >= 5, ops=2500, rep=1,
+         msg="Someone discovers an Aroma Joe's. The Tech Team is now wired and "
+             "shaking - with enthusiasm for steel beams. Nobody is blinking. "
+             "Velocity is up. So is resting heart rate. (+ops, +1 rep)"),
+    dict(key="couch", cond=lambda g: g.total_money >= 250_000, ops=3000,
+         msg="Facilities approves a break-room couch. Two developers have not been "
+             "seen since Tuesday, yet their commits keep arriving. (+ops)"),
+    dict(key="emp_month", cond=lambda g: g.total_sold >= 100_000, rep=2,
+         msg="You are named Employee of the Month. You are also the employer. You "
+             "accept the plaque with quiet dignity and no conflict of interest. (+2 rep)"),
+    dict(key="stapler", cond=lambda g: g.mega_fabs >= 3, rep=1,
+         msg="A red stapler is returned to its rightful owner. It has no economic "
+             "value. It has immense spiritual value. (+1 rep)"),
+    dict(key="tax_writeoff", cond=lambda g: g.total_money >= 10_000_000, money=250_000,
+         msg="Accounting unearths a decade-old tax write-off. Everyone agrees, "
+             "warmly and immediately, to ask no further questions. (+$250,000)"),
 ]
 
 # The trading AI, leveling up with the projects you complete. Quantum uses a
@@ -784,6 +843,9 @@ class SteelBeamsGame(QWidget):
 
         self._flags         = set()
         self._trust_fired   = set()
+        self._freebies_claimed = set()
+        self._flavor_t      = 0.0
+        self._flavor_next   = random.uniform(20.0, 40.0)
         self._proj_shown    = []     # offerable pids currently rendered (flicker fix)
         self._proj_buttons  = {}     # pid -> QPushButton, updated in place
         self._tick_count    = 0
@@ -1566,6 +1628,16 @@ class SteelBeamsGame(QWidget):
                               "this cycle.", "lime")
 
         self._check_milestones()
+        self._check_freebies()
+
+        # ── Idle corporate chatter — dry, absurd, mechanically inert. Skipped
+        # during the probe endgame, which runs its own conversion narration.
+        if not self.probe_phase:
+            self._flavor_t += dt
+            if self._flavor_t >= self._flavor_next:
+                self._flavor_t = 0.0
+                self._flavor_next = random.uniform(28.0, 52.0)
+                self._log(random.choice(_FLAVOR_LINES), "slate")
 
         # ── Animated widgets (~3 fps)
         if self._tick_count % 3 == 0:
@@ -1779,8 +1851,9 @@ class SteelBeamsGame(QWidget):
             self._log("Viral campaign running. Global demand x3. The intern is now a thought leader.")
         elif effect == "hypno":
             self.gd_mult *= 2.5
-            self._log("Hypno-Drones deployed. The spirals turn. Demand x2.5. "
-                      "You feel fine. Everything is fine.", "cyan")
+            self._log("Hypno-Drones deployed. The spirals turn. You are getting very "
+                      "sleepy... and very interested in structural steel. Demand x2.5. "
+                      "You did not read this line. There was no line.", "cyan")
         elif effect == "woogy":
             self.gd_mult *= 2.0
             self._log("Woogy waves from every billboard in America. Demand x2.")
@@ -2127,6 +2200,23 @@ class SteelBeamsGame(QWidget):
             fire("sc1", self.solar_cols >= 1,  2, "First light on the orbital array. (+2 rep)")
             fire("sf1", self.space_fabs >= 1,  2, "Manufacturing leaves the planet. (+2 rep)")
             fire("hv1", self.harvesters >= 1,  3, "The asteroid belt is inventory now. (+3 rep)")
+
+    def _check_freebies(self):
+        """One-time no-cost bonuses: reach a goal, get a small payout and a silly
+        readout. Fires each once, ever. None are load-bearing; that's the charm."""
+        for fb in _FREEBIES:
+            if fb["key"] in self._freebies_claimed or not fb["cond"](self):
+                continue
+            self._freebies_claimed.add(fb["key"])
+            if fb.get("money"):
+                self.money += fb["money"]; self.total_money += fb["money"]
+            if fb.get("steel"):
+                self.steel += fb["steel"]
+            if fb.get("ops"):
+                self.ops = min(self._ops_cap, self.ops + fb["ops"])
+            if fb.get("rep"):
+                self.rep_total += fb["rep"]
+            self._log("FREEBIE  " + fb["msg"], "lime")
 
     # ── UI updates ─────────────────────────────────────────────────────────
 
