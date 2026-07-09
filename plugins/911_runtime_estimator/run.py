@@ -32,7 +32,7 @@ S029, V092 ...), this plugin:
 Runs off an AWARD PACKAGE (the SPARS-received folder of order folders, before
 batching) so work-scope review / division + machine assignment can happen up
 front; the plate cut times are the exact linear-inch estimates. Replaced the
-standalone 911_linear_inch_cuttime tool (retired) whose engine is vendored here.
+standalone 911_linear_inch_cuttime tool (removed) whose engine is vendored here.
 
 CALCULATION (per plate batch-list row; linear inches drive the estimate):
     linear_in_pc = exact DXF cut length for the row's Work Order (inches)
@@ -82,7 +82,7 @@ from openpyxl.utils import get_column_letter
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Linear-inch cut-time engine (vendored from the retired 911_linear_inch_cuttime)
+# Linear-inch cut-time engine (vendored from the removed 911_linear_inch_cuttime)
 # ──────────────────────────────────────────────────────────────────────────
 # Plate cut time = EXACT DXF cut length / feed rate (IPM). Cut length per part
 # comes from the order's IGES DXF vector geometry; the feed rate is looked up by

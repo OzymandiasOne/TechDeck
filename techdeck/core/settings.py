@@ -42,6 +42,12 @@ _PLUGIN_ID_RENAMES = {
     "steeltube_game": "game_asa_the_video_game",
 }
 
+# Plugin IDs that were RETIRED (not renamed). Stripped from profile tiles / plugin
+# settings / stats on load so a removed plugin leaves no dead reference behind.
+_REMOVED_PLUGIN_IDS = {
+    "911_linear_inch_cuttime",  # 2026-07-09: absorbed into 911_runtime_estimator
+}
+
 
 class SettingsManager:
     """
@@ -263,7 +269,7 @@ class SettingsManager:
         references in every profile. Idempotent: only acts when an old ID is
         present, and never overwrites an entry already stored under the new ID.
         """
-        # Rename dict keys in plugin_settings and plugin_stats
+        # Rename dict keys in plugin_settings and plugin_stats; drop retired ones.
         for section in ("plugin_settings", "plugin_stats"):
             bucket = self.data.get(section)
             if not isinstance(bucket, dict):
@@ -274,8 +280,11 @@ class SettingsManager:
                 if new_id not in bucket:
                     bucket[new_id] = bucket[old_id]
                 del bucket[old_id]
+            for removed_id in _REMOVED_PLUGIN_IDS:
+                bucket.pop(removed_id, None)
 
-        # Rewrite tile references in every profile (preserve order, dedupe)
+        # Rewrite tile references in every profile (preserve order, dedupe);
+        # a retired plugin is dropped entirely.
         for profile in self.data.get("profiles", {}).values():
             tiles = profile.get("tiles")
             if not isinstance(tiles, list):
@@ -283,6 +292,8 @@ class SettingsManager:
             new_tiles: List[str] = []
             for tile in tiles:
                 mapped = _PLUGIN_ID_RENAMES.get(tile, tile)
+                if mapped in _REMOVED_PLUGIN_IDS:
+                    continue
                 if mapped not in new_tiles:
                     new_tiles.append(mapped)
             profile["tiles"] = new_tiles
