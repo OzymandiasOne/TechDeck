@@ -13,9 +13,12 @@ S029, V092 ...), this plugin:
      stock size, mil spec, and plate weight -- cross-checking fields across the
      page-1 data row, the SUMMARY page, the part sketch, and the MOVE TICKET,
      exactly like the 911 Setup plugin.
-  3. Joins batch-list rows to nests by 'Nest Pkg Nbr' and computes a per-row
-     cutting-time estimate (thickness band x thickness x pieces, +180 min per
-     bevel piece) -- see CALCULATION below.
+  3. Computes a per-row plate cutting-time estimate from EXACT linear inches of
+     cut. Each batch-list row's 'Work Order' is matched to its DXF in the order's
+     'IGES FILES' folder; the cut length is measured from the DXF vector
+     geometry and divided by a thickness-driven feed rate (IPM) -- see
+     CALCULATION below. Rows with no DXF (structural shapes, or a missing file)
+     fall back to the legacy thickness-band estimate so hours aren't lost.
   4. Writes ONE consolidated workbook with two sheets (Plates / Non-Plates).
      Each is a flat data table that reproduces EVERY batch-list column in its
      native order, then our generated columns. 'Material' on the table is the
@@ -26,16 +29,20 @@ S029, V092 ...), this plugin:
      driving Excel via COM (pywin32). If Excel/COM is unavailable or errors, it
      falls back to a static nest->sum summary so a run never hard-crashes.
 
-CALCULATION (per batch-list row; thickness drives the band):
-    band(t): t < 0.5 -> 6 ; 0.5 <= t < 1.0 -> 9 ; 1.0 <= t < 2.0 -> 12 ; t >= 2.0 -> 18   (min/pc)
-    Factor   = thickness * band(thickness)          # literal multiply
-    row base = Factor * (row PPN Quantity)
-    bevel    = 180 * (row PPN Quantity)  IF row SCOPE OF WORK contains 'BEVEL', else 0
-    row est (min) = row base + bevel
-    row est (hr)  = row est (min) / 60
+Runs off an AWARD PACKAGE (the SPARS-received folder of order folders, before
+batching) so work-scope review / division + machine assignment can happen up
+front; the plate cut times are the exact linear-inch estimates. Replaced the
+standalone 911_linear_inch_cuttime tool (retired) whose engine is vendored here.
 
-The bevel test is a CONTAINS check (real batch lists use compound scopes like
-'CUT/BEVEL'), case-insensitive.
+CALCULATION (per plate batch-list row; linear inches drive the estimate):
+    linear_in_pc = exact DXF cut length for the row's Work Order (inches)
+    feed (IPM)   = lookup_feed(thickness), rounding thickness UP to the next chart row
+    Est Min/PC   = linear_in_pc / feed        (+180 min IF SCOPE OF WORK has 'BEVEL')
+    Est Min/WO   = Est Min/PC * (row PPN Quantity)
+    Est Cut Hours = Est Min/WO / 60
+The +180 min/pc bevel surcharge is unchanged from the legacy band method (a
+CONTAINS check, case-insensitive). Non-plate / DXF-less rows use the legacy band:
+    band(t): t<0.5->6 ; <1.0->9 ; <2.0->12 ; >=2.0->18 (min/pc); est = t*band*qty +bevel.
 
 Prompts for the ROOT via the native folder dialog only (no pre-configured settings
 required). Optional 'output_dir' setting picks where the workbook is saved;
@@ -44,7 +51,10 @@ blank saves it inside ROOT.
 
 from __future__ import annotations
 
+import os
 import re
+import glob
+import math
 import datetime
 from pathlib import Path
 from typing import Optional
@@ -69,7 +79,320 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
-VERSION = "1.2.0"
+# ══════════════════════════════════════════════════════════════════════════
+# Linear-inch cut-time engine (vendored from the retired 911_linear_inch_cuttime)
+# ──────────────────────────────────────────────────────────────────────────
+# Plate cut time = EXACT DXF cut length / feed rate (IPM). Cut length per part
+# comes from the order's IGES DXF vector geometry; the feed rate is looked up by
+# thickness in one combined chart, rounding UP to the next listed thickness so
+# oddball thicknesses stay covered. TODO: centralize this parser into plugin_sdk
+# (customer_dxf_quoting + this module carry copies).
+# ══════════════════════════════════════════════════════════════════════════
+
+# Work order token in DXF filenames (PART.REV.WORKORDER) + the batch list. Two
+# SigmaNest formats: current "X4549775"/"BK514922" (1-2 letters + 5-8 digits) and
+# legacy "3X24-398"; same form 911_setup's summary parser uses.
+WO_RE = re.compile(r"(?:[A-Z]{1,2}\d{5,8}|\d[A-Z]\d+-\d+)", re.I)
+# Layers that are reference-only and never count as cut (matches customer_dxf_quoting).
+EXCLUDE_LAYERS = {"BOUNDING_BOX", "IGNORE"}
+# Entity types we do NOT measure; their presence means the length may be under-counted.
+UNSUPPORTED_FLAGGED = {"SPLINE", "ELLIPSE"}
+
+FEED_RATES_SOURCE = "Plasma & Oxy Feed Rates (single combined chart, rev 2026-07-09)"
+FEED_RATES = [  # (thickness in, speed IPM) - ascending
+    (0.125, 180), (0.188, 140), (0.25, 100), (0.313, 80), (0.375, 100),
+    (0.438, 90), (0.5, 75), (0.625, 55), (0.75, 80), (0.875, 70),
+    (1.0, 50), (1.125, 45), (1.25, 40), (1.375, 35), (1.5, 30),
+    (1.625, 45), (1.75, 40), (2.0, 30), (2.25, 25), (2.5, 20),
+    (2.75, 9.25), (3.0, 9.25), (3.25, 9.0), (3.5, 8.5), (3.75, 8.5),
+    (4.0, 8.5), (4.25, 8.0), (4.5, 8.0), (5.0, 7.25), (5.25, 6.5),
+    (5.5, 6.0), (5.75, 6.0), (6.0, 6.0), (6.25, 6.0), (6.5, 6.0),
+    (6.75, 6.0), (7.0, 6.0),
+]
+
+
+def lookup_feed(thickness):
+    """(ipm, note) for a thickness, rounding UP to the next listed thickness (thicker
+    = slower = more time = conservative). Clamps below/above the chart (flagged via
+    note). None only when thickness is None."""
+    if thickness is None:
+        return None
+    for t, ipm in FEED_RATES:
+        if thickness <= t + 1e-9:
+            note = None if abs(t - thickness) < 1e-6 else f"rounded up to {t}\" row"
+            return ipm, note
+    t, ipm = FEED_RATES[-1]
+    return ipm, f"above chart max {t}\" - used {t}\" row"
+
+
+def _decode_dxf(path):
+    data = Path(path).read_bytes()
+    if data.startswith(b"AutoCAD Binary DXF"):
+        raise ValueError("Binary DXF is not supported - re-export as ASCII DXF.")
+    for enc in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("Could not decode file - is this a DXF?")
+
+
+def _read_pairs(path):
+    lines = _decode_dxf(path).splitlines()
+    pairs = []
+    it = iter(lines)
+    for code_line in it:
+        try:
+            value = next(it)
+        except StopIteration:
+            break
+        try:
+            code = int(code_line.strip())
+        except ValueError:
+            raise ValueError(f"Malformed DXF (expected numeric group code, got {code_line.strip()!r}).")
+        pairs.append((code, value.strip()))
+    if not pairs:
+        raise ValueError("File is empty.")
+    return pairs
+
+
+def _bulge_length(p1, p2, bulge):
+    chord = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    if abs(bulge) < 1e-12 or chord < 1e-12:
+        return chord
+    theta = 4.0 * math.atan(bulge)
+    radius = chord * (1.0 + bulge * bulge) / (4.0 * abs(bulge))
+    return radius * abs(theta)
+
+
+def _collect_until_next_entity(pairs, j):
+    groups = []
+    n = len(pairs)
+    while j < n and pairs[j][0] != 0:
+        groups.append(pairs[j])
+        j += 1
+    return groups, j
+
+
+def _build_line(groups):
+    g = {}
+    for code, val in groups:
+        if code in (8, 10, 20, 11, 21):
+            g[code] = val
+    try:
+        p1 = (float(g[10]), float(g[20]))
+        p2 = (float(g[11]), float(g[21]))
+    except KeyError:
+        return None
+    return {"layer": g.get(8, "0"), "points": [p1, p2], "length": math.dist(p1, p2)}
+
+
+def _build_arc(groups, full_circle=False):
+    g = {}
+    for code, val in groups:
+        if code in (8, 10, 20, 40, 50, 51):
+            g[code] = val
+    try:
+        cx, cy, r = float(g[10]), float(g[20]), float(g[40])
+    except KeyError:
+        return None
+    if full_circle:
+        a0, sweep = 0.0, math.tau
+    else:
+        a0 = math.radians(float(g.get(50, 0.0)))
+        a1 = math.radians(float(g.get(51, 360.0)))
+        sweep = (a1 - a0) % math.tau or math.tau
+    n = max(8, int(abs(sweep) / math.tau * 64) + 1)
+    pts = [(cx + r * math.cos(a0 + sweep * t / n), cy + r * math.sin(a0 + sweep * t / n))
+           for t in range(n + 1)]
+    return {"layer": g.get(8, "0"), "points": pts, "length": r * sweep}
+
+
+def _polyline_entity(layer, verts, closed):
+    verts = [v for v in verts if v[1] is not None]
+    if len(verts) < 2:
+        return None
+    total = 0.0
+    seg_pairs = list(zip(verts, verts[1:]))
+    if closed:
+        seg_pairs.append((verts[-1], verts[0]))
+    for v1, v2 in seg_pairs:
+        total += _bulge_length((v1[0], v1[1]), (v2[0], v2[1]), v1[2])
+    points = [(v[0], v[1]) for v in verts]
+    return {"layer": layer, "points": points, "length": total}
+
+
+def _build_lwpolyline(groups):
+    layer, flags = "0", 0
+    verts = []  # [x, y, bulge]
+    for code, val in groups:
+        if code == 8:
+            layer = val
+        elif code == 70:
+            flags = int(val)
+        elif code == 10:
+            verts.append([float(val), None, 0.0])
+        elif code == 20 and verts:
+            verts[-1][1] = float(val)
+        elif code == 42 and verts:
+            verts[-1][2] = float(val)
+    return _polyline_entity(layer, verts, closed=bool(flags & 1))
+
+
+def _build_polyline(pairs, j):
+    groups, j = _collect_until_next_entity(pairs, j)
+    layer, flags = "0", 0
+    for code, val in groups:
+        if code == 8:
+            layer = val
+        elif code == 70:
+            flags = int(val)
+    verts = []
+    n = len(pairs)
+    while j < n:
+        code, val = pairs[j]
+        if code == 0 and val == "VERTEX":
+            vgroups, j = _collect_until_next_entity(pairs, j + 1)
+            v = [None, None, 0.0]
+            vflags = 0
+            for c, vv in vgroups:
+                if c == 10:
+                    v[0] = float(vv)
+                elif c == 20:
+                    v[1] = float(vv)
+                elif c == 42:
+                    v[2] = float(vv)
+                elif c == 70:
+                    vflags = int(vv)
+            if v[0] is not None and v[1] is not None and not (vflags & 16):
+                verts.append(v)
+        elif code == 0 and val == "SEQEND":
+            _, j = _collect_until_next_entity(pairs, j + 1)
+            break
+        else:
+            j += 1
+    return _polyline_entity(layer, verts, closed=bool(flags & 1)), j
+
+
+def parse_dxf(path):
+    """Return (entities, skipped, insunits). entity = {layer, points, length}."""
+    pairs = _read_pairs(path)
+    n = len(pairs)
+    entities, skipped = [], {}
+    insunits = None
+    section = None
+    i = 0
+    while i < n:
+        code, val = pairs[i]
+        if code == 0 and val == "SECTION" and i + 1 < n and pairs[i + 1][0] == 2:
+            section = pairs[i + 1][1]
+            i += 2
+            continue
+        if code == 0 and val == "ENDSEC":
+            section = None
+            i += 1
+            continue
+        if section == "HEADER" and code == 9 and val == "$INSUNITS":
+            if i + 1 < n and pairs[i + 1][0] == 70:
+                insunits = int(pairs[i + 1][1])
+            i += 1
+            continue
+        if section == "ENTITIES" and code == 0:
+            if val == "LINE":
+                groups, i = _collect_until_next_entity(pairs, i + 1)
+                ent = _build_line(groups)
+            elif val == "ARC":
+                groups, i = _collect_until_next_entity(pairs, i + 1)
+                ent = _build_arc(groups)
+            elif val == "CIRCLE":
+                groups, i = _collect_until_next_entity(pairs, i + 1)
+                ent = _build_arc(groups, full_circle=True)
+            elif val == "LWPOLYLINE":
+                groups, i = _collect_until_next_entity(pairs, i + 1)
+                ent = _build_lwpolyline(groups)
+            elif val == "POLYLINE":
+                ent, i = _build_polyline(pairs, i + 1)
+            else:
+                skipped[val] = skipped.get(val, 0) + 1
+                i += 1
+                continue
+            if ent is not None:
+                entities.append(ent)
+            continue
+        i += 1
+    return entities, skipped, insunits
+
+
+def dxf_metrics(path):
+    """Cut length (in) + anomaly info for one part DXF."""
+    entities, skipped, insunits = parse_dxf(path)
+    scale, unit_note = 1.0, None
+    if insunits == 4:            # millimetres
+        scale, unit_note = 1.0 / 25.4, "units=mm (converted to in)"
+    elif insunits not in (1, 0, None):
+        unit_note = f"unexpected $INSUNITS={insunits}"
+    total = 0.0
+    layers = set()
+    for e in entities:
+        layers.add(e["layer"])
+        if e["layer"].strip().upper() in EXCLUDE_LAYERS:
+            continue
+        total += e["length"]
+    return {
+        "linear_inches": total * scale,
+        "skipped": skipped,
+        "layers": layers,
+        "unit_note": unit_note,
+        "n_entities": len(entities),
+    }
+
+
+def _dxf_work_order(filename):
+    """The work order token embedded in a DXF filename (PART.REV.WORKORDER): the
+    last WO-shaped '.'-separated component, so the part number's leading digits
+    aren't mistaken for it. None if none present."""
+    stem = os.path.splitext(os.path.basename(filename))[0].upper()
+    for comp in reversed(re.split(r"[.\s_]+", stem)):
+        if WO_RE.fullmatch(comp):
+            return comp
+    return None
+
+
+def build_dxf_index(iges_folder, log):
+    """Map WORK ORDER (upper) -> linear inches per piece from an order's IGES DXFs.
+    Also returns a set of work orders whose geometry may be under-counted
+    (unmeasured SPLINE/ELLIPSE, >1 layer, or non-inch units) for flagging."""
+    index, suspect = {}, {}
+    if not iges_folder:
+        return index, suspect
+    for dxf in glob.glob(os.path.join(iges_folder, "**", "*.dxf"), recursive=True):
+        wo = _dxf_work_order(dxf)
+        if not wo:
+            continue
+        try:
+            sdk.ensure_local(dxf, log=log)
+            m = dxf_metrics(dxf)
+        except Exception as exc:
+            log(f"  FLAG: could not read DXF {os.path.basename(dxf)}: {exc}")
+            continue
+        index[wo] = m["linear_inches"]
+        notes = []
+        bad = [k for k in m["skipped"] if k in UNSUPPORTED_FLAGGED]
+        if bad:
+            notes.append("unmeasured " + "/".join(sorted(bad)))
+        # >1 layer: numeric SigmaNest layers may mix cut with scribe/etch; the
+        # length counts every non-excluded layer, so surface it for review.
+        cut_layers = {ly for ly in m["layers"] if ly.strip().upper() not in EXCLUDE_LAYERS}
+        if len(cut_layers) > 1:
+            notes.append(f"{len(cut_layers)} layers - verify all count as cut")
+        if m["unit_note"] and "converted" not in m["unit_note"]:
+            notes.append(m["unit_note"])
+        if notes:
+            suspect[wo] = "; ".join(notes)
+    return index, suspect
+
+
+VERSION = "2.0.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -79,8 +402,13 @@ BATCH_HEADER_RENAME = {"Material": "Source Material"}
 # 'Order' (which order folder a row came from) leads the table; our other
 # generated columns follow the batch-list block (in this order). 'Material' is
 # the MOVE TICKET designation (sits right after MIL SPEC on the packet).
-GENERATED_COLS = ["Process", "Thickness (in)", "Stock L", "Stock W",
-                  "Mil Spec", "Material", "Est Cut Hours", "Flags"]
+GENERATED_COLS = ["Division", "Process", "Thickness (in)", "Stock L", "Stock W",
+                  "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
+                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Est Cut Hours",
+                  "Flags"]
+# 'Division' is an intentionally blank placeholder the planner fills in by hand.
+# The three linear-inch columns + the two Est Min breakouts are populated for
+# plate rows that resolve a DXF; non-plate rows leave them blank.
 # For each OUTPUT header, the UPPERCASE row key its value is read from. Most map
 # to their own upper-cased name; these two are indirections (the display name
 # differs from the key the value is stored under).
@@ -127,6 +455,41 @@ def row_estimate_hours(thickness: Optional[float], ppn_qty: float, scope: str):
     bevel = BEVEL_MINUTES * qty if _is_bevel(scope) else 0.0
     est_min = base + bevel
     return est_min / 60.0, factor, bevel
+
+
+def plate_cut_estimate(linear_in_pc, thickness, ppn_qty, bevel=False):
+    """Linear-inch cut-time estimate for a plate row that resolved a DXF.
+
+    Returns a dict with the per-piece cut length, feed rate, the two Est Min
+    breakouts, and Est Cut Hours -- or None when it can't be computed (no DXF
+    match or no thickness). Cut time = cut length / feed rate (IPM); the feed
+    rate rounds thickness UP to the next chart row. A BEVEL scope adds the same
+    +180 min/pc surcharge the thickness-band method used, so beveled plate
+    hours aren't understated by the switch.
+        Est Min/PC   = linear_in_pc / feed_ipm  (+180 if bevel)
+        Est Min/WO   = Est Min/PC * qty
+        Est Cut Hours = Est Min/WO / 60
+    """
+    if linear_in_pc is None or thickness is None or thickness <= 0:
+        return None
+    feed = lookup_feed(thickness)
+    if feed is None or not feed[0]:
+        return None
+    ipm, note = feed
+    qty = ppn_qty if (ppn_qty and ppn_qty > 0) else 0
+    min_pc = linear_in_pc / ipm
+    if bevel:
+        min_pc += BEVEL_MINUTES
+    min_wo = min_pc * qty
+    return {
+        "linear_in_pc": linear_in_pc,
+        "total_linear_in": linear_in_pc * qty,
+        "feed_ipm": ipm,
+        "feed_note": note,
+        "min_pc": min_pc,
+        "min_wo": min_wo,
+        "hours": min_wo / 60.0,
+    }
 
 
 def _is_bevel(scope) -> bool:
@@ -479,6 +842,17 @@ def find_pdf_folder(cui_folder: Path) -> Optional[Path]:
                 return sub
     if any(cui_folder.glob("*.pdf")):
         return cui_folder
+    return None
+
+
+def find_iges_folder(cui_folder: Path) -> Optional[Path]:
+    """Locate the 'IGES FILES' folder (holds the nest DXFs) under the CUI folder,
+    case-insensitively. None if absent (e.g. a structural-only order)."""
+    if cui_folder is None:
+        return None
+    for sub in cui_folder.iterdir():
+        if sub.is_dir() and sub.name.strip().upper() == "IGES FILES":
+            return sub
     return None
 
 
@@ -868,6 +1242,14 @@ def run(params: dict, progress_callback, cancel_event):
         else:
             log(f"  WARNING: No PDF folder with packets found for {order}.")
 
+        # Exact per-part cut length from the order's IGES DXFs, keyed by work
+        # order (matches the batch list's 'Work Order' column). Absent for
+        # structural-only orders -> those rows fall back to the band estimate.
+        iges_folder = find_iges_folder(cui) if cui else None
+        dxf_index, dxf_suspect = build_dxf_index(str(iges_folder) if iges_folder else None, log)
+        if iges_folder:
+            log(f"  IGES DXFs: {len(dxf_index)} work order(s) measured.")
+
         headers, rows = load_batch_rows(batch_list)
         if not rows:
             log(f"  WARNING: No data rows in {batch_list.name}.")
@@ -920,13 +1302,19 @@ def run(params: dict, progress_callback, cancel_event):
                 thickness = thickness_from_description(row.get("DESCRIPTION"))
                 thk_src = "Description" if thickness is not None else "MISSING"
 
-            est_hr, factor, bevel = row_estimate_hours(thickness, ppn, scope)
+            # Cut time from EXACT DXF linear inches / feed rate when the row's
+            # work order resolves a DXF; else fall back to the thickness band.
+            wo = str(row.get("WORK ORDER") or "").strip().upper()
+            li_pc = dxf_index.get(wo)
+            bevel = _is_bevel(scope)
+            est = plate_cut_estimate(li_pc, thickness, ppn, bevel=bevel)
 
             out_row = {}
             # Copy every batch-list field by header.
             for h in headers:
                 out_row[h] = row.get(h.upper())
             out_row["Order"] = order
+            out_row["Division"] = ""      # blank placeholder (planner fills in)
             # Location / Process: from batch list if present, else PDF-derived.
             out_row["Location"] = row.get("LOCATION")
             proc = row.get("PROCESS")
@@ -939,16 +1327,38 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
             out_row["Mil Spec"] = (pdfd or {}).get("mil_spec") if pdfd else None
             out_row["MT Material"] = (pdfd or {}).get("mt_material") if pdfd else None
-            out_row["Est Cut Hours"] = round(est_hr, 4) if est_hr is not None else None
 
             flags = []
+            if est is not None:
+                out_row["Linear In/PC"] = round(est["linear_in_pc"], 2)
+                out_row["Total Linear In"] = round(est["total_linear_in"], 2)
+                out_row["Feed Rate (IPM)"] = est["feed_ipm"]
+                out_row["Est Min/PC"] = round(est["min_pc"], 2)
+                out_row["Est Min/WO"] = round(est["min_wo"], 2)
+                out_row["Est Cut Hours"] = round(est["hours"], 4)
+                if est["feed_note"]:
+                    flags.append(est["feed_note"])
+                if wo in dxf_suspect:
+                    flags.append(dxf_suspect[wo])
+            else:
+                # No DXF geometry: structural row, or a plate whose DXF is
+                # missing. Keep the thickness-band estimate so hours aren't lost.
+                est_hr, _factor, _bevel = row_estimate_hours(thickness, ppn, scope)
+                out_row["Linear In/PC"] = None
+                out_row["Total Linear In"] = None
+                out_row["Feed Rate (IPM)"] = None
+                out_row["Est Min/PC"] = None
+                out_row["Est Min/WO"] = None
+                out_row["Est Cut Hours"] = round(est_hr, 4) if est_hr is not None else None
+                if li_pc is None and "PLATE" in str(row.get("DESCRIPTION") or "").upper():
+                    flags.append("no DXF match - band estimate")
+
             if thk_src == "MISSING":
                 flags.append("no thickness")
             elif thk_src == "Description":
                 flags.append("thk from desc")
-            if _is_bevel(scope):
+            if bevel:
                 flags.append("bevel +180/pc")
-            # Cross-check PDF pieces vs PPN quantity (informational).
             out_row["Flags"] = "; ".join(flags)
             # Make uppercase-keyed lookups work for pivot/derived fields.
             out_row["Nest Pkg Nbr"] = nest
