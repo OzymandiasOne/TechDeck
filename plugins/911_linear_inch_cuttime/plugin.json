@@ -2,7 +2,7 @@
   "id": "911_linear_inch_cuttime",
   "name": "911 Linear Inch CutTime",
   "description": "Reads a batch's nest DXFs and package PDFs and computes the linear inches of cut per part, per nest, and per batch, exported to an Excel report.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

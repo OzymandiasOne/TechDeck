@@ -41,8 +41,13 @@ import fitz  # PyMuPDF
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-# Work order token embedded in DXF filenames + the summary table, e.g. "3X24-398".
-WO_RE = re.compile(r"\d[A-Z]\d+-\d+")
+# Work order token in DXF filenames + the SUMMARY OF NEST table. Two SigmaNest
+# formats seen: current "X4549775"/"BK514922" (1-2 letters + 5-8 digits, GX029+)
+# and legacy "3X24-398" (digit-letter-digits-dash-digits, batch 3X010). Matches the
+# work-order form 911_setup's summary parser uses (`^[A-Z]{1,2}\d{5,8}$`).
+WO_RE = re.compile(r"(?:[A-Z]{1,2}\d{5,8}|\d[A-Z]\d+-\d+)", re.I)
+# Part number label on a PART SKETCH page, e.g. "PART: R4138947-8M".
+PART_RE = re.compile(r"PART:\s*([A-Z0-9][A-Z0-9./\-]{3,})", re.I)
 # Part thickness on a PART SKETCH page, e.g. "0.250 THK" or "0.500 THICK".
 THK_RE = re.compile(r"([\d.]+)\s*(?:THK|THICK)", re.I)
 # Layers that are reference-only and never count as cut (matches customer_dxf_quoting).
@@ -370,29 +375,51 @@ def derive_nest(subfolder_name):
     return s
 
 
-def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
-    """Return (summary {wo: (part, qty)}, thickness_by_wo {wo: in}, nest_thickness)."""
-    pdf = None
-    if nest_pkg_dir:
-        cands = glob.glob(os.path.join(nest_pkg_dir, f"{nest}.pdf")) + \
-            glob.glob(os.path.join(nest_pkg_dir, f"{nest} *.pdf"))
-        if cands:
-            pdf = cands[0]
-    if pdf is None:  # fall back to the nest folder's MOVE TICKET OMIT pdf
-        nest_folder = _find_child_dir(batch_dir, nest)
-        if nest_folder:
-            cands = glob.glob(os.path.join(nest_folder, "*MOVE TICKET OMIT*.pdf"))
-            if cands:
-                pdf = cands[0]
-    if pdf is None:
-        return {}, {}, None
+def match_work_order(filename, summary):
+    """Resolve a DXF filename to its work order.
+
+    DXF names embed PART.REV.WORKORDER (e.g. "H4533219-16M.01.X4549775.dxf"), so a
+    blind regex search grabs the part number's digits first. Instead we match against
+    the KNOWN summary work orders: the filename's dot-separated component that equals a
+    summary WO, else a summary WO that's a substring of the name. Falls back to a
+    WO_RE search only when there is no summary (legacy filenames). Returns "?" if none.
+    """
+    stem = os.path.splitext(os.path.basename(filename))[0].upper()
+    comps = re.split(r"[.\s_]+", stem)
+    for wo in summary:                       # exact dot-separated component (preferred)
+        if wo in comps:
+            return wo
+    for wo in summary:                       # substring fallback
+        if wo in stem:
+            return wo
+    # No summary match: the work order trails the part in the name (PART.REV.WO), so
+    # take the last WO-shaped component - NOT a WO_RE search, which grabs the part's
+    # leading digits first.
+    for comp in reversed(comps):
+        if WO_RE.fullmatch(comp):
+            return comp
+    return "?"
+
+
+def parse_package_pdf(pdf, log):
+    """Parse ONE nest-package PDF -> (summary {WO: (PART, qty)}, thk_by_wo {WO: in},
+    thk_by_part {PART: in}, first_thickness). Keys are UPPERCASED so DXF filename
+    matching is case-insensitive.
+
+    The SUMMARY OF NEST table renders as a flat line sequence
+    ``REF / PART NUMBER / QTY / WORK ORDER / SK`` then one row of those 5 fields per
+    part; we scan for each WORK ORDER token and read qty (1 line back) + part (2 back).
+    Thickness comes off each PART SKETCH page (SIZE: "1.750 THK"), keyed by BOTH the
+    page's work order (the line just before "PART SKETCH") and its ``PART:`` number, so
+    a DXF resolves its thickness by whichever it can match.
+    """
+    summary, thk_by_wo, thk_by_part, first_thk = {}, {}, {}, None
     try:
         sdk.ensure_local(pdf, log=log)
         doc = fitz.open(pdf)
     except Exception as exc:
-        log(f"  ! could not open package PDF for {nest}: {exc}")
-        return {}, {}, None
-    summary, thk_by_wo, nest_thk = {}, {}, None
+        log(f"  ! could not open package PDF {os.path.basename(pdf)}: {exc}")
+        return summary, thk_by_wo, thk_by_part, first_thk
     try:
         for page in doc:
             text = page.get_text()
@@ -404,22 +431,71 @@ def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
                             qty = int(toks[i - 1])
                         except ValueError:
                             continue
-                        summary[tk] = (toks[i - 2], qty)
+                        summary[tk.upper()] = (toks[i - 2].upper(), qty)
             if "PART SKETCH" in text:
-                mm = WO_RE.search(text)
+                lines = [t.strip() for t in text.splitlines() if t.strip()]
                 tk = THK_RE.search(text)
-                if mm and tk:
-                    try:
-                        val = float(tk.group(1))
-                    except ValueError:
-                        val = None
-                    if val is not None:
-                        thk_by_wo[mm.group(0)] = val
-                        if nest_thk is None:
-                            nest_thk = val
+                try:
+                    val = float(tk.group(1)) if tk else None
+                except ValueError:
+                    val = None
+                if val is not None:
+                    pm = PART_RE.search(text)
+                    if pm:
+                        thk_by_part[pm.group(1).upper()] = val
+                    # The work order is the line right before "PART SKETCH".
+                    if "PART SKETCH" in lines:
+                        idx = lines.index("PART SKETCH")
+                        wo_line = lines[idx - 1] if idx > 0 else ""
+                        if WO_RE.fullmatch(wo_line):
+                            thk_by_wo[wo_line.upper()] = val
+                    if first_thk is None:
+                        first_thk = val
     finally:
         doc.close()
-    return summary, thk_by_wo, nest_thk
+    return summary, thk_by_wo, thk_by_part, first_thk
+
+
+def _locate_nest_pdf(nest, nest_pkg_dir, batch_dir):
+    """The PDF for one nest: NEST PACKAGES\\<nest>.pdf, else the nest order folder's
+    MOVE TICKET OMIT pdf. None if neither exists."""
+    if nest_pkg_dir:
+        cands = glob.glob(os.path.join(nest_pkg_dir, f"{nest}.pdf")) + \
+            glob.glob(os.path.join(nest_pkg_dir, f"{nest} *.pdf"))
+        if cands:
+            return cands[0]
+    nest_folder = _find_child_dir(batch_dir, nest)
+    if nest_folder:
+        cands = glob.glob(os.path.join(nest_folder, "*MOVE TICKET OMIT*.pdf"))
+        if cands:
+            return cands[0]
+    return None
+
+
+def read_nest_package(nest, nest_pkg_dir, batch_dir, log):
+    """(summary, thk_by_wo, thk_by_part, nest_thickness) for one nest, or empty when it
+    has no package of its own (a foreign nest — the batch-wide index covers those)."""
+    pdf = _locate_nest_pdf(nest, nest_pkg_dir, batch_dir)
+    if pdf is None:
+        return {}, {}, {}, None
+    return parse_package_pdf(pdf, log)
+
+
+def build_batch_index(nest_pkg_dir, batch_dir, log):
+    """Batch-wide fallback: merge the summaries + thickness of EVERY nest-package PDF so
+    a foreign nest (its parts nested under a different order, no package of its own —
+    e.g. GX029's 5CDAWH resolves via 5CDAYP.pdf) still gets qty + thickness. Returns
+    (summary, thk_by_wo, thk_by_part)."""
+    all_summary, all_thk_wo, all_thk_part = {}, {}, {}
+    pdfs = glob.glob(os.path.join(nest_pkg_dir, "*.pdf")) if nest_pkg_dir else []
+    for pdf in sorted(pdfs):
+        s, tw, tp, _ = parse_package_pdf(pdf, log)
+        all_summary.update(s)
+        all_thk_wo.update(tw)
+        all_thk_part.update(tp)
+    if all_summary:
+        log(f"Batch index: {len(all_summary)} work order(s) across {len(pdfs)} package PDF(s).")
+    return all_summary, all_thk_wo, all_thk_part
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +610,11 @@ def run(params, progress_callback, cancel_event):
     log(f"IGES root: {iges_root}")
     log(f"Nest packages: {nest_pkg_dir or '(not found - will try MOVE TICKET OMIT pdfs)'}")
 
+    # Batch-wide fallback so foreign nests (parts nested under another order) still
+    # resolve qty + thickness from whichever package PDF actually lists them.
+    batch_summary, batch_thk_wo, batch_thk_part = build_batch_index(
+        nest_pkg_dir, batch_dir, log)
+
     try:
         subs = sorted(d for d in os.listdir(iges_root)
                       if os.path.isdir(os.path.join(iges_root, d)))
@@ -555,8 +636,13 @@ def run(params, progress_callback, cancel_event):
         nest = derive_nest(sub)
         if nest == sub:
             flags.append(f"{sub}: folder name is not the expected N<nest>S format")
-        summary, thk_by_wo, nest_thk = read_nest_package(nest, nest_pkg_dir, batch_dir, log)
-        if not summary:
+        summary, thk_by_wo, thk_by_part, nest_thk = read_nest_package(
+            nest, nest_pkg_dir, batch_dir, log)
+        # Nest's own package wins; fall back to the batch-wide index for foreign nests.
+        eff_summary = {**batch_summary, **summary}
+        eff_thk_wo = {**batch_thk_wo, **thk_by_wo}
+        eff_thk_part = {**batch_thk_part, **thk_by_part}
+        if not eff_summary:
             flags.append(f"{nest}: no SUMMARY OF NEST found - quantities unknown")
 
         dxfs = sorted(glob.glob(os.path.join(iges_root, sub, "*.dxf")))
@@ -574,9 +660,8 @@ def run(params, progress_callback, cancel_event):
             except Exception as exc:
                 flags.append(f"{nest}/{fn}: could not read DXF ({exc})")
                 continue
-            wo_match = WO_RE.search(fn)
-            wo = wo_match.group(0) if wo_match else "?"
-            part, qty = summary.get(wo, ("(unmatched)", 0))
+            wo = match_work_order(fn, eff_summary)
+            part, qty = eff_summary.get(wo, ("(unmatched)", 0))
             if qty == 0:
                 flags.append(f"{nest}/{fn}: no quantity match for work order {wo}")
             if m["skipped"]:
@@ -590,7 +675,7 @@ def run(params, progress_callback, cancel_event):
                 flags.append(f"{nest}/{fn}: {m['unit_note']}")
             indiv = m["linear_inches"]
             total = indiv * qty
-            thickness = thk_by_wo.get(wo, nest_thk)
+            thickness = eff_thk_wo.get(wo) or eff_thk_part.get(part) or nest_thk
             times = part_cut_times(total, thickness)
             if thickness is None:
                 flags.append(f"{nest}/{fn}: thickness not found - no cut-time estimate")
