@@ -95,14 +95,13 @@ from openpyxl.utils import get_column_letter
 # legacy "3X24-398"; same form 911_setup's summary parser uses.
 WO_RE = re.compile(r"(?:[A-Z]{1,2}\d{5,8}|\d[A-Z]\d+-\d+)", re.I)
 # Layers that are reference-only and never count as cut (matches customer_dxf_quoting).
+# Only these NAMED reference layers are dropped; ALL numeric geometry layers count.
+# Confirmed by shop validation in SigmaNest (5 award parts, 2026-07-09): the cut is
+# spread across every numeric layer (1/2 carry perimeter+holes inconsistently, 4/5
+# carry other cut features) - so cut length = the sum of ALL non-reference layers.
+# An earlier "layer 1 only" rule was WRONG (it rested on one Kinetic profile-only
+# sheet that happened to list just a part's outer perimeter).
 EXCLUDE_LAYERS = {"BOUNDING_BOX", "IGNORE"}
-# The CUT layer in these internal SigmaNest DXFs. Validated against the Kinetic
-# "LINEAR INCH" machine sheets across GX027/GX028/GX029/L010 (33 parts): the actual
-# cut is layer "1"; other numeric layers (4, 5, ...) are scribe / mill-marking and
-# must NOT count as cut length. Counting them over-stated one part by +79%; scoping
-# to layer "1" collapses the error spread from +/-15% to +/-3% (residual = machine
-# lead-in). If a DXF has no layer "1" we fall back to summing all layers + flag.
-CUT_LAYER = "1"
 # Entity types we do NOT measure; their presence means the length may be under-counted.
 UNSUPPORTED_FLAGGED = {"SPLINE", "ELLIPSE"}
 
@@ -332,40 +331,28 @@ def parse_dxf(path):
 
 
 def dxf_metrics(path):
-    """Cut length (in) + anomaly info for one part DXF. Counts ONLY the cut layer
-    (`CUT_LAYER`); marking/scribe layers are excluded so they don't inflate the
-    length. Falls back to summing all layers (with a note) if no cut layer exists."""
+    """Cut length (in) + anomaly info for one part DXF. Sums the geometry on ALL
+    non-reference layers (the cut is spread across every numeric layer)."""
     entities, skipped, insunits = parse_dxf(path)
     scale, unit_note = 1.0, None
     if insunits == 4:            # millimetres
         scale, unit_note = 1.0 / 25.4, "units=mm (converted to in)"
     elif insunits not in (1, 0, None):
         unit_note = f"unexpected $INSUNITS={insunits}"
-    per_layer = {}
+    total = 0.0
+    layers = set()
     for e in entities:
         ly = e["layer"].strip()
+        layers.add(ly)
         if ly.upper() in EXCLUDE_LAYERS:
             continue
-        per_layer[ly] = per_layer.get(ly, 0.0) + e["length"]
-    mark_note = None
-    if CUT_LAYER in per_layer:
-        total = per_layer[CUT_LAYER]
-        others = {k: v for k, v in per_layer.items() if k != CUT_LAYER}
-        if others:
-            mark_note = "excluded non-cut layer(s) " + ", ".join(
-                f"{k}={v:.1f}in" for k, v in sorted(others.items()))
-    else:
-        total = sum(per_layer.values())
-        if len(per_layer) > 1:
-            mark_note = (f'no cut layer "{CUT_LAYER}"; summed all '
-                         f"{len(per_layer)} layers - verify")
+        total += e["length"]
     return {
         "linear_inches": total * scale,
         "skipped": skipped,
-        "layers": set(per_layer),
+        "layers": layers,
         "unit_note": unit_note,
         "n_entities": len(entities),
-        "mark_note": mark_note,
     }
 
 
@@ -383,8 +370,7 @@ def _dxf_work_order(filename):
 def build_dxf_index(iges_folder, log):
     """Map WORK ORDER (upper) -> linear inches per piece from an order's IGES DXFs.
     Also returns a set of work orders whose geometry may be under-counted
-    (unmeasured SPLINE/ELLIPSE, non-inch units) or whose marking layers were
-    excluded, for informational flagging."""
+    (unmeasured SPLINE/ELLIPSE or non-inch units) for informational flagging."""
     index, suspect = {}, {}
     if not iges_folder:
         return index, suspect
@@ -403,8 +389,6 @@ def build_dxf_index(iges_folder, log):
         bad = [k for k in m["skipped"] if k in UNSUPPORTED_FLAGGED]
         if bad:
             notes.append("unmeasured " + "/".join(sorted(bad)))
-        if m.get("mark_note"):
-            notes.append(m["mark_note"])
         if m["unit_note"] and "converted" not in m["unit_note"]:
             notes.append(m["unit_note"])
         if notes:
