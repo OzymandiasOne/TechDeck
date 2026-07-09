@@ -1649,7 +1649,7 @@ class SteelBeamsGame(QWidget):
         elif unlock == "megafab":
             self.megafab_unlocked = True
             self._mega_btn.setVisible(True)
-            self._log("Mega-Fab Line available in The Yard.")
+            self._log("Mega-Fab Line available in The Yard. Please do not lean on it.")
         elif unlock == "aframe" and not self.af_unlocked:
             self.af_unlocked = True
             self.tabs.addTab(self._aframe_tab, "A-Frames")
@@ -1674,7 +1674,7 @@ class SteelBeamsGame(QWidget):
 
         if effect == "afd_x2":
             self.af_d_mult *= 2.0
-            self._log("A-Frame demand doubled.")
+            self._log("A-Frame demand doubled. Nobody thought to ask why.")
         elif effect == "afv_75":
             self.af_value *= 1.75
             self._log(f"A-Frame market rate now ${self.af_value:,.0f}. Raise your prices.")
@@ -1685,7 +1685,7 @@ class SteelBeamsGame(QWidget):
                       f"${self.af_value:,.0f}.")
         elif effect == "viral":
             self.gd_mult *= 3.0
-            self._log("Viral campaign running. Global demand x3.")
+            self._log("Viral campaign running. Global demand x3. The intern is now a thought leader.")
         elif effect == "hypno":
             self.gd_mult *= 2.5
             self._log("Hypno-Drones deployed. The spirals turn. Demand x2.5. "
@@ -1701,7 +1701,7 @@ class SteelBeamsGame(QWidget):
             self._log("Steve the office cat approves of your work. (+2 rep)")
         elif effect == "lean":
             self.gp_mult *= 2.0
-            self._log("Waste eliminated. All production x2.")
+            self._log("Waste eliminated. All production x2. The one remaining bolt now has a manager.")
         elif effect == "alloys":
             self.gp_mult *= 5.0
             self._log("Exotic alloys flowing. All production x5.")
@@ -1726,7 +1726,7 @@ class SteelBeamsGame(QWidget):
             self._log(f"Need {fmt_money(cost)}."); return
         self.money -= cost
         self.af_fabs += 1
-        self._log(f"A-Frame Fabricator #{self.af_fabs} online.")
+        self._log(f"A-Frame Fabricator #{self.af_fabs} online. It has not requested any breaks.")
 
     # ── Solar development
     def _fabricate_panel(self):
@@ -1742,7 +1742,7 @@ class SteelBeamsGame(QWidget):
             self._log(f"Need {fmt_money(cost)}."); return
         self.money -= cost
         self.panel_fabs += 1
-        self._log(f"Solar Panel Fabricator #{self.panel_fabs} online.")
+        self._log(f"Solar Panel Fabricator #{self.panel_fabs} online. Output: panels, as promised.")
 
     def _build_solar_field(self):
         if self.panels < self.FIELD_PANELS or self.aframes < self.FIELD_AFRAMES:
