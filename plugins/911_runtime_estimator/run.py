@@ -56,6 +56,7 @@ import os
 import re
 import glob
 import math
+import statistics
 import datetime
 from pathlib import Path
 from typing import Optional
@@ -332,25 +333,29 @@ def parse_dxf(path):
 
 def dxf_metrics(path):
     """Cut length (in) + anomaly info for one part DXF. Sums the geometry on ALL
-    non-reference layers (the cut is spread across every numeric layer)."""
+    non-reference layers (the cut is spread across every numeric layer). Layers
+    that hold no geometry (0 in) are disregarded - they don't count toward the
+    layer total nor toward the multi-layer determination (`n_layers`)."""
     entities, skipped, insunits = parse_dxf(path)
     scale, unit_note = 1.0, None
     if insunits == 4:            # millimetres
         scale, unit_note = 1.0 / 25.4, "units=mm (converted to in)"
     elif insunits not in (1, 0, None):
         unit_note = f"unexpected $INSUNITS={insunits}"
-    total = 0.0
-    layers = set()
+    per_layer = {}
     for e in entities:
         ly = e["layer"].strip()
-        layers.add(ly)
         if ly.upper() in EXCLUDE_LAYERS:
             continue
-        total += e["length"]
+        per_layer[ly] = per_layer.get(ly, 0.0) + e["length"]
+    # Disregard empty (0 in) layers so they can't be counted or skew anything.
+    cut_layers = {ly: ln for ly, ln in per_layer.items() if ln > 1e-9}
+    total = sum(cut_layers.values())
     return {
         "linear_inches": total * scale,
         "skipped": skipped,
-        "layers": layers,
+        "layers": set(cut_layers),
+        "n_layers": len(cut_layers),
         "unit_note": unit_note,
         "n_entities": len(entities),
     }
@@ -369,11 +374,12 @@ def _dxf_work_order(filename):
 
 def build_dxf_index(iges_folder, log):
     """Map WORK ORDER (upper) -> linear inches per piece from an order's IGES DXFs.
-    Also returns a set of work orders whose geometry may be under-counted
-    (unmeasured SPLINE/ELLIPSE or non-inch units) for informational flagging."""
-    index, suspect = {}, {}
+    Also returns `suspect` (work orders whose geometry may be under-counted:
+    unmeasured SPLINE/ELLIPSE or non-inch units) and `multilayer` (work order ->
+    True when the part's cut spans more than one non-empty layer)."""
+    index, suspect, multilayer = {}, {}, {}
     if not iges_folder:
-        return index, suspect
+        return index, suspect, multilayer
     for dxf in glob.glob(os.path.join(iges_folder, "**", "*.dxf"), recursive=True):
         wo = _dxf_work_order(dxf)
         if not wo:
@@ -385,6 +391,7 @@ def build_dxf_index(iges_folder, log):
             log(f"  FLAG: could not read DXF {os.path.basename(dxf)}: {exc}")
             continue
         index[wo] = m["linear_inches"]
+        multilayer[wo] = m["n_layers"] > 1
         notes = []
         bad = [k for k in m["skipped"] if k in UNSUPPORTED_FLAGGED]
         if bad:
@@ -393,7 +400,7 @@ def build_dxf_index(iges_folder, log):
             notes.append(m["unit_note"])
         if notes:
             suspect[wo] = "; ".join(notes)
-    return index, suspect
+    return index, suspect, multilayer
 
 
 VERSION = "2.0.0"
@@ -408,11 +415,17 @@ BATCH_HEADER_RENAME = {"Material": "Source Material"}
 # the MOVE TICKET designation (sits right after MIL SPEC on the packet).
 GENERATED_COLS = ["Division", "Process", "Thickness (in)", "Stock L", "Stock W",
                   "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
+                  "Multi-Layered", "LI Dev (SD)",
                   "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Est Cut Hours",
                   "Flags"]
 # 'Division' is an intentionally blank placeholder the planner fills in by hand.
-# The three linear-inch columns + the two Est Min breakouts are populated for
-# plate rows that resolve a DXF; non-plate rows leave them blank.
+# The linear-inch columns + the two Est Min breakouts are populated for plate rows
+# that resolve a DXF; non-plate rows leave them blank. 'Multi-Layered' = Y/N (does
+# the part's cut span >1 non-empty layer; multi-layer rows are highlighted).
+# 'LI Dev (SD)' = how many standard deviations the part's Linear In/PC sits from
+# the mean of all plate parts in the run; parts past LI_OUTLIER_SD are flagged +
+# highlighted so an inflated/odd part is easy to catch.
+LI_OUTLIER_SD = 3.0
 # For each OUTPUT header, the UPPERCASE row key its value is read from. Most map
 # to their own upper-cased name; these two are indirections (the display name
 # differs from the key the value is stored under).
@@ -933,7 +946,9 @@ _HDR_FILL = PatternFill("solid", fgColor="305496")
 _HDR_FONT = Font(bold=True, color="FFFFFF")
 _PIVOT_FILL = PatternFill("solid", fgColor="1F4E78")
 _TOTAL_FILL = PatternFill("solid", fgColor="FFE699")
-_MISSING_FILL = PatternFill("solid", fgColor="FFFF00")
+_MISSING_FILL = PatternFill("solid", fgColor="FFFF00")   # no estimate (yellow)
+_OUTLIER_FILL = PatternFill("solid", fgColor="F4B084")   # LI outlier (orange)
+_MULTI_FILL = PatternFill("solid", fgColor="DDEBF7")     # multi-layered (light blue)
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
@@ -963,9 +978,9 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log)
 
 
 def write_data_table(ws, data_headers, data_rows):
-    """Write one sheet's flat data table (header row 1, then data; rows missing
-    an estimate flagged yellow). No summary block -- pivots are layered on later
-    by add_real_pivots / add_static_pivots."""
+    """Write one sheet's flat data table (header row 1, then data). Row highlights:
+    orange = LI outlier (past LI_OUTLIER_SD), yellow = no estimate, light blue =
+    multi-layered. No summary block -- pivots are layered on later."""
     for c, name in enumerate(data_headers, start=1):
         cell = ws.cell(1, c, name)
         cell.font = _HDR_FONT
@@ -976,15 +991,19 @@ def write_data_table(ws, data_headers, data_rows):
 
     est_idx = data_headers.index(EST_COL) + 1
     for ri, row in enumerate(data_rows, start=2):
-        # Rows missing the data needed to compute an estimate are flagged
-        # yellow so they're easy to find and fill in by hand.
+        # Pick one row highlight (most-important wins): LI outlier > no-estimate
+        # > multi-layered.
+        is_outlier = "outlier" in str(row.get("Flags") or "").lower()
         missing = row.get(EST_COL) is None
+        is_multi = row.get("Multi-Layered") == "Y"
+        row_fill = (_OUTLIER_FILL if is_outlier else _MISSING_FILL if missing
+                    else _MULTI_FILL if is_multi else None)
         for c, name in enumerate(data_headers, start=1):
             val = row.get(name)
             cell = ws.cell(ri, c, val)
             cell.border = _BORDER
-            if missing:
-                cell.fill = _MISSING_FILL
+            if row_fill is not None:
+                cell.fill = row_fill
             if _is_date(val):
                 cell.number_format = "MM/DD/YYYY"
             if c == est_idx and isinstance(val, (int, float)):
@@ -1245,7 +1264,8 @@ def run(params: dict, progress_callback, cancel_event):
         # order (matches the batch list's 'Work Order' column). Absent for
         # structural-only orders -> those rows fall back to the band estimate.
         iges_folder = find_iges_folder(cui) if cui else None
-        dxf_index, dxf_suspect = build_dxf_index(str(iges_folder) if iges_folder else None, log)
+        dxf_index, dxf_suspect, dxf_multi = build_dxf_index(
+            str(iges_folder) if iges_folder else None, log)
         if iges_folder:
             log(f"  IGES DXFs: {len(dxf_index)} work order(s) measured.")
 
@@ -1328,9 +1348,13 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["MT Material"] = (pdfd or {}).get("mt_material") if pdfd else None
 
             flags = []
+            # LI Dev (SD) is filled in after all rows are built (needs the mean/std
+            # across the whole run); leave a placeholder here.
+            out_row["LI Dev (SD)"] = None
             if est is not None:
                 out_row["Linear In/PC"] = round(est["linear_in_pc"], 2)
                 out_row["Total Linear In"] = round(est["total_linear_in"], 2)
+                out_row["Multi-Layered"] = "Y" if dxf_multi.get(wo) else "N"
                 out_row["Feed Rate (IPM)"] = est["feed_ipm"]
                 out_row["Est Min/PC"] = round(est["min_pc"], 2)
                 out_row["Est Min/WO"] = round(est["min_wo"], 2)
@@ -1345,6 +1369,7 @@ def run(params: dict, progress_callback, cancel_event):
                 est_hr, _factor, _bevel = row_estimate_hours(thickness, ppn, scope)
                 out_row["Linear In/PC"] = None
                 out_row["Total Linear In"] = None
+                out_row["Multi-Layered"] = ""     # N/A without a DXF
                 out_row["Feed Rate (IPM)"] = None
                 out_row["Est Min/PC"] = None
                 out_row["Est Min/WO"] = None
@@ -1401,6 +1426,27 @@ def run(params: dict, progress_callback, cancel_event):
     nonplate_rows = [r for r in norm_rows if not _is_plate_row(r)]
     log(f"\nBuilding workbook: {len(plate_rows)} plate rows, "
         f"{len(nonplate_rows)} non-plate rows.")
+
+    # Linear-inch deviation: how many standard deviations each plate part's
+    # Linear In/PC sits from the mean of all measured plate parts. Parts beyond
+    # LI_OUTLIER_SD are flagged + highlighted so an inflated/odd part stands out.
+    li_vals = [r.get("Linear In/PC") for r in plate_rows
+               if isinstance(r.get("Linear In/PC"), (int, float))]
+    if len(li_vals) >= 2:
+        li_mean = statistics.mean(li_vals)
+        li_sd = statistics.pstdev(li_vals)
+        n_outliers = 0
+        for r in plate_rows:
+            li = r.get("Linear In/PC")
+            if isinstance(li, (int, float)) and li_sd > 0:
+                z = (li - li_mean) / li_sd
+                r["LI Dev (SD)"] = round(z, 2)
+                if abs(z) >= LI_OUTLIER_SD:
+                    n_outliers += 1
+                    note = f"LI outlier {z:+.1f}SD"
+                    r["Flags"] = f"{r['Flags']}; {note}" if r.get("Flags") else note
+        log(f"  Linear-inch mean {li_mean:.0f} in, SD {li_sd:.0f} in; "
+            f"{n_outliers} part(s) beyond {LI_OUTLIER_SD:g} SD flagged.")
 
     # Output path.
     out_dir = settings.get("output_dir", "").strip()
