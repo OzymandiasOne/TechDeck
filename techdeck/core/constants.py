@@ -42,7 +42,7 @@ TICKETS_PER_FEEDBACK = 25  # earned for submitting feedback
 # received"). Baked into the build; empty string = webhook disabled, so
 # usage events only accumulate in the local spool and feedback falls back
 # to the legacy shared-workbook path.
-TELEMETRY_WEBHOOK_URL = ""
+TELEMETRY_WEBHOOK_URL = "https://REDACTED-ENVIRONMENT.api.powerplatform.com:443/powerautomate/automations/direct/workflows/REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=REDACTED"
 
 # Logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
