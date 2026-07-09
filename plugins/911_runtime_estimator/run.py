@@ -24,10 +24,12 @@ S029, V092 ...), this plugin:
      native order, then our generated columns. 'Material' on the table is the
      MOVE TICKET designation; the batch list's own 'Material' (an EB stock code)
      is shown as 'Source Material'.
-  5. Drops a REAL, refreshable Excel PivotTable below the data on each sheet
-     (Nest Pkg Nbr -> Sum of Est Cut Hours, grand total at the bottom) by
-     driving Excel via COM (pywin32). If Excel/COM is unavailable or errors, it
-     falls back to a static nest->sum summary so a run never hard-crashes.
+  5. Drops a REAL, refreshable Excel PivotTable below the data on each sheet --
+     ONE line per nest: Parts (true piece count for the whole nest) + the same
+     Cut Time total in both hours and minutes, grand total at the bottom -- by
+     driving Excel via COM (pywin32). A plain-English "machine cut time only"
+     caveat sits above it. If Excel/COM is unavailable or errors, it falls back
+     to a static per-nest summary of the same shape so a run never hard-crashes.
 
 Runs off an AWARD PACKAGE (the SPARS-received folder of order folders, before
 batching) so work-scope review / division + machine assignment can happen up
@@ -403,7 +405,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer
 
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -1028,21 +1030,6 @@ def _nest_sums(data_rows):
     return sums, grand_est, grand_qty
 
 
-def _nest_qty_groups(data_rows):
-    """Group rows by (nest, PPN Quantity) -> summed Est Cut Hours, mirroring the
-    real pivot's nest -> PPN row hierarchy. Returns (groups, grand_est) where
-    groups maps (nest, ppn) -> est hours."""
-    groups = {}
-    grand_est = 0.0
-    for row in data_rows:
-        est = row.get(EST_COL) or 0.0
-        nest = str(row.get("Nest Pkg Nbr") or "").strip()
-        ppn = _to_float(row.get("PPN Quantity"))
-        groups[(nest, ppn)] = groups.get((nest, ppn), 0.0) + est
-        grand_est += est
-    return groups, grand_est
-
-
 # Excel COM enum constants we need under late binding (no makepy types).
 _XL_DATABASE = 1        # PivotCache SourceType (xlDatabase)
 _XL_ROW_FIELD = 1       # PivotField.Orientation (xlRowField)
@@ -1086,42 +1073,64 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
         # restore these.
         excel.ScreenUpdating = False
         excel.EnableEvents = False
-        excel.Calculation = _XL_CALC_MANUAL
         wb = excel.Workbooks.Open(str(out_path))
+        # Application.Calculation can only be set once a workbook is open.
+        # Setting it on a fresh, workbook-less instance raises "Unable to set
+        # the Calculation property of the Application class" -- which aborted
+        # the ENTIRE pivot pass, so every run silently fell back to the static
+        # summary and no real PivotTable was ever created. Set it AFTER Open.
+        excel.Calculation = _XL_CALC_MANUAL
         for sheet_name, n_rows in sheets_meta:
             if n_rows < 1:
                 continue
             ws = wb.Worksheets(sheet_name)
             last_row = n_rows + 1  # +1 for the header row
             src = ws.Range(f"A1:{last_col}{last_row}")
-            dest = ws.Cells(last_row + 3, 1)  # 2 blank rows under the data
+            # Plain-English caveat right above the pivot so a small per-nest
+            # number is never misread as total labor time.
+            ws.Cells(last_row + 2, 1).Value = (
+                "Machine cut time only (torch-on). Excludes pierce, "
+                "positioning, and handling time.")
+            dest = ws.Cells(last_row + 4, 1)  # blank + caveat rows under the data
             cache = wb.PivotCaches().Create(SourceType=_XL_DATABASE, SourceData=src)
             table_name = sheet_name.replace("-", "") + "Pivot"
             pt = cache.CreatePivotTable(TableDestination=dest, TableName=table_name)
             # Defer recalculation until every field is configured. With the
             # default ManualUpdate=False, Excel rebuilds the WHOLE pivot after
-            # each field change -- and a row-field rebuild enumerates every
-            # distinct item across all nests, so a second row field can mean
-            # several full re-layouts. Batching them into one recalc is the fix.
+            # each field change. Batching them into one recalc is the fix.
             pt.ManualUpdate = True
+            # ONE row per nest. Under it, three data columns so the number is
+            # self-explanatory: Parts = the true piece count for the WHOLE nest
+            # (all quantities summed), then the same cut-time total in BOTH
+            # hours and minutes. (PPN Quantity is no longer a row field -- that
+            # split each nest into confusing per-quantity slivers, e.g.
+            # "5CDAZP / 8 / 0.013", which read as "8 parts = 0.013 hr".)
             pt.PivotFields(nest_header).Orientation = _XL_ROW_FIELD
-            # PPN Quantity as a SECOND row field (nested under the nest) so each
-            # nest's PPN values show per row -- displayed, not summed.
             if qty_header:
-                pt.PivotFields(qty_header).Orientation = _XL_ROW_FIELD
-            df = pt.AddDataField(pt.PivotFields(EST_COL),
-                                 f"Sum of {EST_COL}", _XL_SUM)
-            df.NumberFormat = "0.000"
-            # In Excel's naming, ColumnGrand = the grand total OF each column,
-            # i.e. the total row at the BOTTOM (total of all nests) -- what we
+                dparts = pt.AddDataField(pt.PivotFields(qty_header),
+                                         "Parts", _XL_SUM)
+                dparts.NumberFormat = "0"
+            dhr = pt.AddDataField(pt.PivotFields(EST_COL),
+                                  "Cut Time (hr)", _XL_SUM)
+            dhr.NumberFormat = "0.000"
+            # Minutes = hours x 60, as a calculated field so the minutes column
+            # is always an EXACT conversion of the hours column (never drifts).
+            try:
+                pt.CalculatedFields().Add("CutMinutes", f"='{EST_COL}' *60")
+                dmin = pt.AddDataField(pt.PivotFields("CutMinutes"),
+                                       "Cut Time (min)", _XL_SUM)
+                dmin.NumberFormat = "0.0"
+            except Exception:
+                pass  # minutes is a convenience column; hours is the source of truth
+            # ColumnGrand = the bottom total row (total of all nests) -- what we
             # want. RowGrand would add a redundant rightmost total column.
             pt.ColumnGrand = True
             pt.RowGrand = False
             pt.ManualUpdate = False   # one recalc/re-layout, now that we're done
         wb.Save()
         wb.Close(SaveChanges=True)
-        log("  Added real Excel PivotTables (nest / PPN Quantity -> "
-            "Sum of Est Cut Hours).")
+        log("  Added real Excel PivotTables (per nest -> Parts + Cut Time "
+            "in hr and min).")
         return True
     except Exception as e:
         log(f"  Excel pivot creation failed ({e}); writing static summary instead.")
@@ -1148,26 +1157,46 @@ def add_static_pivots(out_path, plate_rows, nonplate_rows, log):
 
 
 def _write_static_summary(ws, data_rows):
-    """Append a nest / PPN Quantity -> Sum of Est Cut Hours block (+ Grand Total)
-    below the data table, mirroring the real pivot's nest -> PPN row layout."""
-    groups, grand_est = _nest_qty_groups(data_rows)
+    """Append a per-nest summary (+ Grand Total) below the data table, mirroring
+    the real pivot: ONE line per nest with Parts (the true piece count for the
+    whole nest), then the same cut-time total in BOTH hours and minutes."""
+    agg, order = {}, []           # nest -> [parts, hours]
+    for row in data_rows:
+        est = row.get(EST_COL) or 0.0
+        qty = _to_float(row.get("PPN Quantity")) or 0.0
+        nest = str(row.get("Nest Pkg Nbr") or "").strip()
+        if nest not in agg:
+            agg[nest] = [0.0, 0.0]
+            order.append(nest)
+        agg[nest][0] += qty
+        agg[nest][1] += est
     start = ws.max_row + 3
-    for c, label in ((1, "Nest Pkg Nbr"), (2, "PPN Quantity"),
-                     (3, f"Sum of {EST_COL}")):
+    # Plain-English caveat above the summary.
+    ws.cell(start, 1, "Machine cut time only (torch-on). Excludes pierce, "
+                      "positioning, and handling time.")
+    start += 1
+    for c, label in ((1, "Nest Pkg Nbr"), (2, "Parts"),
+                     (3, "Cut Time (hr)"), (4, "Cut Time (min)")):
         cell = ws.cell(start, c, label)
         cell.fill = _PIVOT_FILL
         cell.font = Font(bold=True, color="FFFFFF")
         cell.border = _BORDER
     r = start + 1
-    for nest, ppn in sorted(groups, key=lambda k: (str(k[0]), k[1] or 0)):
+    tot_parts = tot_hr = 0.0
+    for nest in sorted(order):
+        parts, hours = agg[nest]
+        tot_parts += parts
+        tot_hr += hours
         ws.cell(r, 1, nest)
-        if ppn is not None:
-            q = ws.cell(r, 2, round(ppn)); q.number_format = "0"
-        e = ws.cell(r, 3, round(groups[(nest, ppn)], 3)); e.number_format = "0.000"
+        p = ws.cell(r, 2, round(parts)); p.number_format = "0"
+        h = ws.cell(r, 3, round(hours, 3)); h.number_format = "0.000"
+        m = ws.cell(r, 4, round(hours * 60, 1)); m.number_format = "0.0"
         r += 1
-    ws.cell(r, 1, "Grand Total").font = Font(bold=True)
-    e = ws.cell(r, 3, round(grand_est, 3)); e.number_format = "0.000"
-    for c in (1, 2, 3):
+    ws.cell(r, 1, "Grand Total")
+    gp = ws.cell(r, 2, round(tot_parts)); gp.number_format = "0"
+    gh = ws.cell(r, 3, round(tot_hr, 3)); gh.number_format = "0.000"
+    gm = ws.cell(r, 4, round(tot_hr * 60, 1)); gm.number_format = "0.0"
+    for c in (1, 2, 3, 4):
         ws.cell(r, c).fill = _TOTAL_FILL
         ws.cell(r, c).font = Font(bold=True)
         ws.cell(r, c).border = _BORDER
@@ -1474,7 +1503,8 @@ def run(params: dict, progress_callback, cancel_event):
     log("\n" + "=" * 60)
     log(f"DONE. Wrote: {out_path}")
     log(f"  Plate rows: {len(plate_rows)}  |  Non-plate rows: {len(nonplate_rows)}")
-    log(f"  Grand total estimate: {grand_est:.2f} hr across {int(grand_qty)} pieces")
+    log(f"  Plate cut time (machine only): {grand_est:.2f} hr "
+        f"({grand_est * 60:.0f} min) across {int(grand_qty)} pieces")
     if flags_summary:
         log(f"  Flags ({len(flags_summary)}):")
         for f in flags_summary[:25]:
