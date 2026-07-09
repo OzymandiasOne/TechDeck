@@ -10,8 +10,10 @@ the per-part quantity is read from the nest package PDF's "SUMMARY OF NEST" tabl
 (WORK ORDER -> qty), matched to the DXF by the work order embedded in its filename.
 
 Cut time = total linear inches / feed rate (IPM), where the feed rate is looked up by the
-part's thickness (pulled from its PART SKETCH page) in the Plasma/Oxy feed-rate tables.
-Thicknesses that appear in both tables get two estimates (Plasma + Oxy).
+part's thickness (pulled from its PART SKETCH page) in a single feed-rate chart. A plate
+whose thickness falls BETWEEN two listed thicknesses rounds UP to the next (thicker) row's
+feed rate - the conservative choice (thicker = slower = more estimated time), so oddball
+outlier thicknesses stay protected without editing the chart.
 
 Output: one Excel report - per-part rows, per-nest subtotals, batch total.
 
@@ -51,38 +53,42 @@ UNSUPPORTED_FLAGGED = {"SPLINE", "ELLIPSE"}
 # ---------------------------------------------------------------------------
 # Feed rates (cut speed, inches/min) by thickness - cut-time estimate
 # ---------------------------------------------------------------------------
-# Copied from "ASA QFC Quoting.xlsm" > sheet "Plasma & Oxy Feed Rates"
-# ("Machine Cut Rates & Settings", last updated 2021-04-14). Speed is the DIVISOR:
+# One combined chart (no more separate Plasma vs Oxy sets). Speed is the DIVISOR:
 #   cut minutes = total linear inches / speed (IPM).
-# Thicknesses in BOTH tables (~0.5"-1.25") get two estimates (Plasma + Oxy).
-# TO UPDATE: replace the (thickness_in, speed_ipm) pairs below from that sheet's
-# Thickness (leftmost) + Speed (rightmost) columns - Plasma cols G/J, Oxy cols B/E.
-FEED_RATES_SOURCE = "ASA QFC Quoting.xlsm > Plasma & Oxy Feed Rates (rev 2021-04-14)"
+# Rows are ASCENDING by thickness - required by the round-up lookup below.
+# TO UPDATE: replace the (thickness_in, speed_ipm) pairs from the reference sheet's
+# THICKNESS + FEEDRATE (IPM) columns, keeping them sorted thin -> thick.
+FEED_RATES_SOURCE = "Plasma & Oxy Feed Rates (single combined chart, rev 2026-07-09)"
 
-PLASMA_FEED = [  # (thickness in, speed IPM) - sheet rows 7-24
-    (0.048, 50), (0.063, 50), (0.105, 100), (0.125, 100), (0.135, 100),
-    (0.188, 100), (0.25, 90), (0.313, 90), (0.375, 80), (0.438, 70),
-    (0.5, 65), (0.625, 60), (0.75, 60), (0.875, 60), (0.938, 50),
-    (1.0, 40), (1.125, 35), (1.25, 30),
-]
-OXY_FEED = [  # (thickness in, speed IPM) - sheet rows 17-41
-    (0.5, 14), (0.625, 13), (0.75, 12), (0.875, 11), (1.0, 10), (1.125, 10),
-    (1.25, 10), (1.375, 9.75), (1.5, 9.5), (1.625, 9.5), (1.75, 9.5),
-    (2.0, 9.5), (2.25, 9.5), (2.5, 9.5), (2.75, 9.25), (3.0, 9.25),
-    (3.25, 9.0), (3.5, 8.5), (3.75, 8.5), (4.0, 8.5), (4.25, 8.0),
-    (4.5, 8.0), (5.0, 7.25), (5.5, 6.5), (6.0, 6.0),
+FEED_RATES = [  # (thickness in, speed IPM) - ascending
+    (0.125, 180), (0.188, 140), (0.25, 100), (0.313, 80), (0.375, 100),
+    (0.438, 90), (0.5, 75), (0.625, 55), (0.75, 80), (0.875, 70),
+    (1.0, 50), (1.125, 45), (1.25, 40), (1.375, 35), (1.5, 30),
+    (1.625, 45), (1.75, 40), (2.0, 30), (2.25, 25), (2.5, 20),
+    (2.75, 9.25), (3.0, 9.25), (3.25, 9.0), (3.5, 8.5), (3.75, 8.5),
+    (4.0, 8.5), (4.25, 8.0), (4.5, 8.0), (5.0, 7.25), (5.25, 6.5),
+    (5.5, 6.0), (5.75, 6.0), (6.0, 6.0), (6.25, 6.0), (6.5, 6.0),
+    (6.75, 6.0), (7.0, 6.0),
 ]
 
 
-def lookup_feed(table, thickness):
-    """(ipm, exact_bool) for a thickness, or None if outside the table's range."""
+def lookup_feed(thickness):
+    """(ipm, note) for a thickness, rounding UP to the next listed thickness.
+
+    A plate whose thickness sits between two rows uses the next-THICKER row's feed
+    rate (thicker = slower = more time = conservative). Below the thinnest row it
+    clamps to the thinnest; above the thickest it clamps to the thickest. ``note`` is
+    None on an exact hit, else a short string describing the round-up (for flagging).
+    Returns None only when ``thickness`` is None.
+    """
     if thickness is None:
         return None
-    tmin, tmax = table[0][0], table[-1][0]
-    if thickness < tmin - 1e-9 or thickness > tmax + 1e-9:
-        return None
-    best = min(table, key=lambda r: abs(r[0] - thickness))
-    return best[1], abs(best[0] - thickness) < 1e-6
+    for t, ipm in FEED_RATES:
+        if thickness <= t + 1e-9:
+            note = None if abs(t - thickness) < 1e-6 else f"rounded up to {t}\" row"
+            return ipm, note
+    t, ipm = FEED_RATES[-1]  # thicker than the whole chart - clamp to the last row
+    return ipm, f"above chart max {t}\" - used {t}\" row"
 
 
 def fmt_hm(minutes):
@@ -94,18 +100,14 @@ def fmt_hm(minutes):
 
 
 def part_cut_times(total_inches, thickness):
-    """Plasma/Oxy speeds + minutes for a part's total inches. None where the
-    thickness is outside that process's chart."""
-    out = {"plasma_ipm": None, "plasma_min": None, "plasma_exact": True,
-           "oxy_ipm": None, "oxy_min": None, "oxy_exact": True}
-    p = lookup_feed(PLASMA_FEED, thickness)
-    if p:
-        out["plasma_ipm"], out["plasma_exact"] = p
-        out["plasma_min"] = total_inches / p[0] if p[0] else None
-    o = lookup_feed(OXY_FEED, thickness)
-    if o:
-        out["oxy_ipm"], out["oxy_exact"] = o
-        out["oxy_min"] = total_inches / o[0] if o[0] else None
+    """Feed rate + cut minutes for a part's total inches (single combined chart).
+    ipm/min are None only when the thickness is unknown; ``note`` describes any
+    round-up so callers can flag it."""
+    out = {"ipm": None, "min": None, "note": None}
+    r = lookup_feed(thickness)
+    if r:
+        out["ipm"], out["note"] = r
+        out["min"] = total_inches / r[0] if r[0] else None
     return out
 
 
@@ -430,7 +432,7 @@ def write_report(out_path, batch, nests, log):
     ws.title = "Linear Inches"
     header = ["Batch", "Nest", "Part Number", "Work Order", "Qty", "Thickness (in)",
               "Individual Linear Inches", "Total Linear Inches (Part x Qty)",
-              "Plasma Speed (IPM)", "Plasma Cut Time", "Oxy Speed (IPM)", "Oxy Cut Time"]
+              "Feedrate (IPM)", "Cut Time"]
     NCOL = len(header)
     LI_COL = 8            # "Total Linear Inches" column index (1-based)
     hf, hb = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="305496")
@@ -448,30 +450,21 @@ def write_report(out_path, batch, nests, log):
         c.alignment = Alignment(horizontal="center", wrap_text=True)
         c.border = border
 
-    # Totals count EVERY part: where a part's thickness isn't in one chart (e.g. a
-    # thin part oxy can't cut), fall back to the other process's time so the nest
-    # and batch totals stay complete (and the batch total = sum of nest subtotals).
-    def _eff(p, primary, secondary):
-        v = p.get(primary)
-        return v if v is not None else p.get(secondary)
+    CT_COL = 10          # "Cut Time" column index (1-based)
 
     r = 2
     batch_total = 0.0
-    batch_plasma = batch_oxy = 0.0
+    batch_min = 0.0
     for nest, parts in nests:
         nest_total = sum(p["total"] for p in parts)
-        nest_plasma = sum(_eff(p, "plasma_min", "oxy_min") or 0.0 for p in parts)
-        nest_oxy = sum(_eff(p, "oxy_min", "plasma_min") or 0.0 for p in parts)
-        has_plasma = any(_eff(p, "plasma_min", "oxy_min") is not None for p in parts)
-        has_oxy = any(_eff(p, "oxy_min", "plasma_min") is not None for p in parts)
+        nest_min = sum(p.get("min") or 0.0 for p in parts)
+        has_time = any(p.get("min") is not None for p in parts)
         for p in parts:
             ws.append([
                 batch, nest, p["part"], p["wo"], p["qty"],
                 p.get("thickness"), round(p["indiv"], 2), round(p["total"], 2),
-                p.get("plasma_ipm") if p.get("plasma_ipm") is not None else "",
-                fmt_hm(p.get("plasma_min")),
-                p.get("oxy_ipm") if p.get("oxy_ipm") is not None else "",
-                fmt_hm(p.get("oxy_min")),
+                p.get("ipm") if p.get("ipm") is not None else "",
+                fmt_hm(p.get("min")),
             ])
             for c in ws[r]:
                 c.border = border
@@ -479,34 +472,31 @@ def write_report(out_path, batch, nests, log):
         sub = blank_row()
         sub[4] = f"NEST {nest} TOTAL"
         sub[LI_COL - 1] = round(nest_total, 2)
-        sub[9] = fmt_hm(nest_plasma) if has_plasma else ""
-        sub[11] = fmt_hm(nest_oxy) if has_oxy else ""
+        sub[CT_COL - 1] = fmt_hm(nest_min) if has_time else ""
         ws.append(sub)
         for c in ws[r]:
             c.font, c.fill, c.border = nf, nb, border
         r += 1
         batch_total += nest_total
-        batch_plasma += nest_plasma
-        batch_oxy += nest_oxy
+        batch_min += nest_min
 
     tot = blank_row()
     tot[4] = f"BATCH {batch} TOTAL"
     tot[LI_COL - 1] = round(batch_total, 2)
-    tot[9] = fmt_hm(batch_plasma) if batch_plasma else ""
-    tot[11] = fmt_hm(batch_oxy) if batch_oxy else ""
+    tot[CT_COL - 1] = fmt_hm(batch_min) if batch_min else ""
     ws.append(tot)
     for c in ws[r]:
         c.font, c.fill, c.border = bf, bb, border
     r += 1
 
     note = blank_row()
-    note[0] = (f"Feed rates: {FEED_RATES_SOURCE}. Cut time = total linear inches / speed. "
-               "Nest/batch totals include the other process's time for parts a chart "
-               "doesn't cover (e.g. thin plasma-only parts count in the Oxy total).")
+    note[0] = (f"Feed rates: {FEED_RATES_SOURCE}. Cut time = total linear inches / feedrate. "
+               "A thickness between two chart rows uses the next-thicker row's feedrate "
+               "(conservative), so outlier thicknesses stay covered without editing the chart.")
     ws.append(note)
     ws[r][0].font = Font(italic=True, color="808080")
 
-    for i, w in enumerate([10, 12, 22, 13, 6, 12, 16, 20, 16, 13, 16, 13], 1):
+    for i, w in enumerate([10, 12, 22, 13, 6, 12, 16, 20, 14, 13], 1):
         ws.column_dimensions[chr(64 + i)].width = w
     ws.freeze_panes = "A2"
 
@@ -604,23 +594,16 @@ def run(params, progress_callback, cancel_event):
             times = part_cut_times(total, thickness)
             if thickness is None:
                 flags.append(f"{nest}/{fn}: thickness not found - no cut-time estimate")
-            elif times["plasma_min"] is None and times["oxy_min"] is None:
-                flags.append(f"{nest}/{fn}: thickness {thickness}\" outside both feed-rate "
-                             f"charts - no cut-time estimate")
-            else:
-                if times["plasma_ipm"] is not None and not times["plasma_exact"]:
-                    flags.append(f"{nest}/{fn}: thickness {thickness}\" not in Plasma chart - "
-                                 f"used nearest {times['plasma_ipm']} IPM")
-                if times["oxy_ipm"] is not None and not times["oxy_exact"]:
-                    flags.append(f"{nest}/{fn}: thickness {thickness}\" not in Oxy chart - "
-                                 f"used nearest {times['oxy_ipm']} IPM")
+            elif times["note"]:
+                flags.append(f"{nest}/{fn}: thickness {thickness}\" {times['note']} "
+                             f"({times['ipm']} IPM)")
             rec = {"part": part, "wo": wo, "qty": qty, "indiv": indiv,
                    "total": total, "thickness": thickness}
             rec.update(times)
             parts.append(rec)
             log(f"  {nest}  {part}  WO {wo}  {indiv:.2f} in x {qty} = {total:.2f} in"
-                f"  thk {thickness}  plasma {fmt_hm(times['plasma_min']) or '-'}"
-                f"  oxy {fmt_hm(times['oxy_min']) or '-'}")
+                f"  thk {thickness}  {fmt_hm(times['min']) or '-'}"
+                f"{' @ ' + str(times['ipm']) + ' IPM' if times['ipm'] is not None else ''}")
         if parts:
             nests.append((nest, parts))
 
