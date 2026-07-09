@@ -634,21 +634,21 @@ def run(params, progress_callback, cancel_event):
             return
         progress_callback(int(5 + 85 * idx / len(subs)))
         nest = derive_nest(sub)
+        nest_flags = []          # buffered so a fully-foreign nest can be dropped silently
         if nest == sub:
-            flags.append(f"{sub}: folder name is not the expected N<nest>S format")
+            nest_flags.append(f"{sub}: folder name is not the expected N<nest>S format")
         summary, thk_by_wo, thk_by_part, nest_thk = read_nest_package(
             nest, nest_pkg_dir, batch_dir, log)
         # Nest's own package wins; fall back to the batch-wide index for foreign nests.
         eff_summary = {**batch_summary, **summary}
         eff_thk_wo = {**batch_thk_wo, **thk_by_wo}
         eff_thk_part = {**batch_thk_part, **thk_by_part}
-        if not eff_summary:
-            flags.append(f"{nest}: no SUMMARY OF NEST found - quantities unknown")
 
         dxfs = sorted(glob.glob(os.path.join(iges_root, sub, "*.dxf")))
         if not dxfs:
-            flags.append(f"{nest}: subfolder has no DXF files")
+            nest_flags.append(f"{nest}: subfolder has no DXF files")
         parts = []
+        resolved = 0
         for dxf in dxfs:
             if cancel_event is not None and cancel_event.is_set():
                 log("Cancelled.")
@@ -658,30 +658,32 @@ def run(params, progress_callback, cancel_event):
                 sdk.ensure_local(dxf, log=log)
                 m = dxf_metrics(dxf)
             except Exception as exc:
-                flags.append(f"{nest}/{fn}: could not read DXF ({exc})")
+                nest_flags.append(f"{nest}/{fn}: could not read DXF ({exc})")
                 continue
             wo = match_work_order(fn, eff_summary)
             part, qty = eff_summary.get(wo, ("(unmatched)", 0))
             if qty == 0:
-                flags.append(f"{nest}/{fn}: no quantity match for work order {wo}")
+                nest_flags.append(f"{nest}/{fn}: no quantity match for work order {wo}")
+            else:
+                resolved += 1
             if m["skipped"]:
                 bad = ", ".join(f"{k}x{v}" for k, v in m["skipped"].items()
                                 if k in UNSUPPORTED_FLAGGED)
                 if bad:
-                    flags.append(f"{nest}/{fn}: unmeasured geometry ({bad}) - length may be low")
+                    nest_flags.append(f"{nest}/{fn}: unmeasured geometry ({bad}) - length may be low")
             if len(m["layers"]) > 1:
-                flags.append(f"{nest}/{fn}: {len(m['layers'])} layers - verify all count as cut")
+                nest_flags.append(f"{nest}/{fn}: {len(m['layers'])} layers - verify all count as cut")
             if m["unit_note"]:
-                flags.append(f"{nest}/{fn}: {m['unit_note']}")
+                nest_flags.append(f"{nest}/{fn}: {m['unit_note']}")
             indiv = m["linear_inches"]
             total = indiv * qty
             thickness = eff_thk_wo.get(wo) or eff_thk_part.get(part) or nest_thk
             times = part_cut_times(total, thickness)
             if thickness is None:
-                flags.append(f"{nest}/{fn}: thickness not found - no cut-time estimate")
+                nest_flags.append(f"{nest}/{fn}: thickness not found - no cut-time estimate")
             elif times["note"]:
-                flags.append(f"{nest}/{fn}: thickness {thickness}\" {times['note']} "
-                             f"({times['ipm']} IPM)")
+                nest_flags.append(f"{nest}/{fn}: thickness {thickness}\" {times['note']} "
+                                  f"({times['ipm']} IPM)")
             rec = {"part": part, "wo": wo, "qty": qty, "indiv": indiv,
                    "total": total, "thickness": thickness}
             rec.update(times)
@@ -689,8 +691,14 @@ def run(params, progress_callback, cancel_event):
             log(f"  {nest}  {part}  WO {wo}  {indiv:.2f} in x {qty} = {total:.2f} in"
                 f"  thk {thickness}  {fmt_hm(times['min']) or '-'}"
                 f"{' @ ' + str(times['ipm']) + ' IPM' if times['ipm'] is not None else ''}")
+        # A nest whose parts belong to another order (no order folder, no package, and
+        # nothing resolves in this batch) is foreign - drop it and its noise entirely.
+        if parts and resolved == 0:
+            log(f"  (skipping nest {nest} - foreign to this batch, no matching order/package)")
+            continue
         if parts:
             nests.append((nest, parts))
+        flags.extend(nest_flags)
 
     if not nests:
         sdk.show_warning(params, "No results",
