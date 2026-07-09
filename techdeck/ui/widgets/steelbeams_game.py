@@ -894,13 +894,15 @@ class SteelBeamsGame(QWidget):
         self.tabs = QTabWidget()
         root.addWidget(self.tabs, stretch=1)
 
-        self._yard_tab        = self._make_yard_tab()
-        self._tech_tab        = self._make_tech_tab()
-        self._aframe_tab      = self._make_aframe_tab()
-        self._drones_tab      = self._make_drones_tab()
-        self._space_tab       = self._make_space_tab()
-        self._probe_fleet_tab = self._make_probe_fleet_tab()
-        self._probe_dev_tab   = self._make_probe_dev_tab()
+        # Every tab is wrapped in a scroll area so tall content scrolls instead of
+        # overlapping when vertical space is tight (laptop fullscreen / high DPI).
+        self._yard_tab        = self._wrap_scroll(self._make_yard_tab())
+        self._tech_tab        = self._wrap_scroll(self._make_tech_tab())
+        self._aframe_tab      = self._wrap_scroll(self._make_aframe_tab())
+        self._drones_tab      = self._wrap_scroll(self._make_drones_tab())
+        self._space_tab       = self._wrap_scroll(self._make_space_tab())
+        self._probe_fleet_tab = self._wrap_scroll(self._make_probe_fleet_tab())
+        self._probe_dev_tab   = self._wrap_scroll(self._make_probe_dev_tab())
 
         self.tabs.addTab(self._yard_tab, "The Yard")
 
@@ -1019,14 +1021,13 @@ class SteelBeamsGame(QWidget):
 
         root.addWidget(self._hr())
         root.addWidget(self._sec("PROJECTS"))
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
         proj_container = QWidget()
         self._proj_layout = QVBoxLayout(proj_container)
+        self._proj_layout.setContentsMargins(0, 0, 0, 0)
         self._proj_layout.setSpacing(4)
         self._proj_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        scroll.setWidget(proj_container)
-        root.addWidget(scroll, stretch=1)
+        root.addWidget(proj_container)
+        root.addStretch()
         return w
 
     def _build_market_section(self) -> QWidget:
@@ -2556,6 +2557,17 @@ class SteelBeamsGame(QWidget):
         f.setFrameShape(QFrame.Shape.HLine)
         f.setStyleSheet(f"color: {PAL['navy']}; background: {PAL['navy']};")
         return f
+
+    def _wrap_scroll(self, inner: QWidget) -> QScrollArea:
+        """Put a tab's content in a scroll area so it can never be squeezed below
+        its minimum and overlap on a short / high-DPI screen (e.g. laptop
+        fullscreen) — it scrolls instead. On a tall screen the content fits and no
+        scrollbar shows, so nothing changes there."""
+        sa = QScrollArea()
+        sa.setWidgetResizable(True)
+        sa.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        sa.setWidget(inner)
+        return sa
 
     def _opbtn(self) -> QPushButton:
         b = QPushButton()
