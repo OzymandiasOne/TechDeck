@@ -37,12 +37,13 @@ standalone 911_linear_inch_cuttime tool (retired) whose engine is vendored here.
 CALCULATION (per plate batch-list row; linear inches drive the estimate):
     linear_in_pc = exact DXF cut length for the row's Work Order (inches)
     feed (IPM)   = lookup_feed(thickness), rounding thickness UP to the next chart row
-    Est Min/PC   = linear_in_pc / feed        (+180 min IF SCOPE OF WORK has 'BEVEL')
+    Est Min/PC   = linear_in_pc / feed
     Est Min/WO   = Est Min/PC * (row PPN Quantity)
     Est Cut Hours = Est Min/WO / 60
-The +180 min/pc bevel surcharge is unchanged from the legacy band method (a
-CONTAINS check, case-insensitive). Non-plate / DXF-less rows use the legacy band:
-    band(t): t<0.5->6 ; <1.0->9 ; <2.0->12 ; >=2.0->18 (min/pc); est = t*band*qty +bevel.
+Bevel adds NO time (the legacy +180 min/pc surcharge was removed per planning
+direction); bevel scope is still detected and flagged for review. Non-plate /
+DXF-less rows use the legacy band as a fallback:
+    band(t): t<0.5->6 ; <1.0->9 ; <2.0->12 ; >=2.0->18 (min/pc); est = t*band*qty.
 
 Prompts for the ROOT via the native folder dialog only (no pre-configured settings
 required). Optional 'output_dir' setting picks where the workbook is saved;
@@ -420,9 +421,6 @@ HEADER_SOURCE_KEY = {
 # The column the pivot sums (our formula-driven estimate, in hours).
 EST_COL = "Est Cut Hours"
 
-# Number that triggers the bevel surcharge, per piece.
-BEVEL_MINUTES = 180.0
-
 
 # ──────────────────────────────────────────────────────────────────────────
 # Calculation
@@ -443,30 +441,30 @@ def band_minutes(thickness: float) -> int:
 
 
 def row_estimate_hours(thickness: Optional[float], ppn_qty: float, scope: str):
-    """Return (est_hours, factor_min_per_pc, bevel_min) for one batch-list row.
-
-    Returns (None, None, None) when thickness is unknown (can't estimate).
+    """Legacy thickness-band estimate, used only as a fallback for rows with no
+    DXF geometry (structural shapes / a missing file). Returns
+    (est_hours, factor_min_per_pc, 0.0), or (None, None, None) when thickness is
+    unknown. Bevel adds no time (removed per planning direction); ``scope`` is
+    kept for signature stability.
     """
     if thickness is None or thickness <= 0:
         return None, None, None
     qty = ppn_qty if (ppn_qty and ppn_qty > 0) else 0
     factor = thickness * band_minutes(thickness)          # min/pc
-    base = factor * qty
-    bevel = BEVEL_MINUTES * qty if _is_bevel(scope) else 0.0
-    est_min = base + bevel
-    return est_min / 60.0, factor, bevel
+    est_min = factor * qty
+    return est_min / 60.0, factor, 0.0
 
 
-def plate_cut_estimate(linear_in_pc, thickness, ppn_qty, bevel=False):
+def plate_cut_estimate(linear_in_pc, thickness, ppn_qty):
     """Linear-inch cut-time estimate for a plate row that resolved a DXF.
 
     Returns a dict with the per-piece cut length, feed rate, the two Est Min
     breakouts, and Est Cut Hours -- or None when it can't be computed (no DXF
     match or no thickness). Cut time = cut length / feed rate (IPM); the feed
-    rate rounds thickness UP to the next chart row. A BEVEL scope adds the same
-    +180 min/pc surcharge the thickness-band method used, so beveled plate
-    hours aren't understated by the switch.
-        Est Min/PC   = linear_in_pc / feed_ipm  (+180 if bevel)
+    rate rounds thickness UP to the next chart row. Bevel adds NO time (the old
+    +180 min/pc surcharge was removed per planning direction); bevel scope is
+    still flagged for review.
+        Est Min/PC   = linear_in_pc / feed_ipm
         Est Min/WO   = Est Min/PC * qty
         Est Cut Hours = Est Min/WO / 60
     """
@@ -478,8 +476,6 @@ def plate_cut_estimate(linear_in_pc, thickness, ppn_qty, bevel=False):
     ipm, note = feed
     qty = ppn_qty if (ppn_qty and ppn_qty > 0) else 0
     min_pc = linear_in_pc / ipm
-    if bevel:
-        min_pc += BEVEL_MINUTES
     min_wo = min_pc * qty
     return {
         "linear_in_pc": linear_in_pc,
@@ -1307,7 +1303,7 @@ def run(params: dict, progress_callback, cancel_event):
             wo = str(row.get("WORK ORDER") or "").strip().upper()
             li_pc = dxf_index.get(wo)
             bevel = _is_bevel(scope)
-            est = plate_cut_estimate(li_pc, thickness, ppn, bevel=bevel)
+            est = plate_cut_estimate(li_pc, thickness, ppn)
 
             out_row = {}
             # Copy every batch-list field by header.
@@ -1358,7 +1354,7 @@ def run(params: dict, progress_callback, cancel_event):
             elif thk_src == "Description":
                 flags.append("thk from desc")
             if bevel:
-                flags.append("bevel +180/pc")
+                flags.append("bevel scope (no time added)")
             out_row["Flags"] = "; ".join(flags)
             # Make uppercase-keyed lookups work for pivot/derived fields.
             out_row["Nest Pkg Nbr"] = nest
