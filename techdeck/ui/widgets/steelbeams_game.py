@@ -495,6 +495,78 @@ class ProbeWeb(QWidget):
         p.end()
 
 
+class ServerFarmCore(QWidget):
+    """The server farm, once online: a small, deliberately cryptic 'compute core'
+    that just quietly animates. A breathing core, sonar rings pinging outward, a
+    scanline sweeping a data panel, and a row of blinking rack LEDs — it reads as
+    'something advanced is happening here' without spelling out what. Dims to a
+    slow red pulse when the farm stalls on a brownout."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(132, 48)
+        self.frame = 0
+        self.stalled = False
+
+    def advance(self):
+        self.frame += 1
+        self.update()
+
+    def paintEvent(self, event):
+        w, h = self.width(), self.height()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.fillRect(self.rect(), QColor("#05060a"))       # near-black core housing
+        f = self.frame
+        hot  = QColor(PAL["red"]) if self.stalled else QColor(PAL["cyan"])
+        warm = QColor(PAL["red"]) if self.stalled else QColor(PAL["sky"])
+        dim  = QColor(PAL["dark"])
+        cx, cy = w * 0.30, h / 2.0
+
+        # faint compute lattice
+        p.setPen(Qt.PenStyle.NoPen)
+        for gy in range(5, h - 4, 8):
+            for gx in range(6, w, 9):
+                lt = QColor(dim); lt.setAlpha(70)
+                p.setBrush(QBrush(lt)); p.drawEllipse(gx, gy, 1, 1)
+
+        # sonar rings pinging outward from the core (still when stalled)
+        if not self.stalled:
+            for k in range(3):
+                phase = (f * 0.06 + k / 3.0) % 1.0
+                r = 3 + phase * 20
+                rc = QColor(hot); rc.setAlpha(max(0, int(120 * (1.0 - phase))))
+                p.setPen(QPen(rc, 1)); p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawEllipse(int(cx - r), int(cy - r), int(r * 2), int(r * 2))
+
+        # breathing core
+        pulse = 0.5 + 0.5 * math.sin(f * (0.06 if self.stalled else 0.18))
+        cr = 3 + pulse * (1.5 if self.stalled else 3.0)
+        glow = QColor(hot); glow.setAlpha(90)
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(glow))
+        p.drawEllipse(int(cx - cr - 3), int(cy - cr - 3),
+                      int((cr + 3) * 2), int((cr + 3) * 2))
+        p.setBrush(QBrush(warm if self.stalled else QColor(PAL["white"])))
+        p.drawEllipse(int(cx - cr), int(cy - cr), int(cr * 2), int(cr * 2))
+
+        # scanline drifting across the right 'data' panel
+        panel_x0 = int(w * 0.52)
+        if not self.stalled:
+            sx = panel_x0 + int((f * 2) % max(1, w - panel_x0 - 4))
+            sl = QColor(hot); sl.setAlpha(80)
+            p.setPen(QPen(sl, 1)); p.drawLine(sx, 6, sx, h - 10)
+
+        # blinking rack LEDs along the bottom
+        p.setPen(Qt.PenStyle.NoPen)
+        step = max(1, (w - 12) // 10)
+        for i in range(10):
+            on = (_px_hash(i, 0, f // 3) % 100) > (85 if self.stalled else 45)
+            led = QColor(PAL["red"]) if (self.stalled and on) else QColor(warm if on else dim)
+            led.setAlpha(220 if on else 90)
+            p.setBrush(QBrush(led)); p.drawRect(6 + i * step, h - 6, 3, 3)
+        p.end()
+
+
 class SteelBeamsGame(QWidget):
     """ASA: The Video Game — full Universal-Paperclips-style arc."""
 
@@ -548,8 +620,8 @@ class SteelBeamsGame(QWidget):
     SERVER_FARM_BASE = 40_000.0
     SERVER_FARM_MULT = 1.6
     FIELDS_PER_SF    = 5.0          # solar fields for full recharge per server-farm level
-    RECHARGE_PER_FIELD = 14.0       # power/sec per effective solar field (max recharge/level = 70)
-    DRAIN_PER_SF     = 12.0         # power/sec drawn per server-farm level
+    RECHARGE_PER_FIELD = 14.0       # power/sec per effective solar field (max recharge = 70)
+    DRAIN_PER_SF     = 55.0         # power/sec the online server farm draws (needs ~4-5 fields)
     QUANTUM_DRAIN    = 40.0         # extra draw once the quantum array is online
     HYPNO_DRAIN      = 8.0          # wireless-charging the hypno-drone fleet
     POWER_BANK_BASE  = 600.0
@@ -988,12 +1060,27 @@ class SteelBeamsGame(QWidget):
         row2.addWidget(self._buy100_btn); row2.addWidget(self._sell100_btn)
         root.addLayout(row2)
 
-        # Server Farm — build it to put the AI to work day-trading. It draws
-        # POWER, which the solar fields (A-Frames tab) must supply.
+        # Server Farm — a one-time build that puts the AI to work day-trading. It
+        # draws POWER, which the solar fields (A-Frames tab) must supply. Once
+        # online there's nothing more to buy here: the button gives way to a live
+        # status readout + the animated compute core.
         root.addWidget(self._hr())
         root.addWidget(self._sec("SERVER FARM"))
         self._server_farm_btn = self._opbtn(); self._server_farm_btn.clicked.connect(self._buy_server_farm)
         root.addWidget(self._server_farm_btn)
+        self._sf_online = QWidget()
+        sfo = QHBoxLayout(self._sf_online)
+        sfo.setContentsMargins(0, 0, 0, 0); sfo.setSpacing(8)
+        self._sf_core = ServerFarmCore()
+        sfo.addWidget(self._sf_core)
+        sftxt = QVBoxLayout(); sftxt.setSpacing(0)
+        self._sf_status_lbl = self._ml("SERVER FARM: ONLINE", "lime")
+        self._sf_status_lbl.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        self._sf_sub_lbl = self._ml("compute cluster nominal", "slate")
+        sftxt.addWidget(self._sf_status_lbl); sftxt.addWidget(self._sf_sub_lbl)
+        sfo.addLayout(sftxt); sfo.addStretch()
+        self._sf_online.setVisible(False)
+        root.addWidget(self._sf_online)
         self._power_lbl = self._ml("", "cyan")
         self._power_lbl.setWordWrap(True)
         root.addWidget(self._power_lbl)
@@ -1490,6 +1577,9 @@ class SteelBeamsGame(QWidget):
             if self.market_unlocked:
                 self._ai_grid.model = self._ai_model_index()
                 self._ai_grid.advance()
+                if self.server_farm > 0:
+                    self._sf_core.stalled = self._brownout
+                    self._sf_core.advance()
             if self.probe_phase:
                 self._pr_web.explored = self.explored
                 self._pr_web.advance()
@@ -1755,23 +1845,22 @@ class SteelBeamsGame(QWidget):
 
     # ── Power / server farm
     def _buy_server_farm(self):
+        if self.server_farm > 0:
+            return                       # one and done — the farm is a fixture now
         cost = self._server_farm_cost()
         if self.money < cost:
             self._log(f"Need {fmt_money(cost)}."); return
         self.money -= cost
-        self.server_farm += 1
-        if not self.power_unlocked:
-            self.power_unlocked = True
-            self.solar_dev_unlocked = True
-            self._solar_section.setVisible(True)
-            self._dyson_btn.setVisible(True)
-            self._log("Server Farm online. The trading AI now day-trades for you — "
-                      "but it draws POWER.", "yellow")
-            self._log("Build Solar Fields on the A-Frames tab to keep it running.",
-                      "cyan")
-        else:
-            self._log(f"Server Farm expanded to level {self.server_farm}. More AI "
-                      "throughput, more power draw.")
+        self.server_farm = 1
+        self.power_unlocked = True
+        self.solar_dev_unlocked = True
+        self.power = self._power_max()   # boots at a full charge, then draws down
+        self._solar_section.setVisible(True)
+        self._dyson_btn.setVisible(True)
+        self._log("Server Farm online. The trading AI now day-trades for you — "
+                  "but it draws serious POWER.", "yellow")
+        self._log("Build Solar Fields on the A-Frames tab before the bank runs dry.",
+                  "cyan")
 
     def _buy_bank(self):
         cost = self._bank_cost()
@@ -2212,13 +2301,22 @@ class SteelBeamsGame(QWidget):
         self._buy100_btn.setEnabled(self.money >= 100 * self.stock_price)
         self._sell100_btn.setText(f"Sell 100 shares  ({fmt_money(100 * self.stock_price)})")
         self._sell100_btn.setEnabled(self.stock_shares >= 100)
-        # Server farm + power grid
-        sfc = self._server_farm_cost()
-        self._server_farm_btn.setText(
-            ("Build Server Farm" if self.server_farm == 0 else
-             f"Expand Server Farm (Lv {self.server_farm}->{self.server_farm + 1})")
-            + f"  {fmt_money(sfc)}")
-        self._server_farm_btn.setEnabled(self.money >= sfc)
+        # Server farm + power grid — build once, then it's a live status readout
+        built = self.server_farm > 0
+        self._server_farm_btn.setVisible(not built)
+        self._sf_online.setVisible(built)
+        if not built:
+            sfc = self._server_farm_cost()
+            self._server_farm_btn.setText(f"Build Server Farm  {fmt_money(sfc)}")
+            self._server_farm_btn.setEnabled(self.money >= sfc)
+        elif self._brownout:
+            self._sf_status_lbl.setText("SERVER FARM: STALLED")
+            self._sf_status_lbl.setStyleSheet(f"color: {PAL['red']};")
+            self._sf_sub_lbl.setText("power lost - awaiting grid")
+        else:
+            self._sf_status_lbl.setText("SERVER FARM: ONLINE")
+            self._sf_status_lbl.setStyleSheet(f"color: {PAL['lime']};")
+            self._sf_sub_lbl.setText("compute cluster nominal")
         if self.power_unlocked:
             rr, dr = self._recharge_rate(), self._power_drain()
             bal = rr - dr
