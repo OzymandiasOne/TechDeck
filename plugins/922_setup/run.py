@@ -4,9 +4,10 @@
 Creates one Microsoft Planner card per order folder in a 922 batch.
 
 Flow:
-  1. Prompt for the batch number (family-shared via the SDK).
-  2. Resolve the '922 QTDR Production Packages' root and locate 'Batch {n}'
-     (same logic as every other 922 plugin).
+  1. Prompt the user to pick the batch folder (native folder dialog, opened
+     at the '922 QTDR Production Packages' root when it can be found).
+  2. Derive the batch number from the picked folder's name ('Batch 483' ->
+     '483') for the card titles/buckets.
   3. List the order folders directly under the batch folder, dropping the
      'Batch {n} - Documentation' and 'REPEAT BATCHES' folders (and any
      temp/hidden entries).
@@ -138,27 +139,36 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"922 Setup v{VERSION}")
     log("=" * 60)
 
-    # --- Batch number (family-shared) --------------------------------------
-    raw = sdk.request_batch_number(params, "Enter the 922 batch number:")
+    # --- Pick the batch folder (native folder dialog) ----------------------
+    # Open the dialog at the 922 QTDR root when we can find it, so the user is
+    # sitting right on the 'Batch NNN' folders.
+    start_dir = ""
+    try:
+        root = sdk.resolve_922_root(settings.get("base_path", ""))
+        if root is not None and root.exists():
+            start_dir = str(root)
+    except Exception:
+        pass
+    raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
     if cancel_event.is_set():
         return
-    batch = sdk.parse_922_batch(raw)
+    if not raw:
+        log("Folder selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+        return
+    batch_path = Path(raw)
+    if not batch_path.is_dir():
+        log(f"ERROR: '{batch_path}' is not a folder.")
+        return
+
+    # The batch number is still needed for the card titles/buckets, so derive
+    # it from the picked folder's name ('Batch 483' -> '483').
+    batch = sdk.parse_922_batch(batch_path.name)
     if not batch:
-        log(f"ERROR: '{raw}' is not a valid batch number.")
+        log(f"ERROR: could not read a batch number from the folder name "
+            f"'{batch_path.name}'. Pick the 'Batch NNN' folder itself.")
         return
     log(f"Batch: {batch}")
-
-    # --- Locate the batch folder (same logic as other 922 apps) ------------
-    root = sdk.resolve_922_root(settings.get("base_path", ""))
-    if root is None or not root.exists():
-        log("ERROR: could not find the '922 QTDR Production Packages' root.")
-        log("Set it in Settings, or right-click the folder in OneDrive -> "
-            "'Always keep on this device'.")
-        return
-    batch_path = sdk.find_922_batch_path(root, batch)
-    if batch_path is None:
-        log(f"ERROR: Batch {batch} not found under {root}.")
-        return
     log(f"Batch folder: {batch_path}")
     progress_callback(15)
 
@@ -237,8 +247,10 @@ def run(params: dict, progress_callback, cancel_event):
 
 if __name__ == "__main__":
     # Headless smoke test: python plugins/922_setup/run.py
+    # request_directory falls back to a pasted-path prompt when headless, so
+    # point this at a real 'Batch NNN' folder to exercise the full flow.
     import threading
     import builtins
-    builtins.input = lambda *_: "483"
+    builtins.input = lambda *_: r"C:\path\to\Batch 483"
     run({"log": print, "settings": {}, "console": None, "plugin_family": "922"},
         lambda p: print(f"[{p}%]"), threading.Event())
