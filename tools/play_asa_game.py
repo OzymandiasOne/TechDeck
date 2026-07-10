@@ -185,7 +185,7 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
     if reached("converting"):
         g.probes = 5e13
         g.enemy_vessels = 0.0
-        g.combat_tier = len(g.COMBAT_UPGRADES)   # war fully won (all combat upgrades)
+        g.combat_upgrades = {"authorize", "swarm", "formic", "forge", "enders", "reclaim"}
         # Woog war already fought + won in a converting/ending universe, so the
         # 25%-survey first-contact must NOT re-fire here.
         g._flags.update({"drift_seen", "drift_cleared"})
