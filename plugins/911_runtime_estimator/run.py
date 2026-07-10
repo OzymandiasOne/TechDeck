@@ -1107,11 +1107,24 @@ def write_analysis_sheet(wb, plate_rows, log):
         ch.height, ch.width = 8, 12
         ch.add_data(data, titles_from_data=True)
         ch.set_categories(cats)
-        ch.dataLabels = DataLabelList()
-        ch.dataLabels.showPercent = True
+        # The category names live in the legend (right); the on-slice labels
+        # show ONLY the percentage so many-slice pies (thickness/material) don't
+        # pile category + series + value text on top of each other. "bestFit"
+        # lets Excel scatter the labels to reduce overlap.
+        dl = DataLabelList()
+        dl.showPercent = True
+        dl.showCatName = False
+        dl.showSerName = False
+        dl.showVal = False
+        dl.showLegendKey = False
+        dl.numFmt = "0%"
+        dl.dLblPos = "bestFit"
+        ch.dataLabels = dl
+        ch.legend.position = "r"
+        ch.legend.overlay = False
         ws.add_chart(ch, anchor)
 
-    def bar(chart_title, cats, data, anchor):
+    def bar(chart_title, cats, data, anchor, value_labels=True):
         if cats is None or data is None:
             return
         ch = BarChart()
@@ -1121,6 +1134,18 @@ def write_analysis_sheet(wb, plate_rows, log):
         ch.legend = None
         ch.add_data(data, titles_from_data=True)
         ch.set_categories(cats)
+        # openpyxl leaves both axes flagged deleted by default, so Excel hides
+        # the category (x) tick labels -- that's why the bars looked "keyless".
+        # Forcing delete=False restores the labels under each bar.
+        ch.x_axis.delete = False
+        ch.y_axis.delete = False
+        if value_labels:
+            dl = DataLabelList()
+            dl.showVal = True
+            dl.showCatName = False
+            dl.showSerName = False
+            dl.showLegendKey = False
+            ch.dataLabels = dl
         ws.add_chart(ch, anchor)
 
     c_thick = put_table("Plate Thickness", thick_items)
@@ -1135,7 +1160,7 @@ def write_analysis_sheet(wb, plate_rows, log):
     pie("Plate Thickness (in)", *c_thick, anchor="A4")
     pie("Single vs Multi-Layered", *c_layer, anchor="J4")
     pie('Parts with a 0" Layer', *c_empty, anchor="A22")
-    bar("Est Cut Hours by Nest", *c_nest, anchor="J22")
+    bar("Est Cut Hours by Nest", *c_nest, anchor="J22", value_labels=False)
     pie("Material Distribution", *c_mat, anchor="A40")
     bar("Data Quality (parts per flag)", *c_flag, anchor="J40")
     pie("Bevel vs Straight Cut", *c_bevel, anchor="A58")
