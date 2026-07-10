@@ -910,6 +910,7 @@ class SteelBeamsGame(QWidget):
     ALLOC_MAX        = 8
     SERVER_CAP       = 10_000.0
     COMBAT_OPS       = 150_000.0
+    WOOG_CONTACT_PCT = 25.0         # first contact with the Woog at 25% survey
     WOOG_RENDER_OPS  = 250_000.0    # Woog Reclamation Line — post-combat prod x3
     TRUST_RES_BASE   = 5_000.0
     TRUST_RES_MULT   = 1.6
@@ -1628,7 +1629,8 @@ class SteelBeamsGame(QWidget):
         w = min(600, max(320, self.width() - 40))
         h = 176
         x = (self.width() - w) // 2
-        y = max(20, self.height() - h - 52)
+        # Sit over the probe map (upper-middle of the Fleet tab), not the log.
+        y = max(20, int(self.height() * 0.30) - h // 2)
         box.setGeometry(x, y, w, h)
 
     def resizeEvent(self, event):
@@ -1754,16 +1756,25 @@ class SteelBeamsGame(QWidget):
         if self.probes_unlocked and self.probes > 0 and not self.endgame_done:
             a = self.alloc
             growth = self.probes * a["replicate"] * 0.008 * dt
-            drift = 0.0 if self.combat_done else growth * 0.08
+            # The Woog don't attack until we've pushed 25% into their space; before
+            # first contact expansion is peaceful (no drift). War runs until combat
+            # breaks them (drift only bleeds probes while at war).
+            at_war = "drift_seen" in self._flags and not self.combat_done
+            drift = growth * 0.08 if at_war else 0.0
             hazard = self.probes * 0.004 * max(0.05, 1.0 - a["shield"] * 0.12) * dt
             self.probes = max(0.0, self.probes + growth - drift - hazard)
             self.drifters += drift
-            if "drift_seen" not in self._flags and self.drifters >= 1_000:
+            if ("drift_seen" not in self._flags and not self.combat_done
+                    and self.explored >= self.WOOG_CONTACT_PCT):
+                # 25% survey: first contact. The dialog is the declaration of war;
+                # showing it flips the fleet to the map and starts the attack.
                 self._flags.add("drift_seen")
                 self._combat_btn.setVisible(True)
                 self._pr_web.combat_active = True
-                self._log("CONTACT. The dark between the stars was not empty. "
-                          "Something is burning our probes as they arrive.", "red")
+                self.tabs.setCurrentWidget(self._probe_fleet_tab)
+                self._log("CONTACT at 25% survey. The dark between the stars was not "
+                          "empty. Something begins burning our probes on arrival.",
+                          "red")
                 self._log("First contact with the WOOG civilization. They do not "
                           "want us here. (Authorize combat on the Replication tab.)",
                           "orange")

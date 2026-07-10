@@ -170,18 +170,21 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
         for _ in range(2): g._alloc_change("shield", +1)
 
     if reached("drift"):
-        # Enough probes + drifters that the first tick trips Woog first-contact:
-        # the discovery event fires (Woogy's threat dialog + red map hotspots) and
-        # unlocks Combat Subroutines. We deliberately DON'T pre-set 'drift_seen'
-        # so that discovery path runs for real (leave it unset here).
+        # Past 25% survey, so the first tick trips Woog first-contact: the discovery
+        # event fires (Woogy's threat dialog over the map + red hotspots) and unlocks
+        # Combat Subroutines. We deliberately DON'T pre-set 'drift_seen' so that
+        # discovery path runs for real (contact is gated on explored >= 25%).
         g.probes = 5_000_000_000
         g.drifters = 250_000_000
-        g.explored = 3.5
+        g.explored = 30.0
 
     if reached("converting"):
         g.probes = 5e13
         g.drifters = 0.0
         g.combat_done = True
+        # Woog war already fought + won in a converting/ending universe, so the
+        # 25%-survey first-contact must NOT re-fire here.
+        g._flags.update({"drift_seen", "drift_cleared"})
         g.explored = 100.0
         g.converting = True
         g.matter_pct = 30.0
