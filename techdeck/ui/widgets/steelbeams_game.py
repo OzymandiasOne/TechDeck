@@ -2505,7 +2505,7 @@ class SteelBeamsGame(QWidget):
                 self.ops = min(self._ops_cap, self.ops + fb["ops"])
             if fb.get("rep"):
                 self.rep_total += fb["rep"]
-            self._log("FREEBIE  " + fb["msg"], "lime")
+            self._log(fb["msg"], "lime")
 
     # ── UI updates ─────────────────────────────────────────────────────────
 
