@@ -504,6 +504,14 @@ class ProbeWeb(QWidget):
         # filament tree: each node hangs off a nearer-in node
         self._parent = [0] + [max(0, i // 2 + rng.randint(-1, 0))
                               for i in range(1, self.MAXNODES)]
+        # backdrop starfield — fixed positions (fractional), gentle twinkle. Reads
+        # as deep space behind the probe web without competing with the nodes.
+        self._stars = []      # (x-frac, y-frac, radius-px, base-alpha, phase)
+        for _ in range(90):
+            self._stars.append((
+                rng.uniform(0.0, 1.0), rng.uniform(0.0, 1.0),
+                rng.choice((1, 1, 1, 2)), rng.randint(40, 130),
+                rng.uniform(0.0, 6.28)))
 
     def advance(self):
         self.frame += 1
@@ -525,6 +533,16 @@ class ProbeWeb(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#05060a"))       # the void, near-black
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # backdrop stars (drawn first so the web sits in front of them)
+        p.setPen(Qt.PenStyle.NoPen)
+        for sx, sy, srad, base, phase in self._stars:
+            tw = 0.6 + 0.4 * math.sin(self.frame * 0.05 + phase)
+            col = QColor(PAL["white"]); col.setAlpha(int(base * tw))
+            p.setBrush(QBrush(col))
+            x, y = sx * w, sy * h
+            p.drawEllipse(int(x - srad), int(y - srad), srad * 2, srad * 2)
+
         vis = self._visible()
 
         # filaments
@@ -1386,6 +1404,7 @@ class SteelBeamsGame(QWidget):
     def _enter_probe_phase(self):
         """Collapse the business UI; the probe interface takes over."""
         self.probe_phase = True
+        self._brownout = False   # grid sim stops now; drop any stale brownout state
         while self.tabs.count():
             self.tabs.removeTab(0)
         self.tabs.addTab(self._probe_fleet_tab, "Probe Fleet")
@@ -1524,7 +1543,7 @@ class SteelBeamsGame(QWidget):
                     self._log("Drifter swarm eliminated. The fleet sings in unison again.",
                               "lime")
             if not self.converting:
-                gain = self.probes * (1 + a["speed"]) * a["explore"] * 2e-13 * dt
+                gain = self.probes * (1 + a["speed"]) * a["explore"] * 4e-14 * dt
                 self.explored = min(100.0, self.explored + gain)
                 for th in _TRUST_MILESTONES:
                     key = f"tr{th}"
@@ -1606,8 +1625,10 @@ class SteelBeamsGame(QWidget):
                 self.stock_price = max(1.0, min(50_000.0,
                                                 self.stock_price * (1 + change)))
 
-        # ── Power grid + AI day-trading
-        if self.power_unlocked and self.server_farm > 0:
+        # ── Power grid + AI day-trading. Goes dark once the Probe Program takes
+        # over: the business "runs itself" and power/cash are obsolete, so we stop
+        # simulating the grid entirely — no more brownout / trade console spam.
+        if self.power_unlocked and self.server_farm > 0 and not self.probe_phase:
             net = (self._recharge_rate() - self._power_drain()) * dt
             self.power = max(0.0, min(self._power_max(), self.power + net))
             was_out = self._brownout
