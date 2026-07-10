@@ -407,7 +407,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer
 
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -417,11 +417,17 @@ BATCH_HEADER_RENAME = {"Material": "Source Material"}
 # 'Order' (which order folder a row came from) leads the table; our other
 # generated columns follow the batch-list block (in this order). 'Material' is
 # the MOVE TICKET designation (sits right after MIL SPEC on the packet).
-GENERATED_COLS = ["Division", "Process", "Thickness (in)", "Stock L", "Stock W",
+GENERATED_COLS = ["Division", "Process", "Thickness (in)",
+                  "Remnant Length", "Remnant Width", "Stock L", "Stock W",
                   "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
                   "Multi-Layered", "LI Dev (SD)",
-                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Equation",
-                  "Est Cut Hours", "Flags"]
+                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Multiplier",
+                  "Equation", "Est Cut Hours", "Flags"]
+# 'Remnant Length'/'Remnant Width' are the nest sheet's page-1 Length/Width --
+# the remnant's dimensions -- filled ONLY on rows whose batch-list 'Rem Used'
+# (AA) is populated (a remnant was used); blank otherwise.
+# 'Multiplier' is an intentionally blank placeholder the planner fills in by hand
+# (a future classification factor, e.g. base=1 / std bevel=2), like 'Division'.
 # 'Equation' spells out the FULL calculation for the row with this row's own
 # numbers plugged in (Est Min/PC -> Est Min/WO -> Est Cut Hours), so the math is
 # auditable cell-by-cell -- it sits right before 'Est Cut Hours' (the result).
@@ -624,11 +630,13 @@ def _find_nest_pdf(folder: Path, nest_number: str):
 
 
 def _page1_pieces_thickness(page1_text: str):
-    """Pull (pieces, thickness) from the page-1 'Orders Pieces Thickness Length
-    Width' data row. Labels appear as a block, then the values as a block, so
-    we find the label block and read the value sequence after it.
+    """Pull (pieces, thickness, length, width) from the page-1 'Orders Pieces
+    Thickness Length Width' data row. Labels appear as a block, then the values
+    as a block, so we find the label block and read the value sequence after it.
+    Length/Width are the nest sheet dimensions (the remnant's size when the nest
+    is cut from a remnant).
 
-    Returns (pieces|None, thickness|None).
+    Returns (pieces|None, thickness|None, length|None, width|None).
     """
     lines = [ln.strip() for ln in page1_text.splitlines()]
     labels = ["ORDERS", "PIECES", "THICKNESS", "LENGTH", "WIDTH"]
@@ -638,21 +646,24 @@ def _page1_pieces_thickness(page1_text: str):
             start = i + len(labels)
             break
     if start is None:
-        return None, None
-    # Collect the numeric value tokens that follow (skip any trailing label
-    # like 'Remnant Used'). Order is Orders, Pieces, Thickness, Length, Width.
+        return None, None, None, None
+    # Collect the numeric value tokens that follow (skip any trailing label like
+    # 'Remnant Used', whose own value comes AFTER Width). Order is Orders, Pieces,
+    # Thickness, Length, Width -- so the first five numbers are what we need.
     nums = []
     for ln in lines[start:]:
         if _NUM_RE.match(ln):
             nums.append(ln)
-        if len(nums) >= 3:
+        if len(nums) >= 5:
             break
     pieces = _to_float(nums[1]) if len(nums) >= 2 else None
     thickness = _to_float(nums[2]) if len(nums) >= 3 else None
+    length = _to_float(nums[3]) if len(nums) >= 4 else None
+    width = _to_float(nums[4]) if len(nums) >= 5 else None
     # Pieces is a count -> int-ish
     if pieces is not None:
         pieces = int(round(pieces))
-    return pieces, thickness
+    return pieces, thickness, length, width
 
 
 def _parse_size(full_text: str):
@@ -692,7 +703,8 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     None). Thickness is the only field the calculation needs."""
     out = {"thickness": None, "pieces": None, "material": None,
            "stock_l": None, "stock_w": None, "mil_spec": None,
-           "plate_weight": None, "process": None, "mt_material": None}
+           "plate_weight": None, "process": None, "mt_material": None,
+           "sheet_length": None, "sheet_width": None}
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     try:
@@ -702,7 +714,8 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     full = "\n".join(pages)
     page1 = pages[0] if pages else ""
 
-    out["pieces"], out["thickness"] = _page1_pieces_thickness(page1)
+    (out["pieces"], out["thickness"],
+     out["sheet_length"], out["sheet_width"]) = _page1_pieces_thickness(page1)
 
     # Cut method / process from page 1 (PLASMA / LASER / ...).
     m = _CUT_METHOD_RE.search(page1)
@@ -1393,6 +1406,15 @@ def run(params: dict, progress_callback, cancel_event):
                 proc = pdfd.get("process")
             out_row["Process"] = proc
             out_row["Thickness (in)"] = thickness
+            # Remnant Length/Width: the nest sheet's page-1 dimensions, filled
+            # ONLY when this row used a remnant (batch-list 'Rem Used' populated).
+            rem_used = row.get("REM USED")
+            has_rem = rem_used is not None and str(rem_used).strip() != ""
+            out_row["Remnant Length"] = ((pdfd or {}).get("sheet_length")
+                                         if (has_rem and pdfd) else None)
+            out_row["Remnant Width"] = ((pdfd or {}).get("sheet_width")
+                                        if (has_rem and pdfd) else None)
+            out_row["Multiplier"] = ""    # blank placeholder (planner fills in)
             out_row["Stock L"] = (pdfd or {}).get("stock_l") if pdfd else None
             out_row["Stock W"] = (pdfd or {}).get("stock_w") if pdfd else None
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
