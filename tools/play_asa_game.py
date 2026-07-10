@@ -174,8 +174,13 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
         # event fires (Woogy's threat dialog + the Enemy-Vessels battle begins). We
         # deliberately DON'T pre-set 'drift_seen' so the contact path runs for real
         # (gated on explored >= 25%); the tick spawns the armada from the fleet size.
-        g.probes = 5_000_000_000
+        # A MODEST fleet (a huge one makes the per-probe ops trickle effectively
+        # infinite, so combat upgrades become free); Dyson lifts the ops cap enough
+        # to actually afford + test all four combat tiers.
+        g.probes = 5_000_000
+        g.dyson = 30
         g.explored = 30.0
+        g.ops = g._ops_cap   # full ops (cap now lifted by Dyson) to test any combat tier
 
     if reached("converting"):
         g.probes = 5e13

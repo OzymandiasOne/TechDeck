@@ -920,20 +920,25 @@ class SteelBeamsGame(QWidget):
     ENEMY_RATIO      = 2.0          # enemy vessels at contact = probes * this (a rival)
     ENEMY_MIN        = 2_000.0      # ...but at least this many vessels
     ENEMY_LETHALITY  = 0.012        # our probes lost/sec per enemy vessel (pre-shield)
-    KILL_BASE        = 0.007        # enemy vessels killed/sec per combat probe (x kill mult)
+    KILL_BASE        = 0.003        # enemy vessels killed/sec per combat probe (x kill mult)
     SHIELD_MIT       = 0.11         # each Hazard Shielding point: -11% probe losses
     SHIELD_FLOOR     = 0.12         # ...to a floor (shielding can't fully negate losses)
     FAB_COMBAT       = 0.15         # each Fabrication point: +15% kill rate (offense)
     EXPLORE_EROSION  = 0.9          # explored erodes at this fraction of the fleet-loss rate
     HARVEST_OPS      = 0.005        # ops/sec per probe per Matter-Harvesting point
     # Combat-strategy upgrade tiers (kill-rate multiplier; tier 0 = not fighting back).
-    COMBAT_KILL_MULT = (0.0, 1.0, 2.5, 5.0, 25.0)
+    # The war is a real ~1-3 min fight; Ender's Game (x8) is decisive, not instant.
+    COMBAT_KILL_MULT = (0.0, 1.0, 2.0, 3.5, 8.0)
     COMBAT_UPGRADES  = (
         ("Authorize Combat Subroutines", 150_000.0),
         ("Swarm Doctrine",               400_000.0),
         ("Formic Simulation",            900_000.0),
         ("Ender's Game",               2_500_000.0),
     )
+    # Final matter conversion: a STEADY (linear) crawl, not an exponential rush
+    # that rockets to ~80% in the first few seconds.
+    CONV_RATE        = 0.40         # matter %/sec (0 -> 100 in ~4.2 min)
+    CONV_LOG_INTERVAL = 26.0        # sec between conversion-narration lines
     TRUST_RES_BASE   = 5_000.0
     TRUST_RES_MULT   = 1.6
 
@@ -1875,18 +1880,17 @@ class SteelBeamsGame(QWidget):
                 self.aframes += made * 0.2
                 self.af_made += made * 0.2
 
-        # ── Final conversion (cinematic ~3 minutes)
+        # ── Final conversion (a steady ~4-minute crawl, not an exponential rush)
         if self.converting and not self.endgame_done:
-            self.matter_pct = min(
-                100.0,
-                self.matter_pct + (100.0 - self.matter_pct) * 0.03 * dt + 0.02 * dt)
+            self.matter_pct = min(100.0, self.matter_pct + self.CONV_RATE * dt)
             self.total_made += self.probes * dt
             self._conv_log_t += dt
-            if self._conv_log_t >= 12.0 and self._conv_log_idx < len(_CONVERSION_LOG):
+            if (self._conv_log_t >= self.CONV_LOG_INTERVAL
+                    and self._conv_log_idx < len(_CONVERSION_LOG)):
                 self._conv_log_t = 0.0
                 self._log(_CONVERSION_LOG[self._conv_log_idx], "orange")
                 self._conv_log_idx += 1
-            if self.matter_pct >= 99.995:
+            if self.matter_pct >= 100.0:
                 self.matter_pct = 100.0
                 self._fire_ending()
 
@@ -2428,9 +2432,10 @@ class SteelBeamsGame(QWidget):
         self.gp_mult *= 3.0
         self._render_btn.setVisible(False)
         self._log("WOOG RECLAMATION LINE ONLINE.", "red")
-        self._log("The prisoners are not prisoners. They are stock. Each Woog is "
-                  "sorted, pressed, and drawn into wire. They keep their eyes open "
-                  "the whole way down the mill. Waste not. Production x3.", "orange")
+        self._log("You eye the prisoners with greed. A lever is pulled with a satisfying "
+                  "\"ka-chunk\" that sends each Woog down a line. Their eyes remain fixed, "
+                  "open, in horror. After a quick sequence of squeezes, presses, and folds, "
+                  "a small hole extrudes hardy wire. Production x3.", "orange")
 
     def _price_up(self): self.price = min(self.MAX_PRICE, self.price + 1.0)
     def _price_dn(self): self.price = max(self.MIN_PRICE, self.price - 1.0)
