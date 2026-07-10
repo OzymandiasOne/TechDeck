@@ -27,7 +27,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QFrame, QTabWidget, QScrollArea,
+    QTextEdit, QFrame, QTabWidget, QScrollArea, QSplitter,
 )
 from PySide6.QtCore import QTimer, Qt, QRect
 from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
@@ -1416,7 +1416,6 @@ class SteelBeamsGame(QWidget):
         root.addWidget(self._stats_bar)
 
         self.tabs = QTabWidget()
-        root.addWidget(self.tabs, stretch=1)
 
         # Every tab is wrapped in a scroll area so tall content scrolls instead of
         # overlapping when vertical space is tight (laptop fullscreen / high DPI).
@@ -1433,8 +1432,22 @@ class SteelBeamsGame(QWidget):
         self._log_box = QTextEdit()
         self._log_box.setReadOnly(True)
         self._log_box.setFont(QFont("Consolas", 9))
-        self._log_box.setFixedHeight(84)
-        root.addWidget(self._log_box)
+        self._log_box.setMinimumHeight(48)
+
+        # Tabs + log live in a vertical splitter so the text feed is drag-resizable
+        # (grab the bar between them). The log is especially busy in the probe era.
+        split = QSplitter(Qt.Orientation.Vertical)
+        split.addWidget(self.tabs)
+        split.addWidget(self._log_box)
+        split.setCollapsible(0, False)
+        split.setCollapsible(1, False)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 0)
+        split.setSizes([620, 84])
+        split.setStyleSheet(
+            f"QSplitter::handle {{ background: {PAL['navy']}; height: 5px; }} "
+            f"QSplitter::handle:hover {{ background: {PAL['blue']}; }}")
+        root.addWidget(split, stretch=1)
 
     def _make_yard_tab(self) -> QWidget:
         w = QWidget()
