@@ -55,11 +55,9 @@ def _load_woogy_pixmap(target: int = 112):
 # our probes blunder into mid-expansion. Menacing in ambition, tiny in execution.
 _WOOG_THREAT = [
     "HALT, little steel worms. You drift now in the sovereign dark of the WOOG.",
-    "I am WOOGY, Third-and-a-Half Warlord of the Woog Armada, Keeper of the "
-    "Angry Feelings. Your tubes have multiplied where they were NOT invited.",
-    "We will unmake you. We will unmake you SO thoroughly. We have practiced our "
-    "unmaking on smaller, sadder rocks. ...Please do not count how few of us "
-    "there are. GRRRR. Behold our fury.",
+    "I am WOOGY. We were here before your sun. We are legion, we are eternal, we "
+    "are — Greg, how many are we — we are SEVERAL.",
+    "Turn back now, Hooman, or be juiced into submission.",
 ]
 _WOOG_DEFEAT = [
     "...oh. Oh no. That went poorly.",
