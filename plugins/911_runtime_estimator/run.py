@@ -42,6 +42,8 @@ CALCULATION (per plate batch-list row; linear inches drive the estimate):
     Est Min/PC   = linear_in_pc / feed
     Est Min/WO   = Est Min/PC * (row PPN Quantity)
     Est Cut Hours = Est Min/WO / 60
+An 'Equation' column (right before Est Cut Hours) prints this chain with the
+row's own numbers plugged in so the arithmetic is auditable cell-by-cell.
 Bevel adds NO time (the legacy +180 min/pc surcharge was removed per planning
 direction); bevel scope is still detected and flagged for review. Non-plate /
 DXF-less rows use the legacy band as a fallback:
@@ -405,7 +407,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer
 
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -418,8 +420,14 @@ BATCH_HEADER_RENAME = {"Material": "Source Material"}
 GENERATED_COLS = ["Division", "Process", "Thickness (in)", "Stock L", "Stock W",
                   "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
                   "Multi-Layered", "LI Dev (SD)",
-                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Est Cut Hours",
-                  "Flags"]
+                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Equation",
+                  "Est Cut Hours", "Flags"]
+# 'Equation' spells out the FULL calculation for the row with this row's own
+# numbers plugged in (Est Min/PC -> Est Min/WO -> Est Cut Hours), so the math is
+# auditable cell-by-cell -- it sits right before 'Est Cut Hours' (the result).
+# To make that audit hold, the Est columns are rounded PROGRESSIVELY (each derived
+# from the previous rounded cell) so e.g. Est Min/PC x Qty reproduces Est Min/WO
+# exactly rather than diverging by an independent-rounding cent.
 # 'Division' is an intentionally blank placeholder the planner fills in by hand.
 # The linear-inch columns + the two Est Min breakouts are populated for plate rows
 # that resolve a DXF; non-plate rows leave them blank. 'Multi-Layered' = Y/N (does
@@ -443,6 +451,21 @@ EST_COL = "Est Cut Hours"
 # ──────────────────────────────────────────────────────────────────────────
 # Calculation
 # ──────────────────────────────────────────────────────────────────────────
+
+def _eqnum(x):
+    """Format a number for the human-readable Equation cell: no trailing zeros,
+    integers shown without a decimal point ('4.0' -> '4', '0.750' -> '0.75') so
+    the printed arithmetic matches what Excel shows in the neighbouring cells."""
+    if x is None:
+        return "?"
+    try:
+        xf = float(x)
+    except (TypeError, ValueError):
+        return str(x)
+    if xf == int(xf):
+        return str(int(xf))
+    return f"{xf:g}"
+
 
 def band_minutes(thickness: float) -> int:
     """Minutes-per-piece band for a plate thickness (inches).
@@ -1381,13 +1404,30 @@ def run(params: dict, progress_callback, cancel_event):
             # across the whole run); leave a placeholder here.
             out_row["LI Dev (SD)"] = None
             if est is not None:
-                out_row["Linear In/PC"] = round(est["linear_in_pc"], 2)
-                out_row["Total Linear In"] = round(est["total_linear_in"], 2)
+                # Progressive rounding: each cell is derived from the previous
+                # ROUNDED cell so the printed Equation reproduces every column
+                # exactly (Est Min/PC x Qty == Est Min/WO, etc.).
+                li_disp = round(est["linear_in_pc"], 2)
+                ipm = est["feed_ipm"]
+                mpc_disp = round(est["min_pc"], 2)
+                tot_li_disp = round(li_disp * ppn, 2)
+                mwo_disp = round(mpc_disp * ppn, 2)
+                hours_disp = round(mwo_disp / 60.0, 4)
+                out_row["Linear In/PC"] = li_disp
+                out_row["Total Linear In"] = tot_li_disp
                 out_row["Multi-Layered"] = "Y" if dxf_multi.get(wo) else "N"
-                out_row["Feed Rate (IPM)"] = est["feed_ipm"]
-                out_row["Est Min/PC"] = round(est["min_pc"], 2)
-                out_row["Est Min/WO"] = round(est["min_wo"], 2)
-                out_row["Est Cut Hours"] = round(est["hours"], 4)
+                out_row["Feed Rate (IPM)"] = ipm
+                out_row["Est Min/PC"] = mpc_disp
+                out_row["Est Min/WO"] = mwo_disp
+                out_row["Est Cut Hours"] = hours_disp
+                out_row["Equation"] = (
+                    f"Est Min/PC = Linear In/PC / Feed Rate = "
+                    f"{_eqnum(li_disp)} in / {_eqnum(ipm)} IPM = {_eqnum(mpc_disp)} min   |   "
+                    f"Est Min/WO = Est Min/PC x Qty = "
+                    f"{_eqnum(mpc_disp)} x {_eqnum(ppn)} = {_eqnum(mwo_disp)} min   |   "
+                    f"Est Cut Hours = Est Min/WO / 60 = "
+                    f"{_eqnum(mwo_disp)} / 60 = {hours_disp:.3f} hr"
+                )
                 if est["feed_note"]:
                     flags.append(est["feed_note"])
                 if wo in dxf_suspect:
@@ -1395,14 +1435,31 @@ def run(params: dict, progress_callback, cancel_event):
             else:
                 # No DXF geometry: structural row, or a plate whose DXF is
                 # missing. Keep the thickness-band estimate so hours aren't lost.
-                est_hr, _factor, _bevel = row_estimate_hours(thickness, ppn, scope)
+                est_hr, factor, _bevel = row_estimate_hours(thickness, ppn, scope)
                 out_row["Linear In/PC"] = None
                 out_row["Total Linear In"] = None
                 out_row["Multi-Layered"] = ""     # N/A without a DXF
                 out_row["Feed Rate (IPM)"] = None
                 out_row["Est Min/PC"] = None
                 out_row["Est Min/WO"] = None
-                out_row["Est Cut Hours"] = round(est_hr, 4) if est_hr is not None else None
+                if est_hr is not None and factor is not None:
+                    band = band_minutes(thickness)
+                    factor_disp = round(factor, 2)
+                    mwo_disp = round(factor_disp * ppn, 2)
+                    hours_disp = round(mwo_disp / 60.0, 4)
+                    out_row["Est Cut Hours"] = hours_disp
+                    out_row["Equation"] = (
+                        f"Band fallback (no DXF geometry). "
+                        f"Est Min/PC = Thickness x band-factor = "
+                        f"{_eqnum(thickness)} x {band} = {_eqnum(factor_disp)} min   |   "
+                        f"Est Min/WO = Est Min/PC x Qty = "
+                        f"{_eqnum(factor_disp)} x {_eqnum(ppn)} = {_eqnum(mwo_disp)} min   |   "
+                        f"Est Cut Hours = Est Min/WO / 60 = "
+                        f"{_eqnum(mwo_disp)} / 60 = {hours_disp:.3f} hr"
+                    )
+                else:
+                    out_row["Est Cut Hours"] = None
+                    out_row["Equation"] = "No estimate (thickness unknown)."
                 if li_pc is None and "PLATE" in str(row.get("DESCRIPTION") or "").upper():
                     flags.append("no DXF match - band estimate")
 
