@@ -1192,6 +1192,7 @@ def write_analysis_sheet(wb, plate_rows, log):
         ws.cell(mr + 1, 1, "All plate parts matched a DXF -- every cut time is "
                            "measured from geometry.").font = Font(italic=True,
                                                                   color="548235")
+        next_row = mr + 3
     else:
         total_missing = sum(d["count"] for d in missing_dxf.values())
         ws.cell(mr + 1, 1,
@@ -1214,9 +1215,58 @@ def write_analysis_sheet(wb, plate_rows, log):
                 cell.border = _BORDER
                 cell.fill = _NODXF_FILL
             rr += 1
+        next_row = rr + 2
+
+    # ── flagged deviations (LI outliers) ──────────────────────────────────
+    # Parts whose measured Linear In/PC sits past LI_OUTLIER_SD from the mean --
+    # the orange rows on the Plates sheet. Listed most-extreme first so an
+    # inflated/odd geometry is easy to eyeball against its neighbours.
+    outliers = [r for r in plate_rows
+                if "outlier" in str(r.get("Flags") or "").lower()]
+
+    def _abs_sd(r):
+        sd = r.get("LI Dev (SD)")
+        return abs(sd) if isinstance(sd, (int, float)) else 0.0
+    outliers.sort(key=_abs_sd, reverse=True)
+
+    dr = next_row
+    ws.cell(dr, 1, "Flagged Deviations (LI outliers)").font = Font(bold=True, size=12)
+    if not outliers:
+        ws.cell(dr + 1, 1, "No linear-inch outliers -- every measured part sits "
+                           "within tolerance of the mean.").font = Font(italic=True,
+                                                                        color="548235")
+    else:
+        ws.cell(dr + 1, 1,
+                f"{len(outliers)} measured plate part(s) sit past the outlier "
+                f"threshold (rows highlighted orange on the Plates sheet). Review "
+                f"the geometry on these:").font = Font(bold=True, color="C55A11")
+        cols = ("Order", "Nest", "Work Order", "Thickness", "Linear In/PC",
+                "LI Dev (SD)")
+        for c, name in enumerate(cols, start=1):
+            cell = ws.cell(dr + 3, c, name)
+            cell.font = _HDR_FONT
+            cell.fill = _HDR_FILL
+            cell.border = _BORDER
+        er = dr + 4
+        for r in outliers:
+            t = r.get("Thickness (in)")
+            thk = f'{float(t):g}"' if isinstance(t, (int, float)) else "-"
+            li = r.get("Linear In/PC")
+            sd = r.get("LI Dev (SD)")
+            vals = (str(r.get("Order") or "-").strip(),
+                    str(r.get("Nest Pkg Nbr") or "-").strip(),
+                    str(r.get("Work Order") or "-").strip(), thk,
+                    round(li, 1) if isinstance(li, (int, float)) else "-",
+                    round(sd, 2) if isinstance(sd, (int, float)) else "-")
+            for c, v in enumerate(vals, start=1):
+                cell = ws.cell(er, c, v)
+                cell.border = _BORDER
+                cell.fill = _OUTLIER_FILL
+            er += 1
 
     log("  Added Analysis sheet (thickness, cut hours by thickness, layering, "
-        "material, 0-inch layers, data-quality flags, bevel scope, DXF coverage).")
+        "material, 0-inch layers, data-quality flags, bevel scope, DXF coverage, "
+        "flagged deviations).")
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
