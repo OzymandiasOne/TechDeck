@@ -415,7 +415,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -1042,20 +1042,36 @@ def write_analysis_sheet(wb, plate_rows, log):
             nest_hours[nest] = nest_hours.get(nest, 0.0) + (r.get("Est Cut Hours") or 0.0)
     nest_items = [(n, round(h, 3)) for n, h in sorted(nest_hours.items())]
 
-    dxf_meas = sum(1 for r in plate_rows if isinstance(r.get("Linear In/PC"), (int, float)))
-    band = sum(1 for r in plate_rows
-               if not isinstance(r.get("Linear In/PC"), (int, float))
-               and r.get("Est Cut Hours") is not None)
-    none_est = sum(1 for r in plate_rows if r.get("Est Cut Hours") is None)
-    src_items = [("DXF-measured", dxf_meas), ("Band fallback", band),
-                 ("No estimate", none_est)]
-
     mat = {}
     for r in plate_rows:
         name = (str(r.get("Material") or r.get("Source Material") or "").strip()
                 or "(blank)")
         mat[name] = mat.get(name, 0) + 1
     mat_items = sorted(mat.items(), key=lambda kv: -kv[1])
+
+    # Data-quality / flag breakdown: how many parts carry each attention flag
+    # (a part can carry more than one, so bars needn't sum to the part count).
+    # Benign feed-rounding notes ('rounded up to ..'/'above chart max') are NOT
+    # counted, so a row carrying only those still reads as 'Clean'.
+    QUALITY = [
+        ("no thickness", "No thickness"),
+        ("thk from desc", "Thickness from desc"),
+        ("no dxf match", "No DXF match"),
+        ("unmeasured", "Unmeasured geometry"),
+        ("outlier", "LI outlier"),
+        ("bevel", "Bevel scope"),
+        ("insunits", "Unexpected units"),
+    ]
+    flag_counts, clean = {}, 0
+    for r in plate_rows:
+        fl = str(r.get("Flags") or "").lower()
+        hits = {label for needle, label in QUALITY if needle in fl}
+        if hits:
+            for label in hits:
+                flag_counts[label] = flag_counts.get(label, 0) + 1
+        else:
+            clean += 1
+    flag_items = [("Clean", clean)] + sorted(flag_counts.items(), key=lambda kv: -kv[1])
 
     # ── data tables (columns T/U, stacked) ────────────────────────────────
     data_col = 20  # column T
@@ -1107,18 +1123,18 @@ def write_analysis_sheet(wb, plate_rows, log):
     c_layer = put_table("Layering", layer_items)
     c_empty = put_table("Zero-inch Layers", empty_items)
     c_nest = put_table("Est Cut Hours by Nest", nest_items, "Est Cut Hours", "0.000")
-    c_src = put_table("Estimate Source", src_items)
     c_mat = put_table("Material", mat_items)
+    c_flag = put_table("Data Quality", flag_items)
 
     # ── charts (2-wide grid over the left of the sheet) ────────────────────
     pie("Plate Thickness (in)", *c_thick, anchor="A4")
     pie("Single vs Multi-Layered", *c_layer, anchor="J4")
     pie('Parts with a 0" Layer', *c_empty, anchor="A22")
     bar("Est Cut Hours by Nest", *c_nest, anchor="J22")
-    pie("Estimate Source", *c_src, anchor="A40")
-    pie("Material Distribution", *c_mat, anchor="J40")
+    pie("Material Distribution", *c_mat, anchor="A40")
+    bar("Data Quality (parts per flag)", *c_flag, anchor="J40")
     log("  Added Analysis sheet (thickness, layering, 0-inch layers, cut hours "
-        "by nest, estimate source, material).")
+        "by nest, material, data-quality flags).")
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
