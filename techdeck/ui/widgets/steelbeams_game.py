@@ -913,6 +913,7 @@ class SteelBeamsGame(QWidget):
     SERVER_CAP       = 10_000.0
     COMBAT_OPS       = 150_000.0
     WOOG_CONTACT_PCT = 25.0         # first contact with the Woog at 25% survey
+    WOOG_SETBACK_PCT = 0.3          # war drags exploration down to this floor
     WOOG_RENDER_OPS  = 250_000.0    # Woog Reclamation Line — post-combat prod x3
     TRUST_RES_BASE   = 5_000.0
     TRUST_RES_MULT   = 1.6
@@ -1675,13 +1676,10 @@ class SteelBeamsGame(QWidget):
         return self.TRUST_RES_BASE * (self.TRUST_RES_MULT ** self.trust_research)
 
     def _expansion_mult(self) -> float:
-        """Exploration pace vs. the Woog. The war stalls the mid-late push; once
-        the Woog Armada is broken the swarm is free to run away exponentially."""
-        if "drift_cleared" in self._flags:
-            return 2.0        # Woog defeated -> runaway
-        if "drift_seen" in self._flags:
-            return 0.2        # under attack -> expansion crawls
-        return 1.0
+        """Forward-exploration pace multiplier. Once the Woog Armada is broken the
+        swarm runs away (x2); otherwise normal. (The war itself doesn't use this —
+        it suppresses/erodes exploration directly in the tick.)"""
+        return 2.0 if "drift_cleared" in self._flags else 1.0
 
     # ── Tick ───────────────────────────────────────────────────────────────
 
@@ -1793,20 +1791,38 @@ class SteelBeamsGame(QWidget):
                     self._log("So many of them. So soft. So... convertible.", "silver")
                     self._show_woog_dialog(_WOOG_DEFEAT)
             if not self.converting:
-                gain = (self.probes * (1 + a["speed"]) * a["explore"]
-                        * 4e-14 * self._expansion_mult() * dt)
-                self.explored = min(100.0, self.explored + gain)
-                for th in _TRUST_MILESTONES:
-                    key = f"tr{th}"
-                    if key not in self._trust_fired and self.explored >= th:
-                        self._trust_fired.add(key)
-                        self.probe_trust += 1
-                        self._log(f"Probe network milestone: {th:g}% of the universe "
-                                  "charted. (+1 probe trust)", "yellow")
-                if self.explored >= 100.0:
-                    self.converting = True
-                    self._log("The universe is fully charted. Final conversion of all "
-                              "remaining matter has begun.", "yellow")
+                at_war = ("drift_seen" in self._flags
+                          and "drift_cleared" not in self._flags)
+                if at_war:
+                    # The Woog counterattack burns our survey network faster than we
+                    # chart new space: exploration is dragged down toward a fraction
+                    # of a percent and CANNOT climb until the Armada is broken. This
+                    # is the whole reason to fight — you can't win by out-running them.
+                    floor = self.WOOG_SETBACK_PCT
+                    if self.explored > floor:
+                        self.explored = max(
+                            floor,
+                            self.explored - (self.explored - floor) * 0.6 * dt - 0.4 * dt)
+                else:
+                    gain = (self.probes * (1 + a["speed"]) * a["explore"]
+                            * 4e-14 * self._expansion_mult() * dt)
+                    self.explored = min(100.0, self.explored + gain)
+                    if "drift_seen" not in self._flags:
+                        # Can't survey past first contact until the Woog are met +
+                        # beaten — clamp here so a huge fleet can't blow past 25% (and
+                        # on to 100%) in a single tick before the encounter can fire.
+                        self.explored = min(self.explored, self.WOOG_CONTACT_PCT)
+                    for th in _TRUST_MILESTONES:
+                        key = f"tr{th}"
+                        if key not in self._trust_fired and self.explored >= th:
+                            self._trust_fired.add(key)
+                            self.probe_trust += 1
+                            self._log(f"Probe network milestone: {th:g}% of the universe "
+                                      "charted. (+1 probe trust)", "yellow")
+                    if self.explored >= 100.0:
+                        self.converting = True
+                        self._log("The universe is fully charted. Final conversion of "
+                                  "all remaining matter has begun.", "yellow")
             self.steel += self.probes * a["harvest"] * 1e-5 * dt
             made = self.probes * a["fabricate"] * 1e-4 * dt * self.prod_mult
             if made > 0:
