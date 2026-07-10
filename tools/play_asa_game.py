@@ -171,17 +171,16 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
 
     if reached("drift"):
         # Past 25% survey, so the first tick trips Woog first-contact: the discovery
-        # event fires (Woogy's threat dialog over the map + red hotspots) and unlocks
-        # Combat Subroutines. We deliberately DON'T pre-set 'drift_seen' so that
-        # discovery path runs for real (contact is gated on explored >= 25%).
+        # event fires (Woogy's threat dialog + the Enemy-Vessels battle begins). We
+        # deliberately DON'T pre-set 'drift_seen' so the contact path runs for real
+        # (gated on explored >= 25%); the tick spawns the armada from the fleet size.
         g.probes = 5_000_000_000
-        g.drifters = 250_000_000
         g.explored = 30.0
 
     if reached("converting"):
         g.probes = 5e13
-        g.drifters = 0.0
-        g.combat_done = True
+        g.enemy_vessels = 0.0
+        g.combat_tier = len(g.COMBAT_UPGRADES)   # war fully won (all combat upgrades)
         # Woog war already fought + won in a converting/ending universe, so the
         # 25%-survey first-contact must NOT re-fire here.
         g._flags.update({"drift_seen", "drift_cleared"})

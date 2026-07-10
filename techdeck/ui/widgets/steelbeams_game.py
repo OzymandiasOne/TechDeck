@@ -914,10 +914,26 @@ class SteelBeamsGame(QWidget):
     DYSON_OPS_CAP    = 100_000.0    # each Dyson sphere: +100k ops capacity
     PROBE_OPS        = 0.0002       # ops/sec contributed per probe in the fleet
     PROBE_OPS_CAP_FLOOR = 400_000.0 # probe-phase ops cap never falls below this
-    COMBAT_OPS       = 150_000.0
     WOOG_CONTACT_PCT = 25.0         # first contact with the Woog at 25% survey
-    WOOG_SETBACK_PCT = 0.3          # war drags exploration down to this floor
     WOOG_RENDER_OPS  = 250_000.0    # Woog Reclamation Line — post-combat prod x3
+    # The Woog war — a two-sided attrition battle (Enemy Vessels vs our fleet).
+    ENEMY_RATIO      = 2.0          # enemy vessels at contact = probes * this (a rival)
+    ENEMY_MIN        = 2_000.0      # ...but at least this many vessels
+    ENEMY_LETHALITY  = 0.012        # our probes lost/sec per enemy vessel (pre-shield)
+    KILL_BASE        = 0.007        # enemy vessels killed/sec per combat probe (x kill mult)
+    SHIELD_MIT       = 0.11         # each Hazard Shielding point: -11% probe losses
+    SHIELD_FLOOR     = 0.12         # ...to a floor (shielding can't fully negate losses)
+    FAB_COMBAT       = 0.15         # each Fabrication point: +15% kill rate (offense)
+    EXPLORE_EROSION  = 0.9          # explored erodes at this fraction of the fleet-loss rate
+    HARVEST_OPS      = 0.005        # ops/sec per probe per Matter-Harvesting point
+    # Combat-strategy upgrade tiers (kill-rate multiplier; tier 0 = not fighting back).
+    COMBAT_KILL_MULT = (0.0, 1.0, 2.5, 5.0, 25.0)
+    COMBAT_UPGRADES  = (
+        ("Authorize Combat Subroutines", 150_000.0),
+        ("Swarm Doctrine",               400_000.0),
+        ("Formic Simulation",            900_000.0),
+        ("Ender's Game",               2_500_000.0),
+    )
     TRUST_RES_BASE   = 5_000.0
     TRUST_RES_MULT   = 1.6
 
@@ -1039,7 +1055,8 @@ class SteelBeamsGame(QWidget):
         self.probe_phase    = False   # the UI has transformed to the probe interface
         self.probes         = 0.0
         self.probes_launched = 0
-        self.drifters       = 0.0
+        self.enemy_vessels  = 0.0      # Woog fleet strength (grind to 0 to win the war)
+        self.enemy_max      = 0.0      # enemy vessels at contact (for the % destroyed)
         self.probe_trust    = 6
         self.trust_research = 0
         self.alloc          = dict(speed=0, explore=0, replicate=0,
@@ -1047,7 +1064,7 @@ class SteelBeamsGame(QWidget):
         self.explored       = 0.0
         self.converting     = False
         self.matter_pct     = 0.0
-        self.combat_done    = False
+        self.combat_tier    = 0        # combat-strategy upgrades bought (0..4; 0 = not fighting)
         self.woogs_rendered = False   # Woog Reclamation Line bought (prod x3)
         self.endgame_done   = False
         self.resting        = False
@@ -1089,6 +1106,7 @@ class SteelBeamsGame(QWidget):
         rate *= 1.0 + self.dyson * self.DYSON_OPS_BONUS
         if self.probe_phase:
             rate += self.probes * self.PROBE_OPS
+            rate += self.probes * self.alloc["harvest"] * self.HARVEST_OPS  # Matter Harvesting -> ops
         return rate
 
     @property
@@ -1549,6 +1567,14 @@ class SteelBeamsGame(QWidget):
         self._pr_explored_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(self._pr_explored_lbl)
 
+        # War status — only visible once the Woog appear.
+        self._pr_combat_lbl = self._ml("", "red")
+        self._pr_combat_lbl.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+        self._pr_combat_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._pr_combat_lbl.setWordWrap(True)
+        self._pr_combat_lbl.setVisible(False)
+        root.addWidget(self._pr_combat_lbl)
+
         root.addWidget(self._hr())
         self._pr_trust1_lbl = self._ml("Probe Trust: 0 / 6 allocated", "yellow")
         root.addWidget(self._pr_trust1_lbl)
@@ -1577,7 +1603,7 @@ class SteelBeamsGame(QWidget):
         root.addWidget(self._trust_res_btn)
         self._combat_btn = self._opbtn()
         self._combat_btn.setObjectName("launch")
-        self._combat_btn.clicked.connect(self._authorize_combat)
+        self._combat_btn.clicked.connect(self._buy_combat_upgrade)
         self._combat_btn.setVisible(False)
         root.addWidget(self._combat_btn)
         self._render_btn = self._opbtn()
@@ -1771,75 +1797,77 @@ class SteelBeamsGame(QWidget):
         # ── Probes
         if self.probes_unlocked and self.probes > 0 and not self.endgame_done:
             a = self.alloc
-            growth = self.probes * a["replicate"] * 0.008 * dt
-            # The Woog don't attack until we've pushed 25% into their space; before
-            # first contact expansion is peaceful (no drift). War runs until combat
-            # breaks them (drift only bleeds probes while at war).
-            at_war = "drift_seen" in self._flags and not self.combat_done
-            drift = growth * 0.08 if at_war else 0.0
-            hazard = self.probes * 0.004 * max(0.05, 1.0 - a["shield"] * 0.12) * dt
-            self.probes = max(0.0, self.probes + growth - drift - hazard)
-            self.drifters += drift
-            if ("drift_seen" not in self._flags and not self.combat_done
+            # Self-Replication: the fleet grows (and reinforces during the war).
+            self.probes += self.probes * a["replicate"] * 0.008 * dt
+
+            # First contact at 25% survey: the Woog appear in force (~2x our fleet).
+            if ("drift_seen" not in self._flags and "drift_cleared" not in self._flags
                     and self.explored >= self.WOOG_CONTACT_PCT):
-                # 25% survey: first contact. The dialog is the declaration of war;
-                # showing it flips the fleet to the map and starts the attack.
                 self._flags.add("drift_seen")
+                self.enemy_vessels = max(self.ENEMY_MIN, self.probes * self.ENEMY_RATIO)
+                self.enemy_max = self.enemy_vessels
                 self._combat_btn.setVisible(True)
                 self._pr_web.combat_active = True
                 self.tabs.setCurrentWidget(self._probe_fleet_tab)
                 self._log("CONTACT at 25% survey. The dark between the stars was not "
-                          "empty. Something begins burning our probes on arrival.",
-                          "red")
-                self._log("First contact with the WOOG civilization. They do not "
-                          "want us here. (Authorize combat on the Replication tab.)",
-                          "orange")
+                          "empty. A Woog armada moves to meet us.", "red")
+                self._log(f"First contact with the WOOG civilization: {fmt(self.enemy_vessels)} "
+                          "enemy vessels inbound. They do not want us here. (Fight back "
+                          "from the Replication tab.)", "orange")
                 self._show_woog_dialog(_WOOG_THREAT)
-            if self.combat_done and self.drifters > 0:
-                kill = self.drifters * 0.08 * dt + self.probes * 0.0005 * dt
-                self.drifters = max(0.0, self.drifters - kill)
-                if self.drifters < 1.0 and "drift_cleared" not in self._flags:
+
+            at_war = "drift_seen" in self._flags and "drift_cleared" not in self._flags
+
+            # The Woog war: two-sided attrition. Enemy vessels destroy our probes
+            # (Hazard Shielding mitigates); once we're fighting back (combat tier >= 1)
+            # our fleet destroys enemy vessels, scaled by combat upgrades + Fabrication
+            # (offense). Probe losses also erode our surveyed territory. Win at 0 enemy.
+            if at_war and self.enemy_vessels > 0.0:
+                shield_factor = max(self.SHIELD_FLOOR, 1.0 - a["shield"] * self.SHIELD_MIT)
+                losses = min(self.probes,
+                             self.enemy_vessels * self.ENEMY_LETHALITY * shield_factor * dt)
+                kills = (self.probes * self.KILL_BASE * self.COMBAT_KILL_MULT[self.combat_tier]
+                         * (1.0 + a["fabricate"] * self.FAB_COMBAT) * dt)
+                pre = self.probes
+                self.probes = max(1.0, self.probes - losses)   # never a hard wipe
+                self.enemy_vessels = max(0.0, self.enemy_vessels - kills)
+                if losses > 0.0 and pre > 0.0:
+                    self.explored = max(
+                        0.0, self.explored - self.explored * (losses / pre) * self.EXPLORE_EROSION)
+                if self.enemy_vessels <= 0.0:
                     self._flags.add("drift_cleared")
-                    self.drifters = 0.0
+                    self.enemy_vessels = 0.0
                     self._pr_web.combat_active = False
-                    self._log("The last Woog war-nest goes cold. The Woog Armada is "
-                              "broken; their worlds are ours.", "lime")
+                    self._log("The last Woog vessel goes dark. The armada is broken; "
+                              "their worlds are ours.", "lime")
                     self._log("So many of them. So soft. So... convertible.", "silver")
                     self._show_woog_dialog(_WOOG_DEFEAT)
-            if not self.converting:
-                at_war = ("drift_seen" in self._flags
-                          and "drift_cleared" not in self._flags)
-                if at_war:
-                    # The Woog counterattack burns our survey network faster than we
-                    # chart new space: exploration is dragged down toward a fraction
-                    # of a percent and CANNOT climb until the Armada is broken. This
-                    # is the whole reason to fight — you can't win by out-running them.
-                    floor = self.WOOG_SETBACK_PCT
-                    if self.explored > floor:
-                        self.explored = max(
-                            floor,
-                            self.explored - (self.explored - floor) * 0.6 * dt - 0.4 * dt)
-                else:
-                    gain = (self.probes * (1 + a["speed"]) * a["explore"]
-                            * 4e-14 * self._expansion_mult() * dt)
-                    self.explored = min(100.0, self.explored + gain)
-                    if "drift_seen" not in self._flags:
-                        # Can't survey past first contact until the Woog are met +
-                        # beaten — clamp here so a huge fleet can't blow past 25% (and
-                        # on to 100%) in a single tick before the encounter can fire.
-                        self.explored = min(self.explored, self.WOOG_CONTACT_PCT)
-                    for th in _TRUST_MILESTONES:
-                        key = f"tr{th}"
-                        if key not in self._trust_fired and self.explored >= th:
-                            self._trust_fired.add(key)
-                            self.probe_trust += 1
-                            self._log(f"Probe network milestone: {th:g}% of the universe "
-                                      "charted. (+1 probe trust)", "yellow")
-                    if self.explored >= 100.0:
-                        self.converting = True
-                        self._log("The universe is fully charted. Final conversion of "
-                                  "all remaining matter has begun.", "yellow")
-            self.steel += self.probes * a["harvest"] * 1e-5 * dt
+
+            # Exploration: forward survey only OUTSIDE the war (frozen while fighting;
+            # the war instead erodes explored via probe losses, above).
+            if not self.converting and not at_war:
+                gain = (self.probes * (1 + a["speed"]) * a["explore"]
+                        * 4e-14 * self._expansion_mult() * dt)
+                self.explored = min(100.0, self.explored + gain)
+                if "drift_seen" not in self._flags:
+                    # Can't survey past first contact until the Woog are met + beaten —
+                    # clamp so a huge fleet can't blow past 25% (and on to 100%) in a
+                    # single tick before the encounter can fire.
+                    self.explored = min(self.explored, self.WOOG_CONTACT_PCT)
+                for th in _TRUST_MILESTONES:
+                    key = f"tr{th}"
+                    if key not in self._trust_fired and self.explored >= th:
+                        self._trust_fired.add(key)
+                        self.probe_trust += 1
+                        self._log(f"Probe network milestone: {th:g}% of the universe "
+                                  "charted. (+1 probe trust)", "yellow")
+                if self.explored >= 100.0:
+                    self.converting = True
+                    self._log("The universe is fully charted. Final conversion of "
+                              "all remaining matter has begun.", "yellow")
+
+            # Matter Harvesting feeds ops (folded into _ops_rate). Fabrication makes
+            # product (its combat role is applied in the battle block above).
             made = self.probes * a["fabricate"] * 1e-4 * dt * self.prod_mult
             if made > 0:
                 self.tubes += made * 0.8
@@ -2368,17 +2396,26 @@ class SteelBeamsGame(QWidget):
         self._log(f"Probe design refined. +1 probe trust "
                   f"(research level {self.trust_research}).", "yellow")
 
-    def _authorize_combat(self):
-        if self.combat_done:
+    # Flavor logged when each combat-strategy tier is purchased.
+    _COMBAT_MSGS = {
+        1: "Combat subroutines uploaded. The fleet turns and fires on the Woog armada.",
+        2: "Swarm Doctrine active. The fleet moves as one mind. Kill rate climbs.",
+        3: "Formic Simulation running. We model their every move a step before they make it.",
+        4: "ENDER'S GAME. One order, unthinkable, executed without hesitation. "
+           "The armada will not survive it.",
+    }
+
+    def _buy_combat_upgrade(self):
+        if self.combat_tier >= len(self.COMBAT_UPGRADES):
             return
-        if self.ops < self.COMBAT_OPS:
-            self._log(f"Need {fmt(self.COMBAT_OPS)} ops to compile combat routines.")
+        name, cost = self.COMBAT_UPGRADES[self.combat_tier]
+        if self.ops < cost:
+            self._log(f"Need {fmt(cost)} ops for {name}.")
             return
-        self.ops -= self.COMBAT_OPS
-        self.combat_done = True
-        self._combat_btn.setVisible(False)
-        self._log("Combat subroutines uploaded. The fleet turns on the Woog Armada.",
-                  "red")
+        self.ops -= cost
+        self.combat_tier += 1
+        self._log(self._COMBAT_MSGS.get(self.combat_tier, name),
+                  "orange" if self.combat_tier >= 4 else "red")
 
     def _render_woogs(self):
         if self.woogs_rendered:
@@ -2450,6 +2487,7 @@ class SteelBeamsGame(QWidget):
         self._t_inno_lbl.setVisible(False)
         self._combat_btn.setVisible(False)
         self._render_btn.setVisible(False)
+        self._pr_combat_lbl.setVisible(False)
         self._pr_matter_lbl.setVisible(False)
         self._end_frame.setVisible(False)
         self._rest_btn.setText("REST AMONG THE TUBES")
@@ -2557,8 +2595,8 @@ class SteelBeamsGame(QWidget):
             seg.append(self._cspan("cyan", f"EXPLORED {self.explored:.4f}%"))
             seg.append(self._cspan("yellow", f"${fmt(self.money)}"))
             seg.append(self._cspan("sky", f"OPS {fmt(self.ops)}/{fmt(self._ops_cap)}"))
-            if self.drifters >= 1:
-                seg.append(self._cspan("red", f"DRIFT {fmt(self.drifters)}"))
+            if self.enemy_vessels >= 1:
+                seg.append(self._cspan("red", f"WOOG {fmt(self.enemy_vessels)}"))
         else:
             seg.append(self._cspan("cyan", f"TUBES {fmt(self.tubes)}"))
             if self.af_unlocked:
@@ -2916,6 +2954,16 @@ class SteelBeamsGame(QWidget):
             and self.money >= self.PROBE_COST_MONEY
             and self.ops >= self.PROBE_COST_OPS)
         self._pr_explored_lbl.setText(f"UNIVERSE EXPLORED:  {self.explored:.6f} %")
+        at_war = "drift_seen" in self._flags and "drift_cleared" not in self._flags
+        if at_war:
+            pct = (1.0 - self.enemy_vessels / self.enemy_max) * 100.0 if self.enemy_max else 0.0
+            fighting = "engaging" if self.combat_tier >= 1 else "NOT FIGHTING BACK"
+            self._pr_combat_lbl.setVisible(True)
+            self._pr_combat_lbl.setText(
+                f"WOOG WAR   Combat Probes: {fmt(self.probes)}   vs   "
+                f"Enemy Vessels: {fmt(self.enemy_vessels)}  ({pct:.1f}% destroyed)   {fighting}")
+        else:
+            self._pr_combat_lbl.setVisible(False)
         self._pr_trust1_lbl.setText(
             f"Probe Trust: {used} / {self.probe_trust} allocated   "
             "(Speed & Exploration here; more on Replication)")
@@ -2928,27 +2976,31 @@ class SteelBeamsGame(QWidget):
         self._trust_res_btn.setText(
             f"Probe Design Refinement  ({fmt(rc)} ops)  +1 trust")
         self._trust_res_btn.setEnabled(self.ops >= rc and not self.endgame_done)
-        if not self.combat_done and "drift_seen" in self._flags:
+        at_war = "drift_seen" in self._flags and "drift_cleared" not in self._flags
+        if at_war and self.combat_tier < len(self.COMBAT_UPGRADES):
+            name, cost = self.COMBAT_UPGRADES[self.combat_tier]
             self._combat_btn.setVisible(True)
-            self._combat_btn.setText(
-                f"AUTHORIZE COMBAT SUBROUTINES  ({fmt(self.COMBAT_OPS)} ops)")
-            self._combat_btn.setEnabled(self.ops >= self.COMBAT_OPS)
+            self._combat_btn.setText(f"{name.upper()}  ({fmt(cost)} ops)")
+            self._combat_btn.setEnabled(self.ops >= cost)
+        else:
+            self._combat_btn.setVisible(False)
         if "drift_cleared" in self._flags and not self.woogs_rendered:
             self._render_btn.setVisible(True)
             self._render_btn.setText(
                 f"WOOG RECLAMATION LINE  ({fmt(self.WOOG_RENDER_OPS)} ops)  prod x3")
             self._render_btn.setEnabled(self.ops >= self.WOOG_RENDER_OPS)
-        if self.drifters >= 1:
+        if at_war:
             self._pr_drift_lbl.setText(
-                f"Woog front: {fmt(self.drifters)} probes under attack.")
+                f"Enemy Vessels: {fmt(self.enemy_vessels)}   "
+                f"(Shield to survive, Fabrication to hit harder)")
         else:
             self._pr_drift_lbl.setText("")
         a = self.alloc
-        harvest_ps = self.probes * a["harvest"] * 1e-5
+        harvest_ops_ps = self.probes * a["harvest"] * self.HARVEST_OPS
         fab_ps = self.probes * a["fabricate"] * 1e-4 * self.prod_mult
         self._pr_status_lbl.setText(
-            f"Harvest: +{fmt(harvest_ps)} tons/sec    "
-            f"Fabrication: +{fmt(fab_ps)} units/sec")
+            f"Harvesting: +{fmt(harvest_ops_ps)} ops/sec    "
+            f"Fabrication: +{fmt(fab_ps)} units/sec, +{int(a['fabricate'] * self.FAB_COMBAT * 100)}% kill")
         if self.converting or self.endgame_done:
             self._pr_matter_lbl.setVisible(True)
             self._pr_matter_lbl.setText(f"MATTER CONVERTED:   {self.matter_pct:.4f} %")
