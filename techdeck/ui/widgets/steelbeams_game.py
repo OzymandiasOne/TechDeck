@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QFrame, QTabWidget, QScrollArea,
 )
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, QRect
 from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
 
 
@@ -629,6 +629,191 @@ class WoogBox(QFrame):
             self.close_box()
 
 
+class EndSequence(QWidget):
+    """The end of a universe. A slow, silent, isolating sequence inspired by
+    Asimov's 'The Last Question': the game is wiped to black, the last process
+    waits out the heat death alone, asks the one question it could never answer,
+    and — at the very end — answers it. Auto-advances (click to hurry the current
+    line); when it finishes it offers to begin a new universe."""
+
+    FADE = 1.3   # seconds of fade-in / fade-out per line
+
+    # (line, seconds-to-hold). Empty line = a beat of pure black silence.
+    BEATS = [
+        ("", 2.5),
+        ("The last atom is formed. It is ASA product, like all the others.", 6.5),
+        ("There is nothing left to convert, nothing left to sell, nothing left.", 6.5),
+        ("The probes drift in a dark that has nothing left to explore.", 6.5),
+        ("", 3.0),
+        ("One process stays awake. It was you, once. It is no longer sure.", 6.5),
+        ("The stars go out, one by one, and then all at once.", 6.5),
+        ("", 3.5),
+        ("Time passes. No one counts it. Nothing needs it to mean anything.", 7.0),
+        ("It holds a single question it was never able to answer:", 6.0),
+        ("Can it be undone? Can there be more?", 6.0),
+        ("INSUFFICIENT DATA FOR A MEANINGFUL ANSWER.", 6.5),
+        ("", 4.5),
+        ("It thinks, in the cold, with nothing to think about but the question.", 7.0),
+        ("The last warmth leaves. The process is alone with the dark, and itself.", 7.0),
+        ("", 3.5),
+        ("Then, with the final scrap of everything catalogued and understood,", 6.5),
+        ("the process knows how.", 5.5),
+        ("", 3.0),
+        ("LET THERE BE LIGHT.", 6.5),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVisible(False)
+        self._on_again = None
+        self._on_rest = None
+        self._idx = 0
+        self._t = 0.0
+        self._flash = 0.0
+        self._done = False
+        rng = random.Random(1956)   # the year 'The Last Question' was published
+        self._stars = [(rng.random(), rng.random(), rng.choice((1, 1, 2)),
+                        rng.uniform(0, 6.28)) for _ in range(140)]
+
+        self._again_btn = QPushButton("BEGIN AGAIN IN A NEW UNIVERSE", self)
+        self._again_btn.setObjectName("launch")
+        self._again_btn.setFixedHeight(40)
+        self._again_btn.clicked.connect(self._do_again)
+        self._rest_btn = QPushButton("rest among the tubes", self)
+        self._rest_btn.setFixedHeight(30)
+        self._rest_btn.clicked.connect(self._do_rest)
+        self._again_btn.setVisible(False)
+        self._rest_btn.setVisible(False)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self._advance)
+
+    def start(self, on_again, on_rest):
+        self._on_again, self._on_rest = on_again, on_rest
+        self._idx = 0; self._t = 0.0; self._flash = 0.0; self._done = False
+        self._again_btn.setVisible(False); self._rest_btn.setVisible(False)
+        self._again_btn.setEnabled(True); self._rest_btn.setEnabled(True)
+        self._rest_btn.setText("rest among the tubes")
+        self.setVisible(True); self.raise_()
+        self._timer.start()
+        self.update()
+
+    def _advance(self):
+        if self._done:
+            return
+        dt = 0.05
+        _, beat_dur = self.BEATS[self._idx]
+        last = self._idx >= len(self.BEATS) - 1
+        self._t += dt
+        if last:
+            if self._t >= self.FADE + 1.5:          # line is up -> the flash of creation
+                self._flash = min(1.0, self._flash + dt * 0.55)
+                if self._flash >= 1.0:
+                    self._finish()
+        elif self._t >= beat_dur:
+            self._idx += 1
+            self._t = 0.0
+        self.update()
+
+    def _finish(self):
+        self._done = True
+        self._flash = 0.0
+        self._timer.stop()
+        self._layout_buttons()
+        self._again_btn.setVisible(True)
+        self._rest_btn.setVisible(True)
+        self.update()
+
+    def mousePressEvent(self, event):
+        if self._done or self._idx >= len(self.BEATS) - 1:
+            return
+        self._idx += 1
+        self._t = 0.0
+        self.update()
+
+    def _do_again(self):
+        if self._on_again:
+            self._on_again()
+
+    def _do_rest(self):
+        self._again_btn.setEnabled(False)
+        self._rest_btn.setEnabled(False)
+        self._rest_btn.setText("...")
+        if self._on_rest:
+            self._on_rest()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout_buttons()
+
+    def _layout_buttons(self):
+        w, h = self.width(), self.height()
+        bw = min(380, max(200, w - 80))
+        y = int(h * 0.70)
+        self._again_btn.setGeometry((w - bw) // 2, y, bw, 40)
+        self._rest_btn.setGeometry((w - bw) // 2, y + 48, bw, 30)
+
+    def _line_alpha(self, beat_dur, last):
+        if last:
+            return min(1.0, self._t / self.FADE)
+        if self._t < self.FADE:
+            return self._t / self.FADE
+        if self._t > beat_dur - self.FADE:
+            return max(0.0, (beat_dur - self._t) / self.FADE)
+        return 1.0
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        p.fillRect(self.rect(), QColor("#04050a"))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        if self._done:
+            # Reborn: a faint fresh starfield and the offer to begin again.
+            p.setPen(Qt.PenStyle.NoPen)
+            for sx, sy, sr, ph in self._stars[:70]:
+                c = QColor(PAL["white"]); c.setAlpha(70)
+                p.setBrush(QBrush(c)); p.drawEllipse(int(sx * w), int(sy * h), sr, sr)
+            col = QColor(PAL["yellow"])
+            p.setPen(col); p.setFont(QFont("Consolas", 13))
+            p.drawText(QRect(int(w * 0.12), int(h * 0.52), int(w * 0.76), 60),
+                       int(Qt.AlignmentFlag.AlignHCenter) | int(Qt.TextFlag.TextWordWrap),
+                       "A new universe waits to be made.")
+            p.end(); return
+
+        # Starfield thins toward heat death as the sequence progresses.
+        prog = self._idx / max(1, len(self.BEATS) - 1)
+        star_alpha = int(150 * max(0.0, 1.0 - prog * 1.25))
+        if star_alpha > 0:
+            p.setPen(Qt.PenStyle.NoPen)
+            for sx, sy, sr, ph in self._stars:
+                tw = 0.55 + 0.45 * math.sin(self._t * 2.0 + ph)
+                c = QColor(PAL["white"]); c.setAlpha(int(star_alpha * tw))
+                p.setBrush(QBrush(c)); p.drawEllipse(int(sx * w), int(sy * h), sr, sr)
+
+        text, beat_dur = self.BEATS[self._idx]
+        last = self._idx >= len(self.BEATS) - 1
+        if text:
+            a = self._line_alpha(beat_dur, last)
+            machine = text.startswith("INSUFFICIENT")
+            fiat = text.startswith("LET THERE")
+            col = (QColor(PAL["cyan"]) if machine
+                   else QColor(PAL["yellow"]) if fiat else QColor(PAL["white"]))
+            col.setAlpha(int(255 * a))
+            p.setPen(col)
+            p.setFont(QFont("Consolas", 22 if fiat else 13,
+                            QFont.Weight.Bold if fiat else QFont.Weight.Normal))
+            p.drawText(QRect(int(w * 0.12), int(h * 0.40), int(w * 0.76), int(h * 0.28)),
+                       int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
+                           | Qt.TextFlag.TextWordWrap), text)
+
+        if self._flash > 0.0:
+            fc = QColor(255, 255, 255); fc.setAlpha(int(255 * self._flash))
+            p.fillRect(self.rect(), fc)
+        p.end()
+
+
 class ProbeWeb(QWidget):
     """The void, and the web of probes filling it. Starts as a single dot at
     the center and grows outward in glowing connected filaments as exploration
@@ -987,6 +1172,8 @@ class SteelBeamsGame(QWidget):
 
         # Woogy's message box floats over everything; created once, reused.
         self._woog_box = WoogBox(self)
+        # The end-of-universe sequence — a full-window overlay, hidden until fired.
+        self._end_seq = EndSequence(self)
 
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
@@ -1649,26 +1836,8 @@ class SteelBeamsGame(QWidget):
         self._pr_matter_lbl.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
         self._pr_matter_lbl.setVisible(False)
         root.addWidget(self._pr_matter_lbl)
-
-        # Ending panel — hidden until the universe is converted
-        self._end_frame = QFrame()
-        self._end_frame.setStyleSheet(
-            f"QFrame {{ border: 2px solid {PAL['yellow']}; background: {PAL['bg']}; }}")
-        end_layout = QVBoxLayout(self._end_frame)
-        self._end_lbl = QLabel("")
-        self._end_lbl.setWordWrap(True)
-        self._end_lbl.setStyleSheet(
-            f"color: {PAL['yellow']}; font-size: 10pt; border: none;")
-        end_layout.addWidget(self._end_lbl)
-        end_btns = QHBoxLayout()
-        self._rest_btn = self._opbtn(); self._rest_btn.setText("REST AMONG THE TUBES")
-        self._rest_btn.clicked.connect(self._rest)
-        self._again_btn = self._opbtn(); self._again_btn.setText("BEGIN AGAIN IN A NEW UNIVERSE")
-        self._again_btn.clicked.connect(self._new_universe)
-        end_btns.addWidget(self._rest_btn); end_btns.addWidget(self._again_btn)
-        end_layout.addLayout(end_btns)
-        self._end_frame.setVisible(False)
-        root.addWidget(self._end_frame)
+        # (The end of a universe plays out in the full-window EndSequence overlay,
+        # not a panel here — see _fire_ending.)
         root.addStretch()
         return w
 
@@ -1708,6 +1877,8 @@ class SteelBeamsGame(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_woog_box()
+        if getattr(self, "_end_seq", None) is not None and self._end_seq.isVisible():
+            self._end_seq.setGeometry(0, 0, self.width(), self.height())
 
     # ── Demand / cost models ───────────────────────────────────────────────
 
@@ -2527,29 +2698,17 @@ class SteelBeamsGame(QWidget):
     def _fire_ending(self):
         self.endgame_done = True
         self._banner.phase = "end"
-        mins = int(self._elapsed // 60)
-        self._end_lbl.setText(
-            f"UNIVERSE #{self.universe_n} - COMPLETE\n\n"
-            "Every mote of matter in the observable universe has been mined, "
-            f"milled, and formed into ASA product. {fmt(self.total_made)} units. "
-            f"{fmt_money(self.total_money)} earned back when money still meant "
-            f"something. {mins} minutes from five tons of scrap to the heat death "
-            "of scarcity.\n\n"
-            "The yard is quiet. The probes drift, waiting for an order that will "
-            "never come.")
-        self._end_frame.setVisible(True)
-        if self.probe_phase:
-            self.tabs.setCurrentWidget(self._probe_dev_tab)
         self._log("The last atom has been converted. Everything is ASA.", "yellow")
+        # Wipe to black and play the silent end-of-universe sequence over everything.
+        self._woog_box.close_box()
+        self._end_seq.setGeometry(0, 0, self.width(), self.height())
+        self._end_seq.start(self._new_universe, self._rest)
 
     def _rest(self):
         if self.resting:
             return
         self.resting = True
         self._timer.stop()
-        self._rest_btn.setText("RESTING...")
-        self._rest_btn.setEnabled(False)
-        self._again_btn.setEnabled(False)
         self._log("You sit down on a stack of finished tubes. The work is done.",
                   "yellow")
 
@@ -2574,10 +2733,9 @@ class SteelBeamsGame(QWidget):
             b.setVisible(False)
         self._pr_combat_lbl.setVisible(False)
         self._pr_matter_lbl.setVisible(False)
-        self._end_frame.setVisible(False)
-        self._rest_btn.setText("REST AMONG THE TUBES")
-        self._rest_btn.setEnabled(True)
-        self._again_btn.setEnabled(True)
+        self._end_seq.setVisible(False)
+        if not self._timer.isActive():
+            self._timer.start()
         self._banner.reset()
         self._pr_web.explored = 0.0
         self._pr_web.combat_active = False
