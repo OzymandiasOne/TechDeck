@@ -56,7 +56,7 @@ def _load_woogy_pixmap(target: int = 112):
 _WOOG_THREAT = [
     "HALT, little steel worms. You drift now in the sovereign dark of the WOOG.",
     "I am WOOGY. We were here before your sun. We are legion, we are eternal, we "
-    "are — Greg, how many are we — we are SEVERAL.",
+    "are... Greg, how many are we... we are SEVERAL.",
     "Turn back now, Hooman, or be juiced into submission.",
 ]
 _WOOG_DEFEAT = [
@@ -1893,7 +1893,7 @@ class SteelBeamsGame(QWidget):
             was_out = self._brownout
             self._brownout = self.power <= 0.0
             if self._brownout and not was_out:
-                self._log("BROWNOUT — the server farm lost power. The trading AI is "
+                self._log("BROWNOUT. The server farm lost power. The trading AI is "
                           "offline. Build more solar fields.", "red")
             elif was_out and not self._brownout:
                 self._log("Power restored. The trading AI is back online.", "lime")
@@ -2100,7 +2100,7 @@ class SteelBeamsGame(QWidget):
         elif unlock == "market" and not self.market_unlocked:
             self.market_unlocked = True
             self._market_section.setVisible(True)
-            self._log("Trading desk online — a new section on the Tech Team tab.")
+            self._log("Trading desk online. A new section on the Tech Team tab.")
         elif unlock == "drones" and not self.drones_unlocked:
             self.drones_unlocked = True
             self.tabs.addTab(self._drones_tab, "Drones")
@@ -2211,8 +2211,8 @@ class SteelBeamsGame(QWidget):
         self.power = self._power_max()   # boots at a full charge, then draws down
         self._solar_section.setVisible(True)
         self._dyson_btn.setVisible(True)
-        self._log("Server Farm online. The trading AI now day-trades for you — "
-                  "but it draws serious POWER.", "yellow")
+        self._log("Server Farm online. The trading AI now day-trades for you. "
+                  "But it draws serious POWER.", "yellow")
         self._log("Build Solar Fields on the A-Frames tab before the bank runs dry.",
                   "cyan")
 
@@ -2381,7 +2381,7 @@ class SteelBeamsGame(QWidget):
         self._banner.phase = "end"
         mins = int(self._elapsed // 60)
         self._end_lbl.setText(
-            f"UNIVERSE #{self.universe_n} — COMPLETE\n\n"
+            f"UNIVERSE #{self.universe_n} - COMPLETE\n\n"
             "Every mote of matter in the observable universe has been mined, "
             f"milled, and formed into ASA product. {fmt(self.total_made)} units. "
             f"{fmt_money(self.total_money)} earned back when money still meant "
@@ -2434,7 +2434,7 @@ class SteelBeamsGame(QWidget):
         self._pr_web.combat_active = False
         self._pr_web._flashes.clear()
         self._woog_box.close_box()
-        self._log("— — — — — — — — — — — —", "slate")
+        self._log("- - - - - - - - - - - -", "slate")
         bonus = int((self.legacy_mult - 1.0) * 100)
         self._log(f"Universe #{self.universe_n}. A familiar yard. Five tons of "
                   f"scrap steel. (Legacy bonus: +{bonus}% production & demand)",
@@ -2637,14 +2637,14 @@ class SteelBeamsGame(QWidget):
         if out <= 0 and inv <= 0:
             return ""
         if dem <= 0:
-            return f"NO BUYERS — {noun} price above market rate ${value:,.0f}. Lower it."
+            return f"NO BUYERS - {noun} price above market rate ${value:,.0f}. Lower it."
         if dem > out * 1.05 and inv < max(50.0, out * 3):
-            return (f"SOLD OUT — demand outstrips supply. Every {noun} sells instantly; "
+            return (f"SOLD OUT - demand outstrips supply. Every {noun} sells instantly; "
                     "add fabricators or raise price to earn more.")
         if inv > max(1_000.0, out * 30):
-            return (f"OVERSTOCKED — making {noun}s faster than they sell. "
+            return (f"OVERSTOCKED - making {noun}s faster than they sell. "
                     "Raise demand (marketing) or lower price.")
-        return "BALANCED — supply and demand roughly matched."
+        return "BALANCED - supply and demand roughly matched."
 
     def _update_tech(self):
         avail = self._rep_avail
@@ -2722,7 +2722,7 @@ class SteelBeamsGame(QWidget):
                     f"+{fmt_money(self.AI_RATE[tier] * self.legacy_mult)}/sec")
             else:
                 self._ai_income_lbl.setText(
-                    "AI trading OFFLINE — no power." if self._brownout
+                    "AI trading OFFLINE - no power." if self._brownout
                     else "AI trading idle.")
             bc = self._bank_cost()
             self._bank_btn.setText(f"Energy Bank +{fmt(self.POWER_BANK_STEP)}  {fmt_money(bc)}")
