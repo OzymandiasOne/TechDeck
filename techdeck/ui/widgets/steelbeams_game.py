@@ -60,11 +60,7 @@ _WOOG_THREAT = [
     "Turn back now, Hooman, or be juiced into submission.",
 ]
 _WOOG_DEFEAT = [
-    "...oh. Oh no. That went poorly.",
-    "You were meant to be frightened. We rehearsed. There were snacks.",
-    "This is Woogy, signing off. Tell the galaxy we fought bravely, that we "
-    "would like our homeworld back, and that we would prefer not to be turned "
-    "into anything. ...you are going to turn us into something, aren't you.",
+    "...oh. Oh no. Not like this. WOOGY scared. *End of transmission*",
 ]
 
 
