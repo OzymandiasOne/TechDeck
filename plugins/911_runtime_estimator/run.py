@@ -1035,12 +1035,16 @@ def write_analysis_sheet(wb, plate_rows, log):
     no_empty = sum(1 for r in plate_rows if r.get("_empty_layers") is False)
     empty_items = [("All layers cut", no_empty), ('Has 0" layer', has_empty)]
 
-    nest_hours = {}
+    # Est Cut Hours grouped by plate thickness (the "time per material" view --
+    # material here means thickness). Sits beside the Plate Thickness pie so the
+    # part-count split and the cut-time split read against the same buckets.
+    thick_hours = {}
     for r in plate_rows:
-        nest = str(r.get("Nest Pkg Nbr") or "").strip()
-        if nest:
-            nest_hours[nest] = nest_hours.get(nest, 0.0) + (r.get("Est Cut Hours") or 0.0)
-    nest_items = [(n, round(h, 3)) for n, h in sorted(nest_hours.items())]
+        t = r.get("Thickness (in)")
+        if isinstance(t, (int, float)):
+            k = round(float(t), 3)
+            thick_hours[k] = thick_hours.get(k, 0.0) + (r.get("Est Cut Hours") or 0.0)
+    thick_hours_items = [(f'{k:g}"', round(h, 3)) for k, h in sorted(thick_hours.items())]
 
     mat = {}
     for r in plate_rows:
@@ -1151,21 +1155,22 @@ def write_analysis_sheet(wb, plate_rows, log):
     c_thick = put_table("Plate Thickness", thick_items)
     c_layer = put_table("Layering", layer_items)
     c_empty = put_table("Zero-inch Layers", empty_items)
-    c_nest = put_table("Est Cut Hours by Nest", nest_items, "Est Cut Hours", "0.000")
+    c_thick_hours = put_table("Est Cut Hours by Thickness", thick_hours_items,
+                              "Est Cut Hours", "0.000")
     c_mat = put_table("Material", mat_items)
     c_flag = put_table("Data Quality", flag_items)
     c_bevel = put_table("Bevel Scope", bevel_items)
 
     # ── charts (2-wide grid over the left of the sheet) ────────────────────
     pie("Plate Thickness (in)", *c_thick, anchor="A4")
-    pie("Single vs Multi-Layered", *c_layer, anchor="J4")
-    pie('Parts with a 0" Layer', *c_empty, anchor="A22")
-    bar("Est Cut Hours by Nest", *c_nest, anchor="J22", value_labels=False)
-    pie("Material Distribution", *c_mat, anchor="A40")
+    bar("Est Cut Hours by Thickness", *c_thick_hours, anchor="J4", value_labels=False)
+    pie("Single vs Multi-Layered", *c_layer, anchor="A22")
+    pie("Material Distribution", *c_mat, anchor="J22")
+    pie('Parts with a 0" Layer', *c_empty, anchor="A40")
     bar("Data Quality (parts per flag)", *c_flag, anchor="J40")
     pie("Bevel vs Straight Cut", *c_bevel, anchor="A58")
-    log("  Added Analysis sheet (thickness, layering, 0-inch layers, cut hours "
-        "by nest, material, data-quality flags, bevel scope).")
+    log("  Added Analysis sheet (thickness, cut hours by thickness, layering, "
+        "material, 0-inch layers, data-quality flags, bevel scope).")
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
