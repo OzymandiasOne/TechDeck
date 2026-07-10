@@ -309,9 +309,11 @@ _FREEBIES = [
          msg="Someone discovers an Aroma Joe's. The Tech Team is now wired and "
              "shaking - with enthusiasm for steel beams. Nobody is blinking. "
              "Velocity is up. So is resting heart rate. (+2,500 ops, +1 rep)"),
-    dict(key="couch", cond=lambda g: g.total_money >= 250_000, ops=3000,
-         msg="Facilities approves a break-room couch. Two developers have not been "
-             "seen since Tuesday, yet their commits keep arriving. (+3,000 ops)"),
+    dict(key="asa_the_game", cond=lambda g: g.total_money >= 250_000, ops=3000,
+         msg="A developer ships a little incremental game about running a steel yard. "
+             "It is called ASA: The Video Game. It is unsettlingly accurate. The team "
+             "plays it to relax from the job it is identical to, and returns to work "
+             "unable to tell the difference. Productivity is way up. (+3,000 ops)"),
     dict(key="emp_month", cond=lambda g: g.total_sold >= 100_000, rep=2,
          msg="You are named Employee of the Month. You are also the employer. You "
              "accept the plaque with quiet dignity and no conflict of interest. (+2 rep)"),
