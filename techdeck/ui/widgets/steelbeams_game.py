@@ -919,16 +919,19 @@ class SteelBeamsGame(QWidget):
     # The Woog war — a two-sided attrition battle (Enemy Vessels vs our fleet).
     ENEMY_RATIO      = 2.0          # enemy vessels at contact = probes * this (a rival)
     ENEMY_MIN        = 2_000.0      # ...but at least this many vessels
-    ENEMY_LETHALITY  = 0.012        # our probes lost/sec per enemy vessel (pre-shield)
-    KILL_BASE        = 0.003        # enemy vessels killed/sec per combat probe (x kill mult)
+    ENEMY_LETHALITY  = 0.005        # our probes lost/sec per enemy vessel (pre-shield)
+    KILL_BASE        = 0.012        # enemy vessels killed/sec per combat probe (x kill mult)
+    WAR_REINFORCE    = 0.012        # fleet only reinforces this fast DURING the war (fixed,
+                                    # not the replicate alloc) so it can't balloon and turn
+                                    # the battle into a slow-then-sudden anticlimax
     SHIELD_MIT       = 0.11         # each Hazard Shielding point: -11% probe losses
     SHIELD_FLOOR     = 0.12         # ...to a floor (shielding can't fully negate losses)
     FAB_COMBAT       = 0.15         # each Fabrication point: +15% kill rate (offense)
     EXPLORE_EROSION  = 0.9          # explored erodes at this fraction of the fleet-loss rate
     HARVEST_OPS      = 0.005        # ops/sec per probe per Matter-Harvesting point
     # Combat-strategy upgrade tiers (kill-rate multiplier; tier 0 = not fighting back).
-    # The war is a real ~1-3 min fight; Ender's Game (x8) is decisive, not instant.
-    COMBAT_KILL_MULT = (0.0, 1.0, 2.0, 3.5, 8.0)
+    # Steady ~1-3 min fight; Ender's Game is decisive (~35s) but not instant.
+    COMBAT_KILL_MULT = (0.0, 1.0, 1.7, 2.6, 4.5)
     COMBAT_UPGRADES  = (
         ("Authorize Combat Subroutines", 150_000.0),
         ("Swarm Doctrine",               400_000.0),
@@ -1802,8 +1805,14 @@ class SteelBeamsGame(QWidget):
         # ── Probes
         if self.probes_unlocked and self.probes > 0 and not self.endgame_done:
             a = self.alloc
-            # Self-Replication: the fleet grows (and reinforces during the war).
-            self.probes += self.probes * a["replicate"] * 0.008 * dt
+            # Self-Replication drives peacetime expansion. DURING the war the fighting
+            # fleet only reinforces at a slow fixed rate (WAR_REINFORCE) instead of the
+            # exponential replicate alloc — otherwise it balloons and the enemy dies in
+            # a sudden late collapse (feels instant) rather than a steady battle.
+            if "drift_seen" in self._flags and "drift_cleared" not in self._flags:
+                self.probes += self.probes * self.WAR_REINFORCE * dt
+            else:
+                self.probes += self.probes * a["replicate"] * 0.008 * dt
 
             # First contact at 25% survey: the Woog appear in force (~2x our fleet).
             if ("drift_seen" not in self._flags and "drift_cleared" not in self._flags
