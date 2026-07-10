@@ -415,7 +415,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -1059,7 +1059,6 @@ def write_analysis_sheet(wb, plate_rows, log):
         ("no dxf match", "No DXF match"),
         ("unmeasured", "Unmeasured geometry"),
         ("outlier", "LI outlier"),
-        ("bevel", "Bevel scope"),
         ("insunits", "Unexpected units"),
     ]
     flag_counts, clean = {}, 0
@@ -1072,6 +1071,11 @@ def write_analysis_sheet(wb, plate_rows, log):
         else:
             clean += 1
     flag_items = [("Clean", clean)] + sorted(flag_counts.items(), key=lambda kv: -kv[1])
+
+    # Bevel scope is review-worthy but not a data defect, so it gets its own
+    # chart rather than swamping the Data Quality bars.
+    bevel = sum(1 for r in plate_rows if "bevel" in str(r.get("Flags") or "").lower())
+    bevel_items = [("Straight cut", len(plate_rows) - bevel), ("Bevel scope", bevel)]
 
     # ── data tables (columns T/U, stacked) ────────────────────────────────
     data_col = 20  # column T
@@ -1125,6 +1129,7 @@ def write_analysis_sheet(wb, plate_rows, log):
     c_nest = put_table("Est Cut Hours by Nest", nest_items, "Est Cut Hours", "0.000")
     c_mat = put_table("Material", mat_items)
     c_flag = put_table("Data Quality", flag_items)
+    c_bevel = put_table("Bevel Scope", bevel_items)
 
     # ── charts (2-wide grid over the left of the sheet) ────────────────────
     pie("Plate Thickness (in)", *c_thick, anchor="A4")
@@ -1133,8 +1138,9 @@ def write_analysis_sheet(wb, plate_rows, log):
     bar("Est Cut Hours by Nest", *c_nest, anchor="J22")
     pie("Material Distribution", *c_mat, anchor="A40")
     bar("Data Quality (parts per flag)", *c_flag, anchor="J40")
+    pie("Bevel vs Straight Cut", *c_bevel, anchor="A58")
     log("  Added Analysis sheet (thickness, layering, 0-inch layers, cut hours "
-        "by nest, material, data-quality flags).")
+        "by nest, material, data-quality flags, bevel scope).")
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
