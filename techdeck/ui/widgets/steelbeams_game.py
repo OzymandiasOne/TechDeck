@@ -301,17 +301,17 @@ _FREEBIES = [
              "payroll rounds it to $50 and asks no further questions. (+$50)"),
     dict(key="coffee_pot", cond=lambda g: g.tech_unlocked, ops=300,
          msg="A coffee pot appears in the break room. The Tech Team finally has "
-             "coffee. Output rises for reasons everyone agrees are the coffee. (+ops)"),
+             "coffee. Output rises for reasons everyone agrees are the coffee. (+300 ops)"),
     dict(key="scrap_rebate", cond=lambda g: g.auto_fabs >= 5, steel=300,
          msg="The scrap dealer overpays you and drives off before you can mention "
              "it. You mention it quietly, to no one. (+300 tons steel)"),
     dict(key="aroma_joes", cond=lambda g: g.developers >= 5, ops=2500, rep=1,
          msg="Someone discovers an Aroma Joe's. The Tech Team is now wired and "
              "shaking - with enthusiasm for steel beams. Nobody is blinking. "
-             "Velocity is up. So is resting heart rate. (+ops, +1 rep)"),
+             "Velocity is up. So is resting heart rate. (+2,500 ops, +1 rep)"),
     dict(key="couch", cond=lambda g: g.total_money >= 250_000, ops=3000,
          msg="Facilities approves a break-room couch. Two developers have not been "
-             "seen since Tuesday, yet their commits keep arriving. (+ops)"),
+             "seen since Tuesday, yet their commits keep arriving. (+3,000 ops)"),
     dict(key="emp_month", cond=lambda g: g.total_sold >= 100_000, rep=2,
          msg="You are named Employee of the Month. You are also the employer. You "
              "accept the plaque with quiet dignity and no conflict of interest. (+2 rep)"),
