@@ -83,6 +83,8 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.chart import PieChart, BarChart, Reference
+from openpyxl.chart.label import DataLabelList
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -352,14 +354,18 @@ def dxf_metrics(path):
         if ly.upper() in EXCLUDE_LAYERS:
             continue
         per_layer[ly] = per_layer.get(ly, 0.0) + e["length"]
-    # Disregard empty (0 in) layers so they can't be counted or skew anything.
+    # Disregard empty (0 in) layers so they can't be counted or skew anything,
+    # but count them (a part carrying a present-but-zero-length layer is a
+    # data-quality signal we surface on the Analysis sheet).
     cut_layers = {ly: ln for ly, ln in per_layer.items() if ln > 1e-9}
+    n_empty_layers = len(per_layer) - len(cut_layers)
     total = sum(cut_layers.values())
     return {
         "linear_inches": total * scale,
         "skipped": skipped,
         "layers": set(cut_layers),
         "n_layers": len(cut_layers),
+        "n_empty_layers": n_empty_layers,
         "unit_note": unit_note,
         "n_entities": len(entities),
     }
@@ -379,11 +385,12 @@ def _dxf_work_order(filename):
 def build_dxf_index(iges_folder, log):
     """Map WORK ORDER (upper) -> linear inches per piece from an order's IGES DXFs.
     Also returns `suspect` (work orders whose geometry may be under-counted:
-    unmeasured SPLINE/ELLIPSE or non-inch units) and `multilayer` (work order ->
-    True when the part's cut spans more than one non-empty layer)."""
-    index, suspect, multilayer = {}, {}, {}
+    unmeasured SPLINE/ELLIPSE or non-inch units), `multilayer` (work order ->
+    True when the part's cut spans more than one non-empty layer), and `empty`
+    (work order -> True when the part carries a present-but-zero-length layer)."""
+    index, suspect, multilayer, empty = {}, {}, {}, {}
     if not iges_folder:
-        return index, suspect, multilayer
+        return index, suspect, multilayer, empty
     for dxf in glob.glob(os.path.join(iges_folder, "**", "*.dxf"), recursive=True):
         wo = _dxf_work_order(dxf)
         if not wo:
@@ -396,6 +403,7 @@ def build_dxf_index(iges_folder, log):
             continue
         index[wo] = m["linear_inches"]
         multilayer[wo] = m["n_layers"] > 1
+        empty[wo] = m["n_empty_layers"] > 0
         notes = []
         bad = [k for k in m["skipped"] if k in UNSUPPORTED_FLAGGED]
         if bad:
@@ -404,10 +412,10 @@ def build_dxf_index(iges_folder, log):
             notes.append(m["unit_note"])
         if notes:
             suspect[wo] = "; ".join(notes)
-    return index, suspect, multilayer
+    return index, suspect, multilayer, empty
 
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -995,6 +1003,124 @@ def _is_date(v):
     return isinstance(v, (datetime.datetime, datetime.date))
 
 
+def write_analysis_sheet(wb, plate_rows, log):
+    """Add an 'Analysis' sheet of summary charts driven by the plate rows.
+
+    The little aggregate data tables the charts read from are parked in far-right
+    columns (T+) out of the way; the charts float over the left grid. Charts are
+    skipped cleanly when their category has no data (e.g. no DXF-resolved rows).
+    """
+    ws = wb.create_sheet("Analysis")
+    ws.sheet_view.showGridLines = False
+    title = ws.cell(1, 1, "Batch Analysis")
+    title.font = Font(bold=True, size=14)
+    ws.cell(2, 1, "Counts are per part (one batch-list row); charts read the "
+                  "tables parked to the right (columns T+).").font = Font(italic=True,
+                                                                          color="808080")
+
+    # ── aggregations ──────────────────────────────────────────────────────
+    thick = {}
+    for r in plate_rows:
+        t = r.get("Thickness (in)")
+        if isinstance(t, (int, float)):
+            k = round(float(t), 3)
+            thick[k] = thick.get(k, 0) + 1
+    thick_items = [(f'{k:g}"', v) for k, v in sorted(thick.items())]
+
+    single = sum(1 for r in plate_rows if r.get("Multi-Layered") == "N")
+    multi = sum(1 for r in plate_rows if r.get("Multi-Layered") == "Y")
+    layer_items = [("Single-Layer", single), ("Multi-Layered", multi)]
+
+    has_empty = sum(1 for r in plate_rows if r.get("_empty_layers") is True)
+    no_empty = sum(1 for r in plate_rows if r.get("_empty_layers") is False)
+    empty_items = [("All layers cut", no_empty), ('Has 0" layer', has_empty)]
+
+    nest_hours = {}
+    for r in plate_rows:
+        nest = str(r.get("Nest Pkg Nbr") or "").strip()
+        if nest:
+            nest_hours[nest] = nest_hours.get(nest, 0.0) + (r.get("Est Cut Hours") or 0.0)
+    nest_items = [(n, round(h, 3)) for n, h in sorted(nest_hours.items())]
+
+    dxf_meas = sum(1 for r in plate_rows if isinstance(r.get("Linear In/PC"), (int, float)))
+    band = sum(1 for r in plate_rows
+               if not isinstance(r.get("Linear In/PC"), (int, float))
+               and r.get("Est Cut Hours") is not None)
+    none_est = sum(1 for r in plate_rows if r.get("Est Cut Hours") is None)
+    src_items = [("DXF-measured", dxf_meas), ("Band fallback", band),
+                 ("No estimate", none_est)]
+
+    mat = {}
+    for r in plate_rows:
+        name = (str(r.get("Material") or r.get("Source Material") or "").strip()
+                or "(blank)")
+        mat[name] = mat.get(name, 0) + 1
+    mat_items = sorted(mat.items(), key=lambda kv: -kv[1])
+
+    # ── data tables (columns T/U, stacked) ────────────────────────────────
+    data_col = 20  # column T
+    state = {"row": 1}
+
+    def put_table(heading, items, value_title="Parts", fmt=None):
+        hr = state["row"]
+        ws.cell(hr, data_col, heading).font = Font(bold=True)
+        ws.cell(hr, data_col + 1, value_title).font = Font(bold=True)
+        first = hr + 1
+        for i, (k, v) in enumerate(items):
+            ws.cell(first + i, data_col, str(k))
+            cell = ws.cell(first + i, data_col + 1, v)
+            if fmt:
+                cell.number_format = fmt
+        last = first + len(items) - 1
+        state["row"] = (last if items else hr) + 3
+        if not items or sum(float(v) for _, v in items) <= 0:
+            return None, None
+        cats = Reference(ws, min_col=data_col, min_row=first, max_row=last)
+        data = Reference(ws, min_col=data_col + 1, min_row=hr, max_row=last)
+        return cats, data
+
+    def pie(chart_title, cats, data, anchor):
+        if cats is None or data is None:
+            return
+        ch = PieChart()
+        ch.title = chart_title
+        ch.height, ch.width = 8, 12
+        ch.add_data(data, titles_from_data=True)
+        ch.set_categories(cats)
+        ch.dataLabels = DataLabelList()
+        ch.dataLabels.showPercent = True
+        ws.add_chart(ch, anchor)
+
+    def bar(chart_title, cats, data, anchor):
+        if cats is None or data is None:
+            return
+        ch = BarChart()
+        ch.type = "col"
+        ch.title = chart_title
+        ch.height, ch.width = 8, 14
+        ch.legend = None
+        ch.add_data(data, titles_from_data=True)
+        ch.set_categories(cats)
+        ws.add_chart(ch, anchor)
+
+    c_thick = put_table("Plate Thickness", thick_items)
+    c_layer = put_table("Layering", layer_items)
+    c_empty = put_table("Zero-inch Layers", empty_items)
+    c_nest = put_table("Est Cut Hours by Nest", nest_items, "Est Cut Hours", "0.000")
+    c_src = put_table("Estimate Source", src_items)
+    c_mat = put_table("Material", mat_items)
+
+    # ── charts (2-wide grid over the left of the sheet) ────────────────────
+    pie("Plate Thickness (in)", *c_thick, anchor="A4")
+    pie("Single vs Multi-Layered", *c_layer, anchor="J4")
+    pie('Parts with a 0" Layer', *c_empty, anchor="A22")
+    bar("Est Cut Hours by Nest", *c_nest, anchor="J22")
+    pie("Estimate Source", *c_src, anchor="A40")
+    pie("Material Distribution", *c_mat, anchor="J40")
+    log("  Added Analysis sheet (thickness, layering, 0-inch layers, cut hours "
+        "by nest, estimate source, material).")
+
+
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
     """Write the workbook with two identically-structured sheets: 'Plates' and
     'Non-Plates'. Each holds ONLY the flat data table (every batch-list column
@@ -1010,6 +1136,8 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log)
 
     ws_other = wb.create_sheet("Non-Plates")
     write_data_table(ws_other, data_headers, nonplate_rows)
+
+    write_analysis_sheet(wb, plate_rows, log)
 
     wb.save(str(out_path))
     return [("Plates", len(plate_rows)), ("Non-Plates", len(nonplate_rows))]
@@ -1329,7 +1457,7 @@ def run(params: dict, progress_callback, cancel_event):
         # order (matches the batch list's 'Work Order' column). Absent for
         # structural-only orders -> those rows fall back to the band estimate.
         iges_folder = find_iges_folder(cui) if cui else None
-        dxf_index, dxf_suspect, dxf_multi = build_dxf_index(
+        dxf_index, dxf_suspect, dxf_multi, dxf_empty = build_dxf_index(
             str(iges_folder) if iges_folder else None, log)
         if iges_folder:
             log(f"  IGES DXFs: {len(dxf_index)} work order(s) measured.")
@@ -1415,6 +1543,10 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Remnant Width"] = ((pdfd or {}).get("sheet_width")
                                         if (has_rem and pdfd) else None)
             out_row["Multiplier"] = ""    # blank placeholder (planner fills in)
+            # Preserved (non-column) field for the Analysis sheet: did this part's
+            # DXF carry a present-but-zero-length layer? True/False for DXF-resolved
+            # plate rows, None when there's no DXF match.
+            out_row["_empty_layers"] = dxf_empty.get(wo) if wo in dxf_index else None
             out_row["Stock L"] = (pdfd or {}).get("stock_l") if pdfd else None
             out_row["Stock W"] = (pdfd or {}).get("stock_w") if pdfd else None
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
@@ -1525,6 +1657,7 @@ def run(params: dict, progress_callback, cancel_event):
         nr["PPN Quantity"] = row.get("PPN Quantity") if row.get("PPN Quantity") is not None else low.get("PPN QUANTITY")
         nr["Description"] = row.get("Description") if row.get("Description") is not None else low.get("DESCRIPTION")
         nr["Est Cut Hours"] = low.get("EST CUT HOURS")
+        nr["_empty_layers"] = row.get("_empty_layers")   # Analysis sheet only
         norm_rows.append(nr)
 
     # Split into plate vs non-plate (shapes/bars/tubes) — each gets its own
