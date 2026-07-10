@@ -995,6 +995,7 @@ _TOTAL_FILL = PatternFill("solid", fgColor="FFE699")
 _MISSING_FILL = PatternFill("solid", fgColor="FFFF00")   # no estimate (yellow)
 _OUTLIER_FILL = PatternFill("solid", fgColor="F4B084")   # LI outlier (orange)
 _MULTI_FILL = PatternFill("solid", fgColor="DDEBF7")     # multi-layered (light blue)
+_NODXF_FILL = PatternFill("solid", fgColor="FF6666")     # no DXF match / band estimate (red)
 _THIN = Side(style="thin", color="BFBFBF")
 _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
@@ -1169,8 +1170,53 @@ def write_analysis_sheet(wb, plate_rows, log):
     pie('Parts with a 0" Layer', *c_empty, anchor="A40")
     bar("Data Quality (parts per flag)", *c_flag, anchor="J40")
     pie("Bevel vs Straight Cut", *c_bevel, anchor="A58")
+
+    # ── DXF coverage callout (bottom of sheet) ────────────────────────────
+    # Any plate part that fell back to the thickness-band estimate has NO DXF to
+    # measure; group those by order+nest so the missing IGES/DXF files can be
+    # chased. These same rows are filled red on the Plates sheet.
+    missing_dxf = {}
+    for r in plate_rows:
+        if "no dxf match" not in str(r.get("Flags") or "").lower():
+            continue
+        key = (str(r.get("Order") or "").strip(), str(r.get("Nest Pkg Nbr") or "").strip())
+        d = missing_dxf.setdefault(key, {"count": 0, "thk": set()})
+        d["count"] += 1
+        t = r.get("Thickness (in)")
+        if isinstance(t, (int, float)):
+            d["thk"].add(round(float(t), 3))
+
+    mr = 78
+    ws.cell(mr, 1, "DXF Coverage").font = Font(bold=True, size=12)
+    if not missing_dxf:
+        ws.cell(mr + 1, 1, "All plate parts matched a DXF -- every cut time is "
+                           "measured from geometry.").font = Font(italic=True,
+                                                                  color="548235")
+    else:
+        total_missing = sum(d["count"] for d in missing_dxf.values())
+        ws.cell(mr + 1, 1,
+                f"{total_missing} plate part(s) across {len(missing_dxf)} nest(s) "
+                f"had NO DXF match and fell back to the thickness-band estimate "
+                f"(rows highlighted red on the Plates sheet). Chase down these "
+                f"IGES/DXF files:").font = Font(bold=True, color="C00000")
+        for c, name in enumerate(("Order", "Nest", "Parts w/o DXF", "Thickness(es)"),
+                                 start=1):
+            cell = ws.cell(mr + 3, c, name)
+            cell.font = _HDR_FONT
+            cell.fill = _HDR_FILL
+            cell.border = _BORDER
+        rr = mr + 4
+        for (order, nest), d in sorted(missing_dxf.items()):
+            thks = ", ".join(f'{t:g}"' for t in sorted(d["thk"])) or "-"
+            for c, v in enumerate((order or "-", nest or "-", d["count"], thks),
+                                  start=1):
+                cell = ws.cell(rr, c, v)
+                cell.border = _BORDER
+                cell.fill = _NODXF_FILL
+            rr += 1
+
     log("  Added Analysis sheet (thickness, cut hours by thickness, layering, "
-        "material, 0-inch layers, data-quality flags, bevel scope).")
+        "material, 0-inch layers, data-quality flags, bevel scope, DXF coverage).")
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
@@ -1197,8 +1243,9 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log)
 
 def write_data_table(ws, data_headers, data_rows):
     """Write one sheet's flat data table (header row 1, then data). Row highlights:
-    orange = LI outlier (past LI_OUTLIER_SD), yellow = no estimate, light blue =
-    multi-layered. No summary block -- pivots are layered on later."""
+    red = no DXF match (band-estimate fallback), orange = LI outlier (past
+    LI_OUTLIER_SD), yellow = no estimate, light blue = multi-layered. No summary
+    block -- pivots are layered on later."""
     for c, name in enumerate(data_headers, start=1):
         cell = ws.cell(1, c, name)
         cell.font = _HDR_FONT
@@ -1209,12 +1256,15 @@ def write_data_table(ws, data_headers, data_rows):
 
     est_idx = data_headers.index(EST_COL) + 1
     for ri, row in enumerate(data_rows, start=2):
-        # Pick one row highlight (most-important wins): LI outlier > no-estimate
-        # > multi-layered.
+        # Pick one row highlight (most-important wins): no-DXF-match (red) >
+        # LI outlier > no-estimate > multi-layered. Red leads because a
+        # band-estimated row is the least-trustworthy time and the one to chase.
+        is_nodxf = "no dxf match" in str(row.get("Flags") or "").lower()
         is_outlier = "outlier" in str(row.get("Flags") or "").lower()
         missing = row.get(EST_COL) is None
         is_multi = row.get("Multi-Layered") == "Y"
-        row_fill = (_OUTLIER_FILL if is_outlier else _MISSING_FILL if missing
+        row_fill = (_NODXF_FILL if is_nodxf else _OUTLIER_FILL if is_outlier
+                    else _MISSING_FILL if missing
                     else _MULTI_FILL if is_multi else None)
         for c, name in enumerate(data_headers, start=1):
             val = row.get(name)
