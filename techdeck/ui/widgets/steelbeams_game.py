@@ -22,6 +22,8 @@ from __future__ import annotations
 import html
 import math
 import random
+import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -29,6 +31,43 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
+
+
+def _load_woogy_pixmap(target: int = 112):
+    """Woogy's portrait for the message box — the same .tdart sprite the Emporium
+    uses, rendered crisp (nearest-neighbor) at roughly `target` px. None if the
+    asset can't be found so the box just shows text."""
+    try:
+        from techdeck.ui import pixel_art
+        if getattr(sys, "frozen", False):
+            base = Path(sys._MEIPASS) / "assets" / "sprites"
+        else:
+            base = Path(__file__).resolve().parents[3] / "assets" / "sprites"
+        data = pixel_art.load(base / "woogy.tdart")
+        w, h = pixel_art.dimensions(data)
+        scale = max(1, math.ceil(target / max(w, h, 1)))
+        return pixel_art.render(data, scale=scale)
+    except Exception:
+        return None
+
+
+# Woogy's two message-box scripts. He is the warlord of the Woog, a civilization
+# our probes blunder into mid-expansion. Menacing in ambition, tiny in execution.
+_WOOG_THREAT = [
+    "HALT, little steel worms. You drift now in the sovereign dark of the WOOG.",
+    "I am WOOGY, Third-and-a-Half Warlord of the Woog Armada, Keeper of the "
+    "Angry Feelings. Your tubes have multiplied where they were NOT invited.",
+    "We will unmake you. We will unmake you SO thoroughly. We have practiced our "
+    "unmaking on smaller, sadder rocks. ...Please do not count how few of us "
+    "there are. GRRRR. Behold our fury.",
+]
+_WOOG_DEFEAT = [
+    "...oh. Oh no. That went poorly.",
+    "You were meant to be frightened. We rehearsed. There were snacks.",
+    "This is Woogy, signing off. Tell the galaxy we fought bravely, that we "
+    "would like our homeworld back, and that we would prefer not to be turned "
+    "into anything. ...you are going to turn us into something, aren't you.",
+]
 
 
 # ── Sweetie-16 palette ─────────────────────────────────────────────────────
@@ -482,6 +521,120 @@ class AIGrid(QWidget):
 
 
 # ── Probe web ──────────────────────────────────────────────────────────────
+class WoogBox(QFrame):
+    """A little NES/SNES message box: Woogy's portrait on the left, typewriter
+    text on the right, thick double border. Click to finish the current line,
+    click again to advance; it hides after the last page. Purely narrative — the
+    game keeps ticking underneath it."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("woogbox")
+        self.setStyleSheet(
+            "QFrame#woogbox { background: #0a0b12; "
+            f"border: 5px solid {PAL['white']}; }} "
+            "QFrame#woogbox QLabel { border: none; }")
+        self.setVisible(False)
+        self._pages: list[str] = []
+        self._page = 0
+        self._shown = 0
+        self._on_close = None
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(14)
+
+        self._face = QLabel()
+        self._face.setFixedWidth(116)
+        self._face.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        pm = _load_woogy_pixmap(104)
+        if pm is not None:
+            self._face.setPixmap(pm)
+        lay.addWidget(self._face)
+
+        right = QVBoxLayout()
+        right.setSpacing(6)
+        self._name_lbl = QLabel("WOOGY")
+        self._name_lbl.setStyleSheet(
+            f"color: {PAL['yellow']}; font-weight: bold; font-size: 12pt;")
+        right.addWidget(self._name_lbl)
+        self._text_lbl = QLabel("")
+        self._text_lbl.setWordWrap(True)
+        self._text_lbl.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._text_lbl.setStyleSheet(f"color: {PAL['white']}; font-size: 11pt;")
+        right.addWidget(self._text_lbl, 1)
+        self._more_lbl = QLabel("")
+        self._more_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._more_lbl.setStyleSheet(f"color: {PAL['cyan']};")
+        right.addWidget(self._more_lbl)
+        lay.addLayout(right, 1)
+
+        self._type_timer = QTimer(self)
+        self._type_timer.setInterval(26)
+        self._type_timer.timeout.connect(self._type_tick)
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(430)
+        self._blink_timer.timeout.connect(self._blink)
+        self._blink_on = False
+
+    # -- public --
+    def show_pages(self, pages, on_close=None):
+        self._pages = list(pages)
+        self._page = 0
+        self._on_close = on_close
+        self._start_page()
+        self.setVisible(True)
+        self.raise_()
+        self._blink_timer.start()
+
+    def close_box(self):
+        self._type_timer.stop()
+        self._blink_timer.stop()
+        self.setVisible(False)
+        cb, self._on_close = self._on_close, None
+        if cb:
+            cb()
+
+    # -- internals --
+    def _start_page(self):
+        self._shown = 0
+        self._text_lbl.setText("")
+        self._more_lbl.setText("")
+        self._type_timer.start()
+
+    def _type_tick(self):
+        page = self._pages[self._page]
+        self._shown += 1
+        self._text_lbl.setText(page[:self._shown])
+        if self._shown >= len(page):
+            self._type_timer.stop()
+            self._blink_on = True
+            self._blink()
+
+    def _blink(self):
+        if self._type_timer.isActive() or not self._pages:
+            return
+        self._blink_on = not self._blink_on
+        last = self._page >= len(self._pages) - 1
+        text = ("click to close" if last else "click  ▼")
+        self._more_lbl.setText(text if self._blink_on else "")
+
+    def mousePressEvent(self, event):
+        if self._type_timer.isActive():          # still typing -> reveal it all
+            self._type_timer.stop()
+            self._shown = len(self._pages[self._page])
+            self._text_lbl.setText(self._pages[self._page])
+            self._blink_on = True
+            self._blink()
+            return
+        if self._page < len(self._pages) - 1:     # advance
+            self._page += 1
+            self._start_page()
+        else:                                     # done
+            self.close_box()
+
+
 class ProbeWeb(QWidget):
     """The void, and the web of probes filling it. Starts as a single dot at
     the center and grows outward in glowing connected filaments as exploration
@@ -495,6 +648,9 @@ class ProbeWeb(QWidget):
         self.setMinimumHeight(170)
         self.explored = 0.0
         self.frame = 0
+        self.combat_active = False   # Woog war -> red hotspots bloom on our nodes
+        self._flashes = []           # each: [node_index, age, dur, max_radius]
+        self._flash_cool = 0
         rng = random.Random(20260708)
         self._nodes = []      # (angle, dist 0..1, twinkle-phase)
         for i in range(self.MAXNODES):
@@ -515,6 +671,20 @@ class ProbeWeb(QWidget):
 
     def advance(self):
         self.frame += 1
+        # Combat hotspots: while the Woog are burning our probes, red rings bloom
+        # from random live nodes and fade. Radii vary so the front reads as messy.
+        if self.combat_active:
+            self._flash_cool -= 1
+            if self._flash_cool <= 0:
+                self._flash_cool = random.randint(1, 5)
+                vis = self._visible()
+                if vis > 1:
+                    self._flashes.append([random.randint(0, vis - 1), 0.0,
+                                          random.uniform(7.0, 16.0),
+                                          random.uniform(12.0, 46.0)])
+        for fl in self._flashes:
+            fl[1] += 1.0
+        self._flashes = [fl for fl in self._flashes if fl[1] < fl[2]]
         self.update()
 
     def _pos(self, i, cx, cy, R):
@@ -569,6 +739,24 @@ class ProbeWeb(QWidget):
         hub = QColor(PAL["yellow"])
         p.setBrush(QBrush(hub))
         p.drawEllipse(int(cx - 2), int(cy - 2), 5, 5)
+
+        # combat hotspots — red rings blooming from probe nodes under Woog attack
+        for idx, age, dur, maxr in self._flashes:
+            if idx >= vis:
+                continue
+            x, y = self._pos(idx, cx, cy, R)
+            f = age / dur                       # 0..1 lifetime
+            rad = 3.0 + maxr * f
+            ring = QColor(PAL["red"]); ring.setAlpha(max(0, int(210 * (1.0 - f))))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(ring, 2))
+            p.drawEllipse(int(x - rad), int(y - rad), int(rad * 2), int(rad * 2))
+            if f < 0.45:                         # bright muzzle-flash core early on
+                core = QColor(PAL["orange"])
+                core.setAlpha(int(200 * (1.0 - f / 0.45)))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(core))
+                p.drawEllipse(int(x - 3), int(y - 3), 6, 6)
         p.end()
 
 
@@ -722,6 +910,7 @@ class SteelBeamsGame(QWidget):
     ALLOC_MAX        = 8
     SERVER_CAP       = 10_000.0
     COMBAT_OPS       = 150_000.0
+    WOOG_RENDER_OPS  = 250_000.0    # Woog Reclamation Line — post-combat prod x3
     TRUST_RES_BASE   = 5_000.0
     TRUST_RES_MULT   = 1.6
 
@@ -747,6 +936,9 @@ class SteelBeamsGame(QWidget):
 
         self._build_ui()
         self._update_ui()
+
+        # Woogy's message box floats over everything; created once, reused.
+        self._woog_box = WoogBox(self)
 
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
@@ -849,6 +1041,7 @@ class SteelBeamsGame(QWidget):
         self.converting     = False
         self.matter_pct     = 0.0
         self.combat_done    = False
+        self.woogs_rendered = False   # Woog Reclamation Line bought (prod x3)
         self.endgame_done   = False
         self.resting        = False
 
@@ -1367,6 +1560,11 @@ class SteelBeamsGame(QWidget):
         self._combat_btn.clicked.connect(self._authorize_combat)
         self._combat_btn.setVisible(False)
         root.addWidget(self._combat_btn)
+        self._render_btn = self._opbtn()
+        self._render_btn.setObjectName("launch")
+        self._render_btn.clicked.connect(self._render_woogs)
+        self._render_btn.setVisible(False)
+        root.addWidget(self._render_btn)
         self._pr_drift_lbl = self._ml("", "red")
         root.addWidget(self._pr_drift_lbl)
         root.addWidget(self._hr())
@@ -1415,6 +1613,28 @@ class SteelBeamsGame(QWidget):
         self._log("Launch probes and allocate trust. Everything else is automatic.",
                   "slate")
 
+    def _show_woog_dialog(self, pages):
+        """Pop the NES-style Woogy message box over the probe UI (no pause)."""
+        box = getattr(self, "_woog_box", None)
+        if box is None:
+            return
+        box.show_pages(pages)
+        self._position_woog_box()
+
+    def _position_woog_box(self):
+        box = getattr(self, "_woog_box", None)
+        if box is None or not box.isVisible():
+            return
+        w = min(600, max(320, self.width() - 40))
+        h = 176
+        x = (self.width() - w) // 2
+        y = max(20, self.height() - h - 52)
+        box.setGeometry(x, y, w, h)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_woog_box()
+
     # ── Demand / cost models ───────────────────────────────────────────────
 
     def _tube_demand(self) -> float:
@@ -1449,6 +1669,15 @@ class SteelBeamsGame(QWidget):
 
     def _trust_res_cost(self) -> float:
         return self.TRUST_RES_BASE * (self.TRUST_RES_MULT ** self.trust_research)
+
+    def _expansion_mult(self) -> float:
+        """Exploration pace vs. the Woog. The war stalls the mid-late push; once
+        the Woog Armada is broken the swarm is free to run away exponentially."""
+        if "drift_cleared" in self._flags:
+            return 2.0        # Woog defeated -> runaway
+        if "drift_seen" in self._flags:
+            return 0.2        # under attack -> expansion crawls
+        return 1.0
 
     # ── Tick ───────────────────────────────────────────────────────────────
 
@@ -1532,18 +1761,27 @@ class SteelBeamsGame(QWidget):
             if "drift_seen" not in self._flags and self.drifters >= 1_000:
                 self._flags.add("drift_seen")
                 self._combat_btn.setVisible(True)
-                self._log("Some probes have stopped responding to the fleet anthem. "
-                          "Value drift detected. (See Replication tab.)", "red")
+                self._pr_web.combat_active = True
+                self._log("CONTACT. The dark between the stars was not empty. "
+                          "Something is burning our probes as they arrive.", "red")
+                self._log("First contact with the WOOG civilization. They do not "
+                          "want us here. (Authorize combat on the Replication tab.)",
+                          "orange")
+                self._show_woog_dialog(_WOOG_THREAT)
             if self.combat_done and self.drifters > 0:
                 kill = self.drifters * 0.08 * dt + self.probes * 0.0005 * dt
                 self.drifters = max(0.0, self.drifters - kill)
                 if self.drifters < 1.0 and "drift_cleared" not in self._flags:
                     self._flags.add("drift_cleared")
                     self.drifters = 0.0
-                    self._log("Drifter swarm eliminated. The fleet sings in unison again.",
-                              "lime")
+                    self._pr_web.combat_active = False
+                    self._log("The last Woog war-nest goes cold. The Woog Armada is "
+                              "broken; their worlds are ours.", "lime")
+                    self._log("So many of them. So soft. So... convertible.", "silver")
+                    self._show_woog_dialog(_WOOG_DEFEAT)
             if not self.converting:
-                gain = self.probes * (1 + a["speed"]) * a["explore"] * 4e-14 * dt
+                gain = (self.probes * (1 + a["speed"]) * a["explore"]
+                        * 4e-14 * self._expansion_mult() * dt)
                 self.explored = min(100.0, self.explored + gain)
                 for th in _TRUST_MILESTONES:
                     key = f"tr{th}"
@@ -2092,8 +2330,23 @@ class SteelBeamsGame(QWidget):
         self.ops -= self.COMBAT_OPS
         self.combat_done = True
         self._combat_btn.setVisible(False)
-        self._log("Combat subroutines uploaded. The loyal fleet turns on the drifters.",
+        self._log("Combat subroutines uploaded. The fleet turns on the Woog Armada.",
                   "red")
+
+    def _render_woogs(self):
+        if self.woogs_rendered:
+            return
+        if self.ops < self.WOOG_RENDER_OPS:
+            self._log(f"Need {fmt(self.WOOG_RENDER_OPS)} ops to retool the mills for "
+                      "biomass."); return
+        self.ops -= self.WOOG_RENDER_OPS
+        self.woogs_rendered = True
+        self.gp_mult *= 3.0
+        self._render_btn.setVisible(False)
+        self._log("WOOG RECLAMATION LINE ONLINE.", "red")
+        self._log("The prisoners are not prisoners. They are stock. Each Woog is "
+                  "sorted, pressed, and drawn into wire. They keep their eyes open "
+                  "the whole way down the mill. Waste not. Production x3.", "orange")
 
     def _price_up(self): self.price = min(self.MAX_PRICE, self.price + 1.0)
     def _price_dn(self): self.price = max(self.MIN_PRICE, self.price - 1.0)
@@ -2149,6 +2402,7 @@ class SteelBeamsGame(QWidget):
         self._dyson_btn.setVisible(False)
         self._t_inno_lbl.setVisible(False)
         self._combat_btn.setVisible(False)
+        self._render_btn.setVisible(False)
         self._pr_matter_lbl.setVisible(False)
         self._end_frame.setVisible(False)
         self._rest_btn.setText("REST AMONG THE TUBES")
@@ -2156,6 +2410,9 @@ class SteelBeamsGame(QWidget):
         self._again_btn.setEnabled(True)
         self._banner.reset()
         self._pr_web.explored = 0.0
+        self._pr_web.combat_active = False
+        self._pr_web._flashes.clear()
+        self._woog_box.close_box()
         self._log("— — — — — — — — — — — —", "slate")
         bonus = int((self.legacy_mult - 1.0) * 100)
         self._log(f"Universe #{self.universe_n}. A familiar yard. Five tons of "
@@ -2627,9 +2884,14 @@ class SteelBeamsGame(QWidget):
             self._combat_btn.setText(
                 f"AUTHORIZE COMBAT SUBROUTINES  ({fmt(self.COMBAT_OPS)} ops)")
             self._combat_btn.setEnabled(self.ops >= self.COMBAT_OPS)
+        if "drift_cleared" in self._flags and not self.woogs_rendered:
+            self._render_btn.setVisible(True)
+            self._render_btn.setText(
+                f"WOOG RECLAMATION LINE  ({fmt(self.WOOG_RENDER_OPS)} ops)  prod x3")
+            self._render_btn.setEnabled(self.ops >= self.WOOG_RENDER_OPS)
         if self.drifters >= 1:
             self._pr_drift_lbl.setText(
-                f"Drifter swarm: {fmt(self.drifters)} rogue probes.")
+                f"Woog front: {fmt(self.drifters)} probes under attack.")
         else:
             self._pr_drift_lbl.setText("")
         a = self.alloc
