@@ -903,6 +903,17 @@ class SteelBeamsGame(QWidget):
     PROBE_COST_OPS   = 20_000.0
     ALLOC_MAX        = 8
     SERVER_CAP       = 10_000.0
+    # Late-game compute: the Tech Team's dev/server ops economy doesn't scale into
+    # the endgame on its own, so Dyson spheres and the probe fleet (both enormous
+    # distributed processors) pour ops in — and raise the cap so 150k combat is
+    # bankable without grinding out a wall of servers.
+    # Dyson is the main lever (a few spheres take combat from a ~20-min grind to a
+    # few minutes); the tiny per-probe term is only a self-correcting fallback so a
+    # no-Dyson fleet still funds combat in a handful of minutes as it replicates.
+    DYSON_OPS_BONUS  = 2.0          # each Dyson sphere: +200% ops throughput
+    DYSON_OPS_CAP    = 100_000.0    # each Dyson sphere: +100k ops capacity
+    PROBE_OPS        = 0.0002       # ops/sec contributed per probe in the fleet
+    PROBE_OPS_CAP_FLOOR = 400_000.0 # probe-phase ops cap never falls below this
     COMBAT_OPS       = 150_000.0
     WOOG_CONTACT_PCT = 25.0         # first contact with the Woog at 25% survey
     WOOG_SETBACK_PCT = 0.3          # war drags exploration down to this floor
@@ -1070,9 +1081,22 @@ class SteelBeamsGame(QWidget):
     def demand_mult(self) -> float:
         return self.gd_mult * (1.0 + 0.05 * self.del_drones) * self.legacy_mult
 
+    def _ops_rate(self) -> float:
+        """Ops per second. The dev team is the base; late-game compute — Dyson
+        spheres multiply throughput and the probe fleet computes for you — dwarfs
+        it, so ops scale into the endgame instead of staying at Tech-Team levels."""
+        rate = self.developers * self.ops_mult
+        rate *= 1.0 + self.dyson * self.DYSON_OPS_BONUS
+        if self.probe_phase:
+            rate += self.probes * self.PROBE_OPS
+        return rate
+
     @property
     def _ops_cap(self) -> float:
-        return self.servers * self.SERVER_CAP
+        cap = self.servers * self.SERVER_CAP + self.dyson * self.DYSON_OPS_CAP
+        if self.probe_phase:
+            cap = max(cap, self.PROBE_OPS_CAP_FLOOR)
+        return cap
 
     @property
     def _rep_avail(self) -> int:
@@ -1864,7 +1888,7 @@ class SteelBeamsGame(QWidget):
 
         # ── Ops + innovation (innovation accrues while ops sit at cap)
         if self.tech_unlocked:
-            gain = self.developers * self.ops_mult * dt
+            gain = self._ops_rate() * dt
             self.ops = min(self.ops + gain, self._ops_cap)
             if self.ops >= self._ops_cap:
                 if not self.inno_unlocked:
@@ -2241,7 +2265,9 @@ class SteelBeamsGame(QWidget):
         self.money -= self.DYSON_COST
         self.dyson += 1
         self._log(f"Dyson Sphere segment #{self.dyson} encircles the sun. "
-                  f"+{fmt(self.DYSON_POWER)} power/sec, no solar needed.", "yellow")
+                  f"+{fmt(self.DYSON_POWER)} power/sec (no solar needed), and its "
+                  f"compute pours into ops: +{int(self.DYSON_OPS_BONUS * 100)}% "
+                  "ops throughput.", "yellow")
 
     def _buy_stock(self, n: int):
         cost = n * self.stock_price
@@ -2650,7 +2676,7 @@ class SteelBeamsGame(QWidget):
         avail = self._rep_avail
         self._t_rep_lbl.setText(
             f"Reputation: {avail} pts available  ({self.rep_total} total)")
-        ops_ps = self.developers * self.ops_mult
+        ops_ps = self._ops_rate()
         self._t_ops_lbl.setText(
             f"Ops: {fmt(self.ops)} / {fmt(self._ops_cap)}   |   Ops/sec: {fmt(ops_ps)}")
         if self.inno_unlocked:
@@ -2859,7 +2885,8 @@ class SteelBeamsGame(QWidget):
             self._dyson_btn.setVisible(True)
             self._dyson_btn.setText(
                 f"Dyson Sphere  {fmt_money(self.DYSON_COST)}  "
-                f"({self.dyson})  +{fmt(self.DYSON_POWER)} power/sec")
+                f"({self.dyson})  +{fmt(self.DYSON_POWER)} power/sec  "
+                f"+{int(self.DYSON_OPS_BONUS * 100)}% ops")
             self._dyson_btn.setEnabled(self.money >= self.DYSON_COST)
         self._space_status_lbl.setText(
             f"Orbital income: ${fmt(orbital_inc)}/sec    "
@@ -2879,7 +2906,8 @@ class SteelBeamsGame(QWidget):
         self._pr_count_lbl.setText(
             f"Probes: {fmt(self.probes)}   (launched: {self.probes_launched})")
         self._pr_funds_lbl.setText(
-            f"${fmt(self.money)}  |  {fmt(self.ops)} ops")
+            f"${fmt(self.money)}  |  {fmt(self.ops)} / {fmt(self._ops_cap)} ops  "
+            f"(+{fmt(self._ops_rate())}/sec)")
         self._pr_launch_btn.setText(
             f"LAUNCH PROBE   {fmt_money(self.PROBE_COST_MONEY)} + "
             f"{fmt(self.PROBE_COST_OPS)} ops")
