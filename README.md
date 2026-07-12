@@ -1,8 +1,40 @@
-# TechDeck v0.8.6.5 - Baked Beans & Gemba
+# TechDeck v0.8.6.6 - Runtime Estimator v2 & LST Organizer
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.6
+
+**911 Runtime Estimator v2 - exact linear-inch cut times** - Plate cut times are now
+measured, not banded: each work order's DXF geometry is parsed (lines, arcs, circles,
+polylines - every cut layer) and the exact linear inches of cut are divided by a
+thickness-driven feed rate. Runs off an award package (the folder of order folders,
+before batching) so work-scope and machine review can happen up front. The output
+workbook gained an **Analysis sheet** (thickness/material/layering/data-quality charts,
+DXF-coverage callout listing any parts whose DXF is missing, flagged-deviation list),
+an auditable **Equation column** that spells out every row's math, Multi-Layered and
+LI-deviation columns with row highlighting, and remnant dimensions. Rows with no DXF
+fall back to the old thickness band and are flagged red. (The separate 911 Linear Inch
+CutTime app was absorbed into this and removed.)
+
+**New app: 911 LST Organizer** - Pick a nest's PRODUCTION PAPERWORK folder and it pulls
+exactly the .lst files that nest's 1D cutting-pattern diagram lists into an LST
+subfolder - including parts cut from other batches, which are found automatically and
+prefixed with their nest. Missing files or unresolvable nests raise a blocking warning
+so nothing is silently skipped.
+
+**Reliability** - Reading a workbook that OneDrive holds cloud-only no longer fails with
+a confusing "File is not a zip file" error; the file is hydrated and retried like every
+other OneDrive read (this had bitten 911 Setup).
+
+**ASA: The Video Game v2** - Full 16-bit rebuild that now runs the complete arc: the
+business act (yard, tech team, trading desk, A-frames, drones, space program with a real
+power economy), the probe program that transforms the whole interface, a first-contact
+war against the Woogs with an upgrade tree and real attrition combat, and an actual
+ending. Plus: Mr Beans' eyes follow your cursor on the Home tile.
 
 ---
 

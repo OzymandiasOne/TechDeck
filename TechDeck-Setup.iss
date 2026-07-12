@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.5 - Baked Beans & Gemba: new 911 Baked Beans Wild Ride plugin; QA Gemba Analyzer missing-material tracking + QMS data home; Library family badges; window sizing fixes
+; Version 0.8.6.6 - Runtime Estimator v2 & LST Organizer: exact DXF linear-inch cut times + Analysis sheet; new 911 LST Organizer plugin; ASA: The Video Game v2; OneDrive placeholder fix
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.5"
+#define MyAppVersion "0.8.6.6"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

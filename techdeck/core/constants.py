@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.5"  # Baked Beans & Gemba: new 911 Baked Beans Wild Ride plugin (NC-calc consolidation); QA Gemba Analyzer missing-material tracking + QMS-library data home, seed data removed; Library family badges; /admin gate; window sizing fixes
+APP_VERSION = "0.8.6.6"  # Runtime Estimator v2 & LST Organizer: 911 Runtime Estimator exact DXF linear-inch cut times + Analysis sheet; new 911 LST Organizer plugin; ASA: The Video Game v2 full arc; OneDrive placeholder BadZipFile fix; feedback/telemetry plumbing
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
