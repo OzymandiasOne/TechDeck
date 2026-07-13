@@ -2,8 +2,14 @@
 911 SSPO Invoicing Prep  (plugin id: 911_sspo_invoicing_prep, family: 911)
 ==========================================================================
 Takes a big SSPO pricing sheet (like "SSPO Pricing Back Up") and splits it into one
-workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back Up.xlsx", saved in a
-new folder next to the file the user picks.
+workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back Up.xlsx", each saved in
+its own "{BATCH} {NEST} Invoicing Docs" subfolder of a new folder next to the file
+the user picks.
+
+The top level of that output folder also gets a "D911 Workorder Close Outs
+{m-d-yyyy}.xlsx" reconstruction of the sheet previously ripped by hand from the
+pricing master: the source's columns from A through "Machine", values AND cell
+styles copied verbatim, with every row's Scheduling Group set to "Closed".
 
 Each output workbook is built ENTIRELY from scratch (no template file) and gets:
 
@@ -37,6 +43,8 @@ formulas) with each cell's number format preserved so $ and dates still display 
 import os
 import re
 import shutil
+from copy import copy
+from datetime import date
 from pathlib import Path
 
 # --- SDK bootstrap (works under the app and for headless CLI testing) -------------
@@ -65,6 +73,13 @@ PBU_SHEET = "Pricing Back Up"
 INV_SHEET = "Invoice Supplement"
 TOTAL_HEADER = "TOTAL PRICE PER WO"
 LOGO_NAME = "asa_logo.png"
+
+# Workorder Close Outs sheet: the source's columns A..Machine, verbatim, with
+# Scheduling Group forced to "Closed" (reconstructs the sheet previously hand-ripped
+# from the pricing master).
+CLOSEOUT_LAST_HEADER = "MACHINE"
+CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
+CLOSEOUT_STATUS_VALUE = "Closed"
 
 # Forecast sheets searched for the PO / PO Line, in priority order (active
 # forecast first; finished batches roll off to the Complete sheet).
@@ -265,6 +280,53 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
     val.number_format = ACCT_FMT
 
 
+def _copy_cell(src_c, dst_c, value=None):
+    """Copy a source cell's value + full style (font/fill/border/alignment/number
+    format) onto dst_c; `value` overrides the copied value."""
+    dst_c.value = src_c.value if value is None else value
+    dst_c.font = copy(src_c.font)
+    dst_c.fill = copy(src_c.fill)
+    dst_c.border = copy(src_c.border)
+    dst_c.alignment = copy(src_c.alignment)
+    dst_c.number_format = src_c.number_format
+
+
+def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
+    """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
+    out_dir: the source sheet's columns A through "Machine" (values and cell styles
+    verbatim, so the hand-ripped original is reproduced exactly) with every row's
+    Scheduling Group set to "Closed". Returns the filename written."""
+    last_col = hmap.get(CLOSEOUT_LAST_HEADER)
+    if not last_col:
+        last_col = max(hmap.values())
+        log(f"  WARNING: no '{CLOSEOUT_LAST_HEADER}' column - the Close Outs sheet "
+            "will include every column instead.")
+    status_col = hmap.get(CLOSEOUT_STATUS_HEADER)
+    if not status_col or status_col > last_col:
+        status_col = None
+        log(f"  WARNING: no '{CLOSEOUT_STATUS_HEADER}' column - no rows marked "
+            f"'{CLOSEOUT_STATUS_VALUE}'.")
+
+    wb = openpyxl.Workbook()
+    ws = wb.active                      # stays "Sheet1", like the hand-made original
+    for j in range(1, last_col + 1):
+        letter = get_column_letter(j)
+        dim = src_ws.column_dimensions.get(letter)
+        if dim is not None and dim.width:
+            ws.column_dimensions[letter].width = dim.width
+        _copy_cell(src_ws.cell(row=hdr_row, column=j), ws.cell(row=1, column=j))
+    for r_i, src_row in enumerate(valid_rows, start=2):
+        for j in range(1, last_col + 1):
+            _copy_cell(src_row[j - 1], ws.cell(row=r_i, column=j),
+                       value=CLOSEOUT_STATUS_VALUE if j == status_col else None)
+
+    today = date.today()
+    fname = _safe_filename(
+        f"D911 Workorder Close Outs {today.month}-{today.day}-{today.year}.xlsx")
+    wb.save(out_dir / fname)
+    return fname
+
+
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
     """Build one output workbook from scratch for a single Batch+Nest group."""
     wb = openpyxl.Workbook()
@@ -302,9 +364,12 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
 
 def split_workbook(src_path, out_dir, settings, log,
                    progress_callback=None, cancel_event=None):
-    """Split src_path into one from-scratch workbook per (Batch, Nest). Returns
-    (written, missing_po) where written = [(filename, row_count)] and missing_po =
-    [display names of groups whose PO wasn't in the forecast]."""
+    """Split src_path into one from-scratch workbook per (Batch, Nest), each in its
+    own "{BATCH} {NEST} Invoicing Docs" subfolder, plus the Workorder Close Outs
+    workbook at the top of out_dir. Returns (written, missing_po, closeout_name)
+    where written = [(relative path, row_count)], missing_po = [display names of
+    groups whose PO wasn't in the forecast], and closeout_name is the Close Outs
+    filename (None if cancelled before it was written)."""
     src_path = Path(src_path)
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
@@ -318,7 +383,7 @@ def split_workbook(src_path, out_dir, settings, log,
         po_map = _read_po_map(forecast_copy, log, cancel_event) if forecast_copy else {}
         if cancel_event is not None and cancel_event.is_set():
             log("Cancelled.")
-            return [], []
+            return [], [], None
         if progress_callback:
             progress_callback(12)
 
@@ -332,12 +397,13 @@ def split_workbook(src_path, out_dir, settings, log,
         i_batch = hmap["BATCH"]                    # 1-based
         i_nest = hmap["NEST PKG NBR"]
 
-        # Group data rows by (batch, nest), preserving first-seen order.
-        groups, order, skipped = {}, [], 0
+        # Group data rows by (batch, nest), preserving first-seen order; keep the
+        # flat source-order row list too for the Close Outs sheet.
+        groups, order, valid_rows, skipped = {}, [], [], 0
         for i, row in enumerate(ws.iter_rows(min_row=hdr_row + 1, max_col=last_col)):
             if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                 log("Cancelled.")
-                return [], []
+                return [], [], None
             if all(c.value in (None, "") for c in row):
                 continue
             nest = _as_str(row[i_nest - 1].value)
@@ -350,9 +416,14 @@ def split_workbook(src_path, out_dir, settings, log,
                 groups[key] = []
                 order.append(key)
             groups[key].append(row)
+            valid_rows.append(row)
 
         if not order:
             raise ValueError("No rows with a valid nest number were found.")
+
+        closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir, log)
+        log(f"  wrote {closeout_name}  ({len(valid_rows)} rows, "
+            f"Scheduling Group -> '{CLOSEOUT_STATUS_VALUE}')")
 
         written, missing_po = [], []
         for gi, (batch, nest) in enumerate(order):
@@ -365,17 +436,20 @@ def split_workbook(src_path, out_dir, settings, log,
                 missing_po.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} not found in the forecast - "
                     "PO / PO Line left blank.")
+            sub_dir = out_dir / _safe_filename(f"{batch} {nest} Invoicing Docs")
+            sub_dir.mkdir(exist_ok=True)
             fname = _safe_filename(f"{batch} {nest} Pricing Back Up.xlsx")
             _write_output(headers, hmap, rows, po_info, logo_path,
-                          out_dir / fname, log)
-            written.append((fname, len(rows)))
-            log(f"  wrote {fname}  ({len(rows)} row{'s' if len(rows) != 1 else ''})")
+                          sub_dir / fname, log)
+            rel = f"{sub_dir.name}\\{fname}"
+            written.append((rel, len(rows)))
+            log(f"  wrote {rel}  ({len(rows)} row{'s' if len(rows) != 1 else ''})")
             if progress_callback:
                 progress_callback(15 + int(80 * (gi + 1) / len(order)))
 
         if skipped:
             log(f"Skipped {skipped} row(s) without a valid nest number (footers/blanks).")
-        return written, missing_po
+        return written, missing_po, closeout_name
     finally:
         # The forecast copy is working scratch only - always remove it, even on
         # error/cancel, so it never lingers next to the real output files.
@@ -408,7 +482,7 @@ def run(params, progress_callback, cancel_event):
     progress_callback(5)
 
     try:
-        written, missing_po = split_workbook(
+        written, missing_po, closeout_name = split_workbook(
             src, out_dir, settings, log, progress_callback, cancel_event)
     except Exception as e:
         log(f"ERROR: {e}")
@@ -429,7 +503,10 @@ def run(params, progress_callback, cancel_event):
     if callable(on_success):
         on_success()
     msg = (f"Done! Wrote {len(written)} back-up file(s) "
-           f"({total} rows total) to:\n\n{out_dir}")
+           f"({total} rows total), each in its own Invoicing Docs folder, to:"
+           f"\n\n{out_dir}")
+    if closeout_name:
+        msg += f"\n\nWorkorder Close Outs sheet (top level): {closeout_name}"
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)
