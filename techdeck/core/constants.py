@@ -38,11 +38,11 @@ TICKETS_PER_RUN = 5        # earned per successful plugin run
 TICKETS_PER_FEEDBACK = 25  # earned for submitting feedback
 
 # Usage telemetry + feedback delivery (see docs/USAGE_TELEMETRY.md).
-# The maintainer's Power Automate flow URL ("When an HTTP request is
-# received"). Baked into the build; empty string = webhook disabled, so
+# The maintainer's Power Automate flow URL ("When a Teams webhook request
+# is received"). Baked into the build; empty string = webhook disabled, so
 # usage events only accumulate in the local spool and feedback falls back
 # to the legacy shared-workbook path.
-TELEMETRY_WEBHOOK_URL = "https://REDACTED-ENVIRONMENT.api.powerplatform.com:443/powerautomate/automations/direct/workflows/REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=REDACTED"
+TELEMETRY_WEBHOOK_URL = "https://REDACTED-ENVIRONMENT.api.powerplatform.com:443/powerautomate/automations/direct/cu/07/workflows/REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=REDACTED"
 
 # Logging
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
