@@ -30,7 +30,11 @@ _PLUGIN_ID_RENAMES = {
     "po_packet_extractor": "911_po_pdf_extractor",
     "run_time_estimator": "922_runtime_genie",
     "911_repeater": "911_batch_repeater",  # id now matches its folder
-    "911_linear_inch_calc": "911_runtime_estimator",  # renamed 2026-06-04
+    # Chain entries point at the FINAL id: tile/unlock migration is a single
+    # dict lookup (no chaining), so an old->intermediate entry would leave a
+    # stale tile for one launch.
+    "911_linear_inch_calc": "911_sspo_award_review",   # renamed 2026-06-04
+    "911_runtime_estimator": "911_sspo_award_review",  # renamed 2026-07-13
     "linear_inch_calculator": "customer_dxf_quoting",  # renamed 2026-06-10
     # 2026-07-02 naming convention: id = family-prefixed snake_case of the
     # Library name (911_/922_/qa_/game_; family-less plugins unprefixed).

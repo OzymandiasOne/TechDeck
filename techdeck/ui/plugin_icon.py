@@ -39,7 +39,7 @@ PLUGIN_ICON_KEYS = {
     "911_remove_ticket":    "scissors",
     "911_po_pdf_extractor": "claw",
     "911_sketch_extractor": "sym_picture",
-    "911_runtime_estimator": "stopwatch",
+    "911_sspo_award_review": "stopwatch",
     "922_pallet_stamper":   "stamp",
     "922_formingfinder":    "futurama_bender",
     "922_kitting":          "toolbox",

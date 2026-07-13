@@ -76,6 +76,8 @@ Type: filesandordirs; Name: "{app}\plugins\batch_repeater"
 Type: filesandordirs; Name: "{app}\plugins\922_form_seeker"
 Type: filesandordirs; Name: "{app}\plugins\qa_rework"
 Type: filesandordirs; Name: "{app}\plugins\steeltube_game"
+; 2026-07-13: 911_runtime_estimator renamed to 911_sspo_award_review
+Type: filesandordirs; Name: "{app}\plugins\911_runtime_estimator"
 ; 2026-07-09: 911_linear_inch_cuttime retired (absorbed into 911_runtime_estimator).
 ; Removed - so also purge the running copy under %LOCALAPPDATA%.
 Type: filesandordirs; Name: "{app}\plugins\911_linear_inch_cuttime"
