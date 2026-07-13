@@ -177,7 +177,7 @@ class SettingsPage(QWidget, ThemeAware):
         fb_desc.setWordWrap(True)
         fb_section.addWidget(fb_desc)
 
-        self.fb_btn = QPushButton("Open Report Feedback…")
+        self.fb_btn = QPushButton("Submit Feedback")
         self.fb_btn.setMinimumHeight(36)
         self.fb_btn.setMaximumWidth(220)
         self.fb_btn.setStyleSheet(self._fb_btn_style(theme))
