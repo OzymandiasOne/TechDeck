@@ -51,7 +51,7 @@ class FeedbackDialog(QDialog):
         super().__init__(parent)
         self.settings = settings   # SettingsManager, for the ticket reward
 
-        self.setWindowTitle("Report Feedback")
+        self.setWindowTitle("Submit Feedback")
         self.setModal(True)
         self.setMinimumWidth(480)
 
@@ -73,7 +73,7 @@ class FeedbackDialog(QDialog):
         layout.setSpacing(12)
 
         # Header
-        header = QLabel("Report Feedback")
+        header = QLabel("Submit Feedback")
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(header)
 

@@ -3,8 +3,8 @@ TechDeck Sidebar Navigation - With SVG Icon Support and Theme Integration
 Collapsible sidebar with SVG icons, tooltips, proper layout resizing, and
 live theme integration.
 
-Report Feedback now lives in Settings → Help & Feedback; the sidebar's
-bottom slot just holds My Account.
+Submit Feedback (formerly Report Feedback) now lives in Settings → Help &
+Feedback; the sidebar's bottom slot just holds My Account.
 """
 
 from PySide6.QtWidgets import (
@@ -146,7 +146,7 @@ class NavButton(QPushButton):
     def update_style(self):
         """Update button styling."""
         if self.accent_style and self.accent_color:
-            # Theme-accent treatment (used by the Report Feedback button)
+            # Theme-accent treatment (used by the Submit Feedback button)
             hover = self.accent_color_hover or self.accent_color
             self.setStyleSheet(f"""
                 NavButton {{
@@ -268,7 +268,7 @@ class Sidebar(QWidget, ThemeAware):
         self.nav_buttons[0].setChecked(True)
         self._current_page_id = "home"
 
-        # Push My Account to the bottom. Report Feedback lives in
+        # Push My Account to the bottom. Submit Feedback lives in
         # Settings → Help & Feedback now.
         nav_layout.addStretch()
 

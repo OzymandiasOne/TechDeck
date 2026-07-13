@@ -3,7 +3,7 @@ TechDeck Settings Page - Tabbed Interface
 Three tabs: Personalization, Apps, Help & Feedback.
 Personalization hosts sound effects, theme selection, theme builder,
 and Rogue Mode. Apps hosts per-plugin configuration. Help & Feedback
-hosts the Report Feedback action plus version + check-for-updates.
+hosts the Submit Feedback action plus version + check-for-updates.
 """
 
 import json
@@ -32,7 +32,7 @@ class SettingsPage(QWidget, ThemeAware):
     Settings page with three horizontal tabs:
     1. Personalization  – Sound effects, Theme (+ builder), Rogue Mode
     2. Apps             – Per-plugin configuration
-    3. Help & Feedback  – Report Feedback + version + check-for-updates
+    3. Help & Feedback  – Submit Feedback + version + check-for-updates
     """
 
     theme_changed = Signal(str)
@@ -125,7 +125,7 @@ class SettingsPage(QWidget, ThemeAware):
             style.polish(combo)
             combo.update()
 
-        # Report Feedback button uses the secondary accent — re-stamp it.
+        # Submit Feedback button uses the secondary accent — re-stamp it.
         if getattr(self, "fb_btn", None) is not None:
             self.fb_btn.setStyleSheet(self._fb_btn_style(theme))
 
@@ -150,7 +150,7 @@ class SettingsPage(QWidget, ThemeAware):
     # ──────────────────────────────────────────────────────────────────────
 
     def _create_helpfeedback_tab(self) -> QWidget:
-        """Help & Feedback: Report Feedback + version + check for updates."""
+        """Help & Feedback: Submit Feedback + version + check for updates."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; }")
@@ -166,9 +166,9 @@ class SettingsPage(QWidget, ThemeAware):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
 
-        # ── Report Feedback ──
+        # ── Submit Feedback ──
         theme = get_current_palette(self.settings.get_theme())
-        fb_section = self._create_section("Report Feedback")
+        fb_section = self._create_section("Submit Feedback")
         fb_desc = QLabel(
             "Send a note, bug report, or feature request to the TechDeck "
             "maintainer. Replies come from anthony.siebenmorgen@americansteelalum.com."
@@ -226,7 +226,7 @@ class SettingsPage(QWidget, ThemeAware):
         return container
 
     def _open_feedback_dialog(self):
-        """Open the Report Feedback modal from inside Settings."""
+        """Open the Submit Feedback modal from inside Settings."""
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
         dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
         dlg.exec()
