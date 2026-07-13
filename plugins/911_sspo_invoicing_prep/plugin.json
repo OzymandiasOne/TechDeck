@@ -2,7 +2,7 @@
   "id": "911_sspo_invoicing_prep",
   "name": "911 SSPO Invoicing Prep",
   "description": "Splits a pricing sheet into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx', each in its own 'BATCH NEST Invoicing Docs' folder) with an Invoice Supplement tab (PO/Line from the Working Forecast List), plus a top-level 'D911 Workorder Close Outs' sheet (cols A-Machine, Scheduling Group set to Closed).",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

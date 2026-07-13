@@ -94,7 +94,11 @@ INV_COL_WIDTHS = {"A": 11.0, "B": 9.71, "C": 13.86, "D": 13.0, "E": 14.43,
                   "F": 13.86, "H": 14.43, "I": 14.29, "J": 11.57}
 INV_HEADER_ROW = 7
 INV_DATA_START = 8
-LOGO_SIZE = (553, 202)          # px, as placed on the original sheet (anchor A1)
+# px, anchor A1. Was (553, 202) = the logo's natural size, which sprawled over
+# the invoice fields (F2/F3) and the header band; resized 2026-07-13 to match
+# invoicing's corrected sheet (434x121 = 4133850x1152525 EMU) so it stays
+# inside its A1:D5 home.
+LOGO_SIZE = (434, 121)
 
 ACCT_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'
 _THIN = Side(style="thin")
@@ -102,10 +106,10 @@ _MEDIUM = Side(style="medium")
 HDR_FONT = Font(name="Tahoma", size=8, bold=True, color="FFFFFFFF")
 HDR_FILL = PatternFill("solid", fgColor="FF273991")
 HDR_BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
-HDR_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+HDR_ALIGN = Alignment(horizontal="center", vertical="center")
 LABEL_FONT = Font(name="Tahoma", size=10, bold=True)
 DATA_FONT = Font(name="Tahoma", size=10)
-DATA_ALIGN = Alignment(horizontal="center", vertical="center", wrap_text=True)
+DATA_ALIGN = Alignment(horizontal="center", vertical="center")
 GT_LABEL_BORDER = Border(left=_THIN, right=_MEDIUM, top=_THIN, bottom=_THIN)
 GT_VALUE_BORDER = Border(right=_THIN, top=_THIN, bottom=_THIN)
 
