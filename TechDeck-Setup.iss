@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.6 - Runtime Estimator v2 & LST Organizer: exact DXF linear-inch cut times + Analysis sheet; new 911 LST Organizer plugin; ASA: The Video Game v2; OneDrive placeholder fix
+; Version 0.8.6.7 - SSPO suite upgrades: Award Review rename + Shape Ft Req/Working Forecast Input sheets; Invoicing Prep per-nest folders + Close Outs; updater polish; ASA game v2.3
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.6"
+#define MyAppVersion "0.8.6.7"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

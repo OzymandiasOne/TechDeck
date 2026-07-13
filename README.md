@@ -1,8 +1,38 @@
-# TechDeck v0.8.6.6 - Runtime Estimator v2 & LST Organizer
+# TechDeck v0.8.6.7 - SSPO Suite Upgrades
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.7
+
+**911 SSPO Award Review** - The 911 Runtime Estimator has a new name to match what it's
+actually for: reviewing an SSPO award package. Two new output sheets ship with it. **Shape
+Ft Req** gives receiving the stock feet required per shape nest, computed from the Summary
+of Batches lengths (each length rounded up to the foot, then summed, with a grand total).
+**Working Forecast Input** lays out one row per nest in the Working Forecast List's own
+input-column order - Source Material / Pieces / Orders pulled from each nest packet plus
+the shape Total Ft Req - so the whole block copy-pastes straight into the forecast.
+
+**911 SSPO Invoicing Prep** - Each Batch+Nest pricing workbook now lands in its own
+"BATCH NEST Invoicing Docs" subfolder, ready to collect the rest of that nest's invoicing
+paperwork. The run also writes a top-level "D911 Workorder Close Outs {date}" workbook
+(source columns carried over verbatim with styling, Scheduling Group set to "Closed") for
+closing out the work orders. The ASA Invoice Supplement logo is sized correctly and stray
+wrap-text formatting is gone.
+
+**Updater polish** - Installing an update no longer flashes console windows during the
+restart handoff, and release notes in the update dialog no longer clip under the progress
+bar.
+
+**Submit Feedback** - The Help & Feedback button is now "Submit Feedback" everywhere it
+appears, matching what it does.
+
+**ASA: The Video Game v2.3** - The endgame transition is now a proper two-beat "Exit
+Strategy" final project that converts all remaining reputation into compute before the
+probe phase begins - no more stranded resources heading into the finale.
 
 ---
 
