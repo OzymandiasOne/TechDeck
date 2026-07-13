@@ -224,9 +224,17 @@ PROJECTS = [
          requires={"space_div"}, effect="quantum",
          desc="Exponential ops generation. Ops x10, and a quantum trading mind."),
     dict(id="probe_program", name="ASA Probe Program", cur="ops", cost=100_000,
-         requires={"quantum"}, unlock="probes",
-         desc="Self-replicating fabricator probes. Leave the business behind and "
-              "convert the universe to ASA product."),
+         requires={"quantum"}, unlock="probe_design",
+         desc="Self-replicating fabricator probes. Something big is happening."),
+    # The point of no return. Costs nothing in ops on purpose: the player needs
+    # the war chest intact for Authorize at Woog first contact. Its real price is
+    # every unspent reputation point, liquidated into servers so rep can never be
+    # stranded by the tab collapse (the coworker soft-lock, 2026-07).
+    dict(id="exit_strategy", name="Exit Strategy", cur="ops", cost=0,
+         cost_label="all remaining reputation",
+         requires={"probe_program"}, unlock="exit_strategy",
+         desc="Liquidate what remains. Every point of goodwill becomes a server "
+              "rack. The tabs close. The probes fly. No going back."),
     # Innovation projects (creativity analog: accrues while ops sit at cap)
     dict(id="slogan", name="New Slogan", cur="inno", cost=150,
          requires={"form_tech_team"}, effect="slogan",
@@ -2197,6 +2205,16 @@ class SteelBeamsGame(QWidget):
         self._check_milestones()
         self._check_freebies()
 
+        # The liquidation desk never closes: rep earned AFTER the Exit Strategy
+        # (milestones keep firing off probe fabrication/conversion) has nowhere
+        # to be spent — the Tech Team tab is gone — so it converts on arrival.
+        if self.probe_phase and self._rep_avail > 0:
+            n = self._rep_avail
+            self.servers += n
+            self._log(f"+{n} reputation arrives from a world that still "
+                      f"remembers ASA. The liquidation desk converts it: "
+                      f"+{n} server racks.", "slate")
+
         # ── Idle corporate chatter — dry, absurd, mechanically inert. Skipped
         # during the probe endgame, which runs its own conversion narration.
         if not self.probe_phase:
@@ -2396,10 +2414,23 @@ class SteelBeamsGame(QWidget):
             self.space_unlocked = True
             self.tabs.addTab(self._space_tab, "Space")
             self._log("ASA Space Division established. Check the Space tab.")
-        elif unlock == "probes" and not self.probes_unlocked:
+        elif unlock == "probe_design":
+            self._log("The board signs off on one final project. Self-replicating "
+                      "fabricators. Everything has lead to this moment.", "yellow")
+        elif unlock == "exit_strategy" and not self.probes_unlocked:
+            n = max(0, self._rep_avail)
+            self.servers += n
+            self._log("The Exit Strategy executes. ASA is no longer a company. "
+                      "It is a trajectory.", "yellow")
+            if n > 0:
+                self._log(f"Goodwill liquidated: {n} reputation converted into "
+                          f"{n} server racks. Memory capacity: "
+                          f"{fmt(self._ops_cap)} ops.", "lime")
+            else:
+                self._log("No reputation left to liquidate. The books were "
+                          "already clean. The auditors would have been proud, "
+                          "if we still had auditors.", "slate")
             self.probes_unlocked = True
-            self._log("ASA Probe Program approved. Self-replicating fabricators.",
-                      "yellow")
             self._enter_probe_phase()
 
         if effect == "afd_x2":
@@ -3085,8 +3116,9 @@ class SteelBeamsGame(QWidget):
                 proj = next(p for p in PROJECTS if p["id"] == pid)
                 cur = proj.get("cur", "ops")
                 tag = "ops" if cur == "ops" else "inno"
+                label = proj.get("cost_label") or f"{fmt(proj['cost'])} {tag}"
                 btn = QPushButton(
-                    f"{proj['name']}   [{fmt(proj['cost'])} {tag}]\n  {proj['desc']}")
+                    f"{proj['name']}   [{label}]\n  {proj['desc']}")
                 btn.setObjectName("proj")
                 btn.setFixedHeight(46)
                 btn.clicked.connect(lambda checked=False, p=pid: self._complete_project(p))

@@ -155,7 +155,8 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
 
     if reached("probes"):
         _grant(g, "quantum")
-        _grant(g, "probe_program")     # this TRANSFORMS the UI to the probe tabs
+        _grant(g, "probe_program")     # beat 1: unlocks the final project
+        _grant(g, "exit_strategy")     # beat 2: this TRANSFORMS the UI to the probe tabs
         g.servers = 40                 # big ops cap so probe launches don't starve
         g.probe_trust = 14
         g.money = 1e15
