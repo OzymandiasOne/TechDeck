@@ -281,7 +281,7 @@ These are the ones that bite plugin code. The imperative versions live in AGENTS
    drops them unless listed (plugin_window's omission broke Customer DXF Quoting in the
    v0.8.6 frozen build: "Plugin validation failed ... No module named
    'techdeck.core.plugin_window'").
-7. **Defensive folder resolution** (learned on `911_runtime_estimator`): real directory
+7. **Defensive folder resolution** (learned on `911_sspo_award_review`): real directory
    layouts vary. Resolve folders case/space-insensitively and by globbing, never by a
    hardcoded path. E.g. nest packet PDFs were specced under `WPDD SKETCHES` but actually
    live in `NEST PACKAGES` (WPDD held JPGs); the batch list was found via
