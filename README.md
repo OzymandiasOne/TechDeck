@@ -75,8 +75,9 @@ and Library shrink properly and store pages can't force the window to grow.
   workbook and explore them in a chart dashboard (pie/column/stacked, time windows,
   group-by toggles), with a one-click printable Gemba Pack PDF.
 - **911 SSPO Invoicing Prep** - splits an SSPO pricing sheet into one workbook per
-  Batch + Nest, each with a generated ASA Invoice Supplement tab (PO / PO Line filled
-  from the Working Forecast List automatically).
+  Batch + Nest (each in its own "Invoicing Docs" folder), each with a generated ASA
+  Invoice Supplement tab (PO / PO Line filled from the Working Forecast List
+  automatically), plus a top-level Workorder Close Outs sheet.
 
 **Tickets & Woogy's Emporium** - Successful runs and feedback submissions now earn
 tickets, spendable at Woogy's Emporium (My Account > Ticket Counter): fidget-spinner
@@ -365,5 +366,5 @@ QR Code Generator | GUI plugin - dual-tab QR library and generator
 911 Runtime Estimator | Runs off an award package (folder of order folders); estimates plate cutting time from the EXACT linear inches of cut (each work order's DXF geometry / a thickness-driven feed rate) plus stock/material from each nest's packet PDF, and writes one workbook with Plates and Non-Plates sheets (data table + real Excel PivotTable each) 
 Customer DXF Quoting | Interactive DXF quoting viewer - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut 
 QA Gemba Analyzer | GUI plugin (QA family) - logs QA rework events to one shared workbook and charts YTD / last-week performance (pie/column/stacked, best-fit line, %-threshold) with a one-click printable Gemba Pack PDF 
-911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest, each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List) 
+911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus a top-level "D911 Workorder Close Outs" sheet (Scheduling Group set to Closed) 
 911 Baked Beans Wild Ride | Consolidates a folder of filled NC-calc pricing sheets into one review list (DYPN, Batch, Nest, Total Bevels, Total Complex Bevels, Total Cut Lin per part + totals row, sorted by batch/nest/part), saved into that same folder and named from the batch + nest the sheets themselves declare 
