@@ -1,8 +1,15 @@
 {
-  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time.",
+  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time. 'buckets' is the ORDERED left-to-right bucket list created per batch (cards only land in the plain 'BATCH {batch}' bucket). 'label_map' mirrors the D922 PIPELINE plan's 25 label slots top-to-bottom (category1 = top of Planner's label list); if a label is renamed/reordered IN PLANNER, update it here too - this file is the source of truth the plugin matches against.",
   "plan": "D922 PIPELINE",
   "title_format": "BATCH {batch}: {folder}",
   "bucket_format": "BATCH {batch}",
+  "buckets": [
+    "BATCH {batch}: HOLD",
+    "BATCH {batch}",
+    "BATCH {batch}: MODEL CHECK",
+    "BATCH {batch}: 7000",
+    "BATCH {batch}: SHOP READY"
+  ],
   "priority": "Medium",
   "status": "Not started",
   "checklist": [
@@ -11,5 +18,32 @@
     "Inspection Sheet",
     "Program",
     "Processing Completed"
-  ]
+  ],
+  "label_map": {
+    "2.0 X 2.0 X 0.188": "category1",
+    "PALLET 1": "category2",
+    "PALLET 2": "category3",
+    "PALLET 3": "category4",
+    "2.5 X 2.5 X 0.25": "category5",
+    "2.0 X 2.0 X 0.25": "category6",
+    "2.5 X 2.5 X 0.188": "category7",
+    "3.0 X 3.0 X 0.375": "category8",
+    "3.0 X 3.0 X 0.25": "category9",
+    "1.5 X 1.5 X 0.25": "category10",
+    "3.5 X 3.5 X 0.25": "category11",
+    "3.5 X 3.5 X 0.375": "category12",
+    "4.0 X 4.0 X 0.375": "category13",
+    "8.0 X 8.0 X 0.625": "category14",
+    "5.0 X 5.0 X 0.50": "category15",
+    "5.0 X 5.0 X 0.375": "category16",
+    "6.0 X 6.0 X 0.375": "category17",
+    "4.0 X 4.0 X 0.50": "category18",
+    "REPEAT": "category19",
+    "3.0 X 3.0 X 0.50": "category20",
+    "FREE LABEL": "category21",
+    "4.0 X 4.0 X 0.25": "category22",
+    "FORMING": "category23",
+    "6.0 X 6.0 X 0.50": "category24",
+    "MACHINING": "category25"
+  }
 }

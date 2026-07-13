@@ -1,7 +1,8 @@
 """
 922 Setup
 =========
-Creates one Microsoft Planner card per order folder in a 922 batch.
+Creates the batch's Planner buckets and one Microsoft Planner card per order
+folder in a 922 batch, labelled with the order's pallet assignment.
 
 Flow:
   1. Prompt the user to pick the batch folder (native folder dialog, opened
@@ -11,19 +12,29 @@ Flow:
   3. List the order folders directly under the batch folder, dropping the
      'Batch {n} - Documentation' and 'REPEAT BATCHES' folders (and any
      temp/hidden entries).
-  4. Build one card per folder from card_template.json:
+  4. Read the batch's 'PO H{batch} Pallet & Rod Organizer.xlsx' (Pallet
+     Organizer sheet) to map each order number (folder name before the first
+     dash) to its PALLET 1/2/3 assignment - and, when the deferred
+     'apply_material_labels' setting exists and is on, its tube source
+     materials. Labels are sent as Planner slot keys ('category2') resolved
+     through card_template.json's label_map (label NAME -> slot); anything
+     with no matching label warns and is skipped.
+  5. Build one card per folder from card_template.json:
        title    = "BATCH {batch}: {folder}"
        bucket   = "BATCH {batch}"
        priority = Medium, status = Not started
        checklist= TL Print / Saw Print / Inspection Sheet / Program /
                   Processing Completed
-  5. POST the cards as JSON to a Power Automate webhook, which creates the
-     tasks in the D922 PIPELINE plan. With no webhook URL (or dry_run on) it
-     just previews the payload and writes it to disk for inspection.
+       labels   = pallet (+ materials when enabled) slot keys
+  6. POST one JSON payload to a Power Automate webhook, which find-or-creates
+     the ordered bucket list (HOLD / BATCH {n} / MODEL CHECK / 7000 / SHOP
+     READY, left to right) and creates the tasks in the D922 PIPELINE plan.
+     With no webhook URL (or dry_run on) it just previews the payload and
+     writes it to disk for inspection.
 
-The card layout lives in card_template.json so it can be edited without
-touching this code. Power Automate flow setup is documented in
-docs/TEAMS_CARDS.md.
+The card layout, bucket order, and label map live in card_template.json so
+they can be edited without touching this code. Power Automate flow setup is
+documented in docs/TEAMS_CARDS.md.
 """
 from __future__ import annotations
 
@@ -39,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -65,6 +76,136 @@ def _load_template() -> dict:
         return json.load(fh)
 
 
+# Pallet group headers on the Pallet Organizer sheet ("PALLET 1" .. "PALLET 3").
+_PALLET_HDR_RE = re.compile(r"^PALLET\s*\d+$")
+# The orders section ends where the per-pallet "MATERIAL REQUIRED: n" block starts.
+_MATERIAL_REQ_RE = re.compile(r"^MATERIAL\s+REQUIRED", re.IGNORECASE)
+
+
+def _norm_label(text: str) -> str:
+    """Canonical form for matching organizer values against label_map names:
+    uppercase, whitespace collapsed, trailing ' NOM' dropped (the organizer
+    writes '4.0 X 4.0 X 0.50 NOM'; the Planner label is '4.0 X 4.0 X 0.50')."""
+    norm = re.sub(r"\s+", " ", str(text)).strip().upper()
+    if norm.endswith(" NOM"):
+        norm = norm[:-4].rstrip()
+    return norm
+
+
+def _read_pallet_organizer(batch_path: Path, batch: str, log):
+    """Parse the batch's Pallet & Rod Organizer -> order-number map.
+
+    Returns (mapping, warnings) where mapping is
+        {ORDER: {"pallet": "PALLET 1", "materials": ["4.0 X 4.0 X 0.50 NOM", ...]}}
+    or None when the workbook/sheet can't be read (warnings say why). The
+    sheet is a fixed template: the pallet headers sit on one row (found by
+    scanning, not hardcoded), orders in the header's column below it, that
+    order's comma-separated source materials one column to the right.
+    """
+    warnings: list[str] = []
+    xl_path = (batch_path / f"Batch {batch} - Documentation"
+               / f"PO H{batch} Pallet & Rod Organizer.xlsx")
+    if not xl_path.is_file():
+        warnings.append(f"Pallet & Rod Organizer not found "
+                        f"({xl_path.name}) - cards will have NO labels.")
+        return None, warnings
+    try:
+        wb = sdk.load_workbook_resilient(xl_path, log=log, data_only=True,
+                                         read_only=True)
+    except Exception as exc:
+        warnings.append(f"Could not read {xl_path.name}: {exc} - "
+                        f"cards will have NO labels.")
+        return None, warnings
+    try:
+        if "Pallet Organizer" not in wb.sheetnames:
+            warnings.append(f"No 'Pallet Organizer' sheet in {xl_path.name} - "
+                            f"cards will have NO labels.")
+            return None, warnings
+        ws = wb["Pallet Organizer"]
+        # Small fixed-template sheet: snapshot the region once (read-only
+        # worksheets make random cell access slow).
+        grid = [[cell.value for cell in row]
+                for row in ws.iter_rows(min_row=1, max_row=60, max_col=12)]
+    finally:
+        wb.close()
+
+    # Locate the pallet header row + the (order col, pallet name) groups.
+    groups: list[tuple[int, str]] = []   # (0-based col index, "PALLET N")
+    header_row = None
+    for r, row in enumerate(grid[:10]):
+        found = [(c, _norm_label(v)) for c, v in enumerate(row)
+                 if v is not None and _PALLET_HDR_RE.match(_norm_label(v))]
+        if found:
+            header_row, groups = r, found
+            break
+    if not groups:
+        warnings.append(f"No 'PALLET n' headers found on the Pallet Organizer "
+                        f"sheet of {xl_path.name} - cards will have NO labels.")
+        return None, warnings
+    if len(groups) != 3:
+        warnings.append(f"Expected 3 pallet groups on the Pallet Organizer "
+                        f"sheet, found {len(groups)} - proceeding with those.")
+
+    mapping: dict[str, dict] = {}
+    for r in range(header_row + 1, len(grid)):
+        row = grid[r]
+        # Stop at the "MATERIAL REQUIRED" block under the order lists.
+        if any(isinstance(row[c], str) and _MATERIAL_REQ_RE.match(row[c].strip())
+               for c, _ in groups if c < len(row)):
+            break
+        for c, pallet in groups:
+            order = row[c] if c < len(row) else None
+            if order is None or not str(order).strip():
+                continue
+            materials_cell = row[c + 1] if c + 1 < len(row) else None
+            materials = [m.strip() for m in str(materials_cell or "").split(",")
+                         if m.strip()]
+            mapping[str(order).strip().upper()] = {
+                "pallet": pallet,
+                "materials": materials,
+            }
+    if not mapping:
+        warnings.append(f"No orders found under the pallet headers in "
+                        f"{xl_path.name} - cards will have NO labels.")
+        return None, warnings
+    return mapping, warnings
+
+
+def _labels_for_folder(folder: str, organizer: dict | None, label_map: dict,
+                       apply_materials: bool, warnings: list,
+                       unmatched_materials: set):
+    """Resolve one order folder to (slot_keys, display_names).
+
+    label_map is pre-normalized ({_norm_label(name): "categoryN"}). Pallet
+    label always applies; material labels only when apply_materials (the
+    deferred default-off feature). Unmatched names warn and are skipped -
+    the card is still created with whatever did match.
+    """
+    slots: list[str] = []
+    names: list[str] = []
+    if organizer is None:
+        return slots, names
+    order = folder.split("-", 1)[0].strip().upper()
+    entry = organizer.get(order)
+    if entry is None:
+        warnings.append(f"Order {order} ({folder}) is not on the Pallet "
+                        f"Organizer sheet - card created with no labels.")
+        return slots, names
+
+    wanted = [entry["pallet"]]
+    if apply_materials:
+        wanted.extend(entry["materials"])
+    for name in wanted:
+        norm = _norm_label(name)
+        slot = label_map.get(norm)
+        if slot is None:
+            unmatched_materials.add(norm)
+        elif slot not in slots:
+            slots.append(slot)
+            names.append(norm)
+    return slots, names
+
+
 def _is_order_folder(entry: Path) -> bool:
     if not entry.is_dir():
         return False
@@ -76,7 +217,8 @@ def _is_order_folder(entry: Path) -> bool:
     return True
 
 
-def _build_cards(template: dict, batch: str, folders: list[str]) -> list[dict]:
+def _build_cards(template: dict, batch: str, folders: list[str],
+                 folder_labels: dict[str, list[str]]) -> list[dict]:
     title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
     bucket_fmt = template.get("bucket_format", "BATCH {batch}")
     priority = template.get("priority", "Medium")
@@ -90,6 +232,7 @@ def _build_cards(template: dict, batch: str, folders: list[str]) -> list[dict]:
             "priority": priority,
             "status": status,
             "checklist": checklist,
+            "labels": list(folder_labels.get(folder, [])),
         })
     return cards
 
@@ -195,23 +338,63 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"Found {len(folders)} order folder(s).")
     progress_callback(40)
 
+    # --- Read the pallet assignments from the Pallet & Rod Organizer -------
+    # 'apply_material_labels' is the deferred source-material feature: the
+    # code path is complete, but the setting is not declared in plugin.json
+    # yet, so it always resolves False. Declaring the boolean field enables it.
+    apply_materials = bool(settings.get("apply_material_labels", False))
+    organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
+    if organizer is not None:
+        log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
+    progress_callback(50)
+
     # --- Build the cards from the template ---------------------------------
     try:
         template = _load_template()
     except (OSError, json.JSONDecodeError) as exc:
         log(f"ERROR: could not read card_template.json: {exc}")
         return
-    cards = _build_cards(template, batch, folders)
+
+    label_map = {_norm_label(name): slot
+                 for name, slot in (template.get("label_map") or {}).items()}
+    unmatched: set = set()
+    folder_labels: dict[str, list[str]] = {}
+    folder_label_names: dict[str, list[str]] = {}
+    for folder in folders:
+        slots, names = _labels_for_folder(folder, organizer, label_map,
+                                          apply_materials, warnings, unmatched)
+        folder_labels[folder] = slots
+        folder_label_names[folder] = names
+    if unmatched:
+        warnings.append("No matching Planner label for: "
+                        + ", ".join(sorted(unmatched))
+                        + " - skipped (cards still created; add/rename the "
+                        "label in Planner AND card_template.json to cover it).")
+
+    cards = _build_cards(template, batch, folders, folder_labels)
+    buckets = [b.format(batch=batch) for b in template.get("buckets", [])] \
+        or [template.get("bucket_format", "BATCH {batch}").format(batch=batch)]
     payload = {
         "plan": template.get("plan", "D922 PIPELINE"),
         "batch": batch,
+        "buckets": buckets,
         "tasks": cards,
     }
 
+    log(f"\nBuckets (left to right): {', '.join(buckets)}")
     log(f"\nWill create {len(cards)} card(s) in plan '{payload['plan']}', "
         f"bucket 'BATCH {batch}':")
-    for card in cards:
-        log(f"  - {card['title']}")
+    for folder, card in zip(folders, cards):
+        names = folder_label_names.get(folder, [])
+        suffix = f"   [{', '.join(names)}]" if names else ""
+        log(f"  - {card['title']}{suffix}")
+
+    if warnings:
+        log("\nLabel warnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "922 Setup - label warnings",
+                         "\n\n".join(warnings))
     progress_callback(60)
 
     if cancel_event.is_set():
