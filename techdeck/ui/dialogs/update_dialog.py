@@ -87,25 +87,43 @@ class UpdateDialog(QDialog):
             notes_scroll.setStyleSheet(
                 "QScrollArea { background: transparent; }"
                 "QScrollArea > QWidget > QWidget { background: transparent; }")
+            notes_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             notes_scroll.setWidget(notes)
             # 452 = the 500px dialog width minus the 24px content margins.
-            needed = notes.heightForWidth(452) + 8
+            # Measure at the width the text actually wraps to: if the vertical
+            # scrollbar appears it steals ~17px, wrapping the text one line
+            # taller than a bare 452px estimate — the extra line then clipped
+            # mid-height against the widget below (looked like the progress
+            # bar overlapping the notes). Reserve the scrollbar width up front
+            # and round up to whole text lines so a line can never be half-cut.
+            wrap_w = 452 - notes_scroll.verticalScrollBar().sizeHint().width() - 4
+            line_h = max(1, notes.fontMetrics().lineSpacing())
+            needed = notes.heightForWidth(wrap_w)
+            needed = -(-needed // line_h) * line_h + 10
             notes_scroll.setMinimumHeight(max(40, min(needed, 380)))
             notes_scroll.setMaximumHeight(380)
             layout.addWidget(notes_scroll)
 
-        # Progress bar (hidden initially)
+        # Progress bar (hidden initially, but its layout slot is reserved from
+        # the start — retainSizeWhenHidden — so revealing it at download time
+        # never triggers a relayout that squeezes into the notes above).
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setStyleSheet(self._progress_qss())
+        pb_policy = self.progress_bar.sizePolicy()
+        pb_policy.setRetainSizeWhenHidden(True)
+        self.progress_bar.setSizePolicy(pb_policy)
         layout.addWidget(self.progress_bar)
 
-        # Status label
+        # Status label (slot reserved for the same reason as the progress bar)
         self.status_label = QLabel("")
         self.status_label.setVisible(False)
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet(f"color: {t.text_secondary}; font-size: 12px;")
+        sl_policy = self.status_label.sizePolicy()
+        sl_policy.setRetainSizeWhenHidden(True)
+        self.status_label.setSizePolicy(sl_policy)
         layout.addWidget(self.status_label)
 
         layout.addStretch()
