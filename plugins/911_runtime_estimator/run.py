@@ -29,7 +29,15 @@ S029, V092 ...), this plugin:
      native order, then our generated columns. 'Material' on the table is the
      MOVE TICKET designation; the batch list's own 'Material' (an EB stock code)
      is shown as 'Source Material'.
-  5. Drops a REAL, refreshable Excel PivotTable below the data on each sheet --
+  5. Adds a 'Working Forecast Input' sheet -- one row per nest (plates AND
+     shapes) in the Working Forecast List's input-column layout (Order,
+     Source Material, Pieces, Nest Pkg Nbr, Orders, REM Used, REM Made,
+     Total Ft Req, Operations) so a reviewed award copy-pastes straight into
+     the forecast. Source Material is the packet's page-1 'Source Code' (EB
+     stock identifier), Pieces/Orders are the page-1 data-row counts, Total
+     Ft Req repeats the shape nest feet; the REM pair + Operations stay blank
+     for manual input.
+  6. Drops a REAL, refreshable Excel PivotTable below the data on each sheet --
      ONE line per nest: Parts (true piece count for the whole nest) + the same
      Cut Time total in both hours and minutes, grand total at the bottom -- by
      driving Excel via COM (pywin32). A plain-English "machine cut time only"
@@ -420,7 +428,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -686,6 +694,52 @@ def _page1_pieces_thickness(page1_text: str):
     return pieces, thickness, length, width
 
 
+def _page1_orders_pieces(page1_text: str):
+    """(orders, pieces) from the page-1 data row -- works for BOTH packet
+    layouts. Plate nest sheets label the row 'Orders Pieces Thickness Length
+    Width'; shape (1D) nest sheets label it 'Orders Pieces Material Size
+    Material Type Material Style'. Either way the labels come as a block with
+    ORDERS then PIECES adjacent and the values follow it, so the first two
+    numeric lines after the label block are the Orders and Pieces counts. The
+    scan window is bounded so numbers further down the page (e.g. a shape
+    sheet's Summary of Batches) can't be misread as the data row."""
+    lines = [ln.strip() for ln in page1_text.splitlines()]
+    for i in range(len(lines) - 1):
+        if lines[i].upper() == "ORDERS" and lines[i + 1].upper() == "PIECES":
+            nums = []
+            for ln in lines[i + 2:i + 12]:
+                if _NUM_RE.match(ln):
+                    nums.append(_to_float(ln))
+                    if len(nums) == 2:
+                        return (int(round(nums[0])) if nums[0] is not None else None,
+                                int(round(nums[1])) if nums[1] is not None else None)
+            break
+    return None, None
+
+
+def _page1_source_code(page1_text: str):
+    """The page-1 'Source Code' value -- the stock identifier the Working
+    Forecast's Source Mat'l. column carries. Same forms as the batch list's
+    Material column: 'EB218014388A', bare '218019613', '42-07-3105'. The
+    packet prints it in a stacked label layout (no colon): the 'Source Code' /
+    'Alternate Source Code' label lines, then the value(s). Accept the first
+    following token that contains a digit (every stock code does; field labels
+    don't) and stop at the next field block ('Orders')."""
+    lines = [ln.strip() for ln in page1_text.splitlines()]
+    for i, ln in enumerate(lines):
+        if ln.upper() == "SOURCE CODE":
+            for cand in lines[i + 1:i + 6]:
+                cu = cand.upper()
+                if cu in ("", "ALTERNATE SOURCE CODE"):
+                    continue
+                if cu == "ORDERS":  # ran into the next field block: no value
+                    break
+                if any(ch.isdigit() for ch in cand):
+                    return cand
+            break
+    return None
+
+
 def _parse_size(full_text: str):
     """Return (stock_L, stock_W) from a part-sketch 'SIZE:' field, normalized
     L=max, W=min. Thickness-only sizes (e.g. '0.375 THICK') -> (None, None).
@@ -806,7 +860,8 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
            "plate_weight": None, "process": None, "mt_material": None,
            "sheet_length": None, "sheet_width": None,
            "batch_lengths": None, "summary_malformed": False,
-           "mat_size": None, "mat_type": None}
+           "mat_size": None, "mat_type": None,
+           "orders": None, "source_code": None}
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     try:
@@ -818,6 +873,15 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
 
     (out["pieces"], out["thickness"],
      out["sheet_length"], out["sheet_width"]) = _page1_pieces_thickness(page1)
+
+    # Working Forecast Input fields: the page-1 Orders count + the Source Code
+    # (EB stock identifier). Both packet layouts (plate + shape) carry them;
+    # shape sheets lack the Thickness/Length/Width labels, so their Pieces
+    # only resolves here.
+    out["orders"], _wf_pieces = _page1_orders_pieces(page1)
+    if out["pieces"] is None:
+        out["pieces"] = _wf_pieces
+    out["source_code"] = _page1_source_code(page1)
 
     # Cut method / process from page 1 (PLASMA / LASER / ...).
     m = _CUT_METHOD_RE.search(page1)
@@ -1369,13 +1433,14 @@ def write_analysis_sheet(wb, plate_rows, log):
 
 
 def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows,
-                   shape_summary, log):
+                   shape_summary, forecast_summary, log):
     """Write the workbook with two identically-structured sheets: 'Plates' and
     'Non-Plates'. Each holds ONLY the flat data table (every batch-list column
     plus our generated columns) with the yellow missing-data highlighting; the
     real PivotTables are added afterwards via Excel COM (see add_real_pivots).
     A 'Shape Ft Req' rollup sheet (one line per shape nest) follows when any
-    shape nest carried a Summary of Batches table.
+    shape nest carried a Summary of Batches table, then the 'Working Forecast
+    Input' sheet (one line per nest, forecast-input column layout).
 
     Returns sheets_meta: [(sheet_name, data_row_count), ...] for the pivot pass.
     """
@@ -1389,6 +1454,9 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows,
 
     if shape_summary:
         write_shape_ft_sheet(wb, shape_summary, log)
+
+    if forecast_summary:
+        write_working_forecast_sheet(wb, forecast_summary, log)
 
     write_analysis_sheet(wb, plate_rows, log)
 
@@ -1437,6 +1505,54 @@ def write_shape_ft_sheet(wb, shape_summary, log):
     _autosize(ws, SHAPE_FT_HEADERS)
     log(f"  Added Shape Ft Req sheet ({len(shape_summary)} shape nest(s), "
         f"{sum(e['ft'] for e in shape_summary)} ft total).")
+
+
+# The Working Forecast List's input-column layout ('911 Forecast' tab), so a
+# reviewed award copy-pastes straight into the forecast. 'REM Used'/'REM Made'
+# and 'Operations' are intentionally blank manual-input columns (the REM pair
+# is the plate-work remnant info the planner re-enters per nest).
+WFI_HEADERS = ["Order", "Source Material", "Pieces", "Nest Pkg Nbr", "Orders",
+               "REM Used", "REM Made", "Total Ft Req", "Operations"]
+
+
+def write_working_forecast_sheet(wb, forecast_summary, log):
+    """One row per nest -- plates AND shapes -- in the Working Forecast's
+    input-column layout (planning's ask, 2026-07-13). Source Material = the
+    packet's page-1 'Source Code' (EB stock identifier; falls back to the
+    batch list's Material codes); Pieces / Orders = the packet's page-1
+    data-row counts (fall back to the nest's batch-list rows); Total Ft Req =
+    the shape nest's Summary-of-Batches feet (blank on plate nests, with a
+    grand total at the bottom). REM Used / REM Made / Operations stay blank
+    for manual input before the paste."""
+    ws = wb.create_sheet("Working Forecast Input")
+    for c, name in enumerate(WFI_HEADERS, start=1):
+        cell = ws.cell(1, c, name)
+        cell.font = _HDR_FONT
+        cell.fill = _HDR_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+        cell.border = _BORDER
+    ri = 1
+    for entry in forecast_summary:
+        ri += 1
+        vals = [entry["order"], entry["source"], entry["pieces"],
+                entry["nest"], entry["orders"], None, None,
+                entry["ft"], None]
+        for c, v in enumerate(vals, start=1):
+            cell = ws.cell(ri, c, v)
+            cell.border = _BORDER
+    ft_col = WFI_HEADERS.index("Total Ft Req") + 1
+    total_cell = ws.cell(ri + 1, ft_col - 1, "TOTAL")
+    total_cell.font = Font(bold=True)
+    total_cell.border = _BORDER
+    val_cell = ws.cell(ri + 1, ft_col,
+                       sum(e["ft"] for e in forecast_summary if e["ft"]))
+    val_cell.font = Font(bold=True)
+    val_cell.border = _BORDER
+    ws.freeze_panes = "A2"
+    _autosize(ws, WFI_HEADERS)
+    log(f"  Added Working Forecast Input sheet ({len(forecast_summary)} "
+        f"nest(s)).")
 
 
 def write_data_table(ws, data_headers, data_rows):
@@ -1732,6 +1848,7 @@ def run(params: dict, progress_callback, cancel_event):
     data_rows = []
     flags_summary = []
     shape_summary = []          # one entry per shape nest, for the Ft Req sheet
+    forecast_summary = []       # one entry per nest, for Working Forecast Input
 
     for oi, order_folder in enumerate(order_folders):
         if cancel_event.is_set():
@@ -1826,6 +1943,43 @@ def run(params: dict, progress_callback, cancel_event):
                 "mat_size": pdfd.get("mat_size"),
                 "desc": desc, "lengths": lengths,
                 "ft": shape_feet_required(lengths),
+            })
+
+        # Working Forecast Input rollup: one entry per nest (plates AND
+        # shapes) mirroring the forecast's input columns so a reviewed award
+        # copy-pastes straight into the Working Forecast List. Packet page-1
+        # values lead; the nest's batch-list rows are the fallback when the
+        # packet is missing/unparsed.
+        for ns in seen_nests:
+            pdfd = nest_pdf_data.get(ns)
+            nest_rows = [row for row in rows
+                         if str(row.get("NEST PKG NBR") or "").strip() == ns]
+            src = (pdfd or {}).get("source_code")
+            if not src:
+                # Batch-list 'Material' carries the same EB stock code.
+                mats = []
+                for row in nest_rows:
+                    mv = str(row.get("MATERIAL") or "").strip()
+                    if mv and mv not in mats:
+                        mats.append(mv)
+                src = ", ".join(mats) or None
+            pieces = (pdfd or {}).get("pieces")
+            if pieces is None:
+                ppn_sum = sum(_to_float(row.get("PPN QUANTITY")) or 0.0
+                              for row in nest_rows)
+                pieces = int(round(ppn_sum)) if ppn_sum else None
+            n_orders = (pdfd or {}).get("orders")
+            if n_orders is None:
+                n_orders = len(nest_rows) or None
+            if isinstance(src, str) and src.isdigit():
+                src = int(src)  # bare numeric codes are numbers in the forecast
+            _wf_lengths = (pdfd or {}).get("batch_lengths")
+            ft = (shape_feet_required(_wf_lengths)
+                  if _wf_lengths and not (pdfd or {}).get("summary_malformed")
+                  else None)
+            forecast_summary.append({
+                "order": order, "nest": ns, "source": src,
+                "pieces": pieces, "orders": n_orders, "ft": ft,
             })
 
         # Build a data row per batch-list row.
@@ -2029,7 +2183,8 @@ def run(params: dict, progress_callback, cancel_event):
     out_path = out_base / f"911 RUNTIME ESTIMATOR - {root.name} - {stamp}.xlsx"
     try:
         sheets_meta = write_workbook(out_path, data_headers, plate_rows,
-                                     nonplate_rows, shape_summary, log)
+                                     nonplate_rows, shape_summary,
+                                     forecast_summary, log)
     except PermissionError:
         log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
         return
@@ -2053,6 +2208,9 @@ def run(params: dict, progress_callback, cancel_event):
     if shape_summary:
         log(f"  Shape stock required: {sum(e['ft'] for e in shape_summary)} ft "
             f"across {len(shape_summary)} shape nest(s) (Shape Ft Req sheet)")
+    if forecast_summary:
+        log(f"  Working Forecast Input: {len(forecast_summary)} nest(s) ready "
+            f"to paste into the forecast")
     if flags_summary:
         log(f"  Flags ({len(flags_summary)}):")
         for f in flags_summary[:25]:
