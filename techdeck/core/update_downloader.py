@@ -125,32 +125,40 @@ def run_installer_and_exit(installer_path: str) -> None:
     temp_dir = Path(tempfile.gettempdir()) / "TechDeck"
     restart_script = temp_dir / "restart_techdeck.bat"
     
+    # NOTE: delays use `ping -n N` instead of `timeout` — timeout.exe refuses
+    # to run without an interactive console stdin, and under the old
+    # DETACHED_PROCESS launch each timeout call also got a brand-new VISIBLE
+    # console allocated (the two cmd windows that flashed during restart).
+    # ping waits N-1 seconds and works in any console context.
     batch_content = f'''@echo off
 REM Wait for installer to finish
-echo Waiting for installer to complete...
 start /wait "" "{installer_path}" /SILENT /CLOSEAPPLICATIONS
 
 REM Wait a moment for files to settle
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 >nul
 
 REM Restart TechDeck
-echo Restarting TechDeck...
 start "" "{techdeck_exe}"
 
 REM Clean up
-timeout /t 1 /nobreak >nul
+ping 127.0.0.1 -n 2 >nul
 del "{installer_path}"
 del "%~f0"
 '''
-    
+
     try:
         restart_script.write_text(batch_content, encoding='utf-8')
         print(f"[INSTALLER] Created restart script: {restart_script}", flush=True)
-        
-        # Launch restart script detached
+
+        # Launch the restart script in a HIDDEN console (CREATE_NO_WINDOW),
+        # not DETACHED_PROCESS: a detached cmd has no console at all, so every
+        # console child it spawns (timeout/ping/etc.) gets a fresh visible
+        # console window — the split-second cmd flashes users saw during the
+        # update restart. With CREATE_NO_WINDOW the children inherit the one
+        # hidden console and nothing ever shows on screen.
         subprocess.Popen(
             ['cmd', '/c', str(restart_script)],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
