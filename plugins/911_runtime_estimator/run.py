@@ -12,7 +12,12 @@ S029, V092 ...), this plugin:
   2. Parses each nest packet PDF (PyMuPDF) for thickness, pieces, material,
      stock size, mil spec, and plate weight -- cross-checking fields across the
      page-1 data row, the SUMMARY page, the part sketch, and the MOVE TICKET,
-     exactly like the 911 Setup plugin.
+     exactly like the 911 Setup plugin. Shape (1D) nest orders additionally
+     yield the 'Summary of Batches' lengths -> 'Shape Ft Req' (each length /
+     12, rounded UP to the whole foot, summed per nest) plus the stock
+     Material Size / Type, feeding receiving's material cheat sheet: the
+     per-nest value repeats on the nest's rows, and a 'Shape Ft Req' sheet
+     rolls up one line per shape nest with a grand total.
   3. Computes a per-row plate cutting-time estimate from EXACT linear inches of
      cut. Each batch-list row's 'Work Order' is matched to its DXF in the order's
      'IGES FILES' folder; the cut length is measured from the DXF vector
@@ -415,7 +420,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.4.2"
+VERSION = "2.5.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -427,6 +432,7 @@ BATCH_HEADER_RENAME = {"Material": "Source Material"}
 # the MOVE TICKET designation (sits right after MIL SPEC on the packet).
 GENERATED_COLS = ["Division", "Process", "Thickness (in)",
                   "Remnant Length", "Remnant Width", "Stock L", "Stock W",
+                  "Shape Ft Req",
                   "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
                   "Multi-Layered", "LI Dev (SD)",
                   "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Multiplier",
@@ -434,6 +440,12 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
 # 'Remnant Length'/'Remnant Width' are the nest sheet's page-1 Length/Width --
 # the remnant's dimensions -- filled ONLY on rows whose batch-list 'Rem Used'
 # (AA) is populated (a remnant was used); blank otherwise.
+# 'Shape Ft Req' (v2.5.0, receiving's ask) = the SHAPE nest's total stock feet:
+# each 'Summary of Batches' table row's Length (inches) / 12, rounded UP to the
+# whole foot, summed across the table (e.g. 143 + 20 -> 12 ft + 2 ft = 14 ft).
+# It's a per-NEST value repeated on every row of the nest (like Thickness), so
+# don't SUM the column -- the per-nest/total rollup lives on the 'Shape Ft Req'
+# sheet. Blank on plate rows (plate packets carry no Summary of Batches table).
 # 'Multiplier' is an intentionally blank placeholder the planner fills in by hand
 # (a future classification factor, e.g. base=1 / std bevel=2), like 'Division'.
 # 'Equation' spells out the FULL calculation for the row with this row's own
@@ -706,13 +718,95 @@ def _parse_size(full_text: str):
     return None, None
 
 
+def _summary_batch_lengths(pages):
+    """Lengths (inches) from the 'Summary of Batches' table on a SHAPE nest
+    order page (1D nests; plate packets don't carry the table).
+
+    Extracted text layout: the labels 'Batch' / '# of' / 'Parts' / 'Length'
+    each on their own line, then the table rows as a flat run of numbers in
+    triples (batch, # of parts, length), terminated by the next label
+    ('Laser NS'). Returns (lengths, malformed): lengths = one value per table
+    row, or None when no packet page has the table; malformed = True when the
+    table was found but its value run wasn't clean triples.
+    """
+    for txt in pages:
+        if "SUMMARY OF BATCHES" not in txt.upper():
+            continue
+        lines = [ln.strip() for ln in txt.splitlines()]
+        up = [ln.upper() for ln in lines]
+        start = None
+        for i, u in enumerate(up):
+            if u != "BATCH":
+                continue
+            j = i + 1
+            # '# of' + 'Parts' wrap onto one or two lines depending on export.
+            if j < len(up) and up[j].startswith("# OF"):
+                j += 1
+                if j < len(up) and up[j] == "PARTS":
+                    j += 1
+            if j < len(up) and up[j] == "LENGTH":
+                start = j + 1
+                break
+        if start is None:
+            continue
+        nums = []
+        for ln in lines[start:]:
+            if not _NUM_RE.match(ln):
+                break                     # first non-numeric line ends the table
+            nums.append(float(ln.replace(",", "")))
+        if not nums or len(nums) % 3:
+            return None, True             # found the table but couldn't read it
+        return [nums[k + 2] for k in range(0, len(nums), 3)], False
+    return None, False
+
+
+def shape_feet_required(lengths):
+    """Receiving's spec: each Summary-of-Batches row's Length (inches) / 12,
+    rounded UP to the whole foot, then summed (143 + 20 -> 12 + 2 = 14 ft)."""
+    return sum(math.ceil(l / 12.0) for l in lengths)
+
+
+def _material_size_type(pages):
+    """Best-effort (size, type) from the 'Material Size / Material Type /
+    Material Style' block on a shape nest order page. Size formats vary --
+    '2.500 X 2.500 X 0.375 THK' (angle/tube) but also '0.500THK2.000W' (bar,
+    no X separators) -- so the size is the first value line mixing digits and
+    letters; the type ('ANGLE'/'BAR'/...) is the letters-only line after it.
+    Either may be None."""
+    for txt in pages:
+        lines = [ln.strip() for ln in txt.splitlines()]
+        up = [ln.upper() for ln in lines]
+        for i, u in enumerate(up):
+            if (u == "MATERIAL SIZE" and i + 2 < len(up)
+                    and up[i + 1] == "MATERIAL TYPE"
+                    and up[i + 2] == "MATERIAL STYLE"):
+                size = mtype = None
+                for ln in lines[i + 3:i + 13]:
+                    if size is None:
+                        if (any(ch.isdigit() for ch in ln)
+                                and any(ch.isalpha() for ch in ln)):
+                            size = ln
+                        continue
+                    # First letters-only line after the size = the type. Real
+                    # types are ALL CAPS ('ANGLE', 'I SECTION'); a mixed-case
+                    # hit is the next form label ('Mark Operator') leaking in
+                    # because the type cell was blank -- treat as no type.
+                    if ln and not any(ch.isdigit() for ch in ln):
+                        mtype = ln if ln == ln.upper() else None
+                        break
+                return size, mtype
+    return None, None
+
+
 def parse_nest_pdf(pdf_path: Path) -> dict:
     """Parse a nest packet PDF. Returns a dict of extracted fields (any may be
     None). Thickness is the only field the calculation needs."""
     out = {"thickness": None, "pieces": None, "material": None,
            "stock_l": None, "stock_w": None, "mil_spec": None,
            "plate_weight": None, "process": None, "mt_material": None,
-           "sheet_length": None, "sheet_width": None}
+           "sheet_length": None, "sheet_width": None,
+           "batch_lengths": None, "summary_malformed": False,
+           "mat_size": None, "mat_type": None}
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     try:
@@ -752,6 +846,11 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
         tv = _labeled_value(full, "THICK")
         if tv:
             out["thickness"] = _to_float(tv)
+
+    # Shape (1D) nest order data: the Summary of Batches lengths that drive
+    # 'Shape Ft Req', plus the stock Material Size / Type for the Ft Req sheet.
+    out["batch_lengths"], out["summary_malformed"] = _summary_batch_lengths(pages)
+    out["mat_size"], out["mat_type"] = _material_size_type(pages)
     return out
 
 
@@ -1269,11 +1368,14 @@ def write_analysis_sheet(wb, plate_rows, log):
         "flagged deviations).")
 
 
-def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log):
+def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows,
+                   shape_summary, log):
     """Write the workbook with two identically-structured sheets: 'Plates' and
     'Non-Plates'. Each holds ONLY the flat data table (every batch-list column
     plus our generated columns) with the yellow missing-data highlighting; the
     real PivotTables are added afterwards via Excel COM (see add_real_pivots).
+    A 'Shape Ft Req' rollup sheet (one line per shape nest) follows when any
+    shape nest carried a Summary of Batches table.
 
     Returns sheets_meta: [(sheet_name, data_row_count), ...] for the pivot pass.
     """
@@ -1285,10 +1387,56 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows, log)
     ws_other = wb.create_sheet("Non-Plates")
     write_data_table(ws_other, data_headers, nonplate_rows)
 
+    if shape_summary:
+        write_shape_ft_sheet(wb, shape_summary, log)
+
     write_analysis_sheet(wb, plate_rows, log)
 
     wb.save(str(out_path))
     return [("Plates", len(plate_rows)), ("Non-Plates", len(nonplate_rows))]
+
+
+SHAPE_FT_HEADERS = ["Order", "Nest Pkg Nbr", "Material Type", "Material Size",
+                    "Description", "Lengths (in)", "Ft (rounded up)",
+                    "Total Ft Req"]
+
+
+def write_shape_ft_sheet(wb, shape_summary, log):
+    """The receiving cheat-sheet feed: one row per shape nest with its stock
+    material and the Summary-of-Batches feet math spelled out ('143, 20' ->
+    '12 + 2' -> 14), plus a grand-total row. Feet round UP per table row
+    BEFORE summing (receiving's spec)."""
+    ws = wb.create_sheet("Shape Ft Req")
+    for c, name in enumerate(SHAPE_FT_HEADERS, start=1):
+        cell = ws.cell(1, c, name)
+        cell.font = _HDR_FONT
+        cell.fill = _HDR_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center",
+                                   wrap_text=True)
+        cell.border = _BORDER
+    ri = 1
+    for entry in shape_summary:
+        ri += 1
+        feet = [math.ceil(l / 12.0) for l in entry["lengths"]]
+        vals = [entry["order"], entry["nest"], entry["mat_type"],
+                entry["mat_size"], entry["desc"],
+                ", ".join(_eqnum(l) for l in entry["lengths"]),
+                " + ".join(str(f) for f in feet),
+                entry["ft"]]
+        for c, v in enumerate(vals, start=1):
+            cell = ws.cell(ri, c, v)
+            cell.border = _BORDER
+    total_cell = ws.cell(ri + 1, len(SHAPE_FT_HEADERS) - 1, "TOTAL")
+    total_cell.font = Font(bold=True)
+    total_cell.border = _BORDER
+    val_cell = ws.cell(ri + 1, len(SHAPE_FT_HEADERS),
+                       sum(e["ft"] for e in shape_summary))
+    val_cell.font = Font(bold=True)
+    val_cell.border = _BORDER
+    ws.freeze_panes = "A2"
+    _autosize(ws, SHAPE_FT_HEADERS)
+    log(f"  Added Shape Ft Req sheet ({len(shape_summary)} shape nest(s), "
+        f"{sum(e['ft'] for e in shape_summary)} ft total).")
 
 
 def write_data_table(ws, data_headers, data_rows):
@@ -1583,6 +1731,7 @@ def run(params: dict, progress_callback, cancel_event):
     header_seen = set()
     data_rows = []
     flags_summary = []
+    shape_summary = []          # one entry per shape nest, for the Ft Req sheet
 
     for oi, order_folder in enumerate(order_folders):
         if cancel_event.is_set():
@@ -1654,6 +1803,31 @@ def run(params: dict, progress_callback, cancel_event):
                     log(f"  FLAG: packet {pdf.name} not referenced in batch list.")
                     flags_summary.append(f"{order}: orphan PDF {pdf.name}")
 
+        # Shape (1D) nests: one Ft Req rollup entry per nest whose packet
+        # carries a Summary of Batches table (receiving's cheat-sheet feed).
+        for ns in seen_nests:
+            pdfd = nest_pdf_data.get(ns)
+            if not pdfd:
+                continue
+            if pdfd.get("summary_malformed"):
+                log(f"  FLAG: nest {ns}: Summary of Batches table unreadable - "
+                    "Shape Ft Req left blank.")
+                flags_summary.append(f"{order}/{ns}: Summary of Batches unreadable")
+                continue
+            lengths = pdfd.get("batch_lengths")
+            if not lengths:
+                continue
+            desc = next((row.get("DESCRIPTION") for row in rows
+                         if str(row.get("NEST PKG NBR") or "").strip() == ns
+                         and row.get("DESCRIPTION")), None)
+            shape_summary.append({
+                "order": order, "nest": ns,
+                "mat_type": pdfd.get("mat_type"),
+                "mat_size": pdfd.get("mat_size"),
+                "desc": desc, "lengths": lengths,
+                "ft": shape_feet_required(lengths),
+            })
+
         # Build a data row per batch-list row.
         for row in rows:
             nest = str(row.get("NEST PKG NBR") or "").strip()
@@ -1695,6 +1869,11 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Remnant Width"] = ((pdfd or {}).get("sheet_width")
                                         if (has_rem and pdfd) else None)
             out_row["Multiplier"] = ""    # blank placeholder (planner fills in)
+            # Shape Ft Req: per-NEST stock feet from the packet's Summary of
+            # Batches table (shape/1D nests only) -- repeated on the nest's rows.
+            _sb_lengths = (pdfd or {}).get("batch_lengths")
+            out_row["Shape Ft Req"] = (shape_feet_required(_sb_lengths)
+                                       if _sb_lengths else None)
             # Preserved (non-column) field for the Analysis sheet: did this part's
             # DXF carry a present-but-zero-length layer? True/False for DXF-resolved
             # plate rows, None when there's no DXF match.
@@ -1775,6 +1954,8 @@ def run(params: dict, progress_callback, cancel_event):
                 flags.append("thk from desc")
             if bevel:
                 flags.append("bevel scope (no time added)")
+            if pdfd and pdfd.get("summary_malformed"):
+                flags.append("Summary of Batches unreadable - no Shape Ft Req")
             out_row["Flags"] = "; ".join(flags)
             # Make uppercase-keyed lookups work for pivot/derived fields.
             out_row["Nest Pkg Nbr"] = nest
@@ -1848,7 +2029,7 @@ def run(params: dict, progress_callback, cancel_event):
     out_path = out_base / f"911 RUNTIME ESTIMATOR - {root.name} - {stamp}.xlsx"
     try:
         sheets_meta = write_workbook(out_path, data_headers, plate_rows,
-                                     nonplate_rows, log)
+                                     nonplate_rows, shape_summary, log)
     except PermissionError:
         log(f"  Output file is open/locked: {out_path.name}. Close it and re-run.")
         return
@@ -1869,6 +2050,9 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"  Plate rows: {len(plate_rows)}  |  Non-plate rows: {len(nonplate_rows)}")
     log(f"  Plate cut time (machine only): {grand_est:.2f} hr "
         f"({grand_est * 60:.0f} min) across {int(grand_qty)} pieces")
+    if shape_summary:
+        log(f"  Shape stock required: {sum(e['ft'] for e in shape_summary)} ft "
+            f"across {len(shape_summary)} shape nest(s) (Shape Ft Req sheet)")
     if flags_summary:
         log(f"  Flags ({len(flags_summary)}):")
         for f in flags_summary[:25]:

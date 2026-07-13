@@ -1,8 +1,8 @@
 {
   "id": "911_runtime_estimator",
   "name": "911 Runtime Estimator",
-  "description": "Runs off an award package (folder of order folders) and estimates plate cutting time from EXACT linear inches of cut: each work order's DXF geometry / a thickness-driven feed rate, plus stock/material/thickness from each nest's work-package PDF. Writes ONE consolidated Excel workbook - Plates and Non-Plates sheets, every batch-list column plus generated columns (Division placeholder, linear inches, feed rate, Est Min/PC, Est Min/WO, Est Cut Hours) - each followed by a real, refreshable PivotTable (one line per nest: Parts + Cut Time in both hours and minutes). Prompts for the ROOT directory at runtime.",
-  "version": "2.1.0",
+  "description": "Runs off an award package (folder of order folders) and estimates plate cutting time from EXACT linear inches of cut: each work order's DXF geometry / a thickness-driven feed rate, plus stock/material/thickness from each nest's work-package PDF. Writes ONE consolidated Excel workbook - Plates and Non-Plates sheets, every batch-list column plus generated columns (Division placeholder, linear inches, feed rate, Est Min/PC, Est Min/WO, Est Cut Hours) - each followed by a real, refreshable PivotTable (one line per nest: Parts + Cut Time in both hours and minutes), plus a Shape Ft Req sheet totalling each shape nest's stock feet from its Summary of Batches lengths (rounded up to the foot per length) for receiving. Prompts for the ROOT directory at runtime.",
+  "version": "2.5.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
