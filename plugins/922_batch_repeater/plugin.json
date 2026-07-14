@@ -1,8 +1,8 @@
 {
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
-  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run",
-  "version": "2.0.0",
+  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Tags each repeat's Planner card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
+  "version": "2.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "🔄",
@@ -31,6 +31,23 @@
           "pattern": "^.*\\.xlsx?$",
           "message": "Must be an Excel file (.xls or .xlsx)"
         }
+      },
+      {
+        "key": "repeat_webhook_url",
+        "type": "string",
+        "label": "Repeat Tagger Webhook URL",
+        "description": "The Power Automate flow URL that adds the REPEAT label to each repeat's Planner card and moves it to the batch's MODEL CHECK bucket. Get this from the 'TechDeck 922 Repeat Tagger' flow's trigger. Leave blank to dry-run (preview the payload without posting).",
+        "placeholder": "https://...powerplatform.com/.../invoke?...",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "dry_run",
+        "type": "boolean",
+        "label": "Dry run card tagging (preview only)",
+        "description": "When on, build and save the REPEAT-tagging payload but do not post it to the webhook. Forced on automatically when no webhook URL is set. Folder copying is NOT affected by this toggle.",
+        "required": false,
+        "default": false
       }
     ]
   }

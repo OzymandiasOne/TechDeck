@@ -2,7 +2,7 @@
   "id": "922_setup",
   "name": "922 Setup",
   "description": "Reads every order folder in a 922 batch and creates the batch's pipeline buckets (HOLD / BATCH X / MODEL CHECK / 7000 / SHOP READY) plus one Planner card per order (BATCH X: <folder>), labelled with its pallet from the Pallet & Rod Organizer, in the D922 PIPELINE plan via a Power Automate webhook.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Anthony Sieben",
   "family": "922",
   "requires_admin": false,

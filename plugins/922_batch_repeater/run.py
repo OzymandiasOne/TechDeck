@@ -1,9 +1,11 @@
 """
-Batch Repeater Plugin for TechDeck v2.0.0 - WITH CONSOLE INPUT!
+Batch Repeater Plugin for TechDeck v2.1.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
-NEW: Prompts for PO number and batch name via console during execution!
-FIXED: Settings keys now match plugin.json, proper logging to TechDeck console
+v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
+the 'TechDeck 922 Repeat Tagger' Power Automate flow, which adds the REPEAT
+label and moves each card to the batch's MODEL CHECK bucket (see
+docs/TEAMS_CARDS.md). Blank webhook URL or Dry run -> payload preview only.
 """
 
 import os
@@ -75,6 +77,23 @@ def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
     return None
 
 
+def _load_922_setup_template(log) -> dict:
+    """Read the sibling 922 Setup plugin's card_template.json (label_map,
+    title format, plan name). Both plugins live side by side in the plugins
+    dir - repo AND %LOCALAPPDATA% installs - so the Planner card contract
+    stays defined in one file. Returns {} (caller falls back to defaults)
+    if it can't be read."""
+    import json
+    tpl = Path(__file__).resolve().parents[1] / "922_setup" / "card_template.json"
+    try:
+        with open(tpl, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"WARNING: could not read 922 Setup's card_template.json ({exc}) - "
+            f"using built-in defaults.")
+        return {}
+
+
 def dypn_of(folder_name: str) -> Optional[str]:
     """DYPN = the order-folder name after the FIRST dash.
 
@@ -100,7 +119,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     settings = params.get('settings', {})
     log = params.get('log', print)  # Get log callback
     
-    log("Starting 922 Batch Repeater v2.0.0...")
+    log("Starting 922 Batch Repeater v2.1.0...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -390,6 +409,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # shares its DYPN (e.g. repeat 'BK531539-R7211361-H3' feeds root folder
     # 'BL416682-R7211361-H3').
     distributed_count = 0
+    repeat_roots: set = set()  # root order folders that ARE repeats (for card tagging)
     if copied_repeats and not cancel_event.is_set():
         log("")
         log("Distributing CAD prints + binders to matching root folders...")
@@ -418,7 +438,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             dypn = dypn_of(repeat_folder.name)
             matches = root_by_dypn.get(dypn, []) if dypn else []
             if not matches:
+                log(f"  {repeat_folder.name}: no matching root order folder - "
+                    f"its card will NOT be tagged as a repeat")
                 continue
+            repeat_roots.update(m.name for m in matches)
 
             # Locate the CAD folder and binder PDF inside the copied repeat.
             cad_src = None
@@ -451,6 +474,51 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                 except Exception as e:
                     log(f"ERROR: Failed {repeat_folder.name} -> {dest_root.name}: {e}")
                     error_count += 1
+
+    # === Tag the repeats' cards in Planner (REPEAT label + MODEL CHECK) =====
+    # Every root order folder that DYPN-matched a pulled repeat IS a repeat
+    # order: its Planner card (created by 922 Setup) gets the REPEAT label and
+    # moves to the batch's MODEL CHECK bucket, via the 'TechDeck 922 Repeat
+    # Tagger' Power Automate flow (recipe in docs/TEAMS_CARDS.md). The label
+    # slot + title format come from 922 Setup's card_template.json so the
+    # Planner contract lives in exactly one place.
+    if repeat_roots and not cancel_event.is_set():
+        log("")
+        log("Tagging repeat cards in Planner (REPEAT label + MODEL CHECK bucket)...")
+        template = _load_922_setup_template(log)
+        repeat_slot = (template.get("label_map") or {}).get("REPEAT")
+        if not repeat_slot:
+            repeat_slot = "category19"
+            log("WARNING: no REPEAT entry in 922 Setup's label_map - "
+                "assuming category19 (Teal).")
+        title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
+        payload = {
+            "plan": template.get("plan", "D922 PIPELINE"),
+            "batch": str(new_po_num),
+            "bucket": f"BATCH {new_po_num}: MODEL CHECK",
+            "label": repeat_slot,
+            "titles": [title_fmt.format(batch=new_po_num, folder=name)
+                       for name in sorted(repeat_roots, key=str.lower)],
+        }
+        log(f"{len(payload['titles'])} card(s) to tag:")
+        for t in payload["titles"]:
+            log(f"  - {t}")
+
+        url = (settings.get('repeat_webhook_url', '') or '').strip()
+        dry_run = bool(settings.get('dry_run', False))
+        if not url:
+            log("No Repeat Tagger webhook URL configured -> DRY RUN (nothing posted).")
+            log("Set it in Settings > Apps > 922 Batch Repeater to tag the cards.")
+            sdk.write_payload_preview(payload, "last_922_repeat_tag_payload.json", log)
+        elif dry_run:
+            log("Dry run enabled in Settings -> not posting.")
+            sdk.write_payload_preview(payload, "last_922_repeat_tag_payload.json", log)
+        else:
+            if sdk.post_webhook(url, payload, log):
+                log(f"Repeat cards should now sit in 'BATCH {new_po_num}: MODEL CHECK' "
+                    "with the REPEAT label - check the D922 PIPELINE plan.")
+            else:
+                error_count += 1
 
     progress_callback(95)
 

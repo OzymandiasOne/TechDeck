@@ -650,3 +650,55 @@ def load_workbook_resilient(path, log=None, **kwargs):
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
         return openpyxl.load_workbook(path, **kwargs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Power Automate webhook helpers
+#
+# One JSON POST + one preview-file writer, shared by every plugin that talks
+# to a Power Automate flow (922 Setup card creation, 922 Batch Repeater
+# REPEAT tagging). Centralized per the Fix Protocol so logging, timeouts and
+# error wording stay identical across callers.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def post_webhook(url: str, payload: dict, log) -> bool:
+    """POST `payload` as JSON to a Power Automate webhook. Returns True on a
+    2xx response; logs the failure (and the flow's response body, truncated)
+    otherwise. `requests` is bundled (the updater uses it) and respects
+    corporate proxies."""
+    import requests
+
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+    except requests.exceptions.RequestException as exc:
+        log(f"ERROR: could not reach the webhook: {exc}")
+        log("Check the URL in Settings, your network/VPN, and that the flow is on.")
+        return False
+
+    if 200 <= resp.status_code < 300:
+        log(f"Webhook accepted the request (HTTP {resp.status_code}).")
+        body = (resp.text or "").strip()
+        if body:
+            log(f"Response: {body[:500]}")
+        return True
+
+    log(f"ERROR: webhook returned HTTP {resp.status_code}.")
+    log(f"Response: {(resp.text or '')[:500]}")
+    return False
+
+
+def write_payload_preview(payload: dict, filename: str, log) -> None:
+    """Save a webhook payload to %LOCALAPPDATA%/TechDeck/<filename> so a dry
+    run leaves something inspectable (and replayable into the flow's test
+    pane). Failures only log — a preview must never kill the run."""
+    import json as _json
+    import os
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    out = Path(base) / "TechDeck" / filename
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh, indent=2)
+        log(f"Preview written to: {out}")
+    except OSError as exc:
+        log(f"(Could not write preview file: {exc})")

@@ -50,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -237,41 +237,9 @@ def _build_cards(template: dict, batch: str, folders: list[str],
     return cards
 
 
-def _post_cards(url: str, payload: dict, log, cancel_event):
-    """POST the payload to the Power Automate webhook. Returns True on success."""
-    import requests  # bundled (the updater uses it); respects corporate proxies
-
-    try:
-        resp = requests.post(url, json=payload, timeout=60)
-    except requests.exceptions.RequestException as exc:
-        log(f"ERROR: could not reach the webhook: {exc}")
-        log("Check the URL in Settings, your network/VPN, and that the flow is on.")
-        return False
-
-    if 200 <= resp.status_code < 300:
-        log(f"Webhook accepted the request (HTTP {resp.status_code}).")
-        body = (resp.text or "").strip()
-        if body:
-            log(f"Response: {body[:500]}")
-        return True
-
-    log(f"ERROR: webhook returned HTTP {resp.status_code}.")
-    log(f"Response: {(resp.text or '')[:500]}")
-    return False
-
-
 def _write_preview(payload: dict, log) -> None:
     """Save the built payload next to TechDeck's data for inspection."""
-    import os
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
-    out = Path(base) / "TechDeck" / "last_922_setup_payload.json"
-    try:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        with open(out, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
-        log(f"Preview written to: {out}")
-    except OSError as exc:
-        log(f"(Could not write preview file: {exc})")
+    sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
 
 
 def run(params: dict, progress_callback, cancel_event):
@@ -419,7 +387,7 @@ def run(params: dict, progress_callback, cancel_event):
         return
 
     log("\nPosting cards to the webhook...")
-    ok = _post_cards(url, payload, log, cancel_event)
+    ok = sdk.post_webhook(url, payload, log)
     progress_callback(100)
     if ok:
         log(f"\nDONE. Requested {len(cards)} card(s) for Batch {batch}.")
