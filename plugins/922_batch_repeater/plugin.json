@@ -2,7 +2,7 @@
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
   "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Labels each repeat's Teams card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "🔄",
@@ -35,9 +35,9 @@
       {
         "key": "repeat_webhook_url",
         "type": "string",
-        "label": "Repeat Tagger Webhook URL",
-        "description": "The Power Automate flow URL that adds the REPEAT label to each repeat's Teams card and moves it to the batch's MODEL CHECK bucket. Get this from the 'TechDeck 922 Repeat Tagger' flow's trigger. Leave blank to dry-run (preview the payload without posting).",
-        "placeholder": "https://...powerplatform.com/.../invoke?...",
+        "label": "Repeat Tagger Webhook URL (override)",
+        "description": "Leave blank to use TechDeck's built-in REPEAT-labeling flow (adds the REPEAT label to each repeat's Teams card and moves it to the batch's MODEL CHECK bucket). Only set this to point at a different Power Automate flow. Use the Dry run toggle below to preview without posting.",
+        "placeholder": "Blank = TechDeck's built-in flow",
         "required": false,
         "default": ""
       },

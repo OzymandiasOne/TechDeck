@@ -64,7 +64,21 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.1.1"
+VERSION = "2.1.2"
+
+# The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
+# Baked in so a fresh install posts out of the box (same pattern as the
+# telemetry webhook in constants.py) — v0.8.6.8 shipped with a blank default
+# and silently dry-ran on every machine but the author's. The Settings field
+# stays as an OVERRIDE (e.g. pointing at a rebuilt flow without an app
+# update); the dry_run toggle is how you preview without posting.
+DEFAULT_WEBHOOK_URL = (
+    "https://REDACTED-ENVIRONMENT.api"
+    ".powerplatform.com:443/powerautomate/automations/direct/cu/04/workflows/"
+    "REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke"
+    "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=REDACTED"
+)
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -391,16 +405,9 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         return
 
     # --- Post (or dry-run) -------------------------------------------------
-    url = (settings.get("webhook_url", "") or "").strip()
+    url = (settings.get("webhook_url", "") or "").strip() or DEFAULT_WEBHOOK_URL
     dry_run = bool(settings.get("dry_run", False))
 
-    if not url:
-        log("\nNo webhook URL configured -> DRY RUN (nothing posted).")
-        log("Set the Teams Webhook URL in Settings to create the cards.")
-        _write_preview(payload, log)
-        progress_callback(100)
-        log("\nDONE (dry run).")
-        return batch
     if dry_run:
         log("\nDry run enabled in Settings -> not posting.")
         _write_preview(payload, log)

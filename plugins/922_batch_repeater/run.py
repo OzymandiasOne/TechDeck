@@ -1,5 +1,5 @@
 """
-Batch Repeater Plugin for TechDeck v2.2.1
+Batch Repeater Plugin for TechDeck v2.2.2
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
 v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
@@ -30,6 +30,18 @@ except ModuleNotFoundError:
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
 COMPLETED_FOLDER_NAME = "1 - Completed"
+
+# The 'TechDeck 922 Repeat Tagger' Power Automate flow. Baked in so a fresh
+# install labels cards out of the box (v0.8.6.8 shipped with a blank default
+# and silently dry-ran the tagging on every machine but the author's). The
+# Settings field stays as an OVERRIDE; dry_run previews without posting.
+DEFAULT_REPEAT_WEBHOOK_URL = (
+    "https://REDACTED-ENVIRONMENT.api"
+    ".powerplatform.com:443/powerautomate/automations/direct/cu/01/workflows/"
+    "REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke"
+    "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=REDACTED"
+)
 
 
 def get_console_input(params: Dict[str, Any], prompt: str) -> str:
@@ -130,7 +142,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_distribute = bool(stage_options.get('distribute', True))
     do_tag = bool(stage_options.get('tag', True))
 
-    log("Starting 922 Batch Repeater v2.2.1...")
+    log("Starting 922 Batch Repeater v2.2.2...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -526,13 +538,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         for t in payload["titles"]:
             log(f"  - {t}")
 
-        url = (settings.get('repeat_webhook_url', '') or '').strip()
+        url = ((settings.get('repeat_webhook_url', '') or '').strip()
+               or DEFAULT_REPEAT_WEBHOOK_URL)
         dry_run = bool(settings.get('dry_run', False))
-        if not url:
-            log("No Repeat Tagger webhook URL configured -> DRY RUN (nothing posted).")
-            log("Set it in Settings > Apps > 922 Batch Repeater to tag the cards.")
-            sdk.write_payload_preview(payload, "last_922_repeat_tag_payload.json", log)
-        elif dry_run:
+        if dry_run:
             log("Dry run enabled in Settings -> not posting.")
             sdk.write_payload_preview(payload, "last_922_repeat_tag_payload.json", log)
         else:
