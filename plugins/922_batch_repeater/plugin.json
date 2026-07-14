@@ -2,7 +2,7 @@
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
   "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Tags each repeat's Planner card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "🔄",

@@ -1,12 +1,12 @@
 {
   "id": "922_setup",
   "name": "922 Setup",
-  "description": "Reads every order folder in a 922 batch and creates the batch's pipeline buckets (HOLD / BATCH X / MODEL CHECK / 7000 / SHOP READY) plus one Planner card per order (BATCH X: <folder>), labelled with its pallet from the Pallet & Rod Organizer, in the D922 PIPELINE plan via a Power Automate webhook.",
-  "version": "2.0.1",
+  "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Teams Setup (pipeline buckets + one labelled Planner card per order via a Power Automate webhook), 922 Batch Repeater (pull repeats, distribute CAD/binders, tag REPEAT cards), and 922 Pallet Stamper - each stage toggleable, batch number shared across stages.",
+  "version": "2.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "requires_admin": false,
-  "timeout": 600,
+  "timeout": 3600,
   "settings": {
     "fields": [
       {

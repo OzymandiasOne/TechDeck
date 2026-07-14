@@ -1,11 +1,16 @@
 """
-Batch Repeater Plugin for TechDeck v2.1.0
+Batch Repeater Plugin for TechDeck v2.2.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
 v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
 the 'TechDeck 922 Repeat Tagger' Power Automate flow, which adds the REPEAT
 label and moves each card to the batch's MODEL CHECK bucket (see
 docs/TEAMS_CARDS.md). Blank webhook URL or Dry run -> payload preview only.
+
+v2.2.0: honors params['stage_options'] = {"distribute": bool, "tag": bool}
+(both default True) so the consolidated 922 Setup's master toggle window can
+switch the CAD/binder distribution and the card tagging off individually.
+Standalone runs never pass the key, so behavior there is unchanged.
 """
 
 import os
@@ -118,8 +123,14 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     """
     settings = params.get('settings', {})
     log = params.get('log', print)  # Get log callback
-    
-    log("Starting 922 Batch Repeater v2.1.0...")
+
+    # Stage toggles from the consolidated 922 Setup's master window (absent on
+    # standalone runs -> everything on).
+    stage_options = params.get('stage_options') or {}
+    do_distribute = bool(stage_options.get('distribute', True))
+    do_tag = bool(stage_options.get('tag', True))
+
+    log("Starting 922 Batch Repeater v2.2.0...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -412,7 +423,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     repeat_roots: set = set()  # root order folders that ARE repeats (for card tagging)
     if copied_repeats and not cancel_event.is_set():
         log("")
-        log("Distributing CAD prints + binders to matching root folders...")
+        if do_distribute:
+            log("Distributing CAD prints + binders to matching root folders...")
+        else:
+            # The DYPN matching still runs (card tagging needs repeat_roots);
+            # only the copies are skipped.
+            log("CAD/binder distribution switched OFF - matching repeats to "
+                "root folders for card tagging only.")
 
         # Map DYPN -> [root order folders] (direct children of the batch root,
         # excluding REPEAT BATCHES and the batch Documentation folder).
@@ -442,6 +459,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                     f"its card will NOT be tagged as a repeat")
                 continue
             repeat_roots.update(m.name for m in matches)
+            if not do_distribute:
+                continue
 
             # Locate the CAD folder and binder PDF inside the copied repeat.
             cad_src = None
@@ -482,7 +501,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Tagger' Power Automate flow (recipe in docs/TEAMS_CARDS.md). The label
     # slot + title format come from 922 Setup's card_template.json so the
     # Planner contract lives in exactly one place.
-    if repeat_roots and not cancel_event.is_set():
+    if repeat_roots and not do_tag:
+        log("")
+        log("Card tagging switched OFF - repeat cards were NOT tagged in Planner.")
+    if do_tag and repeat_roots and not cancel_event.is_set():
         log("")
         log("Tagging repeat cards in Planner (REPEAT label + MODEL CHECK bucket)...")
         template = _load_922_setup_template(log)

@@ -504,6 +504,50 @@ class ConsoleWidget(QWidget, ThemeAware):
         else:
             self._sel_result = None
 
+    def request_grouped_toggles(self, groups, **kwargs):
+        """Show the two-level stage/option toggle dialog and BLOCK until submit.
+
+        Same worker-thread contract as request_selection. ``groups`` is the
+        plain-data spec GroupedToggleDialog takes (see that module); ``kwargs``
+        pass through (window_title, header, subtext, run_button_text).
+        Returns {group_key: {"enabled": bool, "options": {child_key: bool}}},
+        or None if cancelled. First used by the consolidated 922 Setup.
+        """
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_grouped_toggles() cannot be called from main GUI thread"
+            )
+
+        self._gt_args = ([dict(g) for g in groups], dict(kwargs))
+        self._gt_result = None
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_grouped_toggles_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._gt_result
+
+    @Slot()
+    def _grouped_toggles_gui(self):
+        """GUI-thread half of request_grouped_toggles: run the modal dialog."""
+        from techdeck.ui.dialogs.grouped_toggle_dialog import GroupedToggleDialog
+
+        groups, kwargs = self._gt_args
+        dlg = GroupedToggleDialog(groups, parent=self.window(), **kwargs)
+        if dlg.exec():
+            self._gt_result = dlg.result_map()
+        else:
+            self._gt_result = None
+
     def request_directory(self, title: str = "Select Folder", start_dir: str = ""):
         """Show the native pick-a-folder dialog and BLOCK until the user
         chooses. Same worker-thread contract as request_selection. Returns the

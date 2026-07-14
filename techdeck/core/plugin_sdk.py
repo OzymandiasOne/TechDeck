@@ -366,6 +366,44 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
+def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[dict]:
+    """Show the two-level master toggle dialog (stages as checkable parents,
+    per-stage option toggles as children — GroupedToggleDialog) and block
+    until submit. ``groups`` spec and the returned
+    ``{group_key: {"enabled": bool, "options": {child_key: bool}}}`` shape are
+    documented in techdeck/ui/dialogs/grouped_toggle_dialog.py; ``kwargs``
+    pass through (window_title, header, subtext, run_button_text). Returns
+    None if the user cancelled.
+
+    Headless — or on an older TechDeck whose console lacks the method — it
+    returns every group/child at its declared default (an all-defaults
+    submit), so scripted runs never hang on a dialog.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_grouped_toggles"):
+        try:
+            return console.request_grouped_toggles(groups, **kwargs)
+        except TypeError:
+            # Older console signature without these kwargs (version tolerance).
+            return console.request_grouped_toggles(groups)
+    return {g["key"]: {"enabled": bool(g.get("checked", True)),
+                       "options": {c["key"]: bool(c.get("checked", True))
+                                   for c in g.get("children", [])}}
+            for g in groups}
+
+
+def plugin_settings(plugin_id: str) -> dict:
+    """The saved Settings > Apps values for ANY plugin id (empty dict when
+    none are stored or the store is unreadable). Lets an orchestrating plugin
+    run a sibling stage with the sibling's own configuration — the same values
+    the executor would inject if that plugin ran standalone."""
+    try:
+        from techdeck.core.settings import SettingsManager
+        return dict(SettingsManager().get_plugin_settings(plugin_id) or {})
+    except Exception:
+        return {}
+
+
 def request_batch_number(params: dict, prompt: str) -> str:
     """Prompt for a batch number through the TechDeck console, falling back to
     stdin input() when run standalone (no console). Returns the raw string.

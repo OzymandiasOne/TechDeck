@@ -35,6 +35,16 @@ Flow:
 The card layout, bucket order, and label map live in card_template.json so
 they can be edited without touching this code. Power Automate flow setup is
 documented in docs/TEAMS_CARDS.md.
+
+v2.1.0: consolidated 922 Setup. run() now opens a master toggle window
+(GroupedToggleDialog via sdk.request_grouped_toggles) listing the whole 922
+batch-prep sequence - 922 Teams Setup (the card creation above, with an
+"Apply pallet labels" option), 922 Batch Repeater (with "Distribute CAD
+prints + binders" / "Tag REPEAT cards in Planner" options), and 922 Pallet
+Stamper - and runs the checked stages top to bottom. Sibling stages import
+the INSTALLED sibling plugins' run.py in-process with their own saved
+settings; the batch number derived from the picked folder seeds the
+family-shared cache so later stages never re-prompt for it.
 """
 from __future__ import annotations
 
@@ -50,7 +60,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.0.1"
+VERSION = "2.1.0"
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -242,13 +252,15 @@ def _write_preview(payload: dict, log) -> None:
     sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
 
 
-def run(params: dict, progress_callback, cancel_event):
+def _run_teams_setup(params: dict, progress_callback, cancel_event,
+                     apply_labels: bool = True):
+    """The original 922 Setup stage: pick the batch folder, build the cards,
+    POST (or dry-run) the webhook payload. Returns the batch number string on
+    success (so the orchestrator can seed the family-shared batch cache for
+    the following stages), or None when cancelled / errored (the log says
+    which; user cancels also set cancel_event)."""
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
-
-    log("=" * 60)
-    log(f"922 Setup v{VERSION}")
-    log("=" * 60)
 
     # --- Pick the batch folder (native folder dialog) ----------------------
     # Open the dialog at the 922 QTDR root when we can find it, so the user is
@@ -311,9 +323,15 @@ def run(params: dict, progress_callback, cancel_event):
     # code path is complete, but the setting is not declared in plugin.json
     # yet, so it always resolves False. Declaring the boolean field enables it.
     apply_materials = bool(settings.get("apply_material_labels", False))
-    organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
-    if organizer is not None:
-        log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
+    if apply_labels:
+        organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
+        if organizer is not None:
+            log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
+    else:
+        # Master-window toggle: labels off entirely — skip the organizer read
+        # (no labels also means no label warnings).
+        organizer, warnings = None, []
+        log("Pallet labels switched OFF - cards will be created without labels.")
     progress_callback(50)
 
     # --- Build the cards from the template ---------------------------------
@@ -378,13 +396,13 @@ def run(params: dict, progress_callback, cancel_event):
         _write_preview(payload, log)
         progress_callback(100)
         log("\nDONE (dry run).")
-        return
+        return batch
     if dry_run:
         log("\nDry run enabled in Settings -> not posting.")
         _write_preview(payload, log)
         progress_callback(100)
         log("\nDONE (dry run).")
-        return
+        return batch
 
     log("\nPosting cards to the webhook...")
     ok = sdk.post_webhook(url, payload, log)
@@ -392,14 +410,211 @@ def run(params: dict, progress_callback, cancel_event):
     if ok:
         log(f"\nDONE. Requested {len(cards)} card(s) for Batch {batch}.")
         log("Check the D922 PIPELINE plan in Teams to confirm.")
-    else:
-        log("\nFAILED — see the errors above. The payload was not created.")
+        return batch
+    log("\nFAILED — see the errors above. The payload was not created.")
+    return batch  # the batch is still known — later stages can proceed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Orchestration — the consolidated 922 Setup
+# ─────────────────────────────────────────────────────────────────────────────
+# One tile runs the whole 922 batch-prep sequence behind a master toggle
+# window: 922 Teams Setup (this file's original job) -> 922 Batch Repeater ->
+# 922 Pallet Stamper. The sibling plugins' code is NOT duplicated — their
+# installed run.py files are imported at run time from the plugins dir this
+# file lives in, and each runs with its OWN saved settings
+# (sdk.plugin_settings). The standalone Repeater/Stamper tiles keep working
+# unchanged; if one is missing (partial install) its stage errors cleanly.
+
+# Progress-bar slice per stage (proportionally re-normalized over the enabled
+# stages, so any combination still sweeps 0..100).
+_STAGE_WEIGHTS = {"teams_setup": 35, "batch_repeater": 45, "pallet_stamper": 20}
+
+
+def _dialog_groups() -> list:
+    """The master window's plain-data spec (sdk.request_grouped_toggles)."""
+    return [
+        {"key": "teams_setup",
+         "label": "922 Teams Setup  -  buckets + Planner cards",
+         "checked": True,
+         "children": [
+             {"key": "labels", "label": "Apply pallet labels", "checked": True},
+         ]},
+        {"key": "batch_repeater",
+         "label": "922 Batch Repeater  -  pull repeat folders",
+         "checked": True,
+         "children": [
+             {"key": "distribute", "label": "Distribute CAD prints + binders",
+              "checked": True},
+             {"key": "tag", "label": "Tag REPEAT cards in Planner",
+              "checked": True},
+         ]},
+        {"key": "pallet_stamper",
+         "label": "922 Pallet Stamper  -  stamp work packets",
+         "checked": True,
+         "children": []},
+    ]
+
+
+def _load_sibling(plugin_id: str, log):
+    """Import the installed sibling plugin's run.py as a uniquely named
+    module. Both dev and installed layouts keep every plugin in one flat
+    plugins dir, so the sibling is always next to this folder. Returns the
+    module, or None (logged) when it isn't installed / fails to import."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / plugin_id / "run.py"
+    if not path.is_file():
+        log(f"ERROR: sibling plugin '{plugin_id}' is not installed "
+            f"(missing {path}).")
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location(
+            f"techdeck_922_setup_stage_{plugin_id}", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as exc:
+        log(f"ERROR: could not load sibling plugin '{plugin_id}': {exc}")
+        return None
+
+
+def _scaled(progress_callback, lo: int, hi: int):
+    """Map a stage's 0..100 progress onto the [lo, hi] slice of the run bar."""
+    def cb(p):
+        try:
+            p = max(0, min(100, int(p)))
+        except (TypeError, ValueError):
+            return
+        progress_callback(lo + (hi - lo) * p // 100)
+    return cb
+
+
+def _run_sibling_stage(plugin_id: str, stage_label: str, params: dict,
+                       shared_state: dict, progress_cb, cancel_event,
+                       stage_options: dict | None = None) -> None:
+    """Run a sibling plugin in-process with its own settings. shared_state is
+    passed through so sdk.request_batch_number reuses the batch the Teams
+    Setup stage derived (no re-prompt). Exceptions propagate — a stage
+    failure fails the run, exactly like the standalone tile would."""
+    log = params.get("log", print)
+    module = _load_sibling(plugin_id, log)
+    if module is None or not callable(getattr(module, "run", None)):
+        raise RuntimeError(f"{stage_label} stage could not be loaded - "
+                           f"is '{plugin_id}' installed?")
+    sub_params = dict(params)
+    sub_params["plugin_id"] = plugin_id
+    sub_params["plugin_family"] = "922"
+    sub_params["settings"] = sdk.plugin_settings(plugin_id)
+    sub_params["shared_state"] = shared_state
+    if stage_options is not None:
+        sub_params["stage_options"] = stage_options
+    log("")
+    log("=" * 60)
+    log(f"Stage: {stage_label}")
+    log("=" * 60)
+    module.run(sub_params, progress_cb, cancel_event)
+
+
+def run(params: dict, progress_callback, cancel_event):
+    log = params.get("log", print)
+
+    log("=" * 60)
+    log(f"922 Setup v{VERSION}")
+    log("=" * 60)
+
+    # --- Master toggle window ----------------------------------------------
+    choices = sdk.request_grouped_toggles(
+        params, _dialog_groups(),
+        window_title="922 Setup",
+        header="922 Setup - Select Stages",
+        subtext=("Stages run top to bottom. Click a stage's name to show its "
+                 "options; uncheck a stage to skip it."),
+        run_button_text="Run Selected",
+    )
+    if choices is None:
+        log("Stage selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+        return
+
+    order = ["teams_setup", "batch_repeater", "pallet_stamper"]
+    enabled = [k for k in order if choices.get(k, {}).get("enabled")]
+    if not enabled:
+        log("No stages selected - nothing was run.")
+        cancel_event.set()
+        return
+    log("Stages: " + " -> ".join(enabled))
+
+    # Proportional progress slices over the enabled stages.
+    total = sum(_STAGE_WEIGHTS[k] for k in enabled)
+    slices: dict[str, tuple[int, int]] = {}
+    acc = 0
+    for k in enabled:
+        lo = acc * 100 // total
+        acc += _STAGE_WEIGHTS[k]
+        slices[k] = (lo, acc * 100 // total)
+
+    # The family-shared state travels through every stage so one batch answer
+    # serves all of them (the executor injects it on GUI runs; create one for
+    # headless runs so the stages still share between themselves).
+    shared_state = params.get("shared_state")
+    if shared_state is None:
+        shared_state = {"911": {}, "922": {}, "other": {}}
+
+    # --- Stage 1: 922 Teams Setup (this plugin's original job) -------------
+    if "teams_setup" in enabled:
+        lo, hi = slices["teams_setup"]
+        apply_labels = choices["teams_setup"]["options"].get("labels", True)
+        batch = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
+                                 cancel_event, apply_labels=apply_labels)
+        if cancel_event.is_set():
+            return
+        if batch:
+            # Seed the family batch cache: the folder the user just picked IS
+            # this run's batch, so the Repeater/Stamper never re-prompt.
+            shared_state.setdefault("922", {})["batch_number"] = batch
+        elif len(enabled) > 1:
+            log("\nWARNING: 922 Teams Setup did not complete (see above). "
+                "Continuing with the remaining stages - they will prompt "
+                "for the batch number themselves.")
+        progress_callback(hi)
+
+    # --- Stage 2: 922 Batch Repeater ----------------------------------------
+    if "batch_repeater" in enabled and not cancel_event.is_set():
+        lo, hi = slices["batch_repeater"]
+        opts = choices["batch_repeater"]["options"]
+        _run_sibling_stage(
+            "922_batch_repeater", "922 Batch Repeater", params, shared_state,
+            _scaled(progress_callback, lo, hi), cancel_event,
+            stage_options={"distribute": opts.get("distribute", True),
+                           "tag": opts.get("tag", True)},
+        )
+        if cancel_event.is_set():
+            return
+        progress_callback(hi)
+
+    # --- Stage 3: 922 Pallet Stamper ----------------------------------------
+    if "pallet_stamper" in enabled and not cancel_event.is_set():
+        lo, hi = slices["pallet_stamper"]
+        _run_sibling_stage(
+            "922_pallet_stamper", "922 Pallet Stamper", params, shared_state,
+            _scaled(progress_callback, lo, hi), cancel_event,
+        )
+        if cancel_event.is_set():
+            return
+        progress_callback(hi)
+
+    progress_callback(100)
+    log("")
+    log("=" * 60)
+    log(f"922 Setup finished ({len(enabled)} stage(s)).")
+    log("=" * 60)
 
 
 if __name__ == "__main__":
     # Headless smoke test: python plugins/922_setup/run.py
-    # request_directory falls back to a pasted-path prompt when headless, so
-    # point this at a real 'Batch NNN' folder to exercise the full flow.
+    # The master window falls back to an all-defaults submit when headless;
+    # request_directory falls back to a pasted-path prompt, so point this at
+    # a real 'Batch NNN' folder to exercise the full flow.
     import threading
     import builtins
     builtins.input = lambda *_: r"C:\path\to\Batch 483"
