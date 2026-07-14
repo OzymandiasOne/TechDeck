@@ -1,8 +1,31 @@
-# TechDeck v0.8.6.7 - SSPO Suite Upgrades
+# TechDeck v0.8.6.8 - 922 Setup Expansion
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.8
+
+**922 Setup is now the whole 922 batch-prep sequence in one run.** Launching it opens a
+master window listing the stages - **Generate Teams Cards**, **Batch Repeater**, and
+**Pallet Stamper** - each toggleable, run top to bottom. Click a stage's name to reveal
+its options. The batch you pick for the Teams cards carries through automatically, so
+the later stages never re-ask for it. (The standalone Batch Repeater and Pallet Stamper
+tiles still work exactly as before.)
+
+**Generate Teams Cards builds the full pipeline.** One run creates the batch's five
+buckets in order - HOLD, BATCH {n}, MODEL CHECK, 7000, SHOP READY - and one card per
+order folder, each labelled with its pallet (PALLET 1/2/3) straight from the batch's
+Pallet & Rod Organizer. An "Apply source material labels" option (off by default) adds
+each order's tube source materials as labels too. Re-running finds the existing buckets
+instead of duplicating them.
+
+**Batch Repeater now finishes the job in Teams.** After pulling repeats and
+distributing CAD prints + binders, it labels each repeat's card REPEAT and moves it to
+the batch's MODEL CHECK bucket automatically. Both steps are toggleable from the master
+window, and a dry-run setting previews exactly what would be labelled without posting.
 
 ---
 
@@ -381,11 +404,11 @@ Explorer and on pinned shortcuts.
 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs 
 911 Batch Repeater | Finds and copies repeat parts (NC files + inspection PDFs) for 911 batches 
 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs; keeps MIL-SPEC and HULL pages 
-922 Setup | Reads a batch's order folders and creates one Planner card per order ("BATCH X: folder") in the D922 PIPELINE plan via a Power Automate webhook 
+922 Setup | Full 922 batch prep behind a master toggle window: creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number 
 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info 
 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
-Batch Repeater | Copies repeat orders from prior 922 batches 
+Batch Repeater | Copies repeat orders from prior 922 batches, distributes CAD prints + binders to matching orders, then labels each repeat's Teams card REPEAT and moves it to MODEL CHECK 
 922 LST Organizer | Organizes .lst files by material type; outputs per-batch overview 
 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically 
 

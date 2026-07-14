@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.7 - SSPO suite upgrades: Award Review rename + Shape Ft Req/Working Forecast Input sheets; Invoicing Prep per-nest folders + Close Outs; updater polish; ASA game v2.3
+; Version 0.8.6.8 - 922 Setup expansion: consolidated master toggle window, ordered pipeline buckets + pallet-labelled Teams cards, Batch Repeater REPEAT labeling + MODEL CHECK move
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.7"
+#define MyAppVersion "0.8.6.8"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

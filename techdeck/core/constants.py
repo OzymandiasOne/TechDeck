@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.7"  # SSPO suite upgrades: 911 SSPO Award Review (renamed from Runtime Estimator) w/ Shape Ft Req + Working Forecast Input sheets; SSPO Invoicing Prep per-nest folders + Workorder Close Outs; updater dialog/cmd-flash fixes; Submit Feedback rename; ASA game v2.3
+APP_VERSION = "0.8.6.8"  # 922 Setup expansion: consolidated master toggle window (Generate Teams Cards -> Batch Repeater -> Pallet Stamper), ordered D922 PIPELINE buckets + pallet-labelled Teams cards, Batch Repeater REPEAT labeling + MODEL CHECK move via new webhook flow
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
