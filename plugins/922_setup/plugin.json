@@ -1,8 +1,8 @@
 {
   "id": "922_setup",
   "name": "922 Setup",
-  "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Teams Setup (pipeline buckets + one labelled Planner card per order via a Power Automate webhook), 922 Batch Repeater (pull repeats, distribute CAD/binders, tag REPEAT cards), and 922 Pallet Stamper - each stage toggleable, batch number shared across stages.",
-  "version": "2.1.0",
+  "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order via a Power Automate webhook), Batch Repeater (pull repeats, distribute CAD/binders, label REPEAT cards), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
+  "version": "2.1.1",
   "author": "Anthony Sieben",
   "family": "922",
   "requires_admin": false,
@@ -21,8 +21,8 @@
       {
         "key": "webhook_url",
         "type": "string",
-        "label": "Planner Webhook URL",
-        "description": "The Power Automate flow URL that creates the Planner cards. Get this from the flow's webhook/HTTP-request trigger. Leave blank to dry-run (build and preview the cards without posting).",
+        "label": "Teams Webhook URL",
+        "description": "The Power Automate flow URL that creates the Teams cards. Get this from the flow's webhook/HTTP-request trigger. Leave blank to dry-run (build and preview the cards without posting).",
         "placeholder": "https://prod-XX.westus.logic.azure.com:443/workflows/...",
         "required": false,
         "default": ""

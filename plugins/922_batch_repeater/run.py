@@ -1,5 +1,5 @@
 """
-Batch Repeater Plugin for TechDeck v2.2.0
+Batch Repeater Plugin for TechDeck v2.2.1
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
 v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
@@ -130,7 +130,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_distribute = bool(stage_options.get('distribute', True))
     do_tag = bool(stage_options.get('tag', True))
 
-    log("Starting 922 Batch Repeater v2.2.0...")
+    log("Starting 922 Batch Repeater v2.2.1...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -503,10 +503,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Planner contract lives in exactly one place.
     if repeat_roots and not do_tag:
         log("")
-        log("Card tagging switched OFF - repeat cards were NOT tagged in Planner.")
+        log("Card labeling switched OFF - repeat cards were NOT labeled in Teams.")
     if do_tag and repeat_roots and not cancel_event.is_set():
         log("")
-        log("Tagging repeat cards in Planner (REPEAT label + MODEL CHECK bucket)...")
+        log("Labeling repeat cards in Teams (REPEAT label + MODEL CHECK bucket)...")
         template = _load_922_setup_template(log)
         repeat_slot = (template.get("label_map") or {}).get("REPEAT")
         if not repeat_slot:
@@ -538,7 +538,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         else:
             if sdk.post_webhook(url, payload, log):
                 log(f"Repeat cards should now sit in 'BATCH {new_po_num}: MODEL CHECK' "
-                    "with the REPEAT label - check the D922 PIPELINE plan.")
+                    "with the REPEAT label - check the D922 PIPELINE board "
+                    "in Teams.")
             else:
                 error_count += 1
 

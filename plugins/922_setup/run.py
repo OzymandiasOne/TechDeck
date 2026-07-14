@@ -38,13 +38,17 @@ documented in docs/TEAMS_CARDS.md.
 
 v2.1.0: consolidated 922 Setup. run() now opens a master toggle window
 (GroupedToggleDialog via sdk.request_grouped_toggles) listing the whole 922
-batch-prep sequence - 922 Teams Setup (the card creation above, with an
-"Apply pallet labels" option), 922 Batch Repeater (with "Distribute CAD
-prints + binders" / "Tag REPEAT cards in Planner" options), and 922 Pallet
-Stamper - and runs the checked stages top to bottom. Sibling stages import
-the INSTALLED sibling plugins' run.py in-process with their own saved
-settings; the batch number derived from the picked folder seeds the
-family-shared cache so later stages never re-prompt for it.
+batch-prep sequence - "Generate Teams Cards" (the card creation above),
+"Batch Repeater" (with "Distribute CAD prints + binders" / "Tag REPEAT cards
+in Planner" options), and "Pallet Stamper" - and runs the checked stages top
+to bottom. Sibling stages import the INSTALLED sibling plugins' run.py
+in-process with their own saved settings; the batch number derived from the
+picked folder seeds the family-shared cache so later stages never re-prompt
+for it.
+
+v2.1.1: pallet labels (PALLET 1/2/3) always apply - the Generate Teams Cards
+child toggle is "Apply source material labels" (default OFF), which is now
+the live enablement path for the previously deferred material-label branch.
 """
 from __future__ import annotations
 
@@ -60,7 +64,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.1.0"
+VERSION = "2.1.1"
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -253,12 +257,15 @@ def _write_preview(payload: dict, log) -> None:
 
 
 def _run_teams_setup(params: dict, progress_callback, cancel_event,
-                     apply_labels: bool = True):
+                     apply_materials_opt: bool = False):
     """The original 922 Setup stage: pick the batch folder, build the cards,
-    POST (or dry-run) the webhook payload. Returns the batch number string on
-    success (so the orchestrator can seed the family-shared batch cache for
-    the following stages), or None when cancelled / errored (the log says
-    which; user cancels also set cancel_event)."""
+    POST (or dry-run) the webhook payload. Pallet labels (PALLET 1/2/3)
+    ALWAYS apply; ``apply_materials_opt`` (the master window's "Apply source
+    material labels" toggle, default off) turns the source-material labels on
+    for this run. Returns the batch number string on success (so the
+    orchestrator can seed the family-shared batch cache for the following
+    stages), or None when cancelled / errored (the log says which; user
+    cancels also set cancel_event)."""
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
 
@@ -319,19 +326,16 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
     progress_callback(40)
 
     # --- Read the pallet assignments from the Pallet & Rod Organizer -------
-    # 'apply_material_labels' is the deferred source-material feature: the
-    # code path is complete, but the setting is not declared in plugin.json
-    # yet, so it always resolves False. Declaring the boolean field enables it.
-    apply_materials = bool(settings.get("apply_material_labels", False))
-    if apply_labels:
-        organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
-        if organizer is not None:
-            log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
-    else:
-        # Master-window toggle: labels off entirely — skip the organizer read
-        # (no labels also means no label warnings).
-        organizer, warnings = None, []
-        log("Pallet labels switched OFF - cards will be created without labels.")
+    # Pallet labels always apply. Source-material labels are on only when the
+    # master window's toggle was checked (or the still-undeclared
+    # 'apply_material_labels' plugin.json setting exists and is true).
+    apply_materials = (apply_materials_opt
+                       or bool(settings.get("apply_material_labels", False)))
+    if apply_materials:
+        log("Source material labels: ON for this run.")
+    organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
+    if organizer is not None:
+        log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
     progress_callback(50)
 
     # --- Build the cards from the template ---------------------------------
@@ -352,10 +356,10 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         folder_labels[folder] = slots
         folder_label_names[folder] = names
     if unmatched:
-        warnings.append("No matching Planner label for: "
+        warnings.append("No matching Teams label for: "
                         + ", ".join(sorted(unmatched))
                         + " - skipped (cards still created; add/rename the "
-                        "label in Planner AND card_template.json to cover it).")
+                        "label in Teams AND card_template.json to cover it).")
 
     cards = _build_cards(template, batch, folders, folder_labels)
     buckets = [b.format(batch=batch) for b in template.get("buckets", [])] \
@@ -392,7 +396,7 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
 
     if not url:
         log("\nNo webhook URL configured -> DRY RUN (nothing posted).")
-        log("Set the Planner Webhook URL in Settings to create the cards.")
+        log("Set the Teams Webhook URL in Settings to create the cards.")
         _write_preview(payload, log)
         progress_callback(100)
         log("\nDONE (dry run).")
@@ -432,25 +436,32 @@ _STAGE_WEIGHTS = {"teams_setup": 35, "batch_repeater": 45, "pallet_stamper": 20}
 
 
 def _dialog_groups() -> list:
-    """The master window's plain-data spec (sdk.request_grouped_toggles)."""
+    """The master window's plain-data spec (sdk.request_grouped_toggles).
+
+    Pallet labels (PALLET 1/2/3) always apply — the only label toggle is the
+    source-MATERIAL labels, default OFF (the deferred-by-teammate-input
+    feature; the flow already handles the slots, so checking it is the whole
+    enablement for a run).
+    """
     return [
         {"key": "teams_setup",
-         "label": "922 Teams Setup  -  buckets + Planner cards",
+         "label": "Generate Teams Cards",
          "checked": True,
          "children": [
-             {"key": "labels", "label": "Apply pallet labels", "checked": True},
+             {"key": "materials", "label": "Apply source material labels",
+              "checked": False},
          ]},
         {"key": "batch_repeater",
-         "label": "922 Batch Repeater  -  pull repeat folders",
+         "label": "Batch Repeater",
          "checked": True,
          "children": [
              {"key": "distribute", "label": "Distribute CAD prints + binders",
               "checked": True},
-             {"key": "tag", "label": "Tag REPEAT cards in Planner",
+             {"key": "tag", "label": "Label REPEAT cards in Teams",
               "checked": True},
          ]},
         {"key": "pallet_stamper",
-         "label": "922 Pallet Stamper  -  stamp work packets",
+         "label": "Pallet Stamper",
          "checked": True,
          "children": []},
     ]
@@ -560,12 +571,13 @@ def run(params: dict, progress_callback, cancel_event):
     if shared_state is None:
         shared_state = {"911": {}, "922": {}, "other": {}}
 
-    # --- Stage 1: 922 Teams Setup (this plugin's original job) -------------
+    # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
     if "teams_setup" in enabled:
         lo, hi = slices["teams_setup"]
-        apply_labels = choices["teams_setup"]["options"].get("labels", True)
+        apply_materials = choices["teams_setup"]["options"].get("materials", False)
         batch = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
-                                 cancel_event, apply_labels=apply_labels)
+                                 cancel_event,
+                                 apply_materials_opt=apply_materials)
         if cancel_event.is_set():
             return
         if batch:
@@ -573,17 +585,17 @@ def run(params: dict, progress_callback, cancel_event):
             # this run's batch, so the Repeater/Stamper never re-prompt.
             shared_state.setdefault("922", {})["batch_number"] = batch
         elif len(enabled) > 1:
-            log("\nWARNING: 922 Teams Setup did not complete (see above). "
+            log("\nWARNING: Generate Teams Cards did not complete (see above). "
                 "Continuing with the remaining stages - they will prompt "
                 "for the batch number themselves.")
         progress_callback(hi)
 
-    # --- Stage 2: 922 Batch Repeater ----------------------------------------
+    # --- Stage 2: Batch Repeater --------------------------------------------
     if "batch_repeater" in enabled and not cancel_event.is_set():
         lo, hi = slices["batch_repeater"]
         opts = choices["batch_repeater"]["options"]
         _run_sibling_stage(
-            "922_batch_repeater", "922 Batch Repeater", params, shared_state,
+            "922_batch_repeater", "Batch Repeater", params, shared_state,
             _scaled(progress_callback, lo, hi), cancel_event,
             stage_options={"distribute": opts.get("distribute", True),
                            "tag": opts.get("tag", True)},
@@ -592,11 +604,11 @@ def run(params: dict, progress_callback, cancel_event):
             return
         progress_callback(hi)
 
-    # --- Stage 3: 922 Pallet Stamper ----------------------------------------
+    # --- Stage 3: Pallet Stamper --------------------------------------------
     if "pallet_stamper" in enabled and not cancel_event.is_set():
         lo, hi = slices["pallet_stamper"]
         _run_sibling_stage(
-            "922_pallet_stamper", "922 Pallet Stamper", params, shared_state,
+            "922_pallet_stamper", "Pallet Stamper", params, shared_state,
             _scaled(progress_callback, lo, hi), cancel_event,
         )
         if cancel_event.is_set():
