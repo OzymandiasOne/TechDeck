@@ -403,7 +403,7 @@ Explorer and on pinned shortcuts.
 902 DXF Prep | Batch DXF cleanup and prep for Boost 902 part files - IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles against the PO spreadsheet 
 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs 
 911 Batch Repeater | Finds and copies repeat parts (NC files + inspection PDFs) for 911 batches 
-911 Remove Ticket | Removes Move Ticket pages from nest package PDFs; keeps MIL-SPEC and HULL pages 
+911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets 
 922 Setup | Full 922 batch prep behind a master toggle window: creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number 
 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info 
 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
