@@ -3,8 +3,9 @@ TechDeck Sidebar Navigation - With SVG Icon Support and Theme Integration
 Collapsible sidebar with SVG icons, tooltips, proper layout resizing, and
 live theme integration.
 
-Submit Feedback (formerly Report Feedback) now lives in Settings → Help &
-Feedback; the sidebar's bottom slot just holds My Account.
+The bottom slot holds My Account plus an accent-styled Submit Feedback action
+button (restored to the sidebar 2026-07 by user request — "easy access on the
+left panel"; it also stays available in Settings → Help & Feedback).
 """
 
 from PySide6.QtWidgets import (
@@ -268,8 +269,7 @@ class Sidebar(QWidget, ThemeAware):
         self.nav_buttons[0].setChecked(True)
         self._current_page_id = "home"
 
-        # Push My Account to the bottom. Submit Feedback lives in
-        # Settings → Help & Feedback now.
+        # Push My Account + Submit Feedback to the bottom.
         nav_layout.addStretch()
 
         account_btn = NavButton(
@@ -279,6 +279,19 @@ class Sidebar(QWidget, ThemeAware):
         account_btn.clicked.connect(lambda checked: self._on_nav_clicked("account"))
         self.nav_buttons.append(account_btn)
         nav_layout.addWidget(account_btn)
+
+        # ===== Submit Feedback (accent-styled action button) =====
+        self.feedback_btn = NavButton(
+            icon_path=str(self._feedback_icon_path(icons_dir)),
+            text="Submit Feedback",
+            page_id="feedback",
+            icon_color=self.theme.accent_two,
+            accent_style=True,
+            accent_color=self.theme.accent_two,
+            accent_color_hover=self.theme.accent_two_hover,
+        )
+        self.feedback_btn.clicked.connect(self._open_feedback_dialog)
+        nav_layout.addWidget(self.feedback_btn)
 
         # nav_container stretches so the sidebar surface color paints
         # to the bottom of the window regardless of nav content height.
@@ -299,6 +312,12 @@ class Sidebar(QWidget, ThemeAware):
         from techdeck.ui.theme_manager import get_theme_manager
         theme_name = get_theme_manager().get_current_theme()
         return self._project_root / "assets" / "icons" / _icon_folder_for_theme(theme_name)
+
+    @staticmethod
+    def _feedback_icon_path(icons_dir: Path) -> Path:
+        """feedback.svg, falling back to account.svg so the button always renders."""
+        path = icons_dir / "feedback.svg"
+        return path if path.exists() else icons_dir / "account.svg"
 
     def apply_theme(self):
         """Rebuild every theme-sensitive surface on theme change."""
@@ -362,6 +381,15 @@ class Sidebar(QWidget, ThemeAware):
                 text_color=self.theme.text,
             )
 
+        # Submit Feedback keeps the theme's CTA accent
+        self.feedback_btn.update_theme(
+            icon_path=str(self._feedback_icon_path(icons_dir)),
+            icon_color=self.theme.accent_two,
+            text_color=self.theme.accent_two,
+            accent_color=self.theme.accent_two,
+            accent_color_hover=self.theme.accent_two_hover,
+        )
+
     def _collapse_icon_path(self) -> Path:
         return self._current_icons_dir() / "collapse.svg"
 
@@ -387,6 +415,7 @@ class Sidebar(QWidget, ThemeAware):
         self.app_name.hide()
         for btn in self.nav_buttons:
             btn.set_collapsed(True)
+        self.feedback_btn.set_collapsed(True)
         self.animation.setStartValue(self.expanded_width)
         self.animation.setEndValue(self.collapsed_width)
         self.animation.start()
@@ -401,6 +430,7 @@ class Sidebar(QWidget, ThemeAware):
         self.app_name.show()
         for btn in self.nav_buttons:
             btn.set_collapsed(False)
+        self.feedback_btn.set_collapsed(False)
         self.raise_()
         self.animation.setStartValue(self.collapsed_width)
         self.animation.setEndValue(self.expanded_width)
@@ -432,6 +462,12 @@ class Sidebar(QWidget, ThemeAware):
             self._current_page_id = page_id
 
         self.page_changed.emit(page_id)
+
+    def _open_feedback_dialog(self):
+        """Open the Submit Feedback modal."""
+        from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
+        dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
+        dlg.exec()
 
     def set_current_page(self, page_id: str):
         """Programmatically set current page (no click sound — not user-initiated)."""
