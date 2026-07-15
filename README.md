@@ -409,7 +409,7 @@ Explorer and on pinned shortcuts.
 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
 Batch Repeater | Copies repeat orders from prior 922 batches, distributes CAD prints + binders to matching orders, then labels each repeat's Teams card REPEAT and moves it to MODEL CHECK 
-922 LST Organizer | Organizes .lst files by material type; outputs per-batch overview 
+922 LST Organizer | Gathers a batch's tube .lst files into per-material folders and writes one color-coded PDF that reconciles the PO's tube count against what was actually pulled; files it can't confidently place go to a Needs Review folder 
 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically 
 
 911 PO PDF Extractor | Extracts PO data from PDFs into Excel 
