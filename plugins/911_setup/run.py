@@ -24,7 +24,9 @@ Automates the full 911 QTDR batch setup workflow:
      colliding sheets are renamed using the last 2 chars of the preceding
      segment (e.g. H4533321-80 -> "21-80", H4533322-80 -> "22-80").
   9. Save every nest excel, repeat for all nests in the batch
- 10. Build MOVE TICKET OMIT PDF for each nest (removes MOVE TICKET pages, keeps MIL-SPEC/HULL)
+ 10. Build MOVE TICKET OMIT PDF for each nest (removes MOVE TICKET pages, keeps
+     MIL-SPEC/HULL); first page stamped BATCH/NEST + Material Type filled
+     (v1.5.0, via the sibling 911_remove_ticket helpers)
 
 v1.2.0 changes
   - Filesystem roots are configurable via plugin settings:
@@ -132,11 +134,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-try:
-    from pypdf import PdfWriter, PdfReader
-    PYPDF_AVAILABLE = True
-except ImportError:
-    PYPDF_AVAILABLE = False
+import importlib.util
 
 
 # ---------------------------------------------------------------------------
@@ -838,9 +836,35 @@ def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) ->
 # Step 7b: Part Sketch extraction -> MOVE TICKET OMIT PDF
 # ---------------------------------------------------------------------------
 
+_omit_stamps = None
+
+
+def _load_omit_stamp_helpers(log):
+    """
+    Import the sibling 911_remove_ticket plugin, the single home of the
+    cover-stamp helpers (batch/nest text box + Material Type fill). Both
+    plugins ship in the same plugins dir so they update together. Returns
+    the module, or None (with one logged warning) if unavailable.
+    """
+    global _omit_stamps
+    if _omit_stamps is not None:
+        return _omit_stamps or None
+    try:
+        path = Path(__file__).resolve().parents[1] / "911_remove_ticket" / "run.py"
+        spec = importlib.util.spec_from_file_location(
+            "techdeck_911_remove_ticket_for_setup", str(path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _omit_stamps = mod
+    except Exception as e:
+        log(f"  WARNING: 911 Remove Ticket helpers unavailable ({e}) - omit PDFs will not be stamped.")
+        _omit_stamps = False
+    return _omit_stamps or None
+
 
 def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
-                            dest_path: Path, log) -> bool:
+                            dest_path: Path, log, batch: str = "",
+                            material_hint: str = "") -> bool:
     """
     Build the MOVE TICKET OMIT PDF for a nest.
 
@@ -848,12 +872,14 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
     contain "MOVE TICKET" text.  Pages that contain "MIL-SPEC" or "HULL"
     are always kept, even if they also contain "MOVE TICKET".
 
+    The first page is then stamped (via the sibling 911_remove_ticket
+    helpers): "BATCH {batch} - NEST {nest}" under the Quality Requirements
+    grid, and the blank Material Type cell filled with the MATERIAL read
+    off the removed move tickets (falling back to material_hint, the Step-6
+    value).
+
     Returns True if the output PDF was written successfully.
     """
-    if not PYPDF_AVAILABLE:
-        log("  WARNING: pypdf not available -- cannot extract drawings PDF.")
-        return False
-
     if not nest_packages_folder.exists():
         log("  WARNING: NEST PACKAGES folder not found -- skipping drawings.")
         return False
@@ -866,39 +892,47 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
 
     log(f"  Found nest PDF: {matching_pdf.name}")
 
+    doc = None
     try:
         sdk.ensure_local(matching_pdf)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(str(matching_pdf))
         total_pages = len(doc)
 
-        keep_indices = []
-        removed = 0
-        for i in range(total_pages):
-            text = (doc[i].get_text("text") or "").upper()
-            if "MOVE TICKET" in text and "MIL-SPEC" not in text and "HULL" not in text:
-                removed += 1
-            else:
-                keep_indices.append(i)
-        doc.close()
+        stamps = _load_omit_stamp_helpers(log)
+        if stamps:
+            remove_pages, materials = stamps._scan_document(doc)
+        else:
+            materials = set()
+            remove_pages = set()
+            for i in range(total_pages):
+                text = (doc[i].get_text("text") or "").upper()
+                if "MOVE TICKET" in text and "MIL-SPEC" not in text and "HULL" not in text:
+                    remove_pages.add(i)
 
-        if not keep_indices:
+        if len(remove_pages) >= total_pages:
             log(f"  WARNING: All {total_pages} pages are MOVE TICKET pages - nothing to write for {nest_number}.")
             return False
 
-        reader = PdfReader(str(matching_pdf))
-        writer = PdfWriter()
-        for idx in keep_indices:
-            writer.add_page(reader.pages[idx])
+        if remove_pages:
+            doc.delete_pages(sorted(remove_pages))
 
-        with open(dest_path, "wb") as f:
-            writer.write(f)
+        if stamps:
+            material = " / ".join(sorted(materials)) or (material_hint or "")
+            for w in stamps._stamp_first_page(doc[0], batch, nest_number, material, log):
+                log(f"  WARNING: {w}")
 
-        log(f"  Drawings PDF: {dest_path.name} ({len(keep_indices)} page(s), removed {removed} MOVE TICKET page(s))")
+        doc.save(str(dest_path), garbage=3, deflate=True)
+
+        kept = total_pages - len(remove_pages)
+        log(f"  Drawings PDF: {dest_path.name} ({kept} page(s), removed {len(remove_pages)} MOVE TICKET page(s))")
         return True
 
     except Exception as e:
         log(f"  WARNING: Could not write drawings PDF: {e}")
         return False
+    finally:
+        if doc is not None:
+            doc.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1519,7 +1553,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # -- Step 9: Build MOVE TICKET OMIT PDF (remove MOVE TICKET pages, keep MIL-SPEC/HULL) --
         log(f"  [Step 9] Extracting drawings for {nest}...")
         drawings_dest = batch_folder / nest / f"{nest} MOVE TICKET OMIT.pdf"
-        _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log)
+        _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log,
+                               batch=batch_number, material_hint=matl_type or "")
 
         pct = 30 + int(65 * (nest_idx + 1) / total_nests)
         progress_callback(pct)
