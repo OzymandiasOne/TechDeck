@@ -340,6 +340,7 @@ _C_INK = (0.10, 0.10, 0.12)
 _C_MISS_BG, _C_MISS_TX = (0.97, 0.85, 0.85), (0.60, 0.00, 0.00)
 _C_REV_BG, _C_REV_TX = (0.99, 0.91, 0.82), (0.70, 0.37, 0.02)
 _C_OK_BG, _C_OK_TX = (0.85, 0.93, 0.82), (0.15, 0.31, 0.07)
+_C_EXTRA_BG, _C_EXTRA_TX = (0.82, 0.90, 0.96), (0.10, 0.32, 0.55)
 _C_TGT_BG = (1.0, 0.95, 0.74)
 _C_GRP_BG = (0.86, 0.89, 0.96)
 _C_ZEBRA = (0.96, 0.96, 0.97)
@@ -411,10 +412,14 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
     over_total = sum(1 for v in expected.values() if v[2] == "oversized")
     resolved = [p for p in pulled if p.resolved]
     review = [p for p in pulled if not p.resolved]
-    std_covered = len({p.part for p in resolved if p.tube == "standard"})
+    std_covered = len({p.part for p in resolved
+                       if p.tube == "standard" and p.part in expected})
     covered = {p.part for p in resolved}
     missing = sorted((d, v) for d, v in expected.items()
                      if v[2] == "standard" and d not in covered)
+    # "Extra" = a filed tube whose DYPN is NOT in the batch master PO (found via
+    # the order-folder workbook, so the batch PO is missing that line).
+    extra = [p for p in resolved if p.tube and p.part not in expected]
 
     d = _Pdf()
     d.text(f"922 LST Organizer  -  Batch {batch_no}", size=17, bold=True, color=_C_BAND)
@@ -432,6 +437,7 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         (".lst files found & filed", len(resolved), None),
         (f"Standard tubes accounted for", f"{std_covered} / {std_total}",
          _C_OK_BG if std_covered >= std_total else None),
+        ("EXTRA (filed, not in batch PO)", len(extra), _C_EXTRA_BG if extra else _C_OK_BG),
         ("MISSING standard tubes", len(missing), _C_MISS_BG if missing else _C_OK_BG),
         ("Needs review", len(review), _C_REV_BG if review else _C_OK_BG),
     ]
@@ -440,11 +446,17 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         bg = fill if fill is not None else (_C_ZEBRA if i % 2 else _C_WHITE)
         d.row([label, str(val)], [300, 90], size=9.5, h=18, bold=bold, fill=bg)
     d.gap(4)
-    if not missing and not review:
+    flags = []
+    if missing:
+        flags.append(f"{len(missing)} missing")
+    if review:
+        flags.append(f"{len(review)} need review")
+    if extra:
+        flags.append(f"{len(extra)} extra (not in batch PO)")
+    if not flags:
         d.text("All target tubes accounted for.", size=10, bold=True, color=_C_OK_TX)
     else:
-        d.text(f"{len(missing)} missing  -  {len(review)} need review.",
-               size=10, bold=True, color=_C_MISS_TX)
+        d.text("  -  ".join(flags) + ".", size=10, bold=True, color=_C_MISS_TX)
     d.gap(10)
 
     # missing
@@ -466,6 +478,19 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         for p in review:
             d.row([p.src.name, p.order, p.part, p.reason], [124, 96, 92, 216],
                   size=8, h=14, fill=_C_REV_BG, tcolor=_C_REV_TX)
+        d.gap(10)
+
+    # extra (filed, not in the batch PO)
+    if extra:
+        d.text("EXTRA - FILED BUT NOT IN THIS BATCH'S PO", size=11, bold=True, color=_C_EXTRA_TX)
+        d.text("Found via the order folder's own workbook. Verify the batch PO isn't "
+               "missing these lines.", size=8, color=_C_GREY)
+        d.row(["File", "Order folder", "Part", "Material"],
+              [140, 120, 110, 158], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
+        for p in extra:
+            mat = f"{p.desc} ({p.serial})" if p.desc else (p.serial or "")
+            d.row([p.src.name, p.order, p.part, mat], [140, 120, 110, 158],
+                  size=8, h=14, fill=_C_EXTRA_BG, tcolor=_C_EXTRA_TX)
         d.gap(10)
 
     # pull list by material
@@ -622,17 +647,19 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     covered = {p.part for p in resolved}
     missing = [d for d, v in expected.items()
                if v[2] == "standard" and d not in covered]
+    extra = [p for p in resolved if p.tube and p.part not in expected]
     log("=" * 60)
     log(f"922 LST Organizer - Batch {batch_no}")
     log(f"  Total tubes in PO:            {std_total + over_total}")
     log(f"  Oversized (no .lst):          {over_total}")
     log(f"  Target (standard tubes):      {std_total}")
     log(f"  Files found & filed:          {len(resolved)}")
+    log(f"  Extra (not in batch PO):      {len(extra)}")
     log(f"  Missing standard tubes:       {len(missing)}")
     log(f"  Needs review:                 {len(review)}")
     log("=" * 60)
 
-    if missing or review:
+    if missing or review or extra:
         lines = []
         if missing:
             lines.append(f"{len(missing)} standard tube(s) missing:")
@@ -642,6 +669,10 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         if review:
             lines.append(f"\n{len(review)} file(s) need review (moved to '{NEEDS_REVIEW_FOLDER}'):")
             lines += [f"  - {p.src.name}: {p.reason}" for p in review[:12]]
+        if extra:
+            lines.append(f"\n{len(extra)} extra file(s) filed but NOT in the batch PO "
+                         "(verify the PO isn't missing a line):")
+            lines += [f"  - {p.src.name}  [{p.order}]  = {p.part}" for p in extra[:12]]
         sdk.show_warning(params, f"922 LST - Batch {batch_no}", "\n".join(lines))
 
     progress_callback(100)
