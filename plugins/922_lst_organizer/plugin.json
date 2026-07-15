@@ -1,8 +1,8 @@
 {
   "id": "922_lst_organizer",
   "name": "922 LST Organizer",
-  "description": "Gather, organize, and track .lst files with tube material analysis from production packages",
-  "version": "2.1.0",
+  "description": "Gathers a 922 batch's tube .lst files, files each into its source-material folder, and writes one color-coded PDF report reconciling the PO's tube count against what was pulled. Unresolvable files go to a Needs Review folder.",
+  "version": "3.0.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "📋",

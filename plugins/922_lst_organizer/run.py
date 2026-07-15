@@ -1,28 +1,33 @@
 """
-922 LST Organizer Plugin - v15
-Single-file TechDeck plugin. All logic runs in-process (no subprocess or external script).
+922 LST Organizer - v3.0.0 (rewrite 2026-07)
+============================================
+Gathers the tube-cutting `.lst` files for a 922 batch, files each one into its
+source-material folder, and writes ONE color-coded Excel report that reconciles
+the batch PO's tube count against what was actually pulled.
 
-Changes from v14:
-- Merged into one file; no LSTOrganizer_full.py dependency
-- Post-gather case-insensitive duplicate removal
-- organize_by_material setting wired up
-- Auto-discover base path when setting is empty
-- Granular progress reporting (10/20/30/40/60/75/90/100)
-- Cancellation checkpoints throughout
-- All output routed through log()
-- Fixed output filenames to include actual batch number
+Why the rewrite (replaces the v15 lineage):
+- The old join was `filename stem -> DYPN -> PO` and broke on real filename
+  suffixes (mainly SigmaNest's `_P_TubeN` export tag, plus `-STEP` and the odd
+  duplicated `-4A_4A`). A file that failed the join dropped to "Uncategorized"
+  AND made its PO part show up as a "missing standard tube" - the exact bug of
+  categorized-yet-missing files. Robust normalization + an order-folder-PO
+  fallback + a conservative suffix match now resolve all but genuinely
+  ambiguous files (a foreign part, or a real letter conflict), which are moved
+  to a `Needs Review` folder and listed on the report.
+- Output is now a single color-coded `.pdf` (reconciliation + attention + pull
+  list), not the old `LST_Overview.txt` + `Tube_Parts_Batch.txt` + `.jsonl`.
+
+Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
+the report so the target (standard tubes) reconciles cleanly.
 """
 from __future__ import annotations
 
-import glob
-import json
-import os
 import re
 import shutil
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     from techdeck.core import plugin_sdk as sdk
@@ -31,31 +36,59 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-# ── Material sets (canonical definitions live in the SDK) ───────────────────────
+import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-STANDARD_TUBE_MATERIALS = sdk.STANDARD_TUBE_MATERIALS
-OVERSIZED_TUBE_MATERIALS = sdk.OVERSIZED_TUBE_MATERIALS
-ALL_TUBE_MATERIALS = sdk.ALL_TUBE_MATERIALS
+VERSION = "3.0.0"
 
-# ── Path helpers ───────────────────────────────────────────────────────────────
+NEEDS_REVIEW_FOLDER = "Needs Review"
 
-def _ensure_dir(p: Path) -> None:
-    p.mkdir(parents=True, exist_ok=True)
+# Filename normalization: peel off the export tags that make a .lst stem differ
+# from its PO DYPN. Order matters (tube tag, then STEP, then a duplicated suffix).
+_P_TUBE_RE = re.compile(r"[-_]+P[-_]+Tube\d*$", re.IGNORECASE)   # SigmaNest per-tube export
+_STEP_RE = re.compile(r"[-_]STEP$", re.IGNORECASE)
+_DUP_SUFFIX_RE = re.compile(r"([-_])([A-Za-z0-9]+)[-_]\2$", re.IGNORECASE)  # -4A_4A -> -4A
+_SEG_RE = re.compile(r"^(\d+)([A-Za-z]*)$")
 
 
-ORDER_PREFIX = re.compile(r"^(X|BJ|BK|XY)[0-9]+$", re.IGNORECASE)
+def _normalize_part(stem: str) -> str:
+    """A .lst stem (or a raw PO DYPN) reduced to its canonical DYPN, upper-cased."""
+    s = str(stem)
+    s = _P_TUBE_RE.sub("", s)
+    s = _STEP_RE.sub("", s)
+    s = _DUP_SUFFIX_RE.sub(r"\1\2", s)
+    return s.strip("-_ ").upper()
 
-# ── LST discovery ──────────────────────────────────────────────────────────────
 
-def _find_lsts_for_order(order_dir: Path, cancel_event=None) -> Tuple[List[Path], str]:
-    """
-    Find .lst files inside any CAD-AND-SHOP-PRINTS/*/7000/ subtree.
-    Prefers non-repeat paths; falls back to repeat paths if nothing else found.
+def _split_dypn(part: str) -> Tuple[str, str, str]:
+    """(ppn, number, letter) for the conservative suffix match, e.g.
+    'H5222069-H88-4A' -> ('H5222069-H88', '4', 'A'); '...-4' -> (..., '4', '')."""
+    if "-" not in part:
+        return part, "", ""
+    head, seg = part.rsplit("-", 1)
+    m = _SEG_RE.match(seg)
+    if not m:
+        return head, seg, ""
+    return head, m.group(1), m.group(2).upper()
 
-    The rglob walk over a OneDrive order tree can be slow, so we poll
-    ``cancel_event`` each iteration and bail out early when set — otherwise a
-    Cancel click can't interrupt the scan (the thread is stuck in this loop).
-    """
+
+# ── LST discovery ───────────────────────────────────────────────────────────
+
+def _order_dirs(batch_path: Path, batch_no: str) -> List[Path]:
+    """Top-level order folders, excluding the batch's own system dirs."""
+    doc = f"batch {batch_no} - documentation"
+    out = []
+    for d in sorted(p for p in batch_path.iterdir() if p.is_dir()):
+        low = d.name.strip().lower()
+        if low == doc or low == "repeat batches":
+            continue
+        out.append(d)
+    return out
+
+
+def _find_lsts_for_order(order_dir: Path, cancel_event=None) -> List[Path]:
+    """`.lst` files under any `CAD-AND-SHOP-PRINTS/*/7000/` subtree. Non-repeat
+    paths win; repeat paths are a fallback. Cancel is polled inside the walk
+    (Hard Rule 11) so a Cancel mid-scan actually stops."""
     primary: List[Path] = []
     secondary: List[Path] = []
     for i, p in enumerate(order_dir.rglob("*")):
@@ -63,648 +96,562 @@ def _find_lsts_for_order(order_dir: Path, cancel_event=None) -> Tuple[List[Path]
             break
         if not (p.is_dir() and p.name.lower() == "7000"):
             continue
-        parts_lower = [seg.lower() for seg in p.parts]
-        if "cad-and-shop-prints" not in parts_lower:
+        segs = [s.lower() for s in p.parts]
+        if "cad-and-shop-prints" not in segs:
             continue
-        in_repeat = any("repeat" in seg for seg in parts_lower)
         lsts = [f for f in p.glob("*.lst") if f.is_file()]
         if not lsts:
             continue
-        (secondary if in_repeat else primary).extend(lsts)
-    if primary:
-        return primary, "CAD-AND-SHOP-PRINTS"
-    if secondary:
-        return secondary, "REPEATS*"
-    return [], "NONE"
-
-# ── Excel helpers ──────────────────────────────────────────────────────────────
-
-def _strip_step(dypn: str) -> str:
-    return dypn[:-5] if dypn.upper().endswith("-STEP") else dypn
+        (secondary if any("repeat" in s for s in segs) else primary).extend(lsts)
+    return primary or secondary
 
 
-def _strip_step_suffix(tokens: List[str]) -> List[str]:
-    return tokens[:-1] if tokens and tokens[-1].upper() == "STEP" else tokens
+# ── PO reading ──────────────────────────────────────────────────────────────
+
+def _cell(row: tuple, idx: Optional[int]) -> Optional[str]:
+    if idx is None or idx >= len(row):
+        return None
+    v = row[idx]
+    if v in (None, ""):
+        return None
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return str(v).strip()
 
 
-def _sheetmap(wb) -> dict:
-    return {s.strip().casefold(): s for s in wb.sheetnames}
+def _scan_headers(ws, required: List[str], max_rows: int = 25) -> Tuple[int, Dict[str, int]]:
+    """Find the row (1-based) holding all `required` header names and return
+    {UPPER HEADER: 0-based col}. Streaming, so it works on read-only sheets.
+    Looks up by NAME, never a fixed index (Hard Rules 1-2)."""
+    want = {h.strip().upper() for h in required}
+    for r, row in enumerate(ws.iter_rows(min_row=1, max_row=max_rows, values_only=True), 1):
+        found: Dict[str, int] = {}
+        for c, val in enumerate(row):
+            if val not in (None, ""):
+                found[str(val).strip().upper()] = c
+        if want.issubset(found):
+            return r, found
+    raise ValueError(f"headers {sorted(want)} not found in first {max_rows} rows")
 
 
-def _find_excel_header_row(
-    sheet, required_headers: List[str], max_search_rows: int = 20
-) -> Tuple[int, Dict[str, int]]:
-    required_lower = {h.lower().strip() for h in required_headers}
-    for row_num in range(1, max_search_rows + 1):
-        row = list(sheet.iter_rows(min_row=row_num, max_row=row_num, values_only=True))[0]
-        row_headers: Dict[str, int] = {}
-        for col_idx, cell_value in enumerate(row):
-            if cell_value:
-                row_headers[str(cell_value).lower().strip()] = col_idx
-        if required_lower.issubset(row_headers.keys()):
-            return row_num, {h: row_headers[h.lower().strip()] for h in required_headers}
-    raise ValueError(
-        f"Could not find row with headers {required_headers} in first {max_search_rows} rows"
-    )
-
-
-def _read_po_maps(xlsx_path: Path, debug_fp) -> Tuple[Dict, Dict]:
-    wb = sdk.load_workbook_resilient(xlsx_path, read_only=True, data_only=True)
-    smap = _sheetmap(wb)
-    if not {"po", "source material"}.issubset(smap.keys()):
-        raise ValueError("Workbook missing required sheets: PO / SOURCE MATERIAL")
-    sh_po = wb[smap["po"]]
-    sh_src = wb[smap["source material"]]
-
+def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optional[str]]],
+                                            Dict[str, str]]:
+    """(dypn_map, serial_desc) from a QF-QU-09 workbook.
+       dypn_map:   normalized DYPN -> (order, source-material serial)
+       serial_desc: serial -> material description."""
+    wb = sdk.load_workbook_resilient(xlsx, read_only=True, data_only=True)
     try:
-        po_header_row, po_cols = _find_excel_header_row(
-            sh_po, ["ORDER", "DYPN", "SOURCE MATERIAL"]
-        )
-        debug_fp.write(json.dumps({"event": "found_po_headers", "row": po_header_row, "cols": po_cols}) + "\n")
-    except ValueError as e:
-        raise ValueError(f"PO sheet header error: {e}")
+        smap = {s.strip().casefold(): s for s in wb.sheetnames}
+        if "po" not in smap:
+            raise ValueError("workbook has no 'PO' sheet")
+        po_ws = wb[smap["po"]]
+        hdr, cols = _scan_headers(po_ws, ["ORDER", "DYPN", "SOURCE MATERIAL"])
+        dypn_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        for row in po_ws.iter_rows(min_row=hdr + 1, values_only=True):
+            dypn = _cell(row, cols["DYPN"])
+            if not dypn:
+                continue
+            dypn_map[_normalize_part(dypn)] = (
+                _cell(row, cols["ORDER"]), _cell(row, cols["SOURCE MATERIAL"]))
 
-    dypn_to_order_serial: Dict = {}
-    for row in sh_po.iter_rows(min_row=po_header_row + 1, values_only=True):
-        def _cell(idx: int) -> Optional[str]:
-            return str(row[idx]).strip() if len(row) > idx and row[idx] not in (None, "") else None
-        order = _cell(po_cols["ORDER"])
-        part = _cell(po_cols["DYPN"])
-        serial = _cell(po_cols["SOURCE MATERIAL"])
-        if order and part:
-            dypn_to_order_serial[_strip_step(part)] = (order, serial)
+        serial_desc: Dict[str, str] = {}
+        if "source material" in smap:
+            src = wb[smap["source material"]]
+            try:
+                shr, scols = _scan_headers(src, ["SOURCE MATERIAL", "PART DESCRIPTION"])
+                desc_col = scols["PART DESCRIPTION"]
+            except ValueError:
+                shr, scols = _scan_headers(src, ["SOURCE MATERIAL", "SCRIBE DESCRIPTION"])
+                desc_col = scols["SCRIBE DESCRIPTION"]
+            ser_col = scols["SOURCE MATERIAL"]
+            for row in src.iter_rows(min_row=shr + 1, values_only=True):
+                s, d = _cell(row, ser_col), _cell(row, desc_col)
+                if s and d:
+                    serial_desc.setdefault(s, d)
+        return dypn_map, serial_desc
+    finally:
+        wb.close()
 
+
+def _has_po_sheet(p: Path) -> bool:
     try:
-        src_header_row, src_cols = _find_excel_header_row(sh_src, ["Serial", "Description"])
-        debug_fp.write(json.dumps({"event": "found_src_headers", "row": src_header_row, "cols": src_cols}) + "\n")
-    except ValueError as e:
-        debug_fp.write(json.dumps({"event": "src_header_fallback", "error": str(e)}) + "\n")
-        src_header_row = 1
-        src_cols = {"Serial": 0, "Description": 5}
-
-    serial_to_desc: Dict = {}
-    for row in sh_src.iter_rows(min_row=src_header_row + 1, values_only=True):
-        def _cell(idx: int) -> Optional[str]:
-            return str(row[idx]).strip() if len(row) > idx and row[idx] not in (None, "") else None
-        serial = _cell(src_cols["Serial"])
-        desc = _cell(src_cols["Description"])
-        if serial and desc:
-            serial_to_desc[serial] = desc
-
-    wb.close()
-    debug_fp.write(
-        json.dumps({"event": "po_maps_ok", "dypn": len(dypn_to_order_serial), "serial": len(serial_to_desc)}) + "\n"
-    )
-    return dypn_to_order_serial, serial_to_desc
+        wb = sdk.load_workbook_resilient(p, read_only=True)
+        ok = "po" in {s.strip().casefold() for s in wb.sheetnames}
+        wb.close()
+        return ok
+    except Exception:
+        return False
 
 
-def _autodiscover_master_po(batch_path: Path, debug_fp) -> Optional[Path]:
-    doc_folder = batch_path / f"{batch_path.name} - Documentation"
-    patterns = []
-    if doc_folder.exists():
-        patterns.append(str(doc_folder / "**" / "*.xlsx"))
-    patterns.append(str(batch_path / "**" / "*.xlsx"))
-    seen: set = set(); candidates: List[Path] = []
-    for pat in patterns:
-        for x in glob.glob(pat, recursive=True):
-            if x not in seen:
-                candidates.append(Path(x)); seen.add(x)
-
-    def _score(p: Path) -> int:
-        s = 0; n = p.name.lower()
-        if "qf" in n or "qu" in n: s += 5
-        if "pallet" in n or "organizer" in n: s -= 10
-        if "po " in n: s += 2
-        return s
-
-    ranked = sorted(candidates, key=_score, reverse=True)
-    debug_fp.write(json.dumps({"event": "autodiscover_scan", "candidates": len(ranked)}) + "\n")
-    return ranked[0] if ranked else None
-
-# ── Row building ───────────────────────────────────────────────────────────────
-
-def _parse_name_parts(stem: str) -> Tuple[Optional[str], str]:
-    tokens = _strip_step_suffix(stem.split("-"))
-    if not tokens:
-        return None, stem
-    if ORDER_PREFIX.match(tokens[0]):
-        if len(tokens) >= 4:
-            return "-".join(tokens[:3]), "-".join(tokens[3:])
-        return None, "-".join(tokens)
-    return None, "-".join(tokens)
+def _find_master_po(batch_path: Path, batch_no: str) -> Optional[Path]:
+    """The batch's QF-QU-09 PO workbook in the Documentation folder. Prefers the
+    QF-QU file (the pallet/organizer workbook shares the `PO H{batch}` prefix but
+    has no PO sheet), and validates the PO sheet before returning."""
+    doc = batch_path / f"Batch {batch_no} - Documentation"
+    searches = []
+    if doc.exists():
+        searches += [doc.glob(f"*H{batch_no}*QF*QU*.xlsx"), doc.glob("*QF*QU*.xlsx"),
+                     doc.glob(f"PO H{batch_no}*.xlsx"), doc.glob("*.xlsx")]
+    searches.append(batch_path.rglob("*QF*QU*.xlsx"))
+    seen: set = set()
+    for it in searches:
+        for p in sorted(it):
+            low = p.name.lower()
+            if p in seen or low.startswith("~$") or "pallet" in low or "organizer" in low:
+                continue
+            seen.add(p)
+            if _has_po_sheet(p):
+                return p
+    return None
 
 
-def _build_rows(
-    copied_files: List[Path], dypn_map: Dict, serial_map: Dict, debug_fp
-) -> Tuple[list, List[str]]:
-    rows = []; problems = []
-    for p in copied_files:
-        order, part = _parse_name_parts(p.stem)
-        po_hit = dypn_map.get(part)
-        serial = None
-        if po_hit:
-            order_from_po, serial = po_hit
-            if order is None:
-                order = order_from_po
-        else:
-            problems.append(f"Missing PO mapping for DYPN '{part}'")
-        desc = serial_map.get(serial) if serial else None
-        if serial and not desc:
-            problems.append(f"Missing description for serial '{serial}'")
-        newname = f"{desc}_{order}-{part}.lst" if (desc and order and part) else None
-        rows.append((p.name, order, part, serial, desc, newname))
-        debug_fp.write(
-            json.dumps({"event": "row", "orig": p.name, "order": order, "part": part,
-                        "serial": serial, "desc": desc, "new": newname}) + "\n"
-        )
-    return rows, problems
-
-# ── Counting ───────────────────────────────────────────────────────────────────
-
-def _compute_counts(
-    rows: list, dypn_map: Dict, batch_orders: Set[str], serial_map: Dict
-) -> Tuple:
-    moved_files = len(rows)
-    moved_unique = len({r[2] for r in rows})
-    order_nums = {name.split("-")[0] for name in batch_orders} if batch_orders else set()
-
-    standard_tubes: Dict = {}; oversized_tubes: Dict = {}
-
-    def _categorize(part: str, ordnum: str, serial: Optional[str]) -> None:
-        s = str(serial).strip() if serial else None
-        desc = serial_map.get(s, "UNKNOWN") if s else "UNKNOWN"
-        if s in STANDARD_TUBE_MATERIALS:
-            standard_tubes[part] = (ordnum, serial, desc)
-        elif s in OVERSIZED_TUBE_MATERIALS:
-            oversized_tubes[part] = (ordnum, serial, desc)
-
-    target_map = {
-        part: (ordnum, serial)
-        for part, (ordnum, serial) in dypn_map.items()
-        if not order_nums or ordnum in order_nums
-    }
-    for part, (ordnum, serial) in target_map.items():
-        _categorize(part, ordnum, serial)
-
-    moved_tube_parts = {r[2] for r in rows if r[3] and str(r[3]).strip() in ALL_TUBE_MATERIALS}
-    missing_std = [
-        (p, o, s, d) for p, (o, s, d) in standard_tubes.items() if p not in moved_tube_parts
-    ]
-    oversized_list = [(p, o, s, d) for p, (o, s, d) in oversized_tubes.items()]
-
-    return (
-        moved_files, moved_unique,
-        len(standard_tubes), len(oversized_tubes),
-        len(standard_tubes) + len(oversized_tubes),
-        missing_std, oversized_list,
-    )
-
-# ── Output writers ─────────────────────────────────────────────────────────────
-
-def _write_overview_txt(
-    txt_path: Path, rows: list, issues: List[str], info: dict,
-    moved_files: int, moved_unique: int,
-    std_count: int, over_count: int, total_count: int,
-    missing_std: list, oversized: list, batch_orders: Set[str],
-) -> None:
-    with open(txt_path, "w", encoding="utf-8", newline="") as f:
-        f.write("# LST TXT work file (generated)\n")
-        f.write("# " + "=" * 76 + "\n")
-        for k, v in info.items():
-            f.write(f"# {k}: {v}\n")
-        f.write(f"# moved_files: {moved_files}\n")
-        f.write(f"# moved_unique_parts: {moved_unique}\n")
-        f.write(f"# standard_tubes_in_po: {std_count}\n")
-        f.write(f"# oversized_tubes_in_po: {over_count} (>0.375 NOM - NOT gathered)\n")
-        f.write(f"# total_tubes_in_po: {total_count}\n")
-
-        if oversized:
-            f.write("#\n")
-            f.write(f"# OVERSIZED TUBES (>0.375\" NOM) - {len(oversized)} parts\n")
-            f.write("# " + "=" * 76 + "\n")
-            f.write("# Tracked in PO but NOT gathered (require special handling).\n#\n")
-            by_order: Dict = defaultdict(list)
-            for part, order, serial, desc in oversized:
-                by_order[order].append((part, serial, desc))
-            for order in sorted(by_order):
-                f.write(f"#\n# Order: {order}\n")
-                for part, serial, desc in by_order[order]:
-                    f.write(f"#   - {part} (Serial: {serial}, Desc: {desc})\n")
-            f.write("# " + "=" * 76 + "\n")
-
-        if missing_std:
-            f.write("#\n")
-            f.write(f"# MISSING STANDARD TUBE FILES - {len(missing_std)} not found\n")
-            f.write("# " + "=" * 76 + "\n")
-            f.write("# These parts are in the PO but no .lst was found.\n#\n")
-            by_order = defaultdict(list)
-            for part, order, serial, desc in missing_std:
-                by_order[order].append((part, serial, desc))
-            for order in sorted(by_order):
-                f.write(f"#\n# Order: {order}\n")
-                for part, serial, desc in by_order[order]:
-                    f.write(f"#   - {part} (Serial: {serial}, Desc: {desc})\n")
-                    matching = [fo for fo in batch_orders if fo.startswith(order)]
-                    if matching:
-                        f.write(f"#     Look in: {matching[0]}/*/CAD-AND-SHOP-PRINTS/*/7000/{part}.lst\n")
-            f.write("# " + "=" * 76 + "\n")
-
-        f.write("\n")
-        f.write("original\torder\tpart\tserial\tdescription\tnew_name\tstatus\n")
-        for (orig, order, part, serial, desc, newname) in rows:
-            status = "OK" if newname else "SKIPPED"
-            f.write(
-                f"{orig}\t{order or ''}\t{part or ''}\t{serial or ''}"
-                f"\t{desc or ''}\t{newname or ''}\t{status}\n"
-            )
-
-        if issues:
-            f.write("\n# Issues\n")
-            for it in issues:
-                f.write(f"# {it}\n")
+def _find_order_po(order_dir: Path) -> Optional[Path]:
+    """An order folder's own QF-QU workbook (e.g. `R6513463-H9DR.xlsx`)."""
+    hits = sorted(p for p in order_dir.glob("*.xlsx") if not p.name.startswith("~$"))
+    return hits[0] if hits else None
 
 
-def _write_grouped_txt(out_path: Path, batch_num: str, rows: list) -> int:
-    items = []
-    for (orig, order, part, serial, desc, _) in rows:
-        if not serial or not desc:
-            continue
-        if str(serial).strip() not in STANDARD_TUBE_MATERIALS:
-            continue
-        items.append((desc, str(serial).strip(), order or "", part or ""))
+# ── resolution ──────────────────────────────────────────────────────────────
 
-    items.sort(key=lambda t: (t[0].lower(), t[1], t[2], t[3]))
-    groups: Dict = defaultdict(list)
-    for desc, s, order, part in items:
-        groups[(desc, s)].append((order, part))
+class Pulled:
+    """One gathered .lst file resolved to a material (or flagged for review)."""
+    __slots__ = ("src", "order", "part", "serial", "desc", "tube", "how", "reason")
 
-    with open(out_path, "w", encoding="utf-8", newline="") as f:
-        f.write(f"Batch {batch_num}\n")
-        f.write(f"Total standard tube parts: {len(items)}\n\n")
-        for (desc, s) in sorted(groups, key=lambda k: k[0].lower()):
-            f.write(f"{desc} ({s}):\n")
-            for order, part in groups[(desc, s)]:
-                f.write(f"{order}\t{part}\n")
-            f.write("\n")
-    return len(items)
+    def __init__(self, src, order, part, serial=None, desc=None, tube=None,
+                 how=None, reason=None):
+        self.src = src            # source Path
+        self.order = order        # order folder name
+        self.part = part          # normalized DYPN
+        self.serial = serial      # source-material serial
+        self.desc = desc          # material description
+        self.tube = tube          # 'standard' | 'oversized' | None
+        self.how = how            # 'exact' | 'order-po' | 'suffix' | None(review)
+        self.reason = reason      # why it needs review, when how is None
 
-# ── File operations ────────────────────────────────────────────────────────────
+    @property
+    def resolved(self) -> bool:
+        return self.how is not None
 
-def _retry_fileop(fn, *args, **kwargs):
-    import errno
-    tries = kwargs.pop("tries", 5); delay = kwargs.pop("delay", 0.2)
-    for i in range(tries):
-        try:
-            return fn(*args, **kwargs)
-        except OSError as e:
-            if e.errno in (errno.EACCES, errno.EPERM, errno.EBUSY):
-                time.sleep(delay * (i + 1)); continue
-            raise
+    @property
+    def folder(self) -> str:
+        if not self.resolved:
+            return NEEDS_REVIEW_FOLDER
+        return _sanitize(f"{self.desc} ({self.serial})") if (self.desc and self.serial) \
+            else NEEDS_REVIEW_FOLDER
 
 
-def _gather_and_copy(
-    batch_path: Path, batch_num: str, dry_run: bool,
-    debug_fp, log, cancel_event,
-) -> Tuple[List[Path], List[str], Path, Set[str]]:
-    issues: List[str] = []; copied: List[Path] = []; orders: Set[str] = set()
-    dest = batch_path / f"Batch {batch_num} - Documentation" / "LST"
-    _ensure_dir(dest)
-    seen_lower: Set[str] = set()  # case-insensitive guard during gather
-
-    # Exclude the batch's own system folders so the progress count reflects the
-    # real order folders only (else the denominator is inflated by the always-
-    # present "Batch N - Documentation" and "Repeat Batches" dirs).
-    doc_name = f"batch {batch_num} - documentation"
-    all_dirs = sorted(d for d in batch_path.iterdir() if d.is_dir())
-    order_dirs = []
-    for d in all_dirs:
-        low = d.name.strip().lower()
-        if low == "repeat batches":
-            debug_fp.write(json.dumps({"event": "skip_repeat_batches", "dir": str(d)}) + "\n")
-            continue
-        if low == doc_name:
-            continue
-        order_dirs.append(d)
-    total_dirs = len(order_dirs)
-    for idx, child in enumerate(order_dirs, 1):
-        if cancel_event.is_set():
-            break
-        name = child.name
-        if len(name.split("-")) >= 3:
-            orders.add(name)
-
-        log(f"  Scanning order folder {idx}/{total_dirs}: {name}")
-        lsts, src = _find_lsts_for_order(child, cancel_event)
-        debug_fp.write(
-            json.dumps({"event": "order_probe", "dir": str(child), "source": src, "count": len(lsts)}) + "\n"
-        )
-        if not lsts:
-            continue
-
-        for f in lsts:
-            if cancel_event.is_set():
-                break
-            fname_lower = f.name.lower()
-            target = dest / f.name
-            try:
-                if fname_lower in seen_lower:
-                    debug_fp.write(json.dumps({"event": "skip_duplicate_gather", "src": str(f)}) + "\n")
-                    continue
-                if dry_run:
-                    copied.append(target)
-                    seen_lower.add(fname_lower)
-                    debug_fp.write(json.dumps({"event": "dry_run", "src": str(f), "dst": str(target)}) + "\n")
-                else:
-                    if target.exists():
-                        debug_fp.write(json.dumps({"event": "skip_exists", "dst": str(target)}) + "\n")
-                        continue
-                    _retry_fileop(shutil.copy2, f, target)
-                    copied.append(target)
-                    seen_lower.add(fname_lower)
-                    debug_fp.write(json.dumps({"event": "copied", "src": str(f), "dst": str(target)}) + "\n")
-            except Exception as e:
-                issues.append(f"Failed to copy {f.name}: {e}")
-                debug_fp.write(json.dumps({"event": "copy_error", "src": str(f), "error": str(e)}) + "\n")
-
-    return copied, issues, dest, orders
-
-
-def _dedup_destination(dest_dir: Path, log, debug_fp) -> int:
-    """
-    Case-insensitive duplicate removal on .lst files already in dest_dir.
-    For each collision group, keeps the first name alphabetically; deletes the rest.
-    Returns the count of files removed.
-    """
-    by_lower: Dict[str, List[Path]] = defaultdict(list)
-    for p in dest_dir.glob("*.lst"):
-        by_lower[p.name.lower()].append(p)
-
-    removed = 0
-    for group in by_lower.values():
-        if len(group) <= 1:
-            continue
-        group.sort(key=lambda p: p.name)
-        keep = group[0]
-        for dupe in group[1:]:
-            try:
-                dupe.unlink()
-                log(f"  Removed duplicate: {dupe.name} (kept {keep.name})")
-                debug_fp.write(json.dumps({"event": "dedup_removed", "file": dupe.name, "kept": keep.name}) + "\n")
-                removed += 1
-            except Exception as e:
-                log(f"  Warning: could not remove {dupe.name}: {e}")
-                debug_fp.write(json.dumps({"event": "dedup_error", "file": dupe.name, "error": str(e)}) + "\n")
-    return removed
-
-
-def _sanitize_folder_name(name: str) -> str:
+def _sanitize(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "-", name).strip()
 
 
-def _organize_by_material(dest_dir: Path, rows: list, debug_fp, cancel_event) -> None:
-    by_fname: Dict = {}; by_stem: Dict = {}
-    for (orig, _, _, serial, desc, _) in rows:
-        if not (orig and serial and desc):
-            continue
-        lname = orig.lower()
-        stem = orig[:-4].lower() if lname.endswith(".lst") else lname
-        by_fname[lname] = (desc, str(serial).strip())
-        by_stem[stem] = (desc, str(serial).strip())
+def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
+             batch_path: Path, log) -> Tuple[List[Pulled], Dict[str, Tuple], Dict[str, str]]:
+    """Resolve every gathered file to a material. Returns (pulled, expected_tubes,
+    serial_desc) where expected_tubes maps PO DYPN -> (order, serial, class) for
+    every tube in the master PO (the target list)."""
+    order_cache: Dict[str, Dict] = {}
 
-    moved = 0
-    for p in sorted(dest_dir.glob("*.lst")):
-        if cancel_event.is_set():
-            break
-        lname = p.name.lower(); stem = p.stem
-        clean_stem = stem
-        if "(" in stem and stem.endswith(")"):
-            try:
-                clean_stem = stem[: stem.rindex("(")]
-            except ValueError:
-                pass
+    def _lookup(part, mapping):
+        hit = mapping.get(part)
+        if not hit:
+            return None
+        order, serial = hit
+        serial = str(serial).strip() if serial else None
+        return order, serial
 
-        pair = by_fname.get(lname) or by_stem.get(stem.lower()) or by_stem.get(clean_stem.lower())
-        folder = _sanitize_folder_name(f"{pair[0]} ({pair[1]})") if pair else "Uncategorized"
-        target_dir = dest_dir / folder
-        _ensure_dir(target_dir)
+    results: List[Pulled] = []
+    deferred: List[Pulled] = []
+    for order_name, src in files:
+        part = _normalize_part(src.stem)
+        hit = _lookup(part, master_map)
+        how = "exact"
+        if not hit:
+            # order-folder PO fallback (the master PO can be an incomplete snapshot)
+            if order_name not in order_cache:
+                po = _find_order_po(batch_path / order_name)
+                omap, odesc = ({}, {})
+                if po:
+                    try:
+                        omap, odesc = _read_po(po, log)
+                    except Exception as e:
+                        log(f"  WARNING: could not read order PO {po.name}: {e}")
+                order_cache[order_name] = omap
+                for k, v in odesc.items():
+                    serial_desc.setdefault(k, v)
+            hit = _lookup(part, order_cache[order_name])
+            how = "order-po"
+        if hit:
+            order, serial = hit
+            serial = serial or None
+            desc = serial_desc.get(serial) if serial else None
+            results.append(Pulled(src, order_name, part, serial, desc,
+                                  sdk.tube_class(serial), how))
+        else:
+            deferred.append(Pulled(src, order_name, part))
 
+    # Expected tubes = every tube DYPN in the master PO (the target).
+    expected: Dict[str, Tuple] = {}
+    for dypn, (order, serial) in master_map.items():
+        serial = str(serial).strip() if serial else None
+        cls = sdk.tube_class(serial)
+        if cls:
+            expected[dypn] = (order, serial, cls)
+
+    covered = {p.part for p in results}
+    missing = {d: v for d, v in expected.items()
+               if v[2] == "standard" and d not in covered}
+
+    # Conservative suffix match: a still-unresolved file maps to a MISSING
+    # standard tube only when the PPN + number agree and either the file has no
+    # letter or the letters match, and exactly one such tube is missing.
+    for pf in deferred:
+        ppn, num, letter = _split_dypn(pf.part)
+        cands = []
+        for d, (order, serial, _cls) in missing.items():
+            dppn, dnum, dletter = _split_dypn(d)
+            if dppn == ppn and dnum == num and (letter == "" or letter == dletter):
+                cands.append((d, order, serial))
+        if len(cands) == 1:
+            d, order, serial = cands[0]
+            pf.part, pf.order = d, order or pf.order
+            pf.serial, pf.desc = serial, serial_desc.get(serial)
+            pf.tube, pf.how = sdk.tube_class(serial), "suffix"
+            pf.reason = None
+            missing.pop(d, None)
+        else:
+            same_ppn = [d for d in expected if _split_dypn(d)[0] == ppn]
+            if not same_ppn:
+                pf.reason = "part not found in this batch's PO (foreign / repeat?)"
+            else:
+                pf.reason = ("no matching tube for this suffix (PO has "
+                             f"{', '.join(sorted(same_ppn))})")
+        results.append(pf)   # keep review items in the result set
+
+    return results, expected, serial_desc
+
+
+# ── report ──────────────────────────────────────────────────────────────────
+
+# colors (RGB 0-1)
+_C_BAND = (0.12, 0.31, 0.37)     # dark teal header band
+_C_WHITE = (1, 1, 1)
+_C_GREY = (0.46, 0.46, 0.46)
+_C_INK = (0.10, 0.10, 0.12)
+_C_MISS_BG, _C_MISS_TX = (0.97, 0.85, 0.85), (0.60, 0.00, 0.00)
+_C_REV_BG, _C_REV_TX = (0.99, 0.91, 0.82), (0.70, 0.37, 0.02)
+_C_OK_BG, _C_OK_TX = (0.85, 0.93, 0.82), (0.15, 0.31, 0.07)
+_C_TGT_BG = (1.0, 0.95, 0.74)
+_C_GRP_BG = (0.86, 0.89, 0.96)
+_C_ZEBRA = (0.96, 0.96, 0.97)
+
+_PW, _PH, _M = 612, 792, 42
+
+
+class _Pdf:
+    """Tiny top-down PDF layout helper over PyMuPDF with auto page breaks."""
+
+    def __init__(self):
+        self.doc = fitz.open()
+        self._page()
+
+    def _page(self):
+        self.p = self.doc.new_page(width=_PW, height=_PH)
+        self.y = _M
+
+    def _fits(self, h):
+        if self.y + h > _PH - _M:
+            self._page()
+
+    @staticmethod
+    def _font(bold):
+        return "hebo" if bold else "helv"
+
+    def _clip(self, s, w, size, bold=False):
+        s = "" if s is None else str(s)
+        fn = self._font(bold)
+        if fitz.get_text_length(s, fontname=fn, fontsize=size) <= w - 6:
+            return s
+        while s and fitz.get_text_length(s + "..", fontname=fn, fontsize=size) > w - 6:
+            s = s[:-1]
+        return s + ".."
+
+    def gap(self, h):
+        self.y += h
+
+    def text(self, s, size=9, bold=False, color=_C_INK, dx=0):
+        self._fits(size + 4)
+        self.y += size
+        self.p.insert_text((_M + dx, self.y), s, fontsize=size,
+                           fontname=self._font(bold), color=color)
+        self.y += 4
+
+    def row(self, cells, widths, size=8.5, h=15, bold=False,
+            fill=None, tcolor=_C_INK):
+        self._fits(h)
+        x0 = _M
+        if fill is not None:
+            self.p.draw_rect(fitz.Rect(x0, self.y, x0 + sum(widths), self.y + h),
+                             fill=fill, width=0)
+        x, base = x0, self.y + h - 4.5
+        for c, w in zip(cells, widths):
+            self.p.insert_text((x + 3, base), self._clip(c, w, size, bold),
+                               fontsize=size, fontname=self._font(bold), color=tcolor)
+            x += w
+        self.y += h
+
+    def save(self, path):
+        self.doc.save(str(path), garbage=3, deflate=True)
+        self.doc.close()
+
+
+def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
+                  orders: List[str], pulled: List[Pulled], expected: Dict[str, Tuple],
+                  files_found: int) -> None:
+    std_total = sum(1 for v in expected.values() if v[2] == "standard")
+    over_total = sum(1 for v in expected.values() if v[2] == "oversized")
+    resolved = [p for p in pulled if p.resolved]
+    review = [p for p in pulled if not p.resolved]
+    std_covered = len({p.part for p in resolved if p.tube == "standard"})
+    covered = {p.part for p in resolved}
+    missing = sorted((d, v) for d, v in expected.items()
+                     if v[2] == "standard" and d not in covered)
+
+    d = _Pdf()
+    d.text(f"922 LST Organizer  -  Batch {batch_no}", size=17, bold=True, color=_C_BAND)
+    d.text(f"Generated {time.strftime('%Y-%m-%d %H:%M')}   |   "
+           f"PO: {master_po.name if master_po else '(not found)'}   |   "
+           f"{len(orders)} order folders", size=8.5, color=_C_GREY)
+    d.gap(8)
+
+    # reconciliation
+    d.text("TUBE RECONCILIATION", size=11, bold=True, color=_C_BAND)
+    recon = [
+        ("Total tubes in PO", std_total + over_total, None),
+        ("Oversized (no .lst expected)", over_total, None),
+        ("TARGET  -  standard tubes to pull", std_total, _C_TGT_BG),
+        (".lst files found & filed", len(resolved), None),
+        (f"Standard tubes accounted for", f"{std_covered} / {std_total}",
+         _C_OK_BG if std_covered >= std_total else None),
+        ("MISSING standard tubes", len(missing), _C_MISS_BG if missing else _C_OK_BG),
+        ("Needs review", len(review), _C_REV_BG if review else _C_OK_BG),
+    ]
+    for i, (label, val, fill) in enumerate(recon):
+        bold = label.startswith("TARGET") or label.startswith("MISSING")
+        bg = fill if fill is not None else (_C_ZEBRA if i % 2 else _C_WHITE)
+        d.row([label, str(val)], [300, 90], size=9.5, h=18, bold=bold, fill=bg)
+    d.gap(4)
+    if not missing and not review:
+        d.text("All target tubes accounted for.", size=10, bold=True, color=_C_OK_TX)
+    else:
+        d.text(f"{len(missing)} missing  -  {len(review)} need review.",
+               size=10, bold=True, color=_C_MISS_TX)
+    d.gap(10)
+
+    # missing
+    if missing:
+        d.text("MISSING STANDARD TUBES", size=11, bold=True, color=_C_MISS_TX)
+        d.row(["Order", "Part", "Serial", "Where to look"],
+              [90, 130, 70, 240], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
+        for dd, (order, serial, _c) in missing:
+            hint = f"{order}*/…/7000/{dd}*.lst" if order else ""
+            d.row([order, dd, serial, hint], [90, 130, 70, 240],
+                  h=14, fill=_C_MISS_BG, tcolor=_C_MISS_TX)
+        d.gap(10)
+
+    # needs review
+    if review:
+        d.text("NEEDS REVIEW  (moved to 'Needs Review' folder)", size=11, bold=True, color=_C_REV_TX)
+        d.row(["File", "Order folder", "Part", "Reason"],
+              [124, 96, 92, 216], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
+        for p in review:
+            d.row([p.src.name, p.order, p.part, p.reason], [124, 96, 92, 216],
+                  size=8, h=14, fill=_C_REV_BG, tcolor=_C_REV_TX)
+        d.gap(10)
+
+    # pull list by material
+    d.text("PULL LIST BY MATERIAL", size=11, bold=True, color=_C_BAND)
+    groups: Dict[Tuple[str, str], List[Pulled]] = defaultdict(list)
+    for p in resolved:
+        groups[(p.desc or "(unknown)", p.serial or "")].append(p)
+    if not groups:
+        d.text("No files were filed.", size=9, color=_C_GREY)
+    for (desc, serial) in sorted(groups, key=lambda k: str(k[0]).lower()):
+        items = sorted(groups[(desc, serial)], key=lambda p: p.part)
+        d.row([f"{desc}  ({serial})", f"{len(items)} pc"], [430, 90],
+              size=9.5, h=17, bold=True, fill=_C_GRP_BG)
+        d.row(["Order", "Part", "File", "via"], [110, 150, 210, 50],
+              size=8, h=13, bold=True, tcolor=_C_GREY)
+        for i, p in enumerate(items):
+            d.row([p.order, p.part, p.src.name, p.how], [110, 150, 210, 50],
+                  h=13, fill=_C_ZEBRA if i % 2 else _C_WHITE)
+        d.gap(6)
+
+    d.save(path)
+
+
+# ── file operations ─────────────────────────────────────────────────────────
+
+def _retry(fn, *a, tries=5, delay=0.2, **kw):
+    import errno
+    for i in range(tries):
         try:
-            final = target_dir / p.name
-            k = 2
-            while final.exists():
-                final = target_dir / f"{p.stem}({k}){p.suffix}"; k += 1
-            shutil.move(str(p), str(final))
-            moved += 1
-            debug_fp.write(json.dumps({"event": "organized", "file": p.name, "folder": folder}) + "\n")
-        except Exception as e:
-            debug_fp.write(json.dumps({"event": "organize_error", "file": p.name, "error": str(e)}) + "\n")
+            return fn(*a, **kw)
+        except OSError as e:
+            if e.errno in (errno.EACCES, errno.EPERM, errno.EBUSY):
+                time.sleep(delay * (i + 1))
+                continue
+            raise
 
-    debug_fp.write(json.dumps({"event": "organize_done", "moved": moved}) + "\n")
 
-# ── TechDeck plugin entry point ────────────────────────────────────────────────
+def _unique(dest: Path) -> Path:
+    if not dest.exists():
+        return dest
+    k = 2
+    while True:
+        cand = dest.with_name(f"{dest.stem}({k}){dest.suffix}")
+        if not cand.exists():
+            return cand
+        k += 1
+
+
+# ── entry point ─────────────────────────────────────────────────────────────
 
 def run(params: dict, progress_callback, cancel_event) -> None:
-    settings = params.get('settings', {})
-    log = params.get('log', print)
+    settings = params.get("settings", {})
+    log = params.get("log", print)
 
-    log("Starting 922 LST Organizer...")
+    log(f"Starting 922 LST Organizer (v{VERSION})...")
     progress_callback(0)
 
-    base_path_str = settings.get('base_path', '').strip()
-    dry_run = settings.get('dry_run', False)
-    do_organize = settings.get('organize_by_material', True)
+    dry_run = bool(settings.get("dry_run", False))
+    do_organize = bool(settings.get("organize_by_material", True))
 
-    # Always prompt for batch number at run time
     raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "403", "Batch 403", or "PO 403"):'
-    )
-    batch_no = sdk.parse_922_batch(raw or '')
+        params, 'Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
+    batch_no = sdk.parse_922_batch(raw or "")
     if not batch_no:
         raise ValueError(f"Unrecognised batch number input: {raw!r}")
 
-    # Resolve base path - override wins, otherwise auto-discover
-    root = sdk.resolve_922_root(base_path_str)
-    if not root:
+    root = sdk.resolve_922_root((settings.get("base_path") or "").strip())
+    if not root or not root.is_dir():
         raise RuntimeError(
-            "Could not auto-locate '922 QTDR Production Packages'. "
-            "Set Base Directory in plugin settings."
-        )
-    if not root.is_dir():
-        raise ValueError(f"Base directory not found: {root}")
-    log(f"Base directory: {root}")
-
+            "Could not locate '922 QTDR Production Packages'. Set Base Directory "
+            "in plugin settings.")
     batch_path = sdk.find_922_batch_path(root, batch_no)
     if not batch_path:
         raise RuntimeError(
-            f"Batch {batch_no} not found under {root} (also checked '1 - Completed'). "
-            "Verify the batch exists and OneDrive is synced."
-        )
-
+            f"Batch {batch_no} not found under {root} (also checked '1 - Completed').")
     log(f"Batch {batch_no}: {batch_path}")
     if dry_run:
-        log("DRY RUN MODE - no files will be copied or moved.")
+        log("DRY RUN - no files will be copied or moved.")
 
-    # Output file paths
-    ts = time.strftime("%Y%m%d_%H%M%S")
     lst_dir = batch_path / f"Batch {batch_no} - Documentation" / "LST"
-    _ensure_dir(lst_dir)
-    debug_path = lst_dir / f"debug_gather_lsts_{ts}.jsonl"
-    txt_path = lst_dir / f"LST_Overview_Batch_{batch_no}.txt"
-    group_path = lst_dir / f"Tube_Parts_Batch_{batch_no}.txt"
+    lst_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(debug_path, "a", encoding="utf-8") as debug_fp:
-        debug_fp.write(
-            json.dumps({"event": "start", "ts": ts, "batch": batch_no,
-                        "root": str(root), "batch_path": str(batch_path)}) + "\n"
-        )
-
-        if cancel_event.is_set():
-            return
-
-        # ── Phase 1: Gather LST files ──────────────────────────────────────────
-        log("Scanning order folders for .lst files...")
-        copied, copy_issues, dest_dir, batch_orders = _gather_and_copy(
-            batch_path, batch_no, dry_run, debug_fp, log, cancel_event
-        )
+    # ── Phase 1: gather ──
+    log("Scanning order folders for .lst files...")
+    order_dirs = _order_dirs(batch_path, batch_no)
+    gathered: List[Tuple[str, Path]] = []   # (order_name, dest_path) for the report
+    seen: set = set()
+    for idx, od in enumerate(order_dirs, 1):
         if cancel_event.is_set():
             log("Cancelled."); return
-        log(f"Gathered {len(copied)} file(s) across {len(batch_orders)} order folder(s).")
-        progress_callback(10)
-
-        # ── Phase 2: Deduplicate destination ───────────────────────────────────
-        if not dry_run:
-            log("Checking for case-insensitive duplicate filenames...")
-            removed = _dedup_destination(dest_dir, log, debug_fp)
-            if removed:
-                log(f"Removed {removed} duplicate file(s).")
-                copied = [p for p in copied if p.exists()]
+        log(f"  [{idx}/{len(order_dirs)}] {od.name}")
+        for f in _find_lsts_for_order(od, cancel_event):
+            key = f.name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            if dry_run:
+                gathered.append((od.name, f))
             else:
-                log("No duplicates found.")
-        progress_callback(20)
+                sdk.ensure_local(f)
+                dest = _unique(lst_dir / f.name)
+                _retry(shutil.copy2, f, dest)
+                gathered.append((od.name, dest))
+    log(f"Gathered {len(gathered)} .lst file(s) from {len(order_dirs)} order folder(s).")
+    progress_callback(35)
 
-        if cancel_event.is_set():
-            log("Cancelled."); return
+    if cancel_event.is_set():
+        log("Cancelled."); return
 
-        # ── Phase 3: Locate Master PO ──────────────────────────────────────────
-        log("Auto-discovering Master PO workbook...")
-        master_po = _autodiscover_master_po(batch_path, debug_fp)
+    # ── Phase 2: PO ──
+    master_po = _find_master_po(batch_path, batch_no)
+    if not master_po:
+        raise RuntimeError(
+            "Master PO workbook (PO H{batch} QF-QU-09) not found in the batch's "
+            "Documentation folder.".replace("{batch}", batch_no))
+    log(f"Reading PO: {master_po.name}...")
+    master_map, serial_desc = _read_po(master_po, log)
+    log(f"  {len(master_map)} DYPN rows, {len(serial_desc)} material descriptions.")
+    progress_callback(55)
 
-        if not master_po or not master_po.exists():
-            log("WARNING: Master PO not found - writing seed file (filenames only).")
-            seed_rows = [(p.name, None, _strip_step(p.stem), None, None, None) for p in copied]
-            _write_overview_txt(
-                txt_path, seed_rows, ["Master PO workbook NOT FOUND"],
-                {"batch": batch_no, "note": "seed only"},
-                len(seed_rows), len({r[2] for r in seed_rows}),
-                0, 0, 0, [], [], batch_orders,
-            )
-            raise RuntimeError(
-                f"Master PO not found. Seed report written to:\n  {txt_path}\n"
-                "Ensure the Master PO workbook is present in the batch folder and re-run."
-            )
+    # ── Phase 3: resolve ──
+    log("Matching files to materials...")
+    pulled, expected, serial_desc = _resolve(
+        gathered, master_map, serial_desc, batch_path, log)
+    resolved = [p for p in pulled if p.resolved]
+    review = [p for p in pulled if not p.resolved]
+    progress_callback(75)
 
-        debug_fp.write(json.dumps({"event": "master_po", "path": str(master_po)}) + "\n")
-        progress_callback(30)
+    # ── Phase 4: organize ──
+    if do_organize and not dry_run:
+        log("Filing files into material folders...")
+        for p in pulled:
+            target_dir = lst_dir / p.folder
+            target_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                _retry(shutil.move, str(p.src), str(_unique(target_dir / p.src.name)))
+            except Exception as e:
+                log(f"  WARNING: could not file {p.src.name}: {e}")
+    progress_callback(88)
 
-        # ── Phase 4: Read PO data ──────────────────────────────────────────────
-        log(f"Reading Master PO: {master_po.name}...")
-        try:
-            dypn_map, serial_map = _read_po_maps(master_po, debug_fp)
-        except Exception as e:
-            debug_fp.write(json.dumps({"event": "po_read_fail", "error": str(e)}) + "\n")
-            raise RuntimeError(f"Could not read Master PO: {e}")
+    # ── Phase 5: report ──
+    report = lst_dir / f"LST Report - Batch {batch_no}.pdf"
+    try:
+        _write_report(report, batch_no, master_po,
+                      [d.name for d in order_dirs], pulled, expected, len(gathered))
+        log(f"Report: {report}")
+    except Exception as e:
+        log(f"WARNING: could not write report: {e}")
+    progress_callback(95)
 
-        log(f"Loaded {len(dypn_map)} DYPN entries and {len(serial_map)} material descriptions.")
-        progress_callback(40)
-
-        if cancel_event.is_set():
-            log("Cancelled."); return
-
-        # ── Phase 5: Build rows ────────────────────────────────────────────────
-        log("Mapping files to PO data...")
-        rows, problems = _build_rows(copied, dypn_map, serial_map, debug_fp)
-        progress_callback(60)
-
-        # ── Phase 6: Compute tube counts ───────────────────────────────────────
-        (moved_files, moved_unique, std_count, over_count, total_count,
-         missing_std, oversized_list) = _compute_counts(rows, dypn_map, batch_orders, serial_map)
-
-        # ── Phase 7: Write output files ────────────────────────────────────────
-        log("Writing output files...")
-        issues = copy_issues + problems
-        _write_overview_txt(
-            txt_path, rows, issues,
-            {"batch": batch_no, "root": str(root), "master_po": str(master_po),
-             "dest_dir": str(dest_dir), "orders": ",".join(sorted(batch_orders))},
-            moved_files, moved_unique, std_count, over_count, total_count,
-            missing_std, oversized_list, batch_orders,
-        )
-        _write_grouped_txt(group_path, batch_no, rows)
-        progress_callback(75)
-
-        if cancel_event.is_set():
-            log("Cancelled."); return
-
-        # ── Phase 8: Organize by material ──────────────────────────────────────
-        if do_organize and not dry_run:
-            log("Organizing files by material type...")
-            _organize_by_material(dest_dir, rows, debug_fp, cancel_event)
-        elif dry_run:
-            log("Dry run: skipping file organization.")
-        progress_callback(90)
-
-        debug_fp.write(json.dumps({"event": "done"}) + "\n")
-
-    # ── Console summary ────────────────────────────────────────────────────────
+    # ── console summary ──
+    std_total = sum(1 for v in expected.values() if v[2] == "standard")
+    over_total = sum(1 for v in expected.values() if v[2] == "oversized")
+    covered = {p.part for p in resolved}
+    missing = [d for d, v in expected.items()
+               if v[2] == "standard" and d not in covered]
     log("=" * 60)
-    log(f"922 LST Organizer - Batch {batch_no} Complete")
+    log(f"922 LST Organizer - Batch {batch_no}")
+    log(f"  Total tubes in PO:            {std_total + over_total}")
+    log(f"  Oversized (no .lst):          {over_total}")
+    log(f"  Target (standard tubes):      {std_total}")
+    log(f"  Files found & filed:          {len(resolved)}")
+    log(f"  Missing standard tubes:       {len(missing)}")
+    log(f"  Needs review:                 {len(review)}")
     log("=" * 60)
-    log(f"Files gathered:  {moved_files}")
-    log(f"Unique parts:    {moved_unique}")
-    log("")
-    log("Tube counts:")
-    log(f"  Standard (gathered):      {std_count}")
-    log(f"  Oversized (>0.375\" NOM):  {over_count}")
-    log(f"  Total in PO:              {total_count}")
 
-    if oversized_list:
-        log(f"\n{len(oversized_list)} oversized tube part(s) tracked but NOT gathered.")
+    if missing or review:
+        lines = []
+        if missing:
+            lines.append(f"{len(missing)} standard tube(s) missing:")
+            lines += [f"  - {d}" for d in sorted(missing)[:12]]
+            if len(missing) > 12:
+                lines.append(f"  ...and {len(missing) - 12} more")
+        if review:
+            lines.append(f"\n{len(review)} file(s) need review (moved to '{NEEDS_REVIEW_FOLDER}'):")
+            lines += [f"  - {p.src.name}: {p.reason}" for p in review[:12]]
+        sdk.show_warning(params, f"922 LST - Batch {batch_no}", "\n".join(lines))
 
-    if missing_std:
-        log(f"\nWARNING: {len(missing_std)} standard tube file(s) not found!")
-        for part, order, *_ in sorted(missing_std)[:5]:
-            log(f"  - {part} (Order: {order})")
-        if len(missing_std) > 5:
-            log(f"  ... and {len(missing_std) - 5} more. See report for full list.")
-    else:
-        log("\nAll expected standard tube files found.")
-
-    if issues:
-        log(f"\n{len(issues)} issue(s) logged - see report for details.")
-
-    log("")
-    log(f"Main report:   {txt_path}")
-    log(f"Grouped tubes: {group_path}")
-    log(f"Debug log:     {debug_path}")
-    log("=" * 60)
     progress_callback(100)
 
 
-# ── Standalone test harness ────────────────────────────────────────────────────
 if __name__ == "__main__":
     import threading
-    cancel = threading.Event()
     run(
-        params={
-            'log': print,
-            'settings': {
-                'base_path': '',
-                'batch_number': input("Batch number: ").strip(),
-                'master_po_path': '',
-                'dry_run': False,
-                'organize_by_material': True,
-            },
-        },
+        params={"log": print,
+                "settings": {"base_path": "", "dry_run": True, "organize_by_material": True}},
         progress_callback=lambda p: print(f"[{p}%]"),
-        cancel_event=cancel,
+        cancel_event=threading.Event(),
     )
