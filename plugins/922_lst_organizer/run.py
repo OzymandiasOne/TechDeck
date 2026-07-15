@@ -244,6 +244,12 @@ def _sanitize(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "-", name).strip()
 
 
+def _order_num(name: str) -> str:
+    """Order number = the folder name before the first dash
+    ('FK357980-H5222070-H3' -> 'FK357980'). Bare PO order values pass through."""
+    return (name or "").split("-", 1)[0]
+
+
 def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
              batch_path: Path, log) -> Tuple[List[Pulled], Dict[str, Tuple], Dict[str, str]]:
     """Resolve every gathered file to a material. Returns (pulled, expected_tubes,
@@ -465,18 +471,19 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         d.row(["Order", "Part", "Serial", "Where to look"],
               [90, 130, 70, 240], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
         for dd, (order, serial, _c) in missing:
-            hint = f"{order}*/…/7000/{dd}*.lst" if order else ""
-            d.row([order, dd, serial, hint], [90, 130, 70, 240],
+            onum = _order_num(order)
+            hint = f"{onum}*/…/7000/{dd}*.lst" if onum else ""
+            d.row([onum, dd, serial, hint], [90, 130, 70, 240],
                   h=14, fill=_C_MISS_BG, tcolor=_C_MISS_TX)
         d.gap(10)
 
     # needs review
     if review:
         d.text("NEEDS REVIEW  (moved to 'Needs Review' folder)", size=11, bold=True, color=_C_REV_TX)
-        d.row(["File", "Order folder", "Part", "Reason"],
-              [124, 96, 92, 216], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
+        d.row(["File", "Order", "Part", "Reason"],
+              [124, 80, 96, 228], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
         for p in review:
-            d.row([p.src.name, p.order, p.part, p.reason], [124, 96, 92, 216],
+            d.row([p.src.name, _order_num(p.order), p.part, p.reason], [124, 80, 96, 228],
                   size=8, h=14, fill=_C_REV_BG, tcolor=_C_REV_TX)
         d.gap(10)
 
@@ -485,11 +492,11 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         d.text("EXTRA - FILED BUT NOT IN THIS BATCH'S PO", size=11, bold=True, color=_C_EXTRA_TX)
         d.text("Found via the order folder's own workbook. Verify the batch PO isn't "
                "missing these lines.", size=8, color=_C_GREY)
-        d.row(["File", "Order folder", "Part", "Material"],
-              [140, 120, 110, 158], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
+        d.row(["File", "Order", "Part", "Material"],
+              [140, 84, 110, 194], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
         for p in extra:
             mat = f"{p.desc} ({p.serial})" if p.desc else (p.serial or "")
-            d.row([p.src.name, p.order, p.part, mat], [140, 120, 110, 158],
+            d.row([p.src.name, _order_num(p.order), p.part, mat], [140, 84, 110, 194],
                   size=8, h=14, fill=_C_EXTRA_BG, tcolor=_C_EXTRA_TX)
         d.gap(10)
 
@@ -504,10 +511,10 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         items = sorted(groups[(desc, serial)], key=lambda p: p.part)
         d.row([f"{desc}  ({serial})", f"{len(items)} pc"], [430, 90],
               size=9.5, h=17, bold=True, fill=_C_GRP_BG)
-        d.row(["Order", "Part", "File", "via"], [110, 150, 210, 50],
+        d.row(["Order", "Part", "File", "via"], [90, 150, 230, 50],
               size=8, h=13, bold=True, tcolor=_C_GREY)
         for i, p in enumerate(items):
-            d.row([p.order, p.part, p.src.name, p.how], [110, 150, 210, 50],
+            d.row([_order_num(p.order), p.part, p.src.name, p.how], [90, 150, 230, 50],
                   h=13, fill=_C_ZEBRA if i % 2 else _C_WHITE)
         d.gap(6)
 
@@ -672,7 +679,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         if extra:
             lines.append(f"\n{len(extra)} extra file(s) filed but NOT in the batch PO "
                          "(verify the PO isn't missing a line):")
-            lines += [f"  - {p.src.name}  [{p.order}]  = {p.part}" for p in extra[:12]]
+            lines += [f"  - {p.src.name}  [{_order_num(p.order)}]  = {p.part}" for p in extra[:12]]
         sdk.show_warning(params, f"922 LST - Batch {batch_no}", "\n".join(lines))
 
     progress_callback(100)
