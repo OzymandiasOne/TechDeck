@@ -17,12 +17,14 @@ Automates the full 911 QTDR batch setup workflow:
      MIL SPEC field (-> D4) and MATERIAL field (-> E4) off the MOVE TICKET page
   7. Read BATCH LIST -> filter rows by nest number -> paste into NEST cols F-K
      starting row 4
-  8. Read DYPN values from NEST col G -> copy INSPECTION SHEET tab for each
-     part, write full DYPN into A16 (merged A16:C17). Nothing else on the
-     copied sheet is modified -- the template's formulas/CF drive the rest
-     off A16. Sheet name = suffix (e.g. "-80"); on collisions, both
-     colliding sheets are renamed using the last 2 chars of the preceding
-     segment (e.g. H4533321-80 -> "21-80", H4533322-80 -> "22-80").
+  8. Read part rows (Work Order / DYPN / DYPN QTY) from NEST -> copy
+     INSPECTION SHEET tab for each row; fill one Part Number slot per piece
+     (qty 3 -> slots A16/A18/A20) with the hull code (= work order's first
+     2 chars) under the part number in every slot; slots 2+ mirror slot 1's
+     description; template tab hidden afterwards (v1.6.0). Sheet name =
+     suffix (e.g. "-80"); on collisions, both colliding sheets are renamed
+     using the last 2 chars of the preceding segment (e.g. H4533321-80 ->
+     "21-80", H4533322-80 -> "22-80").
   9. Save every nest excel, repeat for all nests in the batch
  10. Build MOVE TICKET OMIT PDF for each nest (removes MOVE TICKET pages, keeps
      MIL-SPEC/HULL); first page stamped BATCH/NEST + Material Type filled
@@ -992,14 +994,21 @@ def _plan_sheet_names(dypns: list, existing_sheet_names: set = None) -> list:
 
 def _get_dypn_rows(nest_ws) -> list:
     """
-    Read NEST col G (col 7, DYPN) from row 4 downward.
-    Return list of full DYPN strings for every non-empty cell.
+    Read NEST cols F/G/I (Work Order / DYPN / DYPN QTY) from row 4 downward.
+    Return a list of (dypn, work_order, qty) triples for every row with a
+    DYPN. qty falls back to 1 on blank/junk (the sheet still gets one slot).
     """
     result = []
     for row in range(4, nest_ws.max_row + 1):
         val = nest_ws.cell(row, 7).value  # Column G = DYPN
-        if val and str(val).strip():
-            result.append(str(val).strip())
+        if not (val and str(val).strip()):
+            continue
+        wo = str(nest_ws.cell(row, 6).value or "").strip()   # Column F
+        try:
+            qty = int(float(str(nest_ws.cell(row, 9).value).strip()))  # Column I
+        except (TypeError, ValueError):
+            qty = 1
+        result.append((str(val).strip(), wo, max(qty, 1)))
     return result
 
 
@@ -1017,19 +1026,29 @@ def _get_dypn_rows(nest_ws) -> list:
 # the openpyxl load/save round-trip intact.
 # ---------------------------------------------------------------------------
 
-def _build_inspection_sheets_via_excel(workbook_path: Path, dypns: list, log):
+def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
     """
-    Copy the INSPECTION SHEET tab once per DYPN, writing the full DYPN
-    into A16 on each copy. Excel COM is used so conditional formatting
-    on the copies is preserved (openpyxl's copy_worksheet drops it).
+    Copy the INSPECTION SHEET tab once per NEST part row. parts is the
+    list of (full_dypn, work_order, qty) triples from _get_dypn_rows.
+
+    v1.6.0 (QA feedback, C.D. 2026-07): each copy now fills one
+    Part Number slot PER PIECE — qty 3 writes the part into the first 3
+    of the form's 10 two-row slots (A16, A18, ... A34) so the inspector
+    records each piece; qty > 10 fills all 10 with a warning. Every slot
+    shows the HULL CODE under the part number (= the work order's first
+    two characters — verified identical to the part sketches' HULL field
+    across V094). Slots 2+ get description formulas mirroring slot 1
+    (the template's own D18+ formulas are broken #REF! stubs). After the
+    copies, the INSPECTION SHEET template tab is hidden (her April ask)
+    so the workbook opens straight onto real sheets.
+
+    Excel COM is used so conditional formatting on the copies is
+    preserved (openpyxl's copy_worksheet drops it).
 
     Implementation note: Excel SaveAs writing back to a OneDrive-synced
     path fails with "Cannot access" because OneDrive is tracking the
     file. So we do all COM work on a local temp copy outside OneDrive,
     then atomically replace the original via os.replace.
-
-    Nothing else on copies is modified -- template formulas/CF drive
-    the rest off A16. The original INSPECTION SHEET tab stays visible.
 
     Sheet name = suffix after the last '-' (e.g. '-80'). When two DYPNs
     share a suffix, both names are disambiguated (e.g. H4533321-80 ->
@@ -1046,7 +1065,7 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, dypns: list, log):
     import os
     import tempfile
 
-    plan = _plan_sheet_names(dypns)
+    plan = _plan_sheet_names([p[0] for p in parts])
 
     xlCalculationManual = -4135
     xlCalculationAutomatic = -4105
@@ -1099,7 +1118,11 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, dypns: list, log):
 
         template = wb.Sheets("INSPECTION SHEET")
 
-        for full_dypn, sheet_name in plan:
+        # The QF-QU-09 form has 10 two-row Part Number slots: A16:C17,
+        # A18:C19, ... A34:C35.
+        SLOT_ROWS = list(range(16, 36, 2))
+
+        for (full_dypn, sheet_name), (_, work_order, qty) in zip(plan, parts):
             count_before = wb.Sheets.Count
             last_sheet = wb.Sheets(count_before)
 
@@ -1146,8 +1169,44 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, dypns: list, log):
             # 22 times instead of the actual copies.
             new_sheet = excel.ActiveSheet
             new_sheet.Name = sheet_name
-            new_sheet.Range("A16").Value = full_dypn
-            log(f"  Creating inspection sheet '{sheet_name}' for {full_dypn}")
+
+            # Hull code shows on its own line under the part number in
+            # every filled slot (merged 2-row cell, so wrap displays it).
+            hull = work_order[:2].upper() if work_order else ""
+            slot_text = f"{full_dypn}\n{hull}" if hull else full_dypn
+
+            n_slots = min(qty, len(SLOT_ROWS))
+            if qty > len(SLOT_ROWS):
+                log(f"  WARNING: {full_dypn} qty {qty} exceeds the form's "
+                    f"{len(SLOT_ROWS)} sample slots - filling {len(SLOT_ROWS)}.")
+
+            for slot in range(n_slots):
+                r = SLOT_ROWS[slot]
+                cell = new_sheet.Range(f"A{r}")
+                cell.Value = slot_text
+                cell.WrapText = True
+                if slot > 0:
+                    # Description mirrors slot 1 (same part every slot);
+                    # the template's own D18+ formulas are broken #REF!
+                    # stubs that render blank. Slots 2+ have ONE merged
+                    # 2-row description cell (D18:G19 etc.), so combine
+                    # slot 1's code (D16) + readable desc (D17, often
+                    # #N/A) into a single formula.
+                    new_sheet.Range(f"D{r}").Formula = (
+                        f'=IF(A{r}="","",IF(ISERROR(D$16),"",D$16)'
+                        f'&IF(ISERROR(D$17),""," "&D$17))')
+
+            log(f"  Creating inspection sheet '{sheet_name}' for {full_dypn} "
+                f"(qty {qty}, hull {hull or '?'})")
+
+        # Hide the template tab so the workbook opens onto the real
+        # inspection sheets (April QA ask). Copies were already made,
+        # and at least one other sheet is always visible.
+        if plan:
+            try:
+                template.Visible = 0  # xlSheetHidden
+            except Exception:
+                pass
 
         try:
             excel.Calculation = xlCalculationAutomatic
@@ -1523,13 +1582,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             _fill_nest_part_rows(nest_ws, num_parts)
             log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
 
-        # -- Step 8a: Collect DYPN values from NEST col G ----------------
+        # -- Step 8a: Collect part rows (WO / DYPN / qty) from NEST ------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
-        dypns = _get_dypn_rows(nest_ws)
-        if not dypns:
+        part_rows = _get_dypn_rows(nest_ws)
+        if not part_rows:
             log(f"  WARNING: No DYPN values found in NEST col G.")
         else:
-            log(f"  Found {len(dypns)} DYPN rows.")
+            log(f"  Found {len(part_rows)} DYPN rows.")
 
         # -- Save and close openpyxl workbook before Excel COM opens it --
         log(f"  Saving {nest_excel.name}...")
@@ -1540,10 +1599,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # openpyxl's copy_worksheet drops conditional formatting rules
         # on copy (verified: 350 CF rules on template -> 0 on copy).
         # Excel's native Sheet.Copy preserves them.
-        if dypns:
-            log(f"  Building {len(dypns)} inspection sheet(s) via Excel...")
+        if part_rows:
+            log(f"  Building {len(part_rows)} inspection sheet(s) via Excel...")
             try:
-                _build_inspection_sheets_via_excel(nest_excel, dypns, log)
+                _build_inspection_sheets_via_excel(nest_excel, part_rows, log)
             except Exception as e:
                 log(f"  ERROR: Excel COM inspection sheet build failed: {e}")
                 raise
