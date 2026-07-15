@@ -33,14 +33,30 @@ class UpdateDialog(QDialog):
 
         self.setWindowTitle("Update Available" if not mandatory else "Update Required")
         self.setModal(True)
+        # Width floor only here. Do NOT hardcode a minimum HEIGHT: the old
+        # setMinimumHeight(200) sat BELOW what the content actually needs
+        # (~295px), and on a display with fractional scaling the dialog would
+        # open toward that too-low floor and clip the fixed top/bottom rows
+        # (header + buttons). The real height floor is pinned from the laid-out
+        # content below, after _setup_ui.
         self.setMinimumWidth(500)
-        self.setMinimumHeight(200)
 
         # Prevent closing if mandatory
         if mandatory:
             self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.CustomizeWindowHint | Qt.WindowType.WindowTitleHint)
 
         self._setup_ui()
+
+        # Pin the window's minimum HEIGHT to what the content actually needs,
+        # then open at the full preferred size. The layout's minimum accounts
+        # for the fixed title/labels/buttons plus the notes area, so the top
+        # and bottom rows can never be clipped no matter the display scaling
+        # (Qt6 defaults to fractional High-DPI scaling; on a coworker's
+        # non-100% display the old 200px floor sat below the content and let
+        # the dialog open too short). The width floor (500) is left intact.
+        self.layout().activate()
+        self.setMinimumHeight(self.layout().minimumSize().height())
+        self.resize(self.sizeHint())
 
     def _setup_ui(self):
         """Create UI elements."""
