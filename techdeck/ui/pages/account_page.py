@@ -148,10 +148,13 @@ class AccountPage(QWidget, ThemeAware):
         self.tabs.addTab(scroll, "My Account")
         self.emporium = EmporiumPage(self.settings)
         # The Emporium scene never lays out below its design width; a smaller
-        # window crops it (drag bigger to reveal) instead of being forced to
-        # grow. 880 = the scene's natural minimum (banner + category boxes).
+        # window crops it symmetrically (drag bigger to reveal) instead of being
+        # forced to grow. 760 = the scene's natural minimum (banner + a 4-digit
+        # ticket balance) AFTER the banner dropped to scale 3; it must stay <=
+        # the default window's ~824px content width or the too-wide page gets
+        # centre-cropped and the banner's left edge (and balance's right) clip.
         from techdeck.ui.widgets.cropped_page import CroppedPage
-        self.tabs.addTab(CroppedPage(self.emporium, design_width=880),
+        self.tabs.addTab(CroppedPage(self.emporium, design_width=760),
                          "Ticket Counter")
         self.my_stuff = MyStuffPage(self.settings)
         self.tabs.addTab(self.my_stuff, "My Stuff")

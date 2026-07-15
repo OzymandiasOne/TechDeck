@@ -767,9 +767,14 @@ class EmporiumPage(QWidget):
             "balance": _load_art("bubble_balance.tdart"),
             "dialogue": _load_art("bubble_dialogue.tdart"),
         }
-        # Pre-render the neon sign (bright + dim) once.
-        self._sign_on = _trim_v(_sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_on"]))
-        self._sign_off = _trim_v(_sf().render("WOOGY'S EMPORIUM", 4, EMP["neon_off"]))
+        # Pre-render the neon sign (bright + dim) once. Scale 3 (not 4) so the
+        # banner + a 4-digit ticket balance both fit the top bar within the
+        # default window's content width (~824px after the sidebar) — at scale 4
+        # the row needed ~866px and got centre-cropped ~28px on each side by the
+        # CroppedPage host, clipping the banner's left edge (and the balance's
+        # right). See account_page.py's CroppedPage design_width.
+        self._sign_on = _trim_v(_sf().render("WOOGY'S EMPORIUM", 3, EMP["neon_on"]))
+        self._sign_off = _trim_v(_sf().render("WOOGY'S EMPORIUM", 3, EMP["neon_off"]))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 14)
