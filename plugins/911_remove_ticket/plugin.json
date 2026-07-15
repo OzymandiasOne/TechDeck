@@ -1,8 +1,8 @@
 {
   "id": "911_remove_ticket",
   "name": "911 Remove Ticket",
-  "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Originals are untouched.",
-  "version": "1.0.0",
+  "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Stamps the first page with the batch + nest (red Century Gothic, under Quality Requirements) and fills the blank Material Type cell from the removed move tickets. Originals are untouched.",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
