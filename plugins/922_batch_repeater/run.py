@@ -1,5 +1,5 @@
 """
-Batch Repeater Plugin for TechDeck v2.2.2
+Batch Repeater Plugin for TechDeck v2.3.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
 v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
@@ -11,6 +11,13 @@ v2.2.0: honors params['stage_options'] = {"distribute": bool, "tag": bool}
 (both default True) so the consolidated 922 Setup's master toggle window can
 switch the CAD/binder distribution and the card tagging off individually.
 Standalone runs never pass the key, so behavior there is unchanged.
+
+v2.3.0: order->folder matching is now EXACT (folder PPN or whole name equals
+the MPL order), not a substring - so a '-H1' order no longer pulls a '-H11' /
+'-H14' folder (11 such prefix-collision pairs exist across the real batches).
+Same fix applied to the 'already pulled' check. Also removed the dead
+get_console_input helper and stopped hardcoding the MPL sheet name + header
+row (both are now scanned).
 """
 
 import os
@@ -44,24 +51,7 @@ DEFAULT_REPEAT_WEBHOOK_URL = (
 )
 
 
-def get_console_input(params: Dict[str, Any], prompt: str) -> str:
-    """
-    Get input from user via TechDeck console.
-    
-    Args:
-        params: Plugin params (contains 'console' reference)
-        prompt: Question to ask user
-        
-    Returns:
-        User's input as string
-    """
-    console = params.get('console')
-    if console and hasattr(console, 'request_input'):
-        return console.request_input(prompt)
-    raise RuntimeError(
-        "Batch Repeater requires user input but no TechDeck console is available. "
-        "Run this plugin from within TechDeck."
-    )
+_PO_HDR_RE = re.compile(r"^\s*PO\s*\d+\s*$", re.IGNORECASE)
 
 
 def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
@@ -124,6 +114,63 @@ def dypn_of(folder_name: str) -> Optional[str]:
     return None
 
 
+def _order_matches_folder(order: str, folder_name: str) -> bool:
+    """EXACT match between an MPL order value (a PPN like 'H7921467-H1') and an
+    order folder ('X7443992-H7921467-H1'): the folder's PPN (name after the
+    first dash) OR the whole folder name must equal the order. NEVER a substring,
+    so a '-H1' order can't grab a '-H11' / '-H14' folder (the old bug: order
+    'H7921467-H1' substring-matched 11 real '-H1x' folders across the batches)."""
+    key = order.strip().lower()
+    return dypn_of(folder_name) == key or folder_name.strip().lower() == key
+
+
+def _resolve_po_sheet(xls, preferred: str, log) -> str:
+    """Pick the MPL sheet: the preferred name if present, else the sheet whose
+    first rows hold the most 'PO ###' headers (so a rename doesn't break us)."""
+    for s in xls.sheet_names:
+        if s.strip().casefold() == preferred.strip().casefold():
+            return s
+    best, best_n = None, 0
+    for s in xls.sheet_names:
+        raw = pd.read_excel(xls, sheet_name=s, header=None, nrows=8)
+        n = max((sum(1 for v in row if isinstance(v, str) and _PO_HDR_RE.match(v))
+                 for _, row in raw.iterrows()), default=0)
+        if n > best_n:
+            best, best_n = s, n
+    if best:
+        log(f"WARNING: sheet '{preferred}' not found; using '{best}' ({best_n} PO columns).")
+    return best or preferred
+
+
+def _find_po_header_row(raw) -> int:
+    """0-based index of the row with the most 'PO ###' cells (Hard Rule 2 - scan,
+    don't hardcode). Falls back to the legacy row index 2."""
+    best_i, best_n = 2, 0
+    for i in range(min(8, len(raw))):
+        n = sum(1 for v in raw.iloc[i] if isinstance(v, str) and _PO_HDR_RE.match(v))
+        if n > best_n:
+            best_i, best_n = i, n
+    return best_i if best_n >= 3 else 2
+
+
+def _read_mpl_po_columns(path: Path, preferred_sheet: str, log) -> Tuple[Any, Dict[int, str]]:
+    """(dataframe, {po_num: column_name}) from the MPL PO sheet, with the sheet
+    and header row resolved rather than hardcoded."""
+    xls = pd.ExcelFile(path)
+    sheet = _resolve_po_sheet(xls, preferred_sheet, log)
+    raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=8)
+    hdr = _find_po_header_row(raw)
+    df = pd.read_excel(xls, sheet_name=sheet, header=hdr)
+    log(f"Sheet '{sheet}', header row {hdr + 1}")
+    po_columns: Dict[int, str] = {}
+    for col in df.columns:
+        if isinstance(col, str) and col.strip().lower().startswith("po"):
+            m = re.search(r"(\d+)", col)
+            if m:
+                po_columns[int(m.group(1))] = col
+    return df, po_columns
+
+
 def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     """
     Main plugin execution function.
@@ -142,7 +189,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_distribute = bool(stage_options.get('distribute', True))
     do_tag = bool(stage_options.get('tag', True))
 
-    log("Starting 922 Batch Repeater v2.2.2...")
+    log("Starting 922 Batch Repeater v2.3.0...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -233,31 +280,22 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log("Operation cancelled")
         return
     
-    # Read Excel file
+    # Read the MPL and identify PO columns (sheet + header row auto-resolved,
+    # not hardcoded - Hard Rule 2).
     log("Reading Excel spreadsheet...")
     try:
         sdk.ensure_local(spreadsheet_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
-        df = pd.read_excel(spreadsheet_path, sheet_name=SHEET_NAME, header=2)
+        df, po_columns = _read_mpl_po_columns(spreadsheet_path, SHEET_NAME, log)
     except Exception as e:
         log(f"ERROR: Error reading spreadsheet: {e}")
         raise RuntimeError(f"Error reading spreadsheet: {e}")
-    
+
     progress_callback(15)
-    
-    # Identify PO columns
-    log("Identifying PO columns...")
-    po_columns: Dict[int, str] = {}
-    for col in df.columns:
-        if isinstance(col, str) and col.strip().lower().startswith("po"):
-            m = re.search(r"(\d+)", col)
-            if m:
-                po_num = int(m.group(1))
-                po_columns[po_num] = col
-    
+
     if not po_columns:
         log("ERROR: No PO columns found in spreadsheet.")
         raise ValueError("No PO columns found in spreadsheet.")
-    
+
     log(f"Found {len(po_columns)} PO columns")
     progress_callback(20)
     
@@ -329,7 +367,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         existing_repeat_dirs = [d.name for d in repeat_batch_folder.iterdir() if d.is_dir()]
     done_orders = {
         order for order in orders_to_copy
-        if any(order.lower() in name.lower() for name in existing_repeat_dirs)
+        if any(_order_matches_folder(order, name) for name in existing_repeat_dirs)
     }
     if done_orders:
         log(f"{len(done_orders)} repeat(s) already pulled in a prior run")
@@ -400,7 +438,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         try:
             for entry in os.listdir(batch_root):
                 entry_path = batch_root / entry
-                if entry_path.is_dir() and order.lower() in entry.lower():
+                if entry_path.is_dir() and _order_matches_folder(order, entry):
                     found_folder = entry_path
                     break
         except (FileNotFoundError, PermissionError) as e:
