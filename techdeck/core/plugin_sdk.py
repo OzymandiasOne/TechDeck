@@ -663,8 +663,37 @@ def ensure_local(path, log=None) -> None:
         hydrate_cloud_file(path, log=log)
 
 
+def locked_file_error(path, cause: Exception | None = None) -> RuntimeError:
+    """A user-actionable RuntimeError for a file Windows won't let us read
+    because another program holds it open — PermissionError / [Errno 13].
+
+    This is a DIFFERENT failure from the cloud-only placeholder (Errno 22 /
+    BadZipFile, handled by ensure_local): here the file's content is on disk,
+    but Excel/Acrobat has it open, or a OneDrive co-author locked it. No
+    amount of retrying or copy-to-temp helps — the first opener chose the
+    share mode — so the only fix is for the user to close the file. Bit
+    902 DXF Prep when the pricing .xlsm was open in Excel (Errno 13,
+    CPENG_TOWERPC, v0.8.6.8)."""
+    path = Path(path)
+    return RuntimeError(
+        f"'{path.name}' is open in another program (Excel, Acrobat, or a "
+        f"OneDrive co-author) so Windows won't let TechDeck read it. Close "
+        f"the file everywhere it's open - and delete any leftover "
+        f"'~${path.stem}' lock file in that folder - then run again."
+        f"\n  File: {path}"
+    )
+
+
+def _is_share_lock(exc: Exception) -> bool:
+    """True for a Windows sharing-violation / permission-denied read
+    (PermissionError, or any OSError with errno 13). NOT a cloud placeholder
+    (that's errno 22)."""
+    return isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
+
+
 def load_workbook_resilient(path, log=None, **kwargs):
-    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders.
+    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders
+    AND turns a locked-open workbook into a clear instruction (not a crash).
 
     A dehydrated workbook fails inside zipfile with OSError [Errno 22] even
     though the path exists — and zipfile's end-of-central-directory reader
@@ -674,20 +703,99 @@ def load_workbook_resilient(path, log=None, **kwargs):
     actually honors; zipfile's backwards seek can stall the recall for 60s+
     and then fail), and treat both exception types as the placeholder
     signature on the retry. Bit 911 Setup as "File is not a zip file"
-    (v0.8.6.5, LAPTOP-1AMLBK7B). Use this for ANY workbook under the
+    (v0.8.6.5, LAPTOP-1AMLBK7B).
+
+    A workbook the user still has open in Excel fails with PermissionError
+    [Errno 13] instead — surface `locked_file_error` so they know to close
+    it (bit 902 DXF Prep, v0.8.6.8). Use this for ANY workbook under the
     OneDrive tree (Hard Rule 13)."""
     import openpyxl
     import zipfile
     ensure_local(path, log=log)
     try:
         return openpyxl.load_workbook(path, **kwargs)
-    except (OSError, zipfile.BadZipFile):
+    except Exception as exc:
+        if _is_share_lock(exc):
+            raise locked_file_error(path, exc) from exc
+        if not isinstance(exc, (OSError, zipfile.BadZipFile)):
+            raise
         if not is_cloud_placeholder(path):
             raise
         if log:
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
         return openpyxl.load_workbook(path, **kwargs)
+
+
+def read_excel_resilient(path, log=None, **kwargs):
+    """pandas.read_excel that survives OneDrive placeholders and reports a
+    locked-open workbook clearly — the pandas sibling of
+    `load_workbook_resilient`. Pass the same args you'd give pd.read_excel
+    (sheet_name, header, usecols, ...). Use for ANY user-editable workbook
+    read via pandas (Hard Rule 13)."""
+    import pandas as pd
+    import zipfile
+    ensure_local(path, log=log)
+    try:
+        return pd.read_excel(path, **kwargs)
+    except Exception as exc:
+        if _is_share_lock(exc):
+            raise locked_file_error(path, exc) from exc
+        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
+            raise
+        if log:
+            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
+        hydrate_cloud_file(path, log=log)
+        return pd.read_excel(path, **kwargs)
+
+
+def open_excel_resilient(path, log=None):
+    """pandas.ExcelFile opened resiliently (placeholder hydrate + locked-open
+    message). Returns a pd.ExcelFile whose sheets you then read with
+    pd.read_excel(xls, sheet_name=...) — the file lock bites at open time, so
+    the returned handle reads sheets without re-touching the lock."""
+    import pandas as pd
+    import zipfile
+    ensure_local(path, log=log)
+    try:
+        return pd.ExcelFile(path)
+    except Exception as exc:
+        if _is_share_lock(exc):
+            raise locked_file_error(path, exc) from exc
+        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
+            raise
+        if log:
+            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
+        hydrate_cloud_file(path, log=log)
+        return pd.ExcelFile(path)
+
+
+def copy_resilient(src, dest, log=None):
+    """shutil.copy2 that hydrates a cloud-only source first and reports a
+    locked-open file clearly instead of crashing with a raw Errno 13.
+
+    The copy-to-temp pattern (stage a live workbook, then read/edit the copy so
+    Excel never sees the synced path) still fails at the COPY if the user has
+    the source open in Excel — same PermissionError class as a direct read.
+    On a lock we name the actual culprit: usually the source, but on a
+    write-back it's the destination. Returns the destination Path."""
+    src, dest = Path(src), Path(dest)
+    ensure_local(src, log=log)
+    try:
+        shutil.copy2(src, dest)
+        return dest
+    except Exception as exc:
+        if not _is_share_lock(exc):
+            raise
+        # Which side is locked? If we can't even read the source, it's the
+        # source; otherwise the open handle is on the destination.
+        culprit = dest
+        try:
+            with open(src, "rb") as fh:
+                fh.read(1)
+        except OSError:
+            culprit = src
+        raise locked_file_error(culprit, exc) from exc
 
 
 # ─────────────────────────────────────────────────────────────────────────────

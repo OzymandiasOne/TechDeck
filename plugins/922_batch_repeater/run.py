@@ -156,7 +156,7 @@ def _find_po_header_row(raw) -> int:
 def _read_mpl_po_columns(path: Path, preferred_sheet: str, log) -> Tuple[Any, Dict[int, str]]:
     """(dataframe, {po_num: column_name}) from the MPL PO sheet, with the sheet
     and header row resolved rather than hardcoded."""
-    xls = pd.ExcelFile(path)
+    xls = sdk.open_excel_resilient(path, log=log)  # placeholder hydrate + locked-open message
     sheet = _resolve_po_sheet(xls, preferred_sheet, log)
     raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=8)
     hdr = _find_po_header_row(raw)

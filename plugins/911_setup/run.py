@@ -1101,7 +1101,7 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
         # Stage the file outside OneDrive so Excel never sees a synced path
         tmp_dir = tempfile.mkdtemp(prefix="techdeck_911_")
         local_copy = Path(tmp_dir) / workbook_path.name
-        shutil.copy2(workbook_path, local_copy)
+        sdk.copy_resilient(workbook_path, local_copy, log)  # hydrate + locked-open message
         log(f"  Staging via local temp: {local_copy}")
 
         excel = win32com.client.DispatchEx("Excel.Application")
@@ -1518,8 +1518,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         )
 
     forecast_copy = batch_folder / forecast_filename
-    sdk.ensure_local(forecast_src, log)  # copy reads content -> hydrate first (Hard Rule 13)
-    shutil.copy2(forecast_src, forecast_copy)
+    sdk.copy_resilient(forecast_src, forecast_copy, log)  # hydrate + locked-open message (Hard Rule 13)
     log(f"Forecast copy : {forecast_copy}")
 
     log("Loading 911 Forecast sheet...")

@@ -333,7 +333,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     pdf_dir = stage_dir / "pdfs"
     pdf_dir.mkdir(exist_ok=True)
 
-    shutil.copy2(organizer_path, staged_workbook)
+    sdk.copy_resilient(organizer_path, staged_workbook, log)  # hydrate + locked-open message
 
     excel = None
     wb = None

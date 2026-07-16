@@ -157,10 +157,9 @@ def _copy_forecast(settings, out_dir, log):
         log(f"WARNING: forecast workbook not found at {src} - "
             "PO / PO Line will be left blank.")
         return None
-    sdk.ensure_local(src, log=log)     # hydrate before copying (Hard Rule 13)
     dest = out_dir / FORECAST_COPY_NAME
     log(f"Copying {src.name} into the output folder (the live file is never opened)...")
-    shutil.copy2(src, dest)
+    sdk.copy_resilient(src, dest, log)  # hydrate + locked-open message (Hard Rule 13)
     return dest
 
 

@@ -238,9 +238,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     # Read Excel pallet organizer
     try:
-        sdk.ensure_local(xl_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
-        df = pd.read_excel(
+        df = sdk.read_excel_resilient(  # placeholder hydrate + locked-open message (Hard Rule 13)
             xl_path,
+            log=log,
             sheet_name="Pallet Organizer",
             usecols="B,E,H",
             header=3,
