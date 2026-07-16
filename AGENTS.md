@@ -32,11 +32,11 @@ always know it exists.
 | `docs/CONSOLE_AND_EGGS.md` | Adding/changing a console `/command`, the talkback system, or an easter egg. |
 | `docs/TEAMS_CARDS.md` | Working on the `922_setup` plugin or the Power Automate flow that turns its payload into D922 PIPELINE Planner cards (the webhook contract + flow recipe). |
 | `docs/USAGE_TELEMETRY.md` | Working on usage telemetry or feedback delivery — the local-spool + Power Automate webhook design, payload schema, flow recipe, and go-live steps. |
-| `docs/DOC_PROTOCOL.md` | A change adds/removes/renames a plugin, ships a feature, or bumps the version — the full doc-sync procedure + the two Excel workbooks. |
 | `docs/PLUGIN_SHIP_REQUIREMENTS.md` | Adding a plugin or an import to one, or prepping a release — the "works out of the box" checklist + the `tools/check_ship_readiness.py` gate that build.ps1 enforces. |
 | `LESSONS_LEARNED.md` | Chasing a weird runtime symptom, or before touching theming/splash/console/tile UI — the "what bit us" war stories. |
 | `.Codex/skills/techdeck-plugin` | Authoring/modifying/debugging a plugin: plugin.json schema, `run()`, the SDK, GUI plugins, dev-testing, plugin Hard Rules + failure modes. Ships a scaffold. |
 | `.Codex/skills/techdeck-release` | Version bump + PyInstaller/Inno build + test + local commit/tag + draft the manifest description. **LOCAL only — Codex never touches GitHub**; the user pushes, cuts the Release, and updates the manifest. |
+| `.Codex/skills/techdeck-docsync` | A change adds/removes/renames a plugin, ships a feature, or bumps the version — the full cross-doc sync pass (CLAUDE.md/README/docs rows + the two Excel workbooks). Auto-loads on that trigger; source of truth for the doc-sync procedure. |
 
 **Skills load themselves** when a task matches their description; **docs you Read** when the
 trigger above fires. Prefer both over re-deriving procedure.
@@ -213,8 +213,9 @@ one-line pointer** in the Reference Docs Map.
 **Maintain everything as living docs — automatically, without being asked.** When work
 changes a workflow a skill covers, update that SKILL.md (and scaffold) the same session.
 When it changes architecture/plugin/command detail, update the matching `docs/` file. The
-full cross-doc sync procedure (README, the two Excel workbooks, etc.) is in
-`docs/DOC_PROTOCOL.md`. Commit doc updates immediately (see Git Workflow).
+full cross-doc sync procedure (README, the two Excel workbooks, etc.) runs via the
+**`techdeck-docsync`** skill, which auto-loads on the trigger. Commit doc updates
+immediately (see Git Workflow).
 
 ---
 
