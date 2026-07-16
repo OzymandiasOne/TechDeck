@@ -264,8 +264,14 @@ Provides:
   raw `PermissionError`/Errno 13, even wrapped in another exception, via
   `sdk.as_user_facing`) and the console prints a succinct **⚠️ …stopped: <problem>**
   / **How to fix: <fix>** block — no traceback (the full traceback still goes to the
-  file log). Genuine code bugs stay raw so they're not hidden. `locked_file_error`
-  and the cloud-download failure already raise `UserFacingError`.
+  file log). `locked_file_error` and the cloud-download failure already raise
+  `UserFacingError`. **Never `log("ERROR: …")` then `return`** for a real failure —
+  a normal return makes the executor mark the run SUCCESS (ticket + ✅), hiding the
+  error. Raise instead: `UserFacingError` if the user can fix it, else a plain
+  `Exception` (a bug / missing-dependency / undiagnosable case) → the console shows
+  **❌ …failed** plus a generic *"try again, then Settings → Generate Debug Report →
+  send to a TechDeck admin"* prompt. (A bare `return` is still correct for a user
+  *cancel* — set `cancel_event` so it's counted as cancelled, not a failure.)
 
 `request_batch_number` resets at the start of every fresh `_run_selected_plugins` and after
 a successful shelf load.
