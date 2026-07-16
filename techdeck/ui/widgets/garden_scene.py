@@ -311,7 +311,7 @@ BUDDY_INTERACTIONS = {
     "deco_books":      {"anim": "Read",      "sound": SOUND_PET_BOOK,   "dur": (5.0, 8.0)},
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
     "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (8.0, 8.0),
-                        "frame_ms": 2000, "start_frame": 1},   # 8s nap: frames 1/0/1/0, 2s each (QA: old 200ms toggle was a frantic snore)
+                        "seq": [(0, 3.0), (1, 2.0), (0, 3.0)]},   # 8s nap: frame 0 (3s), 1 (2s), 0 (3s) -- QA-tuned breath
     "deco_telescope":  {"anim": "Telescope", "sound": None,             "dur": (4.0, 7.0)},
     # Added with their item-clip animations. Chest has no Buddy pose ("Chest" has
     # no sprite), so Buddy stands idle while the lid opens; the others reuse their
@@ -1154,12 +1154,17 @@ class GardenScene(QWidget):
         spec = BUDDY_INTERACTIONS[iid]
         bu["state"] = "act"
         bu["act_frames"] = self._buddy_acts.get(iid) or [bu["frames"][BUDDY_IDLE]]
-        # Per-interaction frame pacing + start frame; most interactions use the
-        # defaults, but SleepBed breathes slowly and opens on frame 1 (see
-        # BUDDY_INTERACTIONS). Painting/advance both mod by frame count, so an
-        # out-of-range start_frame is harmless.
-        bu["act_frame_ms"] = spec.get("frame_ms", BUDDY_ACT_FRAME_MS)
-        bu["act_idx"], bu["act_wt"] = spec.get("start_frame", 0), bu["act_frame_ms"] / 1000.0
+        # Frame timing: an interaction may define an explicit (frame, seconds)
+        # sequence (SleepBed's hand-tuned breath), else a uniform frame_ms with
+        # an optional start frame. Painting/advance mod by frame count, so an
+        # out-of-range frame index is harmless.
+        bu["act_seq"] = spec.get("seq")
+        if bu["act_seq"]:
+            bu["act_seq_i"] = 0
+            bu["act_idx"], bu["act_wt"] = bu["act_seq"][0][0], bu["act_seq"][0][1]
+        else:
+            bu["act_frame_ms"] = spec.get("frame_ms", BUDDY_ACT_FRAME_MS)
+            bu["act_idx"], bu["act_wt"] = spec.get("start_frame", 0), bu["act_frame_ms"] / 1000.0
         bu["act_t"] = random.uniform(*spec["dur"])
         # If the item has a triggered clip, start it playing from frame 0.
         rec = self._rec_by_id(iid)
@@ -1208,8 +1213,13 @@ class GardenScene(QWidget):
             bu["act_t"] -= dt
             bu["act_wt"] -= dt
             if bu["act_wt"] <= 0 and bu["act_frames"]:
-                bu["act_idx"] = (bu["act_idx"] + 1) % len(bu["act_frames"])
-                bu["act_wt"] = bu.get("act_frame_ms", BUDDY_ACT_FRAME_MS) / 1000.0
+                if bu.get("act_seq"):
+                    bu["act_seq_i"] = (bu["act_seq_i"] + 1) % len(bu["act_seq"])
+                    step = bu["act_seq"][bu["act_seq_i"]]
+                    bu["act_idx"], bu["act_wt"] = step[0], step[1]
+                else:
+                    bu["act_idx"] = (bu["act_idx"] + 1) % len(bu["act_frames"])
+                    bu["act_wt"] = bu.get("act_frame_ms", BUDDY_ACT_FRAME_MS) / 1000.0
             if bu.get("act_rec") is not None:    # animate the item alongside Buddy
                 self._advance_clip(bu["act_rec"], dt)
             if bu["act_t"] <= 0:
