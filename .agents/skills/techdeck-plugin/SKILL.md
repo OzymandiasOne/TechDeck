@@ -248,6 +248,15 @@ Provides:
   force-download with retries or raise a user-actionable error. Lower-level:
   `is_cloud_placeholder(path)`, `hydrate_cloud_file(path, log=...)`. Every plugin's
   read sites were converted in the post-0.8.6.1 sweep — keep new reads converted.
+  **A different failure, same guardrail: a file the user has OPEN in Excel/Acrobat
+  raises `PermissionError [Errno 13]` (content IS local; another process holds a
+  deny-share lock — retry/copy can't fix it).** The resilient loaders map it to
+  `sdk.locked_file_error` ("… is open in another program … close it and run again")
+  so plugins never crash with a raw traceback (bit 902 DXF Prep on the pricing
+  `.xlsm`, v0.8.6.8). For pandas reads use `read_excel_resilient(path, log=..., **kw)`
+  or `open_excel_resilient(path, log=...)` (→ a `pd.ExcelFile`); to stage a live
+  workbook to a temp copy use `copy_resilient(src, dest, log)` — it hydrates the
+  source AND surfaces the locked-file message from the copy step.
 
 `request_batch_number` resets at the start of every fresh `_run_selected_plugins` and after
 a successful shelf load.
@@ -345,3 +354,4 @@ remember Hard Rule 12: copy EVERY edited plugin to `%LOCALAPPDATA%` before testi
 | Wrong Excel column / junk rows | Header lookup by name (Rules 1–2) + nest regex (Rule 3). |
 | `OSError [Errno 22] Invalid argument` opening an xlsx that exists | OneDrive cloud-only placeholder; content isn't local. Use `sdk.load_workbook_resilient`; tell the user to right-click the folder → "Always keep on this device". |
 | `zipfile.BadZipFile: File is not a zip file` opening an xlsx that exists (file is NOT a zip you made) | Same OneDrive placeholder failure in disguise — zipfile converts the placeholder `OSError [Errno 22]` to BadZipFile while seeking the central directory (bit 911 Setup, v0.8.6.5). `sdk.load_workbook_resilient` handles it since that fix; same user remedy as above. |
+| `PermissionError: [Errno 13] Permission denied` opening/copying a workbook that exists | NOT a placeholder — the user has it OPEN in Excel (or a co-author locked it via OneDrive); the first opener's deny-share mode blocks the read, so retry/copy-to-temp can't help (bit 902 DXF Prep on the pricing `.xlsm`, v0.8.6.8). `sdk.load_workbook_resilient` / `read_excel_resilient` / `open_excel_resilient` / `copy_resilient` map it to `sdk.locked_file_error`; tell the user to close the file everywhere (and delete any stray `~$…` lock file). |
