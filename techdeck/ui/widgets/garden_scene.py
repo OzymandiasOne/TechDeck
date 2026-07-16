@@ -311,7 +311,7 @@ BUDDY_INTERACTIONS = {
     "deco_books":      {"anim": "Read",      "sound": SOUND_PET_BOOK,   "dur": (5.0, 8.0)},
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
     "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (8.0, 8.0),
-                        "frame_ms": 4000},   # one calm 8s breath: 2 frames x 4000ms (QA: the old 200ms toggle read as a frantic snore)
+                        "frame_ms": 2000, "start_frame": 1},   # 8s nap: frames 1/0/1/0, 2s each (QA: old 200ms toggle was a frantic snore)
     "deco_telescope":  {"anim": "Telescope", "sound": None,             "dur": (4.0, 7.0)},
     # Added with their item-clip animations. Chest has no Buddy pose ("Chest" has
     # no sprite), so Buddy stands idle while the lid opens; the others reuse their
@@ -1154,10 +1154,12 @@ class GardenScene(QWidget):
         spec = BUDDY_INTERACTIONS[iid]
         bu["state"] = "act"
         bu["act_frames"] = self._buddy_acts.get(iid) or [bu["frames"][BUDDY_IDLE]]
-        # Per-interaction frame pacing; most interactions use the default, but
-        # SleepBed overrides it to breathe slowly (see BUDDY_INTERACTIONS).
+        # Per-interaction frame pacing + start frame; most interactions use the
+        # defaults, but SleepBed breathes slowly and opens on frame 1 (see
+        # BUDDY_INTERACTIONS). Painting/advance both mod by frame count, so an
+        # out-of-range start_frame is harmless.
         bu["act_frame_ms"] = spec.get("frame_ms", BUDDY_ACT_FRAME_MS)
-        bu["act_idx"], bu["act_wt"] = 0, bu["act_frame_ms"] / 1000.0
+        bu["act_idx"], bu["act_wt"] = spec.get("start_frame", 0), bu["act_frame_ms"] / 1000.0
         bu["act_t"] = random.uniform(*spec["dur"])
         # If the item has a triggered clip, start it playing from frame 0.
         rec = self._rec_by_id(iid)
