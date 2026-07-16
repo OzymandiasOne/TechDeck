@@ -229,32 +229,35 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     repeater_root = _repeater_root(settings.get("qtdr_base_path", ""))
     if repeater_root is None or not repeater_root.exists():
-        log("ERROR: Could not locate the 911 QTDR REPEATER folder. "
-            "Verify OneDrive is synced, or set the 911 QTDR root in "
-            "Settings > Apps > 911 Batch Repeater.")
-        return
+        raise sdk.UserFacingError(
+            "Couldn't find the 911 QTDR REPEATER folder.",
+            "Make sure OneDrive is synced, or set the 911 QTDR root in "
+            "Settings → Apps → 911 Batch Repeater, then run again.")
     log(f"Repeater root : {repeater_root}")
 
     parts_lib = repeater_root / "MASTER PARTS LIBRARY"
     insp_lib = repeater_root / "MASTER INSPECTION LIBRARY"
 
     if not parts_lib.exists():
-        log(f"ERROR: Master Parts Library not found:\n  {parts_lib}")
-        return
+        raise sdk.UserFacingError(
+            f"Couldn't find the MASTER PARTS LIBRARY folder.\n  {parts_lib}",
+            "Make sure OneDrive is synced, then run again.")
 
     if not insp_lib.exists():
-        log(f"ERROR: Master Inspection Library not found:\n  {insp_lib}")
-        return
+        raise sdk.UserFacingError(
+            f"Couldn't find the MASTER INSPECTION LIBRARY folder.\n  {insp_lib}",
+            "Make sure OneDrive is synced, then run again.")
 
     # ------------------------------------------------------------------ #
     # Step 3 - Locate batch folder in QTDR
     # ------------------------------------------------------------------ #
     batch_folder = sdk.find_911_batch_folder(repeater_root, batch_number)
     if batch_folder is None:
-        log(f"ERROR: Batch folder '{batch_number}' not found under:\n"
-            f"  {repeater_root}\n"
-            "Check that the batch folder exists inside the REPEATER directory.")
-        return
+        raise sdk.UserFacingError(
+            f"Couldn't find batch folder '{batch_number}' in the REPEATER "
+            f"directory.\n  {repeater_root}",
+            "Double-check the batch number and that the folder exists there, "
+            "then run again.")
 
     log(f"Batch folder  : {batch_folder}")
     progress_callback(5)

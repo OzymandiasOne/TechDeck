@@ -199,14 +199,17 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     base_path = sdk.resolve_922_root(base_directory)
     if base_path is None or not base_path.exists():
-        log("ERROR: Could not locate '922 QTDR Production Packages'.")
-        log("Verify OneDrive is synced, or set Base Directory in plugin settings.")
-        raise ValueError("922 QTDR Production Packages root not found")
+        raise sdk.UserFacingError(
+            "Couldn't find the '922 QTDR Production Packages' folder.",
+            "Make sure OneDrive is synced, or set the Base Directory in this "
+            "plugin's Settings, then run again.")
 
     spreadsheet_path = base_path / spreadsheet_filename
     if not spreadsheet_path.exists():
-        log(f"ERROR: Spreadsheet not found: {spreadsheet_path}")
-        raise ValueError(f"Spreadsheet not found: {spreadsheet_path}")
+        raise sdk.UserFacingError(
+            f"Couldn't find the spreadsheet '{spreadsheet_filename}'.",
+            "Make sure OneDrive is synced and the file name matches this "
+            "plugin's Settings, then run again.")
 
     completed_root = base_path / COMPLETED_FOLDER_NAME
     
@@ -227,8 +230,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     raw_input = batch_name_input.strip()
     if not raw_input:
-        log("ERROR: Batch name cannot be empty!")
-        raise ValueError("Batch name cannot be empty")
+        raise sdk.UserFacingError(
+            "No batch number was entered.",
+            "Run it again and type the batch number (e.g. '429').")
 
     # Extract a number from whatever the user typed
     num_match = re.search(r'\d+', raw_input)
@@ -261,9 +265,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Look for numbers in the batch name
     po_match = re.search(r'\d+', actual_batch_name)
     if not po_match:
-        log("ERROR: Could not find PO number in batch name!")
-        log("   Batch name must contain a number (e.g., 'Batch 429')")
-        raise ValueError("Could not extract PO number from batch name")
+        raise sdk.UserFacingError(
+            f"There's no number in what you entered ('{actual_batch_name}').",
+            "Run it again and include the batch number (e.g. 'Batch 429').")
     
     new_po_num = int(po_match.group())
     log(f"Extracted PO: {new_po_num}")
@@ -293,8 +297,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     progress_callback(15)
 
     if not po_columns:
-        log("ERROR: No PO columns found in spreadsheet.")
-        raise ValueError("No PO columns found in spreadsheet.")
+        raise sdk.UserFacingError(
+            "No PO columns were found in the spreadsheet.",
+            "Check that the MPL has its usual 'PO ###' header row, then run again.")
 
     log(f"Found {len(po_columns)} PO columns")
     progress_callback(20)
@@ -302,8 +307,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Check if new PO exists
     if new_po_num not in po_columns:
         available_pos = sorted(po_columns.keys())
-        log(f"ERROR: PO {new_po_num} not found. Available: {available_pos}")
-        raise ValueError(f"PO {new_po_num} not found. Available: {available_pos}")
+        raise sdk.UserFacingError(
+            f"PO {new_po_num} isn't in the spreadsheet.",
+            f"Pick one of the POs that are there: {available_pos}.")
     
     new_po_col = po_columns[new_po_num]
     log(f"Using column '{new_po_col}'")

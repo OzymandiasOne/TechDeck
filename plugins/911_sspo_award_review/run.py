@@ -1807,8 +1807,9 @@ def run(params: dict, progress_callback, cancel_event):
     settings = params.get("settings", {}) or {}
 
     if not PYMUPDF_AVAILABLE:
-        log("ERROR: PyMuPDF (fitz) is not available; cannot parse PDFs.")
-        return
+        # An install/build problem, not something the user can fix -> generic
+        # error path (try again, then send a debug report).
+        raise RuntimeError("PyMuPDF (fitz) is not available; cannot parse PDFs.")
 
     log("=" * 60)
     log(f"911 SSPO Award Review v{VERSION}")
@@ -1831,16 +1832,18 @@ def run(params: dict, progress_callback, cancel_event):
         return
     root = Path(raw.strip().strip('"'))
     if not root.exists() or not root.is_dir():
-        log(f"ERROR: ROOT directory not found: {root}")
-        return
+        raise sdk.UserFacingError(
+            f"That folder doesn't exist: {root}",
+            "Check the path and pick the ROOT folder of order folders, then run again.")
     log(f"ROOT: {root}")
 
     order_folders = discover_order_folders(root, log)
     if not order_folders:
-        log("ERROR: No order folders found under ROOT (no folder holding a "
-            "CUI- TECH DATA READ ME folder, a BATCH LIST workbook, or NEST "
-            "PACKAGES). Pick the folder whose subfolders are the orders.")
-        return
+        raise sdk.UserFacingError(
+            "No order folders were found under that folder.",
+            "Pick the folder whose subfolders are the orders (each holds a "
+            "'CUI- TECH DATA READ ME' folder, a BATCH LIST workbook, or NEST "
+            "PACKAGES), then run again.")
     log(f"Found {len(order_folders)} order folder(s): "
         f"{', '.join(o.name for o in order_folders)}")
     progress_callback(5)

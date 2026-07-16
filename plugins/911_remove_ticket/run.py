@@ -263,8 +263,9 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
         return input(msg + " ")
 
     if not PYMUPDF_AVAILABLE:
-        log("ERROR: PyMuPDF (fitz) is not available. Cannot process PDFs.")
-        return
+        # An install/build problem, not something the user can fix -> let it hit
+        # the generic error path (try again, then send a debug report).
+        raise RuntimeError("PyMuPDF (fitz) is not available; cannot process PDFs.")
 
     # --- Resolve directory ---
     raw_dir = (settings.get("pdf_directory") or "").strip()
@@ -276,8 +277,9 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
         pdf_dir = Path(raw_dir.strip())
 
     if not pdf_dir.exists() or not pdf_dir.is_dir():
-        log(f"ERROR: Directory not found: {pdf_dir}")
-        return
+        raise sdk.UserFacingError(
+            f"That folder doesn't exist: {pdf_dir}",
+            "Check the path and pick the correct PDF folder, then run again.")
 
     pdfs = sorted(p for p in pdf_dir.glob("*.pdf")
                   if p.parent != pdf_dir / "Move Ticket Omit")

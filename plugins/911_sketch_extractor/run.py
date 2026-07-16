@@ -582,8 +582,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     folder = Path(folder_input.strip()).expanduser().resolve()
     if not folder.exists() or not folder.is_dir():
-        log(f"ERROR: Folder not found: {folder}")
-        raise ValueError(f"Folder not found: {folder}")
+        raise sdk.UserFacingError(
+            f"That folder doesn't exist: {folder}",
+            "Check the path and pick the correct folder, then run again.")
     
     log(f"Folder: {folder}")
     progress_callback(5)
@@ -598,8 +599,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     output_input = get_console_input(params, "Enter output Excel filename (e.g., 'part_sketches')")
     
     if not output_input.strip():
-        log("ERROR: Output filename cannot be empty!")
-        raise ValueError("Output filename is required")
+        raise sdk.UserFacingError(
+            "No output filename was entered.",
+            "Run it again and type a name for the Excel file (e.g. 'part_sketches').")
     
     # Auto-append .xlsx if not present
     output_filename = output_input.strip()
@@ -626,8 +628,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     pdfs = sorted([p for p in folder.iterdir() if p.suffix.lower() == ".pdf"])
     
     if not pdfs:
-        log("ERROR: No PDFs found in folder")
-        raise ValueError("No PDFs found")
+        raise sdk.UserFacingError(
+            "There are no PDF files in that folder.",
+            "Pick the folder that holds the part-sketch PDFs, then run again.")
     
     log(f"Found {len(pdfs)} PDF(s)")
     progress_callback(20)

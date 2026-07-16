@@ -533,11 +533,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     folder = Path(folder_input.strip()).expanduser().resolve()
     if not folder.exists():
-        log(f"ERROR: Folder does not exist: {folder}")
-        raise ValueError(f"Folder does not exist: {folder}")
+        raise sdk.UserFacingError(
+            f"That folder doesn't exist: {folder}",
+            "Check the path and pick the correct folder, then run again.")
     if not folder.is_dir():
-        log(f"ERROR: Path is not a directory: {folder}")
-        raise ValueError(f"Path is not a directory: {folder}")
+        raise sdk.UserFacingError(
+            f"That's a file, not a folder: {folder}",
+            "Pick the folder that holds the PO PDFs, then run again.")
     
     log(f"Folder: {folder}")
     progress_callback(5)
@@ -546,14 +548,16 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     output_input = get_console_input(params, "Enter output Excel filename (e.g., 'po_data')")
     
     if not output_input.strip():
-        log("ERROR: Output filename cannot be empty!")
-        raise ValueError("Output filename is required")
-    
+        raise sdk.UserFacingError(
+            "No output filename was entered.",
+            "Run it again and type a name for the Excel file (e.g. 'po_data').")
+
     # Auto-append .xlsx if not present
     output_filename = output_input.strip()
     if '/' in output_filename or '\\' in output_filename:
-        log("ERROR: Filename cannot contain path separators!")
-        raise ValueError("Filename cannot contain path separators")
+        raise sdk.UserFacingError(
+            "The filename can't contain slashes (\\ or /).",
+            "Run it again and enter just a name, with no folders in it.")
     
     if not output_filename.lower().endswith('.xlsx'):
         output_filename += '.xlsx'
@@ -584,8 +588,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     pdfs = sorted([p for p in folder.iterdir() if p.suffix.lower() == ".pdf"])
     
     if not pdfs:
-        log("ERROR: No PDFs found in folder")
-        raise ValueError("No PDFs found")
+        raise sdk.UserFacingError(
+            "There are no PDF files in that folder.",
+            "Pick the folder that holds the PO PDFs, then run again.")
     
     log(f"Found {len(pdfs)} PDF(s)")
     progress_callback(15)

@@ -203,9 +203,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     root = sdk.resolve_922_root(base_path)
     if root is None or not root.exists():
-        log("ERROR: Could not locate '922 QTDR Production Packages'.")
-        log("Verify OneDrive is synced, or set Base Directory in plugin settings.")
-        raise ValueError("922 QTDR Production Packages root not found")
+        raise sdk.UserFacingError(
+            "Couldn't find the '922 QTDR Production Packages' folder.",
+            "Make sure OneDrive is synced, or set the Base Directory in this "
+            "plugin's Settings, then run again.")
 
     # Prompt for batch number via console (family-shared cache aware)
     raw_input = sdk.request_batch_number(
@@ -215,22 +216,28 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     batch_no = parse_batch_number(raw_input.strip())
 
     if not batch_no:
-        log("ERROR: No valid batch number entered.")
-        raise ValueError("No valid batch number entered")
+        raise sdk.UserFacingError(
+            "That isn't a batch number I can read.",
+            'Run it again and enter the batch number (e.g. "401" or "Batch 401").')
 
     log(f"Batch number: {batch_no}")
 
     # Construct paths (checks the live root and the 1 - Completed archive)
     batch_path = sdk.find_922_batch_path(root, batch_no)
     if batch_path is None:
-        log(f"ERROR: Batch {batch_no} not found under {root} (also checked '1 - Completed').")
-        raise ValueError(f"Batch {batch_no} not found")
+        raise sdk.UserFacingError(
+            f"Couldn't find Batch {batch_no} (checked the live folder and "
+            f"'1 - Completed').",
+            "Double-check the batch number and that OneDrive is synced, then "
+            "run again.")
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     xl_path = doc_folder / f"PO H{batch_no} Pallet & Rod Organizer.xlsx"
 
     if not xl_path.is_file():
-        log(f"ERROR: Organizer Excel file not found: {xl_path}")
-        raise ValueError(f"Organizer Excel file not found: {xl_path}")
+        raise sdk.UserFacingError(
+            f"Couldn't find the Pallet & Rod Organizer for Batch {batch_no}.",
+            f"Expected it here: {xl_path}. Make sure it exists and OneDrive is "
+            "synced, then run again.")
 
     log(f"Batch folder: {batch_path.name}")
     log(f"Reading pallet assignments from Excel...")

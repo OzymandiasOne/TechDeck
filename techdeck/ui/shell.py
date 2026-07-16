@@ -571,24 +571,36 @@ class MainWindow(QMainWindow):
                 self.console.append_system(f"⚠️ {plugin_name} was cancelled")
             elif result.status.value == "timeout":
                 self.console.append_error(f"⏰ {plugin_name} timed out: {result.message}")
+                self._print_error_next_steps()
                 get_audio_manager().play(SOUND_ERROR)
             elif result.status.value == "error":
                 # A known user-caused failure (file open in Excel, cloud file
                 # won't download): show a clean "problem + fix" in plain English
-                # instead of a raw error string. Otherwise, the raw failure.
+                # instead of a raw error string. Otherwise, the raw failure plus
+                # the generic "try again, then send a debug report" next steps.
                 if getattr(result, "is_user_error", False):
                     self.console.append_error(f"⚠️ {plugin_name} stopped: {result.message}")
                     if getattr(result, "user_fix", ""):
                         self.console.append_system(f"How to fix: {result.user_fix}")
                 else:
                     self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
+                    self._print_error_next_steps()
                 get_audio_manager().play(SOUND_ERROR)
 
         # A plugin may defer a clickable line to be the run's last word
         # (append_link(at_run_end=True) — Baked Beans Wild Ride's finale);
         # print it after the completion/ticket/talkback messages above.
         self.console.flush_pending_links()
-    
+
+    def _print_error_next_steps(self):
+        """Guidance for a failure the user can't fix or we can't diagnose:
+        try once more, then send a debug report to an admin. Both lines print
+        at once (no retry tracking)."""
+        self.console.append_system("What to do: first, try running it again.")
+        self.console.append_system(
+            "If it still fails, open Settings → Generate Debug Report and send "
+            "the file to a TechDeck admin.")
+
     def _on_all_plugins_done(self):
         """Handle the end of a full run (all queued plugins finished or cancelled)."""
         self._plugin_spinner_timer.stop()
