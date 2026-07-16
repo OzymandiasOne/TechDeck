@@ -310,8 +310,8 @@ BUDDY_INTERACTIONS = {
     "deco_fridge":     {"anim": "Fridge",    "sound": SOUND_PET_FRIDGE, "dur": (3.0, 5.0)},
     "deco_books":      {"anim": "Read",      "sound": SOUND_PET_BOOK,   "dur": (5.0, 8.0)},
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
-    "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (6.0, 10.0),
-                        "frame_ms": 4000},   # slow, calm breathing (QA: the 200ms toggle read as a frantic snore)
+    "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (8.0, 8.0),
+                        "frame_ms": 4000},   # one calm 8s breath: 2 frames x 4000ms (QA: the old 200ms toggle read as a frantic snore)
     "deco_telescope":  {"anim": "Telescope", "sound": None,             "dur": (4.0, 7.0)},
     # Added with their item-clip animations. Chest has no Buddy pose ("Chest" has
     # no sprite), so Buddy stands idle while the lid opens; the others reuse their
