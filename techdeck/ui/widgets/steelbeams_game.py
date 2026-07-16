@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTimer, Qt, QRect
 from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
 
+from techdeck.ui.widgets.steelbeams_events import EventEngine
+
 
 def _load_woogy_pixmap(target: int = 112):
     """Woogy's portrait for the message box — the same .tdart sprite the Emporium
@@ -1019,6 +1021,90 @@ class ServerFarmCore(QWidget):
         p.end()
 
 
+class EventModal(QWidget):
+    """FTL-style responsive-event window: title -> placeholder art panel ->
+    description -> option buttons. Overlays the whole game and dims it; the game
+    pauses the sim while it's up and resumes when an option resolves. Layout per
+    docs/ASA_GAME_EVENTS.md. Real .tdart art replaces the tinted placeholder later."""
+
+    _ART_TINT = {
+        "yard": "#6b5330", "yard_dark": "#3a2020", "tech": "#20404a",
+        "aframe": "#245a3a", "market": "#3a3040", "drones": "#204a4a",
+        "grid": "#4a3a20", "space": "#202040", "probe": "#301030",
+    }
+
+    def __init__(self, parent, event, on_choose):
+        super().__init__(parent)
+        self._on_choose = on_choose
+        self.ev_data = event          # NOT 'event' — that's QWidget.event()
+        self.setGeometry(0, 0, parent.width(), parent.height())
+
+        card = QFrame(self)
+        card.setObjectName("evcard")
+        card.setStyleSheet(
+            "#evcard{background:#15151d;border:2px solid #4a4a5a;border-radius:10px;}")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(11)
+
+        title = QLabel(event.get("name", "Event"))
+        title.setFont(QFont("Consolas", 15, QFont.Weight.Bold))
+        title.setStyleSheet("color:#e8e8f4;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title)
+
+        art = QLabel(f"[ {event.get('art', 'scene')} ]")
+        art.setFixedHeight(148)
+        art.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tint = self._ART_TINT.get(event.get("art", ""), "#333340")
+        art.setStyleSheet(
+            f"background:{tint};border:2px solid #55556a;border-radius:6px;"
+            "color:#99a; font-family:Consolas; font-size:10px;")
+        lay.addWidget(art)
+
+        desc = QLabel(event.get("desc", ""))
+        desc.setWordWrap(True)
+        desc.setFont(QFont("Consolas", 10))
+        desc.setStyleSheet("color:#c8c8d8;")
+        lay.addWidget(desc)
+
+        for i, opt in enumerate(event.get("options", [])):
+            b = QPushButton(opt.get("label", f"Option {i + 1}"))
+            b.setFont(QFont("Consolas", 10))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton{background:#26263a;color:#e0e0ee;border:1px solid #4a4a66;"
+                "border-radius:6px;padding:8px;text-align:left;}"
+                "QPushButton:hover{background:#33334d;border:1px solid #7a7ab0;}")
+            b.clicked.connect(lambda _=False, idx=i: self._pick(idx))
+            lay.addWidget(b)
+
+        self._card = card
+        self._relayout()
+
+    def _pick(self, idx):
+        cb, self._on_choose = self._on_choose, None   # guard double-click
+        if cb:
+            cb(idx)
+
+    def _relayout(self):
+        w = min(560, max(340, self.width() - 60))
+        self._card.setFixedWidth(w)
+        h = self._card.sizeHint().height()
+        self._card.move((self.width() - w) // 2, max(20, (self.height() - h) // 2))
+
+    def reposition(self):
+        p = self.parent()
+        if p is not None:
+            self.setGeometry(0, 0, p.width(), p.height())
+            self._relayout()
+
+    def paintEvent(self, _e):
+        pnt = QPainter(self)
+        pnt.fillRect(self.rect(), QColor(0, 0, 0, 185))   # dim the game behind
+        pnt.end()
+
+
 class SteelBeamsGame(QWidget):
     """ASA: The Video Game — full Universal-Paperclips-style arc."""
 
@@ -1194,6 +1280,10 @@ class SteelBeamsGame(QWidget):
     # ── State ──────────────────────────────────────────────────────────────
 
     def _init_state(self):
+        # Event system (automatic drift-hits + responsive FTL decisions). Reset per
+        # run so ending axes / active modifiers / seen-once don't leak across a rebirth.
+        self._events = EventEngine()
+        self._event_modal = None      # the responsive-event window while one is open
         # Phase 1
         self.tubes          = 0.0
         self.steel          = self.START_STEEL
@@ -1876,6 +1966,30 @@ class SteelBeamsGame(QWidget):
         self._log("Launch probes and allocate trust. Everything else is automatic.",
                   "slate")
 
+    def _show_event_modal(self, event):
+        """Open a responsive-event decision window and PAUSE the sim."""
+        self._timer.stop()
+        self._event_modal = EventModal(self, event, self._resolve_event_choice)
+        self._event_modal.show()
+        self._event_modal.raise_()
+
+    def _resolve_event_choice(self, idx):
+        """Apply the chosen option's outcomes + ending tags, close, resume the sim."""
+        m = self._event_modal
+        if m is None:
+            return
+        event = m.ev_data
+        try:
+            self._events.choose(self, event, idx)
+            opt = event["options"][idx]
+            self._log(f"[{event['name']}] {opt.get('label', '')}.", "cyan")
+        finally:
+            m.hide()
+            m.deleteLater()
+            self._event_modal = None
+            if not self.endgame_done and not self._timer.isActive():
+                self._timer.start()
+
     def _show_woog_dialog(self, pages):
         """Pop the NES-style Woogy message box over the probe UI (no pause)."""
         box = getattr(self, "_woog_box", None)
@@ -1900,20 +2014,24 @@ class SteelBeamsGame(QWidget):
         self._position_woog_box()
         if getattr(self, "_end_seq", None) is not None and self._end_seq.isVisible():
             self._end_seq.setGeometry(0, 0, self.width(), self.height())
+        if getattr(self, "_event_modal", None) is not None:
+            self._event_modal.reposition()
 
     # ── Demand / cost models ───────────────────────────────────────────────
 
     def _tube_demand(self) -> float:
         frac = max(0.0, 1.0 - self.price / self.TUBE_VALUE)
-        return self.BASE_DEMAND * self.mkt_mult * self.demand_mult * frac
+        return (self.BASE_DEMAND * self.mkt_mult * self.demand_mult * frac
+                * self._events.mod("tube_demand"))
 
     def _af_demand(self) -> float:
         frac = max(0.0, 1.0 - self.af_price / self.af_value)
-        return self.AF_BASE_DEMAND * self.af_d_mult * self.demand_mult * frac
+        return (self.AF_BASE_DEMAND * self.af_d_mult * self.demand_mult * frac
+                * self._events.mod("af_demand"))
 
     def _tube_output(self) -> float:
         return (self.auto_fabs * self.fab_mult + self.mega_fabs * self.MEGA_RATE) \
-            * self.prod_mult
+            * self.prod_mult * self._events.mod("prod_mult")
 
     def _fab_cost(self) -> float:
         return self.FAB_BASE_COST * (self.FAB_COST_MULT ** self.auto_fabs)
@@ -1925,10 +2043,12 @@ class SteelBeamsGame(QWidget):
         return self.MKT_BASE_COST * (self.MKT_COST_MULT ** self.mkt_level)
 
     def _steel_cost(self) -> float:
-        return (self.LOT_COST / 2) if self.bulk_done else self.LOT_COST
+        base = (self.LOT_COST / 2) if self.bulk_done else self.LOT_COST
+        return base * self._events.mod("steel_cost")
 
     def _steel_big_cost(self) -> float:
-        return (self.BIG_LOT_COST / 2) if self.bulk_done else self.BIG_LOT_COST
+        base = (self.BIG_LOT_COST / 2) if self.bulk_done else self.BIG_LOT_COST
+        return base * self._events.mod("steel_cost")
 
     def _af_fab_cost(self) -> float:
         return self.AF_FAB_BASE * (self.AF_FAB_MULT ** self.af_fabs)
@@ -1992,15 +2112,16 @@ class SteelBeamsGame(QWidget):
             take = min(total_want, self.steel)
             share = take / total_want
             self.steel -= take
-            made_t = (tube_want * share / self.STEEL_PER_TUBE) * self.prod_mult
+            pm = self.prod_mult * self._events.mod("prod_mult")   # events can slow/halt the line
+            made_t = (tube_want * share / self.STEEL_PER_TUBE) * pm
             self.tubes += made_t
             self.total_made += made_t
             if af_want > 0:
-                made_a = (af_want * share / self.STEEL_PER_AF) * self.prod_mult
+                made_a = (af_want * share / self.STEEL_PER_AF) * pm
                 self.aframes += made_a
                 self.af_made += made_a
             if panel_want > 0:
-                made_p = (panel_want * share / self.STEEL_PER_PANEL) * self.prod_mult
+                made_p = (panel_want * share / self.STEEL_PER_PANEL) * pm
                 self.panels += made_p
                 self.panel_made += made_p
 
@@ -2193,7 +2314,8 @@ class SteelBeamsGame(QWidget):
             elif was_out and not self._brownout:
                 self._log("Power restored. The trading AI is back online.", "lime")
             if self._ai_trading:
-                inc = self.AI_RATE[self._ai_model_index()] * dt * self.legacy_mult
+                inc = (self.AI_RATE[self._ai_model_index()] * dt * self.legacy_mult
+                       * self._events.mod("ai_income"))
                 self.money += inc
                 self.total_money += inc
                 self._ai_trade_t += dt
@@ -2204,6 +2326,13 @@ class SteelBeamsGame(QWidget):
 
         self._check_milestones()
         self._check_freebies()
+
+        # ── Events: automatic drift-hits apply inline; a responsive decision (if one
+        # fires) is returned and shown as a modal that pauses the sim.
+        if not self.endgame_done and self._event_modal is None:
+            _ev = self._events.tick(self, dt)
+            if _ev is not None:
+                self._show_event_modal(_ev)
 
         # The liquidation desk never closes: rep earned AFTER the Exit Strategy
         # (milestones keep firing off probe fabrication/conversion) has nowhere
