@@ -2,7 +2,7 @@
   "id": "911_lst_organizer",
   "name": "911 LST Organizer",
   "description": "Pulls the .lst files for the parts on a nest's 1D cutting diagram (cross-batch aware) into the nest's PRODUCTION PAPERWORK\\LST folder",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "author": "Anthony Sieben",
   "family": "911",
   "icon": "📋",

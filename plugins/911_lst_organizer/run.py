@@ -53,7 +53,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-VERSION = "2.0.1"
+VERSION = "2.0.2"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
 NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
@@ -92,11 +92,16 @@ def _classify_token(token: str, current_nest: str) -> Optional[Tuple[str, str]]:
 
     'H4143481-3'        -> (current nest, 'H4143481-3')
     '503874-H4143481-3' -> ('503874', 'H4143481-3')
+    '503874- H4143481-3'-> ('503874', 'H4143481-3')   (multi-nest bar-nest layout)
     """
     token = token.strip().upper()
     if PART_RE.match(token):
         return current_nest, token
+    # Multi-nest bar diagrams render the prefix as '{nest}- {part}' (or
+    # '{nest} - {part}') with whitespace around the separating hyphen, so
+    # strip both sides before matching (a leading space would sink PART_RE).
     head, sep, tail = token.partition("-")
+    head, tail = head.strip(), tail.strip()
     if sep and NEST_RE.match(head) and PART_RE.match(tail):
         return head, tail
     return None
