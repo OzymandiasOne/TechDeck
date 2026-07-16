@@ -1,0 +1,12 @@
+{
+  "id": "sheet_metal_calculators",
+  "name": "Sheet Metal Calculators",
+  "description": "A library of shop calculators (flat length / bend allowance and more) behind a picker.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "other",
+  "icon": "icon.png",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "timeout": 300
+}
