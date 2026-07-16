@@ -413,6 +413,47 @@ def ruler(d):               # 911 linear inch calc
     _draw_grid(d, _RULER_GRID, _RULER_TONES)
 
 
+_CALCULATOR_GRID = [
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "........aaaaaaaaaaaaaaaa........",
+    "........abbbbbbbbbbbbbba........",
+    "........abaaaaaaaaaaaaba........",
+    "........abaddddddddddaba........",
+    "........abaddddddddddaba........",
+    "........abaaaaaaaaaaaaba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abccbccbccbccbba........",
+    "........abccbccbccbccbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abccbccbccbccbba........",
+    "........abccbccbccbccbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abccbccbccbccbba........",
+    "........abccbccbccbccbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abccbccbccbccbba........",
+    "........abccbccbccbccbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........abccbccbccbccbba........",
+    "........abccbccbccbccbba........",
+    "........abbbbbbbbbbbbbba........",
+    "........aaaaaaaaaaaaaaaa........",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+]
+# Dark steel body -> mid casing -> light buttons -> lit display (luminance ramp).
+_CALCULATOR_TONES = {"a": "#1E2530", "b": "#465A6B", "c": "#9AA7B0", "d": "#DDEFE8"}
+
+def calculator(d):          # sheet_metal_calculators
+    _draw_grid(d, _CALCULATOR_GRID, _CALCULATOR_TONES)
+
+
 _STAMP_GRID = [
     "................................",
     "................................",
@@ -1980,6 +2021,7 @@ ICONS = {
     "claw": claw,
     "picture": picture,
     "ruler": ruler,
+    "calculator": calculator,
     "stamp": stamp,
     "magnifier": magnifier,
     "toolbox": toolbox,
