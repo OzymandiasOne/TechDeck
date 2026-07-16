@@ -257,6 +257,15 @@ Provides:
   or `open_excel_resilient(path, log=...)` (→ a `pd.ExcelFile`); to stage a live
   workbook to a temp copy use `copy_resilient(src, dest, log)` — it hydrates the
   source AND surfaces the locked-file message from the copy step.
+- **Clean user-error messages (all apps).** For ANY failure the USER can fix, raise
+  `sdk.UserFacingError(problem, fix)` (both plain-English) instead of a bare
+  Exception — e.g. `raise sdk.UserFacingError("The folder has no DXF files in it.",
+  "Pick the folder that holds the part files.")`. The executor detects it (and any
+  raw `PermissionError`/Errno 13, even wrapped in another exception, via
+  `sdk.as_user_facing`) and the console prints a succinct **⚠️ …stopped: <problem>**
+  / **How to fix: <fix>** block — no traceback (the full traceback still goes to the
+  file log). Genuine code bugs stay raw so they're not hidden. `locked_file_error`
+  and the cloud-download failure already raise `UserFacingError`.
 
 `request_batch_number` resets at the start of every fresh `_run_selected_plugins` and after
 a successful shelf load.
