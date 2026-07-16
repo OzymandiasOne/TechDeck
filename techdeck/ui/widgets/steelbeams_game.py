@@ -1426,7 +1426,7 @@ class SteelBeamsGame(QWidget):
         if self.probe_phase:
             rate += self.probes * self.PROBE_OPS
             rate += self.probes * self.alloc["harvest"] * self.HARVEST_OPS  # Matter Harvesting -> ops
-        return rate
+        return rate * self._events.mod("ops_rate")
 
     @property
     def _ops_cap(self) -> float:
@@ -1467,7 +1467,7 @@ class SteelBeamsGame(QWidget):
         solar just takes longer to fill. Dyson spheres add solar-independent power."""
         eff = min(self.solar_fields, self._fields_target())
         solar = eff * self.RECHARGE_PER_FIELD * (1.0 + self.recharge_level * self.RECHARGE_UP_STEP)
-        return solar + self.dyson * self.DYSON_POWER
+        return (solar + self.dyson * self.DYSON_POWER) * self._events.mod("power_recharge")
 
     def _power_drain(self) -> float:
         if self.server_farm <= 0:
@@ -1477,7 +1477,7 @@ class SteelBeamsGame(QWidget):
             d += self.QUANTUM_DRAIN
         if "hypno_drones" in self.completed_projects:
             d += self.HYPNO_DRAIN
-        return d
+        return d * self._events.mod("power_drain")
 
     def _server_farm_cost(self) -> float:
         return self.SERVER_FARM_BASE * (self.SERVER_FARM_MULT ** self.server_farm)
@@ -2210,8 +2210,9 @@ class SteelBeamsGame(QWidget):
 
         # ── Space production (no steel required)
         if self.space_unlocked:
-            sp = (self.space_fabs * 25 + self.harvesters * 300) * dt * self.prod_mult
-            sa = (self.space_fabs * 5 + self.harvesters * 60) * dt * self.prod_mult
+            _epm = self._events.mod("prod_mult")
+            sp = (self.space_fabs * 25 + self.harvesters * 300) * dt * self.prod_mult * _epm
+            sa = (self.space_fabs * 5 + self.harvesters * 60) * dt * self.prod_mult * _epm
             pi = (self.solar_cols * 2000) * dt
             self.tubes += sp; self.total_made += sp
             self.aframes += sa; self.af_made += sa
@@ -2316,7 +2317,7 @@ class SteelBeamsGame(QWidget):
 
             # Matter Harvesting feeds ops (folded into _ops_rate). Fabrication makes
             # product (its combat role is applied in the battle block above).
-            made = self.probes * a["fabricate"] * 1e-4 * dt * self.prod_mult
+            made = self.probes * a["fabricate"] * 1e-4 * dt * self.prod_mult * self._events.mod("prod_mult")
             if made > 0:
                 self.tubes += made * 0.8
                 self.total_made += made * 0.8
@@ -2888,7 +2889,8 @@ class SteelBeamsGame(QWidget):
 
     def _enemy_growth_mult(self) -> float:
         """Woog manufacturing rate — crushed once we raid their Forge Worlds."""
-        return self.FORGE_GROWTH_MULT if "forge" in self.combat_upgrades else 1.0
+        base = self.FORGE_GROWTH_MULT if "forge" in self.combat_upgrades else 1.0
+        return base * self._events.mod("enemy_growth")
 
     def _combat_available(self, key: str) -> bool:
         """Whether a combat upgrade's button should be offered right now."""
