@@ -1276,10 +1276,10 @@ class SteelBeamsGame(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
-        # Secret dev terminal — Ctrl+` toggles a cheat console (resources / flags /
-        # force events). Left in for players to discover. See _run_cheat for codes.
+        # Secret dev terminal — Ctrl+Shift+Space toggles a cheat console (resources /
+        # flags / force events). Left in for players to discover. See _run_cheat.
         self._cheat_edit = None
-        sc = QShortcut(QKeySequence("Ctrl+`"), self)
+        sc = QShortcut(QKeySequence("Ctrl+Shift+Space"), self)
         sc.activated.connect(self._toggle_cheat_console)
 
         self._log("ASA founded. Five tons of scrap steel in the corner of the yard.")
@@ -1981,7 +1981,7 @@ class SteelBeamsGame(QWidget):
             self._cheat_edit = None
             return
         e = QLineEdit(self)
-        e.setPlaceholderText("> cheat code  (help)   —   Ctrl+` to close")
+        e.setPlaceholderText("> cheat code  (help)   —   Ctrl+Shift+Space to close")
         e.setStyleSheet(
             "background:#0b0b12;color:#7CFC7C;border:1px solid #2f6b2f;"
             "font-family:Consolas;font-size:12px;padding:5px;")
