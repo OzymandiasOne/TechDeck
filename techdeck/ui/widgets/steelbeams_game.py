@@ -27,10 +27,12 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QFrame, QTabWidget, QScrollArea, QSplitter,
+    QTextEdit, QFrame, QTabWidget, QScrollArea, QSplitter, QLineEdit,
 )
 from PySide6.QtCore import QTimer, Qt, QRect
-from PySide6.QtGui import QFont, QPainter, QImage, QColor, QBrush, QPen
+from PySide6.QtGui import (
+    QFont, QPainter, QImage, QColor, QBrush, QPen, QShortcut, QKeySequence,
+)
 
 from techdeck.ui.widgets.steelbeams_events import EventEngine
 
@@ -1274,6 +1276,12 @@ class SteelBeamsGame(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start()
 
+        # Secret dev terminal — Ctrl+` toggles a cheat console (resources / flags /
+        # force events). Left in for players to discover. See _run_cheat for codes.
+        self._cheat_edit = None
+        sc = QShortcut(QKeySequence("Ctrl+`"), self)
+        sc.activated.connect(self._toggle_cheat_console)
+
         self._log("ASA founded. Five tons of scrap steel in the corner of the yard.")
         self._log("Fabricate to begin.")
 
@@ -1966,6 +1974,79 @@ class SteelBeamsGame(QWidget):
         self._log("Launch probes and allocate trust. Everything else is automatic.",
                   "slate")
 
+    # ── Secret dev terminal (Ctrl+`) ────────────────────────────────────────
+    def _toggle_cheat_console(self):
+        if self._cheat_edit is not None:
+            self._cheat_edit.deleteLater()
+            self._cheat_edit = None
+            return
+        e = QLineEdit(self)
+        e.setPlaceholderText("> cheat code  (help)   —   Ctrl+` to close")
+        e.setStyleSheet(
+            "background:#0b0b12;color:#7CFC7C;border:1px solid #2f6b2f;"
+            "font-family:Consolas;font-size:12px;padding:5px;")
+        e.returnPressed.connect(lambda: self._run_cheat(e.text()))
+        self._cheat_edit = e
+        self._position_cheat_console()
+        e.show()
+        e.raise_()
+        e.setFocus()
+
+    def _position_cheat_console(self):
+        e = self._cheat_edit
+        if e is not None:
+            e.setGeometry(10, self.height() - 34, self.width() - 20, 26)
+
+    def _run_cheat(self, text: str):
+        """Dev cheat codes. Resource shorthands (money/steel/tubes/aframes/panels/
+        ops/power/probes) set the value; `give X n` adds; `unlock market_unlocked`
+        sets a flag True; `flag name` adds to _flags; `event <id>` forces a
+        responsive event; `auto` forces a drift-hit; `axes` prints the ending tally."""
+        t = (text or "").strip()
+        if self._cheat_edit is not None:
+            self._cheat_edit.clear()
+        if not t:
+            return
+        parts = t.split()
+        cmd = parts[0].lower()
+        RES = {"money", "steel", "tubes", "aframes", "panels", "ops", "power",
+               "probes", "rep", "developers", "servers", "inno"}
+
+        def num(s):
+            return float(s)
+        try:
+            if cmd in ("help", "?"):
+                self._log("cheats: money N | give <attr> N | unlock <flag> | "
+                          "flag <name> | event <id> | auto | axes | win", "cyan")
+            elif cmd in RES and len(parts) >= 2:
+                setattr(self, cmd, num(parts[1])); self._log(f"set {cmd}={parts[1]}", "cyan")
+            elif cmd == "give" and len(parts) >= 3:
+                setattr(self, parts[1], getattr(self, parts[1]) + num(parts[2]))
+                self._log(f"+{parts[2]} {parts[1]}", "cyan")
+            elif cmd == "set" and len(parts) >= 3:
+                setattr(self, parts[1], num(parts[2])); self._log(f"set {parts[1]}={parts[2]}", "cyan")
+            elif cmd == "unlock" and len(parts) >= 2:
+                setattr(self, parts[1], True); self._log(f"{parts[1]}=True", "cyan")
+            elif cmd == "flag" and len(parts) >= 2:
+                self._flags.add(parts[1]); self._log(f"flag {parts[1]} set", "cyan")
+            elif cmd == "event" and len(parts) >= 2:
+                ev = self._events.force(parts[1])
+                if ev and self._event_modal is None:
+                    self._show_event_modal(ev)
+                else:
+                    self._log(f"no event '{parts[1]}' (or a modal is open)", "orange")
+            elif cmd == "auto":
+                self._events._auto_t = 0.0
+                self._events.tick(self, 0.001)
+            elif cmd == "axes":
+                self._log("axes: " + ", ".join(f"{k} {v}" for k, v in self._events.axes.items() if v), "cyan")
+            elif cmd == "win":
+                self.money = max(self.money, 1e9); self._log("war chest topped up", "cyan")
+            else:
+                self._log(f"? {t}  (try: help)", "orange")
+        except Exception as ex:
+            self._log(f"cheat error: {ex}", "red")
+
     def _show_event_modal(self, event):
         """Open a responsive-event decision window and PAUSE the sim."""
         self._timer.stop()
@@ -2016,6 +2097,8 @@ class SteelBeamsGame(QWidget):
             self._end_seq.setGeometry(0, 0, self.width(), self.height())
         if getattr(self, "_event_modal", None) is not None:
             self._event_modal.reposition()
+        if getattr(self, "_cheat_edit", None) is not None:
+            self._position_cheat_console()
 
     # ── Demand / cost models ───────────────────────────────────────────────
 
