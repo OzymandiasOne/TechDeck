@@ -1037,10 +1037,14 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
     records each piece; qty > 10 fills all 10 with a warning. Every slot
     shows the HULL CODE under the part number (= the work order's first
     two characters — verified identical to the part sketches' HULL field
-    across V094). Slots 2+ get description formulas mirroring slot 1
-    (the template's own D18+ formulas are broken #REF! stubs). After the
-    copies, the INSPECTION SHEET template tab is hidden (her April ask)
-    so the workbook opens straight onto real sheets.
+    across V094). Each duplicate slot is un-greyed (its conditional-format
+    helper cell BB{r} is stamped, since the form only whitens slot 1 off
+    A16) and rebuilt to slot 1's TWO-row Part Description layout — source
+    material CODE (=D$16) on top, DESCRIPTION (=D$17) below — replacing the
+    template's broken single-cell #REF! stub so every piece shows the same
+    code + description as the first. After the copies, the INSPECTION SHEET
+    template tab is hidden (her April ask) so the workbook opens straight
+    onto real sheets.
 
     Excel COM is used so conditional formatting on the copies is
     preserved (openpyxl's copy_worksheet drops it).
@@ -1186,15 +1190,41 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
                 cell.Value = slot_text
                 cell.WrapText = True
                 if slot > 0:
-                    # Description mirrors slot 1 (same part every slot);
-                    # the template's own D18+ formulas are broken #REF!
-                    # stubs that render blank. Slots 2+ have ONE merged
-                    # 2-row description cell (D18:G19 etc.), so combine
-                    # slot 1's code (D16) + readable desc (D17, often
-                    # #N/A) into a single formula.
-                    new_sheet.Range(f"D{r}").Formula = (
-                        f'=IF(A{r}="","",IF(ISERROR(D$16),"",D$16)'
-                        f'&IF(ISERROR(D$17),""," "&D$17))')
+                    # --- Un-grey the duplicate slot (QA feedback 2026-07) --
+                    # The form's conditional formatting greys the whole
+                    # A{r}:I{r+1} block while helper cell BB{r} is blank
+                    # (slot 1 keys off A16 instead, so filling A16 already
+                    # whitens it). The template leaves BB{r} empty for slots
+                    # 2+, so every duplicate piece stayed grey. Stamp BB{r}
+                    # with slot 1's part reference so the rule turns the row
+                    # white, matching slot 1.
+                    new_sheet.Range(f"BB{r}").Formula = "=BB$14"
+
+                    # --- Two-row description like slot 1 ------------------
+                    # Slot 1 shows the source-material CODE (D16) on the top
+                    # row and its DESCRIPTION (D17) on the row below, as two
+                    # separate merged cells. The template pre-merges slots 2+
+                    # into ONE cell (D{r}:G{r+1}) carrying a broken #REF!
+                    # formula, so duplicates showed only the code on one line.
+                    # Rebuild slot 1's two-row layout and mirror it (every
+                    # slot on the sheet is the same part).
+                    xlPasteFormats = -4122
+                    try:
+                        new_sheet.Range(f"D{r}:G{r+1}").UnMerge()
+                    except Exception:
+                        pass
+                    # Copy slot 1's formatting (borders + the two 1-row merges)
+                    new_sheet.Range("D16:G17").Copy()
+                    new_sheet.Range(f"D{r}").PasteSpecial(Paste=xlPasteFormats)
+                    excel.CutCopyMode = False
+                    # Guarantee the two 1-row merges regardless of paste behaviour
+                    for rr in (r, r + 1):
+                        try:
+                            new_sheet.Range(f"D{rr}:G{rr}").Merge()
+                        except Exception:
+                            pass
+                    new_sheet.Range(f"D{r}").Formula = "=D$16"     # code
+                    new_sheet.Range(f"D{r + 1}").Formula = "=D$17"  # description
 
             log(f"  Creating inspection sheet '{sheet_name}' for {full_dypn} "
                 f"(qty {qty}, hull {hull or '?'})")
