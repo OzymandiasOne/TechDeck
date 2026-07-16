@@ -310,7 +310,8 @@ BUDDY_INTERACTIONS = {
     "deco_fridge":     {"anim": "Fridge",    "sound": SOUND_PET_FRIDGE, "dur": (3.0, 5.0)},
     "deco_books":      {"anim": "Read",      "sound": SOUND_PET_BOOK,   "dur": (5.0, 8.0)},
     "deco_stove":      {"anim": "Cook",      "sound": SOUND_PET_COOK,   "dur": (4.0, 7.0)},
-    "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (6.0, 10.0)},
+    "deco_bed":        {"anim": "SleepBed",  "sound": SOUND_PET_SLEEP,  "dur": (6.0, 10.0),
+                        "frame_ms": 4000},   # slow, calm breathing (QA: the 200ms toggle read as a frantic snore)
     "deco_telescope":  {"anim": "Telescope", "sound": None,             "dur": (4.0, 7.0)},
     # Added with their item-clip animations. Chest has no Buddy pose ("Chest" has
     # no sprite), so Buddy stands idle while the lid opens; the others reuse their
@@ -1153,7 +1154,10 @@ class GardenScene(QWidget):
         spec = BUDDY_INTERACTIONS[iid]
         bu["state"] = "act"
         bu["act_frames"] = self._buddy_acts.get(iid) or [bu["frames"][BUDDY_IDLE]]
-        bu["act_idx"], bu["act_wt"] = 0, BUDDY_ACT_FRAME_MS / 1000.0
+        # Per-interaction frame pacing; most interactions use the default, but
+        # SleepBed overrides it to breathe slowly (see BUDDY_INTERACTIONS).
+        bu["act_frame_ms"] = spec.get("frame_ms", BUDDY_ACT_FRAME_MS)
+        bu["act_idx"], bu["act_wt"] = 0, bu["act_frame_ms"] / 1000.0
         bu["act_t"] = random.uniform(*spec["dur"])
         # If the item has a triggered clip, start it playing from frame 0.
         rec = self._rec_by_id(iid)
@@ -1203,7 +1207,7 @@ class GardenScene(QWidget):
             bu["act_wt"] -= dt
             if bu["act_wt"] <= 0 and bu["act_frames"]:
                 bu["act_idx"] = (bu["act_idx"] + 1) % len(bu["act_frames"])
-                bu["act_wt"] = BUDDY_ACT_FRAME_MS / 1000.0
+                bu["act_wt"] = bu.get("act_frame_ms", BUDDY_ACT_FRAME_MS) / 1000.0
             if bu.get("act_rec") is not None:    # animate the item alongside Buddy
                 self._advance_clip(bu["act_rec"], dt)
             if bu["act_t"] <= 0:
