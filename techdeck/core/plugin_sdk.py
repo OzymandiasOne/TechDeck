@@ -35,6 +35,57 @@ from typing import Iterable, Optional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# User-facing errors
+#
+# A failure the USER can fix (a file left open in Excel, a cloud file that
+# won't download, an empty/wrong folder) — NOT a code bug. Raising this instead
+# of a bare Exception lets the console print a clean "here's the problem, here's
+# the fix" in plain English across every plugin, instead of a raw traceback or a
+# cryptic errno. Raise via a factory (locked_file_error, ...) or directly:
+#
+#     raise UserFacingError("The folder has no DXF files in it.",
+#                           "Pick the folder that holds the part files.")
+# ─────────────────────────────────────────────────────────────────────────────
+
+class UserFacingError(RuntimeError):
+    """An error with a plain-language `problem` + `fix` for the user."""
+
+    def __init__(self, problem: str, fix: str = "", *, detail: str = ""):
+        self.problem = " ".join(str(problem).split())
+        self.fix = " ".join(str(fix).split())
+        self.detail = str(detail).strip()  # e.g. the full file path (for logs)
+        msg = self.problem + (f"  Fix: {self.fix}" if self.fix else "")
+        super().__init__(msg)
+
+
+def as_user_facing(exc: BaseException) -> "UserFacingError | None":
+    """Map an exception to a UserFacingError when it's a KNOWN user-caused
+    failure, else None. This is the executor's safety net so every app shows a
+    clean message, not a traceback.
+
+    Walks the exception chain (`__cause__`/`__context__`): a plugin that catches
+    a UserFacingError and re-raises `RuntimeError(f"...: {e}")` still surfaces
+    cleanly, and a raw share-lock (Errno 13) from an un-converted read site is
+    recognized too (open()/copy set exc.filename)."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, UserFacingError):
+            return cur
+        if _is_share_lock(cur):
+            fn = getattr(cur, "filename", None)
+            if fn:
+                return locked_file_error(fn, cur)
+            return UserFacingError(
+                "A file TechDeck needs is open in another program (usually Excel).",
+                "Close any open batch or pricing files, then run again.",
+            )
+        cur = cur.__cause__ or cur.__context__
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # OneDrive / Pilot Program root resolution
 #
 # Every machine syncs the same SharePoint library, but the local cache path
@@ -642,11 +693,13 @@ def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) ->
             if log:
                 log(f"OneDrive download attempt {attempt}/{attempts} failed: {exc}")
             time.sleep(delay)
-    raise RuntimeError(
-        f"'{path.name}' is a OneDrive cloud-only file and Windows could not "
-        f"download it. Make sure OneDrive is running and signed in, then try "
-        f"again. For reliability, right-click the folder in File Explorer and "
-        f"choose 'Always keep on this device'.\n  File: {path}"
+    raise UserFacingError(
+        problem=f"'{path.name}' is stored only in the cloud and Windows "
+                f"couldn't download it.",
+        fix="Make sure OneDrive is running and signed in, then try again. To "
+            "avoid this, right-click the folder in File Explorer and choose "
+            "'Always keep on this device'.",
+        detail=str(path),
     ) from last_err
 
 
@@ -663,9 +716,9 @@ def ensure_local(path, log=None) -> None:
         hydrate_cloud_file(path, log=log)
 
 
-def locked_file_error(path, cause: Exception | None = None) -> RuntimeError:
-    """A user-actionable RuntimeError for a file Windows won't let us read
-    because another program holds it open — PermissionError / [Errno 13].
+def locked_file_error(path, cause: Exception | None = None) -> "UserFacingError":
+    """A UserFacingError for a file Windows won't let us read because another
+    program holds it open — PermissionError / [Errno 13].
 
     This is a DIFFERENT failure from the cloud-only placeholder (Errno 22 /
     BadZipFile, handled by ensure_local): here the file's content is on disk,
@@ -675,12 +728,12 @@ def locked_file_error(path, cause: Exception | None = None) -> RuntimeError:
     902 DXF Prep when the pricing .xlsm was open in Excel (Errno 13,
     CPENG_TOWERPC, v0.8.6.8)."""
     path = Path(path)
-    return RuntimeError(
-        f"'{path.name}' is open in another program (Excel, Acrobat, or a "
-        f"OneDrive co-author) so Windows won't let TechDeck read it. Close "
-        f"the file everywhere it's open - and delete any leftover "
-        f"'~${path.stem}' lock file in that folder - then run again."
-        f"\n  File: {path}"
+    return UserFacingError(
+        problem=f"'{path.name}' is open in another program (usually Excel), so "
+                f"TechDeck can't read it.",
+        fix=f"Close the file everywhere it's open, then run again. If it stays "
+            f"stuck, delete the '~${path.stem}' file in that folder.",
+        detail=str(path),
     )
 
 

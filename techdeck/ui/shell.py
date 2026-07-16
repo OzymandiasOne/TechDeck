@@ -573,7 +573,15 @@ class MainWindow(QMainWindow):
                 self.console.append_error(f"⏰ {plugin_name} timed out: {result.message}")
                 get_audio_manager().play(SOUND_ERROR)
             elif result.status.value == "error":
-                self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
+                # A known user-caused failure (file open in Excel, cloud file
+                # won't download): show a clean "problem + fix" in plain English
+                # instead of a raw error string. Otherwise, the raw failure.
+                if getattr(result, "is_user_error", False):
+                    self.console.append_error(f"⚠️ {plugin_name} stopped: {result.message}")
+                    if getattr(result, "user_fix", ""):
+                        self.console.append_system(f"How to fix: {result.user_fix}")
+                else:
+                    self.console.append_error(f"❌ {plugin_name} failed: {result.error}")
                 get_audio_manager().play(SOUND_ERROR)
 
         # A plugin may defer a clickable line to be the run's last word

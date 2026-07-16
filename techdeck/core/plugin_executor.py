@@ -122,6 +122,16 @@ def get_detail_logger() -> logging.Logger:
     return logger
 
 
+def _as_user_facing(exc: BaseException):
+    """Return a UserFacingError for a known user-caused failure, else None.
+    Lazy import keeps the SDK out of the executor's import graph."""
+    try:
+        from techdeck.core.plugin_sdk import as_user_facing
+        return as_user_facing(exc)
+    except Exception:
+        return None
+
+
 class PluginStatus(Enum):
     """Plugin execution status."""
     PENDING = "pending"
@@ -142,6 +152,11 @@ class PluginResult:
     progress: int = 0
     error: Optional[str] = None
     execution_time: float = 0.0  # PHASE 2: Track execution time
+    # Known user-caused failure (file open in Excel, cloud file won't download,
+    # ...). When True, `message` is the plain-language problem and `user_fix`
+    # is how to fix it — the shell renders a clean block instead of a traceback.
+    is_user_error: bool = False
+    user_fix: Optional[str] = None
 
 
 class PluginExecutor:
@@ -566,13 +581,24 @@ class PluginExecutor:
             except Exception:
                 pass
 
-            # Handle errors
+            # Handle errors — a KNOWN user-caused failure (file open in Excel,
+            # cloud file won't download) gets a clean plain-English message; the
+            # shell renders problem + fix. Unknown errors keep the raw text (and
+            # always the full traceback in the file log for debugging).
+            user_err = _as_user_facing(e)
             with self._lock:
                 result.status = PluginStatus.ERROR
-                result.message = f"Error: {str(e)}"
-                result.error = str(e)
+                if user_err is not None:
+                    result.is_user_error = True
+                    result.message = user_err.problem
+                    result.user_fix = user_err.fix
+                    result.error = str(user_err)
+                else:
+                    result.message = f"Error: {str(e)}"
+                    result.error = str(e)
                 result.execution_time = execution_time
-            safe_log(f"Plugin error: {str(e)}")
+            if user_err is None:
+                safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
             get_run_logger().error(
                 "RUN ERROR %s after %.1fs\n%s",
@@ -713,12 +739,20 @@ class PluginExecutor:
             except Exception:
                 pass
 
+            user_err = _as_user_facing(e)
             with self._lock:
                 result.status = PluginStatus.ERROR
-                result.message = f"Error: {str(e)}"
-                result.error = str(e)
+                if user_err is not None:
+                    result.is_user_error = True
+                    result.message = user_err.problem
+                    result.user_fix = user_err.fix
+                    result.error = str(user_err)
+                else:
+                    result.message = f"Error: {str(e)}"
+                    result.error = str(e)
                 result.execution_time = execution_time
-            safe_log(f"Plugin error: {str(e)}")
+            if user_err is None:
+                safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
             get_run_logger().error(
                 "RUN ERROR %s after %.1fs\n%s",
