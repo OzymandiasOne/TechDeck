@@ -137,10 +137,21 @@ class SheetMetalCalculators(PluginWindow):
         self._form = None
         self._result_box = None
         self._error_label = None
-        while self._panel_layout.count():
-            item = self._panel_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        self._clear_layout(self._panel_layout)
+
+    def _clear_layout(self, layout):
+        """Recursively remove every widget AND nested layout (the QFormLayout is
+        added via addLayout, so it's a layout item, not a widget item - a plain
+        widget-only sweep leaves its rows alive and they stack on the next form)."""
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            child = item.layout()
+            if child is not None:
+                self._clear_layout(child)
+                child.deleteLater()
 
     def _on_pick(self, index: int):
         if index < 0 or index >= len(CALCULATORS):
