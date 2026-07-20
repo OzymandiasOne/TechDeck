@@ -335,8 +335,16 @@ def load_pricing_map(quote_path: Path, log=None) -> Dict[str, Dict[str, Any]]:
     materials become Clevis (user rule), everything else inherits the nearest
     typed neighbor above/below in the sheet (user rule: 'infer what it is from
     the other parts around it'), tagged source='inferred'.
+
+    The quote workbook is a live document someone often has open in Excel, so
+    it's read via a TEMP COPY (a locked file blocks a direct open but not a
+    copy) - the copy-to-temp pattern, same as 911 SSPO's forecast read.
     """
-    wb = sdk.load_workbook_resilient(quote_path, log=log, read_only=True,
+    import os
+    import tempfile
+    tmp = Path(tempfile.gettempdir()) / f"techdeck_quote_{os.getpid()}.xlsx"
+    sdk.copy_resilient(quote_path, tmp, log=log)
+    wb = sdk.load_workbook_resilient(tmp, log=log, read_only=True,
                                      data_only=True)
     try:
         ws = None
@@ -364,6 +372,10 @@ def load_pricing_map(quote_path: Path, log=None) -> Dict[str, Dict[str, Any]]:
                             _clean(val(c_desc)) if c_desc else None))
     finally:
         wb.close()
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
 
     families = [normalize_material_type(raw) for _, raw, _ in ordered]
     out: Dict[str, Dict[str, Any]] = {}
@@ -440,59 +452,50 @@ def classify_part(source_material: Optional[str],
 
 def group_pieces(rows: List[Dict[str, Any]],
                  warnings: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    """Collapse one occurrence's PO rows (one row per DYPN x material) into
-    pieces: {dypn, qty, source_material (composite '; ' signature), notes,
-    hours}. The same DYPN legitimately spans several rows when the part is cut
-    from more than one source material; a repeated (DYPN, material) pair is a
-    true duplicate and sums qty with a warning."""
-    pieces: Dict[str, Dict[str, Any]] = {}
-    seen_pairs: Dict[Tuple[str, str], int] = {}
+    """One piece per (DYPN, source material) PO row. The same DYPN on two rows
+    with different materials is TWO SEPARATE PARTS that happen to share a name
+    (plate + rod pairs are common; user-confirmed 2026-07-20) - each gets its
+    own catalog row. A repeated (DYPN, material) pair is a true duplicate and
+    sums qty with a warning."""
+    pieces: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for r in rows:
-        k = r["dypn"].upper()
-        sm = (r.get("source_material") or "").strip()
-        pair = (k, sm.upper())
-        if pair in seen_pairs:
-            pieces[k]["_qty_by_sm"][sm] = pieces[k]["_qty_by_sm"].get(sm, 0) \
-                + r["qty"]
-            if warnings is not None:
-                warnings.append(f"duplicate row {r['dypn']} / {sm or '(no SM)'}"
-                                f" (qty summed)")
-            continue
-        seen_pairs[pair] = 1
+        sm = (r.get("source_material") or "").strip() or None
+        k = (r["dypn"].upper(), (sm or "").upper())
         p = pieces.get(k)
         if p is None:
-            pieces[k] = {"dypn": r["dypn"], "_sms": [sm] if sm else [],
-                         "_qty_by_sm": {sm: r["qty"]},
-                         "notes": r.get("notes"), "hours": r.get("hours")}
+            pieces[k] = {"dypn": r["dypn"], "source_material": sm,
+                         "qty": r["qty"], "notes": r.get("notes"),
+                         "hours": r.get("hours")}
         else:
-            if sm and sm not in p["_sms"]:
-                p["_sms"].append(sm)
-            p["_qty_by_sm"][sm] = p["_qty_by_sm"].get(sm, 0) + r["qty"]
+            p["qty"] += r["qty"]
+            if warnings is not None:
+                warnings.append(f"duplicate row {r['dypn']} / "
+                                f"{sm or '(no SM)'} (qty summed)")
             if r.get("notes") and not p.get("notes"):
                 p["notes"] = r["notes"]
             if r.get("hours") is not None and p.get("hours") is None:
                 p["hours"] = r["hours"]
-    out = []
-    for p in pieces.values():
-        sms = sorted(p.pop("_sms"))
-        qty_by_sm = p.pop("_qty_by_sm")
-        p["source_material"] = "; ".join(sms) if sms else None
-        # piece qty = the per-material qty (they should agree; take the max)
-        p["qty"] = max(qty_by_sm.values()) if qty_by_sm else 1
-        out.append(p)
-    return out
+    return list(pieces.values())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # The merge engine (repeat counting + alternate-suffix alignment)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _rk(ppn: str, dypn: str, sm: Optional[str]) -> Tuple[str, str, str]:
+    """Catalog row key. A row = one (PPN, DYPN, source material) - the same
+    DYPN with two materials is two separate parts sharing a name."""
+    return (ppn.upper(), dypn.upper(), (sm or "").upper())
+
+
 class Catalog:
     """In-memory MASTER PARTS catalog.
 
-    rows: {(ppn_upper, canonical_dypn_upper): row dict}
+    rows: {(ppn_u, canonical_dypn_u, sm_u): row dict} - one row per part,
+    where a part is a (DYPN, source material) line (same-name parts with
+    different materials each get their own row; user-confirmed 2026-07-20).
     _ppn: {ppn_upper: {"batches": set[int], "prev": [(dypn, sm, rowkey)],
-                       "dypn_map": {dypn_upper: rowkey}}}
+                       "dypn_map": {(dypn_upper, sm_upper): rowkey}}}
 
     Feed occurrences (one WO's pieces for one PPN) in batch order via
     merge_occurrence(); the same code path serves the Phase 1 bulk build and
@@ -500,16 +503,16 @@ class Catalog:
     """
 
     def __init__(self):
-        self.rows: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self.rows: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         self._ppn: Dict[str, Dict[str, Any]] = {}
         self.warnings: List[str] = []
 
     # -- row plumbing --------------------------------------------------------
 
     def _new_row(self, ppn: str, piece: Dict[str, Any], batch: int, wo: str,
-                 today: str) -> Tuple[str, str]:
-        key = (ppn.upper(), piece["dypn"].upper())
-        if key in self.rows:  # same DYPN reappearing as a "new" row - just update
+                 today: str) -> Tuple[str, str, str]:
+        key = _rk(ppn, piece["dypn"], piece.get("source_material"))
+        if key in self.rows:  # same part reappearing as a "new" row - just update
             self._absorb(key, piece, batch, wo, today)
             return key
         self.rows[key] = {
@@ -525,7 +528,7 @@ class Catalog:
         }
         return key
 
-    def _absorb(self, rowkey: Tuple[str, str], piece: Dict[str, Any],
+    def _absorb(self, rowkey: Tuple[str, str, str], piece: Dict[str, Any],
                 batch: int, wo: str, today: str) -> None:
         row = self.rows[rowkey]
         row["qty_latest"] = piece["qty"]
@@ -553,9 +556,8 @@ class Catalog:
                          rows: List[Dict[str, Any]], today: str) -> None:
         """Fold one occurrence (one WO's PO rows for one PPN in one batch) in.
 
-        Rows are first grouped into pieces (a DYPN + its composite
-        source-material signature - a part cut from two materials is one piece
-        with 'SM1; SM2').
+        Rows are first grouped into pieces - one per (DYPN, source material)
+        line; the same DYPN with two materials is two separate parts.
 
         Alignment rule (user-specified): a piece renamed between batches can
         only be re-identified through its SOURCE MATERIAL group - and only when
@@ -574,16 +576,20 @@ class Catalog:
 
         exact, remainder = [], []
         for p in new_pieces:
-            rk = state["dypn_map"].get(p["dypn"].upper())
-            if rk is None and (pu, p["dypn"].upper()) in self.rows:
-                rk = (pu, p["dypn"].upper())
+            smu = (p.get("source_material") or "").upper()
+            rk = state["dypn_map"].get((p["dypn"].upper(), smu))
+            if rk is None:
+                direct = _rk(ppn, p["dypn"], p.get("source_material"))
+                if direct in self.rows:
+                    rk = direct
             (exact if rk else remainder).append((p, rk))
 
         matched_rowkeys = set()
-        this_occ: List[Tuple[str, Optional[str], Tuple[str, str]]] = []
+        this_occ: List[Tuple[str, Optional[str], Tuple[str, str, str]]] = []
         for p, rk in exact:
             self._absorb(rk, p, batch, wo, today)
-            state["dypn_map"][p["dypn"].upper()] = rk
+            state["dypn_map"][(p["dypn"].upper(),
+                              (p.get("source_material") or "").upper())] = rk
             matched_rowkeys.add(rk)
             this_occ.append((p["dypn"], p.get("source_material"), rk))
 
@@ -609,13 +615,17 @@ class Catalog:
                             suffix_of(p["dypn"], ppn)))
                     for (pd, _psm, prk), np in zip(prev_sorted, new_sorted):
                         self._absorb(prk, np, batch, wo, today)
-                        state["dypn_map"][np["dypn"].upper()] = prk
+                        state["dypn_map"][(np["dypn"].upper(),
+                                           (np.get("source_material") or "")
+                                           .upper())] = prk
                         this_occ.append((np["dypn"],
                                          np.get("source_material"), prk))
                 else:
                     for np in group:
                         rk = self._new_row(ppn, np, batch, wo, today)
-                        state["dypn_map"][np["dypn"].upper()] = rk
+                        state["dypn_map"][(np["dypn"].upper(),
+                                           (np.get("source_material") or "")
+                                           .upper())] = rk
                         this_occ.append((np["dypn"],
                                          np.get("source_material"), rk))
 
@@ -630,8 +640,9 @@ class Catalog:
     def finalize_times_made(self) -> None:
         """TIMES MADE = distinct batches the PPN ran in (PPN-level, same value
         on every row of the PPN - the user's definition of a repeat)."""
-        for (pu, _), row in self.rows.items():
-            row["times_made"] = len(self._ppn.get(pu, {}).get("batches", ())) or 1
+        for key, row in self.rows.items():
+            row["times_made"] = len(
+                self._ppn.get(key[0], {}).get("batches", ())) or 1
 
     def apply_part_types(self, pricing: Dict[str, Dict[str, Any]],
                          only_untyped: bool = False) -> None:
@@ -648,9 +659,11 @@ class Catalog:
             row["part_description"] = info["description"]
 
     def sorted_rows(self) -> List[Dict[str, Any]]:
+        # PPN, then suffix, then material - same-name parts sit adjacent
         return sorted(
             self.rows.values(),
-            key=lambda r: (r["ppn"].upper(), natural_suffix_key(r["suffix"])))
+            key=lambda r: (r["ppn"].upper(), natural_suffix_key(r["suffix"]),
+                           r.get("source_material") or ""))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -759,15 +772,17 @@ def read_master_sheet(ws) -> Catalog:
             "notes": val("NOTES"),
             "last_updated": val("LAST UPDATED"),
         }
-        key = (row["ppn"].upper(), row["dypn"].upper())
+        key = _rk(row["ppn"], row["dypn"], row["source_material"])
         cat.rows[key] = row
         state = cat._ppn.setdefault(
             row["ppn"].upper(), {"batches": set(), "prev": [], "dypn_map": {}})
         state["batches"].update(batches)
-        state["dypn_map"][row["dypn"].upper()] = key
-        state["dypn_map"][row["last_dypn"].upper()] = key
+        smu = (row["source_material"] or "").upper() \
+            if isinstance(row["source_material"], str) else ""
+        state["dypn_map"][(row["dypn"].upper(), smu)] = key
+        state["dypn_map"][(row["last_dypn"].upper(), smu)] = key
         for a in alts:
-            state["dypn_map"][f"{row['ppn']}-{a}".upper()] = key
+            state["dypn_map"][(f"{row['ppn']}-{a}".upper(), smu)] = key
 
     # prev-occurrence reconstruction: the PPN's newest batch's pieces
     for pu, state in cat._ppn.items():
