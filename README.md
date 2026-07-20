@@ -408,7 +408,7 @@ Explorer and on pinned shortcuts.
 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info 
 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet 
 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF 
-Batch Repeater | Copies repeat orders from prior 922 batches, distributes CAD prints + binders to matching orders, then labels each repeat's Teams card REPEAT and moves it to MODEL CHECK 
+Batch Repeater | Copies repeat orders from prior 922 batches, distributes CAD prints + binders to matching orders, labels each repeat's Teams card REPEAT and moves it to MODEL CHECK - and keeps the 922 MPL up to date (writes the new batch's PO column and updates the MASTER PARTS catalog: how many times each part has been made, in which batches, and its alternate part names) 
 922 LST Organizer | Gathers a batch's tube .lst files into per-material folders and writes one color-coded PDF that reconciles the PO's tube count against what was actually pulled; files it can't confidently place go to a Needs Review folder 
 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically 
 
