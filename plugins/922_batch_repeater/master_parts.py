@@ -743,11 +743,18 @@ def write_master_sheet(wb, rows: List[Dict[str, Any]],
 # ANALYSIS sheet (formulas + native charts; auto-recalcs on every MPL update)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# One-hue palette (light-surface validated): series blue + ordinal blue ramp.
+# Palette (light-surface validated). Navy matches the MASTER PARTS header so
+# the workbook reads as one designed document; the 12 slice hues are the
+# fixed-order categorical palette + 3 blue-ramp extras + gray for 'Other'.
 _VIZ_BLUE = "2A78D6"
 _VIZ_BLUE_LIGHT = "B7D3F6"
-_VIZ_RAMP = ["86B6EF", "5598E7", "2A78D6", "1C5CAB", "104281"]
+_VIZ_NAVY = "1F4E5F"
+_TILE_FILL = "EEF4FB"
+_TILE_EDGE = "C9D9EE"
+_ROW_BAND = "F5F7FA"
 _INK_SECONDARY = "52514E"
+_VIZ_SLICES = ["2A78D6", "1BAF7A", "EDA100", "008300", "4A3AA7", "E34948",
+               "E87BA4", "EB6834", "86B6EF", "1C5CAB", "104281", "898781"]
 
 # Fixed part-type row order for the type table (roughly by expected volume;
 # 'Other' catches any family not listed so the total always reconciles).
@@ -757,17 +764,19 @@ _ANALYSIS_TYPES = ["Rod", "Mount Plate", "Tube", "Flat Bar", "Lug", "Unknown",
 
 
 def write_analysis_sheet(wb, after_sheet: str = MASTER_SHEET_NAME):
-    """(Re)create the ANALYSIS sheet: KPI stats + part-type / repeat /
-    times-made breakdowns, all as plain Excel FORMULAS over 'MASTER PARTS'
-    (via its PPN FIRST helper column) and 'PO 321+', so everything recalcs
-    the moment those sheets change - no macros, no manual refresh. Native
-    charts reference the formula cells and follow along. Safe to delete and
-    rebuild (nothing references ANALYSIS)."""
-    from openpyxl.chart import BarChart, PieChart, Reference
+    """(Re)create the ANALYSIS sheet as a dashboard: a title band, KPI stat
+    tiles, two pies, and styled breakdown tables - all plain Excel FORMULAS
+    over 'MASTER PARTS' (via its PPN FIRST helper column) and 'PO 321+', so
+    everything recalcs the moment those sheets change; no macros, no manual
+    refresh. Native charts reference the formula cells and follow along.
+    Safe to delete and rebuild (nothing references ANALYSIS)."""
+    from openpyxl.chart import PieChart, Reference
     from openpyxl.chart.label import DataLabelList
     from openpyxl.chart.marker import DataPoint
+    from openpyxl.chart.series import SeriesLabel
     from openpyxl.chart.shapes import GraphicalProperties
-    from openpyxl.styles import Font
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
     if ANALYSIS_SHEET_NAME in wb.sheetnames:
         del wb[ANALYSIS_SHEET_NAME]
@@ -776,134 +785,204 @@ def write_analysis_sheet(wb, after_sheet: str = MASTER_SHEET_NAME):
     except ValueError:
         idx = len(wb.sheetnames)
     ws = wb.create_sheet(ANALYSIS_SHEET_NAME, idx)
+    ws.sheet_view.showGridLines = False
 
     M = f"'{MASTER_SHEET_NAME}'"
-    N = 60000  # formula row cap (~3x headroom over today's 19.7k rows)
-    title_font = Font(bold=True, size=14)
-    label_font = Font(color=_INK_SECONDARY)
-    value_font = Font(bold=True, size=12)
-    hdr_font = Font(bold=True)
+    N = 60000  # formula row cap (~3x headroom over today's row count)
+    # shared sub-expressions (kept as strings so every tile is self-contained)
+    DISTINCT = f"SUM({M}!$U$2:$U${N})"
+    INSTANCES = f"SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}))"
+    REPEAT_PPNS = f"SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}>1))"
+    UNIQUE = f"COUNTA({M}!$A$2:$A${N})"
 
-    ws["A1"] = "922 MASTER PARTS - ANALYSIS"
-    ws["A1"].font = title_font
-    ws["A2"] = ("Auto-updates from the MASTER PARTS and PO 321+ sheets - "
-                "no refresh needed. Don't edit column B formulas.")
-    ws["A2"].font = Font(italic=True, size=9, color=_INK_SECONDARY)
+    navy = _VIZ_NAVY
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    tile_fill = PatternFill("solid", fgColor=_TILE_FILL)
+    band_fill = PatternFill("solid", fgColor=_ROW_BAND)
+    hdr_fill = PatternFill("solid", fgColor=navy)
+    hdr_font = Font(bold=True, color="FFFFFF", size=10)
+    small_hdr = Font(bold=True, size=9, color=_INK_SECONDARY)
+    edge = Side(style="thin", color=_TILE_EDGE)
 
-    kpis = [
-        ("Unique parts catalogued", f"=COUNTA({M}!$A$2:$A${N})", "#,##0"),
-        ("Distinct part numbers (PPNs)", f"=SUM({M}!$U$2:$U${N})", "#,##0"),
-        ("Repeat PPNs (made in 2+ batches)",
-         f"=SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}>1))", "#,##0"),
-        ("First-time PPNs", "=B5-B6", "#,##0"),
-        ("Total order instances (PPN x batch)",
-         f"=SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}))", "#,##0"),
-        ("Repeat orders pulled (re-makes)", "=B8-B5", "#,##0"),
-        ("Repeat share of all orders", "=IFERROR(B9/B8,0)", "0.0%"),
-        ("Repeat share of PPNs", "=IFERROR(B6/B5,0)", "0.0%"),
-        ("Avg times each PPN is made", "=IFERROR(B8/B5,0)", "0.00"),
-        ("Parts with alternate names", f"=COUNTIF({M}!$D$2:$D${N},\"?*\")",
-         "#,##0"),
-        ("Total pieces made", f"=SUM({M}!$M$2:$M${N})", "#,##0"),
-        ("Batches in the PO 321+ matrix",
-         "=COUNTIF('PO 321+'!$1:$5,\"PO *\")", "#,##0"),
-        ("Orders logged in the matrix",
-         "=SUMPRODUCT(--('PO 321+'!$A$4:$ZZ$600<>\"\"))", "#,##0"),
+    # --- column grid: five 3-wide tile bays with slim spacers --------------
+    tile_starts = [1, 5, 9, 13, 17]  # A, E, I, M, Q
+    for c0 in tile_starts:
+        for c in range(c0, c0 + 3):
+            ws.column_dimensions[get_column_letter(c)].width = 10.2
+    for c in (4, 8, 12, 16, 20):
+        ws.column_dimensions[get_column_letter(c)].width = 1.6
+
+    # --- title band --------------------------------------------------------
+    for r in (1, 2):
+        for c in range(1, 20):
+            ws.cell(r, c).fill = hdr_fill
+    ws.merge_cells("A1:S2")
+    t = ws["A1"]
+    t.value = "922 MASTER PARTS  —  ANALYSIS"
+    t.font = Font(bold=True, size=20, color="FFFFFF")
+    t.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 22
+    ws.row_dimensions[2].height = 22
+    ws.merge_cells("A3:S3")
+    sub = ws["A3"]
+    sub.value = ("Live view of the MASTER PARTS catalog and PO 321+ matrix "
+                 "— every figure recalculates automatically when they "
+                 "change.")
+    sub.font = Font(italic=True, size=9, color=_INK_SECONDARY)
+    sub.alignment = Alignment(horizontal="left", indent=1)
+
+    # --- KPI tiles ---------------------------------------------------------
+    def tile(row0, col0, caption, formula, fmt, accent=navy):
+        for r in range(row0, row0 + 3):
+            for c in range(col0, col0 + 3):
+                cell = ws.cell(r, c)
+                cell.fill = tile_fill
+                b = {}
+                if r == row0:
+                    b["top"] = edge
+                if r == row0 + 2:
+                    b["bottom"] = edge
+                if c == col0:
+                    b["left"] = edge
+                if c == col0 + 2:
+                    b["right"] = edge
+                if b:
+                    cell.border = Border(**b)
+        ws.merge_cells(start_row=row0, start_column=col0,
+                       end_row=row0 + 1, end_column=col0 + 2)
+        ws.merge_cells(start_row=row0 + 2, start_column=col0,
+                       end_row=row0 + 2, end_column=col0 + 2)
+        v = ws.cell(row0, col0, formula)
+        v.font = Font(bold=True, size=19, color=accent)
+        v.alignment = center
+        v.number_format = fmt
+        cap = ws.cell(row0 + 2, col0, caption)
+        cap.font = Font(bold=True, size=8, color=_INK_SECONDARY)
+        cap.alignment = center
+
+    for r, h in ((5, 20), (6, 20), (7, 24), (9, 20), (10, 20), (11, 24)):
+        ws.row_dimensions[r].height = h
+
+    tiles_top = [
+        ("UNIQUE PARTS CATALOGUED", f"={UNIQUE}", "#,##0", navy),
+        ("DISTINCT PART NUMBERS (PPNs)", f"={DISTINCT}", "#,##0", navy),
+        ("REPEAT PPNs (MADE IN 2+ BATCHES)", f"={REPEAT_PPNS}", "#,##0",
+         _VIZ_BLUE),
+        ("REPEAT SHARE OF ALL ORDERS",
+         f"=IFERROR(({INSTANCES}-{DISTINCT})/{INSTANCES},0)", "0.0%",
+         _VIZ_BLUE),
+        ("REPEAT ORDERS PULLED (RE-MAKES)", f"={INSTANCES}-{DISTINCT}",
+         "#,##0", _VIZ_BLUE),
     ]
-    for i, (label, formula, fmt) in enumerate(kpis, 4):  # rows 4-16
-        ws.cell(i, 1, label).font = label_font
-        c = ws.cell(i, 2, formula)
-        c.font = value_font
-        c.number_format = fmt
+    tiles_bottom = [
+        ("AVG TIMES EACH PPN IS MADE",
+         f"=IFERROR({INSTANCES}/{DISTINCT},0)", "0.00", navy),
+        ("PARTS WITH ALTERNATE NAMES",
+         '=COUNTIF(' + M + '!$D$2:$D$' + str(N) + ',"?*")', "#,##0", navy),
+        ("TOTAL PIECES MADE", f"=SUM({M}!$M$2:$M${N})", "#,##0", navy),
+        ("BATCHES IN THE PO 321+ MATRIX",
+         '=COUNTIF(\'PO 321+\'!$1:$5,"PO *")', "#,##0", navy),
+        ("ORDERS LOGGED IN THE MATRIX",
+         '=SUMPRODUCT(--(\'PO 321+\'!$A$4:$ZZ$600<>""))', "#,##0", navy),
+    ]
+    for (cap, formula, fmt, accent), c0 in zip(tiles_top, tile_starts):
+        tile(5, c0, cap, formula, fmt, accent)
+    for (cap, formula, fmt, accent), c0 in zip(tiles_bottom, tile_starts):
+        tile(9, c0, cap, formula, fmt, accent)
 
-    # --- part-type table (rows 19-31) + chart -----------------------------
-    ws.cell(18, 1, "PART TYPE").font = hdr_font
-    ws.cell(18, 2, "PARTS").font = hdr_font
-    ws.cell(18, 3, "% OF PARTS").font = hdr_font
-    t0 = 19
+    # --- breakdown tables (also feed the pies) -----------------------------
+    def section(row, col0, col1, label):
+        ws.merge_cells(start_row=row, start_column=col0,
+                       end_row=row, end_column=col1)
+        for c in range(col0, col1 + 1):
+            ws.cell(row, c).fill = hdr_fill
+        s = ws.cell(row, col0, label)
+        s.font = hdr_font
+        s.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+
+    T = 40   # tables start row (the pies float over rows 13-38)
+    section(T, 1, 3, "PART TYPE BREAKDOWN")
+    for c, h in ((1, "PART TYPE"), (2, "PARTS"), (3, "% OF PARTS")):
+        ws.cell(T + 1, c, h).font = small_hdr
+    t0 = T + 2                          # first data row (42)
     for i, fam in enumerate(_ANALYSIS_TYPES):
         r = t0 + i
-        ws.cell(r, 1, fam).font = label_font
+        ws.cell(r, 1, fam)
         ws.cell(r, 2, f"=COUNTIF({M}!$G$2:$G${N},A{r})").number_format = "#,##0"
-        ws.cell(r, 3, f"=IFERROR(B{r}/$B$4,0)").number_format = "0.0%"
-    r_other = t0 + len(_ANALYSIS_TYPES)  # 30
-    ws.cell(r_other, 1, "Other").font = label_font
+        ws.cell(r, 3, f"=IFERROR(B{r}/{UNIQUE},0)").number_format = "0.0%"
+    r_other = t0 + len(_ANALYSIS_TYPES)
+    ws.cell(r_other, 1, "Other")
     ws.cell(r_other, 2,
-            f"=MAX(0,$B$4-SUM(B{t0}:B{r_other - 1}))").number_format = "#,##0"
-    ws.cell(r_other, 3, f"=IFERROR(B{r_other}/$B$4,0)").number_format = "0.0%"
+            f"=MAX(0,{UNIQUE}-SUM(B{t0}:B{r_other - 1}))").number_format = "#,##0"
+    ws.cell(r_other, 3,
+            f"=IFERROR(B{r_other}/{UNIQUE},0)").number_format = "0.0%"
+    for r in range(t0, r_other + 1):
+        if (r - t0) % 2 == 1:
+            for c in (1, 2, 3):
+                ws.cell(r, c).fill = band_fill
 
-    # --- times-made distribution (rows 34-38, distinct PPNs) --------------
-    ws.cell(33, 1, "TIMES MADE").font = hdr_font
-    ws.cell(33, 2, "PPNS").font = hdr_font
+    section(T, 5, 7, "TIMES MADE (DISTINCT PPNs)")
+    ws.cell(T + 1, 5, "TIMES MADE").font = small_hdr
+    ws.cell(T + 1, 6, "PPNS").font = small_hdr
     dist = [("1x", "=1"), ("2x", "=2"), ("3x", "=3"), ("4x", "=4"),
             ("5x +", ">=5")]
     for i, (label, cond) in enumerate(dist):
-        r = 34 + i
-        ws.cell(r, 1, label).font = label_font
+        r = t0 + i
+        ws.cell(r, 5, label)
         expr = (f"({M}!$L$2:$L${N}>=5)" if cond == ">=5"
                 else f"({M}!$L$2:$L${N}={cond[1:]})")
-        ws.cell(r, 2,
+        ws.cell(r, 6,
                 f"=SUMPRODUCT(({M}!$U$2:$U${N})*{expr})").number_format = "#,##0"
+        if i % 2 == 1:
+            for c in (5, 6, 7):
+                ws.cell(r, c).fill = band_fill
 
-    # --- repeat vs first-time (rows 41-42, feeds the pie) -----------------
-    ws.cell(40, 1, "PPN MIX").font = hdr_font
-    ws.cell(41, 1, "Repeat PPNs").font = label_font
-    ws.cell(41, 2, "=B6").number_format = "#,##0"
-    ws.cell(42, 1, "First-time PPNs").font = label_font
-    ws.cell(42, 2, "=B7").number_format = "#,##0"
+    section(T, 9, 11, "PPN MIX")
+    ws.cell(T + 1, 9, "GROUP").font = small_hdr
+    ws.cell(T + 1, 10, "PPNS").font = small_hdr
+    ws.cell(t0, 9, "Repeat")
+    ws.cell(t0, 10, f"={REPEAT_PPNS}").number_format = "#,##0"
+    ws.cell(t0 + 1, 9, "First-time")
+    ws.cell(t0 + 1, 10, f"={DISTINCT}-J{t0}").number_format = "#,##0"
 
-    for col, w in {"A": 32, "B": 13, "C": 11}.items():
-        ws.column_dimensions[col].width = w
-
-    # --- charts -----------------------------------------------------------
-    bar = BarChart()
-    bar.type = "bar"  # horizontal
-    bar.title = "Parts by type"
-    bar.legend = None
-    bar.y_axis.delete = False
-    bar.height, bar.width = 10.5, 15
+    # --- charts ------------------------------------------------------------
+    # Every series gets an explicit name - an unnamed series surfaces as
+    # Excel's meaningless "Series 1" default in tooltips/labels.
+    type_pie = PieChart()
+    type_pie.title = "Parts by type"
+    type_pie.height, type_pie.width = 12, 17
     data = Reference(ws, min_col=2, min_row=t0, max_row=r_other)
     cats = Reference(ws, min_col=1, min_row=t0, max_row=r_other)
-    bar.add_data(data, titles_from_data=False)
-    bar.set_categories(cats)
-    bar.series[0].graphicalProperties.solidFill = _VIZ_BLUE
-    bar.dataLabels = DataLabelList(showVal=True)
-    bar.gapWidth = 60
-    ws.add_chart(bar, "E4")
-
-    col_chart = BarChart()
-    col_chart.type = "col"
-    col_chart.title = "How many times parts are made (distinct PPNs)"
-    col_chart.legend = None
-    col_chart.height, col_chart.width = 9, 15
-    data = Reference(ws, min_col=2, min_row=34, max_row=38)
-    cats = Reference(ws, min_col=1, min_row=34, max_row=38)
-    col_chart.add_data(data, titles_from_data=False)
-    col_chart.set_categories(cats)
-    ser = col_chart.series[0]
-    ser.graphicalProperties.solidFill = _VIZ_BLUE
+    type_pie.add_data(data, titles_from_data=False)
+    type_pie.set_categories(cats)
+    ser = type_pie.series[0]
+    ser.tx = SeriesLabel(v="Parts")
     ser.data_points = [
         DataPoint(idx=i, spPr=GraphicalProperties(solidFill=hx))
-        for i, hx in enumerate(_VIZ_RAMP)]
-    col_chart.dataLabels = DataLabelList(showVal=True)
-    col_chart.gapWidth = 60
-    ws.add_chart(col_chart, "E27")
+        for i, hx in enumerate(_VIZ_SLICES)]
+    # 12 slices, several near zero: identity via the legend (labels on tiny
+    # slices collide); exact counts live in the table below it.
+    if type_pie.legend is not None:
+        type_pie.legend.position = "r"
+    ws.add_chart(type_pie, "A13")
 
-    pie = PieChart()
-    pie.title = "Repeat vs first-time PPNs"
-    pie.legend = None
-    pie.height, pie.width = 9, 9
-    data = Reference(ws, min_col=2, min_row=41, max_row=42)
-    cats = Reference(ws, min_col=1, min_row=41, max_row=42)
-    pie.add_data(data, titles_from_data=False)
-    pie.set_categories(cats)
-    pie.series[0].data_points = [
+    mix_pie = PieChart()
+    mix_pie.title = "Repeat vs first-time PPNs"
+    mix_pie.legend = None
+    mix_pie.height, mix_pie.width = 12, 13
+    data = Reference(ws, min_col=10, min_row=t0, max_row=t0 + 1)
+    cats = Reference(ws, min_col=9, min_row=t0, max_row=t0 + 1)
+    mix_pie.add_data(data, titles_from_data=False)
+    mix_pie.set_categories(cats)
+    ser = mix_pie.series[0]
+    ser.tx = SeriesLabel(v="PPNs")
+    ser.data_points = [
         DataPoint(idx=0, spPr=GraphicalProperties(solidFill=_VIZ_BLUE)),
         DataPoint(idx=1, spPr=GraphicalProperties(solidFill=_VIZ_BLUE_LIGHT)),
     ]
-    pie.dataLabels = DataLabelList(showCatName=True, showPercent=True,
-                                   showVal=False)
-    ws.add_chart(pie, "N27")
+    mix_pie.dataLabels = DataLabelList(showCatName=True, showPercent=True,
+                                       showVal=False)
+    ws.add_chart(mix_pie, "M13")
     return ws
 
 
