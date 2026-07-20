@@ -137,10 +137,13 @@ def main():
         print(f"backup -> {backup}")
 
         wb = sdk.load_workbook_resilient(mpl_path)
-        pre_sheets = [s for s in wb.sheetnames if s != mp.MASTER_SHEET_NAME]
+        pre_sheets = [s for s in wb.sheetnames
+                      if s not in (mp.MASTER_SHEET_NAME, mp.ANALYSIS_SHEET_NAME)]
         mp.write_master_sheet(wb, rows, after_sheet="PO 321+")
+        mp.write_analysis_sheet(wb)
         wb.save(mpl_path)
-        print(f"wrote '{mp.MASTER_SHEET_NAME}' ({len(rows)} rows) -> {mpl_path}")
+        print(f"wrote '{mp.MASTER_SHEET_NAME}' ({len(rows)} rows) + "
+              f"'{mp.ANALYSIS_SHEET_NAME}' -> {mpl_path}")
 
         diffs = verify_untouched_sheets(backup, mpl_path, pre_sheets)
         report["post_write_sheet_diffs"] = diffs

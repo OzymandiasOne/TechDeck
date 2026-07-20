@@ -306,6 +306,9 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
     for w in cat.warnings:
         log(f"  note: {w}")
     mp.write_master_sheet(wb, cat.sorted_rows())
+    if mp.ANALYSIS_SHEET_NAME not in wb.sheetnames:
+        mp.write_analysis_sheet(wb)
+        log("ANALYSIS sheet was missing - recreated it.")
     log(f"MASTER PARTS updated: {merged} order(s) folded in"
         + (f", {skipped} already recorded" if skipped else "")
         + f" - {len(cat.rows)} catalog rows total.")

@@ -34,7 +34,15 @@ MASTER_HEADERS = [
     "PART TYPE", "PART TYPE SOURCE", "MATERIAL TYPE (RAW)", "PART DESCRIPTION",
     "QTY (LATEST)", "TIMES MADE", "TOTAL PIECES", "FIRST BATCH", "LAST BATCH",
     "BATCHES", "LAST WO", "HOURS (LATEST)", "NOTES", "LAST UPDATED",
+    # helper for the ANALYSIS sheet: 1 on the first row of each PPN, 0 after -
+    # lets plain COUNTIF/SUMPRODUCT formulas count DISTINCT PPNs (TIMES MADE
+    # repeats on every row of a PPN, so summing it raw would overcount).
+    # Written as static values by write_master_sheet, which rewrites the whole
+    # sheet on every update, so it can never go stale.
+    "PPN FIRST",
 ]
+
+ANALYSIS_SHEET_NAME = "ANALYSIS"
 
 PO_SHEET_REQUIRED = ("ORDER", "PPN", "DYPN", "SOURCE MATERIAL")
 
@@ -685,18 +693,24 @@ def _row_to_cells(row: Dict[str, Any]) -> list:
 
 def write_master_sheet(wb, rows: List[Dict[str, Any]],
                        after_sheet: str = "PO 321+"):
-    """(Re)create the MASTER PARTS sheet in an open workbook. Existing sheet is
-    replaced; every other sheet is untouched. Caller saves."""
+    """(Re)write the MASTER PARTS sheet in an open workbook. An existing sheet
+    is cleared and refilled IN PLACE - never deleted - because the ANALYSIS
+    sheet's formulas reference 'MASTER PARTS'!... and a delete/recreate would
+    turn every one of them into #REF!. Every other sheet is untouched. Caller
+    saves."""
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     if MASTER_SHEET_NAME in wb.sheetnames:
-        del wb[MASTER_SHEET_NAME]
-    try:
-        idx = wb.sheetnames.index(after_sheet) + 1
-    except ValueError:
-        idx = len(wb.sheetnames)
-    ws = wb.create_sheet(MASTER_SHEET_NAME, idx)
+        ws = wb[MASTER_SHEET_NAME]
+        if ws.max_row:
+            ws.delete_rows(1, ws.max_row)
+    else:
+        try:
+            idx = wb.sheetnames.index(after_sheet) + 1
+        except ValueError:
+            idx = len(wb.sheetnames)
+        ws = wb.create_sheet(MASTER_SHEET_NAME, idx)
 
     hdr_font = Font(bold=True, color="FFFFFF")
     hdr_fill = PatternFill("solid", fgColor="1F4E5F")
@@ -705,18 +719,191 @@ def write_master_sheet(wb, rows: List[Dict[str, Any]],
         cell.font = hdr_font
         cell.fill = hdr_fill
         cell.alignment = Alignment(horizontal="center")
+    seen_ppns: set = set()
     for r, row in enumerate(rows, 2):
-        for c, v in enumerate(_row_to_cells(row), 1):
+        cells = _row_to_cells(row)
+        pu = row["ppn"].upper()
+        cells.append(0 if pu in seen_ppns else 1)  # PPN FIRST helper
+        seen_ppns.add(pu)
+        for c, v in enumerate(cells, 1):
             ws.cell(r, c, v)
 
     widths = {"A": 18, "B": 22, "C": 8, "D": 14, "E": 22, "F": 16, "G": 12,
               "H": 12, "I": 20, "J": 26, "K": 8, "L": 8, "M": 8, "N": 8,
-              "O": 8, "P": 24, "Q": 12, "R": 9, "S": 32, "T": 12}
+              "O": 8, "P": 24, "Q": 12, "R": 9, "S": 32, "T": 12, "U": 6}
     for col, w in widths.items():
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = (
         f"A1:{get_column_letter(len(MASTER_HEADERS))}{max(len(rows) + 1, 2)}")
+    return ws
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ANALYSIS sheet (formulas + native charts; auto-recalcs on every MPL update)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# One-hue palette (light-surface validated): series blue + ordinal blue ramp.
+_VIZ_BLUE = "2A78D6"
+_VIZ_BLUE_LIGHT = "B7D3F6"
+_VIZ_RAMP = ["86B6EF", "5598E7", "2A78D6", "1C5CAB", "104281"]
+_INK_SECONDARY = "52514E"
+
+# Fixed part-type row order for the type table (roughly by expected volume;
+# 'Other' catches any family not listed so the total always reconciles).
+_ANALYSIS_TYPES = ["Rod", "Mount Plate", "Tube", "Flat Bar", "Lug", "Unknown",
+                   "Clevis", "Assembly", "Angle Iron", "Square Bar",
+                   "Round Bar"]
+
+
+def write_analysis_sheet(wb, after_sheet: str = MASTER_SHEET_NAME):
+    """(Re)create the ANALYSIS sheet: KPI stats + part-type / repeat /
+    times-made breakdowns, all as plain Excel FORMULAS over 'MASTER PARTS'
+    (via its PPN FIRST helper column) and 'PO 321+', so everything recalcs
+    the moment those sheets change - no macros, no manual refresh. Native
+    charts reference the formula cells and follow along. Safe to delete and
+    rebuild (nothing references ANALYSIS)."""
+    from openpyxl.chart import BarChart, PieChart, Reference
+    from openpyxl.chart.label import DataLabelList
+    from openpyxl.chart.marker import DataPoint
+    from openpyxl.chart.shapes import GraphicalProperties
+    from openpyxl.styles import Font
+
+    if ANALYSIS_SHEET_NAME in wb.sheetnames:
+        del wb[ANALYSIS_SHEET_NAME]
+    try:
+        idx = wb.sheetnames.index(after_sheet) + 1
+    except ValueError:
+        idx = len(wb.sheetnames)
+    ws = wb.create_sheet(ANALYSIS_SHEET_NAME, idx)
+
+    M = f"'{MASTER_SHEET_NAME}'"
+    N = 60000  # formula row cap (~3x headroom over today's 19.7k rows)
+    title_font = Font(bold=True, size=14)
+    label_font = Font(color=_INK_SECONDARY)
+    value_font = Font(bold=True, size=12)
+    hdr_font = Font(bold=True)
+
+    ws["A1"] = "922 MASTER PARTS - ANALYSIS"
+    ws["A1"].font = title_font
+    ws["A2"] = ("Auto-updates from the MASTER PARTS and PO 321+ sheets - "
+                "no refresh needed. Don't edit column B formulas.")
+    ws["A2"].font = Font(italic=True, size=9, color=_INK_SECONDARY)
+
+    kpis = [
+        ("Unique parts catalogued", f"=COUNTA({M}!$A$2:$A${N})", "#,##0"),
+        ("Distinct part numbers (PPNs)", f"=SUM({M}!$U$2:$U${N})", "#,##0"),
+        ("Repeat PPNs (made in 2+ batches)",
+         f"=SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}>1))", "#,##0"),
+        ("First-time PPNs", "=B5-B6", "#,##0"),
+        ("Total order instances (PPN x batch)",
+         f"=SUMPRODUCT(({M}!$U$2:$U${N})*({M}!$L$2:$L${N}))", "#,##0"),
+        ("Repeat orders pulled (re-makes)", "=B8-B5", "#,##0"),
+        ("Repeat share of all orders", "=IFERROR(B9/B8,0)", "0.0%"),
+        ("Repeat share of PPNs", "=IFERROR(B6/B5,0)", "0.0%"),
+        ("Avg times each PPN is made", "=IFERROR(B8/B5,0)", "0.00"),
+        ("Parts with alternate names", f"=COUNTIF({M}!$D$2:$D${N},\"?*\")",
+         "#,##0"),
+        ("Total pieces made", f"=SUM({M}!$M$2:$M${N})", "#,##0"),
+        ("Batches in the PO 321+ matrix",
+         "=COUNTIF('PO 321+'!$1:$5,\"PO *\")", "#,##0"),
+        ("Orders logged in the matrix",
+         "=SUMPRODUCT(--('PO 321+'!$A$4:$ZZ$600<>\"\"))", "#,##0"),
+    ]
+    for i, (label, formula, fmt) in enumerate(kpis, 4):  # rows 4-16
+        ws.cell(i, 1, label).font = label_font
+        c = ws.cell(i, 2, formula)
+        c.font = value_font
+        c.number_format = fmt
+
+    # --- part-type table (rows 19-31) + chart -----------------------------
+    ws.cell(18, 1, "PART TYPE").font = hdr_font
+    ws.cell(18, 2, "PARTS").font = hdr_font
+    ws.cell(18, 3, "% OF PARTS").font = hdr_font
+    t0 = 19
+    for i, fam in enumerate(_ANALYSIS_TYPES):
+        r = t0 + i
+        ws.cell(r, 1, fam).font = label_font
+        ws.cell(r, 2, f"=COUNTIF({M}!$G$2:$G${N},A{r})").number_format = "#,##0"
+        ws.cell(r, 3, f"=IFERROR(B{r}/$B$4,0)").number_format = "0.0%"
+    r_other = t0 + len(_ANALYSIS_TYPES)  # 30
+    ws.cell(r_other, 1, "Other").font = label_font
+    ws.cell(r_other, 2,
+            f"=MAX(0,$B$4-SUM(B{t0}:B{r_other - 1}))").number_format = "#,##0"
+    ws.cell(r_other, 3, f"=IFERROR(B{r_other}/$B$4,0)").number_format = "0.0%"
+
+    # --- times-made distribution (rows 34-38, distinct PPNs) --------------
+    ws.cell(33, 1, "TIMES MADE").font = hdr_font
+    ws.cell(33, 2, "PPNS").font = hdr_font
+    dist = [("1x", "=1"), ("2x", "=2"), ("3x", "=3"), ("4x", "=4"),
+            ("5x +", ">=5")]
+    for i, (label, cond) in enumerate(dist):
+        r = 34 + i
+        ws.cell(r, 1, label).font = label_font
+        expr = (f"({M}!$L$2:$L${N}>=5)" if cond == ">=5"
+                else f"({M}!$L$2:$L${N}={cond[1:]})")
+        ws.cell(r, 2,
+                f"=SUMPRODUCT(({M}!$U$2:$U${N})*{expr})").number_format = "#,##0"
+
+    # --- repeat vs first-time (rows 41-42, feeds the pie) -----------------
+    ws.cell(40, 1, "PPN MIX").font = hdr_font
+    ws.cell(41, 1, "Repeat PPNs").font = label_font
+    ws.cell(41, 2, "=B6").number_format = "#,##0"
+    ws.cell(42, 1, "First-time PPNs").font = label_font
+    ws.cell(42, 2, "=B7").number_format = "#,##0"
+
+    for col, w in {"A": 32, "B": 13, "C": 11}.items():
+        ws.column_dimensions[col].width = w
+
+    # --- charts -----------------------------------------------------------
+    bar = BarChart()
+    bar.type = "bar"  # horizontal
+    bar.title = "Parts by type"
+    bar.legend = None
+    bar.y_axis.delete = False
+    bar.height, bar.width = 10.5, 15
+    data = Reference(ws, min_col=2, min_row=t0, max_row=r_other)
+    cats = Reference(ws, min_col=1, min_row=t0, max_row=r_other)
+    bar.add_data(data, titles_from_data=False)
+    bar.set_categories(cats)
+    bar.series[0].graphicalProperties.solidFill = _VIZ_BLUE
+    bar.dataLabels = DataLabelList(showVal=True)
+    bar.gapWidth = 60
+    ws.add_chart(bar, "E4")
+
+    col_chart = BarChart()
+    col_chart.type = "col"
+    col_chart.title = "How many times parts are made (distinct PPNs)"
+    col_chart.legend = None
+    col_chart.height, col_chart.width = 9, 15
+    data = Reference(ws, min_col=2, min_row=34, max_row=38)
+    cats = Reference(ws, min_col=1, min_row=34, max_row=38)
+    col_chart.add_data(data, titles_from_data=False)
+    col_chart.set_categories(cats)
+    ser = col_chart.series[0]
+    ser.graphicalProperties.solidFill = _VIZ_BLUE
+    ser.data_points = [
+        DataPoint(idx=i, spPr=GraphicalProperties(solidFill=hx))
+        for i, hx in enumerate(_VIZ_RAMP)]
+    col_chart.dataLabels = DataLabelList(showVal=True)
+    col_chart.gapWidth = 60
+    ws.add_chart(col_chart, "E27")
+
+    pie = PieChart()
+    pie.title = "Repeat vs first-time PPNs"
+    pie.legend = None
+    pie.height, pie.width = 9, 9
+    data = Reference(ws, min_col=2, min_row=41, max_row=42)
+    cats = Reference(ws, min_col=1, min_row=41, max_row=42)
+    pie.add_data(data, titles_from_data=False)
+    pie.set_categories(cats)
+    pie.series[0].data_points = [
+        DataPoint(idx=0, spPr=GraphicalProperties(solidFill=_VIZ_BLUE)),
+        DataPoint(idx=1, spPr=GraphicalProperties(solidFill=_VIZ_BLUE_LIGHT)),
+    ]
+    pie.dataLabels = DataLabelList(showCatName=True, showPercent=True,
+                                   showVal=False)
+    ws.add_chart(pie, "N27")
     return ws
 
 
