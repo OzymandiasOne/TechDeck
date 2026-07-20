@@ -293,7 +293,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         # Name without the family prefix — the family shows as a corner badge,
         # matching Home ("911 Setup" → badge "911" + name "Setup"). The info
         # popup keeps the full name for context.
-        self._family = getattr(plugin, "family", "other")
+        self._family = getattr(plugin, "family", "General")
         self.name_label = QLabel(
             _strip_family_prefix(getattr(plugin, "name", tile_id), self._family))
         self.name_label.setWordWrap(True)
@@ -307,8 +307,8 @@ class LibraryPluginCard(QFrame, ThemeAware):
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
 
-        # Family badge in the top-left corner (matches Home; hidden for
-        # "other"). Absolutely-positioned child; the info "i" button owns the
+        # Family badge in the top-left corner (matches Home; shown for every
+        # family). Absolutely-positioned child; the info "i" button owns the
         # top-right corner, so the two never collide.
         self.family_badge = QLabel(
             self._family if self._family in _FAMILY_BADGE_COLORS else "", self)
@@ -343,7 +343,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
 
     def _style_family_badge(self):
         """Same look as Home's badge: text-only, colored with the theme accent.
-        `_FAMILY_BADGE_COLORS` gates which families get a tag ("other" gets none)."""
+        `_FAMILY_BADGE_COLORS` gates which families get a tag (all of them now)."""
         if self._family not in _FAMILY_BADGE_COLORS:
             self.family_badge.setVisible(False)
             return
@@ -825,9 +825,9 @@ class LibraryPage(QWidget, ThemeAware):
         all_tile_ids = list(set(self.available_tiles) | current_profile_tiles)
 
         # Sort according to user-selected mode. "alphabetical" by display name,
-        # "family" groups 911 -> 922 -> other (alphabetical within each group).
+        # "family" groups 902 -> 911 -> 922 -> QA -> Games -> General (alpha within each).
         sort_mode = self.settings.get_library_sort_mode()
-        _family_rank = {"902": 0, "911": 1, "922": 2, "QA": 3, "Games": 4, "other": 5}
+        _family_rank = {"902": 0, "911": 1, "922": 2, "QA": 3, "Games": 4, "General": 5}
 
         def _name_no_family(name: str) -> str:
             # Drop a leading family prefix ("911 ", "922 ", "qa ") so Alphabetical
@@ -841,8 +841,8 @@ class LibraryPage(QWidget, ThemeAware):
             p = self.plugin_loader.get_plugin(tid)
             name = (p.name if p else tid).lower()
             if sort_mode == "family":
-                # Group 911 -> 922 -> other; alphabetical within each group.
-                family = (p.family if p else "other")
+                # Group by family rank; alphabetical within each group.
+                family = (p.family if p else "General")
                 return (_family_rank.get(family, 5), name)
             # Flat A-Z by the descriptive name (family number ignored).
             return (_name_no_family(name),)

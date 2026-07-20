@@ -506,7 +506,7 @@ class PluginExecutor:
             # request_batch_number) can resolve their context without the caller
             # threading it through every call.
             plugin_params['plugin_id'] = plugin_id
-            plugin_params['plugin_family'] = getattr(plugin, 'family', 'other')
+            plugin_params['plugin_family'] = getattr(plugin, 'family', 'General')
 
             # Inject plugin settings
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
@@ -545,7 +545,7 @@ class PluginExecutor:
                 try:
                     from techdeck.core.usage_tracker import record_run
                     record_run(plugin_id, plugin.name,
-                               getattr(plugin, 'family', 'other'), execution_time)
+                               getattr(plugin, 'family', 'General'), execution_time)
                 except Exception:
                     pass  # telemetry must never affect a run
 
@@ -688,7 +688,7 @@ class PluginExecutor:
             plugin_params = params.copy()
             plugin_params['log'] = safe_log
             plugin_params['plugin_id'] = plugin_id
-            plugin_params['plugin_family'] = getattr(plugin, 'family', 'other')
+            plugin_params['plugin_family'] = getattr(plugin, 'family', 'General')
 
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
             plugin_params['settings'] = plugin_settings
@@ -708,7 +708,7 @@ class PluginExecutor:
             try:
                 from techdeck.core.usage_tracker import record_run
                 record_run(plugin_id, plugin.name,
-                           getattr(plugin, 'family', 'other'), execution_time)
+                           getattr(plugin, 'family', 'General'), execution_time)
             except Exception:
                 pass  # telemetry must never affect a run
 

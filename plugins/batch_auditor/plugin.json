@@ -4,7 +4,7 @@
   "description": "Read-only readiness check for a 911 or 922 batch. Verifies the batch is complete before the floor (orders & prints, LST, run time, forming, pallets, kitting) and presents the results as a dashboard in the console.",
   "version": "1.0.0",
   "author": "Anthony Sieben",
-  "family": "other",
+  "family": "General",
   "requires_admin": false,
   "timeout": 1800,
   "settings": {

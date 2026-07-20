@@ -493,7 +493,7 @@ class SettingsManager:
         return self.get_theme() == "professional"
 
     # Library page tile sort. "alphabetical" sorts by plugin display name;
-    # "family" groups by 911 -> 922 -> other, alphabetical within each group.
+    # "family" groups by 911 -> 922 -> General, alphabetical within each group.
     _LIBRARY_SORT_MODES = ("alphabetical", "family")
 
     def get_library_sort_mode(self) -> str:
@@ -796,7 +796,7 @@ class SettingsManager:
             {
               "stored_at": ISO8601 UTC timestamp,
               "remaining_tile_ids": [str, ...],
-              "shared_state": {"911": {...}, "922": {...}, "other": {...}},
+              "shared_state": {"911": {...}, "922": {...}, "General": {...}},
               "originating_profile": str
             }
         """

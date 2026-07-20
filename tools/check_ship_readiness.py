@@ -21,7 +21,7 @@ good (CLAUDE.md Hard Rule 8).
 
 Checks (E = error, fails the build; W = warning):
   E1  plugin.json parses, is an object, id matches the folder name
-  E2  family, if present, is one of 902/911/922/other/Games/QA; timeout is a
+  E2  family, if present, is one of 902/911/922/General/Games/QA; timeout is a
       non-negative int
   E3  any plugin importing PySide6/PyQt must set requires_main_thread: true
   E4  every .py in the plugin compiles (syntax gate)
@@ -43,7 +43,7 @@ Checks (E = error, fails the build; W = warning):
       the Library display name, family-prefixed - 902/911/922/QA names start
       with their family ("911 Setup" -> 911_setup, "QA Gemba Analyzer" ->
       qa_gemba_analyzer), Games ids get a "game_" prefix, and family-less
-      ("other") plugins are just the slug of their name.
+      ("General") plugins are just the slug of their name.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -67,7 +67,9 @@ APP_PKG_DIR = REPO / "techdeck"
 SPEC_FILE = REPO / "TechDeck.spec"
 ENTRY_MODULE = "techdeck.__main__"
 
-VALID_FAMILIES = {"902", "911", "922", "other", "Games", "QA"}
+# "General" is the current family-less bucket; "other" stays accepted as its
+# legacy alias so an un-migrated plugin.json doesn't fail the gate.
+VALID_FAMILIES = {"902", "911", "922", "General", "other", "Games", "QA"}
 # Packages whose submodules are independent compiled extensions: a plugin
 # importing PySide6.QtX needs THAT submodule bundled, not just "PySide6"
 # (this is how QtCharts went missing once).
@@ -323,7 +325,7 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
             errors.append(f"{pid}: plugin.json id '{mid}' does not match folder name")
         family = manifest.get("family")
         if family is not None and family not in VALID_FAMILIES:
-            errors.append(f"{pid}: invalid family '{family}' (must be 902/911/922/other/Games/QA)")
+            errors.append(f"{pid}: invalid family '{family}' (must be 902/911/922/General/Games/QA)")
         timeout = manifest.get("timeout")
         if timeout is not None and (not isinstance(timeout, int) or timeout < 0):
             errors.append(f"{pid}: timeout must be a non-negative integer, got {timeout!r}")

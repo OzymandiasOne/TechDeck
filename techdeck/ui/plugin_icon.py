@@ -95,7 +95,7 @@ _FAMILY_COLORS = {
     "902": "#06B6D4",   # cyan
     "911": "#3B82F6",   # blue
     "922": "#F59E0B",   # amber
-    "other": "#8B5CF6",  # violet
+    "General": "#8B5CF6",  # violet
     "QA": "#10B981",    # emerald
 }
 
@@ -215,7 +215,7 @@ def _new_canvas(size: int) -> QPixmap:
 
 
 def _monogram_text(plugin) -> str:
-    family = getattr(plugin, "family", "other")
+    family = getattr(plugin, "family", "General")
     if family in ("902", "911", "922"):
         return family
     name = (getattr(plugin, "name", "") or "?").strip()
@@ -228,8 +228,8 @@ def _monogram_text(plugin) -> str:
 def _monogram(plugin, size: int) -> QPixmap:
     """Family-colored rounded-square tile with the family number or initials."""
     text = _monogram_text(plugin)
-    color = QColor(_FAMILY_COLORS.get(getattr(plugin, "family", "other"),
-                                      _FAMILY_COLORS["other"]))
+    color = QColor(_FAMILY_COLORS.get(getattr(plugin, "family", "General"),
+                                      _FAMILY_COLORS["General"]))
     pm = _new_canvas(size)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)

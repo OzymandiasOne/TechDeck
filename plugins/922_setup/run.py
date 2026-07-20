@@ -576,7 +576,7 @@ def run(params: dict, progress_callback, cancel_event):
     # headless runs so the stages still share between themselves).
     shared_state = params.get("shared_state")
     if shared_state is None:
-        shared_state = {"911": {}, "922": {}, "other": {}}
+        shared_state = {"911": {}, "922": {}, "General": {}}
 
     # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
     if "teams_setup" in enabled:

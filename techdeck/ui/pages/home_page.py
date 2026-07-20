@@ -41,9 +41,9 @@ HOME_TILE_H = 140
 HOME_TILE_ICON = 64
 HOME_TILE_ICON_BOX = 72
 
-# Fixed family-tag colors for the Home tile corner badge ("other" gets none).
+# Fixed family-tag colors for the Home tile corner badge (every family gets one).
 _FAMILY_BADGE_COLORS = {"902": "#06B6D4", "911": "#3B82F6", "922": "#F59E0B",
-                        "QA": "#10B981", "Games": "#A855F7"}
+                        "QA": "#10B981", "Games": "#A855F7", "General": "#8B5CF6"}
 
 
 def _strip_family_prefix(name: str, family: str) -> str:
@@ -168,7 +168,7 @@ class PluginCard(QFrame, ThemeAware):
         self._eye_follow = _EyeFollow(self.icon_label, key, HOME_TILE_ICON) if key else None
 
         # Name without the family prefix (the family shows as a corner badge).
-        self._family = getattr(plugin, "family", "other")
+        self._family = getattr(plugin, "family", "General")
         self.name_label = QLabel(_strip_family_prefix(getattr(plugin, "name", tile_id), self._family))
         self.name_label.setWordWrap(True)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
@@ -183,7 +183,7 @@ class PluginCard(QFrame, ThemeAware):
         layout.addWidget(self.name_label, 0)
         layout.addStretch()
 
-        # Family badge in the top-left corner (911/922/QA; hidden for "other").
+        # Family badge in the top-left corner (902/911/922/QA/Games/General).
         # Absolutely-positioned child so it overlays the corner without affecting
         # the centered icon/name layout.
         self.family_badge = QLabel(self._family if self._family in _FAMILY_BADGE_COLORS else "", self)
@@ -346,10 +346,10 @@ class PluginCard(QFrame, ThemeAware):
         """Style the corner family tag. Currently TEXT-ONLY: transparent chip
         background (blends with the tile in every state) and the text colored with
         the active theme's accent, so the tag matches each theme. `_FAMILY_BADGE_COLORS`
-        still gates which families get a tag (911/922/QA/Games — "other" gets none);
+        gates which families get a tag (all of them now: 902/911/922/QA/Games/General);
         to bring a colored chip back later, set `background-color` to that family
         color and text `#FFFFFF`."""
-        if self._family not in _FAMILY_BADGE_COLORS:   # "other" has no badge
+        if self._family not in _FAMILY_BADGE_COLORS:   # unknown family -> no badge
             self.family_badge.setVisible(False)
             return
         self.family_badge.setStyleSheet(
@@ -913,7 +913,7 @@ class HomePage(QWidget, ThemeAware):
         # Per-run, per-family scratch dict. plugin_sdk.request_batch_number
         # caches the first answer here and subsequent same-family plugins reuse
         # it. Cleared when the whole multi-plugin run completes.
-        self._shared_state: dict = {"911": {}, "922": {}, "other": {}}
+        self._shared_state: dict = {"911": {}, "922": {}, "General": {}}
         self.plugin_status_updated.connect(self._apply_plugin_status)
         self._plugins_all_done.connect(self._check_run_complete)
         self._input_idle_requested.connect(self._on_input_idle_requested)
@@ -1374,7 +1374,7 @@ class HomePage(QWidget, ThemeAware):
         # Remember the largest multi-run for the "run N at once" achievements.
         self.settings.record_run_batch(len(self._plugin_queue))
         # Reset family-shared scratch state at the start of every multi-run.
-        self._shared_state = {"911": {}, "922": {}, "other": {}}
+        self._shared_state = {"911": {}, "922": {}, "General": {}}
         self._plugin_params = {
             'console': console,
             # GUI plugins (requires_main_thread) suppress the auto success sound and call
@@ -1745,7 +1745,7 @@ class HomePage(QWidget, ThemeAware):
         # about. A future family added between shelve and resume would be
         # ignored — that's fine; worst case the user gets prompted again.
         shared = shelf.get("shared_state", {})
-        self._shared_state = {"911": {}, "922": {}, "other": {}}
+        self._shared_state = {"911": {}, "922": {}, "General": {}}
         for fam, info in shared.items():
             if fam in self._shared_state and isinstance(info, dict):
                 self._shared_state[fam].update(info)

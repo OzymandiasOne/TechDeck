@@ -25,10 +25,14 @@ logger = logging.getLogger(__name__)
 FAMILY_902 = "902"
 FAMILY_911 = "911"
 FAMILY_922 = "922"
-FAMILY_OTHER = "other"
+FAMILY_GENERAL = "General"  # apps that don't belong to a specific family
 FAMILY_GAMES = "Games"   # purchasable mini-games (Woogy's Emporium)
 FAMILY_QA = "QA"         # quality-assurance tools (QA Gemba Analyzer, etc.)
-VALID_FAMILIES = {FAMILY_902, FAMILY_911, FAMILY_922, FAMILY_OTHER, FAMILY_GAMES, FAMILY_QA}
+VALID_FAMILIES = {FAMILY_902, FAMILY_911, FAMILY_922, FAMILY_GENERAL, FAMILY_GAMES, FAMILY_QA}
+
+# Legacy family values accepted from older plugin.json and normalized on load.
+# "other" was the family-less bucket before it became the visible "General" family.
+_FAMILY_ALIASES = {"other": FAMILY_GENERAL}
 
 
 def _infer_family_from_id(plugin_id: str) -> str:
@@ -48,7 +52,7 @@ def _infer_family_from_id(plugin_id: str) -> str:
         return FAMILY_QA
     if pid.startswith("game_"):
         return FAMILY_GAMES
-    return FAMILY_OTHER
+    return FAMILY_GENERAL
 
 
 @dataclass
@@ -65,7 +69,7 @@ class Plugin:
         path: Path to plugin directory
         icon: Optional icon path
         requires_admin: Whether plugin needs admin rights
-        family: Workflow grouping ("911", "922", or "other"). Drives the family-aware
+        family: Workflow grouping ("911", "922", "General", ...). Drives the family-aware
                 shared-state run and the Library page's "sort by family" mode.
     """
     id: str
@@ -78,7 +82,7 @@ class Plugin:
     requires_admin: bool = False
     requires_main_thread: bool = False
     timeout: Optional[int] = None  # Per-plugin timeout override (None = use executor default)
-    family: str = FAMILY_OTHER
+    family: str = FAMILY_GENERAL
     locked: bool = False  # purchasable: hidden in the Library until is_unlocked(id)
 
 class PluginLoader:
@@ -197,6 +201,7 @@ class PluginLoader:
                 
                 # Family: explicit field wins; fall back to ID prefix.
                 family = metadata.get('family')
+                family = _FAMILY_ALIASES.get(family, family)  # legacy "other" -> "General"
                 if family not in VALID_FAMILIES:
                     if family is not None:
                         logger.warning(
