@@ -3,15 +3,18 @@ Batch Repeater Plugin for TechDeck v2.4.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
 
 v2.4.0: the repeater now MAINTAINS the 922 MPL workbook instead of only
-reading it. Before the repeat search it parses the new batch's own
-'PO {n} QF-QU-09 REV C' workbook (Documentation folder, order-folder copies
-as fallback) and, in one open/save of 922 MPL.xlsx:
-  1) writes the batch's 'PO {n}' column into the PO 321+ matrix sheet
-     (fills a missing column so the old "PO isn't in the spreadsheet" dead
-     end fixes itself; an existing column only gets blanks filled), and
-  2) folds every order into the MASTER PARTS catalog sheet via the shared
-     master_parts.py merge engine - new parts appended, repeats updated
-     (times made, batch history, alternate suffixes, latest WO/qty).
+reading it. Before the repeat search, in one open/save of 922 MPL.xlsx:
+  1) writes the batch's 'PO {n}' column into the PO 321+ matrix sheet,
+     filled from the batch root's ORDER FOLDER NAMES ('{WO}-{PPN}', skipping
+     Documentation/REPEAT BATCHES) - so a missing column fills itself and
+     the old "PO isn't in the spreadsheet" dead end is gone; an existing
+     column only gets blanks appended, and
+  2) parses the batch's own 'PO {n} QF-QU-09 REV C' workbook (Documentation
+     folder, order-folder copies as fallback) and folds every order into the
+     MASTER PARTS catalog sheet via the shared master_parts.py merge engine
+     - new parts appended, repeats updated (times made, batch history,
+     alternate suffixes, latest WO/qty). Runs without the other half if the
+     workbook (or the folders) aren't there yet.
 Toggles: Settings 'update_mpl_matrix' / 'update_master_parts' and
 stage_options keys 'mpl_matrix' / 'master_parts' (all default ON);
 Settings 'dry_run' previews the MPL changes without saving. A locked
@@ -309,29 +312,65 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
     return True
 
 
+def _batch_folder_ppns(batch_folder: Path, log) -> list:
+    """PPNs read off the batch root's ORDER FOLDER NAMES ('{WO}-{PPN}' - the
+    text after the first dash), skipping the Documentation folder and REPEAT
+    BATCHES. These fill the PO 321+ column (user-specified source: the
+    folders, not the PO workbook - so the column fills even when the workbook
+    is missing or blank)."""
+    ppns: list = []
+    seen = set()
+    try:
+        for entry in sorted(os.listdir(batch_folder)):
+            p = batch_folder / entry
+            n = entry.lower()
+            if not p.is_dir() or "documentation" in n or "repeat" in n:
+                continue
+            if "-" not in entry:
+                continue
+            ppn = entry.split("-", 1)[1].strip()
+            if ppn and ppn.lower() not in seen:
+                seen.add(ppn.lower())
+                ppns.append(ppn)
+    except OSError as e:
+        log(f"WARNING: could not scan the batch folder for order folders: {e}")
+    return ppns
+
+
 def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
                        new_po_num: int, batch_folder: Path, do_matrix: bool,
                        do_master: bool, dry_run: bool, log) -> int:
-    """v2.4.0 stage: parse the batch's own PO workbook and maintain the MPL
-    (PO 321+ column + MASTER PARTS catalog) in ONE open/save. Returns the
-    error count (0 or 1) - a locked/unreadable MPL is a warning, never a
+    """v2.4.0 stage: maintain the MPL in ONE open/save. The PO 321+ column is
+    filled from the batch's ORDER FOLDER NAMES; the MASTER PARTS catalog from
+    the batch's own PO workbook (which has the DYPN/material/qty detail the
+    folder names don't). Either half can proceed without the other. Returns
+    the error count (0 or 1) - a locked/unreadable MPL is a warning, never a
     run-killer, so repeat pulling still happens."""
-    res = mp.extract_batch(batch_folder, new_po_num, log=log)
-    if res["status"] != "ok":
-        reasons = {
-            "old_rev": "the batch's PO workbook isn't REV C",
-            "no_po_workbook": f"no 'PO {new_po_num} QF-QU-09 REV C' workbook "
-                              "in the batch's Documentation or order folders",
-        }
-        log(f"WARNING: MPL update skipped - "
-            f"{reasons.get(res['status'], res.get('error', res['status']))}.")
-        return 0
-    for w in res["warnings"]:
-        log(f"  note: {w}")
-    log(f"Parsed {len(res['rows'])} PO rows from '{res['path'].name}'")
+    ppn_list = _batch_folder_ppns(batch_folder, log) if do_matrix else []
+    if do_matrix and not ppn_list:
+        log("WARNING: no order folders in the batch root yet - the PO column "
+            "can't be filled from them this run.")
 
-    # unique PPNs in sheet order = the PO 321+ column contents
-    ppn_list = list(dict.fromkeys(r["ppn"].strip() for r in res["rows"]))
+    po_rows = []
+    if do_master:
+        res = mp.extract_batch(batch_folder, new_po_num, log=log)
+        if res["status"] != "ok":
+            reasons = {
+                "old_rev": "the batch's PO workbook isn't REV C",
+                "no_po_workbook": f"no 'PO {new_po_num} QF-QU-09 REV C' "
+                                  "workbook in the batch's Documentation or "
+                                  "order folders",
+            }
+            log(f"WARNING: MASTER PARTS update skipped - "
+                f"{reasons.get(res['status'], res.get('error', res['status']))}.")
+        else:
+            for w in res["warnings"]:
+                log(f"  note: {w}")
+            log(f"Parsed {len(res['rows'])} PO rows from '{res['path'].name}'")
+            po_rows = res["rows"]
+
+    if not ppn_list and not po_rows:
+        return 0
 
     try:
         wb = sdk.load_workbook_resilient(spreadsheet_path, log=log)
@@ -341,11 +380,11 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
         return 1
     try:
         changed = False
-        if do_matrix:
+        if do_matrix and ppn_list:
             changed |= _write_po_matrix_column(wb, new_po_num, ppn_list, log)
-        if do_master:
+        if do_master and po_rows:
             changed |= _update_master_parts_sheet(
-                wb, new_po_num, res["rows"], quote_path, log)
+                wb, new_po_num, po_rows, quote_path, log)
         if not changed:
             return 0
         if dry_run:

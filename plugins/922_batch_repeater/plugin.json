@@ -36,7 +36,7 @@
         "key": "update_mpl_matrix",
         "type": "boolean",
         "label": "Update MPL PO columns",
-        "description": "When on, the new batch's 'PO {n}' column is written into the PO 321+ sheet from the batch's own 'PO {n} QF-QU-09 REV C' workbook (existing cells are never overwritten).",
+        "description": "When on, the new batch's 'PO {n}' column is written into the PO 321+ sheet from the batch root's order folder names (existing cells are never overwritten).",
         "required": false,
         "default": true
       },
