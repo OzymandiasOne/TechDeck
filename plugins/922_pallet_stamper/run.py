@@ -284,7 +284,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     total = len(subfolders)
     stamped_count = 0
     skipped_count = 0
-    error_count = 0
+    failures: list = []  # (order_no, pallet_no, pdf_path) - retried after the main pass
 
     log(f"Processing {total} order folders...")
     log("")
@@ -322,8 +322,32 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             log(f"Stamped {order_no} -> Pallet {pallet_no}")
             stamped_count += 1
         else:
-            error_count += 1
+            # remember it - a second pass retries after the main run (cloud
+            # hydration failures are usually transient)
+            failures.append((order_no, pallet_no, pdf_path))
 
+    # === Retry pass ========================================================
+    # A OneDrive cloud error on one PDF shouldn't cost a manual stamp if the
+    # file hydrates fine two minutes later - go back to the missed ones once,
+    # then report whatever still failed with its pallet so the user can stamp
+    # those by hand.
+    if failures and not cancel_event.is_set():
+        log("")
+        log(f"Retrying {len(failures)} failed stamp(s)...")
+        still_failed = []
+        for i, (order_no, pallet_no, pdf_path) in enumerate(failures):
+            if cancel_event.is_set():
+                still_failed.extend(failures[i:])  # untried = still failed
+                break
+            if stamp_single(pdf_path, batch_no, pallet_no, font_size,
+                            h_offset, v_offset, log):
+                log(f"Stamped on retry: {order_no} -> Pallet {pallet_no}")
+                stamped_count += 1
+            else:
+                still_failed.append((order_no, pallet_no, pdf_path))
+        failures = still_failed
+
+    error_count = len(failures)
     progress_callback(95)
 
     log("")
@@ -336,13 +360,23 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log(f"Skipped: {skipped_count}")
 
     if error_count > 0:
-        log(f"Errors: {error_count}")
+        log(f"NOT stamped (after retry): {error_count}")
+        for order_no, pallet_no, pdf_path in failures:
+            log(f"  {order_no} -> Pallet {pallet_no}  ({Path(pdf_path).name})")
 
     log("=" * 50)
 
     progress_callback(100)
 
     if error_count > 0:
+        lines = "\n".join(
+            f"  {order_no}  ->  Pallet {pallet_no}\n      {pdf_path}"
+            for order_no, pallet_no, pdf_path in failures)
+        sdk.show_warning(
+            params,
+            "Pallet Stamper - stamps missing",
+            f"{error_count} PDF(s) could not be stamped (even after a retry). "
+            f"Stamp these by hand:\n\n{lines}")
         log("WARNING: Completed with errors")
     else:
         log("All done successfully!")
