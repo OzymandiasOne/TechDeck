@@ -89,6 +89,8 @@ class SheetMetalCalculators(PluginWindow):
         # Per-form runtime state, rebuilt on each calculator selection.
         self._fields = {}          # key -> (spec, widget)
         self._dynamic_labels = []  # (field_spec, QLabel) pairs to refresh live
+        self._visibility_rows = []  # (field_spec, row_index) pairs to show/hide live
+        self._form = None          # the active QFormLayout (for setRowVisible)
         self._result_box = None
         self._error_label = None
 
@@ -131,6 +133,8 @@ class SheetMetalCalculators(PluginWindow):
     def _clear_panel(self):
         self._fields = {}
         self._dynamic_labels = []
+        self._visibility_rows = []
+        self._form = None
         self._result_box = None
         self._error_label = None
         while self._panel_layout.count():
@@ -164,15 +168,18 @@ class SheetMetalCalculators(PluginWindow):
         form.setHorizontalSpacing(14)
         form.setVerticalSpacing(10)
 
-        for spec in calc["fields"]:
+        for row_index, spec in enumerate(calc["fields"]):
             label = QLabel(self._label_text(spec, {}))
             label.setStyleSheet("font-weight: bold;")
             widget = self._make_widget(spec)
             self._fields[spec["key"]] = (spec, widget)
             if callable(spec.get("dynamic_label")):
                 self._dynamic_labels.append((spec, label))
+            if callable(spec.get("visible_when")):
+                self._visibility_rows.append((spec, row_index))
             form.addRow(label, widget)
 
+        self._form = form
         self._panel_layout.addLayout(form)
 
         calc_btn = QPushButton(calc.get("button_text", "Calculate"))
@@ -200,7 +207,7 @@ class SheetMetalCalculators(PluginWindow):
         self._panel_layout.addWidget(self._result_box)
 
         self._panel_layout.addStretch(1)
-        self._refresh_dynamic_labels()
+        self._on_input_change()
 
     def _make_widget(self, spec: dict) -> QWidget:
         ftype = spec.get("type", "number")
@@ -212,7 +219,7 @@ class SheetMetalCalculators(PluginWindow):
                 if value == spec.get("default"):
                     default_index = i
             combo.setCurrentIndex(default_index)
-            combo.currentIndexChanged.connect(self._refresh_dynamic_labels)
+            combo.currentIndexChanged.connect(self._on_input_change)
             return combo
 
         # number
@@ -222,6 +229,7 @@ class SheetMetalCalculators(PluginWindow):
         if spec.get("placeholder"):
             edit.setPlaceholderText(spec["placeholder"])
         edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        edit.textChanged.connect(self._on_input_change)
         return edit
 
     # -- values / labels ---------------------------------------------------
@@ -250,12 +258,33 @@ class SheetMetalCalculators(PluginWindow):
                     values[key] = float("nan")
         return values
 
-    def _refresh_dynamic_labels(self):
-        if not self._dynamic_labels:
+    def _on_input_change(self, *args):
+        """Any input changed: refresh live labels and conditional-field visibility."""
+        if not self._dynamic_labels and not self._visibility_rows:
             return
         values = self._current_values()
+        self._refresh_dynamic_labels(values)
+        self._refresh_visibility(values)
+
+    def _refresh_dynamic_labels(self, values=None):
+        if not self._dynamic_labels:
+            return
+        if values is None:
+            values = self._current_values()
         for spec, label in self._dynamic_labels:
             label.setText(self._label_text(spec, values))
+
+    def _refresh_visibility(self, values=None):
+        if not self._visibility_rows or self._form is None:
+            return
+        if values is None:
+            values = self._current_values()
+        for spec, row_index in self._visibility_rows:
+            try:
+                visible = bool(spec["visible_when"](values))
+            except Exception:
+                visible = True
+            self._form.setRowVisible(row_index, visible)
 
     # -- compute -----------------------------------------------------------
     def _calculate(self):
@@ -277,7 +306,10 @@ class SheetMetalCalculators(PluginWindow):
         text = result if isinstance(result, str) else f"{result:,.{decimals}f}"
         unit = self._active.get("result_unit", "")
         label = self._active.get("result_label", "Result")
-        self._result_box.setText(f"{label}: {text}{(' ' + unit) if unit else ''}")
+        body = f"{text}{(' ' + unit) if unit else ''}"
+        # A calc that computes its own multi-line result string sets a falsy
+        # result_label to suppress the "Label: " prefix (e.g. Bend Deduction).
+        self._result_box.setText(f"{label}: {body}" if label else body)
         self._result_box.show()
 
         if callable(self._on_success):
@@ -326,6 +358,107 @@ _DIM_LABELS = {
     "id": "Inside Diameter (ID)",
     "od": "Outside Diameter (OD)",
 }
+
+
+def _result_table(rows):
+    """Render a list of (label, value) rows as an HTML table for a calculator
+    that produces several results at once. The LAST row is the headline (bold,
+    larger, accent-colored) - mirroring the HTML calculators' bottom "total"
+    line. Returned as a string so the engine shows it verbatim (the calc sets a
+    falsy result_label to suppress the "Result:" prefix).
+    """
+    parts = ["<table style='border-collapse:collapse;'>"]
+    last = len(rows) - 1
+    for i, (label, value) in enumerate(rows):
+        headline = i == last
+        size = "15pt" if headline else "11pt"
+        weight = "bold" if headline else "normal"
+        top = "border-top:1px solid #888; padding-top:6px;" if headline else ""
+        parts.append(
+            f"<tr>"
+            f"<td style='text-align:left; padding:3px 18px 3px 0; "
+            f"font-size:{size}; font-weight:{weight}; {top}'>{label}</td>"
+            f"<td style='text-align:right; font-family:monospace; "
+            f"font-size:{size}; font-weight:{weight}; {top}'>{value}</td>"
+            f"</tr>"
+        )
+    parts.append("</table>")
+    return "".join(parts)
+
+
+def _bend_deduction(v):
+    """Bend deduction / allowance / setback. Ported from BenDud_01."""
+    t = v["thickness"]
+    r = v["radius"]
+    angle = v["angle"]
+    k = v["kfactor_custom"] if v["kfactor_choice"] == "custom" else v["kfactor_choice"]
+
+    if any(math.isnan(x) for x in (t, r, angle, k)):
+        raise CalcError("Please enter valid numbers in every field.")
+    if t <= 0:
+        raise CalcError("Material Thickness must be greater than 0.")
+    if not (0 < angle < 180):
+        raise CalcError("Bend Angle must be between 0 and 180 degrees.")
+    if k <= 0:
+        raise CalcError("K-Factor must be greater than 0.")
+
+    angle_rad = math.radians(angle)
+    ba = angle_rad * (r + k * t)
+    ossb = math.tan(angle_rad / 2.0) * (r + t)
+    bd = 2.0 * ossb - ba
+
+    return _result_table([
+        ("Outside Setback (OSSB)", f"{ossb:.4f}"),
+        ("Bend Allowance (BA)", f"{ba:.4f}"),
+        ("Bend Deduction (BD)", f"{bd:.4f}"),
+    ])
+
+
+_WEIGHT_METHOD_LABELS = {
+    "sqin": "Total Square Inches (SQ IN)",
+    "sqft": "Total Square Feet (SQ FT)",
+}
+
+
+def _material_weight(v):
+    """Sheet material weight by sheet size or total area. Ported from
+    Mat_Weight_Cal_02."""
+    density = v["density_custom"] if v["material"] == "custom" else v["material"]
+    t = v["thickness"]
+    method = v["method"]
+
+    if math.isnan(density) or density <= 0:
+        raise CalcError("Please enter a valid material density greater than 0.")
+    if math.isnan(t) or t <= 0:
+        raise CalcError("Material Thickness must be greater than 0.")
+
+    if method == "sheet":
+        length = v["length"]
+        width = v["width"]
+        if any(math.isnan(x) for x in (length, width)):
+            raise CalcError("Please enter valid Length and Width values.")
+        total_sq_in = length * width
+    elif method == "sqft":
+        if math.isnan(v["area"]):
+            raise CalcError("Please enter a valid area.")
+        total_sq_in = v["area"] * 144.0
+    else:  # sqin
+        if math.isnan(v["area"]):
+            raise CalcError("Please enter a valid area.")
+        total_sq_in = v["area"]
+
+    if total_sq_in <= 0:
+        raise CalcError("The sheet area must be greater than 0.")
+
+    total_sq_ft = total_sq_in / 144.0
+    total_weight = total_sq_in * t * density
+    weight_per_sq_ft = 144.0 * t * density
+
+    return _result_table([
+        ("Total Area", f"{total_sq_ft:,.2f} sq ft ({total_sq_in:,.0f} sq in)"),
+        ("Unit Weight", f"{weight_per_sq_ft:,.2f} lbs / sq ft"),
+        ("Total Weight", f"{total_weight:,.2f} lbs"),
+    ])
 
 CALCULATORS = [
     {
@@ -382,5 +515,135 @@ CALCULATORS = [
         "compute": _flat_length,
         "result_label": "Flat Length",
         "decimals": 3,
+    },
+    {
+        "id": "bend_deduction",
+        "name": "Bend Deduction Calculator",
+        "description": (
+            "Bend allowance, outside setback, and bend deduction for a single "
+            "air bend, from thickness, inside radius, angle, and K-factor."
+        ),
+        "fields": [
+            {
+                "key": "thickness",
+                "label": "Material Thickness (T)",
+                "type": "number",
+                "default": 0.063,
+                "placeholder": "e.g., 0.063",
+            },
+            {
+                "key": "radius",
+                "label": "Inside Bend Radius (R)",
+                "type": "number",
+                "default": 0.063,
+                "placeholder": "e.g., 0.063",
+            },
+            {
+                "key": "angle",
+                "label": "Bend Angle (Degrees)",
+                "type": "number",
+                "default": 90,
+                "placeholder": "1 - 179",
+            },
+            {
+                "key": "kfactor_choice",
+                "label": "K-Factor",
+                "type": "choice",
+                "choices": [
+                    ("0.44 - Mild Steel (Air Bend)", 0.44),
+                    ("0.45 - Stainless Steel (Air Bend)", 0.45),
+                    ("0.40 - Aluminum (Air Bend)", 0.40),
+                    ("0.38 - Copper / Soft Brass", 0.38),
+                    ("0.50 - Bottoming / Coined", 0.50),
+                    ("Custom Value...", "custom"),
+                ],
+                "default": 0.44,
+            },
+            {
+                "key": "kfactor_custom",
+                "label": "Custom K-Factor",
+                "type": "number",
+                "default": 0.44,
+                "placeholder": "e.g., 0.42",
+                "visible_when": lambda v: v.get("kfactor_choice") == "custom",
+            },
+        ],
+        "compute": _bend_deduction,
+        "result_label": None,  # compute returns its own multi-row result
+    },
+    {
+        "id": "material_weight",
+        "name": "Material Weight Calculator",
+        "description": (
+            "Sheet / plate weight from material density and thickness - by sheet "
+            "size (L x W) or by a known total area in square inches or square feet."
+        ),
+        "fields": [
+            {
+                "key": "material",
+                "label": "Material Type",
+                "type": "choice",
+                "choices": [
+                    ("Mild Steel (0.2833 lbs/in3)", 0.2833),
+                    ("Aluminum 5052/6061 (0.098 lbs/in3)", 0.0980),
+                    ("Stainless 304/316 (0.289 lbs/in3)", 0.2890),
+                    ("Copper (0.323 lbs/in3)", 0.3230),
+                    ("Brass (0.307 lbs/in3)", 0.3070),
+                    ("Custom Density...", "custom"),
+                ],
+                "default": 0.2833,
+            },
+            {
+                "key": "density_custom",
+                "label": "Custom Density (lbs/in3)",
+                "type": "number",
+                "placeholder": "e.g., 0.2833",
+                "visible_when": lambda v: v.get("material") == "custom",
+            },
+            {
+                "key": "thickness",
+                "label": "Material Thickness (Inches)",
+                "type": "number",
+                "default": 0.190,
+                "placeholder": "e.g., 0.190",
+            },
+            {
+                "key": "method",
+                "label": "Calculation Method",
+                "type": "choice",
+                "choices": [
+                    ("Sheet Size (L x W)", "sheet"),
+                    ("Total SQ IN", "sqin"),
+                    ("Total SQ FT", "sqft"),
+                ],
+                "default": "sheet",
+            },
+            {
+                "key": "length",
+                "label": "Length (Inches)",
+                "type": "number",
+                "default": 96,
+                "visible_when": lambda v: v.get("method") == "sheet",
+            },
+            {
+                "key": "width",
+                "label": "Width (Inches)",
+                "type": "number",
+                "default": 48,
+                "visible_when": lambda v: v.get("method") == "sheet",
+            },
+            {
+                "key": "area",
+                "label": "Total Square Inches (SQ IN)",
+                "type": "number",
+                "default": 4608,
+                "dynamic_label": lambda v: _WEIGHT_METHOD_LABELS.get(
+                    v.get("method"), "Total Area"
+                ),
+                "visible_when": lambda v: v.get("method") != "sheet",
+            },
+        ],
+        "compute": _material_weight,
+        "result_label": None,  # compute returns its own multi-row result
     },
 ]
