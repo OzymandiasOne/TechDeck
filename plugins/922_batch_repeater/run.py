@@ -1,6 +1,22 @@
 """
-Batch Repeater Plugin for TechDeck v2.3.0
+Batch Repeater Plugin for TechDeck v2.4.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
+
+v2.4.0: the repeater now MAINTAINS the 922 MPL workbook instead of only
+reading it. Before the repeat search it parses the new batch's own
+'PO {n} QF-QU-09 REV C' workbook (Documentation folder, order-folder copies
+as fallback) and, in one open/save of 922 MPL.xlsx:
+  1) writes the batch's 'PO {n}' column into the PO 321+ matrix sheet
+     (fills a missing column so the old "PO isn't in the spreadsheet" dead
+     end fixes itself; an existing column only gets blanks filled), and
+  2) folds every order into the MASTER PARTS catalog sheet via the shared
+     master_parts.py merge engine - new parts appended, repeats updated
+     (times made, batch history, alternate suffixes, latest WO/qty).
+Toggles: Settings 'update_mpl_matrix' / 'update_master_parts' and
+stage_options keys 'mpl_matrix' / 'master_parts' (all default ON);
+Settings 'dry_run' previews the MPL changes without saving. A locked
+workbook (open in Excel) skips the MPL stage with a warning - repeat
+pulling still runs.
 
 v2.1.0: after the CAD/binder distribution, POSTs the repeats' card titles to
 the 'TechDeck 922 Repeat Tagger' Power Automate flow, which adds the REPEAT
@@ -33,6 +49,16 @@ except ModuleNotFoundError:
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
+
+# master_parts.py lives beside this file; load it by path so it resolves under
+# every plugin-loader import style (dev repo AND %LOCALAPPDATA% installs).
+import importlib.util as _ilu
+_MP_SPEC = _ilu.spec_from_file_location(
+    "techdeck_922_master_parts",
+    Path(__file__).resolve().parent / "master_parts.py")
+assert _MP_SPEC is not None and _MP_SPEC.loader is not None
+mp = _ilu.module_from_spec(_MP_SPEC)
+_MP_SPEC.loader.exec_module(mp)
 
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
@@ -171,6 +197,172 @@ def _read_mpl_po_columns(path: Path, preferred_sheet: str, log) -> Tuple[Any, Di
     return df, po_columns
 
 
+def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log) -> bool:
+    """Write the batch's 'PO {n}' column into the PO 321+ matrix sheet of an
+    open MPL workbook. The sheet + header row are found by scanning for
+    'PO ###' header cells (Hard Rule 2). A missing column is created after the
+    last PO column (header look copied from its neighbor); an existing column
+    only gets PPNs it doesn't already contain appended below its last value -
+    a hand-edited cell is never overwritten. Returns True if anything changed."""
+    import copy as _copy
+    best_ws, best_row, best_cols = None, None, {}
+    for ws in wb.worksheets:
+        for r_i in range(1, min(8, ws.max_row or 1) + 1):
+            cols = {}
+            for c_i in range(1, (ws.max_column or 1) + 1):
+                v = ws.cell(r_i, c_i).value
+                if isinstance(v, str) and _PO_HDR_RE.match(v):
+                    m = re.search(r"(\d+)", v)
+                    if m:
+                        cols[int(m.group(1))] = c_i
+            if len(cols) > len(best_cols):
+                best_ws, best_row, best_cols = ws, r_i, cols
+    if best_ws is None or len(best_cols) < 3:
+        log("WARNING: couldn't find the PO matrix sheet - PO column not written.")
+        return False
+
+    changed = False
+    if new_po_num in best_cols:
+        col = best_cols[new_po_num]
+    else:
+        col = max(best_cols.values()) + 1
+        hdr = best_ws.cell(best_row, col)
+        hdr.value = f"PO {new_po_num}"
+        left = best_ws.cell(best_row, col - 1)
+        try:
+            hdr.font = _copy.copy(left.font)
+            hdr.fill = _copy.copy(left.fill)
+            hdr.border = _copy.copy(left.border)
+            hdr.alignment = _copy.copy(left.alignment)
+        except Exception:
+            pass
+        log(f"Added column 'PO {new_po_num}' to '{best_ws.title}'")
+        changed = True
+
+    existing = []
+    for r_i in range(best_row + 1, (best_ws.max_row or best_row) + 1):
+        v = best_ws.cell(r_i, col).value
+        if v is not None and str(v).strip():
+            existing.append(str(v).strip().lower())
+    next_row = best_row + 1 + len(existing)
+    have = set(existing)
+    added = 0
+    for ppn in ppn_list:
+        if ppn.strip().lower() in have:
+            continue
+        best_ws.cell(next_row, col, ppn)
+        next_row += 1
+        added += 1
+    if added:
+        log(f"PO {new_po_num} column: {added} order(s) written"
+            + (f" (kept {len(existing)} already there)" if existing else ""))
+        changed = True
+    elif existing:
+        log(f"PO {new_po_num} column already lists all "
+            f"{len(existing)} order(s) - unchanged.")
+    return changed
+
+
+def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
+                               log) -> bool:
+    """Fold the batch's PO rows into the MASTER PARTS catalog sheet of an open
+    MPL workbook via the shared merge engine. Orders whose PPN already records
+    this batch are skipped (idempotent re-runs). Returns True if the sheet was
+    rewritten."""
+    import datetime as _dt
+    if mp.MASTER_SHEET_NAME not in wb.sheetnames:
+        log(f"WARNING: no '{mp.MASTER_SHEET_NAME}' sheet in the MPL - run the "
+            "initial build (tools/mpl_build_master.py) first; skipped.")
+        return False
+    cat = mp.read_master_sheet(wb[mp.MASTER_SHEET_NAME])
+    today = _dt.date.today().isoformat()
+
+    occ: Dict[Tuple[str, str], list] = {}
+    for r in po_rows:
+        occ.setdefault((r["order"], r["ppn"]), []).append(r)
+    merged = skipped = 0
+    for (wo, ppn), rows in occ.items():
+        if cat.has_batch(ppn, new_po_num):
+            skipped += 1
+            continue
+        cat.merge_occurrence(ppn, new_po_num, wo, rows, today)
+        merged += 1
+    if merged == 0:
+        log(f"MASTER PARTS already records batch {new_po_num} for all "
+            f"{skipped} order(s) - nothing to add.")
+        return False
+    cat.finalize_times_made()
+    try:
+        pricing = mp.load_pricing_map(quote_path, log=log)
+        cat.apply_part_types(pricing)
+    except Exception as exc:
+        log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
+            " - existing part types kept, new parts typed from tube serials "
+            "only.")
+        cat.apply_part_types({}, only_untyped=True)
+    for w in cat.warnings:
+        log(f"  note: {w}")
+    mp.write_master_sheet(wb, cat.sorted_rows())
+    log(f"MASTER PARTS updated: {merged} order(s) folded in"
+        + (f", {skipped} already recorded" if skipped else "")
+        + f" - {len(cat.rows)} catalog rows total.")
+    return True
+
+
+def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
+                       new_po_num: int, batch_folder: Path, do_matrix: bool,
+                       do_master: bool, dry_run: bool, log) -> int:
+    """v2.4.0 stage: parse the batch's own PO workbook and maintain the MPL
+    (PO 321+ column + MASTER PARTS catalog) in ONE open/save. Returns the
+    error count (0 or 1) - a locked/unreadable MPL is a warning, never a
+    run-killer, so repeat pulling still happens."""
+    res = mp.extract_batch(batch_folder, new_po_num, log=log)
+    if res["status"] != "ok":
+        reasons = {
+            "old_rev": "the batch's PO workbook isn't REV C",
+            "no_po_workbook": f"no 'PO {new_po_num} QF-QU-09 REV C' workbook "
+                              "in the batch's Documentation or order folders",
+        }
+        log(f"WARNING: MPL update skipped - "
+            f"{reasons.get(res['status'], res.get('error', res['status']))}.")
+        return 0
+    for w in res["warnings"]:
+        log(f"  note: {w}")
+    log(f"Parsed {len(res['rows'])} PO rows from '{res['path'].name}'")
+
+    # unique PPNs in sheet order = the PO 321+ column contents
+    ppn_list = list(dict.fromkeys(r["ppn"].strip() for r in res["rows"]))
+
+    try:
+        wb = sdk.load_workbook_resilient(spreadsheet_path, log=log)
+    except sdk.UserFacingError as exc:
+        log(f"WARNING: {exc.problem} MPL update skipped - repeat pulling "
+            "continues.")
+        return 1
+    try:
+        changed = False
+        if do_matrix:
+            changed |= _write_po_matrix_column(wb, new_po_num, ppn_list, log)
+        if do_master:
+            changed |= _update_master_parts_sheet(
+                wb, new_po_num, res["rows"], quote_path, log)
+        if not changed:
+            return 0
+        if dry_run:
+            log("Dry run enabled in Settings -> MPL changes NOT saved.")
+            return 0
+        wb.save(spreadsheet_path)
+        log("MPL saved.")
+        return 0
+    except PermissionError:
+        log(f"WARNING: '{spreadsheet_path.name}' is open in another program "
+            "(usually Excel) - MPL changes NOT saved. Close it and re-run to "
+            "record this batch; repeat pulling continues.")
+        return 1
+    finally:
+        wb.close()
+
+
 def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     """
     Main plugin execution function.
@@ -188,8 +380,12 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     stage_options = params.get('stage_options') or {}
     do_distribute = bool(stage_options.get('distribute', True))
     do_tag = bool(stage_options.get('tag', True))
+    do_mpl_matrix = (bool(settings.get('update_mpl_matrix', True))
+                     and bool(stage_options.get('mpl_matrix', True)))
+    do_master_parts = (bool(settings.get('update_master_parts', True))
+                       and bool(stage_options.get('master_parts', True)))
 
-    log("Starting 922 Batch Repeater v2.3.0...")
+    log("Starting 922 Batch Repeater v2.4.0...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -283,7 +479,27 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     if cancel_event.is_set():
         log("Operation cancelled")
         return
-    
+
+    # === v2.4.0: MAINTAIN THE MPL (PO column + MASTER PARTS catalog) ========
+    # The batch folder is needed first - the batch's own PO workbook lives in
+    # its Documentation/order folders.
+    new_po_folder = base_path / actual_batch_name
+    new_po_folder.mkdir(exist_ok=True)
+    log(f"Batch folder: {new_po_folder.name}")
+
+    mpl_errors = 0
+    if do_mpl_matrix or do_master_parts:
+        log("")
+        log("Updating the MPL from the batch's PO workbook...")
+        quote_path = base_path / "2 - Planning" / "EB 922 H# Quote.xlsx"
+        mpl_errors = _update_mpl_sheets(
+            spreadsheet_path, quote_path, new_po_num, new_po_folder,
+            do_mpl_matrix, do_master_parts,
+            bool(settings.get('dry_run', False)), log)
+        log("")
+    else:
+        log("MPL updates switched OFF.")
+
     # Read the MPL and identify PO columns (sheet + header row auto-resolved,
     # not hardcoded - Hard Rule 2).
     log("Reading Excel spreadsheet...")
@@ -304,22 +520,25 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     log(f"Found {len(po_columns)} PO columns")
     progress_callback(20)
     
-    # Check if new PO exists
+    # Check if new PO exists. Normally the MPL stage above just wrote it from
+    # the batch's PO workbook; landing here means that stage was off, dry-run,
+    # skipped (no REV C workbook), or the save was blocked.
     if new_po_num not in po_columns:
         available_pos = sorted(po_columns.keys())
         raise sdk.UserFacingError(
             f"PO {new_po_num} isn't in the spreadsheet.",
-            f"Pick one of the POs that are there: {available_pos}.")
+            "TechDeck adds it automatically from the batch's 'PO {n} QF-QU-09 "
+            "REV C' workbook - make sure that workbook is in the batch's "
+            "Documentation folder, the MPL isn't open in Excel, and the "
+            "'Update MPL' settings are on. Otherwise add the column by hand. "
+            f"POs currently there: {available_pos}.")
     
     new_po_col = po_columns[new_po_num]
     log(f"Using column '{new_po_col}'")
     
-    # Setup destination folders. REPEAT BATCHES is created later, only after the
-    # user has chosen which repeats to pull (so a cancelled run leaves no folder).
-    new_po_folder = base_path / actual_batch_name
-    new_po_folder.mkdir(exist_ok=True)
-    log(f"Created: {new_po_folder.name}")
-
+    # REPEAT BATCHES is created later, only after the user has chosen which
+    # repeats to pull (so a cancelled run leaves no folder). new_po_folder
+    # itself was already created before the MPL stage above.
     repeat_batch_folder = new_po_folder / "REPEAT BATCHES"
 
     progress_callback(25)
@@ -413,7 +632,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # Copy folders with progress
     copied_count = 0
     not_found_count = 0
-    error_count = 0
+    error_count = mpl_errors  # a skipped MPL save counts as a warning-level error
     copied_repeats: list = []  # destination folders inside REPEAT BATCHES (for DYPN distribution below)
     
     total_orders = len(orders_to_copy)

@@ -287,9 +287,11 @@ def natural_suffix_key(suffix: str):
 # Part typing (EB 922 H# Quote.xlsx -> MATERIAL PRICING)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Display order for composite types: a multi-material piece's families join in
+# THIS order (so plate+rod is always 'Mount Plate / Rod', never the reverse).
 PART_TYPE_FAMILIES = (
-    "Assembly", "Clevis", "Tube", "Flat Bar", "Angle Iron", "Square Bar",
-    "Round Bar", "Rod", "Lug", "Mount Plate",
+    "Assembly", "Clevis", "Mount Plate", "Lug", "Flat Bar", "Tube",
+    "Rod", "Angle Iron", "Square Bar", "Round Bar",
 )
 
 # Ordered: first hit wins. 'Flat Bar Assembly' must land on Assembly, and
@@ -420,7 +422,10 @@ def classify_part(source_material: Optional[str],
     for i in infos:
         if i["family"] not in families:
             families.append(i["family"])
-    known = [f for f in families if f != "Unknown"]
+    known = sorted(
+        (f for f in families if f != "Unknown"),
+        key=lambda f: (PART_TYPE_FAMILIES.index(f)
+                       if f in PART_TYPE_FAMILIES else len(PART_TYPE_FAMILIES), f))
     best = next((i for i in infos if i["family"] != "Unknown"), infos[0])
     return {
         "family": " / ".join(known) if known else "Unknown",
@@ -617,14 +622,25 @@ class Catalog:
         state["prev"] = this_occ
         state["batches"].add(batch)
 
+    def has_batch(self, ppn: str, batch: int) -> bool:
+        """True when this batch is already recorded for the PPN - the
+        repeater's idempotency guard against double-counting a re-run."""
+        return batch in self._ppn.get(ppn.upper(), {}).get("batches", set())
+
     def finalize_times_made(self) -> None:
         """TIMES MADE = distinct batches the PPN ran in (PPN-level, same value
         on every row of the PPN - the user's definition of a repeat)."""
         for (pu, _), row in self.rows.items():
             row["times_made"] = len(self._ppn.get(pu, {}).get("batches", ())) or 1
 
-    def apply_part_types(self, pricing: Dict[str, Dict[str, Any]]) -> None:
+    def apply_part_types(self, pricing: Dict[str, Dict[str, Any]],
+                         only_untyped: bool = False) -> None:
+        """only_untyped=True leaves rows that already carry a real type alone -
+        used when the pricing sheet couldn't be read, so existing types are
+        never clobbered to Unknown."""
         for row in self.rows.values():
+            if only_untyped and row.get("part_type") not in (None, "", "Unknown"):
+                continue
             info = classify_part(row.get("source_material"), pricing)
             row["part_type"] = info["family"]
             row["part_type_source"] = info["source"]

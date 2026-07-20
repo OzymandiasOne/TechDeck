@@ -1,8 +1,8 @@
 {
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
-  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Labels each repeat's Teams card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
-  "version": "2.3.0",
+  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Labels each repeat's Teams card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
+  "version": "2.4.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "🔄",
@@ -33,6 +33,22 @@
         }
       },
       {
+        "key": "update_mpl_matrix",
+        "type": "boolean",
+        "label": "Update MPL PO columns",
+        "description": "When on, the new batch's 'PO {n}' column is written into the PO 321+ sheet from the batch's own 'PO {n} QF-QU-09 REV C' workbook (existing cells are never overwritten).",
+        "required": false,
+        "default": true
+      },
+      {
+        "key": "update_master_parts",
+        "type": "boolean",
+        "label": "Update MASTER PARTS catalog",
+        "description": "When on, every order in the batch's PO workbook is folded into the MPL's MASTER PARTS sheet - new parts appended, repeats updated (times made, batch history, alternate part names). Re-runs are safe: a batch already recorded is skipped.",
+        "required": false,
+        "default": true
+      },
+      {
         "key": "repeat_webhook_url",
         "type": "string",
         "label": "Repeat Tagger Webhook URL (override)",
@@ -44,8 +60,8 @@
       {
         "key": "dry_run",
         "type": "boolean",
-        "label": "Dry run card tagging (preview only)",
-        "description": "When on, build and save the REPEAT-tagging payload but do not post it to the webhook. Forced on automatically when no webhook URL is set. Folder copying is NOT affected by this toggle.",
+        "label": "Dry run (preview only)",
+        "description": "When on, the REPEAT-tagging payload is built and saved but not posted, and the MPL changes are computed and logged but not saved. Folder copying is NOT affected by this toggle.",
         "required": false,
         "default": false
       }
