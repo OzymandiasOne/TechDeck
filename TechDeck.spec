@@ -35,6 +35,12 @@ a = Analysis(
     excludes=[
         # Dev/IDE and stdlib never imported by the app or any plugin.
         'tkinter', 'Pythonwin', 'pydoc_data',
+        # DevKit dev tools (Pixel Studio + authoring scripts) live under tools/
+        # and must NEVER ship. The shell lazy-imports them only behind the
+        # source-only dev-mode gate (techdeck.ui.dev_mode.is_dev_build), but
+        # PyInstaller's static analysis can't see that guard, so exclude the
+        # whole package here to keep it out of every frozen build.
+        'tools',
         # Qt modules NOT imported anywhere in techdeck/ or plugins/ (verified by
         # grep: only QtCharts/QtCore/QtGui/QtMultimedia/QtSvg/QtWidgets are used).
         # Excluding the bindings stops PyInstaller pulling these large, unused

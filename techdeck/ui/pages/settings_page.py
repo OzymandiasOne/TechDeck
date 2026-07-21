@@ -64,6 +64,18 @@ class SettingsPage(QWidget, ThemeAware):
         self.tabs.addTab(self._create_plugin_tab(),          "Apps")
         self.tabs.addTab(self._create_helpfeedback_tab(),    "Help && Feedback")
 
+        # DevKit tab — developer tools (source builds only). Never added in a
+        # frozen exe; when present it stays hidden until the Home dev-mode
+        # toggle is switched on.
+        from techdeck.ui.dev_mode import is_dev_build, get_dev_mode
+        self._devkit_tab_index = None
+        if is_dev_build():
+            self._devkit_tab_index = self.tabs.addTab(
+                self._create_devkit_tab(), "DevKit")
+            self.tabs.setTabVisible(
+                self._devkit_tab_index, get_dev_mode().is_active())
+            get_dev_mode().changed.connect(self._on_dev_mode_changed)
+
         # Hidden tabs must not lock the window's minimum width.
         from techdeck.ui.utils import limit_min_size_to_current_page
         limit_min_size_to_current_page(self.tabs)
@@ -148,6 +160,46 @@ class SettingsPage(QWidget, ThemeAware):
     # ──────────────────────────────────────────────────────────────────────
     # HELP & FEEDBACK TAB
     # ──────────────────────────────────────────────────────────────────────
+
+    def _on_dev_mode_changed(self, active: bool):
+        """Show/hide the DevKit tab as the Home dev-mode toggle flips. Only
+        wired in source builds (the tab isn't added otherwise)."""
+        if self._devkit_tab_index is not None:
+            self.tabs.setTabVisible(self._devkit_tab_index, active)
+
+    def _create_devkit_tab(self) -> QWidget:
+        """DevKit: developer-only tools (Pixel Studio + diagnostics). Source
+        builds only — see techdeck.ui.dev_mode. Phase 0 is a placeholder; the
+        tool dropdown + embedded studio land in later phases."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(24)
+
+        title = QLabel("DevKit")
+        title.setStyleSheet("font-size: 24px; font-weight: bold;")
+        layout.addWidget(title)
+
+        desc = QLabel(
+            "Developer tools for building TechDeck itself — the Pixel Studio "
+            "and diagnostics. This surface exists only when running from "
+            "source and is never included in a shipped build."
+        )
+        desc.setStyleSheet("color: #888; font-size: 12px;")
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+
+        placeholder = QLabel("Tools land here in the next phase.")
+        placeholder.setStyleSheet("color: #666; font-size: 13px; margin-top: 8px;")
+        layout.addWidget(placeholder)
+
+        layout.addStretch()
+        scroll.setWidget(content)
+        return scroll
 
     def _create_helpfeedback_tab(self) -> QWidget:
         """Help & Feedback: Submit Feedback + version + check for updates."""

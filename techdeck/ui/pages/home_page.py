@@ -962,6 +962,20 @@ class HomePage(QWidget, ThemeAware):
         profile_layout.addWidget(self._profile_label)
         profile_layout.addWidget(self.profile_combo)
         profile_layout.addStretch()
+        # Dev-mode toggle (source builds only). Switches the shell into dev
+        # mode, which reveals the DevKit tab under Settings. Session-only —
+        # resets off each launch. Never constructed in a frozen exe, so a
+        # shipped build has no way to reach DevKit.
+        from techdeck.ui.dev_mode import is_dev_build, get_dev_mode
+        if is_dev_build():
+            self.btn_dev_mode = QPushButton("Dev Mode")
+            self.btn_dev_mode.setCheckable(True)
+            self.btn_dev_mode.setMinimumHeight(36)
+            self.btn_dev_mode.setToolTip(
+                "Developer mode (source builds only): reveals the DevKit tab "
+                "in Settings. Resets off each launch.")
+            self.btn_dev_mode.toggled.connect(get_dev_mode().set_active)
+            profile_layout.addWidget(self.btn_dev_mode)
         profile_layout.addWidget(self.btn_add)
 
         layout.addWidget(self._profile_container)
