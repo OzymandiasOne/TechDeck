@@ -16,7 +16,6 @@ DEFAULT_PROFILE_NAME = "Default"
 # These will be resolved at runtime using Path.home()
 SETTINGS_DIR_NAME = "TechDeck"
 SETTINGS_FILE_NAME = "settings.json"
-METRICS_FILE_NAME = "metrics.jsonl"
 PLUGINS_DIR_NAME = "plugins"
 
 # UI Constants

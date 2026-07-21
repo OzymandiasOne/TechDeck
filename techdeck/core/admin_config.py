@@ -115,14 +115,7 @@ class AdminConfigManager:
         return {
             "version": "1.0.0",
             "user_role": UserRole.USER.value,
-            "company_api_key": "",
-            "update_url": "",
-            "plugin_whitelist": [],  # Empty = all plugins allowed
-            "plugin_blacklist": [],  # Explicitly blocked plugins
-            "mandatory_plugins": [],  # Plugins that must be installed
-            "allow_plugin_install": True,
-            "allow_custom_profiles": True,
-            "locked": False  # If true, only super_admin can modify
+            "locked": False,  # If true, only super_admin can modify
         }
     
     # ========== Role Management ==========
@@ -161,141 +154,13 @@ class AdminConfigManager:
         """Check if current user is super_admin."""
         return self.get_user_role() == UserRole.SUPER_ADMIN
     
-    # ========== API Key Management ==========
-    
-    def get_api_key(self) -> str:
-        """Get company API key (read-only for users)."""
-        return self._config.get("company_api_key", "")
-    
-    def set_api_key(self, key: str) -> bool:
-        """
-        Set company API key (requires admin).
-        
-        Args:
-            key: New API key
-            
-        Returns:
-            True if successful, False if permission denied
-        """
-        if not self.is_admin():
-            return False
-        
-        self._config["company_api_key"] = key
-        return self.save()
-    
-    # ========== Update Management ==========
-    
-    def get_update_url(self) -> str:
-        """Get update server URL."""
-        return self._config.get("update_url", "")
-    
-    def set_update_url(self, url: str) -> bool:
-        """
-        Set update server URL (requires admin).
-        
-        Args:
-            url: New update URL
-            
-        Returns:
-            True if successful, False if permission denied
-        """
-        if not self.is_admin():
-            return False
-        
-        self._config["update_url"] = url
-        return self.save()
-    
-    # ========== Plugin Management ==========
-    
-    def is_plugin_allowed(self, plugin_id: str) -> bool:
-        """
-        Check if a plugin is allowed to run.
-        
-        Args:
-            plugin_id: Plugin ID to check
-            
-        Returns:
-            True if plugin is allowed
-        """
-        # Check blacklist first
-        blacklist = self._config.get("plugin_blacklist", [])
-        if plugin_id in blacklist:
-            return False
-        
-        # Check whitelist (empty = all allowed)
-        whitelist = self._config.get("plugin_whitelist", [])
-        if not whitelist:
-            return True
-        
-        return plugin_id in whitelist
-    
-    def get_mandatory_plugins(self) -> list[str]:
-        """Get list of plugins that must be installed."""
-        return self._config.get("mandatory_plugins", [])
-    
-    def set_plugin_whitelist(self, plugin_ids: list[str]) -> bool:
-        """
-        Set plugin whitelist (requires admin).
-        Empty list = all plugins allowed.
-        
-        Args:
-            plugin_ids: List of allowed plugin IDs
-            
-        Returns:
-            True if successful, False if permission denied
-        """
-        if not self.is_admin():
-            return False
-        
-        self._config["plugin_whitelist"] = plugin_ids
-        return self.save()
-    
-    def set_plugin_blacklist(self, plugin_ids: list[str]) -> bool:
-        """
-        Set plugin blacklist (requires admin).
-        
-        Args:
-            plugin_ids: List of blocked plugin IDs
-            
-        Returns:
-            True if successful, False if permission denied
-        """
-        if not self.is_admin():
-            return False
-        
-        self._config["plugin_blacklist"] = plugin_ids
-        return self.save()
-    
-    def set_mandatory_plugins(self, plugin_ids: list[str]) -> bool:
-        """
-        Set mandatory plugins (requires admin).
-        
-        Args:
-            plugin_ids: List of required plugin IDs
-            
-        Returns:
-            True if successful, False if permission denied
-        """
-        if not self.is_admin():
-            return False
-        
-        self._config["mandatory_plugins"] = plugin_ids
-        return self.save()
-    
-    # ========== Permission Checks ==========
-    
-    def can_install_plugins(self) -> bool:
-        """Check if user can install new plugins."""
-        if not self._config.get("allow_plugin_install", True):
-            return self.is_admin()
-        return True
-    
-    def can_create_profiles(self) -> bool:
-        """Check if user can create custom profiles."""
-        if not self._config.get("allow_custom_profiles", True):
-            return self.is_admin()
-        return True
-    
+    # NOTE: The plugin allow/deny-list, mandatory-plugins, company-API-key,
+    # configurable-update-URL, and install/profile permission gates were never
+    # wired into loading or execution — pure scaffolding — so they were removed.
+    # Only role state (below) is live, gating the /admin console command. If a
+    # real policy need appears, reintroduce enforcement at the call site, not
+    # just the accessor.
+
     # ========== Configuration Lock ==========
     
     def is_locked(self) -> bool:

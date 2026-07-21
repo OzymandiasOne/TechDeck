@@ -110,45 +110,12 @@ Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// Custom initialization for plugins directory and admin config
-procedure CurStepChanged(CurStep: TSetupStep);
-var
-  LocalAppData: String;
-  AdminConfigPath: String;
-  AdminConfig: String;
-begin
-  if CurStep = ssPostInstall then
-  begin
-    // Get %LOCALAPPDATA% path
-    LocalAppData := ExpandConstant('{localappdata}');
-    
-    // Create default admin.config if it doesn't exist
-    AdminConfigPath := LocalAppData + '\TechDeck\admin.config';
-    
-    if not FileExists(AdminConfigPath) then
-    begin
-      AdminConfig := '{' + #13#10 +
-        '  "version": "1.0.0",' + #13#10 +
-        '  "user_role": "user",' + #13#10 +
-        '  "company_api_key": "",' + #13#10 +
-        '  "update_url": "https://ozymandiasone.github.io/TechDeck-updates/manifest.json",' + #13#10 +
-        '  "plugin_whitelist": [],' + #13#10 +
-        '  "plugin_blacklist": [],' + #13#10 +
-        '  "mandatory_plugins": [],' + #13#10 +
-        '  "allow_plugin_install": true,' + #13#10 +
-        '  "allow_custom_profiles": true,' + #13#10 +
-        '  "locked": false' + #13#10 +
-        '}';
-      
-      SaveStringToFile(AdminConfigPath, AdminConfig, False);
-      Log('Created default admin.config at: ' + AdminConfigPath);
-    end
-    else
-    begin
-      Log('Admin config already exists, preserving: ' + AdminConfigPath);
-    end;
-  end;
-end;
+// NOTE: the installer used to write a default admin.config to
+// %LOCALAPPDATA%\TechDeck, but AdminConfigManager reads it from %PROGRAMDATA%
+// (system-wide, admin-only — that mismatch meant the file was never read), and
+// the default it wrote was identical to the code defaults anyway. Removed so
+// there is no misleading dead file. Admin policy, if ever needed, is a
+// deliberately-placed ProgramData\TechDeck\admin.config.
 
 // Uninstall: Ask about keeping user data
 function InitializeUninstall(): Boolean;
