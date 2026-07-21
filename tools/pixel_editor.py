@@ -15,6 +15,9 @@ Tools:  Pencil (paint active color) · Eraser (transparent) · Fill (flood) ·
 Mouse:  left-drag paints. The checkerboard shows transparency.
 Files:  New (set size) · Open · Save / Save As (.tdart) · Copy as Python
         (puts a PALETTE + ART snippet on the clipboard for legacy widgets).
+        Open/Save default to tools/pixel_playground.
+Edit:   Resize (scale art) · Reduce duplicate lines · Add / remove lines
+        (signed per-side count: positive adds transparent lines, negative crops).
 """
 
 import sys
@@ -483,8 +486,7 @@ class Editor(QMainWindow):
         editm.addSeparator()
         editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
         editm.addAction("Reduce duplicate lines", self.reduce_lines)
-        editm.addAction("Add lines (expand canvas)...", self.expand_canvas)
-        editm.addAction("Remove lines (crop canvas)...", self.crop_canvas)
+        editm.addAction("Add / remove lines...", self.resize_edges)
 
     def _build_sidebar(self):
         side = QFrame()
@@ -633,15 +635,18 @@ class Editor(QMainWindow):
         self.statusBar().showMessage(f"Resized to {nw}x{nh}")
 
     def _ask_sides(self, title):
-        """Per-side line-count dialog shared by Add lines / Remove lines.
-        Returns (top, bottom, left, right) or None on cancel."""
+        """Per-side SIGNED line-count dialog. Positive adds lines, negative
+        removes them. Returns (top, bottom, left, right) or None on cancel."""
         dlg = QDialog(self)
         dlg.setWindowTitle(title)
         form = QFormLayout(dlg)
+        hint = QLabel("Positive = add lines, negative = remove lines.")
+        hint.setWordWrap(True)
+        form.addRow(hint)
         spins = {}
         for side in ("Top", "Bottom", "Left", "Right"):
             sp = QSpinBox()
-            sp.setRange(0, 256)
+            sp.setRange(-256, 256)
             sp.setSuffix(" px")
             spins[side] = sp
             form.addRow(side, sp)
@@ -654,34 +659,30 @@ class Editor(QMainWindow):
             return None
         return tuple(spins[s].value() for s in ("Top", "Bottom", "Left", "Right"))
 
-    def expand_canvas(self):
-        """Add transparent rows/columns on chosen sides (no scaling)."""
-        sides = self._ask_sides("Add lines (expand canvas)")
-        if sides is None or sides == (0, 0, 0, 0):
+    def resize_edges(self):
+        """Add or remove rows/columns per side WITHOUT scaling. Each side takes a
+        signed count: positive pads transparent lines, negative crops lines
+        (art on removed lines is discarded). One undoable step."""
+        sides = self._ask_sides("Add / remove lines")
+        if sides is None or all(v == 0 for v in sides):
             return
+        # split each side into its pad (>=0) and crop (>=0) magnitudes
+        pad = tuple(max(v, 0) for v in sides)
+        crop = tuple(-min(v, 0) for v in sides)
         self.canvas.push_undo()
-        self.canvas.pad_grid(*sides)
+        # crop first (so a mixed add/remove can't transiently over-grow), then pad
+        if any(crop):
+            if not self.canvas.crop_grid(*crop):
+                self.canvas._undo.pop()   # nothing changed; drop the snapshot
+                self.statusBar().showMessage(
+                    "Refused - that would remove the whole canvas")
+                return
+        if any(pad):
+            self.canvas.pad_grid(*pad)
         if self.canvas.symmetry and self.canvas.grid_size()[0] != self.canvas.grid_size()[1]:
-            self.sym_btn.setChecked(False)
+            self.sym_btn.setChecked(False)   # 4-fold needs a square canvas
         w, h = self.canvas.grid_size()
-        self.statusBar().showMessage(f"Expanded to {w}x{h}")
-
-    def crop_canvas(self):
-        """Remove rows/columns from chosen sides (no scaling) — the inverse of
-        Add lines. Art on the removed lines is discarded (undoable)."""
-        sides = self._ask_sides("Remove lines (crop canvas)")
-        if sides is None or sides == (0, 0, 0, 0):
-            return
-        self.canvas.push_undo()
-        if not self.canvas.crop_grid(*sides):
-            self.canvas._undo.pop()   # nothing changed; drop the snapshot
-            self.statusBar().showMessage(
-                "Crop refused - that would remove the whole canvas")
-            return
-        if self.canvas.symmetry and self.canvas.grid_size()[0] != self.canvas.grid_size()[1]:
-            self.sym_btn.setChecked(False)
-        w, h = self.canvas.grid_size()
-        self.statusBar().showMessage(f"Cropped to {w}x{h}")
+        self.statusBar().showMessage(f"Canvas now {w}x{h}")
 
     def reduce_lines(self):
         self.canvas.push_undo()
@@ -847,7 +848,9 @@ class Editor(QMainWindow):
 
     # ---- helpers -------------------------------------------------------------
     def _assets_dir(self):
-        return Path(__file__).resolve().parents[1] / "assets"
+        # Default browse location for Open/Import/Save. Points at the pixel-art
+        # playground (icon sources live there) rather than the app's assets tree.
+        return Path(__file__).resolve().parent / "pixel_playground"
 
     def _on_modified(self):
         if not self.dirty:

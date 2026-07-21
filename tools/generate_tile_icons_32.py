@@ -416,6 +416,8 @@ def ruler(d):               # 911 linear inch calc
 _CALCULATOR_GRID = [
     "................................",
     "................................",
+    "................................",
+    "................................",
     "......aaaaaaaaaaaaaaaaaaaa......",
     "......aaaaaaaaaaaaaaaaaaaa......",
     "......aawwwwwwwwwwwwwwwwaa......",
@@ -442,8 +444,6 @@ _CALCULATOR_GRID = [
     "......aaaaaaaaaaaaaaaaaaaa......",
     "......aaaaaaaaaaaaaaaaaaaa......",
     "......aaaaaaaaaaaaaaaaaaaa......",
-    "................................",
-    "................................",
     "................................",
     "................................",
 ]
@@ -673,8 +673,8 @@ _LAMP_GRID = [
     "....cccccccccccccccccccc....cc..",
     "......cccccccccccccccccc..cc....",
     "......cccccccccccccccccc..cc....",
-    "..........ccddddddddcc..........",
-    "..........ccddddddddcc..........",
+    "..........cccccccccccc..........",
+    "..........cccccccccccc..........",
     "..............dddd..............",
     "..............dddd..............",
     "........dddddddddddddddd........",
