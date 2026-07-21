@@ -407,11 +407,25 @@ class MainWindow(QMainWindow):
         self._step("account page built")
         QApplication.processEvents()
 
+        # DevKit page — developer tools, source builds only. Only constructed
+        # when running from source, so the source-only tools/devkit package is
+        # never imported in a frozen exe.
+        from techdeck.ui.dev_mode import is_dev_build, get_dev_mode
+        self.devkit_page = None
+        self._devkit_page_index = None
+        if is_dev_build():
+            from techdeck.ui.pages.devkit_page import DevKitPage
+            self.devkit_page = DevKitPage(self.settings)
+            get_dev_mode().changed.connect(self._on_dev_mode_toggled)
+            self._step("devkit page built")
+
         # Add all pages to stack
         self.page_stack.addWidget(home_container)     # 0: Home (with console)
         self.page_stack.addWidget(self.library_page)  # 1: Library
         self.page_stack.addWidget(self.settings_page) # 2: Settings
         self.page_stack.addWidget(self.account_page)  # 3: Account
+        if self.devkit_page is not None:
+            self._devkit_page_index = self.page_stack.addWidget(self.devkit_page)
 
         # Hidden pages must not lock the window's minimum width (Library's
         # toolbar / the Emporium scene are wide; Home's grid reflows).
@@ -463,6 +477,14 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentIndex(0)
         QApplication.processEvents()
 
+    def _on_dev_mode_toggled(self, active: bool):
+        """When dev mode is switched off while the DevKit page is showing, fall
+        back to Home so the user isn't stranded on a now-hidden page."""
+        if (not active and self._devkit_page_index is not None
+                and self.page_stack.currentIndex() == self._devkit_page_index):
+            self.sidebar.set_current_page("home")
+            self.page_stack.setCurrentIndex(0)
+
     def _on_page_changed(self, page_id: str):
         """Handle sidebar navigation."""
         page_map = {
@@ -471,6 +493,8 @@ class MainWindow(QMainWindow):
             "settings": 2,
             "account": 3
         }
+        if self._devkit_page_index is not None:
+            page_map["devkit"] = self._devkit_page_index
 
         index = page_map.get(page_id, 0)
         self.page_stack.setCurrentIndex(index)

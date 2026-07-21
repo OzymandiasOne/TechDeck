@@ -269,6 +269,23 @@ class Sidebar(QWidget, ThemeAware):
         self.nav_buttons[0].setChecked(True)
         self._current_page_id = "home"
 
+        # DevKit — developer-tools page (source builds only). Sits just below
+        # Settings, hidden until the Home dev-mode toggle is switched on. Never
+        # constructed in a frozen exe.
+        from techdeck.ui.dev_mode import is_dev_build, get_dev_mode
+        self.devkit_btn = None
+        if is_dev_build():
+            self.devkit_btn = NavButton(
+                str(icons_dir / "devkit.svg"), "DevKit", "devkit",
+                icon_color=self.theme.text,
+            )
+            self.devkit_btn.clicked.connect(
+                lambda checked: self._on_nav_clicked("devkit"))
+            self.devkit_btn.setVisible(get_dev_mode().is_active())
+            self.nav_buttons.append(self.devkit_btn)
+            nav_layout.addWidget(self.devkit_btn)
+            get_dev_mode().changed.connect(self._on_dev_mode_changed)
+
         # Push My Account + Submit Feedback to the bottom.
         nav_layout.addStretch()
 
@@ -449,6 +466,11 @@ class Sidebar(QWidget, ThemeAware):
                 pass
         self.toggle_btn.setIcon(QIcon())
         self.toggle_btn.setText("→" if self.collapsed else "←")
+
+    def _on_dev_mode_changed(self, active: bool):
+        """Reveal/hide the DevKit nav item as dev mode flips (source only)."""
+        if self.devkit_btn is not None:
+            self.devkit_btn.setVisible(active)
 
     def _on_nav_clicked(self, page_id: str):
         """Handle navigation button click."""
