@@ -7,6 +7,8 @@ Manages profiles, user data, app configuration, and plugin settings.
 import json
 import os
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
@@ -53,6 +55,19 @@ _REMOVED_PLUGIN_IDS = {
 }
 
 
+# Process-wide default-location instance + guards. The shell (GUI thread), the
+# plugin executor (worker thread), and the SDK (inside a plugin) all construct
+# SettingsManager() with no arguments; before this each got its OWN in-memory
+# copy of settings.json and wrote the WHOLE document on every change, so a later
+# writer silently reverted an earlier one's edits (a run's run_count/total_runs
+# bump clobbered by the shell's stale-snapshot ticket write, and vice-versa).
+# Sharing one instance means everyone mutates one document. _SETTINGS_LOCK then
+# serializes the actual disk write so the two threads can't tear the file.
+_default_instance: Optional["SettingsManager"] = None
+_default_instance_lock = threading.Lock()
+_SETTINGS_LOCK = threading.RLock()
+
+
 class SettingsManager:
     """
     Manages application settings and profiles.
@@ -65,90 +80,176 @@ class SettingsManager:
     - Ensure Default profile always exists
     """
 
+    def __new__(cls, settings_dir: Optional[Path] = None):
+        # The default-location manager is a process-wide singleton so every
+        # caller shares ONE in-memory document (see _default_instance note). An
+        # explicit settings_dir (tests, alternate stores) always gets its own
+        # independent instance.
+        if settings_dir is None:
+            global _default_instance
+            with _default_instance_lock:
+                if _default_instance is None:
+                    _default_instance = super().__new__(cls)
+                return _default_instance
+        return super().__new__(cls)
+
     def __init__(self, settings_dir: Optional[Path] = None):
         """
         Initialize settings manager.
-        
+
         Args:
             settings_dir: Optional custom settings directory.
                          Defaults to %LOCALAPPDATA%/TechDeck on Windows.
         """
-        if settings_dir is None:
-            # Default: %LOCALAPPDATA%/TechDeck on Windows
-            if os.name == 'nt':
-                base = Path(os.environ.get('LOCALAPPDATA', Path.home()))
-            else:
-                base = Path.home() / '.local' / 'share'
-            settings_dir = base / SETTINGS_DIR_NAME
-        
-        self.settings_dir = Path(settings_dir)
-        self.settings_file = self.settings_dir / SETTINGS_FILE_NAME
-        self.data: Dict[str, Any] = {}
-        
-        # Ensure directory exists
-        self.settings_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Load or create settings
-        self.load()
+        # The shared singleton is constructed once but __init__ runs on every
+        # SettingsManager() call — guard so we don't reload the document (and
+        # blow away in-flight state) on the 2nd..Nth construction.
+        with _default_instance_lock:
+            if getattr(self, '_initialized', False):
+                return
+
+            if settings_dir is None:
+                # Default: %LOCALAPPDATA%/TechDeck on Windows
+                if os.name == 'nt':
+                    base = Path(os.environ.get('LOCALAPPDATA', Path.home()))
+                else:
+                    base = Path.home() / '.local' / 'share'
+                settings_dir = base / SETTINGS_DIR_NAME
+
+            self.settings_dir = Path(settings_dir)
+            self.settings_file = self.settings_dir / SETTINGS_FILE_NAME
+            self.data: Dict[str, Any] = {}
+
+            # Ensure directory exists
+            self.settings_dir.mkdir(parents=True, exist_ok=True)
+
+            # Load or create settings
+            self.load()
+
+            self._initialized = True
     
     def load(self) -> None:
-        """Load settings from disk. Creates default if doesn't exist."""
+        """Load settings from disk, recovering from the .bak copy when the live
+        file is missing or corrupt before falling back to fresh defaults."""
         if self.settings_file.exists():
             try:
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     self.data = json.load(f)
                 self._validate_and_migrate()
+                return
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load settings: {e}")
+                # Corrupt live file — try the last-known-good backup before
+                # discarding the user's profile/tickets/unlocks.
+                if self._load_from_backup():
+                    return
                 print("Creating new settings file.")
                 self._create_default_settings()
         else:
+            # Live file absent. On an older build a crash between unlink and
+            # rename could leave exactly this state with a good .bak beside it —
+            # recover it rather than silently resetting the user to defaults.
+            if self._load_from_backup():
+                return
             self._create_default_settings()
+
+    def _load_from_backup(self) -> bool:
+        """Restore self.data from the .bak copy. Returns True on success. The
+        subsequent _validate_and_migrate() re-writes a fresh settings.json, so a
+        recovered backup heals the missing/corrupt live file."""
+        backup_path = self.settings_file.with_suffix('.bak')
+        if not backup_path.exists():
+            return False
+        try:
+            with open(backup_path, 'r', encoding='utf-8') as f:
+                self.data = json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Settings backup also unreadable: {e}")
+            return False
+        print(f"Recovered settings from backup: {backup_path}")
+        self._validate_and_migrate()
+        return True
     
     def save(self) -> None:
-        """Save current settings to disk using atomic write (temp file + rename)."""
-        try:
-            # Create a temporary file in the same directory
-            temp_fd, temp_path = tempfile.mkstemp(
-                suffix='.tmp',
-                prefix='settings_',
-                dir=self.settings_dir,
-                text=True
-            )
-            
+        """Save current settings to disk atomically.
+
+        Serialized by _SETTINGS_LOCK so the GUI thread and a plugin worker
+        thread (which now share ONE document) can't race on the temp file.
+        os.replace swaps the target in a SINGLE atomic step on both Windows and
+        POSIX, so there is never a window where settings.json is absent — the
+        old delete-then-rename could crash into exactly that gap and, since
+        load() didn't recover the .bak, silently wipe the user's profile.
+        """
+        with _SETTINGS_LOCK:
+            # Encode first. If another thread mutates the shared document
+            # mid-encode we get "dictionary changed size during iteration";
+            # retry a few times, then defer this save to the next write rather
+            # than raising (the in-memory document is the shared source of
+            # truth and isn't lost — and raising here would flip a successful
+            # plugin run to ERROR in the executor).
+            payload = None
+            for _ in range(8):
+                try:
+                    payload = json.dumps(self.data, indent=2)
+                    break
+                except RuntimeError:
+                    continue
+            if payload is None:
+                print("Warning: settings save skipped (document busy); "
+                      "will persist on the next write")
+                return
+
             try:
-                # Write to temp file
-                with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
-                    json.dump(self.data, f, indent=2)
-                
-                # Atomic rename (on Windows, need to handle existing file)
-                temp_path_obj = Path(temp_path)
-                
-                if os.name == 'nt':
-                    # Windows: remove target first if it exists
-                    if self.settings_file.exists():
-                        # Create backup before replacing
-                        backup_path = self.settings_file.with_suffix('.bak')
-                        if backup_path.exists():
-                            backup_path.unlink()
-                        shutil.copy2(self.settings_file, backup_path)
-                        self.settings_file.unlink()
-                    
-                    # Now rename temp to target
-                    temp_path_obj.rename(self.settings_file)
-                else:
-                    # Unix: atomic rename (overwrites target)
-                    temp_path_obj.rename(self.settings_file)
-                
-            except Exception as e:
-                # Clean up temp file on error
-                if Path(temp_path).exists():
-                    Path(temp_path).unlink()
-                raise
-                
-        except IOError as e:
-            print(f"Error saving settings: {e}")
-            raise
+                temp_fd, temp_path = tempfile.mkstemp(
+                    suffix='.tmp',
+                    prefix='settings_',
+                    dir=self.settings_dir,
+                    text=True
+                )
+                try:
+                    with os.fdopen(temp_fd, 'w', encoding='utf-8') as f:
+                        f.write(payload)
+                        f.flush()
+                        os.fsync(f.fileno())
+
+                    # Atomic swap, retried for the transient Windows "Access is
+                    # denied" that Defender/the search indexer/OneDrive throw when
+                    # they briefly hold a handle on the temp or target file.
+                    last_err: Optional[BaseException] = None
+                    for attempt in range(5):
+                        try:
+                            os.replace(temp_path, self.settings_file)
+                            last_err = None
+                            break
+                        except PermissionError as e:
+                            last_err = e
+                            time.sleep(0.1 * (attempt + 1))
+                    if last_err is not None:
+                        raise last_err
+
+                    # Refresh the backup FROM the good file we just wrote (never
+                    # from the pre-existing live file — if that was externally
+                    # corrupted, copying it would poison the .bak and defeat
+                    # recovery). Best-effort: a miss just leaves the prior .bak.
+                    try:
+                        shutil.copy2(self.settings_file,
+                                     self.settings_file.with_suffix('.bak'))
+                    except OSError:
+                        pass
+                except Exception:
+                    # Clean up temp file on error
+                    if Path(temp_path).exists():
+                        try:
+                            Path(temp_path).unlink()
+                        except OSError:
+                            pass
+                    raise
+            except (IOError, OSError) as e:
+                # Defer rather than raise: a raise here propagates into the
+                # plugin executor and flips a SUCCESSFUL run to ERROR. The
+                # in-memory document is intact and the next write retries.
+                print(f"Warning: settings save deferred ({e}); "
+                      "will retry on the next write")
     
     def _create_default_settings(self) -> None:
         """Create default settings structure."""
