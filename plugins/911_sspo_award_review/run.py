@@ -472,7 +472,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.7.2"
+VERSION = "2.7.3"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -1431,9 +1431,10 @@ def write_analysis_sheet(wb, plate_rows, log):
     pie("Bevel vs Straight Cut", *c_bevel, anchor="A58")
 
     # ── DXF coverage callout (bottom of sheet) ────────────────────────────
-    # Any plate part that fell back to the thickness-band estimate has NO DXF to
-    # measure; group those by order+nest so the missing IGES/DXF files can be
-    # chased. These same rows are filled red on the Plates sheet.
+    # Plate parts with NO DXF match still get the throughput estimate (v2.7.0),
+    # but their far-right LI reference columns are empty; group them by
+    # order+nest so the missing IGES/DXF files can be chased. These same rows
+    # are filled red on the Plates sheet.
     missing_dxf = {}
     for r in plate_rows:
         if "no dxf match" not in str(r.get("Flags") or "").lower():
@@ -1448,17 +1449,19 @@ def write_analysis_sheet(wb, plate_rows, log):
     mr = 78
     ws.cell(mr, 1, "DXF Coverage").font = Font(bold=True, size=12)
     if not missing_dxf:
-        ws.cell(mr + 1, 1, "All plate parts matched a DXF -- every cut time is "
-                           "measured from geometry.").font = Font(italic=True,
-                                                                  color="548235")
+        ws.cell(mr + 1, 1, "All plate parts matched a DXF -- every row has the "
+                           "linear-inch reference columns alongside its "
+                           "throughput estimate.").font = Font(italic=True,
+                                                               color="548235")
         next_row = mr + 3
     else:
         total_missing = sum(d["count"] for d in missing_dxf.values())
         ws.cell(mr + 1, 1,
                 f"{total_missing} plate part(s) across {len(missing_dxf)} nest(s) "
-                f"had NO DXF match and fell back to the thickness-band estimate "
-                f"(rows highlighted red on the Plates sheet). Chase down these "
-                f"IGES/DXF files:").font = Font(bold=True, color="C00000")
+                f"had NO DXF match -- their cut time still estimates from the "
+                f"pieces/hour table, but the linear-inch reference columns are "
+                f"empty (rows highlighted red on the Plates sheet). Chase down "
+                f"these IGES/DXF files:").font = Font(bold=True, color="C00000")
         for c, name in enumerate(("Order", "Nest", "Parts w/o DXF", "Thickness(es)"),
                                  start=1):
             cell = ws.cell(mr + 3, c, name)
