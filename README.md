@@ -1,8 +1,26 @@
-# TechDeck v0.8.6.8 - 922 Setup Expansion
+# TechDeck v0.8.6.9 - Icon Overhaul
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.9
+
+**Sharper tile icons across the board.** Ten of the app's hand-drawn tile icons were
+redrawn for a cleaner, more consistent look - calculator, copy, lamp, magnifier, ruler,
+stamp, toolbox, QR, scissors, plus the ASA game's cartridge. They recolor correctly in
+every theme. Purely visual; nothing about how the tools work changed.
+
+**Runtime estimate reworked (SSPO Award Review).** The primary plate-cut estimate is now
+derived from actual production throughput (pieces per hour) rather than the older
+feed-rate model, with the thickness break tuned per shop feedback and a matching
+Analysis sheet.
+
+**922 Setup gains a Batch Folder Setup stage** at the front of the run, and awards
+tickets per stage completed (5 each). Multi-PPN orders now get their work-packet PDF
+placed in every relevant folder.
 
 ---
 

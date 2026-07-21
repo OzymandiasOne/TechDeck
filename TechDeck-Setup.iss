@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.8 - 922 Setup expansion: consolidated master toggle window, ordered pipeline buckets + pallet-labelled Teams cards, Batch Repeater REPEAT labeling + MODEL CHECK move
+; Version 0.8.6.9 - Icon overhaul (10 redrawn tile icons + game cartridge) + pixel-editor UX; SSPO Award Review v2.7.x throughput estimate; 922 Setup v2.3.x Batch Folder Setup stage + per-stage tickets
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.8"
+#define MyAppVersion "0.8.6.9"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
