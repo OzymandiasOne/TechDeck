@@ -53,6 +53,17 @@ the live enablement path for the previously deferred material-label branch.
 v2.2.0: tickets scale with the stages run - each completed stage counts as a
 full system run (sdk.set_ticket_units), so Setup alone pays 5 tickets,
 Setup + Stamper 10, Setup + Repeater + Stamper 15.
+
+v2.3.0: new FIRST stage "Batch Folder Setup" - builds the batch's order
+folders from the PO sheet of the Documentation folder's 'PO H{n} QF-QU-09
+REV C.xlsx' (one folder per unique ORDER-PPN pair, named '{ORDER}-{PPN}'),
+copies the REV C workbook into each as '{PPN}.xlsx' (never overwriting an
+existing copy - those get filled in per order later), then moves each order's
+work-packet PDF (filename contains the ORDER number) out of the batch's
+'Work Packets' folder - falling back to PDFs loose in the batch root, the
+pre-convention drop spot - into its order folder. Idempotent: existing
+folders/copies/moved PDFs are skipped, so re-runs are safe. The batch-folder
+pick now happens ONCE up front (orchestrator level) and feeds every stage.
 """
 from __future__ import annotations
 
@@ -68,7 +79,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -274,22 +285,13 @@ def _write_preview(payload: dict, log) -> None:
     sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
 
 
-def _run_teams_setup(params: dict, progress_callback, cancel_event,
-                     apply_materials_opt: bool = False):
-    """The original 922 Setup stage: pick the batch folder, build the cards,
-    POST (or dry-run) the webhook payload. Pallet labels (PALLET 1/2/3)
-    ALWAYS apply; ``apply_materials_opt`` (the master window's "Apply source
-    material labels" toggle, default off) turns the source-material labels on
-    for this run. Returns the batch number string on success (so the
-    orchestrator can seed the family-shared batch cache for the following
-    stages), or None when cancelled / errored (the log says which; user
-    cancels also set cancel_event)."""
+def _pick_batch_folder(params: dict, cancel_event):
+    """Prompt for the 'Batch NNN' folder (native dialog, opened at the 922
+    QTDR root when it can be found) and derive the batch number from its
+    name. Returns (batch_path, batch) or (None, None) on cancel/bad pick —
+    a user cancel also sets cancel_event so the run counts as cancelled."""
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
-
-    # --- Pick the batch folder (native folder dialog) ----------------------
-    # Open the dialog at the 922 QTDR root when we can find it, so the user is
-    # sitting right on the 'Batch NNN' folders.
     start_dir = ""
     try:
         root = sdk.resolve_922_root(settings.get("base_path", ""))
@@ -299,25 +301,37 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         pass
     raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
     if cancel_event.is_set():
-        return
+        return None, None
     if not raw:
         log("Folder selection cancelled - nothing was run.")
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
-        return
+        return None, None
     batch_path = Path(raw)
     if not batch_path.is_dir():
         log(f"ERROR: '{batch_path}' is not a folder.")
-        return
-
-    # The batch number is still needed for the card titles/buckets, so derive
-    # it from the picked folder's name ('Batch 483' -> '483').
+        return None, None
+    # 'Batch 483' -> '483' (needed for card titles/buckets + file discovery).
     batch = sdk.parse_922_batch(batch_path.name)
     if not batch:
         log(f"ERROR: could not read a batch number from the folder name "
             f"'{batch_path.name}'. Pick the 'Batch NNN' folder itself.")
-        return
+        return None, None
     log(f"Batch: {batch}")
     log(f"Batch folder: {batch_path}")
+    return batch_path, batch
+
+
+def _run_teams_setup(params: dict, progress_callback, cancel_event,
+                     batch_path: Path, batch: str,
+                     apply_materials_opt: bool = False):
+    """The original 922 Setup stage: build the cards for the already-picked
+    batch folder, POST (or dry-run) the webhook payload. Pallet labels
+    (PALLET 1/2/3) ALWAYS apply; ``apply_materials_opt`` (the master window's
+    "Apply source material labels" toggle, default off) turns the
+    source-material labels on for this run. Returns the batch number string
+    on success, or None when cancelled / errored (the log says which)."""
+    log = params.get("log", print)
+    settings = params.get("settings", {}) or {}
     progress_callback(15)
 
     # --- List order folders (drop the Documentation folder) ----------------
@@ -431,6 +445,209 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Stage 0 — Batch Folder Setup (v2.3.0)
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the batch's order folders from the REV C PO sheet, drops a renamed
+# copy of the REV C workbook in each, and files each order's work-packet PDF
+# into its folder. Idempotent — everything that already exists is skipped.
+
+# The new drop-spot convention for incoming work-packet PDFs.
+_WORK_PACKETS_RE = re.compile(r"^\s*work\s*packets?\s*$", re.IGNORECASE)
+
+
+def _find_rev_c_workbook(batch_path: Path, batch: str) -> Path:
+    """The batch's own 'PO H{n} QF-QU-09 REV C.xlsx' in the Documentation
+    folder (both matched loosely — layouts vary). Raises UserFacingError
+    when the folder or workbook is missing."""
+    doc_dir = next((e for e in sorted(batch_path.iterdir())
+                    if e.is_dir() and _DOC_RE.search(e.name)), None)
+    if doc_dir is None:
+        raise sdk.UserFacingError(
+            f"No 'Batch {batch} - Documentation' folder inside "
+            f"'{batch_path.name}'.",
+            "Create the Documentation folder with the batch's 'PO QF-QU-09 "
+            "REV C' workbook in it, then run 922 Setup again.")
+    candidates = [p for p in sorted(doc_dir.glob("*.xlsx"))
+                  if not p.name.startswith("~$")
+                  and re.search(r"QF[\s.-]*QU[\s.-]*09", p.name, re.IGNORECASE)
+                  and re.search(r"REV\s*C", p.name, re.IGNORECASE)]
+    if not candidates:
+        raise sdk.UserFacingError(
+            f"No 'QF-QU-09 REV C' workbook found in '{doc_dir.name}'.",
+            "Put the batch's 'PO H{batch} QF-QU-09 REV C.xlsx' in the "
+            "Documentation folder, then run 922 Setup again.")
+    return candidates[0]
+
+
+def _read_po_order_ppns(rev_c: Path, log) -> list[tuple[str, str]]:
+    """Ordered unique (ORDER, PPN) pairs from the REV C workbook's PO sheet.
+    Columns are found by header NAME (never position); ORDER is
+    forward-filled since it repeats per line item on some copies."""
+    wb = sdk.load_workbook_resilient(rev_c, log=log, data_only=True)
+    try:
+        ws = wb["PO"] if "PO" in wb.sheetnames else wb.active
+        header_row, cols = sdk.find_header_row(ws, ["ORDER", "PPN"])
+        if header_row is None:
+            raise sdk.UserFacingError(
+                f"Could not find the ORDER / PPN header row on the PO sheet "
+                f"of '{rev_c.name}'.",
+                "Check that the workbook's PO sheet still has ORDER and PPN "
+                "columns, then run 922 Setup again.")
+        pairs: list[tuple[str, str]] = []
+        seen: set = set()
+        last_order = None
+        for r in range(header_row + 1, ws.max_row + 1):
+            def _v(c):
+                v = ws.cell(r, c).value
+                return str(v).strip() if v not in (None, "") else None
+            order, ppn = _v(cols["ORDER"]), _v(cols["PPN"])
+            if order:
+                last_order = order
+            else:
+                order = last_order
+            if not order or not ppn:
+                continue
+            key = (order.upper(), ppn.upper())
+            if key not in seen:
+                seen.add(key)
+                pairs.append((order, ppn))
+        return pairs
+    finally:
+        wb.close()
+
+
+def _order_pdf_sources(batch_path: Path, log) -> list[Path]:
+    """The work-packet PDFs to file into order folders. The convention is a
+    'Work Packets' folder inside the batch folder; batches from before the
+    convention have the PDFs loose in the batch root, so fall back there."""
+    wp_dir = next((e for e in sorted(batch_path.iterdir())
+                   if e.is_dir() and _WORK_PACKETS_RE.match(e.name)), None)
+    if wp_dir is not None:
+        pdfs = [p for p in sorted(wp_dir.iterdir())
+                if p.is_file() and p.suffix.lower() == ".pdf"]
+        log(f"Work Packets folder: {len(pdfs)} PDF(s).")
+        return pdfs
+    pdfs = [p for p in sorted(batch_path.iterdir())
+            if p.is_file() and p.suffix.lower() == ".pdf"]
+    if pdfs:
+        log(f"No 'Work Packets' folder - using {len(pdfs)} PDF(s) loose in "
+            f"the batch folder.")
+    else:
+        log("No 'Work Packets' folder and no loose PDFs in the batch folder.")
+    return pdfs
+
+
+def _run_folder_setup(params: dict, progress_callback, cancel_event,
+                      batch_path: Path, batch: str) -> bool:
+    """Stage 0: order folders + per-order REV C copy + work-packet filing.
+
+    For every unique ORDER-PPN pair on the REV C PO sheet: create
+    '{ORDER}-{PPN}', copy the REV C workbook in as '{PPN}.xlsx' (existing
+    copies are NEVER overwritten - they get filled in per order later), then
+    move each PDF whose filename contains the ORDER number out of the Work
+    Packets folder (or the batch root) into that order's folder. Returns
+    True when the stage completed."""
+    import shutil
+
+    log = params.get("log", print)
+    warnings: list[str] = []
+
+    rev_c = _find_rev_c_workbook(batch_path, batch)
+    log(f"PO workbook: {rev_c.name}")
+    pairs = _read_po_order_ppns(rev_c, log)
+    if not pairs:
+        raise sdk.UserFacingError(
+            f"The PO sheet of '{rev_c.name}' has no ORDER/PPN rows.",
+            "Check the workbook's PO sheet, then run 922 Setup again.")
+    log(f"PO sheet: {len(pairs)} unique ORDER-PPN pair(s).")
+    progress_callback(20)
+    if cancel_event.is_set():
+        return False
+
+    # --- Order folders + the per-order REV C copy --------------------------
+    # First folder per ORDER wins the PDF when an order spans several PPNs.
+    order_to_folder: dict[str, Path] = {}
+    made_folders = made_copies = 0
+    for i, (order, ppn) in enumerate(pairs):
+        if i % 16 == 0 and cancel_event.is_set():
+            return False
+        folder = batch_path / f"{order}-{ppn}"
+        if not folder.exists():
+            folder.mkdir()
+            made_folders += 1
+        key = order.upper()
+        if key in order_to_folder:
+            warnings.append(f"Order {order} has more than one PPN on the PO "
+                            f"sheet - its work packet PDF goes in "
+                            f"'{order_to_folder[key].name}'.")
+        else:
+            order_to_folder[key] = folder
+        dest = folder / f"{ppn}.xlsx"
+        if not dest.exists():
+            sdk.copy_resilient(rev_c, dest, log)
+            made_copies += 1
+        progress_callback(20 + 50 * (i + 1) // len(pairs))
+    log(f"Order folders: {made_folders} created "
+        f"({len(pairs) - made_folders} already existed); "
+        f"{made_copies} PO workbook cop(ies) placed.")
+    if cancel_event.is_set():
+        return False
+
+    # --- File the work-packet PDFs into their order folders ----------------
+    # The ORDER number appears in the PDF filename ('BK573423.pdf',
+    # 'X6401069 NOFORN.pdf'); match it as a whole token so one order number
+    # can never match inside a longer one.
+    pdfs = _order_pdf_sources(batch_path, log)
+    moved = 0
+    matched_orders: set = set()
+    for i, pdf in enumerate(pdfs):
+        if i % 16 == 0 and cancel_event.is_set():
+            return False
+        stem = pdf.stem
+        hit = next((key for key in order_to_folder
+                    if re.search(rf"(?<![A-Za-z0-9]){re.escape(key)}"
+                                 rf"(?![A-Za-z0-9])", stem, re.IGNORECASE)),
+                   None)
+        if hit is None:
+            warnings.append(f"'{pdf.name}' matches no ORDER on the PO sheet - "
+                            f"left where it is.")
+            continue
+        dest = order_to_folder[hit] / pdf.name
+        if dest.exists():
+            if pdf.resolve() != dest.resolve():
+                warnings.append(f"'{pdf.name}' already exists in "
+                                f"'{dest.parent.name}' - left where it is.")
+            continue
+        shutil.move(str(pdf), str(dest))
+        moved += 1
+        matched_orders.add(hit)
+        if moved <= 40:
+            log(f"  {pdf.name} -> {dest.parent.name}")
+    log(f"Work packets: {moved} PDF(s) filed into order folders.")
+
+    # Orders whose folder still has no work-packet PDF (not moved this run
+    # AND none already inside) are worth a heads-up.
+    no_pdf = [o for o, f in order_to_folder.items()
+              if o not in matched_orders
+              and not any(p.suffix.lower() == ".pdf" for p in f.iterdir())]
+    if no_pdf:
+        warnings.append("No work-packet PDF found for: "
+                        + ", ".join(sorted(no_pdf))
+                        + " - drop them in the batch's 'Work Packets' folder "
+                        "and run again.")
+
+    if warnings:
+        log("\nFolder setup warnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "922 Setup - folder setup warnings",
+                         "\n\n".join(warnings))
+    progress_callback(100)
+    log(f"Batch Folder Setup DONE - {len(pairs)} order folder(s) ready.")
+    return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Orchestration — the consolidated 922 Setup
 # ─────────────────────────────────────────────────────────────────────────────
 # One tile runs the whole 922 batch-prep sequence behind a master toggle
@@ -443,7 +660,8 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
 
 # Progress-bar slice per stage (proportionally re-normalized over the enabled
 # stages, so any combination still sweeps 0..100).
-_STAGE_WEIGHTS = {"teams_setup": 35, "batch_repeater": 45, "pallet_stamper": 20}
+_STAGE_WEIGHTS = {"folder_setup": 15, "teams_setup": 30,
+                  "batch_repeater": 40, "pallet_stamper": 15}
 
 
 def _dialog_groups() -> list:
@@ -455,6 +673,10 @@ def _dialog_groups() -> list:
     enablement for a run).
     """
     return [
+        {"key": "folder_setup",
+         "label": "Batch Folder Setup",
+         "checked": True,
+         "children": []},
         {"key": "teams_setup",
          "label": "Generate Teams Cards",
          "checked": True,
@@ -558,7 +780,7 @@ def run(params: dict, progress_callback, cancel_event):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return
 
-    order = ["teams_setup", "batch_repeater", "pallet_stamper"]
+    order = ["folder_setup", "teams_setup", "batch_repeater", "pallet_stamper"]
     enabled = [k for k in order if choices.get(k, {}).get("enabled")]
     if not enabled:
         log("No stages selected - nothing was run.")
@@ -583,27 +805,50 @@ def run(params: dict, progress_callback, cancel_event):
         shared_state = {"911": {}, "922": {}, "General": {}}
 
     # Each completed stage counts as a full system run for the ticket award
-    # (5 per system: Setup=5, +Stamper=10, +Repeater=15).
+    # (5 per system: all four stages = 20).
     stages_done = 0
 
-    # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
-    if "teams_setup" in enabled:
-        lo, hi = slices["teams_setup"]
-        apply_materials = choices["teams_setup"]["options"].get("materials", False)
-        batch = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
-                                 cancel_event,
-                                 apply_materials_opt=apply_materials)
+    # --- One batch-folder pick feeds every stage that needs it -------------
+    batch_path = batch = None
+    if "folder_setup" in enabled or "teams_setup" in enabled:
+        batch_path, batch = _pick_batch_folder(params, cancel_event)
         if cancel_event.is_set():
             return
-        if batch:
+        if batch_path is None:
+            raise sdk.UserFacingError(
+                "The picked folder is not a 'Batch NNN' batch folder.",
+                "Run 922 Setup again and pick the batch's own folder (the "
+                "one named like 'Batch 483').")
+        # Seed the family batch cache immediately: the folder the user just
+        # picked IS this run's batch, so NO later stage ever re-prompts.
+        shared_state.setdefault("922", {})["batch_number"] = batch
+
+    # --- Stage 0: Batch Folder Setup ----------------------------------------
+    if "folder_setup" in enabled:
+        assert batch_path is not None and batch is not None
+        lo, hi = slices["folder_setup"]
+        if _run_folder_setup(params, _scaled(progress_callback, lo, hi),
+                             cancel_event, batch_path, batch):
             stages_done += 1
-            # Seed the family batch cache: the folder the user just picked IS
-            # this run's batch, so the Repeater/Stamper never re-prompt.
-            shared_state.setdefault("922", {})["batch_number"] = batch
+        if cancel_event.is_set():
+            return
+        progress_callback(hi)
+
+    # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
+    if "teams_setup" in enabled and not cancel_event.is_set():
+        assert batch_path is not None and batch is not None
+        lo, hi = slices["teams_setup"]
+        apply_materials = choices["teams_setup"]["options"].get("materials", False)
+        done = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
+                                cancel_event, batch_path, batch,
+                                apply_materials_opt=apply_materials)
+        if cancel_event.is_set():
+            return
+        if done:
+            stages_done += 1
         elif len(enabled) > 1:
             log("\nWARNING: Generate Teams Cards did not complete (see above). "
-                "Continuing with the remaining stages - they will prompt "
-                "for the batch number themselves.")
+                "Continuing with the remaining stages.")
         progress_callback(hi)
 
     # --- Stage 2: Batch Repeater --------------------------------------------
