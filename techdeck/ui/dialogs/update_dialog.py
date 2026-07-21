@@ -251,7 +251,8 @@ class UpdateDialog(QDialog):
 
         self.downloader = UpdateDownloader(
             self.update_info.download_url,
-            self.update_info.version
+            self.update_info.version,
+            getattr(self.update_info, "sha256", "")
         )
         self.downloader.progress_updated.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
         self.downloader.download_complete.connect(self._on_complete, Qt.ConnectionType.QueuedConnection)

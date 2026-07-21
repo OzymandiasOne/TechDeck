@@ -21,6 +21,11 @@ class UpdateInfo:
         # Support both old and new manifest formats
         self.version: str = data.get("latest_version") or data.get("version", "0.0.0")
         self.download_url: str = data.get("download_url", "")
+        # Optional SHA-256 of the installer .exe (hex). When present, the
+        # downloader verifies the bytes before running the installer, so a
+        # tampered/corrupt download can't be executed. Absent = legacy manifest,
+        # download proceeds unverified (logged).
+        self.sha256: str = (data.get("sha256") or data.get("installer_sha256") or "").strip().lower()
         self.critical: bool = data.get("critical", False)
         self.release_notes: str = data.get("release_notes", "")
         self.min_version: str = data.get("min_supported_version") or data.get("min_version", "0.0.0")

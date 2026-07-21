@@ -3,6 +3,7 @@ TechDeck Update Downloader
 Downloads and installs updates from GitHub releases.
 """
 
+import hashlib
 import requests
 import subprocess
 import tempfile
@@ -20,17 +21,21 @@ class UpdateDownloader(QObject):
     download_complete = Signal(str)      # installer_path
     download_failed = Signal(str)        # error_message
     
-    def __init__(self, download_url: str, version: str):
+    def __init__(self, download_url: str, version: str, expected_sha256: str = ""):
         """
         Initialize downloader.
-        
+
         Args:
             download_url: URL to installer .exe
             version: Version being downloaded (for filename)
+            expected_sha256: Optional hex SHA-256 of the installer from the
+                manifest. When set, the downloaded bytes are verified against it
+                and a mismatch aborts (the file is deleted, never executed).
         """
         super().__init__()
         self.download_url = download_url
         self.version = version
+        self.expected_sha256 = (expected_sha256 or "").strip().lower()
         self.cancelled = False
         self._thread = None
     
@@ -66,18 +71,40 @@ class UpdateDownloader(QObject):
             
             total_size = int(response.headers.get('content-length', 0))
             downloaded = 0
-            
+            hasher = hashlib.sha256()
+
             with open(installer_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if self.cancelled:
                         installer_path.unlink(missing_ok=True)
                         return
-                    
+
                     if chunk:
                         f.write(chunk)
+                        hasher.update(chunk)
                         downloaded += len(chunk)
                         self.progress_updated.emit(downloaded, total_size)
-            
+
+            # Integrity check: if the manifest pinned a SHA-256, the bytes we ran
+            # to disk must match it before we hand the .exe to the installer.
+            # This is the guard against a tampered manifest/download pointing at
+            # an arbitrary executable.
+            actual = hasher.hexdigest()
+            if self.expected_sha256:
+                if actual != self.expected_sha256:
+                    print(f"[DOWNLOADER] SHA-256 mismatch: expected "
+                          f"{self.expected_sha256}, got {actual}", flush=True)
+                    installer_path.unlink(missing_ok=True)
+                    self.download_failed.emit(
+                        "Update verification failed: the downloaded installer "
+                        "does not match the expected checksum. The update was "
+                        "not installed. Please try again later.")
+                    return
+                print("[DOWNLOADER] SHA-256 verified OK", flush=True)
+            else:
+                print("[DOWNLOADER] No SHA-256 in manifest; download "
+                      f"unverified (sha256={actual})", flush=True)
+
             self.download_complete.emit(str(installer_path))
             
         except requests.RequestException as e:
