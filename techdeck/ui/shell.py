@@ -493,6 +493,8 @@ class MainWindow(QMainWindow):
     
     def _on_run_selected(self, tile_ids: list):
         """Handle run selected tiles - Log to console and start spinner."""
+        # Fresh per-run outcome tally — drives the honest end-of-run banner.
+        self._run_tally = {}
         self.console.append_system(f"Starting execution of {len(tile_ids)} plugin(s)...")
         for tile_id in tile_ids:
             plugin = self.home_page.plugin_loader.get_plugin(tile_id)
@@ -545,14 +547,28 @@ class MainWindow(QMainWindow):
         result = self.home_page.plugin_executor.get_result(plugin_id)
         
         if result:
-            if result.status.value == "success":
-                self.console.append_system(f"✅ {plugin_name} completed successfully")
+            # Record the per-plugin outcome so the end-of-run banner can tell the
+            # truth about a mixed run instead of always showing a checkmark.
+            self._run_tally[result.status.value] = \
+                self._run_tally.get(result.status.value, 0) + 1
+
+            if result.status.value in ("success", "warning"):
+                is_warning = result.status.value == "warning"
+                if is_warning:
+                    # Ran to completion but the plugin flagged issues
+                    # (sdk.set_run_outcome) — surface them instead of a blank ✅.
+                    detail = getattr(result, "outcome_message", "") or result.message
+                    self.console.append_system(
+                        f"⚠️ {plugin_name} finished with warnings: {detail}")
+                else:
+                    self.console.append_system(f"✅ {plugin_name} completed successfully")
                 # Tally the run by family for the family achievements (911/922).
                 self.settings.record_family_run(getattr(plugin, "family", ""))
-                # Reward tickets for a successful run (spendable at Woogy's Emporium).
-                # An orchestrating run (922 Setup running several stages) reports
-                # how many systems it performed via sdk.set_ticket_units — each
-                # earns a full run's worth.
+                # Reward tickets for a completed run (spendable at Woogy's Emporium).
+                # A warning run still did the work, so it still earns. An
+                # orchestrating run (922 Setup running several stages) reports how
+                # many systems it performed via sdk.set_ticket_units — each earns a
+                # full run's worth.
                 # Professional theme hides the playful ticket message (still earned).
                 units = max(1, int(getattr(result, "ticket_units", 1) or 1))
                 earned = TICKETS_PER_RUN * units
@@ -562,8 +578,9 @@ class MainWindow(QMainWindow):
                     self.console.append_game(
                         f"🎟 +{earned} tickets (balance: {bal}){suffix}")
                 # GUI plugins (requires_main_thread) call params['on_success'] themselves
-                # at a meaningful moment. Suppress the auto sound for them.
-                if not getattr(plugin, 'requires_main_thread', False):
+                # at a meaningful moment. Suppress the auto sound for them. A clean
+                # success chimes; a warning stays quiet (the ⚠️ line carries it).
+                if not is_warning and not getattr(plugin, 'requires_main_thread', False):
                     get_audio_manager().play(SOUND_SUCCESS)
                 # Talkback ~1 in 5; tech tip ~1 in 12 if talkback didn't fire
                 if plugin_id != self._last_talkback_plugin and random.random() < 0.20:
@@ -609,13 +626,36 @@ class MainWindow(QMainWindow):
             "the file to a TechDeck admin.")
 
     def _on_all_plugins_done(self):
-        """Handle the end of a full run (all queued plugins finished or cancelled)."""
+        """Handle the end of a full run. The banner reflects the REAL mix of
+        outcomes (tallied per plugin in _on_plugin_completed) — a checkmark only
+        when every plugin actually succeeded, not unconditionally."""
         self._plugin_spinner_timer.stop()
         elapsed = time.time() - self._plugin_run_start
-        done_text = self._spinner_done_pool.get_line()
-        done_html = self._plugin_spinner_html(
-            "✓", f"{done_text} {self._format_elapsed(elapsed)}."
-        )
+        elapsed_str = self._format_elapsed(elapsed)
+        tally = getattr(self, "_run_tally", {}) or {}
+        errors = tally.get("error", 0) + tally.get("timeout", 0)
+        cancelled = tally.get("cancelled", 0)
+        warnings = tally.get("warning", 0)
+
+        if errors:
+            icon = "✗"
+            text = (f"Finished with {errors} failed "
+                    f"plugin{'s' if errors != 1 else ''} in {elapsed_str}.")
+        elif cancelled and not tally.get("success") and not warnings:
+            icon, text = "■", f"Run stopped after {elapsed_str}."
+        elif warnings or cancelled:
+            bits = []
+            if warnings:
+                bits.append(f"{warnings} warning{'s' if warnings != 1 else ''}")
+            if cancelled:
+                bits.append(f"{cancelled} cancelled")
+            icon, text = "⚠", f"Finished ({', '.join(bits)}) in {elapsed_str}."
+        else:
+            # Fully clean run — keep the celebratory flavour line.
+            done_text = self._spinner_done_pool.get_line()
+            icon, text = "✓", f"{done_text} {elapsed_str}."
+
+        done_html = self._plugin_spinner_html(icon, text)
         self.console.show_spinner(done_html)
         QTimer.singleShot(4000, self.console.hide_spinner)
 
@@ -1003,11 +1043,43 @@ class MainWindow(QMainWindow):
         super().changeEvent(event)
 
     def closeEvent(self, event):
-        """PHASE 2: Cleanup before closing (console height no longer saved)."""
+        """Cleanup before closing. If a plugin is still running, confirm first —
+        workers are daemon threads, so quitting mid-run can terminate one while
+        it is writing a PDF/Excel file or moving folders, leaving a half-written
+        output. On confirm we request cancellation and give cooperative
+        cancellation a brief bounded window to reach a safe boundary."""
+        executor = self.home_page.plugin_executor
+        active = executor.get_active_plugins()
+
+        if active:
+            from PySide6.QtWidgets import QMessageBox
+            names = ", ".join(
+                (self.home_page.plugin_loader.get_plugin(pid).name
+                 if self.home_page.plugin_loader.get_plugin(pid) else pid)
+                for pid in active
+            )
+            reply = QMessageBox.question(
+                self,
+                "Work in progress",
+                f"{names} is still running.\n\n"
+                "Quitting now may interrupt it while it is writing a file and "
+                "leave a partial result behind.\n\nQuit anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
         # Stop update checker
         self.update_checker.stop()
 
-        # Cancel any running plugins
-        self.home_page.plugin_executor.cancel_all()
+        # Request cancellation of any running plugins.
+        executor.cancel_all()
+        # Give each active worker a short, bounded chance to stop at a safe
+        # point (cooperative cancellation checks cancel_event). A genuinely hung
+        # plugin just times out here and is left to the daemon-thread teardown.
+        for pid in active:
+            executor.wait_for_completion(pid, timeout=3.0)
 
         event.accept()

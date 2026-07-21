@@ -137,6 +137,7 @@ class PluginStatus(Enum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
+    WARNING = "warning"  # ran to completion but reported issues (set_run_outcome)
     CANCELLED = "cancelled"
     ERROR = "error"
     TIMEOUT = "timeout"  # PHASE 2: New status
@@ -161,6 +162,9 @@ class PluginResult:
     # orchestrating plugin that ran N sibling stages in one run reports N via
     # sdk.set_ticket_units(params, N) and the shell awards N x TICKETS_PER_RUN.
     ticket_units: int = 1
+    # Plain-English summary when the plugin finished with a WARNING outcome
+    # (sdk.set_run_outcome) — shown instead of the blank "completed" line.
+    outcome_message: str = ""
 
 
 class PluginExecutor:
@@ -211,6 +215,19 @@ class PluginExecutor:
             return max(1, min(20, int(plugin_params.get("ticket_units", 1))))
         except (TypeError, ValueError):
             return 1
+
+    @staticmethod
+    def _run_outcome_from(plugin_params: dict):
+        """The (status, message) a plugin reported via sdk.set_run_outcome, or
+        (None, "") if it reported nothing / junk. Only 'warning'/'partial' are
+        honoured — any other value collapses to a clean success."""
+        raw = plugin_params.get("run_outcome")
+        if not isinstance(raw, dict):
+            return None, ""
+        status = str(raw.get("status", "")).strip().lower()
+        if status not in ("warning", "partial"):
+            return None, ""
+        return status, str(raw.get("message", "") or "")
     
     def execute_plugin(
         self,
@@ -549,15 +566,25 @@ class PluginExecutor:
                     "TIMEOUT" if timed_out else "CANCELLED", plugin_id, execution_time,
                 )
             else:
+                outcome_status, outcome_msg = self._run_outcome_from(plugin_params)
                 with self._lock:
-                    result.status = PluginStatus.SUCCESS
-                    result.message = "Completed successfully"
+                    if outcome_status is not None:
+                        result.status = PluginStatus.WARNING
+                        result.message = outcome_msg or "Completed with warnings"
+                        result.outcome_message = outcome_msg
+                    else:
+                        result.status = PluginStatus.SUCCESS
+                        result.message = "Completed successfully"
                     result.progress = 100
                     result.execution_time = execution_time
                     result.ticket_units = self._ticket_units_from(plugin_params)
                 settings_manager.increment_plugin_runs(plugin_id)
                 safe_progress(100)
-                get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
+                get_run_logger().info(
+                    "RUN %s %s in %.1fs",
+                    "WARNING" if outcome_status is not None else "OK",
+                    plugin_id, execution_time,
+                )
                 try:
                     from techdeck.core.usage_tracker import record_run
                     record_run(plugin_id, plugin.name,
@@ -713,15 +740,25 @@ class PluginExecutor:
 
             execution_time = time.time() - start_time
 
+            outcome_status, outcome_msg = self._run_outcome_from(plugin_params)
             with self._lock:
-                result.status = PluginStatus.SUCCESS
-                result.message = "Completed successfully"
+                if outcome_status is not None:
+                    result.status = PluginStatus.WARNING
+                    result.message = outcome_msg or "Completed with warnings"
+                    result.outcome_message = outcome_msg
+                else:
+                    result.status = PluginStatus.SUCCESS
+                    result.message = "Completed successfully"
                 result.progress = 100
                 result.execution_time = execution_time
                 result.ticket_units = self._ticket_units_from(plugin_params)
             settings_manager.increment_plugin_runs(plugin_id)
             safe_progress(100)
-            get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
+            get_run_logger().info(
+                "RUN %s %s in %.1fs",
+                "WARNING" if outcome_status is not None else "OK",
+                plugin_id, execution_time,
+            )
             try:
                 from techdeck.core.usage_tracker import record_run
                 record_run(plugin_id, plugin.name,

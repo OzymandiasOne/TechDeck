@@ -470,6 +470,34 @@ def set_ticket_units(params: dict, units: int) -> None:
         pass
 
 
+# Run outcomes a plugin may report via set_run_outcome. Absence of a report
+# (the default) is treated as a clean success — so existing plugins that simply
+# return are unaffected.
+RUN_OUTCOME_WARNING = "warning"   # ran to completion, but with issues to surface
+RUN_OUTCOME_PARTIAL = "partial"   # some requested work was skipped or failed
+
+
+def set_run_outcome(params: dict, status: str, message: str = "") -> None:
+    """Report that this run finished WITHOUT raising but not cleanly, so
+    TechDeck stops claiming a blank 'completed successfully'.
+
+    Use for the middle ground the old all-or-nothing SUCCESS hid: a Teams
+    webhook POST returned non-2xx, a nest had no forecast rows, one of several
+    stages was skipped. Pass status = RUN_OUTCOME_WARNING or RUN_OUTCOME_PARTIAL
+    and a short plain-English `message`; TechDeck shows it (⚠) instead of the ✅
+    line, but the run still counts and still earns tickets — the work happened.
+
+    A hard failure should still RAISE (that path stays ERROR). On an older
+    TechDeck unaware of the key the run simply reports the normal success."""
+    try:
+        params["run_outcome"] = {
+            "status": str(status),
+            "message": str(message or ""),
+        }
+    except (TypeError, ValueError):
+        pass
+
+
 def request_batch_number(params: dict, prompt: str) -> str:
     """Prompt for a batch number through the TechDeck console, falling back to
     stdin input() when run standalone (no console). Returns the raw string.
