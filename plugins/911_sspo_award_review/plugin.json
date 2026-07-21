@@ -2,7 +2,7 @@
   "id": "911_sspo_award_review",
   "name": "911 SSPO Award Review",
   "description": "Runs off an award package (folder of order folders) and estimates plate cutting time from ACTUAL D911 throughput: a pieces-per-hour table by thickness band derived from 18.5 months of closed actuals (includes setup/handling), plus stock/material/thickness from each nest's work-package PDF. The old exact-linear-inch times (each work order's DXF geometry / a thickness-driven feed rate) are still computed as reference columns at the far right. Writes ONE consolidated Excel workbook - Plates and Non-Plates sheets, every batch-list column plus generated columns (Division placeholder, linear inches, Pcs/Hr, Est Min/PC, Est Min/WO, Est Cut Hours, then the LI reference block) - each followed by a real, refreshable PivotTable (one line per nest: Parts + Cut Time in both hours and minutes), plus a Shape Ft Req sheet totalling each shape nest's stock feet from its Summary of Batches lengths (rounded up to the foot per length) for receiving, and a Working Forecast Input sheet (one line per nest: Source Material / Pieces / Orders from the nest packet, shape Total Ft Req, blank REM Used / REM Made / Operations) that copy-pastes straight into the Working Forecast List. Prompts for the ROOT directory at runtime.",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

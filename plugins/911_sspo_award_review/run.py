@@ -470,7 +470,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -487,6 +487,8 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
                   "Multi-Layered", "LI Dev (SD)",
                   "Pcs/Hr", "Est Min/PC", "Est Min/WO", "Multiplier",
                   "Equation", "Est Cut Hours", "Flags",
+                  "",   # deliberate BLANK spacer column: clean visual division
+                        # between the live estimate and the old LI reference
                   "Feed Rate (IPM)", "LI Est Min/PC", "LI Est Min/WO",
                   "LI Est Cut Hours"]
 # 'Remnant Length'/'Remnant Width' are the nest sheet's page-1 Length/Width --
@@ -1654,6 +1656,8 @@ def write_data_table(ws, data_headers, data_rows):
     (past LI_OUTLIER_SD), yellow = no estimate, light blue = multi-layered. No
     summary block -- pivots are layered on later."""
     for c, name in enumerate(data_headers, start=1):
+        if name == "":
+            continue   # spacer column: no header text or styling
         cell = ws.cell(1, c, name)
         cell.font = _HDR_FONT
         cell.fill = _HDR_FILL
@@ -1677,6 +1681,8 @@ def write_data_table(ws, data_headers, data_rows):
                     else _MISSING_FILL if missing
                     else _MULTI_FILL if is_multi else None)
         for c, name in enumerate(data_headers, start=1):
+            if name == "":
+                continue   # spacer stays truly empty: no border, no highlight
             val = row.get(name)
             cell = ws.cell(ri, c, val)
             cell.border = _BORDER
@@ -1735,7 +1741,11 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
     nest_header = next((h for h in data_headers if h.upper() == "NEST PKG NBR"),
                        "Nest Pkg Nbr")
     qty_header = next((h for h in data_headers if h.upper() == "PPN QUANTITY"), None)
-    last_col = get_column_letter(len(data_headers))
+    # Pivot source range stops at the blank spacer column: Excel refuses a
+    # PivotCache whose source has a blank header, and every pivoted field
+    # (Nest Pkg Nbr, PPN Quantity, Est Cut Hours) sits left of it anyway.
+    n_src_cols = data_headers.index("") if "" in data_headers else len(data_headers)
+    last_col = get_column_letter(n_src_cols)
 
     pythoncom.CoInitialize()
     excel = None
@@ -1884,7 +1894,7 @@ def _write_static_summary(ws, data_rows):
 def _autosize(ws, data_headers):
     widths = {}
     for c, name in enumerate(data_headers, start=1):
-        widths[c] = max(len(str(name)), 10)
+        widths[c] = 4 if name == "" else max(len(str(name)), 10)
     for row in ws.iter_rows(min_row=2, max_row=min(ws.max_row, 400)):
         for cell in row:
             if cell.value is not None and cell.column <= len(data_headers):
