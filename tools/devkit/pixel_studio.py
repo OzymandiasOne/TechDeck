@@ -22,21 +22,74 @@ surrounding UI is re-expressed here for embedding.
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QScrollArea,
-    QButtonGroup, QFrame, QStackedWidget, QFileDialog, QColorDialog,
-    QMessageBox, QInputDialog, QSizePolicy,
+    QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QPushButton, QLabel,
+    QScrollArea, QButtonGroup, QFrame, QStackedWidget, QComboBox,
+    QFileDialog, QColorDialog, QMessageBox, QInputDialog, QSizePolicy,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QSize, QByteArray
+from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 from techdeck.ui import pixel_art
-from tools.pixel_editor import Canvas
+from tools.pixel_editor import Canvas, _DEFAULT_PALETTE, _CHAR_POOL
 
 
 def _playground_dir() -> Path:
     """Default browse location — the icon-source working area, matching the
     standalone editors so files land in one place."""
     return Path(__file__).resolve().parents[1] / "pixel_playground"
+
+
+# Tool glyphs — Feather/Lucide-style stroke paths, rendered + tinted at build.
+_TOOL_ICONS = {
+    "pencil": [
+        "M12 20h9",
+        "M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z",
+    ],
+    "eraser": [
+        "m7 21-4.3-4.3a1 1 0 0 1 0-1.4l10-10a1 1 0 0 1 1.4 0l4.3 4.3"
+        "a1 1 0 0 1 0 1.4L13 21",
+        "M22 21H7",
+    ],
+    "fill": ["M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"],
+    "eyedropper": [
+        "M2 22l1-1h3l9-9",
+        "M3 21v-3l9-9",
+        "M14 6l4 4 3-3a2.83 2.83 0 0 0-4-4l-3 3z",
+    ],
+}
+
+
+def _svg_icon(paths, color: str, size: int = 22) -> QIcon:
+    """Build a tinted QIcon from a list of stroke path 'd' strings."""
+    body = "".join(
+        f'<path d="{d}" stroke="{color}" stroke-width="2" fill="none" '
+        f'stroke-linecap="round" stroke-linejoin="round"/>' for d in paths)
+    svg = f'<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">{body}</svg>'
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    renderer.render(p)
+    p.end()
+    return QIcon(pm)
+
+
+# Preset palettes for the Sprite palette dropdown. None = the editor default.
+_PRESETS = {
+    "Default": None,
+    "PICO-8": [
+        "#000000", "#1D2B53", "#7E2553", "#008751", "#AB5236", "#5F574F",
+        "#C2C3C7", "#FFF1E8", "#FF004D", "#FFA300", "#FFEC27", "#00E436",
+        "#29ADFF", "#83769C", "#FF77A8", "#FFCCAA",
+    ],
+    "Sweetie-16": [
+        "#1a1c2c", "#5d275d", "#b13e53", "#ef7d57", "#ffcd75", "#a7f070",
+        "#38b764", "#257179", "#29366f", "#3b5dc9", "#41a6f6", "#73eff7",
+        "#f4f4f4", "#94b0c2", "#566c86", "#333c57",
+    ],
+    "Grayscale": ["#000000", "#333333", "#666666", "#999999", "#cccccc", "#ffffff"],
+}
 
 
 # ── Sprite mode ─────────────────────────────────────────────────────────────
@@ -48,6 +101,11 @@ class _SpritePanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.path: "Path | None" = None
+
+        from techdeck.ui.theme_manager import get_theme_manager
+        pal = get_theme_manager().get_current_palette()
+        self._icon_color = pal.text
+        self._accent = pal.accent
 
         self.canvas = Canvas()
         self.canvas.color_picked.connect(self._on_pick)
@@ -94,20 +152,38 @@ class _SpritePanel(QWidget):
 
     def _build_tools_rail(self):
         side = QFrame()
-        side.setFixedWidth(150)
+        side.setFixedWidth(140)
         v = QVBoxLayout(side)
         v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Tools"))
+        # Drawing tools as a 2-column icon grid; the name shows on hover.
+        tool_style = f"""
+            QPushButton {{ background: transparent; border: 1px solid #444;
+                           border-radius: 6px; }}
+            QPushButton:hover {{ background: rgba(127, 127, 127, 0.15); }}
+            QPushButton:checked {{ background: rgba(127, 127, 127, 0.28);
+                                   border: 2px solid {self._accent}; }}
+        """
+        grid = QGridLayout()
+        grid.setSpacing(4)
         self.tool_group = QButtonGroup(self)
         self.tool_buttons = {}
-        for name in ("pencil", "eraser", "fill", "eyedropper"):
-            b = QPushButton(name.capitalize())
+        for i, name in enumerate(("pencil", "eraser", "fill", "eyedropper")):
+            b = QPushButton()
             b.setCheckable(True)
+            b.setIcon(_svg_icon(_TOOL_ICONS[name], self._icon_color))
+            b.setIconSize(QSize(22, 22))
+            b.setFixedSize(44, 44)
+            b.setToolTip(name.capitalize())
+            b.setStyleSheet(tool_style)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _c, n=name: self._select_tool(n))
             self.tool_group.addButton(b)
             self.tool_buttons[name] = b
-            v.addWidget(b)
+            grid.addWidget(b, i // 2, i % 2)
+        grid.setColumnStretch(2, 1)   # keep the two icon columns left-packed
+        v.addLayout(grid)
         self.tool_buttons["pencil"].setChecked(True)
 
         urow = QHBoxLayout()
@@ -140,6 +216,12 @@ class _SpritePanel(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Palette"))
+        # Preset palettes sit above the swatches.
+        self.preset_combo = QComboBox()
+        self.preset_combo.setToolTip("Load a preset palette")
+        self.preset_combo.addItems(list(_PRESETS.keys()))
+        v.addWidget(self.preset_combo)
+
         self.swatch_host = QWidget()
         self.swatch_box = QVBoxLayout(self.swatch_host)
         self.swatch_box.setContentsMargins(0, 0, 0, 0)
@@ -160,7 +242,29 @@ class _SpritePanel(QWidget):
         prow.addWidget(add)
         prow.addWidget(editb)
         v.addLayout(prow)
+        # Connect AFTER the items are added so the initial population — which
+        # emits currentTextChanged once — doesn't clobber the canvas palette.
+        self.preset_combo.currentTextChanged.connect(self._apply_preset)
         return side
+
+    def _apply_preset(self, name: str):
+        """Replace the working palette with a preset. Existing pixels keep
+        their chars; any not in the new palette render transparent."""
+        hexes = _PRESETS.get(name)
+        if hexes is None:
+            pal = dict(_DEFAULT_PALETTE)
+        else:
+            pal = {}
+            chars = iter(_CHAR_POOL)
+            for hx in hexes:
+                ch = next(chars, None)
+                if ch is None:
+                    break
+                pal[ch] = hx
+        self.canvas.palette = pal
+        self.canvas.active_char = next(iter(pal), "k")
+        self.canvas.update()
+        self._rebuild_swatches()
 
     @staticmethod
     def _heading(text):
