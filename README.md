@@ -22,6 +22,13 @@ Analysis sheet.
 tickets per stage completed (5 each). Multi-PPN orders now get their work-packet PDF
 placed in every relevant folder.
 
+**New app: Sheet Metal Calculators** - A library of shop calculators behind a simple
+picker. Pick a calculator on the left, fill in the fields, get the result live. Three
+to start - **Flat Length** (bend-allowance flat length from K-factor, thickness, inside
+radius/ID/OD, and bend angle), **Bend Deduction** (OSSB / bend allowance / bend
+deduction), and **Material Weight** (by sheet size or area) - with more being added one
+at a time.
+
 ---
 
 ## What's New in v0.8.6.8
