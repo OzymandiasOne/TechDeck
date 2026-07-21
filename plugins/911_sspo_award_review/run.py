@@ -21,12 +21,14 @@ S029, V092 ...), this plugin:
      Material Size / Type, feeding receiving's material cheat sheet: the
      per-nest value repeats on the nest's rows, and a 'Shape Ft Req' sheet
      rolls up one line per shape nest with a grand total.
-  3. Computes a per-row plate cutting-time estimate from EXACT linear inches of
-     cut. Each batch-list row's 'Work Order' is matched to its DXF in the order's
-     'IGES FILES' folder; the cut length is measured from the DXF vector
-     geometry and divided by a thickness-driven feed rate (IPM) -- see
-     CALCULATION below. Rows with no DXF (structural shapes, or a missing file)
-     fall back to the legacy thickness-band estimate so hours aren't lost.
+  3. Computes a per-row plate cutting-time estimate from ACTUAL THROUGHPUT:
+     a thickness-band 'pieces per hour' table derived from 18.5 months of
+     closed D911 actuals (planning's table, 2026-07) -- see CALCULATION below.
+     Structural-shape rows keep the legacy thickness-band estimate. The old
+     linear-inch times are still computed for every plate row that resolves a
+     DXF (Work Order matched in the order's 'IGES FILES' folder, cut length
+     measured from the DXF vector geometry / a thickness-driven feed rate) and
+     ride along as REFERENCE columns at the far right of the table.
   4. Writes ONE consolidated workbook with two sheets (Plates / Non-Plates).
      Each is a flat data table that reproduces EVERY batch-list column in its
      native order, then our generated columns. 'Material' on the table is the
@@ -43,26 +45,31 @@ S029, V092 ...), this plugin:
   6. Drops a REAL, refreshable Excel PivotTable below the data on each sheet --
      ONE line per nest: Parts (true piece count for the whole nest) + the same
      Cut Time total in both hours and minutes, grand total at the bottom -- by
-     driving Excel via COM (pywin32). A plain-English "machine cut time only"
-     caveat sits above it. If Excel/COM is unavailable or errors, it falls back
+     driving Excel via COM (pywin32). A plain-English caveat stating the
+     throughput basis (includes setup/handling -- it's derived from closed
+     actuals) sits above it. If Excel/COM is unavailable or errors, it falls back
      to a static per-nest summary of the same shape so a run never hard-crashes.
 
 Runs off an AWARD PACKAGE (the SPARS-received folder of order folders, before
 batching) so work-scope review / division + machine assignment can happen up
-front; the plate cut times are the exact linear-inch estimates. Replaced the
+front; the plate cut times are the actuals-derived throughput estimates (with
+the exact linear-inch times as far-right reference columns). Replaced the
 standalone 911_linear_inch_cuttime tool (removed) whose engine is vendored here.
 
-CALCULATION (per plate batch-list row; linear inches drive the estimate):
-    linear_in_pc = exact DXF cut length for the row's Work Order (inches)
-    feed (IPM)   = lookup_feed(thickness), rounding thickness UP to the next chart row
-    Est Min/PC   = linear_in_pc / feed
+CALCULATION (per plate batch-list row; v2.7.0 -- actuals-derived throughput):
+    pcs/hr       = lookup_pieces_per_hour(thickness)  [PIECES_PER_HOUR bands]
+    Est Min/PC   = 60 / pcs/hr
     Est Min/WO   = Est Min/PC * (row PPN Quantity)
     Est Cut Hours = Est Min/WO / 60
 An 'Equation' column (right before Est Cut Hours) prints this chain with the
 row's own numbers plugged in so the arithmetic is auditable cell-by-cell.
+The prior primary estimate -- EXACT DXF linear inches / thickness feed rate --
+is kept per planning's request as reference columns at the FAR RIGHT of the
+table (Feed Rate (IPM), LI Est Min/PC, LI Est Min/WO, LI Est Cut Hours):
+    LI Est Min/PC = linear_in_pc / lookup_feed(thickness)  [rounds thk UP]
 Bevel adds NO time (the legacy +180 min/pc surcharge was removed per planning
-direction); bevel scope is still detected and flagged for review. Non-plate /
-DXF-less rows use the legacy band as a fallback:
+direction); bevel scope is still detected and flagged for review. Structural
+shape rows use the legacy band for their primary estimate:
     band(t): t<0.5->6 ; <1.0->9 ; <2.0->12 ; >=2.0->18 (min/pc); est = t*band*qty.
 
 Prompts for the ROOT via the native folder dialog only (no pre-configured settings
@@ -153,6 +160,38 @@ def lookup_feed(thickness):
             return ipm, note
     t, ipm = FEED_RATES[-1]
     return ipm, f"above chart max {t}\" - used {t}\" row"
+
+
+# PRIMARY estimate driver since v2.7.0 (planning's table, 2026-07-20): pieces
+# per hour by thickness band, derived from 18.5 months of closed D911 actuals
+# ('D911 Closed as of 7-14-2026' -> 'Pivot Summ_Piv': pcs/hr = $500/hr shop
+# rate / avg billed value per piece in the band, Jan 2025 - Jul 2026). Being
+# billing-derived it bakes in setup/handling/downtime, which is why it replaced
+# the geometry-only linear-inch time as the primary number (LI times remain as
+# reference columns). Bands are contiguous (source sheet's gaps/typos cleaned
+# per planning: <=0.312, >0.312-0.50, >0.50-1, >1-2, >2).
+PIECES_PER_HOUR_SOURCE = ("D911 closed actuals Jan 2025 - Jul 2026 "
+                          "('D911 Closed as of 7-14-2026', Pivot Summ_Piv)")
+PIECES_PER_HOUR = [  # (band max thickness in, pieces per hour) - ascending
+    (0.312, 5.73),
+    (0.50, 6.00),
+    (1.0, 5.33),
+    (2.0, 2.85),
+    (6.5, 1.05),
+]
+
+
+def lookup_pieces_per_hour(thickness):
+    """(pcs_hr, note) for a thickness; band = first row whose max covers it.
+    Above the table max, clamps to the last band (flagged via note). None only
+    when thickness is None/non-positive."""
+    if thickness is None or thickness <= 0:
+        return None
+    for tmax, pph in PIECES_PER_HOUR:
+        if thickness <= tmax + 1e-9:
+            return pph, None
+    tmax, pph = PIECES_PER_HOUR[-1]
+    return pph, f"above throughput table max {tmax}\" - used {tmax}\" band"
 
 
 def _decode_dxf(path):
@@ -431,7 +470,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -446,8 +485,10 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
                   "Shape Ft Req",
                   "Mil Spec", "Material", "Linear In/PC", "Total Linear In",
                   "Multi-Layered", "LI Dev (SD)",
-                  "Feed Rate (IPM)", "Est Min/PC", "Est Min/WO", "Multiplier",
-                  "Equation", "Est Cut Hours", "Flags"]
+                  "Pcs/Hr", "Est Min/PC", "Est Min/WO", "Multiplier",
+                  "Equation", "Est Cut Hours", "Flags",
+                  "Feed Rate (IPM)", "LI Est Min/PC", "LI Est Min/WO",
+                  "LI Est Cut Hours"]
 # 'Remnant Length'/'Remnant Width' are the nest sheet's page-1 Length/Width --
 # the remnant's dimensions -- filled ONLY on rows whose batch-list 'Rem Used'
 # (AA) is populated (a remnant was used); blank otherwise.
@@ -459,6 +500,9 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
 # sheet. Blank on plate rows (plate packets carry no Summary of Batches table).
 # 'Multiplier' is an intentionally blank placeholder the planner fills in by hand
 # (a future classification factor, e.g. base=1 / std bevel=2), like 'Division'.
+# 'Pcs/Hr' (v2.7.0) is the row's PIECES_PER_HOUR band rate -- the primary
+# estimate driver: Est Min/PC = 60 / Pcs/Hr for every plate row with a known
+# thickness (no DXF needed). Structural shapes keep the legacy band estimate.
 # 'Equation' spells out the FULL calculation for the row with this row's own
 # numbers plugged in (Est Min/PC -> Est Min/WO -> Est Cut Hours), so the math is
 # auditable cell-by-cell -- it sits right before 'Est Cut Hours' (the result).
@@ -466,8 +510,15 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
 # from the previous rounded cell) so e.g. Est Min/PC x Qty reproduces Est Min/WO
 # exactly rather than diverging by an independent-rounding cent.
 # 'Division' is an intentionally blank placeholder the planner fills in by hand.
-# The linear-inch columns + the two Est Min breakouts are populated for plate rows
-# that resolve a DXF; non-plate rows leave them blank. 'Multi-Layered' = Y/N (does
+# The FAR-RIGHT block after 'Flags' -- Feed Rate (IPM) / LI Est Min/PC /
+# LI Est Min/WO / LI Est Cut Hours -- is the RETIRED primary estimate (exact DXF
+# linear inches / feed rate), kept as a reference comparison per planning's
+# request (v2.7.0: "keep the original runtimes, moved to a separate location on
+# the right"). LI Est Min/PC = Linear In/PC / Feed Rate; the chain matches the
+# old Equation column. Populated only for plate rows that resolve a DXF.
+# The linear-inch measurement columns (Linear In/PC, Total Linear In,
+# Multi-Layered, LI Dev (SD)) stay in place -- they're geometry facts, not
+# runtimes. 'Multi-Layered' = Y/N (does
 # the part's cut span >1 non-empty layer; multi-layer rows are highlighted).
 # 'LI Dev (SD)' = how many standard deviations the part's Linear In/PC sits from
 # the mean of all plate parts in the run; parts past LI_OUTLIER_SD are flagged +
@@ -533,6 +584,33 @@ def row_estimate_hours(thickness: Optional[float], ppn_qty: float, scope: str):
     return est_min / 60.0, factor, 0.0
 
 
+def throughput_estimate(thickness, ppn_qty):
+    """PRIMARY plate estimate since v2.7.0: actuals-derived pieces-per-hour.
+
+    Returns a dict with the band rate, the two Est Min breakouts, and Est Cut
+    Hours -- or None when thickness is unknown. Needs NO DXF (the band covers
+    setup/handling because it's billing-derived), so every plate row with a
+    thickness gets a primary estimate:
+        Est Min/PC   = 60 / pcs_hr
+        Est Min/WO   = Est Min/PC * qty
+        Est Cut Hours = Est Min/WO / 60
+    """
+    pph = lookup_pieces_per_hour(thickness)
+    if pph is None:
+        return None
+    pcs_hr, note = pph
+    qty = ppn_qty if (ppn_qty and ppn_qty > 0) else 0
+    min_pc = 60.0 / pcs_hr
+    min_wo = min_pc * qty
+    return {
+        "pcs_hr": pcs_hr,
+        "pph_note": note,
+        "min_pc": min_pc,
+        "min_wo": min_wo,
+        "hours": min_wo / 60.0,
+    }
+
+
 def plate_cut_estimate(linear_in_pc, thickness, ppn_qty):
     """Linear-inch cut-time estimate for a plate row that resolved a DXF.
 
@@ -587,6 +665,18 @@ _NONPLATE_FORMS = ("ANGLE", "TUBE", "PIPE", "BAR", "ROD", "CHANNEL", "BEAM",
                    "W-SECTION", "W SECTION", "SECTION")
 
 
+def _desc_is_shape_form(description) -> bool:
+    """True if a Description's LEADING form token is a structural shape.
+
+    Shared by _is_plate_row (sheet split) and the build loop (which estimate
+    drives the row: shapes keep the legacy band, everything else gets the
+    throughput table) so the two can never disagree.
+    """
+    desc = str(description or "").upper()
+    lead = re.split(r"[;,]", desc, maxsplit=1)[0].strip()
+    return any(lead.startswith(f) for f in _NONPLATE_FORMS)
+
+
 def _is_plate_row(row: dict) -> bool:
     """True if a data row is a plate (vs a structural shape/bar/tube).
 
@@ -602,8 +692,7 @@ def _is_plate_row(row: dict) -> bool:
         computed' -- a nest-packet plate thickness implies a plate.
     """
     desc = str(row.get("Description") or "").upper()
-    lead = re.split(r"[;,]", desc, maxsplit=1)[0].strip()
-    if any(lead.startswith(f) for f in _NONPLATE_FORMS):
+    if _desc_is_shape_form(desc):
         return False
     if "PLATE" in desc:
         return True
@@ -1560,9 +1649,10 @@ def write_working_forecast_sheet(wb, forecast_summary, log):
 
 def write_data_table(ws, data_headers, data_rows):
     """Write one sheet's flat data table (header row 1, then data). Row highlights:
-    red = no DXF match (band-estimate fallback), orange = LI outlier (past
-    LI_OUTLIER_SD), yellow = no estimate, light blue = multi-layered. No summary
-    block -- pivots are layered on later."""
+    red = plate with no DXF match (geometry missing -- the LI reference block is
+    empty; the pcs/hr primary estimate still computes), orange = LI outlier
+    (past LI_OUTLIER_SD), yellow = no estimate, light blue = multi-layered. No
+    summary block -- pivots are layered on later."""
     for c, name in enumerate(data_headers, start=1):
         cell = ws.cell(1, c, name)
         cell.font = _HDR_FONT
@@ -1571,11 +1661,14 @@ def write_data_table(ws, data_headers, data_rows):
                                    wrap_text=True)
         cell.border = _BORDER
 
-    est_idx = data_headers.index(EST_COL) + 1
+    # Hours columns get 3-decimal formatting: the primary Est Cut Hours + the
+    # far-right LI reference copy.
+    hour_idxs = {data_headers.index(c) + 1
+                 for c in (EST_COL, "LI Est Cut Hours") if c in data_headers}
     for ri, row in enumerate(data_rows, start=2):
         # Pick one row highlight (most-important wins): no-DXF-match (red) >
-        # LI outlier > no-estimate > multi-layered. Red leads because a
-        # band-estimated row is the least-trustworthy time and the one to chase.
+        # LI outlier > no-estimate > multi-layered. Red leads because a plate
+        # with no geometry (empty LI reference) is the one to chase.
         is_nodxf = "no dxf match" in str(row.get("Flags") or "").lower()
         is_outlier = "outlier" in str(row.get("Flags") or "").lower()
         missing = row.get(EST_COL) is None
@@ -1591,7 +1684,7 @@ def write_data_table(ws, data_headers, data_rows):
                 cell.fill = row_fill
             if _is_date(val):
                 cell.number_format = "MM/DD/YYYY"
-            if c == est_idx and isinstance(val, (int, float)):
+            if c in hour_idxs and isinstance(val, (int, float)):
                 cell.number_format = "0.000"
     ws.freeze_panes = "A2"
     _autosize(ws, data_headers)
@@ -1669,11 +1762,13 @@ def add_real_pivots(out_path, data_headers, sheets_meta, log):
             ws = wb.Worksheets(sheet_name)
             last_row = n_rows + 1  # +1 for the header row
             src = ws.Range(f"A1:{last_col}{last_row}")
-            # Plain-English caveat right above the pivot so a small per-nest
-            # number is never misread as total labor time.
+            # Plain-English caveat right above the pivot stating what the
+            # number is: throughput-derived, so it INCLUDES handling (v2.7.0
+            # flipped this from the old torch-on-only linear-inch basis).
             ws.Cells(last_row + 2, 1).Value = (
-                "Machine cut time only (torch-on). Excludes pierce, "
-                "positioning, and handling time.")
+                "Estimated from actual D911 throughput (pieces/hour by "
+                "thickness, closed actuals Jan 2025 - Jul 2026); includes "
+                "typical setup, positioning, and handling time.")
             dest = ws.Cells(last_row + 4, 1)  # blank + caveat rows under the data
             cache = wb.PivotCaches().Create(SourceType=_XL_DATABASE, SourceData=src)
             table_name = sheet_name.replace("-", "") + "Pivot"
@@ -1754,9 +1849,10 @@ def _write_static_summary(ws, data_rows):
         agg[nest][0] += qty
         agg[nest][1] += est
     start = ws.max_row + 3
-    # Plain-English caveat above the summary.
-    ws.cell(start, 1, "Machine cut time only (torch-on). Excludes pierce, "
-                      "positioning, and handling time.")
+    # Plain-English caveat above the summary (matches the COM pivot's).
+    ws.cell(start, 1, "Estimated from actual D911 throughput (pieces/hour by "
+                      "thickness, closed actuals Jan 2025 - Jul 2026); includes "
+                      "typical setup, positioning, and handling time.")
     start += 1
     for c, label in ((1, "Nest Pkg Nbr"), (2, "Parts"),
                      (3, "Cut Time (hr)"), (4, "Cut Time (min)")):
@@ -1813,6 +1909,8 @@ def run(params: dict, progress_callback, cancel_event):
 
     log("=" * 60)
     log(f"911 SSPO Award Review v{VERSION}")
+    log(f"Cut-time basis: pieces/hour by thickness ({PIECES_PER_HOUR_SOURCE});")
+    log("linear-inch times kept as far-right reference columns.")
     log("=" * 60)
 
     start_dir = ""
@@ -2000,12 +2098,16 @@ def run(params: dict, progress_callback, cancel_event):
                 thickness = thickness_from_description(row.get("DESCRIPTION"))
                 thk_src = "Description" if thickness is not None else "MISSING"
 
-            # Cut time from EXACT DXF linear inches / feed rate when the row's
-            # work order resolves a DXF; else fall back to the thickness band.
+            # Primary cut time (v2.7.0): actuals-derived pieces/hour by
+            # thickness band for every non-shape row; structural shapes keep
+            # the legacy band. The DXF linear-inch time is still computed as
+            # the far-right reference block when the work order resolves a DXF.
             wo = str(row.get("WORK ORDER") or "").strip().upper()
             li_pc = dxf_index.get(wo)
             bevel = _is_bevel(scope)
-            est = plate_cut_estimate(li_pc, thickness, ppn)
+            is_shape = _desc_is_shape_form(row.get("DESCRIPTION"))
+            est = None if is_shape else throughput_estimate(thickness, ppn)
+            est_li = plate_cut_estimate(li_pc, thickness, ppn)
 
             out_row = {}
             # Copy every batch-list field by header.
@@ -2048,53 +2150,73 @@ def run(params: dict, progress_callback, cancel_event):
             # LI Dev (SD) is filled in after all rows are built (needs the mean/std
             # across the whole run); leave a placeholder here.
             out_row["LI Dev (SD)"] = None
+            # Far-right LI reference block (the retired primary estimate) --
+            # filled whenever the row's work order resolved a DXF. Progressive
+            # rounding as below so LI Est Min/PC x Qty reproduces LI Est Min/WO.
+            if est_li is not None:
+                li_disp = round(est_li["linear_in_pc"], 2)
+                li_mpc_disp = round(est_li["min_pc"], 2)
+                li_mwo_disp = round(li_mpc_disp * ppn, 2)
+                out_row["Linear In/PC"] = li_disp
+                out_row["Total Linear In"] = round(li_disp * ppn, 2)
+                out_row["Multi-Layered"] = "Y" if dxf_multi.get(wo) else "N"
+                out_row["Feed Rate (IPM)"] = est_li["feed_ipm"]
+                out_row["LI Est Min/PC"] = li_mpc_disp
+                out_row["LI Est Min/WO"] = li_mwo_disp
+                out_row["LI Est Cut Hours"] = round(li_mwo_disp / 60.0, 4)
+                if est_li["feed_note"]:
+                    flags.append(est_li["feed_note"])
+                if wo in dxf_suspect:
+                    flags.append(dxf_suspect[wo])
+            else:
+                out_row["Linear In/PC"] = None
+                out_row["Total Linear In"] = None
+                out_row["Multi-Layered"] = ""     # N/A without a DXF
+                out_row["Feed Rate (IPM)"] = None
+                out_row["LI Est Min/PC"] = None
+                out_row["LI Est Min/WO"] = None
+                out_row["LI Est Cut Hours"] = None
+                # A plate SHOULD have an IGES DXF; flag the miss (the primary
+                # estimate no longer needs it, but the LI reference is lost).
+                if li_pc is None and "PLATE" in str(row.get("DESCRIPTION") or "").upper():
+                    flags.append("no DXF match - no LI reference")
+
             if est is not None:
-                # Progressive rounding: each cell is derived from the previous
-                # ROUNDED cell so the printed Equation reproduces every column
-                # exactly (Est Min/PC x Qty == Est Min/WO, etc.).
-                li_disp = round(est["linear_in_pc"], 2)
-                ipm = est["feed_ipm"]
+                # Primary estimate: pieces/hour band. Progressive rounding:
+                # each cell is derived from the previous ROUNDED cell so the
+                # printed Equation reproduces every column exactly
+                # (Est Min/PC x Qty == Est Min/WO, etc.).
                 mpc_disp = round(est["min_pc"], 2)
-                tot_li_disp = round(li_disp * ppn, 2)
                 mwo_disp = round(mpc_disp * ppn, 2)
                 hours_disp = round(mwo_disp / 60.0, 4)
-                out_row["Linear In/PC"] = li_disp
-                out_row["Total Linear In"] = tot_li_disp
-                out_row["Multi-Layered"] = "Y" if dxf_multi.get(wo) else "N"
-                out_row["Feed Rate (IPM)"] = ipm
+                out_row["Pcs/Hr"] = est["pcs_hr"]
                 out_row["Est Min/PC"] = mpc_disp
                 out_row["Est Min/WO"] = mwo_disp
                 out_row["Est Cut Hours"] = hours_disp
                 out_row["Equation"] = (
-                    f"Est Min/PC = Linear In/PC / Feed Rate = "
-                    f"{_eqnum(li_disp)} in / {_eqnum(ipm)} IPM = {_eqnum(mpc_disp)} min   |   "
+                    f"Est Min/PC = 60 / Pcs-Hr = "
+                    f"60 / {_eqnum(est['pcs_hr'])} = {_eqnum(mpc_disp)} min   |   "
                     f"Est Min/WO = Est Min/PC x Qty = "
                     f"{_eqnum(mpc_disp)} x {_eqnum(ppn)} = {_eqnum(mwo_disp)} min   |   "
                     f"Est Cut Hours = Est Min/WO / 60 = "
                     f"{_eqnum(mwo_disp)} / 60 = {hours_disp:.3f} hr"
                 )
-                if est["feed_note"]:
-                    flags.append(est["feed_note"])
-                if wo in dxf_suspect:
-                    flags.append(dxf_suspect[wo])
+                if est["pph_note"]:
+                    flags.append(est["pph_note"])
             else:
-                # No DXF geometry: structural row, or a plate whose DXF is
-                # missing. Keep the thickness-band estimate so hours aren't lost.
+                # Structural shape (legacy band estimate), or thickness unknown.
                 est_hr, factor, _bevel = row_estimate_hours(thickness, ppn, scope)
-                out_row["Linear In/PC"] = None
-                out_row["Total Linear In"] = None
-                out_row["Multi-Layered"] = ""     # N/A without a DXF
-                out_row["Feed Rate (IPM)"] = None
-                out_row["Est Min/PC"] = None
-                out_row["Est Min/WO"] = None
+                out_row["Pcs/Hr"] = None
                 if est_hr is not None and factor is not None:
                     band = band_minutes(thickness)
                     factor_disp = round(factor, 2)
                     mwo_disp = round(factor_disp * ppn, 2)
                     hours_disp = round(mwo_disp / 60.0, 4)
+                    out_row["Est Min/PC"] = factor_disp
+                    out_row["Est Min/WO"] = mwo_disp
                     out_row["Est Cut Hours"] = hours_disp
                     out_row["Equation"] = (
-                        f"Band fallback (no DXF geometry). "
+                        f"Band fallback (structural shape). "
                         f"Est Min/PC = Thickness x band-factor = "
                         f"{_eqnum(thickness)} x {band} = {_eqnum(factor_disp)} min   |   "
                         f"Est Min/WO = Est Min/PC x Qty = "
@@ -2103,10 +2225,10 @@ def run(params: dict, progress_callback, cancel_event):
                         f"{_eqnum(mwo_disp)} / 60 = {hours_disp:.3f} hr"
                     )
                 else:
+                    out_row["Est Min/PC"] = None
+                    out_row["Est Min/WO"] = None
                     out_row["Est Cut Hours"] = None
                     out_row["Equation"] = "No estimate (thickness unknown)."
-                if li_pc is None and "PLATE" in str(row.get("DESCRIPTION") or "").upper():
-                    flags.append("no DXF match - band estimate")
 
             if thk_src == "MISSING":
                 flags.append("no thickness")
@@ -2209,7 +2331,7 @@ def run(params: dict, progress_callback, cancel_event):
     log("\n" + "=" * 60)
     log(f"DONE. Wrote: {out_path}")
     log(f"  Plate rows: {len(plate_rows)}  |  Non-plate rows: {len(nonplate_rows)}")
-    log(f"  Plate cut time (machine only): {grand_est:.2f} hr "
+    log(f"  Plate cut time (throughput basis, incl. handling): {grand_est:.2f} hr "
         f"({grand_est * 60:.0f} min) across {int(grand_qty)} pieces")
     if shape_summary:
         log(f"  Shape stock required: {sum(e['ft'] for e in shape_summary)} ft "
