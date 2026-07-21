@@ -157,6 +157,10 @@ class PluginResult:
     # is how to fix it — the shell renders a clean block instead of a traceback.
     is_user_error: bool = False
     user_fix: Optional[str] = None
+    # How many ticket-earning systems this run performed. Normally 1; an
+    # orchestrating plugin that ran N sibling stages in one run reports N via
+    # sdk.set_ticket_units(params, N) and the shell awards N x TICKETS_PER_RUN.
+    ticket_units: int = 1
 
 
 class PluginExecutor:
@@ -196,6 +200,17 @@ class PluginExecutor:
         self._lock = threading.RLock()
         # PHASE 2: Default timeout
         self.default_timeout = default_timeout
+
+    @staticmethod
+    def _ticket_units_from(plugin_params: dict) -> int:
+        """How many ticket-earning systems the plugin reported for this run
+        (sdk.set_ticket_units mutates the params dict). Defaults to 1; junk
+        values from a misbehaving plugin can never zero out or inflate a run
+        to something absurd, so clamp to [1, 20]."""
+        try:
+            return max(1, min(20, int(plugin_params.get("ticket_units", 1))))
+        except (TypeError, ValueError):
+            return 1
     
     def execute_plugin(
         self,
@@ -539,6 +554,7 @@ class PluginExecutor:
                     result.message = "Completed successfully"
                     result.progress = 100
                     result.execution_time = execution_time
+                    result.ticket_units = self._ticket_units_from(plugin_params)
                 settings_manager.increment_plugin_runs(plugin_id)
                 safe_progress(100)
                 get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)
@@ -702,6 +718,7 @@ class PluginExecutor:
                 result.message = "Completed successfully"
                 result.progress = 100
                 result.execution_time = execution_time
+                result.ticket_units = self._ticket_units_from(plugin_params)
             settings_manager.increment_plugin_runs(plugin_id)
             safe_progress(100)
             get_run_logger().info("RUN OK %s in %.1fs", plugin_id, execution_time)

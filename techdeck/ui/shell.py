@@ -550,10 +550,17 @@ class MainWindow(QMainWindow):
                 # Tally the run by family for the family achievements (911/922).
                 self.settings.record_family_run(getattr(plugin, "family", ""))
                 # Reward tickets for a successful run (spendable at Woogy's Emporium).
+                # An orchestrating run (922 Setup running several stages) reports
+                # how many systems it performed via sdk.set_ticket_units — each
+                # earns a full run's worth.
                 # Professional theme hides the playful ticket message (still earned).
-                bal = self.settings.add_tickets(TICKETS_PER_RUN)
+                units = max(1, int(getattr(result, "ticket_units", 1) or 1))
+                earned = TICKETS_PER_RUN * units
+                bal = self.settings.add_tickets(earned)
                 if not self.settings.is_professional():
-                    self.console.append_game(f"🎟 +{TICKETS_PER_RUN} tickets (balance: {bal})")
+                    suffix = f" — {units} systems ran" if units > 1 else ""
+                    self.console.append_game(
+                        f"🎟 +{earned} tickets (balance: {bal}){suffix}")
                 # GUI plugins (requires_main_thread) call params['on_success'] themselves
                 # at a meaningful moment. Suppress the auto sound for them.
                 if not getattr(plugin, 'requires_main_thread', False):

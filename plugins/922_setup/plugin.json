@@ -2,7 +2,7 @@
   "id": "922_setup",
   "name": "922 Setup",
   "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order via a Power Automate webhook), Batch Repeater (pull repeats, distribute CAD/binders, label REPEAT cards), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "author": "Anthony Sieben",
   "family": "922",
   "requires_admin": false,

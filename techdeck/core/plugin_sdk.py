@@ -455,6 +455,21 @@ def plugin_settings(plugin_id: str) -> dict:
         return {}
 
 
+def set_ticket_units(params: dict, units: int) -> None:
+    """Report how many ticket-earning systems this run performed (default 1).
+
+    An orchestrating plugin that runs N sibling stages inside ONE plugin run
+    (e.g. 922 Setup running Teams Cards + Batch Repeater + Pallet Stamper)
+    calls this with N so the shell awards N x TICKETS_PER_RUN on success
+    instead of a single run's worth. Values below 1 clamp to 1; on an older
+    TechDeck (executor unaware of the key) the extra units are simply ignored
+    and the run pays the normal single-run tickets."""
+    try:
+        params["ticket_units"] = max(1, int(units))
+    except (TypeError, ValueError):
+        pass
+
+
 def request_batch_number(params: dict, prompt: str) -> str:
     """Prompt for a batch number through the TechDeck console, falling back to
     stdin input() when run standalone (no console). Returns the raw string.

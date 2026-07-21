@@ -34,7 +34,8 @@ TILE_MIN_WIDTH = 150
 TILE_MIN_HEIGHT = 120
 
 # Tickets (Woogy's Emporium economy)
-TICKETS_PER_RUN = 5        # earned per successful plugin run
+TICKETS_PER_RUN = 5        # per successful run, x result.ticket_units when an
+                           # orchestrating run reports several systems (922 Setup)
 TICKETS_PER_FEEDBACK = 25  # earned for submitting feedback
 
 # Usage telemetry + feedback delivery (see docs/USAGE_TELEMETRY.md).

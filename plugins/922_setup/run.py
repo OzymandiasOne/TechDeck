@@ -49,6 +49,10 @@ for it.
 v2.1.1: pallet labels (PALLET 1/2/3) always apply - the Generate Teams Cards
 child toggle is "Apply source material labels" (default OFF), which is now
 the live enablement path for the previously deferred material-label branch.
+
+v2.2.0: tickets scale with the stages run - each completed stage counts as a
+full system run (sdk.set_ticket_units), so Setup alone pays 5 tickets,
+Setup + Stamper 10, Setup + Repeater + Stamper 15.
 """
 from __future__ import annotations
 
@@ -64,7 +68,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.1.2"
+VERSION = "2.2.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -578,6 +582,10 @@ def run(params: dict, progress_callback, cancel_event):
     if shared_state is None:
         shared_state = {"911": {}, "922": {}, "General": {}}
 
+    # Each completed stage counts as a full system run for the ticket award
+    # (5 per system: Setup=5, +Stamper=10, +Repeater=15).
+    stages_done = 0
+
     # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
     if "teams_setup" in enabled:
         lo, hi = slices["teams_setup"]
@@ -588,6 +596,7 @@ def run(params: dict, progress_callback, cancel_event):
         if cancel_event.is_set():
             return
         if batch:
+            stages_done += 1
             # Seed the family batch cache: the folder the user just picked IS
             # this run's batch, so the Repeater/Stamper never re-prompt.
             shared_state.setdefault("922", {})["batch_number"] = batch
@@ -609,6 +618,7 @@ def run(params: dict, progress_callback, cancel_event):
         )
         if cancel_event.is_set():
             return
+        stages_done += 1
         progress_callback(hi)
 
     # --- Stage 3: Pallet Stamper --------------------------------------------
@@ -620,7 +630,13 @@ def run(params: dict, progress_callback, cancel_event):
         )
         if cancel_event.is_set():
             return
+        stages_done += 1
         progress_callback(hi)
+
+    # Each completed stage earns a full system's tickets (older SDKs lack the
+    # helper — a plain single-run award is the graceful fallback).
+    if hasattr(sdk, "set_ticket_units"):
+        sdk.set_ticket_units(params, stages_done)
 
     progress_callback(100)
     log("")
