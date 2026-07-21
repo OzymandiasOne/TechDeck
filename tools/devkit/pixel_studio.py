@@ -1,8 +1,9 @@
 """
 Pixel Studio — the unified TechDeck pixel-art workbench (embeddable).
 
-One surface that hosts every art-authoring workflow behind a left-hand MODE
-rail, each mode swapping the working surface + preview + export target:
+One surface that hosts every art-authoring workflow. A top bar carries the
+active mode's file/actions on the left and the MODE selector on the right;
+each mode swaps the working surface + preview + export target:
 
     Sprite      .tdart sprites (this phase)          -> reuses pixel_editor.Canvas
     Tile Icon   plugin tile icons + live per-theme    (next phase)
@@ -10,11 +11,12 @@ rail, each mode swapping the working surface + preview + export target:
     Placement   garden/house furniture, Buddy &       (next phase)
                 item animations, nav graph
 
-It mounts inside Settings > DevKit (source builds only). Long-term this
-supersedes the standalone tools/*.py editors; they stay runnable during the
-migration. The pixel ENGINE (grid model, undo, paint, palette ops, .tdart
-load/save) is reused from pixel_editor.Canvas — only the surrounding UI is
-re-expressed here for embedding.
+Sprite mode flanks the canvas with tools on the left and the palette on the
+right so the grid stays centred. It mounts inside the DevKit page (source
+builds only) and long-term supersedes the standalone tools/*.py editors (still
+runnable during the migration). The pixel ENGINE (grid model, undo, paint,
+palette ops, .tdart load/save) is reused from pixel_editor.Canvas — only the
+surrounding UI is re-expressed here for embedding.
 """
 
 from pathlib import Path
@@ -39,8 +41,9 @@ def _playground_dir() -> Path:
 
 # ── Sprite mode ─────────────────────────────────────────────────────────────
 class _SpritePanel(QWidget):
-    """.tdart authoring: the reused Canvas engine plus a compact sidebar and
-    file actions. Equivalent to the standalone pixel_editor, embeddable."""
+    """.tdart authoring: the reused Canvas engine, flanked by a tools rail
+    (left) and the palette (right) so the grid stays centred. Its file actions
+    live in `action_bar`, which the studio hosts in the shared top bar."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,14 +58,17 @@ class _SpritePanel(QWidget):
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll.setStyleSheet("QScrollArea { background: #1e1e1e; border: none; }")
 
+        # File actions — hosted by the studio's top bar (not this panel).
+        self.action_bar = self._build_action_bar()
+
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
-        root.addLayout(self._build_file_row())
         body = QHBoxLayout()
         body.setSpacing(8)
-        body.addWidget(self._build_sidebar())
+        body.addWidget(self._build_tools_rail())
         body.addWidget(self.scroll, 1)
+        body.addWidget(self._build_palette_rail())
         root.addLayout(body, 1)
 
         self.status = QLabel("Ready")
@@ -72,8 +78,10 @@ class _SpritePanel(QWidget):
         self._rebuild_swatches()
 
     # ---- construction --------------------------------------------------------
-    def _build_file_row(self):
-        row = QHBoxLayout()
+    def _build_action_bar(self):
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(6)
         for label, slot in (
             ("New", self._new), ("Open...", self._open),
@@ -82,13 +90,13 @@ class _SpritePanel(QWidget):
             b = QPushButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
-        row.addStretch()
-        return row
+        return bar
 
-    def _build_sidebar(self):
+    def _build_tools_rail(self):
         side = QFrame()
-        side.setFixedWidth(180)
+        side.setFixedWidth(150)
         v = QVBoxLayout(side)
+        v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Tools"))
         self.tool_group = QButtonGroup(self)
@@ -109,29 +117,6 @@ class _SpritePanel(QWidget):
             urow.addWidget(b)
         v.addLayout(urow)
 
-        v.addWidget(self._heading("Palette"))
-        self.swatch_host = QWidget()
-        self.swatch_box = QVBoxLayout(self.swatch_host)
-        self.swatch_box.setContentsMargins(0, 0, 0, 0)
-        self.swatch_box.setSpacing(3)
-        pal_scroll = QScrollArea()
-        pal_scroll.setWidgetResizable(True)
-        pal_scroll.setWidget(self.swatch_host)
-        pal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        pal_scroll.setMinimumHeight(120)
-        pal_scroll.setStyleSheet("QScrollArea { border: none; }")
-        v.addWidget(pal_scroll, 1)
-        prow = QHBoxLayout()
-        add = QPushButton("+ Add")
-        add.clicked.connect(self._add_color)
-        editb = QPushButton("Edit")
-        editb.setToolTip("Recolor the selected palette entry (repaints every "
-                         "pixel using it)")
-        editb.clicked.connect(self._edit_color)
-        prow.addWidget(add)
-        prow.addWidget(editb)
-        v.addLayout(prow)
-
         v.addWidget(self._heading("View"))
         zrow = QHBoxLayout()
         zrow.addWidget(QLabel("Zoom"))
@@ -145,12 +130,42 @@ class _SpritePanel(QWidget):
         grid = QPushButton("Toggle Grid")
         grid.clicked.connect(self._toggle_grid)
         v.addWidget(grid)
+        v.addStretch()
+        return side
+
+    def _build_palette_rail(self):
+        side = QFrame()
+        side.setFixedWidth(150)
+        v = QVBoxLayout(side)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        v.addWidget(self._heading("Palette"))
+        self.swatch_host = QWidget()
+        self.swatch_box = QVBoxLayout(self.swatch_host)
+        self.swatch_box.setContentsMargins(0, 0, 0, 0)
+        self.swatch_box.setSpacing(3)
+        pal_scroll = QScrollArea()
+        pal_scroll.setWidgetResizable(True)
+        pal_scroll.setWidget(self.swatch_host)
+        pal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        pal_scroll.setStyleSheet("QScrollArea { border: none; }")
+        v.addWidget(pal_scroll, 1)
+        prow = QHBoxLayout()
+        add = QPushButton("+ Add")
+        add.clicked.connect(self._add_color)
+        editb = QPushButton("Edit")
+        editb.setToolTip("Recolor the selected palette entry (repaints every "
+                         "pixel using it)")
+        editb.clicked.connect(self._edit_color)
+        prow.addWidget(add)
+        prow.addWidget(editb)
+        v.addLayout(prow)
         return side
 
     @staticmethod
     def _heading(text):
         lbl = QLabel(text)
-        lbl.setStyleSheet("font-weight: bold; margin-top: 8px;")
+        lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
         return lbl
 
     # ---- palette -------------------------------------------------------------
@@ -160,21 +175,16 @@ class _SpritePanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         for ch, hexval in self.canvas.palette.items():
-            b = QPushButton(ch)
+            # No text — just the colour; a white border marks the selection.
+            b = QPushButton()
             b.setFixedHeight(22)
+            b.setToolTip(hexval)
             selected = (ch == self.canvas.active_char)
             border = "3px solid #ffffff" if selected else "1px solid #555"
-            b.setStyleSheet(
-                f"background:{hexval}; color:{self._contrast(hexval)};"
-                f"border:{border}; font-weight:bold;")
+            b.setStyleSheet(f"background:{hexval}; border:{border}; border-radius:4px;")
             b.clicked.connect(lambda _c, c=ch: self._select_char(c))
             self.swatch_box.addWidget(b)
-
-    @staticmethod
-    def _contrast(hexval):
-        c = QColor(hexval)
-        lum = 0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()
-        return "#000000" if lum > 140 else "#ffffff"
+        self.swatch_box.addStretch()
 
     def _select_char(self, ch):
         self.canvas.active_char = ch
@@ -281,8 +291,9 @@ class _SpritePanel(QWidget):
 class _StubPanel(QWidget):
     def __init__(self, title: str, blurb: str, parent=None):
         super().__init__(parent)
+        self.action_bar = QWidget()   # nothing in the top bar yet
         v = QVBoxLayout(self)
-        v.setContentsMargins(40, 40, 40, 40)
+        v.setContentsMargins(20, 20, 20, 20)
         v.setSpacing(10)
         head = QLabel(title)
         head.setStyleSheet("font-size: 20px; font-weight: bold;")
@@ -296,7 +307,8 @@ class _StubPanel(QWidget):
 
 # ── the studio shell ────────────────────────────────────────────────────────
 class PixelStudio(QWidget):
-    """Mode rail + stacked panels. The rail selects the active authoring mode."""
+    """Top bar (active-mode actions on the left, MODE selector right-aligned)
+    over a stack of mode panels."""
 
     _MODES = [
         ("Sprite", "sprite"),
@@ -308,41 +320,41 @@ class PixelStudio(QWidget):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
 
-        # Left mode rail.
-        rail = QFrame()
-        rail.setFixedWidth(130)
-        rail.setStyleSheet("QFrame { border-right: 1px solid #333; }")
-        rv = QVBoxLayout(rail)
-        rv.setContentsMargins(8, 12, 8, 12)
-        rv.setSpacing(6)
-        rv.addWidget(self._heading("Mode"))
+        # Top bar: [ active-mode actions ] ....... [ Sprite | Tile Icon | Placement ]
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        self.action_host = QStackedWidget()
+        self.action_host.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        top.addWidget(self.action_host)
+        top.addStretch()
+
         self._mode_group = QButtonGroup(self)
         self.stack = QStackedWidget()
-
         for i, (label, key) in enumerate(self._MODES):
-            b = QPushButton(label)
-            b.setCheckable(True)
-            b.clicked.connect(lambda _c, idx=i: self.stack.setCurrentIndex(idx))
-            self._mode_group.addButton(b)
-            rv.addWidget(b)
-            self.stack.addWidget(self._make_panel(key))
-        rv.addStretch()
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _c, idx=i: self._set_mode(idx))
+            self._mode_group.addButton(btn)
+            top.addWidget(btn)
 
-        row.addWidget(rail)
-        row.addWidget(self.stack, 1)
+            panel = self._make_panel(key)
+            self.stack.addWidget(panel)
+            self.action_host.addWidget(panel.action_bar)
 
-        self._mode_group.buttons()[0].setChecked(True)
-        self.stack.setCurrentIndex(0)
+        root.addLayout(top)
+        root.addWidget(self.stack, 1)
 
-    @staticmethod
-    def _heading(text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet("font-weight: bold;")
-        return lbl
+        self._set_mode(0)
+
+    def _set_mode(self, idx: int):
+        self.stack.setCurrentIndex(idx)
+        self.action_host.setCurrentIndex(idx)
+        self._mode_group.buttons()[idx].setChecked(True)
 
     def _make_panel(self, key: str) -> QWidget:
         if key == "sprite":
