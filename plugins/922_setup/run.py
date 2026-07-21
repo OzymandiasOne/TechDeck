@@ -64,6 +64,9 @@ work-packet PDF (filename contains the ORDER number) out of the batch's
 pre-convention drop spot - into its order folder. Idempotent: existing
 folders/copies/moved PDFs are skipped, so re-runs are safe. The batch-folder
 pick now happens ONCE up front (orchestrator level) and feeds every stage.
+
+v2.3.1: an order spanning several PPNs (several folders) gets its work
+packet PDF placed in EVERY one of its folders, not just the first.
 """
 from __future__ import annotations
 
@@ -79,7 +82,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -545,8 +548,9 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
     '{ORDER}-{PPN}', copy the REV C workbook in as '{PPN}.xlsx' (existing
     copies are NEVER overwritten - they get filled in per order later), then
     move each PDF whose filename contains the ORDER number out of the Work
-    Packets folder (or the batch root) into that order's folder. Returns
-    True when the stage completed."""
+    Packets folder (or the batch root) into EVERY folder belonging to that
+    order (a multi-PPN order has several). Returns True when the stage
+    completed."""
     import shutil
 
     log = params.get("log", print)
@@ -565,8 +569,9 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
         return False
 
     # --- Order folders + the per-order REV C copy --------------------------
-    # First folder per ORDER wins the PDF when an order spans several PPNs.
-    order_to_folder: dict[str, Path] = {}
+    # An order that spans several PPNs gets several folders - and its work
+    # packet PDF is placed in EVERY one of them below.
+    order_to_folders: dict[str, list] = {}
     made_folders = made_copies = 0
     for i, (order, ppn) in enumerate(pairs):
         if i % 16 == 0 and cancel_event.is_set():
@@ -575,13 +580,7 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
         if not folder.exists():
             folder.mkdir()
             made_folders += 1
-        key = order.upper()
-        if key in order_to_folder:
-            warnings.append(f"Order {order} has more than one PPN on the PO "
-                            f"sheet - its work packet PDF goes in "
-                            f"'{order_to_folder[key].name}'.")
-        else:
-            order_to_folder[key] = folder
+        order_to_folders.setdefault(order.upper(), []).append(folder)
         dest = folder / f"{ppn}.xlsx"
         if not dest.exists():
             sdk.copy_resilient(rev_c, dest, log)
@@ -604,7 +603,7 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
         if i % 16 == 0 and cancel_event.is_set():
             return False
         stem = pdf.stem
-        hit = next((key for key in order_to_folder
+        hit = next((key for key in order_to_folders
                     if re.search(rf"(?<![A-Za-z0-9]){re.escape(key)}"
                                  rf"(?![A-Za-z0-9])", stem, re.IGNORECASE)),
                    None)
@@ -612,24 +611,31 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
             warnings.append(f"'{pdf.name}' matches no ORDER on the PO sheet - "
                             f"left where it is.")
             continue
-        dest = order_to_folder[hit] / pdf.name
-        if dest.exists():
-            if pdf.resolve() != dest.resolve():
-                warnings.append(f"'{pdf.name}' already exists in "
-                                f"'{dest.parent.name}' - left where it is.")
+        # The PDF goes in EVERY folder for its order (a multi-PPN order has
+        # several): copy to each folder that doesn't have it yet, then remove
+        # the source once all of them do.
+        dests = [f / pdf.name for f in order_to_folders[hit]]
+        missing = [d for d in dests if not d.exists()]
+        if not missing:
+            warnings.append(f"'{pdf.name}' already exists in its order "
+                            f"folder(s) - left where it is.")
             continue
-        shutil.move(str(pdf), str(dest))
+        for d in missing:
+            shutil.copy2(str(pdf), str(d))
+        pdf.unlink()
         moved += 1
         matched_orders.add(hit)
         if moved <= 40:
-            log(f"  {pdf.name} -> {dest.parent.name}")
+            names = " + ".join(d.parent.name for d in dests)
+            log(f"  {pdf.name} -> {names}")
     log(f"Work packets: {moved} PDF(s) filed into order folders.")
 
-    # Orders whose folder still has no work-packet PDF (not moved this run
-    # AND none already inside) are worth a heads-up.
-    no_pdf = [o for o, f in order_to_folder.items()
+    # Orders with a folder that still has no work-packet PDF (nothing placed
+    # this run AND none already inside) are worth a heads-up.
+    no_pdf = [o for o, folders in order_to_folders.items()
               if o not in matched_orders
-              and not any(p.suffix.lower() == ".pdf" for p in f.iterdir())]
+              and any(not any(p.suffix.lower() == ".pdf" for p in f.iterdir())
+                      for f in folders)]
     if no_pdf:
         warnings.append("No work-packet PDF found for: "
                         + ", ".join(sorted(no_pdf))
