@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox, QPushButton, QFrame, QScrollArea,
     QLineEdit, QMessageBox, QTabWidget,
     QCheckBox, QSlider, QListWidget, QListWidgetItem,
-    QFileDialog, QInputDialog, QSizePolicy,
+    QFileDialog, QInputDialog, QSizePolicy, QStackedWidget,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -168,38 +168,67 @@ class SettingsPage(QWidget, ThemeAware):
             self.tabs.setTabVisible(self._devkit_tab_index, active)
 
     def _create_devkit_tab(self) -> QWidget:
-        """DevKit: developer-only tools (Pixel Studio + diagnostics). Source
-        builds only — see techdeck.ui.dev_mode. Phase 0 is a placeholder; the
-        tool dropdown + embedded studio land in later phases."""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; }")
+        """DevKit: a picker of developer tools + an embedded host that mounts
+        the selected tool inside TechDeck. Source builds only (the whole tab is
+        only added when techdeck.ui.dev_mode.is_dev_build())."""
+        from tools.devkit.registry import DEV_TOOLS
 
-        content = QWidget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(24)
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setSpacing(12)
 
-        title = QLabel("DevKit")
-        title.setStyleSheet("font-size: 24px; font-weight: bold;")
-        layout.addWidget(title)
+        # Picker row: [Tool  v]  [Run]
+        row = QHBoxLayout()
+        row.setSpacing(10)
+        label = QLabel("Tool")
+        label.setStyleSheet("font-weight: 600;")
+        row.addWidget(label)
+        self.devkit_combo = QComboBox()
+        self.devkit_combo.setMinimumHeight(34)
+        self.devkit_combo.setMinimumWidth(240)
+        self._devkit_tools = list(DEV_TOOLS)
+        for tool in self._devkit_tools:
+            self.devkit_combo.addItem(tool.label)
+        row.addWidget(self.devkit_combo)
+        run_btn = QPushButton("Run")
+        run_btn.setMinimumHeight(34)
+        run_btn.setMinimumWidth(90)
+        run_btn.clicked.connect(self._run_devkit_tool)
+        row.addWidget(run_btn)
+        row.addStretch()
+        outer.addLayout(row)
 
-        desc = QLabel(
-            "Developer tools for building TechDeck itself — the Pixel Studio "
-            "and diagnostics. This surface exists only when running from "
-            "source and is never included in a shipped build."
-        )
-        desc.setStyleSheet("color: #888; font-size: 12px;")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+        # Embed host: the selected tool's widget mounts here, built once and
+        # cached so re-selecting a tool keeps its state.
+        self.devkit_host = QStackedWidget()
+        self._devkit_placeholder = QLabel(
+            "Select a tool and press Run to load it here.")
+        self._devkit_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._devkit_placeholder.setStyleSheet("color: #888; font-size: 13px;")
+        self.devkit_host.addWidget(self._devkit_placeholder)
+        self._devkit_loaded: dict = {}   # registry index -> built widget
+        outer.addWidget(self.devkit_host, 1)
 
-        placeholder = QLabel("Tools land here in the next phase.")
-        placeholder.setStyleSheet("color: #666; font-size: 13px; margin-top: 8px;")
-        layout.addWidget(placeholder)
+        return container
 
-        layout.addStretch()
-        scroll.setWidget(content)
-        return scroll
+    def _run_devkit_tool(self):
+        """Build (once) and show the selected DevKit tool in the embed host."""
+        idx = self.devkit_combo.currentIndex()
+        if idx < 0:
+            return
+        tool = self._devkit_tools[idx]
+        widget = self._devkit_loaded.get(idx)
+        if widget is None:
+            try:
+                widget = tool.build()
+            except Exception as e:
+                QMessageBox.critical(
+                    self, "DevKit", f"Could not load {tool.label}:\n{e}")
+                return
+            self._devkit_loaded[idx] = widget
+            self.devkit_host.addWidget(widget)
+        self.devkit_host.setCurrentWidget(widget)
 
     def _create_helpfeedback_tab(self) -> QWidget:
         """Help & Feedback: Submit Feedback + version + check for updates."""
