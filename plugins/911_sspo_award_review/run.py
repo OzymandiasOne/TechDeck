@@ -169,11 +169,13 @@ def lookup_feed(thickness):
 # billing-derived it bakes in setup/handling/downtime, which is why it replaced
 # the geometry-only linear-inch time as the primary number (LI times remain as
 # reference columns). Bands are contiguous (source sheet's gaps/typos cleaned
-# per planning: <=0.312, >0.312-0.50, >0.50-1, >1-2, >2).
+# per planning: <=0.313, >0.313-0.50, >0.50-1, >1-2, >2). Scott's call
+# (2026-07-21, via planning): 5/16" is the group-1/group-2 break -- 0.313 is
+# the TOP of group 1, so 5/16 (0.3125) plate lands in group 1.
 PIECES_PER_HOUR_SOURCE = ("D911 closed actuals Jan 2025 - Jul 2026 "
                           "('D911 Closed as of 7-14-2026', Pivot Summ_Piv)")
 PIECES_PER_HOUR = [  # (band max thickness in, pieces per hour) - ascending
-    (0.312, 5.73),
+    (0.313, 5.73),
     (0.50, 6.00),
     (1.0, 5.33),
     (2.0, 2.85),
@@ -470,7 +472,7 @@ def build_dxf_index(iges_folder, log):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.7.1"
+VERSION = "2.7.2"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
