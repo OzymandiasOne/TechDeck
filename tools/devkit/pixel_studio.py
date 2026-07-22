@@ -5,18 +5,19 @@ One surface that hosts every art-authoring workflow. A top bar carries the
 active mode's file/actions on the left and the MODE selector on the right;
 each mode swaps the working surface + preview + export target:
 
-    Sprite      .tdart sprites (this phase)          -> reuses pixel_editor.Canvas
-    Tile Icon   plugin tile icons + live per-theme    (next phase)
-                preview across every colour scheme
+    Sprite      .tdart sprites                        -> reuses pixel_editor.Canvas
+    Tile Icon   plugin tile icons with a LIVE         -> reuses the tile-icon
+                per-theme preview (every colour          generator's recolor +
+                scheme except Professional) +            icon_editor's save-to-
+                save-to-generator                        script contract
     Placement   garden/house furniture, Buddy &       (next phase)
                 item animations, nav graph
 
-Sprite mode flanks the canvas with tools on the left and the palette on the
-right so the grid stays centred. It mounts inside the DevKit page (source
-builds only) and long-term supersedes the standalone tools/*.py editors (still
-runnable during the migration). The pixel ENGINE (grid model, undo, paint,
-palette ops, .tdart load/save) is reused from pixel_editor.Canvas — only the
-surrounding UI is re-expressed here for embedding.
+Sprite and Tile Icon share the canvas/tools/palette via _CanvasPanel; Tile Icon
+locks the canvas to 32x32 and adds the preview column. It mounts inside the
+DevKit page (source builds only) and long-term supersedes the standalone
+tools/*.py editors. The pixel ENGINE (grid model, undo, paint, palette ops,
+.tdart load/save) is reused from pixel_editor.Canvas.
 """
 
 from pathlib import Path
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QButtonGroup, QFrame, QStackedWidget, QComboBox,
     QFileDialog, QColorDialog, QMessageBox, QInputDialog, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QSize, QByteArray
+from PySide6.QtCore import Qt, QSize, QByteArray, QTimer
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
@@ -81,7 +82,7 @@ def _svg_icon(paths, color: str, size: int = 22) -> QIcon:
     return QIcon(pm)
 
 
-# Preset palettes for the Sprite palette dropdown. None = the editor default.
+# Preset palettes for the palette dropdown. None = the editor default.
 _PRESETS = {
     "Default": None,
     "PICO-8": [
@@ -98,16 +99,46 @@ _PRESETS = {
 }
 
 
-# ── Sprite mode ─────────────────────────────────────────────────────────────
-class _SpritePanel(QWidget):
-    """.tdart authoring: the reused Canvas engine, flanked by a tools rail
-    (left) and the palette (right) so the grid stays centred. Its file actions
-    live in `action_bar`, which the studio hosts in the shared top bar."""
+# ── tile-icon preview helpers ────────────────────────────────────────────────
+def _recolor_tones(tones: dict, theme_name: str) -> dict:
+    """Map a {char: hex} tone set onto a theme's PICO-8 subset by luminance
+    rank — the exact transform the tile-icon generator uses, so the preview is
+    faithful. Returns the recolored {char: hex} for that theme."""
+    from tools.generate_tile_icons_32 import (
+        _hex, _build_map, THEME_PALETTES, THEME_SUBSTITUTIONS, _DEFAULT_PALETTE)
+    if not tones:
+        return {}
+    palette = [_hex(h) for h in THEME_PALETTES.get(theme_name, _DEFAULT_PALETTE)]
+    mapping = _build_map([_hex(h) for h in tones.values()], palette)
+    subs = {_hex(a): _hex(b)
+            for a, b in THEME_SUBSTITUTIONS.get(theme_name, {}).items()}
+    if subs:
+        mapping = {k: subs.get(v, v) for k, v in mapping.items()}
+    return {ch: "#%02x%02x%02x" % mapping[_hex(h)] for ch, h in tones.items()}
+
+
+def _preview_themes():
+    from tools.generate_tile_icons_32 import THEME_PALETTES
+    return list(THEME_PALETTES.keys())
+
+
+def _theme_surface(theme_name: str) -> str:
+    try:
+        from techdeck.ui.theme import get_current_palette
+        return get_current_palette(theme_name).surface
+    except Exception:
+        return "#1e1e1e"
+
+
+# ── shared canvas panel (tools + palette + status) ───────────────────────────
+class _CanvasPanel(QWidget):
+    """Base for the paint modes: the reused Canvas engine flanked by a tools
+    rail (left) and palette rail (right), plus a status line. Subclasses supply
+    the top-bar action set via _build_action_bar() and may extend the body via
+    _build_body()."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.path: "Path | None" = None
-
         from techdeck.ui.theme_manager import get_theme_manager
         pal = get_theme_manager().get_current_palette()
         self._icon_color = pal.text
@@ -122,18 +153,13 @@ class _SpritePanel(QWidget):
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scroll.setStyleSheet("QScrollArea { background: #1e1e1e; border: none; }")
 
-        # File actions — hosted by the studio's top bar (not this panel).
+        # Action bar — hosted by the studio's top bar (not this panel).
         self.action_bar = self._build_action_bar()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
-        body = QHBoxLayout()
-        body.setSpacing(8)
-        body.addWidget(self._build_tools_rail())
-        body.addWidget(self.scroll, 1)
-        body.addWidget(self._build_palette_rail())
-        root.addLayout(body, 1)
+        root.addLayout(self._build_body(), 1)
 
         self.status = QLabel("Ready")
         self.status.setStyleSheet("color: #888; font-size: 11px;")
@@ -141,21 +167,24 @@ class _SpritePanel(QWidget):
 
         self._rebuild_swatches()
 
-    # ---- construction --------------------------------------------------------
-    def _build_action_bar(self):
-        bar = QWidget()
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        for label, slot in (
-            ("New", self._new), ("Open...", self._open),
-            ("Save", self._save), ("Save As...", self._save_as),
-        ):
-            b = QPushButton(label)
-            b.clicked.connect(slot)
-            row.addWidget(b)
-        return bar
+    # ---- overridable hooks ---------------------------------------------------
+    def _build_action_bar(self) -> QWidget:
+        return QWidget()
 
+    def _build_body(self):
+        body = QHBoxLayout()
+        body.setSpacing(8)
+        body.addWidget(self._build_tools_rail())
+        body.addWidget(self.scroll, 1)
+        body.addWidget(self._build_palette_rail())
+        return body
+
+    def _on_appearance_changed(self):
+        """Called when the drawn result changes via a palette edit / preset —
+        Tile Icon overrides this to refresh its preview."""
+        pass
+
+    # ---- tools rail ----------------------------------------------------------
     def _build_tools_rail(self):
         side = QFrame()
         side.setFixedWidth(140)
@@ -163,7 +192,6 @@ class _SpritePanel(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Tools"))
-        # Drawing tools as a 2-column icon grid; the name shows on hover.
         tool_style = f"""
             QPushButton {{ background: transparent; border: 1px solid #444;
                            border-radius: 6px; }}
@@ -188,11 +216,10 @@ class _SpritePanel(QWidget):
             self.tool_group.addButton(b)
             self.tool_buttons[name] = b
             grid.addWidget(b, i // 2, i % 2)
-        grid.setColumnStretch(2, 1)   # keep the two icon columns left-packed
+        grid.setColumnStretch(2, 1)
         v.addLayout(grid)
         self.tool_buttons["pencil"].setChecked(True)
 
-        # Undo / Redo as back / forward arrow icons.
         nav_style = """
             QPushButton { background: transparent; border: 1px solid #444;
                           border-radius: 6px; }
@@ -204,7 +231,7 @@ class _SpritePanel(QWidget):
             b = QPushButton()
             b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 22))
             b.setIconSize(QSize(22, 22))
-            b.setFixedSize(44, 44)   # same box as the tool icons
+            b.setFixedSize(44, 44)
             b.setToolTip(name.capitalize())
             b.setStyleSheet(nav_style)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -238,6 +265,7 @@ class _SpritePanel(QWidget):
         v.addWidget(gbtn)
         return side
 
+    # ---- palette rail --------------------------------------------------------
     def _build_palette_rail(self):
         side = QFrame()
         side.setFixedWidth(150)
@@ -245,7 +273,6 @@ class _SpritePanel(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Palette"))
-        # Preset palettes sit above the swatches.
         self.preset_combo = QComboBox()
         self.preset_combo.setToolTip("Load a preset palette")
         self.preset_combo.addItems(list(_PRESETS.keys()))
@@ -294,14 +321,8 @@ class _SpritePanel(QWidget):
         self.canvas.active_char = next(iter(pal), "k")
         self.canvas.update()
         self._rebuild_swatches()
+        self._on_appearance_changed()
 
-    @staticmethod
-    def _heading(text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
-        return lbl
-
-    # ---- palette -------------------------------------------------------------
     def _rebuild_swatches(self):
         while self.swatch_box.count():
             item = self.swatch_box.takeAt(0)
@@ -354,6 +375,7 @@ class _SpritePanel(QWidget):
             self.canvas.palette[ch] = c.name()
             self.canvas.update()
             self._rebuild_swatches()
+            self._on_appearance_changed()
             self.status.setText(f"Recolored '{ch}' -> {c.name()}")
 
     def _toggle_grid(self):
@@ -369,7 +391,35 @@ class _SpritePanel(QWidget):
         self.status.setText(
             f"{w}x{h}   cell ({x},{y})   active '{self.canvas.active_char}'")
 
-    # ---- files ---------------------------------------------------------------
+    @staticmethod
+    def _heading(text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet("font-weight: bold; margin-top: 4px;")
+        return lbl
+
+
+# ── Sprite mode ─────────────────────────────────────────────────────────────
+class _SpritePanel(_CanvasPanel):
+    """.tdart authoring."""
+
+    def __init__(self, parent=None):
+        self.path: "Path | None" = None
+        super().__init__(parent)
+
+    def _build_action_bar(self):
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for label, slot in (
+            ("New", self._new), ("Open...", self._open),
+            ("Save", self._save), ("Save As...", self._save_as),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        return bar
+
     def _new(self):
         w, ok = QInputDialog.getInt(self, "New", "Width (cells):", 32, 1, 256)
         if not ok:
@@ -420,6 +470,178 @@ class _SpritePanel(QWidget):
         self.status.setText(f"Saved {path.name}")
 
 
+# ── Tile Icon mode ───────────────────────────────────────────────────────────
+class _TileIconPanel(_CanvasPanel):
+    """32x32 tile-icon authoring with a live preview of the icon recolored into
+    every theme, and save-back into the generator scripts."""
+
+    def __init__(self, parent=None):
+        self.icon_key = None
+        self.icon_static = False
+        super().__init__(parent)
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(60)
+        self._preview_timer.timeout.connect(self._refresh_preview)
+        self.canvas.modified.connect(self._schedule_preview)
+        self._refresh_preview()
+
+    def _build_action_bar(self):
+        bar = QWidget()
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        for label, slot in (
+            ("Open Icon...", self._open_icon),
+            ("Save Icon...", self._save_icon),
+        ):
+            b = QPushButton(label)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        return bar
+
+    def _build_body(self):
+        body = super()._build_body()
+        body.addWidget(self._build_preview_rail())
+        return body
+
+    def _build_preview_rail(self):
+        side = QFrame()
+        side.setFixedWidth(200)
+        v = QVBoxLayout(side)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(self._heading("Preview"))
+        note = QLabel("Recolored per theme by luminance rank — draw with tonal "
+                      "contrast.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #888; font-size: 10px;")
+        v.addWidget(note)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        self._preview_labels = {}
+        for i, theme in enumerate(_preview_themes()):
+            cell = QVBoxLayout()
+            cell.setSpacing(2)
+            tile = QLabel()
+            tile.setFixedSize(70, 70)
+            tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            tile.setStyleSheet("border: 1px solid #333; border-radius: 4px;")
+            self._preview_labels[theme] = tile
+            name = QLabel(theme.replace("_", " ").title())
+            name.setStyleSheet("font-size: 10px; color: #999;")
+            name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            cell.addWidget(tile, alignment=Qt.AlignmentFlag.AlignCenter)
+            cell.addWidget(name)
+            holder = QWidget()
+            holder.setLayout(cell)
+            grid.addWidget(holder, i // 2, i % 2)
+        v.addLayout(grid)
+        v.addStretch()
+        return side
+
+    # ---- preview -------------------------------------------------------------
+    def _on_appearance_changed(self):
+        self._schedule_preview()
+
+    def _schedule_preview(self):
+        # Debounce: a drag emits modified per cell; coalesce into one refresh.
+        if getattr(self, "_preview_timer", None) is not None:
+            self._preview_timer.start()
+
+    def _used_tones(self):
+        rows = ["".join(r) for r in self.canvas.rows]
+        used = {ch for row in rows for ch in row
+                if ch != "." and ch in self.canvas.palette}
+        return rows, {ch: self.canvas.palette[ch] for ch in used}
+
+    def _refresh_preview(self):
+        rows, tones = self._used_tones()
+        n = len(rows) or 32
+        cell = max(1, 64 // n)
+        side = cell * n
+        for theme, label in self._preview_labels.items():
+            pm = QPixmap(side, side)
+            pm.fill(QColor(_theme_surface(theme)))
+            recolored = _recolor_tones(tones, theme)
+            p = QPainter(pm)
+            for y, row in enumerate(rows):
+                for x, ch in enumerate(row):
+                    hexv = recolored.get(ch)
+                    if hexv:
+                        p.fillRect(x * cell, y * cell, cell, cell, QColor(hexv))
+            p.end()
+            label.setPixmap(pm)
+
+    # ---- open / save ---------------------------------------------------------
+    def _open_icon(self):
+        from tools.icon_editor import list_icons, parse_icon, THEMED_SCRIPT, PACK_SCRIPT
+        icons = list_icons()
+        if not icons:
+            QMessageBox.information(self, "No icons", "No grid-based icons found.")
+            return
+        labels = [f"{k}   [{m}]" for k, m in sorted(icons.items())]
+        pick, ok = QInputDialog.getItem(
+            self, "Open icon", "Icon (from the generator scripts):",
+            labels, 0, False)
+        if not ok:
+            return
+        key = pick.split()[0]
+        static = icons[key] == "static"
+        script = PACK_SCRIPT if static else THEMED_SCRIPT
+        rows, tones = parse_icon(script.read_text(encoding="utf-8"), key)
+        self.canvas.load({"palette": tones, "rows": rows})
+        self._rebuild_swatches()
+        self.icon_key, self.icon_static = key, static
+        self._refresh_preview()
+        self.status.setText(f"Opened {key} ({icons[key]})")
+
+    def _save_icon(self):
+        from tools.icon_editor import (
+            GRID_SIZE, save_icon_to_script, regenerate, list_icons,
+            SaveIconDialog, _KEY_RE)
+        w, h = self.canvas.grid_size()
+        if (w, h) != (GRID_SIZE, GRID_SIZE):
+            QMessageBox.warning(
+                self, "Wrong size",
+                f"Tile icons are {GRID_SIZE}x{GRID_SIZE}; this canvas is {w}x{h}.")
+            return
+        rows = ["".join(r) for r in self.canvas.rows]
+        used = {ch for row in rows for ch in row if ch != "."}
+        if not used:
+            QMessageBox.warning(self, "Empty", "The canvas is empty.")
+            return
+        tones = {ch: self.canvas.palette[ch] for ch in sorted(used)}
+
+        dlg = SaveIconDialog(self.icon_key or "", self.icon_static, self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        key, static = dlg.result_values()
+        if not _KEY_RE.match(key):
+            QMessageBox.warning(self, "Bad name",
+                                "Name must be snake_case (a-z, 0-9, _).")
+            return
+        existing = list_icons()
+        if key in existing and (existing[key] == "static") != static:
+            QMessageBox.warning(
+                self, "Name taken",
+                f'"{key}" already exists as a {existing[key]} icon.')
+            return
+        try:
+            script = save_icon_to_script(key, static, rows, tones)
+            out = regenerate(static)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save failed", str(exc))
+            return
+        self.icon_key, self.icon_static = key, static
+        msg = f"Saved {key} into {script.name} — {out}"
+        if key not in existing:
+            msg += ('\n\nNew icon: point a plugin at it via PLUGIN_ICON_KEYS in '
+                    f'techdeck/ui/plugin_icon.py:  "<plugin_id>": "{key}"')
+            QMessageBox.information(self, "Icon saved", msg)
+        self.status.setText(f"Saved {key} + regenerated PNGs")
+
+
 # ── stub modes (built out in later phases) ──────────────────────────────────
 class _StubPanel(QWidget):
     def __init__(self, title: str, blurb: str, parent=None):
@@ -457,7 +679,7 @@ class PixelStudio(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        # Top bar: [ active-mode actions ] ....... [ Sprite | Tile Icon | Placement ]
+        # Top bar: [ active-mode actions ] ..... [ Sprite | Tile Icon | Placement ]
         top = QHBoxLayout()
         top.setSpacing(8)
         self.action_host = QStackedWidget()
@@ -493,11 +715,7 @@ class PixelStudio(QWidget):
         if key == "sprite":
             return _SpritePanel()
         if key == "icon":
-            return _StubPanel(
-                "Tile Icon",
-                "Standard-size icon canvas with a live per-theme preview grid "
-                "(every colour scheme except Professional), plus save-to-"
-                "generator and a style lint. Lands in the next phase.")
+            return _TileIconPanel()
         return _StubPanel(
             "Placement",
             "Drag-to-place garden/house furniture, Buddy and item animations, "
