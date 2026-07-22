@@ -942,6 +942,123 @@ class EndSequence(QWidget):
         p.end()
 
 
+class GameOver(QWidget):
+    """A hard lose screen — the failure state the economy never had. Two vectors
+    reach it: INSOLVENCY (the board liquidates ASA) and the lost Woog war (the
+    swarm is overrun). Full-window overlay, hidden until fired. Offers a fresh
+    run; the loss is real — no save, no legacy carried over."""
+
+    FADE = 0.9   # seconds of fade-in before the buttons appear
+
+    MESSAGES = {
+        "insolvency": ("INSOLVENT", "red", [
+            "The board has seen the numbers. There is no version of them that works.",
+            "The creditors move first. The yard is sold for scrap before lunch.",
+            "Someone finds Doug a job across town. Doug will be fine. Doug is always fine.",
+            "ASA is dissolved. The tubes outlive the company that made them.",
+        ]),
+        "woog": ("OVERRUN", "red", [
+            "The survey is gone. The fleet is a rumor. The Woog were patient.",
+            "One by one the probes go dark, and the dark does not give them back.",
+            "Whatever ASA was becoming out here, it stops becoming it now.",
+            "The Woog broadcast something on every channel. It sounds like laughter.",
+        ]),
+    }
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVisible(False)
+        self._on_again = None
+        self._on_stop = None
+        self._title = ""
+        self._accent = QColor(PAL["red"])
+        self._lines = []
+        self._t = 0.0
+
+        self._again_btn = QPushButton("TRY AGAIN", self)
+        self._again_btn.setObjectName("launch")
+        self._again_btn.setFixedHeight(40)
+        self._again_btn.clicked.connect(self._do_again)
+        self._stop_btn = QPushButton("walk away from the wreckage", self)
+        self._stop_btn.setFixedHeight(30)
+        self._stop_btn.clicked.connect(self._do_stop)
+        self._again_btn.setVisible(False)
+        self._stop_btn.setVisible(False)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(50)
+        self._timer.timeout.connect(self._advance)
+
+    def start(self, vector, on_again, on_stop):
+        self._on_again, self._on_stop = on_again, on_stop
+        title, accent, lines = self.MESSAGES.get(vector, self.MESSAGES["insolvency"])
+        self._title = title
+        self._accent = QColor(PAL.get(accent, "red"))
+        self._lines = lines
+        self._t = 0.0
+        self._again_btn.setVisible(False); self._stop_btn.setVisible(False)
+        self._again_btn.setEnabled(True); self._stop_btn.setEnabled(True)
+        self._stop_btn.setText("walk away from the wreckage")
+        self.setVisible(True); self.raise_()
+        self._timer.start()
+        self.update()
+
+    def _advance(self):
+        self._t += 0.05
+        if self._t >= self.FADE and not self._again_btn.isVisible():
+            self._timer.stop()
+            self._layout_buttons()
+            self._again_btn.setVisible(True)
+            self._stop_btn.setVisible(True)
+        self.update()
+
+    def _do_again(self):
+        if self._on_again:
+            self._on_again()
+
+    def _do_stop(self):
+        self._again_btn.setEnabled(False)
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setText("...")
+        if self._on_stop:
+            self._on_stop()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._again_btn.isVisible():
+            self._layout_buttons()
+
+    def _layout_buttons(self):
+        w, h = self.width(), self.height()
+        bw = min(360, max(200, w - 80))
+        y = int(h * 0.68)
+        self._again_btn.setGeometry((w - bw) // 2, y, bw, 40)
+        self._stop_btn.setGeometry((w - bw) // 2, y + 48, bw, 30)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        p.fillRect(self.rect(), QColor("#0a0406"))   # a dim, bloodless dark
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        a = min(1.0, self._t / self.FADE)
+
+        title = QColor(self._accent); title.setAlpha(int(255 * a))
+        p.setPen(title)
+        p.setFont(QFont("Consolas", 30, QFont.Weight.Bold))
+        p.drawText(QRect(int(w * 0.08), int(h * 0.22), int(w * 0.84), 60),
+                   int(Qt.AlignmentFlag.AlignHCenter), self._title)
+
+        body = QColor(PAL["white"]); body.setAlpha(int(210 * a))
+        p.setPen(body)
+        p.setFont(QFont("Consolas", 12))
+        y = int(h * 0.34)
+        for ln in self._lines:
+            p.drawText(QRect(int(w * 0.12), y, int(w * 0.76), 48),
+                       int(Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap), ln)
+            y += 40
+        p.end()
+
+
 class ProbeWeb(QWidget):
     """The void, and the web of probes filling it. Starts as a single dot at
     the center and grows outward in glowing connected filaments as exploration
@@ -1334,6 +1451,15 @@ class SteelBeamsGame(QWidget):
     AMBUSH_MIN_S     = 13.0
     AMBUSH_MAX_S     = 28.0
     AMBUSH_FRAC      = 0.10
+    # ── Failure vectors (game-over). Both only bite in the failure region, so
+    # normal play is untouched. INSOLVENCY (MID+): while cash is negative, debt
+    # compounds and a grace clock runs; recover to solvent or the board liquidates
+    # ASA. WAR LOSS (LATE): the Woog grind your survey to nothing while their fleet
+    # dwarfs yours -> they overrun the probe network. See _check_solvency + the war.
+    INSOLVENCY_GRACE_S = 50.0
+    DEBT_RATE          = 0.02       # negative cash compounds ~2%/s (a real spiral)
+    WAR_LOSS_EXPLORED  = 1.0        # survey ground below this % ...
+    WAR_LOSS_RATIO     = 20.0       # ...while the enemy outnumbers the fleet this heavily
     # Combat upgrades — normal upgrade buttons, appear when their prereqs are met
     # (a small dependency tree, not a fixed sequence). Effects in _apply_combat_effect;
     # availability in _combat_available. Woog Reclamation sits alongside them.
@@ -1386,6 +1512,8 @@ class SteelBeamsGame(QWidget):
         self._woog_box = WoogBox(self)
         # The end-of-universe sequence — a full-window overlay, hidden until fired.
         self._end_seq = EndSequence(self)
+        # The lose screen — a separate full-window overlay for the two failure vectors.
+        self._game_over_seq = GameOver(self)
 
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
@@ -1503,6 +1631,10 @@ class SteelBeamsGame(QWidget):
         self.combat_upgrades = set()   # purchased combat-upgrade keys (incl. "reclaim")
         self.endgame_done   = False
         self.resting        = False
+        # Failure vectors (reset per run). game_over = a lose vector fired; the run
+        # is dead until Try Again. _insolvent_t = seconds in the red (0 = solvent).
+        self.game_over      = False
+        self._insolvent_t   = 0.0
 
         # Smoothed ACTUAL throughput (what's really selling), so supply-side
         # upgrades are legible even when you're sold out and inventory sits at 0.
@@ -2133,7 +2265,8 @@ class SteelBeamsGame(QWidget):
         try:
             if cmd in ("help", "?"):
                 self._log("cheats: money N | give <attr> N | unlock <flag> | "
-                          "flag <name> | event <id> | auto | axes | win", "cyan")
+                          "flag <name> | event <id> | auto | axes | win | "
+                          "broke [N] | lose [insolvency|woog]", "cyan")
             elif cmd in RES and len(parts) >= 2:
                 setattr(self, cmd, num(parts[1])); self._log(f"set {cmd}={parts[1]}", "cyan")
             elif cmd == "give" and len(parts) >= 3:
@@ -2158,6 +2291,12 @@ class SteelBeamsGame(QWidget):
                 self._log("axes: " + ", ".join(f"{k} {v}" for k, v in self._events.axes.items() if v), "cyan")
             elif cmd == "win":
                 self.money = max(self.money, 1e9); self._log("war chest topped up", "cyan")
+            elif cmd == "broke":
+                self.money = -abs(num(parts[1])) if len(parts) >= 2 else -1.0
+                self._log(f"cash forced to {fmt_money(self.money)} (insolvency clock arms "
+                          "if market is unlocked)", "cyan")
+            elif cmd == "lose":
+                self._fire_game_over(parts[1] if len(parts) >= 2 else "insolvency")
             else:
                 self._log(f"? {t}  (try: help)", "orange")
         except Exception as ex:
@@ -2211,6 +2350,8 @@ class SteelBeamsGame(QWidget):
         self._position_woog_box()
         if getattr(self, "_end_seq", None) is not None and self._end_seq.isVisible():
             self._end_seq.setGeometry(0, 0, self.width(), self.height())
+        if getattr(self, "_game_over_seq", None) is not None and self._game_over_seq.isVisible():
+            self._game_over_seq.setGeometry(0, 0, self.width(), self.height())
         if getattr(self, "_event_modal", None) is not None:
             self._event_modal.reposition()
         if getattr(self, "_cheat_edit", None) is not None:
@@ -2398,6 +2539,13 @@ class SteelBeamsGame(QWidget):
                 if total_loss > 0.0 and pre > 0.0:
                     self.explored = max(
                         0.0, self.explored - self.explored * (total_loss / pre) * self.EXPLORE_EROSION)
+                # Vector B: neglect the war long enough and the Woog grind your survey
+                # to nothing while their fleet dwarfs yours -> they overrun the probe
+                # network. The war is lost. (Only reachable after a sustained collapse.)
+                if (self.explored <= self.WAR_LOSS_EXPLORED
+                        and self.enemy_vessels >= self.probes * self.WAR_LOSS_RATIO):
+                    self._fire_game_over("woog")
+                    return
             # Win when the armada is gone (grind to 0, or Ender's Game wipes them).
             if at_war and self.enemy_vessels <= 0.0:
                 self._flags.add("drift_cleared")
@@ -2533,6 +2681,12 @@ class SteelBeamsGame(QWidget):
             _ev = self._events.tick(self, dt)
             if _ev is not None:
                 self._show_event_modal(_ev)
+
+        # ── Insolvency (game-over vector A). Evaluated after all income + any event
+        # fine this tick, so a recovery counts and a fresh hit registers immediately.
+        self._check_solvency(dt)
+        if self.game_over:
+            return
 
         # The liquidation desk never closes: rep earned AFTER the Exit Strategy
         # (milestones keep firing off probe fabrication/conversion) has nowhere
@@ -3108,6 +3262,67 @@ class SteelBeamsGame(QWidget):
         self._end_seq.setGeometry(0, 0, self.width(), self.height())
         self._end_seq.start(self._new_universe, self._rest, variant)
 
+    # ── Failure vectors (game-over) ────────────────────────────────────────
+
+    def _check_solvency(self, dt):
+        """Vector A. Only bites in the MID empire (market unlocked) and never once
+        cash is obsolete in the probe act — EARLY is a safe on-ramp, LATE loses via
+        the war. While cash is negative, debt compounds and a grace clock runs;
+        recover to solvent to reset it, or the board liquidates ASA."""
+        if self.game_over or self.probe_phase or not self.market_unlocked:
+            self._insolvent_t = 0.0
+            return
+        if self.money < 0:
+            self.money += self.money * self.DEBT_RATE * dt   # debt compounds (a spiral)
+            prev = self._insolvent_t
+            if prev == 0.0:
+                self._log("INSOLVENT. ASA is in the red and the board has noticed. "
+                          "Get back to positive cash before the liquidators finish "
+                          "the paperwork.", "red")
+            self._insolvent_t += dt
+            left = self.INSOLVENCY_GRACE_S - self._insolvent_t
+            if left > 0 and int(prev / 5) != int(self._insolvent_t / 5):
+                self._log(f"Insolvent: {int(left) + 1}s to liquidation.", "orange")
+            if self._insolvent_t >= self.INSOLVENCY_GRACE_S:
+                self._fire_game_over("insolvency")
+        else:
+            if self._insolvent_t > 0.0:
+                self._log("Back in the black. The liquidators put their pens away.", "lime")
+            self._insolvent_t = 0.0
+
+    def _fire_game_over(self, vector):
+        """A lose vector fired. Stop the sim, clear any open modal/box, and raise
+        the full-window lose screen (Try Again / walk away)."""
+        if self.game_over:
+            return
+        self.game_over = True
+        self._timer.stop()
+        self._woog_box.close_box()
+        if self._event_modal is not None:
+            try:
+                self._event_modal.hide(); self._event_modal.deleteLater()
+            except Exception:
+                pass
+            self._event_modal = None
+        msg = {"insolvency": "ASA is insolvent. The board liquidates the company.",
+               "woog": "The Woog overrun the probe network. The war is lost."}
+        self._log(msg.get(vector, "Game over."), "red")
+        self._game_over_seq.setGeometry(0, 0, self.width(), self.height())
+        self._game_over_seq.start(vector, self._restart_run, self._giveup)
+
+    def _restart_run(self):
+        """Try Again after a loss: a fresh run from universe #1, no legacy carried —
+        the loss is real. Mirrors _new_universe but resets the legacy scaler."""
+        self.universe_n = 1
+        self.legacy_mult = 1.0
+        self._reset_universe()
+        self._log("A fresh yard. Five tons of scrap steel. Nothing carried over. "
+                  "Try again.", "yellow")
+
+    def _giveup(self):
+        """Walk away from the wreckage — leave the lose screen up, sim already stopped."""
+        self.resting = True
+
     def _rest(self):
         if self.resting:
             return
@@ -3138,6 +3353,7 @@ class SteelBeamsGame(QWidget):
         self._pr_combat_lbl.setVisible(False)
         self._pr_matter_lbl.setVisible(False)
         self._end_seq.setVisible(False)
+        self._game_over_seq.setVisible(False)
         if not self._timer.isActive():
             self._timer.start()
         self._banner.reset()
