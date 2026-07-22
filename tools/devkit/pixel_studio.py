@@ -686,22 +686,76 @@ class _TileIconPanel(_CanvasPanel):
         self.status.setText(f"Saved {key} + regenerated PNGs")
 
 
-# ── stub modes (built out in later phases) ──────────────────────────────────
-class _StubPanel(QWidget):
-    def __init__(self, title: str, blurb: str, parent=None):
+# ── Placement mode ───────────────────────────────────────────────────────────
+class _PlacementPanel(QWidget):
+    """Consolidates the four drag-to-place tuning tools (furniture / Buddy
+    animation / item animation / nav graph) as sub-tabs. Each reuses its
+    standalone placer widget verbatim — including its own Export button, which
+    still writes coords to tools/placement_export.py to paste into garden_scene.
+
+    Embedded at SCALE 2 so the whole 384x216 scene fits the studio; precision is
+    unaffected (arrow-nudge is 1 native px regardless of scale). Placers are
+    built lazily on first view. Note: the mode-toggle button works, but the Tab
+    shortcut some placers use may be swallowed by focus navigation when embedded.
+    """
+
+    _SPECS = [
+        ("Furniture", "tools.furniture_placer", "Placer"),
+        ("Buddy Anim", "tools.animation_placer", "Placer"),
+        ("Item Anim", "tools.item_anim_placer", "Placer"),
+        ("Nav", "tools.nav_editor", "Editor"),
+    ]
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.action_bar = QWidget()   # nothing in the top bar yet
-        v = QVBoxLayout(self)
-        v.setContentsMargins(20, 20, 20, 20)
-        v.setSpacing(10)
-        head = QLabel(title)
-        head.setStyleSheet("font-size: 20px; font-weight: bold;")
-        v.addWidget(head)
-        desc = QLabel(blurb)
-        desc.setWordWrap(True)
-        desc.setStyleSheet("color: #888; font-size: 13px;")
-        v.addWidget(desc)
-        v.addStretch()
+        self.action_bar = QWidget()   # each placer carries its own toolbar
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(8)
+
+        tabrow = QHBoxLayout()
+        tabrow.setSpacing(6)
+        self._group = QButtonGroup(self)
+        self.stack = QStackedWidget()
+        for i, (label, _mod, _cls) in enumerate(self._SPECS):
+            b = QPushButton(label)
+            b.setCheckable(True)
+            b.clicked.connect(lambda _c, idx=i: self._select(idx))
+            self._group.addButton(b)
+            tabrow.addWidget(b)
+            page = QScrollArea()
+            page.setWidgetResizable(False)
+            self.stack.addWidget(page)
+        tabrow.addStretch()
+        root.addLayout(tabrow)
+        root.addWidget(self.stack, 1)
+        self._group.buttons()[0].setChecked(True)
+
+    def showEvent(self, evt):
+        super().showEvent(evt)
+        self._ensure_built(self.stack.currentIndex())
+
+    def _select(self, idx: int):
+        self.stack.setCurrentIndex(idx)
+        self._group.buttons()[idx].setChecked(True)
+        self._ensure_built(idx)
+
+    def _ensure_built(self, idx: int):
+        page = self.stack.widget(idx)
+        if page.widget() is not None:
+            return
+        label, mod, cls = self._SPECS[idx]
+        try:
+            import importlib
+            m = importlib.import_module(mod)
+            m.SCALE = 2   # fit the whole scene in the embed area
+            page.setWidget(getattr(m, cls)())
+        except Exception as exc:
+            err = QLabel(f"Could not load {label}:\n{exc}")
+            err.setStyleSheet("color: #cc6666; padding: 20px;")
+            err.setWordWrap(True)
+            page.setWidget(err)
 
 
 # ── the studio shell ────────────────────────────────────────────────────────
@@ -760,7 +814,4 @@ class PixelStudio(QWidget):
             return _SpritePanel()
         if key == "icon":
             return _TileIconPanel()
-        return _StubPanel(
-            "Placement",
-            "Drag-to-place garden/house furniture, Buddy and item animations, "
-            "and the nav graph, with coordinate export. Lands in the next phase.")
+        return _PlacementPanel()
