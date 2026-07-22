@@ -13,6 +13,25 @@ from typing import Optional
 from PySide6.QtCore import QObject, Signal
 
 
+def sha256_file(path) -> str:
+    """Return the lowercase hex SHA-256 of a file's bytes on disk. Reads in
+    chunks so a large installer never has to fit in memory."""
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def sha256_matches(actual_hex: str, expected_hex: str) -> bool:
+    """Constant-shape compare of two hex digests, normalized (stripped,
+    lowercased). Empty/None expected -> False (an unpinned manifest must not
+    count as 'verified')."""
+    if not expected_hex or not actual_hex:
+        return False
+    return actual_hex.strip().lower() == expected_hex.strip().lower()
+
+
 class UpdateDownloader(QObject):
     """Background worker for downloading installer using Python threading."""
     
@@ -91,7 +110,7 @@ class UpdateDownloader(QObject):
             # an arbitrary executable.
             actual = hasher.hexdigest()
             if self.expected_sha256:
-                if actual != self.expected_sha256:
+                if not sha256_matches(actual, self.expected_sha256):
                     print(f"[DOWNLOADER] SHA-256 mismatch: expected "
                           f"{self.expected_sha256}, got {actual}", flush=True)
                     installer_path.unlink(missing_ok=True)
