@@ -59,6 +59,12 @@ _TOOL_ICONS = {
     ],
 }
 
+# Undo / redo as back / forward arrows.
+_NAV_ICONS = {
+    "undo": ["M19 12H5", "M12 19l-7-7 7-7"],
+    "redo": ["M5 12h14", "M12 5l7 7-7 7"],
+}
+
 
 def _svg_icon(paths, color: str, size: int = 22) -> QIcon:
     """Build a tinted QIcon from a list of stroke path 'd' strings."""
@@ -128,12 +134,30 @@ class _SpritePanel(QWidget):
         body.addWidget(self.scroll, 1)
         body.addWidget(self._build_palette_rail())
         root.addLayout(body, 1)
-
-        self.status = QLabel("Ready")
-        self.status.setStyleSheet("color: #888; font-size: 11px;")
-        root.addWidget(self.status)
+        root.addLayout(self._build_bottom_bar())
 
         self._rebuild_swatches()
+
+    def _build_bottom_bar(self):
+        """Status on the left; View controls (zoom + grid) on the right."""
+        bar = QHBoxLayout()
+        self.status = QLabel("Ready")
+        self.status.setStyleSheet("color: #888; font-size: 11px;")
+        bar.addWidget(self.status)
+        bar.addStretch()
+        bar.addWidget(QLabel("Zoom"))
+        zout = QPushButton("-")
+        zout.setFixedWidth(30)
+        zin = QPushButton("+")
+        zin.setFixedWidth(30)
+        zout.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px - 2))
+        zin.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px + 2))
+        bar.addWidget(zout)
+        bar.addWidget(zin)
+        gbtn = QPushButton("Toggle Grid")
+        gbtn.clicked.connect(self._toggle_grid)
+        bar.addWidget(gbtn)
+        return bar
 
     # ---- construction --------------------------------------------------------
     def _build_action_bar(self):
@@ -186,26 +210,25 @@ class _SpritePanel(QWidget):
         v.addLayout(grid)
         self.tool_buttons["pencil"].setChecked(True)
 
+        # Undo / Redo as back / forward arrow icons.
+        nav_style = """
+            QPushButton { background: transparent; border: 1px solid #444;
+                          border-radius: 6px; }
+            QPushButton:hover { background: rgba(127, 127, 127, 0.15); }
+        """
         urow = QHBoxLayout()
-        for label, slot in (("Undo", self.canvas.undo), ("Redo", self.canvas.redo)):
-            b = QPushButton(label)
+        urow.setSpacing(4)
+        for name, slot in (("undo", self.canvas.undo), ("redo", self.canvas.redo)):
+            b = QPushButton()
+            b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 20))
+            b.setIconSize(QSize(20, 20))
+            b.setFixedHeight(32)
+            b.setToolTip(name.capitalize())
+            b.setStyleSheet(nav_style)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(slot)
             urow.addWidget(b)
         v.addLayout(urow)
-
-        v.addWidget(self._heading("View"))
-        zrow = QHBoxLayout()
-        zrow.addWidget(QLabel("Zoom"))
-        zout = QPushButton("-")
-        zin = QPushButton("+")
-        zout.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px - 2))
-        zin.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px + 2))
-        zrow.addWidget(zout)
-        zrow.addWidget(zin)
-        v.addLayout(zrow)
-        grid = QPushButton("Toggle Grid")
-        grid.clicked.connect(self._toggle_grid)
-        v.addWidget(grid)
         v.addStretch()
         return side
 
