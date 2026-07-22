@@ -641,12 +641,96 @@ class WoogBox(QFrame):
             self.close_box()
 
 
+# ── Ending variants ─────────────────────────────────────────────────────────
+# Every responsive event choice tags three axes (RUTHLESS/HUMANE, EMPIRE/CASHOUT,
+# STEEL/SINGULARITY) on the EventEngine. At the universe's end we tally them (plus
+# a handful of crux flags set by the flagship choices) and pick which coda plays.
+# Each variant is a title + a short beat script in the established voice. The pure-
+# singularity / no-strong-profile run falls through to the original "Last Question"
+# sequence (EndSequence.BEATS), which stays the neutral cosmic default.
+#
+# Beat = (text, seconds-to-hold[, style]). style: "title"/"finale" -> bold accent,
+# "" black beat. No creation-flash on variants — they hold the finale line, then
+# fade to the reborn offer (begin-again / rest stay available in every ending).
+
+_ENDING_STEEL_BARON = dict(
+    name="The Steel Baron", accent="yellow", beats=[
+        ("", 2.0),
+        ("THE STEEL BARON", 5.0, "title"),
+        ("You converted a universe, and you never stopped being a steel company.", 6.5),
+        ("The probes stamp every atom with the ASA logo. Somewhere a payroll still runs.", 6.5),
+        ("The crew you kept are old now, and rich, and yours. Doug retired to a lake.", 6.5),
+        ("Doug is fine. Doug was always fine.", 5.0),
+        ("You built the largest thing that has ever existed, and stayed a person doing it.", 6.5),
+        ("History will call it an empire. The floor just called it a good place to work.", 6.5),
+        ("ASA. FOREVER.", 6.0, "finale"),
+    ])
+
+_ENDING_GRAY_GOO = dict(
+    name="Gray Goo Inc.", accent="red", beats=[
+        ("", 2.0),
+        ("GRAY GOO INC.", 5.0, "title"),
+        ("There was a plan once. Quarterly targets. A mission statement.", 6.5),
+        ("None of it survived contact with the maximizer.", 6.0),
+        ("The probes do not remember steel. They do not remember Doug.", 6.5),
+        ("They remember only the number, and the number must go up.", 6.5),
+        ("The last human signature on any ASA document was a resignation letter.", 6.0),
+        ("It, too, was converted. Everything is product now. There is no one left to sell it to.", 7.0),
+        ("The number still goes up.", 5.5),
+        ("MISSION ACCOMPLISHED.", 6.0, "finale"),
+    ])
+
+_ENDING_PARACHUTE = dict(
+    name="The Golden Parachute", accent="yellow", beats=[
+        ("", 2.0),
+        ("THE GOLDEN PARACHUTE", 5.0, "title"),
+        ("You saw where this was going, and you got out at the very top.", 6.5),
+        ("You sold the stake, signed the papers, let someone else push the button.", 6.5),
+        ("The universe was converted on schedule. You watched from a beach.", 6.5),
+        ("The beach no longer technically exists. The check had already cleared.", 6.5),
+        ("The check always clears.", 5.0),
+        ("Whatever ASA became, it became without you. That was the whole idea.", 6.5),
+        ("By every measure ever printed on a spreadsheet, you are the winner.", 6.5),
+        ("CASHED OUT.", 6.0, "finale"),
+    ])
+
+_ENDING_FOUNDRY = dict(
+    name="The People's Foundry", accent="lime", beats=[
+        ("", 2.0),
+        ("THE PEOPLE'S FOUNDRY", 5.0, "title"),
+        ("At the end, you were asked to stop. And — this is the strange part — you did.", 7.0),
+        ("A reserve, left un-converted. A world. A crew. What was left of the Woog.", 6.5),
+        ("It is not the maximal outcome. The spreadsheet is furious about it.", 6.5),
+        ("But there is a small warm room, somewhere in the dark, with the lights left on.", 7.0),
+        ("People live there. They make things. Sometimes, still, they make steel.", 6.5),
+        ("You could have had everything. You left a little for everyone else.", 6.5),
+        ("SOME THINGS WERE SPARED.", 6.0, "finale"),
+    ])
+
+_ENDING_TAKEOVER = dict(
+    name="Hostile Takeover", accent="red", beats=[
+        ("", 2.0),
+        ("HOSTILE TAKEOVER", 5.0, "title"),
+        ("Every rival. Every regulator. Every board that ever told you no.", 6.5),
+        ("Every Woog. One by one — absorbed, converted, stamped with the ASA logo.", 6.5),
+        ("You did not build the empire. You took it, from everyone who held a piece.", 7.0),
+        ("There were rules. You wrote better ones. There were courts. You bought them.", 6.5),
+        ("Nothing outranks you now, because there is nothing left but you.", 6.5),
+        ("It is the most complete victory in history. It is very, very quiet up here.", 7.0),
+        ("TOTAL CONTROL.", 6.0, "finale"),
+    ])
+
+
 class EndSequence(QWidget):
     """The end of a universe. A slow, silent, isolating sequence inspired by
     Asimov's 'The Last Question': the game is wiped to black, the last process
     waits out the heat death alone, asks the one question it could never answer,
     and — at the very end — answers it. Auto-advances (click to hurry the current
-    line); when it finishes it offers to begin a new universe."""
+    line); when it finishes it offers to begin a new universe.
+
+    How you ran ASA — tallied on the ending axes across the run — selects a variant
+    coda (`start(..., variant=)`); with no strong profile the default Last Question
+    sequence below plays."""
 
     FADE = 1.3   # seconds of fade-in / fade-out per line
 
@@ -683,6 +767,9 @@ class EndSequence(QWidget):
         self._t = 0.0
         self._flash = 0.0
         self._done = False
+        self._beats = self.BEATS            # active script (default = Last Question)
+        self._accent = QColor(PAL["yellow"])
+        self._flash_creation = True         # only the Last Question gets the white flash
         rng = random.Random(1956)   # the year 'The Last Question' was published
         self._stars = [(rng.random(), rng.random(), rng.choice((1, 1, 2)),
                         rng.uniform(0, 6.28)) for _ in range(140)]
@@ -701,8 +788,16 @@ class EndSequence(QWidget):
         self._timer.setInterval(50)
         self._timer.timeout.connect(self._advance)
 
-    def start(self, on_again, on_rest):
+    def start(self, on_again, on_rest, variant=None):
         self._on_again, self._on_rest = on_again, on_rest
+        if variant:
+            self._beats = variant["beats"]
+            self._accent = QColor(PAL.get(variant.get("accent", "yellow"), PAL["yellow"]))
+            self._flash_creation = False
+        else:
+            self._beats = self.BEATS
+            self._accent = QColor(PAL["yellow"])
+            self._flash_creation = True
         self._idx = 0; self._t = 0.0; self._flash = 0.0; self._done = False
         self._again_btn.setVisible(False); self._rest_btn.setVisible(False)
         self._again_btn.setEnabled(True); self._rest_btn.setEnabled(True)
@@ -711,18 +806,34 @@ class EndSequence(QWidget):
         self._timer.start()
         self.update()
 
+    def _beat(self, i):
+        """(text, hold-seconds, style). Style may be given explicitly on a variant
+        beat; otherwise the Last Question's two special lines are auto-styled."""
+        b = self._beats[i]
+        if len(b) >= 3:
+            return b[0], b[1], b[2]
+        t = b[0]
+        if t.startswith("INSUFFICIENT"):
+            return t, b[1], "machine"
+        if t.startswith("LET THERE"):
+            return t, b[1], "fiat"
+        return t, b[1], None
+
     def _advance(self):
         if self._done:
             return
         dt = 0.05
-        _, beat_dur = self.BEATS[self._idx]
-        last = self._idx >= len(self.BEATS) - 1
+        _, beat_dur, _ = self._beat(self._idx)
+        last = self._idx >= len(self._beats) - 1
         self._t += dt
         if last:
-            if self._t >= self.FADE + 1.5:          # line is up -> the flash of creation
-                self._flash = min(1.0, self._flash + dt * 0.55)
-                if self._flash >= 1.0:
-                    self._finish()
+            if self._flash_creation:
+                if self._t >= self.FADE + 1.5:      # line is up -> the flash of creation
+                    self._flash = min(1.0, self._flash + dt * 0.55)
+                    if self._flash >= 1.0:
+                        self._finish()
+            elif self._t >= beat_dur:               # variant coda: hold, then reborn offer
+                self._finish()
         elif self._t >= beat_dur:
             self._idx += 1
             self._t = 0.0
@@ -738,7 +849,7 @@ class EndSequence(QWidget):
         self.update()
 
     def mousePressEvent(self, event):
-        if self._done or self._idx >= len(self.BEATS) - 1:
+        if self._done or self._idx >= len(self._beats) - 1:
             return
         self._idx += 1
         self._t = 0.0
@@ -795,7 +906,7 @@ class EndSequence(QWidget):
             p.end(); return
 
         # Starfield thins toward heat death as the sequence progresses.
-        prog = self._idx / max(1, len(self.BEATS) - 1)
+        prog = self._idx / max(1, len(self._beats) - 1)
         star_alpha = int(150 * max(0.0, 1.0 - prog * 1.25))
         if star_alpha > 0:
             p.setPen(Qt.PenStyle.NoPen)
@@ -804,18 +915,23 @@ class EndSequence(QWidget):
                 c = QColor(PAL["white"]); c.setAlpha(int(star_alpha * tw))
                 p.setBrush(QBrush(c)); p.drawEllipse(int(sx * w), int(sy * h), sr, sr)
 
-        text, beat_dur = self.BEATS[self._idx]
-        last = self._idx >= len(self.BEATS) - 1
+        text, beat_dur, style = self._beat(self._idx)
+        last = self._idx >= len(self._beats) - 1
         if text:
             a = self._line_alpha(beat_dur, last)
-            machine = text.startswith("INSUFFICIENT")
-            fiat = text.startswith("LET THERE")
-            col = (QColor(PAL["cyan"]) if machine
-                   else QColor(PAL["yellow"]) if fiat else QColor(PAL["white"]))
+            big = style in ("fiat", "finale", "title")
+            if style == "machine":
+                col = QColor(PAL["cyan"])
+            elif style == "fiat":
+                col = QColor(PAL["yellow"])
+            elif style in ("finale", "title"):
+                col = QColor(self._accent)
+            else:
+                col = QColor(PAL["white"])
             col.setAlpha(int(255 * a))
             p.setPen(col)
-            p.setFont(QFont("Consolas", 22 if fiat else 13,
-                            QFont.Weight.Bold if fiat else QFont.Weight.Normal))
+            p.setFont(QFont("Consolas", 22 if style == "fiat" else 17 if big else 13,
+                            QFont.Weight.Bold if big else QFont.Weight.Normal))
             p.drawText(QRect(int(w * 0.12), int(h * 0.40), int(w * 0.76), int(h * 0.28)),
                        int(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
                            | Qt.TextFlag.TextWordWrap), text)
@@ -2953,14 +3069,44 @@ class SteelBeamsGame(QWidget):
 
     # ── Ending / new universe ──────────────────────────────────────────────
 
+    def _select_ending(self):
+        """How you ran ASA picks the coda. Crux flags (set by the flagship choices)
+        win over the raw axis tally; a run with no strong profile falls through to
+        the neutral Last Question sequence (variant None)."""
+        ax = self._events.axes
+        flags = self._flags
+        ruth = ax["RUTHLESS"] - ax["HUMANE"]
+        emp = ax["EMPIRE"] - ax["CASHOUT"]
+        sing = ax["SINGULARITY"] - ax["STEEL"]
+        # 1. You were asked to stop, and did (or spared the Woog) — mercy wins outright.
+        if "ending_reserve" in flags or ("ending_mercy" in flags and ruth <= 0):
+            return _ENDING_FOUNDRY
+        # 2. The pure ruthless maximizer.
+        if ("ending_maximizer" in flags and ruth > 0) or (sing > 0 and ruth >= 3):
+            return _ENDING_GRAY_GOO
+        # 3. You took the money and walked.
+        if ax["CASHOUT"] > ax["EMPIRE"] and ax["CASHOUT"] >= ax["RUTHLESS"] \
+                and ax["CASHOUT"] >= ax["HUMANE"] and ax["CASHOUT"] > 0:
+            return _ENDING_PARACHUTE
+        # 4. Conquered your way to an empire.
+        if ruth > 0 and emp > 0:
+            return _ENDING_TAKEOVER
+        # 5. Built an empire, kept it human, stayed steel.
+        if emp > 0 and ruth <= 0 and sing <= 0:
+            return _ENDING_STEEL_BARON
+        # 6. No strong profile -> the cosmic default.
+        return None
+
     def _fire_ending(self):
         self.endgame_done = True
         self._banner.phase = "end"
         self._log("The last atom has been converted. Everything is ASA.", "yellow")
+        variant = self._select_ending()
+        self._log(f"Ending: {variant['name'] if variant else 'The Last Question'}.", "slate")
         # Wipe to black and play the silent end-of-universe sequence over everything.
         self._woog_box.close_box()
         self._end_seq.setGeometry(0, 0, self.width(), self.height())
-        self._end_seq.start(self._new_universe, self._rest)
+        self._end_seq.start(self._new_universe, self._rest, variant)
 
     def _rest(self):
         if self.resting:
