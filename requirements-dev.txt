@@ -1,0 +1,11 @@
+# TechDeck dev/test dependencies — NOT shipped, not in the frozen build.
+# Installs the runtime deps plus the test toolchain.
+#
+#   python -m pip install -r requirements-dev.txt
+#
+# In the locked-down corporate environment use --user (no admin needed):
+#   python -m pip install --user -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest==9.1.1
