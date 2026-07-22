@@ -134,30 +134,12 @@ class _SpritePanel(QWidget):
         body.addWidget(self.scroll, 1)
         body.addWidget(self._build_palette_rail())
         root.addLayout(body, 1)
-        root.addLayout(self._build_bottom_bar())
 
-        self._rebuild_swatches()
-
-    def _build_bottom_bar(self):
-        """Status on the left; View controls (zoom + grid) on the right."""
-        bar = QHBoxLayout()
         self.status = QLabel("Ready")
         self.status.setStyleSheet("color: #888; font-size: 11px;")
-        bar.addWidget(self.status)
-        bar.addStretch()
-        bar.addWidget(QLabel("Zoom"))
-        zout = QPushButton("-")
-        zout.setFixedWidth(30)
-        zin = QPushButton("+")
-        zin.setFixedWidth(30)
-        zout.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px - 2))
-        zin.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px + 2))
-        bar.addWidget(zout)
-        bar.addWidget(zin)
-        gbtn = QPushButton("Toggle Grid")
-        gbtn.clicked.connect(self._toggle_grid)
-        bar.addWidget(gbtn)
-        return bar
+        root.addWidget(self.status)
+
+        self._rebuild_swatches()
 
     # ---- construction --------------------------------------------------------
     def _build_action_bar(self):
@@ -220,16 +202,40 @@ class _SpritePanel(QWidget):
         urow.setSpacing(4)
         for name, slot in (("undo", self.canvas.undo), ("redo", self.canvas.redo)):
             b = QPushButton()
-            b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 20))
-            b.setIconSize(QSize(20, 20))
-            b.setFixedHeight(32)
+            b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 22))
+            b.setIconSize(QSize(22, 22))
+            b.setFixedSize(44, 44)   # same box as the tool icons
             b.setToolTip(name.capitalize())
             b.setStyleSheet(nav_style)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(slot)
             urow.addWidget(b)
+        urow.addStretch()
         v.addLayout(urow)
+
         v.addStretch()
+
+        # View controls pinned to the bottom of the rail so they line up with
+        # the palette's Add/Edit row on the other side of the canvas.
+        v.addWidget(self._heading("View"))
+        zbtn_style = "QPushButton { padding: 2px; font-size: 15px; font-weight: bold; }"
+        zrow = QHBoxLayout()
+        zrow.setSpacing(4)
+        zrow.addWidget(QLabel("Zoom"))
+        zout = QPushButton("-")
+        zin = QPushButton("+")
+        for zb in (zout, zin):
+            zb.setFixedSize(32, 28)
+            zb.setStyleSheet(zbtn_style)
+        zout.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px - 2))
+        zin.clicked.connect(lambda: self.canvas.set_zoom(self.canvas.cell_px + 2))
+        zrow.addWidget(zout)
+        zrow.addWidget(zin)
+        zrow.addStretch()
+        v.addLayout(zrow)
+        gbtn = QPushButton("Toggle Grid")
+        gbtn.clicked.connect(self._toggle_grid)
+        v.addWidget(gbtn)
         return side
 
     def _build_palette_rail(self):
