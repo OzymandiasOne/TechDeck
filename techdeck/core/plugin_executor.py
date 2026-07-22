@@ -20,6 +20,7 @@ from enum import Enum
 
 from techdeck.core.plugin_loader import PluginLoader, Plugin
 from techdeck.ui.widgets.console import InputAborted
+from techdeck.core.plugin_sdk import PluginCancelled  # cooperative-cancel signal (stdlib-only SDK top)
 
 
 # Default plugin IDLE timeout. The watchdog is inactivity-based: a plugin is
@@ -539,6 +540,10 @@ class PluginExecutor:
             # threading it through every call.
             plugin_params['plugin_id'] = plugin_id
             plugin_params['plugin_family'] = getattr(plugin, 'family', 'General')
+            # Stash the cancel flag so deeply-nested helper code can poll it via
+            # sdk.raise_if_cancelled(params.get('cancel_event')) without threading
+            # the event through every call.
+            plugin_params['cancel_event'] = cancel_event
 
             # Inject plugin settings
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
@@ -591,6 +596,20 @@ class PluginExecutor:
                                getattr(plugin, 'family', 'General'), execution_time)
                 except Exception:
                     pass  # telemetry must never affect a run
+
+        except PluginCancelled:
+            # Cooperative cancel: a plugin called sdk.raise_if_cancelled() after
+            # the user hit Cancel. A clean stop, not an error.
+            execution_time = time.time() - start_time
+            with self._lock:
+                result.status = PluginStatus.CANCELLED
+                result.message = "Cancelled by user"
+                result.execution_time = execution_time
+            safe_log("Plugin execution cancelled")
+            get_run_logger().info(
+                "RUN CANCELLED %s after %.1fs (cooperative)",
+                plugin_id, execution_time,
+            )
 
         except InputAborted as exc:
             # Plugin's request_input was aborted. reason="paused" → user (or
@@ -732,6 +751,10 @@ class PluginExecutor:
             plugin_params['log'] = safe_log
             plugin_params['plugin_id'] = plugin_id
             plugin_params['plugin_family'] = getattr(plugin, 'family', 'General')
+            # Stash the cancel flag so deeply-nested helper code can poll it via
+            # sdk.raise_if_cancelled(params.get('cancel_event')) without threading
+            # the event through every call.
+            plugin_params['cancel_event'] = cancel_event
 
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
             plugin_params['settings'] = plugin_settings
@@ -765,6 +788,20 @@ class PluginExecutor:
                            getattr(plugin, 'family', 'General'), execution_time)
             except Exception:
                 pass  # telemetry must never affect a run
+
+        except PluginCancelled:
+            # Cooperative cancel: a plugin called sdk.raise_if_cancelled() after
+            # the user hit Cancel. A clean stop, not an error.
+            execution_time = time.time() - start_time
+            with self._lock:
+                result.status = PluginStatus.CANCELLED
+                result.message = "Cancelled by user"
+                result.execution_time = execution_time
+            safe_log("Plugin execution cancelled")
+            get_run_logger().info(
+                "RUN CANCELLED %s after %.1fs (cooperative)",
+                plugin_id, execution_time,
+            )
 
         except InputAborted as exc:
             execution_time = time.time() - start_time

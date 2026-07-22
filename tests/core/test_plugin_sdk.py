@@ -3,6 +3,9 @@ parsing, tube classification, the batch cache, run-outcome params, and the
 user-facing error mapping)."""
 
 import builtins
+import threading
+
+import pytest
 
 from techdeck.core import plugin_sdk
 from techdeck.core.plugin_executor import PluginExecutor
@@ -130,6 +133,23 @@ def test_as_user_facing_recognizes_and_rejects():
     assert "open in another program" in mapped.problem.lower()
 
     assert plugin_sdk.as_user_facing(ValueError("plain code bug")) is None
+
+
+# ── cooperative cancellation ─────────────────────────────────────────────────
+def test_cancellation_helpers():
+    ev = threading.Event()
+    # None + unset -> not cancelled; helpers are no-ops.
+    assert plugin_sdk.cancelled(None) is False
+    assert plugin_sdk.cancelled(ev) is False
+    plugin_sdk.raise_if_cancelled(ev)
+    plugin_sdk.raise_if_cancelled(None)
+    # Set -> cancelled; raise_if_cancelled raises PluginCancelled (an Exception,
+    # so the executor's generic handler can't miss it, but it's ordered first).
+    ev.set()
+    assert plugin_sdk.cancelled(ev) is True
+    assert issubclass(plugin_sdk.PluginCancelled, Exception)
+    with pytest.raises(plugin_sdk.PluginCancelled):
+        plugin_sdk.raise_if_cancelled(ev)
 
 
 def test_as_user_facing_walks_cause_chain():

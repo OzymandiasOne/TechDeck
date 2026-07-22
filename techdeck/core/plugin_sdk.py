@@ -86,6 +86,37 @@ def as_user_facing(exc: BaseException) -> "UserFacingError | None":
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Cooperative cancellation
+#
+# The executor sets a threading.Event (run()'s 3rd arg) when the user hits
+# Cancel; it CANNOT interrupt a running plugin, so plugins must poll it. Call
+# raise_if_cancelled(cancel_event) inside any loop that can run for a while
+# (over files, PDFs, DXFs, rows, nests, ...) and Cancel responds promptly
+# instead of waiting for the whole batch to finish. The executor maps
+# PluginCancelled to a clean CANCELLED status (not an error).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class PluginCancelled(Exception):
+    """Raised by raise_if_cancelled() when the user cancels a run. Caught by the
+    executor and reported as CANCELLED, never ERROR."""
+
+
+def cancelled(cancel_event) -> bool:
+    """True if the run has been cancelled. Tolerates cancel_event=None (a plugin
+    run standalone / in tests), returning False."""
+    return bool(cancel_event is not None and cancel_event.is_set())
+
+
+def raise_if_cancelled(cancel_event) -> None:
+    """Bail out of a long operation the instant the user cancels. Call once per
+    iteration of any loop that can run a while (over files/PDFs/DXFs/rows/nests).
+    Cheap — a plain flag read — so per-item calls are fine. Raises
+    PluginCancelled, which the executor turns into a clean CANCELLED."""
+    if cancelled(cancel_event):
+        raise PluginCancelled()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # OneDrive / Pilot Program root resolution
 #
 # Every machine syncs the same SharePoint library, but the local cache path
