@@ -16,7 +16,7 @@ from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtGui import QPainter, QColor, QIcon, QImage, QPixmap
 
 from techdeck.ui.sprite_font import font as _sf
-from techdeck.ui.pages.emporium_page import (
+from techdeck.ui.arcade_chrome import (
     EMP, _draw_bubble, _load_art, _trim_v, _tile_ring, _garden_dir,
 )
 from techdeck.ui.pages.mystuff_page import _wall_tile, _WALL_BASE

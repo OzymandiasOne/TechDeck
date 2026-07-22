@@ -20,10 +20,11 @@ from PySide6.QtCore import Qt, QPoint, QRect
 from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QImage
 
 from techdeck.ui.sprite_font import font as _sf
-from techdeck.ui.pages.emporium_page import (
-    EMP, CATALOG, _draw_bubble, _load_pixmap, _load_art, _trim_v,
+from techdeck.ui.arcade_chrome import (
+    EMP, _draw_bubble, _load_pixmap, _load_art, _trim_v,
     _tile_ring, _equipped_badge,
 )
+from techdeck.ui.emporium_catalog import CATALOG
 
 # The diagonal-stripe wall, as a SEAMLESS tile so it fills the whole page (and
 # repeats as the locker scrolls) instead of the old stretched art whose solid
