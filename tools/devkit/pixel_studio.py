@@ -486,6 +486,20 @@ class _TileIconPanel(_CanvasPanel):
         self.canvas.modified.connect(self._schedule_preview)
         self._refresh_preview()
 
+    def showEvent(self, evt):
+        super().showEvent(evt)
+        # The icon is a fixed 32x32; fit it to the (narrower) canvas column so
+        # it reads as a square work area rather than a clipped strip. Deferred
+        # a tick so the viewport has its final size after layout settles.
+        QTimer.singleShot(0, self._fit_canvas)
+
+    def _fit_canvas(self):
+        vp = self.scroll.viewport().size()
+        w, h = self.canvas.grid_size()
+        if w and h and vp.width() > 20 and vp.height() > 20:
+            cell = max(2, min((vp.width() - 4) // w, (vp.height() - 4) // h))
+            self.canvas.set_zoom(cell)
+
     def _build_action_bar(self):
         bar = QWidget()
         row = QHBoxLayout(bar)
@@ -537,7 +551,7 @@ class _TileIconPanel(_CanvasPanel):
 
     def _build_preview_rail(self):
         side = QFrame()
-        side.setFixedWidth(200)
+        side.setFixedWidth(180)
         v = QVBoxLayout(side)
         v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(self._heading("Preview"))
@@ -554,7 +568,7 @@ class _TileIconPanel(_CanvasPanel):
             cell = QVBoxLayout()
             cell.setSpacing(2)
             tile = QLabel()
-            tile.setFixedSize(70, 70)
+            tile.setFixedSize(64, 64)
             tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
             tile.setStyleSheet("border: 1px solid #333; border-radius: 4px;")
             self._preview_labels[theme] = tile
