@@ -494,11 +494,41 @@ class _TileIconPanel(_CanvasPanel):
         for label, slot in (
             ("Open Icon...", self._open_icon),
             ("Save Icon...", self._save_icon),
+            ("Lint", self._lint),
         ):
             b = QPushButton(label)
             b.clicked.connect(slot)
             row.addWidget(b)
         return bar
+
+    def _lint(self):
+        """Run the pixel-style linter on the current grid and show its report
+        (the 'logo' profile — the tile-icon ruleset: cluster/chunk/jaggy)."""
+        import io
+        import contextlib
+        from tools.check_pixel_style import lint
+        from tools.generate_tile_icons_32 import _hex
+        rows, tones = self._used_tones()
+        if not tones:
+            QMessageBox.information(self, "Lint", "The canvas is empty.")
+            return
+        grid = [[(*_hex(tones[ch]), 255) if ch in tones else None for ch in row]
+                for row in rows]
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                level = lint(self.icon_key or "icon", grid, "logo")
+        except Exception as exc:
+            QMessageBox.critical(self, "Lint failed", str(exc))
+            return
+        report = buf.getvalue().strip() or f"{level}: no issues"
+        box = QMessageBox(self)
+        box.setWindowTitle(f"Pixel Style Lint - {level}")
+        box.setText(report)
+        box.setIcon(QMessageBox.Icon.Information if level == "PASS"
+                    else QMessageBox.Icon.Warning)
+        box.exec()
+        self.status.setText(f"Lint: {level}")
 
     def _build_body(self):
         body = super()._build_body()
