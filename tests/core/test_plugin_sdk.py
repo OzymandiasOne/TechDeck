@@ -147,7 +147,10 @@ def test_cancellation_helpers():
     # so the executor's generic handler can't miss it, but it's ordered first).
     ev.set()
     assert plugin_sdk.cancelled(ev) is True
-    assert issubclass(plugin_sdk.PluginCancelled, Exception)
+    # BaseException (not Exception) so a plugin's `except Exception` around
+    # per-file work can't swallow a cancel; the executor still catches it.
+    assert issubclass(plugin_sdk.PluginCancelled, BaseException)
+    assert not issubclass(plugin_sdk.PluginCancelled, Exception)
     with pytest.raises(plugin_sdk.PluginCancelled):
         plugin_sdk.raise_if_cancelled(ev)
 

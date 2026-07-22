@@ -439,7 +439,7 @@ def _dxf_work_order(filename):
     return None
 
 
-def build_dxf_index(iges_folder, log):
+def build_dxf_index(iges_folder, log, cancel_event=None):
     """Map WORK ORDER (upper) -> linear inches per piece from an order's IGES DXFs.
     Also returns `suspect` (work orders whose geometry may be under-counted:
     unmeasured SPLINE/ELLIPSE or non-inch units), `multilayer` (work order ->
@@ -448,7 +448,9 @@ def build_dxf_index(iges_folder, log):
     index, suspect, multilayer, empty = {}, {}, {}, {}
     if not iges_folder:
         return index, suspect, multilayer, empty
-    for dxf in glob.glob(os.path.join(iges_folder, "**", "*.dxf"), recursive=True):
+    for i, dxf in enumerate(glob.glob(os.path.join(iges_folder, "**", "*.dxf"), recursive=True)):
+        if i % 64 == 0:
+            sdk.raise_if_cancelled(cancel_event)
         wo = _dxf_work_order(dxf)
         if not wo:
             continue
@@ -1995,7 +1997,7 @@ def run(params: dict, progress_callback, cancel_event):
         # structural-only orders -> those rows fall back to the band estimate.
         iges_folder = find_iges_folder(cui) if cui else None
         dxf_index, dxf_suspect, dxf_multi, dxf_empty = build_dxf_index(
-            str(iges_folder) if iges_folder else None, log)
+            str(iges_folder) if iges_folder else None, log, cancel_event)
         if iges_folder:
             log(f"  IGES DXFs: {len(dxf_index)} work order(s) measured.")
 
@@ -2019,6 +2021,7 @@ def run(params: dict, progress_callback, cancel_event):
                     seen_nests.append(ns)
         nest_pdf_data = {}
         for ns in seen_nests:
+            sdk.raise_if_cancelled(cancel_event)
             pdf = _find_nest_pdf(pdf_folder, ns) if pdf_folder else None
             if pdf is None:
                 nest_pdf_data[ns] = None

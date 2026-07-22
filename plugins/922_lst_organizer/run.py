@@ -630,6 +630,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     if do_organize and not dry_run:
         log("Filing files into material folders...")
         for p in pulled:
+            sdk.raise_if_cancelled(cancel_event)
             target_dir = lst_dir / p.folder
             target_dir.mkdir(parents=True, exist_ok=True)
             try:

@@ -372,7 +372,7 @@ def _find_header_col_prefix(ws, prefix: str, header_row: int):
 
 
 def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
-                          nests: list, log) -> tuple:
+                          nests: list, log, cancel_event=None) -> tuple:
     """
     Decide which BATCH LIST column truly holds the DYPN quantities by
     scoring the column labeled 'DYPN QTY' and the one labeled
@@ -399,6 +399,7 @@ def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
 
     packet_qtys = {}
     for nest in nests:
+        sdk.raise_if_cancelled(cancel_event)
         pdf = _find_nest_pdf(nest_packages_folder, nest)
         if pdf is None:
             log(f"  WARNING: No packet PDF for nest {nest} -- skipping it in QTY verification.")
@@ -1443,7 +1444,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     log("Verifying DYPN QTY column against the nest packet PDFs...")
     qty_col, swap_with, packet_qtys = _resolve_dypn_qty_col(
-        batch_list_path, nest_packages_folder, all_nests, log)
+        batch_list_path, nest_packages_folder, all_nests, log, cancel_event)
     if swap_with is not None:
         _swap_batch_list_headers(batch_list_path, qty_col, swap_with, log)
 

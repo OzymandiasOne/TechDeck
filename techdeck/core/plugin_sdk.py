@@ -96,9 +96,13 @@ def as_user_facing(exc: BaseException) -> "UserFacingError | None":
 # PluginCancelled to a clean CANCELLED status (not an error).
 # ─────────────────────────────────────────────────────────────────────────────
 
-class PluginCancelled(Exception):
+class PluginCancelled(BaseException):
     """Raised by raise_if_cancelled() when the user cancels a run. Caught by the
-    executor and reported as CANCELLED, never ERROR."""
+    executor and reported as CANCELLED, never ERROR.
+
+    Subclasses BaseException (like KeyboardInterrupt), NOT Exception, so a
+    plugin's own `try/except Exception` around per-file work (used to skip a bad
+    file and continue) can never accidentally swallow a cancel."""
 
 
 def cancelled(cancel_event) -> bool:

@@ -104,9 +104,11 @@ def _pallet_assignment_count(organizer_path: Path) -> int:
         wb.close()
 
 
-def _order_has_7000_prints(order_dir: Path) -> bool:
+def _order_has_7000_prints(order_dir: Path, cancel_event=None) -> bool:
     """True if the order has a CAD-AND-SHOP-PRINTS/.../7000/ folder with PDFs."""
-    for p in order_dir.rglob("7000"):
+    for i, p in enumerate(order_dir.rglob("7000")):
+        if i % 64 == 0:
+            sdk.raise_if_cancelled(cancel_event)
         if not p.is_dir():
             continue
         if "cad-and-shop-prints" in [s.lower() for s in p.parts]:
@@ -117,7 +119,7 @@ def _order_has_7000_prints(order_dir: Path) -> bool:
 
 # ── 922 audit ───────────────────────────────────────────────────────────────
 
-def _audit_922(batch_no: str, batch_path: Path, log):
+def _audit_922(batch_no: str, batch_path: Path, log, cancel_event=None):
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
 
     po_matches = [p for p in doc_folder.glob(f"PO H{batch_no} QF-QU-09 REV C*.xlsx")
@@ -148,6 +150,7 @@ def _audit_922(batch_no: str, batch_path: Path, log):
             return None
 
         for order, serials in order_to_serials.items():
+            sdk.raise_if_cancelled(cancel_event)
             folder = _folder_for(order)
             if folder is None:
                 missing_folders += 1
@@ -156,7 +159,7 @@ def _audit_922(batch_no: str, batch_path: Path, log):
             is_laser = any(sdk.tube_class(s) == "standard" for s in serials)
             if is_laser:
                 laser_orders += 1
-                if _order_has_7000_prints(folder):
+                if _order_has_7000_prints(folder, cancel_event):
                     prints_present += 1
                 else:
                     missing_prints += 1
@@ -240,7 +243,7 @@ def _audit_922(batch_no: str, batch_path: Path, log):
 
 # ── 911 audit (first pass) ───────────────────────────────────────────────────
 
-def _audit_911(batch: str, batch_folder: Path, log):
+def _audit_911(batch: str, batch_folder: Path, log, cancel_event=None):
     cards: list[dict] = []
     summary: list[str] = []
 
@@ -272,6 +275,7 @@ def _audit_911(batch: str, batch_folder: Path, log):
     total = len(nests)
     folders = workbooks = tickets = 0
     for nest in nests:
+        sdk.raise_if_cancelled(cancel_event)
         nest_dir = batch_folder / nest
         if not nest_dir.is_dir():
             continue
@@ -348,7 +352,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             raise RuntimeError(f"Batch {batch_no} not found under {root} (also checked '1 - Completed').")
         log(f"Auditing 922 Batch {batch_no}: {batch_path}")
         progress_callback(20)
-        cards, charts, summary = _audit_922(batch_no, batch_path, log)
+        cards, charts, summary = _audit_922(batch_no, batch_path, log, cancel_event)
         title = f"922 Batch {batch_no} - Readiness"
         label = f"922 Batch {batch_no}"
     else:
@@ -365,7 +369,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             raise RuntimeError(f"911 batch folder '{batch}' not found under {root}.")
         log(f"Auditing 911 Batch {batch}: {batch_folder}")
         progress_callback(20)
-        cards, charts, summary = _audit_911(batch, batch_folder, log)
+        cards, charts, summary = _audit_911(batch, batch_folder, log, cancel_event)
         title = f"911 Batch {batch} - Readiness"
         label = f"911 Batch {batch}"
 

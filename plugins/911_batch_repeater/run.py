@@ -86,12 +86,16 @@ def _read_dypns(excel_path: Path) -> list[str]:
         wb.close()
 
 
-def _build_library_index(library_dir: Path, extension: str) -> dict[str, Path]:
+def _build_library_index(library_dir: Path, extension: str, cancel_event=None) -> dict[str, Path]:
     index: dict[str, Path] = {}
     if not library_dir.exists():
         return index
     ext_lower = extension.lower()
-    for f in library_dir.iterdir():
+    # The MASTER PARTS / INSPECTION libraries can hold thousands of files on a
+    # OneDrive tree; poll so Cancel responds during the listing (Hard Rule 11).
+    for i, f in enumerate(library_dir.iterdir()):
+        if i % 64 == 0:
+            sdk.raise_if_cancelled(cancel_event)
         if f.is_file() and f.suffix.lower() == ext_lower:
             index[f.stem.upper()] = f
     return index
@@ -269,11 +273,11 @@ def run(params, progress_callback, cancel_event):
     # Step 4 - Build library indexes once
     # ------------------------------------------------------------------ #
     log("Indexing Master Parts Library...")
-    nc_index = _build_library_index(parts_lib, ".NC")
+    nc_index = _build_library_index(parts_lib, ".NC", cancel_event)
     log(f"  .NC files found  : {len(nc_index)}")
 
     log("Indexing Master Inspection Library...")
-    pdf_index = _build_library_index(insp_lib, ".pdf")
+    pdf_index = _build_library_index(insp_lib, ".pdf", cancel_event)
     log(f"  .pdf files found : {len(pdf_index)}")
 
     progress_callback(10)
@@ -295,6 +299,7 @@ def run(params, progress_callback, cancel_event):
     nest_dypns: dict[str, list[str]] = {}
 
     for nest_dir in nest_folders:
+        sdk.raise_if_cancelled(cancel_event)
         nest_name = nest_dir.name
         excel_path = _find_nest_excel(nest_dir, batch_number, nest_name)
 
@@ -350,6 +355,7 @@ def run(params, progress_callback, cancel_event):
         nest_nc = nest_pdf = nest_edited = nest_errors = 0
 
         for dypn in dypns:
+            sdk.raise_if_cancelled(cancel_event)
             dypn_key = dypn.upper()
             if dypn_key in seen:
                 continue
