@@ -44,7 +44,7 @@ PLUGIN_ICON_KEYS = {
     "922_formingfinder":    "futurama_bender",
     "922_kitting":          "toolbox",
     "922_lst_organizer":    "sym_opened_folder",
-    "911_lst_organizer":    "sym_opened_folder",
+    "911_lst_organizer":    "sym_opened_folder_911",  # recolored variant (blue body)
     "922_runtime_genie":    "lamp",
     "922_batch_repeater":   "copy",
     "batch_auditor":        "badge",

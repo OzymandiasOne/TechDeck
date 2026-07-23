@@ -66,6 +66,24 @@ THEME_ICON_SWAPS = {
     ("matrix", "stopwatch"): ("#00E436", "#9BFFB0"),
 }
 
+# Per-(theme, icon-key) ONE-WAY final-color substitutions {a: b}, applied AFTER
+# recolor + THEME_SUBSTITUTIONS. Unlike THEME_ICON_SWAPS (which exchanges two
+# colors already in the image) this pushes a tier onto a DIFFERENT color from
+# that theme's palette than the luminance-rank mapping picked. It's what makes
+# a recolor-only variant key possible: same grid, different primary color.
+# sym_opened_folder_911 = the 911 LST Organizer folder; its body moves off the
+# theme's lightest tier (which the 922 folder keeps) onto a contrasting palette
+# color -- blue where the palette has it (911's family color), else the most
+# distinct remaining hue.
+ICON_SUBSTITUTIONS = {
+    ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#29ADFF"},
+    ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#AB5236"},
+    ("cherry_blossom", "sym_opened_folder_911"): {"#FFF1E8": "#FF77A8"},
+    ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
+    ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#29ADFF"},
+    ("matrix", "sym_opened_folder_911"):         {"#9BFFB0": "#00E436"},
+}
+
 
 def _hex(h):
     h = h.lstrip("#")
@@ -143,6 +161,18 @@ def _swap_colors(im, hex_a, hex_b):
                 px[x, y] = (*cb, a)
             elif (r, g, b) == cb:
                 px[x, y] = (*ca, a)
+    return im
+
+
+def _replace_colors(im, subs):
+    """One-way exact-color replacement {a_hex: b_hex} (ICON_SUBSTITUTIONS)."""
+    table = {_hex(a): _hex(b) for a, b in subs.items()}
+    px = im.load()
+    for y in range(im.height):
+        for x in range(im.width):
+            r, g, b, a = px[x, y]
+            if a and (r, g, b) in table:
+                px[x, y] = (*table[(r, g, b)], a)
     return im
 
 
@@ -2065,6 +2095,10 @@ ICONS.update({
     "sym_user_female": sym_user_female,
     "sym_wrench": sym_wrench,
 })
+# Recolor-only variants: same art as the base key, but ICON_SUBSTITUTIONS moves
+# a tier onto a different palette color per theme. 911 LST Organizer's folder
+# body differs from 922 LST Organizer's so the two tiles read apart at a glance.
+ICONS["sym_opened_folder_911"] = sym_opened_folder
 
 
 def main():
@@ -2079,6 +2113,9 @@ def main():
             if subs:
                 mapping = {k: subs.get(v, v) for k, v in mapping.items()}
             _recolor(im, mapping)
+            isubs = ICON_SUBSTITUTIONS.get((tname, key))
+            if isubs:
+                _replace_colors(im, isubs)
             swap = THEME_ICON_SWAPS.get((tname, key))
             if swap:
                 _swap_colors(im, *swap)
