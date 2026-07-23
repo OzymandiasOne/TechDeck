@@ -49,6 +49,10 @@ class SettingsPage(QWidget, ThemeAware):
 
         self.current_plugin_widget = None
         self._rogue_player = None  # keep alive
+        # Dimmed description/note labels that should track the theme's
+        # secondary-text color (was a hardcoded #888 gray — illegible on the
+        # Cherry Blossom pink surface). Re-stamped in apply_theme().
+        self._secondary_labels = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -129,6 +133,24 @@ class SettingsPage(QWidget, ThemeAware):
         if getattr(self, "fb_btn", None) is not None:
             self.fb_btn.setStyleSheet(self._fb_btn_style(theme))
 
+        # Dimmed description/note labels follow the theme's secondary text color.
+        for label, extra in list(getattr(self, "_secondary_labels", [])):
+            try:
+                label.setStyleSheet(f"color: {theme.text_secondary}; {extra}")
+            except RuntimeError:
+                # Label was deleted (e.g. plugin re-selected) — drop it.
+                self._secondary_labels.remove((label, extra))
+
+    def _secondary_css(self, extra: str = "") -> str:
+        """Inline style for a dimmed label, using the live theme's secondary text."""
+        theme = get_current_palette(self.settings.get_theme())
+        return f"color: {theme.text_secondary}; {extra}"
+
+    def _style_secondary(self, label, extra: str = ""):
+        """Style a dimmed label now AND register it to follow theme changes."""
+        self._secondary_labels.append((label, extra))
+        label.setStyleSheet(self._secondary_css(extra))
+
     @staticmethod
     def _fb_btn_style(theme) -> str:
         return f"""
@@ -173,7 +195,7 @@ class SettingsPage(QWidget, ThemeAware):
             "Send a note, bug report, or feature request to the TechDeck "
             "maintainer. Replies come from anthony.siebenmorgen@americansteelalum.com."
         )
-        fb_desc.setStyleSheet("color: #888; font-size: 12px;")
+        self._style_secondary(fb_desc, "font-size: 12px;")
         fb_desc.setWordWrap(True)
         fb_section.addWidget(fb_desc)
 
@@ -193,7 +215,7 @@ class SettingsPage(QWidget, ThemeAware):
             "contains TechDeck's own version, configuration, folder-discovery "
             "and log information from this machine — no production documents."
         )
-        diag_desc.setStyleSheet("color: #888; font-size: 12px;")
+        self._style_secondary(diag_desc, "font-size: 12px;")
         diag_desc.setWordWrap(True)
         diag_section.addWidget(diag_desc)
 
@@ -280,7 +302,7 @@ class SettingsPage(QWidget, ThemeAware):
         title.setStyleSheet("font-size: 24px; font-weight: bold;")
         layout.addWidget(title)
         sub = QLabel("Configure settings for each installed app")
-        sub.setStyleSheet("color: #888; font-size: 14px; margin-bottom: 12px;")
+        self._style_secondary(sub, "font-size: 14px; margin-bottom: 12px;")
         layout.addWidget(sub)
 
         selection_section = self._create_section("Select App")
@@ -308,7 +330,7 @@ class SettingsPage(QWidget, ThemeAware):
         self.plugin_layout = QVBoxLayout()
         self.plugin_layout.setSpacing(12)
         self.no_plugin_label = QLabel("Select an app to view its settings.")
-        self.no_plugin_label.setStyleSheet("color: #888; font-style: italic; padding: 20px;")
+        self._style_secondary(self.no_plugin_label, "font-style: italic; padding: 20px;")
         self.no_plugin_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.plugin_layout.addWidget(self.no_plugin_label)
         settings_section.addLayout(self.plugin_layout)
@@ -417,7 +439,7 @@ class SettingsPage(QWidget, ThemeAware):
         theme_section.addLayout(theme_row)
 
         theme_note = QLabel("Theme changes apply immediately — no restart required.")
-        theme_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 4px;")
+        self._style_secondary(theme_note, "font-size: 12px; margin-top: 4px;")
         theme_section.addWidget(theme_note)
 
         # Custom theme management
@@ -461,7 +483,7 @@ class SettingsPage(QWidget, ThemeAware):
             "Upload audio files and build focus playlists. "
             "Launch the player with /roguemode in the console."
         )
-        rogue_desc.setStyleSheet("color: #888; font-size: 12px;")
+        self._style_secondary(rogue_desc, "font-size: 12px;")
         rogue_desc.setWordWrap(True)
         rogue_section.addWidget(rogue_desc)
 
@@ -631,7 +653,7 @@ class SettingsPage(QWidget, ThemeAware):
 
         self.no_plugin_label.hide()
         version_label = QLabel(f"Version: {plugin_data.get('version', '1.0.0')}")
-        version_label.setStyleSheet("font-size: 13px; color: #888; margin-bottom: 16px;")
+        self._style_secondary(version_label, "font-size: 13px; margin-bottom: 16px;")
         version_label.setObjectName("plugin_version_label")
         self.plugin_layout.addWidget(version_label)
 
@@ -646,6 +668,10 @@ class SettingsPage(QWidget, ThemeAware):
             current_values=current_values,
         )
         self.plugin_layout.addWidget(self.current_plugin_widget)
+        # Re-stamp the widget's dimmed labels with the live theme's secondary
+        # text color and keep them tracking future theme changes.
+        for label, extra in self.current_plugin_widget.secondary_labels:
+            self._style_secondary(label, extra)
         self.save_plugin_btn.setEnabled(True)
 
     def _show_no_settings(self, message: str):

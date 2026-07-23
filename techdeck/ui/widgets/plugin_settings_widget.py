@@ -52,6 +52,9 @@ class PluginSettingsWidget(QWidget):
         self.current_values = current_values
         self.widgets: Dict[str, QWidget] = {}
         self.validators: Dict[str, Callable[[], bool]] = {}
+        # Dimmed labels the host page should restyle with the theme's
+        # secondary text color (the #888 default is a fallback only).
+        self.secondary_labels: List[tuple] = []
         
         self._create_ui()
     
@@ -67,6 +70,7 @@ class PluginSettingsWidget(QWidget):
         if not fields:
             no_settings_label = QLabel("This plugin has no configurable settings.")
             no_settings_label.setStyleSheet("color: #888; font-style: italic;")
+            self.secondary_labels.append((no_settings_label, "font-style: italic;"))
             layout.addWidget(no_settings_label)
             return
         
@@ -127,6 +131,7 @@ class PluginSettingsWidget(QWidget):
             if description:
                 desc_label = QLabel(description)
                 desc_label.setStyleSheet("color: #888; font-size: 12px;")
+                self.secondary_labels.append((desc_label, "font-size: 12px;"))
                 desc_label.setWordWrap(True)
                 container_layout.addWidget(desc_label)
             

@@ -113,7 +113,7 @@ class _ColorButton(QPushButton):
 class _SwatchPreview(QWidget):
     """Simple color swatch preview showing key palette values."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, secondary: str = "#888"):
         super().__init__(parent)
         self.setMinimumWidth(220)
         self._layout = QVBoxLayout(self)
@@ -122,7 +122,7 @@ class _SwatchPreview(QWidget):
 
         title = QLabel("Preview")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-weight: bold; font-size: 13px; background: transparent; color: #888;")
+        title.setStyleSheet(f"font-weight: bold; font-size: 13px; background: transparent; color: {secondary};")
         self._layout.addWidget(title)
 
         self._swatches: dict[str, QLabel] = {}
@@ -333,7 +333,7 @@ class ThemeBuilderDialog(QDialog):
         body.addWidget(scroll, 2)
 
         # Right: preview
-        self._preview = _SwatchPreview()
+        self._preview = _SwatchPreview(secondary=_dlg_theme.text_secondary)
         body.addWidget(self._preview, 1)
 
         root.addLayout(body, 1)

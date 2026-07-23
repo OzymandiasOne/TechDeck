@@ -30,7 +30,10 @@ class AccountPage(QWidget, ThemeAware):
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         self.settings = settings
-        
+        # Dimmed labels that should track the theme's secondary-text color
+        # (was a hardcoded #888 gray — illegible on warm/light themes).
+        self._secondary_labels = []
+
         # Create scroll area for content
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -53,7 +56,7 @@ class AccountPage(QWidget, ThemeAware):
         username_label = QLabel("Username (Windows Login):")
         username_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
         self.username_value = QLabel(os.environ.get('USERNAME', 'unknown'))
-        self.username_value.setStyleSheet("color: #888; margin-bottom: 12px;")
+        self._style_secondary(self.username_value, "margin-bottom: 12px;")
         user_section.addWidget(username_label)
         user_section.addWidget(self.username_value)
         
@@ -117,7 +120,7 @@ class AccountPage(QWidget, ThemeAware):
         # Placeholder for future access control info
         access_note = QLabel("Access control features coming soon.\n"
                              "This will show your license status, expiry date, and permissions.")
-        access_note.setStyleSheet("color: #888; font-size: 12px; margin-top: 8px;")
+        self._style_secondary(access_note, "font-size: 12px; margin-top: 8px;")
         access_section.addWidget(access_note)
         
         layout.addLayout(access_section)
@@ -188,6 +191,22 @@ class AccountPage(QWidget, ThemeAware):
         self._apply_status_style()
         self._style_tabs()
         self._apply_professional()
+        self._restyle_secondary_labels()
+
+    def _style_secondary(self, label, extra: str = ""):
+        """Style a dimmed label with the theme's secondary text + register it
+        to follow theme changes."""
+        self._secondary_labels.append((label, extra))
+        t = self.get_current_palette()
+        label.setStyleSheet(f"color: {t.text_secondary}; {extra}")
+
+    def _restyle_secondary_labels(self):
+        t = self.get_current_palette()
+        for label, extra in list(self._secondary_labels):
+            try:
+                label.setStyleSheet(f"color: {t.text_secondary}; {extra}")
+            except RuntimeError:
+                self._secondary_labels.remove((label, extra))
 
     def _apply_professional(self):
         """Professional theme hides the playful tabs (Ticket Counter, My Stuff,

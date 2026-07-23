@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from techdeck.core.settings import SettingsManager
+from techdeck.ui.theme import get_current_palette
 
 
 class DevKitPage(QWidget):
@@ -75,7 +76,8 @@ class DevKitPage(QWidget):
         self.host = QStackedWidget()
         self._placeholder = QLabel("Select a tool and press Run to load it here.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._placeholder.setStyleSheet("color: #888; font-size: 13px;")
+        _pal = get_current_palette(self.settings.get_theme())
+        self._placeholder.setStyleSheet(f"color: {_pal.text_secondary}; font-size: 13px;")
         self.host.addWidget(self._placeholder)
         host_layout.addWidget(self.host)
         outer.addWidget(host_frame, 1)
