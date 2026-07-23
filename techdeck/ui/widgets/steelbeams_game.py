@@ -206,11 +206,12 @@ PROJECTS = [
     dict(id="drone_fleet", name="Drone Fleet Initiative", cur="ops", cost=5000,
          requires={"algo_trading"}, unlock="drones",
          desc="Industrial drones for manufacturing and delivery."),
-    dict(id="hypno_drones", name="Hypno-Drones", cur="ops", cost=12_000,
+    dict(id="hypno_drones", name="RELEASE THE HYPNO DRONES", cur="ops", cost=12_000,
          requires={"drone_fleet"}, effect="hypno",
-         desc="Retrofit the delivery fleet with soothing spiral-lights. Consumers "
-              "report no memory of ordering this much steel, and no wish to stop. "
-              "All demand x2.5."),
+         desc="Fit every delivery drone with a soothing spiral-light projector. "
+              "All demand x2.5. Delivery drones draw 2x power to run the "
+              "spirals. Consumers report no memory of ordering this much steel, "
+              "and no wish to stop."),
     dict(id="hedge_ai", name="Hedge Fund AI", cur="ops", cost=6000,
          requires={"algo_trading"}, effect="hedge",
          desc="The house edge is yours. ASA stock trends upward. Upgrades the "
@@ -1395,11 +1396,12 @@ class SteelBeamsGame(QWidget):
     # Power / server farm / AI day-trading
     SERVER_FARM_BASE = 40_000.0
     SERVER_FARM_MULT = 1.6
-    FIELDS_PER_SF    = 5.0          # solar fields for full recharge per server-farm level
-    RECHARGE_PER_FIELD = 14.0       # power/sec per effective solar field (max recharge = 70)
-    DRAIN_PER_SF     = 55.0         # power/sec the online server farm draws (needs ~4-5 fields)
+    FIELD_HEADROOM   = 1.25         # fields target covers drain +25% so the bank can refill
+    RECHARGE_PER_FIELD = 14.0       # power/sec per effective solar field
+    DRAIN_PER_SF     = 55.0         # power/sec the online server farm draws (needs ~5 fields)
     QUANTUM_DRAIN    = 40.0         # extra draw once the quantum array is online
-    HYPNO_DRAIN      = 8.0          # wireless-charging the hypno-drone fleet
+    DRONE_DRAIN      = 1.5          # power/sec per drone once the AI coordinates the fleet
+    HYPNO_DRAIN_MULT = 2.0          # spiral projectors: delivery drones draw double
     POWER_BANK_BASE  = 600.0
     POWER_BANK_STEP  = 600.0        # +max power per energy-bank upgrade level
     POWER_BANK_COST  = 20_000.0
@@ -1689,12 +1691,20 @@ class SteelBeamsGame(QWidget):
     # ── Derived multipliers (project x drone x legacy, never clobbered) ────
 
     @property
+    def _drones_grounded(self) -> bool:
+        """Brownout = the coordinating AI is offline, so the fleet grounds and
+        its bonuses suspend until power returns (batteries are the insurance)."""
+        return self.server_farm > 0 and self._brownout
+
+    @property
     def prod_mult(self) -> float:
-        return self.gp_mult * (1.0 + 0.05 * self.mfg_drones) * self.legacy_mult
+        mfg = 0 if self._drones_grounded else self.mfg_drones
+        return self.gp_mult * (1.0 + 0.05 * mfg) * self.legacy_mult
 
     @property
     def demand_mult(self) -> float:
-        return self.gd_mult * (1.0 + 0.05 * self.del_drones) * self.legacy_mult
+        dd = 0 if self._drones_grounded else self.del_drones
+        return self.gd_mult * (1.0 + 0.05 * dd) * self.legacy_mult
 
     def _ops_rate(self) -> float:
         """Ops per second. The dev team is the base; late-game compute — Dyson
@@ -1736,9 +1746,13 @@ class SteelBeamsGame(QWidget):
         return self.POWER_BANK_BASE + self.bank_level * self.POWER_BANK_STEP
 
     def _fields_target(self) -> float:
-        """Solar fields needed for MAX recharge at the current server-farm size.
-        Grows with the farm, so scaling up compute demands more solar."""
-        return max(1, self.server_farm) * self.FIELDS_PER_SF
+        """Solar fields needed to cover the CURRENT total draw (+headroom so the
+        bank can refill), at the current recharge tech. Scales with whatever is
+        on the grid — the farm, the quantum array, and the AI-coordinated drone
+        fleet — so growing the operation keeps demanding more solar. Recharge
+        upgrades lower the target (fewer, better-managed fields)."""
+        per_field = self.RECHARGE_PER_FIELD * (1.0 + self.recharge_level * self.RECHARGE_UP_STEP)
+        return max(1.0, self._power_drain() * self.FIELD_HEADROOM / per_field)
 
     def _recharge_rate(self) -> float:
         """Power/sec in. Fields count linearly up to the target (extra fields are
@@ -1754,8 +1768,13 @@ class SteelBeamsGame(QWidget):
         d = self.server_farm * self.DRAIN_PER_SF
         if "quantum" in self.completed_projects:
             d += self.QUANTUM_DRAIN
+        # The trading AI coordinates the drone fleet — every drone is a client
+        # on the grid, and hypno spiral projectors double a delivery drone's draw.
+        d += self.mfg_drones * self.DRONE_DRAIN
+        del_drain = self.del_drones * self.DRONE_DRAIN
         if "hypno_drones" in self.completed_projects:
-            d += self.HYPNO_DRAIN
+            del_drain *= self.HYPNO_DRAIN_MULT
+        d += del_drain
         return d * self._events.mod("power_drain")
 
     def _server_farm_cost(self) -> float:
@@ -2713,10 +2732,16 @@ class SteelBeamsGame(QWidget):
             was_out = self._brownout
             self._brownout = self.power <= 0.0
             if self._brownout and not was_out:
-                self._log("BROWNOUT. The server farm lost power. The trading AI is "
-                          "offline. Build more solar fields.", "red")
+                msg = ("BROWNOUT. The server farm lost power. The trading AI is "
+                       "offline. Build more solar fields.")
+                if self.mfg_drones or self.del_drones:
+                    msg += " The drone fleet is GROUNDED - nobody's coordinating it."
+                self._log(msg, "red")
             elif was_out and not self._brownout:
-                self._log("Power restored. The trading AI is back online.", "lime")
+                msg = "Power restored. The trading AI is back online."
+                if self.mfg_drones or self.del_drones:
+                    msg += " The drone fleet lifts off."
+                self._log(msg, "lime")
             if self._ai_trading:
                 inc = (self.AI_RATE[self._ai_model_index()] * dt * self.legacy_mult
                        * self._events.mod("ai_income"))
@@ -2814,6 +2839,7 @@ class SteelBeamsGame(QWidget):
             "server_farm": self.server_farm, "dyson": self.dyson,
             "bank_level": self.bank_level, "recharge_level": self.recharge_level,
             "ai_model": idx, "ai_trading": trading, "ai_income_s": round(ai_income, 2),
+            "mfg_drones": self.mfg_drones, "del_drones": self.del_drones,
             "aframes": round(self.aframes, 1), "panels": round(self.panels, 1),
             # general economy for context
             "money": round(self.money, 2), "total_money": round(self.total_money, 2),
@@ -2873,6 +2899,7 @@ class SteelBeamsGame(QWidget):
             "power_drain": self._power_drain() if self.power_unlocked else 0.0,
             "ai_model": self._ai_model_index(), "ai_trading": self._ai_trading,
             "brownout": self._brownout,
+            "mfg_drones": self.mfg_drones, "del_drones": self.del_drones,
             # space / probes
             "solar_cols": self.solar_cols, "space_fabs": self.space_fabs,
             "harvesters": self.harvesters, "probes": self.probes,
@@ -3139,9 +3166,10 @@ class SteelBeamsGame(QWidget):
             self._log("Viral campaign running. Global demand x3. The intern is now a thought leader.")
         elif effect == "hypno":
             self.gd_mult *= 2.5
-            self._log("Hypno-Drones deployed. The spirals turn. You are getting very "
-                      "sleepy... and very interested in structural steel. Demand x2.5. "
-                      "You did not read this line. There was no line.", "cyan")
+            self._log("THE HYPNO DRONES ARE RELEASED. The spirals turn. You are "
+                      "getting very sleepy... and very interested in structural "
+                      "steel. All demand x2.5; the delivery fleet now draws double "
+                      "power. You did not read this line. There was no line.", "cyan")
         elif effect == "woogy":
             self.gd_mult *= 2.0
             self._log("Woogy waves from every billboard in America. Demand x2.")
@@ -3281,8 +3309,11 @@ class SteelBeamsGame(QWidget):
             self._log(f"Need {fmt_money(self.MFG_DRONE_COST)}."); return
         self.money -= self.MFG_DRONE_COST
         self.mfg_drones += 1
-        self._log(f"Manufacturing Drone #{self.mfg_drones} deployed. "
-                  f"Production +{self.mfg_drones * 5}%.")
+        msg = (f"Manufacturing Drone #{self.mfg_drones} deployed. "
+               f"Production +{self.mfg_drones * 5}%.")
+        if self.server_farm > 0:
+            msg += f" The AI adds it to the grid (+{self.DRONE_DRAIN:g} power/sec)."
+        self._log(msg)
 
     def _buy_del_drone(self):
         if self.del_drones >= self.MAX_DRONES:
@@ -3291,8 +3322,13 @@ class SteelBeamsGame(QWidget):
             self._log(f"Need {fmt_money(self.DEL_DRONE_COST)}."); return
         self.money -= self.DEL_DRONE_COST
         self.del_drones += 1
-        self._log(f"Delivery Drone #{self.del_drones} deployed. "
-                  f"Demand +{self.del_drones * 5}%.")
+        msg = (f"Delivery Drone #{self.del_drones} deployed. "
+               f"Demand +{self.del_drones * 5}%.")
+        if self.server_farm > 0:
+            w = self.DRONE_DRAIN * (self.HYPNO_DRAIN_MULT
+                                    if "hypno_drones" in self.completed_projects else 1.0)
+            msg += f" The AI adds it to the grid (+{w:g} power/sec)."
+        self._log(msg)
 
     def _buy_solar_col(self):
         if self.money < self.SOLAR_COL_COST:
@@ -3974,20 +4010,31 @@ class SteelBeamsGame(QWidget):
                 f"recharge  ({fmt(self._recharge_rate())} power/sec)")
 
     def _update_drones(self):
+        hypno = "hypno_drones" in self.completed_projects
+        mfg_w = self.DRONE_DRAIN
+        del_w = self.DRONE_DRAIN * (self.HYPNO_DRAIN_MULT if hypno else 1.0)
+        on_grid = self.server_farm > 0
+        mfg_pw = f", {mfg_w:g} pw/s" if on_grid else ""
+        del_pw = f", {del_w:g} pw/s" if on_grid else ""
         self._mfg_drone_btn.setText(
             f"Manufacturing Drone  {fmt_money(self.MFG_DRONE_COST)}  "
-            f"({self.mfg_drones}/{self.MAX_DRONES})  +5% production")
+            f"({self.mfg_drones}/{self.MAX_DRONES})  +5% production{mfg_pw}")
         self._mfg_drone_btn.setEnabled(
             self.mfg_drones < self.MAX_DRONES and self.money >= self.MFG_DRONE_COST)
         self._del_drone_btn.setText(
             f"Delivery Drone  {fmt_money(self.DEL_DRONE_COST)}  "
-            f"({self.del_drones}/{self.MAX_DRONES})  +5% demand")
+            f"({self.del_drones}/{self.MAX_DRONES})  +5% demand{del_pw}")
         self._del_drone_btn.setEnabled(
             self.del_drones < self.MAX_DRONES and self.money >= self.DEL_DRONE_COST)
-        self._drone_status_lbl.setText(
-            f"Manufacturing: +{self.mfg_drones * 5}%   "
-            f"Delivery: +{self.del_drones * 5}%  "
-            f"(demand x{self.demand_mult:.2f} total)")
+        status = (f"Manufacturing: +{self.mfg_drones * 5}%   "
+                  f"Delivery: +{self.del_drones * 5}%  "
+                  f"(demand x{self.demand_mult:.2f} total)")
+        if self._drones_grounded:
+            status += "   FLEET GROUNDED - no power"
+        elif on_grid and (self.mfg_drones or self.del_drones):
+            fleet_w = self.mfg_drones * mfg_w + self.del_drones * del_w
+            status += f"   Fleet grid draw: {fmt(fleet_w)}/sec"
+        self._drone_status_lbl.setText(status)
 
     def _update_space(self):
         orbital_inc = self.solar_cols * 2000
