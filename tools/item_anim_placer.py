@@ -129,10 +129,16 @@ class Placer(QWidget):
 
         self.status = QLabel("", self)
         self.status.setStyleSheet("color:#eee; font: 13px 'Consolas';")
-        self.status.setGeometry(10, NATIVE_H * SCALE + 8, NATIVE_W * SCALE - 340, 48)
 
+        # Width from font metrics — a fixed 150px clips the label in the
+        # app theme's wider font (DevKit embed).
         self.mode_btn = QPushButton("View: Interior  (Tab)", self)
-        self.mode_btn.setGeometry(NATIVE_W * SCALE - 330, NATIVE_H * SCALE + 16, 150, 32)
+        bw = max(self.mode_btn.fontMetrics().horizontalAdvance(t) for t in (
+            "View: Interior  (Tab)", "View: Exterior  (Tab)")) + 28
+        self.mode_btn.setGeometry(NATIVE_W * SCALE - 180 - bw,
+                                  NATIVE_H * SCALE + 16, bw, 32)
+        self.status.setGeometry(10, NATIVE_H * SCALE + 8,
+                                NATIVE_W * SCALE - 200 - bw, 48)
         self.mode_btn.clicked.connect(self.toggle_mode)
         btn = QPushButton("Export coords", self)
         btn.setGeometry(NATIVE_W * SCALE - 170, NATIVE_H * SCALE + 16, 160, 32)

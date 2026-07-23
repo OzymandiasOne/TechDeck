@@ -129,10 +129,16 @@ class Placer(QWidget):
         self.status = QLabel("Drag a Buddy sprite onto its item.  Tab = Interior/Exterior.",
                              self)
         self.status.setStyleSheet("color:#eee; font: 13px 'Consolas';")
-        self.status.setGeometry(10, NATIVE_H * SCALE + 8, NATIVE_W * SCALE - 320, 40)
 
+        # Width from font metrics — a fixed 145px clips the label in the
+        # app theme's wider font (DevKit embed).
         self.mode_btn = QPushButton("View: Exterior  (Tab)", self)
-        self.mode_btn.setGeometry(NATIVE_W * SCALE - 310, NATIVE_H * SCALE + 12, 145, 32)
+        bw = max(self.mode_btn.fontMetrics().horizontalAdvance(t) for t in (
+            "View: Interior  (Tab)", "View: Exterior  (Tab)")) + 28
+        self.mode_btn.setGeometry(NATIVE_W * SCALE - 170 - bw,
+                                  NATIVE_H * SCALE + 12, bw, 32)
+        self.status.setGeometry(10, NATIVE_H * SCALE + 8,
+                                NATIVE_W * SCALE - 190 - bw, 40)
         self.mode_btn.clicked.connect(self.toggle_mode)
         btn = QPushButton("Export coords", self)
         btn.setGeometry(NATIVE_W * SCALE - 160, NATIVE_H * SCALE + 12, 150, 32)

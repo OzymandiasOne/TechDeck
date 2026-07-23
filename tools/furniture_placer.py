@@ -115,10 +115,18 @@ class Placer(QWidget):
         self.status = QLabel("Drag a piece (or click it, then nudge with arrow keys).",
                              self)
         self.status.setStyleSheet("color:#eee; font: 13px 'Consolas';")
-        self.status.setGeometry(10, NATIVE_H * SCALE + 8, NATIVE_W * SCALE - 320, 40)
 
+        # Size the view button to its widest label in the ACTUAL font (the
+        # app theme's font is wider than the standalone default — a fixed
+        # 145px clipped the text when embedded in the DevKit).
         self.mode_btn = QPushButton("View: Interior  (Tab)", self)
-        self.mode_btn.setGeometry(NATIVE_W * SCALE - 310, NATIVE_H * SCALE + 12, 145, 32)
+        bw = max(self.mode_btn.fontMetrics().horizontalAdvance(t) for t in (
+            "View: Interior  (Tab)", "View: Exterior  (Tab)",
+            "View: Tree 5/5  ([ ])")) + 28
+        self.mode_btn.setGeometry(NATIVE_W * SCALE - 170 - bw,
+                                  NATIVE_H * SCALE + 12, bw, 32)
+        self.status.setGeometry(10, NATIVE_H * SCALE + 8,
+                                NATIVE_W * SCALE - 190 - bw, 40)
         self.mode_btn.clicked.connect(self.toggle_mode)
 
         btn = QPushButton("Export coords", self)
