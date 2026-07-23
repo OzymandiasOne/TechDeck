@@ -72,17 +72,18 @@ THEME_ICON_SWAPS = {
 # that theme's palette than the luminance-rank mapping picked. It's what makes
 # a recolor-only variant key possible: same grid, different primary color.
 # sym_opened_folder_911 = the 911 LST Organizer folder; its body moves off the
-# theme's lightest tier (which the 922 folder keeps) onto the SECOND-DARKEST
-# slot of each theme's palette -- the slot hot-pink #FF004D occupies in
-# cyberpunk. Exception: matrix, whose second-darkest (dgrey #5F574F) is
-# luminance-identical to the dgreen trim (the outline would vanish), so it
-# takes the next slot up, green #00E436.
+# theme's lightest tier (which the 922 folder keeps) onto the slot that renders
+# pink #FF77A8 in cyberpunk -- the tier the calculator's buttons and the
+# magnifier's glass land on, taken per theme from those same icons (third-
+# darkest palette color). blue theme: the two anchors disagree (buttons orange,
+# glass lgrey); orange matches the palette rank and stays distinct from the
+# 922 folder's white body.
 ICON_SUBSTITUTIONS = {
-    ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#83769C"},
-    ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#AB5236"},
-    ("cherry_blossom", "sym_opened_folder_911"): {"#FFF1E8": "#7E2553"},
-    ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#29ADFF"},
-    ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#FF004D"},
+    ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
+    ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#5F574F"},
+    ("cherry_blossom", "sym_opened_folder_911"): {"#FFF1E8": "#AB5236"},
+    ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
+    ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#FF77A8"},
     ("matrix", "sym_opened_folder_911"):         {"#9BFFB0": "#00E436"},
 }
 
