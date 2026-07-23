@@ -11,7 +11,7 @@ package here is safe — it never runs in a frozen exe.
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QStackedWidget, QMessageBox, QFrame,
 )
 from PySide6.QtCore import Qt
@@ -55,12 +55,11 @@ class DevKitPage(QWidget):
         self.combo.setMinimumWidth(240)
         for tool in self._tools:
             self.combo.addItem(tool.label)
+        # Selecting a tool mounts it directly — no separate Run click. The
+        # initial tool mounts on first show (currentIndexChanged doesn't fire
+        # for the starting index).
+        self.combo.currentIndexChanged.connect(self._mount_tool)
         row.addWidget(self.combo)
-        run_btn = QPushButton("Run")
-        run_btn.setMinimumHeight(34)
-        run_btn.setMinimumWidth(90)
-        run_btn.clicked.connect(self._run_tool)
-        row.addWidget(run_btn)
         row.addStretch()
         outer.addWidget(picker)
 
@@ -74,7 +73,7 @@ class DevKitPage(QWidget):
         host_layout = QVBoxLayout(host_frame)
         host_layout.setContentsMargins(2, 2, 2, 2)
         self.host = QStackedWidget()
-        self._placeholder = QLabel("Select a tool and press Run to load it here.")
+        self._placeholder = QLabel("Select a tool to load it here.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _pal = get_current_palette(self.settings.get_theme())
         self._placeholder.setStyleSheet(f"color: {_pal.text_secondary}; font-size: 13px;")
@@ -82,7 +81,12 @@ class DevKitPage(QWidget):
         host_layout.addWidget(self.host)
         outer.addWidget(host_frame, 1)
 
-    def _run_tool(self):
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.host.currentWidget() is self._placeholder:
+            self._mount_tool()
+
+    def _mount_tool(self):
         """Build (once) and show the selected DevKit tool in the embed host."""
         idx = self.combo.currentIndex()
         if idx < 0:
