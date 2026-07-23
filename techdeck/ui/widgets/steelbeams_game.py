@@ -192,11 +192,13 @@ PROJECTS = [
          requires={"form_tech_team"}, unlock="megafab",
          desc="Industrial-scale tube fabricators. 12 tubes/sec each."),
     dict(id="solar_v1", name="Solar Panel Integration", cur="ops", cost=1000,
-         requires={"aframe_proto"}, effect="afd_x2",
+         requires={"aframe_proto", "algo_trading"}, effect="afd_x2",
          desc="Mount panels on ASA A-Frames. A-Frame demand x2."),
     dict(id="algo_trading", name="Algorithmic Trading", cur="ops", cost=2000,
-         requires={"form_tech_team"}, unlock="market",
-         desc="Use compute power to play the open market. Opens the Trading desk."),
+         requires={"form_tech_team"}, unlock="market", needs_servers=1,
+         cost_label="2.0k ops + 1 server",
+         desc="Use compute power to play the open market. Opens the Trading "
+              "desk. The algorithm needs a Tech Team server to run on."),
     dict(id="solar_v2", name="High-Efficiency Panels", cur="ops", cost=3000,
          requires={"solar_v1"}, effect="afv_75",
          desc="Premium cells. A-Frame market rate x1.75 - charge more, sell more."),
@@ -3091,6 +3093,9 @@ class SteelBeamsGame(QWidget):
             return
         if not proj["requires"].issubset(self.completed_projects):
             self._log("Requirements not met."); return
+        if self.servers < proj.get("needs_servers", 0):
+            self._log(f"{proj['name']} needs {proj['needs_servers']} server(s) "
+                      "on the Tech Team to run on."); return
         cur = proj.get("cur", "ops")
         cost = proj["cost"]
         if cur == "ops":
@@ -3967,7 +3972,8 @@ class SteelBeamsGame(QWidget):
         for pid, btn in self._proj_buttons.items():
             proj = next(p for p in PROJECTS if p["id"] == pid)
             have = self.ops if proj.get("cur", "ops") == "ops" else self.inno
-            btn.setEnabled(have >= proj["cost"])
+            btn.setEnabled(have >= proj["cost"]
+                           and self.servers >= proj.get("needs_servers", 0))
 
     def _update_aframe(self):
         ad = self._af_demand()
