@@ -124,11 +124,16 @@ class _DiagnosticsPanel(QWidget):
         self._on_output()  # flush any buffered tail
         if exit_status == QProcess.ExitStatus.CrashExit:
             self._set_status("STOPPED", _RED)
-        elif exit_code == 0:
-            self._set_status("PASSED", _GREEN)
         else:
-            self._set_status(f"FAILED (exit {exit_code})", _RED)
+            self._set_status(*self._verdict(exit_code))
         self._teardown()
+
+    def _verdict(self, exit_code) -> tuple:
+        """(status text, color) for a normal exit — override to phrase what a
+        nonzero exit means for this check."""
+        if exit_code == 0:
+            return "PASSED", _GREEN
+        return f"FAILED (exit {exit_code})", _RED
 
     def _on_error(self, error):
         # finished() does not fire for FailedToStart — clean up here.
@@ -219,3 +224,10 @@ class PixelLintPanel(_DiagnosticsPanel):
         if self.profile.currentIndex() > 0:
             cmd += ["--profile", self.profile.currentText()]
         return cmd
+
+    def _verdict(self, exit_code):
+        # Exit 1 means the ART failed the style spec, not that the linter
+        # broke — phrase it so a FAIL verdict isn't read as a tool error.
+        if exit_code == 0:
+            return "PASS (any warnings are in the log)", _GREEN
+        return "STYLE FINDINGS — the art fails the style spec (see log)", _RED
