@@ -24,6 +24,11 @@ Outcome primitives (a list per automatic event / per responsive option):
 Levers a ("mod", ...) may target (the game getters multiply in EventEngine.mod(lever)):
     steel_cost, tube_demand, af_demand, prod_mult, power_drain, power_recharge,
     ai_income, enemy_growth
+
+Legibility: flavor logs never said WHAT an outcome changed. apply() collects the
+concrete primitives it applies (gambles resolved) so describe_effects() can print a
+plain readout ("tube demand -20% for 120s"), and active_mod_labels() drives the
+game's live "Active Effects" strip. LEVER_LABELS/ATTR_LABELS keep those honest.
 """
 
 import random
