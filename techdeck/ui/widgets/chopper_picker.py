@@ -119,7 +119,11 @@ class GunnerOverlay(QWidget):
     """
 
     def __init__(self, dialog: QDialog, screen_geo: QRect):
-        super().__init__(None)
+        # Parent to the dialog: an OWNED tool window stays above its owner in
+        # z-order automatically, so the HUD/FX composite ABOVE the modal
+        # QFileDialog (a sibling top-level would render BEHIND it — the bug
+        # that made the effect invisible in the real modal-exec path).
+        super().__init__(dialog)
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -206,6 +210,11 @@ class GunnerOverlay(QWidget):
     # ── state machine ────────────────────────────────────────────────────
 
     def _tick(self):
+        # Keep the overlay above the modal dialog every frame — parent
+        # ownership alone doesn't reliably win z-order on Windows once the
+        # dialog is interacted with, and raise_() on an already-top window
+        # is cheap (no visible flicker since the frame recomposites anyway).
+        self.raise_()
         dt_ms = self._timer.interval()
         self._elapsed += dt_ms
 

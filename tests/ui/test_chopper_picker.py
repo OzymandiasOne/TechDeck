@@ -24,6 +24,18 @@ def _drive(overlay, ticks):
         overlay._tick()
 
 
+def _wait_for(pred, timeout_ms=2000):
+    """Pump the event loop until pred() is true or timeout — deterministic
+    regardless of test ordering (a fixed qWait can miss the singleShot under
+    full-suite load on the offscreen platform)."""
+    from PySide6.QtCore import QDeadlineTimer
+    from PySide6.QtWidgets import QApplication
+    deadline = QDeadlineTimer(timeout_ms)
+    while not pred() and not deadline.hasExpired():
+        QApplication.processEvents()
+    return pred()
+
+
 def test_fire_sequence_runs_to_done(qapp):
     """flight → burst (particles spawn) → knockout → done, dialog restored."""
     dlg, overlay = _make_overlay(qapp)
@@ -40,9 +52,7 @@ def test_fire_sequence_runs_to_done(qapp):
     assert overlay._state == "done"
     assert dlg.windowOpacity() == 1.0        # knockout flicker restored
 
-    from PySide6.QtTest import QTest
-    QTest.qWait(400)                         # _finish delivers cb after 250 ms
-    assert done == [True]
+    assert _wait_for(lambda: done == [True])  # _finish delivers cb after 250 ms
 
     overlay._timer.stop()
     overlay.deleteLater()
@@ -61,9 +71,7 @@ def test_skip_jumps_to_done(qapp):
     assert not overlay._parts and not overlay._smoke and not overlay._puffs
     assert dlg.windowOpacity() == 1.0
 
-    from PySide6.QtTest import QTest
-    QTest.qWait(400)
-    assert done == [True]
+    assert _wait_for(lambda: done == [True])
 
     overlay._timer.stop()
     overlay.deleteLater()
