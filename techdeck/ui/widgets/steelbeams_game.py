@@ -20,6 +20,7 @@ never shadow a method or state variable again.
 from __future__ import annotations
 
 import html
+import json
 import math
 import random
 import sys
@@ -34,7 +35,7 @@ from PySide6.QtGui import (
     QFont, QPainter, QImage, QColor, QBrush, QPen, QShortcut, QKeySequence,
 )
 
-from techdeck.ui.widgets.steelbeams_events import EventEngine
+from techdeck.ui.widgets.steelbeams_events import EventEngine, phase_of
 
 
 def _load_woogy_pixmap(target: int = 112):
@@ -1492,6 +1493,7 @@ class SteelBeamsGame(QWidget):
 
     TICK_MS = 100
     TICK_DT = 0.1
+    TELEMETRY_INTERVAL = 3.0        # sim-seconds between run-telemetry samples (for balancing)
 
     def __init__(self):
         super().__init__(None, Qt.WindowType.Window)
@@ -1525,6 +1527,26 @@ class SteelBeamsGame(QWidget):
         self._cheat_edit = None
         sc = QShortcut(QKeySequence("Ctrl+Shift+Space"), self)
         sc.activated.connect(self._toggle_cheat_console)
+
+        # Dev-only Export Run button (a floating child, not in any layout) — one
+        # click writes the run's telemetry for balancing. Never appears in a frozen
+        # build (the DevKit gate); shipped players use the dev terminal `export`.
+        self._export_btn = None
+        try:
+            from techdeck.ui.dev_mode import is_dev_build
+            if is_dev_build():
+                b = QPushButton("⬇ export run", self)
+                b.setStyleSheet(
+                    "background:#12121b;color:#7CFC7C;border:1px solid #2f6b2f;"
+                    "font-family:Consolas;font-size:11px;padding:3px 8px;")
+                b.setCursor(Qt.CursorShape.PointingHandCursor)
+                b.clicked.connect(self._export_run)
+                b.adjustSize()
+                self._export_btn = b
+                self._position_export_btn()
+                b.show()
+        except Exception:
+            pass
 
         self._log("ASA founded. Five tons of scrap steel in the corner of the yard.")
         self._log("Fabricate to begin.")
@@ -1652,6 +1674,13 @@ class SteelBeamsGame(QWidget):
         self._proj_buttons  = {}     # pid -> QPushButton, updated in place
         self._tick_count    = 0
         self._elapsed       = 0.0
+        # Run telemetry (for balancing): a periodic timeline of the economy + power
+        # grid, plus discrete build/phase markers. Exported via the dev terminal
+        # `export` command, the dev-only Export Run button, or auto on run end.
+        self._run_log       = []     # timeline samples (every TELEMETRY_INTERVAL)
+        self._run_events    = []     # discrete build/phase change markers
+        self._telem_t       = 0.0    # sampler accumulator
+        self._telem_prev    = None   # last discrete-state fingerprint
         self._conv_log_t    = 0.0
         self._conv_log_idx  = 0
 
@@ -2245,6 +2274,12 @@ class SteelBeamsGame(QWidget):
         if e is not None:
             e.setGeometry(10, self.height() - 34, self.width() - 20, 26)
 
+    def _position_export_btn(self):
+        b = getattr(self, "_export_btn", None)
+        if b is not None:
+            b.move(self.width() - b.width() - 12, 10)
+            b.raise_()
+
     def _run_cheat(self, text: str):
         """Dev cheat codes. Resource shorthands (money/steel/tubes/aframes/panels/
         ops/power/probes) set the value; `give X n` adds; `unlock market_unlocked`
@@ -2266,7 +2301,7 @@ class SteelBeamsGame(QWidget):
             if cmd in ("help", "?"):
                 self._log("cheats: money N | give <attr> N | unlock <flag> | "
                           "flag <name> | event <id> | auto | axes | win | "
-                          "broke [N] | lose [insolvency|woog]", "cyan")
+                          "broke [N] | lose [insolvency|woog] | export", "cyan")
             elif cmd in RES and len(parts) >= 2:
                 setattr(self, cmd, num(parts[1])); self._log(f"set {cmd}={parts[1]}", "cyan")
             elif cmd == "give" and len(parts) >= 3:
@@ -2297,6 +2332,8 @@ class SteelBeamsGame(QWidget):
                           "if market is unlocked)", "cyan")
             elif cmd == "lose":
                 self._fire_game_over(parts[1] if len(parts) >= 2 else "insolvency")
+            elif cmd == "export":
+                self._export_run()
             else:
                 self._log(f"? {t}  (try: help)", "orange")
         except Exception as ex:
@@ -2356,6 +2393,8 @@ class SteelBeamsGame(QWidget):
             self._event_modal.reposition()
         if getattr(self, "_cheat_edit", None) is not None:
             self._position_cheat_console()
+        if getattr(self, "_export_btn", None) is not None:
+            self._position_export_btn()
 
     # ── Demand / cost models ───────────────────────────────────────────────
 
@@ -2698,6 +2737,9 @@ class SteelBeamsGame(QWidget):
                       f"remembers ASA. The liquidation desk converts it: "
                       f"+{n} server racks.", "slate")
 
+        # ── Run telemetry (balancing): sample the economy + power grid over time.
+        self._record_telemetry(dt)
+
         # ── Idle corporate chatter — dry, absurd, mechanically inert. Skipped
         # during the probe endgame, which runs its own conversion narration.
         if not self.probe_phase:
@@ -2726,6 +2768,137 @@ class SteelBeamsGame(QWidget):
                 self._pr_web.advance()
 
         self._update_ui()
+
+    # ── Run telemetry / export (for balancing) ─────────────────────────────
+
+    def _record_telemetry(self, dt):
+        """Sample the economy + power grid every TELEMETRY_INTERVAL sim-seconds
+        into `_run_log`, and record a marker in `_run_events` whenever a buildable
+        count or phase flag changes. Cheap (a dict append every 3s). Exported by
+        `_export_run` so a run can be replayed/diagnosed offline."""
+        self._telem_t += dt
+        if self._telem_t < self.TELEMETRY_INTERVAL:
+            return
+        self._telem_t = 0.0
+        idx = self._ai_model_index()
+        trading = self._ai_trading
+        recharge = self._recharge_rate() if self.power_unlocked else 0.0
+        drain = self._power_drain() if self.power_unlocked else 0.0
+        ai_income = (self.AI_RATE[idx] * self.legacy_mult * self._events.mod("ai_income")
+                     if trading else 0.0)
+        t = round(self._elapsed, 1)
+        self._run_log.append({
+            "t": t, "phase": phase_of(self),
+            # power / solar economy (the balancing focus)
+            "power": round(self.power, 2), "power_max": round(self._power_max(), 2),
+            "recharge": round(recharge, 3), "drain": round(drain, 3),
+            "net_power": round(recharge - drain, 3), "brownout": self._brownout,
+            "solar_fields": self.solar_fields, "fields_target": round(self._fields_target(), 1),
+            "server_farm": self.server_farm, "dyson": self.dyson,
+            "bank_level": self.bank_level, "recharge_level": self.recharge_level,
+            "ai_model": idx, "ai_trading": trading, "ai_income_s": round(ai_income, 2),
+            "aframes": round(self.aframes, 1), "panels": round(self.panels, 1),
+            # general economy for context
+            "money": round(self.money, 2), "total_money": round(self.total_money, 2),
+            "tubes": round(self.tubes, 1), "steel": round(self.steel, 1),
+            "ops": round(self.ops, 1), "ops_cap": round(self._ops_cap, 1),
+            "rep": self.rep_total, "developers": self.developers, "servers": self.servers,
+            "probes": round(self.probes, 1), "explored": round(self.explored, 2),
+            "insolvent_t": round(self._insolvent_t, 1),
+        })
+        # Discrete build/phase markers — a compact fingerprint; log on any change.
+        fp = (self.server_farm, self.solar_fields, self.dyson, self.bank_level,
+              self.recharge_level, len(self.completed_projects), self.market_unlocked,
+              self.power_unlocked, self.probe_phase, self.converting)
+        if fp != self._telem_prev:
+            if self._telem_prev is not None:
+                self._run_events.append({
+                    "t": t, "server_farm": self.server_farm, "solar_fields": self.solar_fields,
+                    "dyson": self.dyson, "bank_level": self.bank_level,
+                    "recharge_level": self.recharge_level, "power": round(self.power, 1),
+                    "money": round(self.money, 0), "projects": len(self.completed_projects),
+                    "phase": phase_of(self)})
+            self._telem_prev = fp
+
+    def _export_run(self):
+        """Write the current run's telemetry + a full state snapshot to a JSON file
+        under ~/TechDeck Game Exports and return the path. Hand the file over to
+        replay exactly how the run went (balancing)."""
+        from datetime import datetime
+        self._telem_t = self.TELEMETRY_INTERVAL      # force one final sample "now"
+        self._record_telemetry(0.0)
+        try:
+            from techdeck.core.constants import APP_VERSION
+        except Exception:
+            APP_VERSION = "?"
+        snap = {
+            "universe_n": self.universe_n, "legacy_mult": round(self.legacy_mult, 3),
+            "elapsed_s": round(self._elapsed, 1), "phase": phase_of(self),
+            "game_over": self.game_over, "endgame_done": self.endgame_done,
+            "insolvent_t": round(self._insolvent_t, 1),
+            # economy
+            "money": self.money, "total_money": self.total_money,
+            "price": self.price, "af_price": self.af_price,
+            "prod_mult": self.prod_mult, "demand_mult": self.demand_mult,
+            "tubes": self.tubes, "steel": self.steel, "aframes": self.aframes,
+            "panels": self.panels, "total_made": self.total_made, "total_sold": self.total_sold,
+            "auto_fabs": self.auto_fabs, "mega_fabs": self.mega_fabs, "af_fabs": self.af_fabs,
+            "panel_fabs": self.panel_fabs, "mkt_level": self.mkt_level,
+            # tech / ops
+            "rep_total": self.rep_total, "developers": self.developers, "servers": self.servers,
+            "ops": self.ops, "ops_cap": self._ops_cap, "inno": self.inno,
+            # power grid
+            "power": self.power, "power_max": self._power_max(),
+            "server_farm": self.server_farm, "solar_fields": self.solar_fields,
+            "fields_target": self._fields_target(), "dyson": self.dyson,
+            "bank_level": self.bank_level, "recharge_level": self.recharge_level,
+            "recharge_rate": self._recharge_rate() if self.power_unlocked else 0.0,
+            "power_drain": self._power_drain() if self.power_unlocked else 0.0,
+            "ai_model": self._ai_model_index(), "ai_trading": self._ai_trading,
+            "brownout": self._brownout,
+            # space / probes
+            "solar_cols": self.solar_cols, "space_fabs": self.space_fabs,
+            "harvesters": self.harvesters, "probes": self.probes,
+            "probes_launched": self.probes_launched, "explored": self.explored,
+            "enemy_vessels": self.enemy_vessels, "converting": self.converting,
+            "matter_pct": self.matter_pct, "probe_trust": self.probe_trust,
+            "alloc": dict(self.alloc),
+            # sets / progression
+            "completed_projects": sorted(self.completed_projects),
+            "combat_upgrades": sorted(self.combat_upgrades),
+            "flags": sorted(self._flags),
+            "ending_axes": dict(self._events.axes),
+            "active_mods": [{"lever": m["lever"], "mult": round(m["mult"], 3),
+                             "t_left": round(m["t"], 1)} for m in self._events.active_mods],
+        }
+        data = {
+            "meta": {"game": "ASA: The Video Game", "app_version": APP_VERSION,
+                     "exported": datetime.now().isoformat(timespec="seconds"),
+                     "sample_interval_s": self.TELEMETRY_INTERVAL,
+                     "samples": len(self._run_log), "markers": len(self._run_events)},
+            "snapshot": snap, "timeline": self._run_log, "events": self._run_events,
+        }
+        folder = Path.home() / "TechDeck Game Exports"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = folder / f"asa_run_{stamp}.json"
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as ex:
+            self._log(f"Export failed: {ex}", "red")
+            return None
+        self._log(f"Run exported ({len(self._run_log)} samples): {path}", "lime")
+        return path
+
+    def _auto_export(self):
+        """Auto-capture the finished run — dev builds only, so a completed run is
+        always saved for balancing without having to remember before rebirth."""
+        try:
+            from techdeck.ui.dev_mode import is_dev_build
+            if is_dev_build():
+                self._export_run()
+        except Exception:
+            pass
 
     # ── Player actions ─────────────────────────────────────────────────────
 
@@ -3257,6 +3430,7 @@ class SteelBeamsGame(QWidget):
         self._log("The last atom has been converted. Everything is ASA.", "yellow")
         variant = self._select_ending()
         self._log(f"Ending: {variant['name'] if variant else 'The Last Question'}.", "slate")
+        self._auto_export()
         # Wipe to black and play the silent end-of-universe sequence over everything.
         self._woog_box.close_box()
         self._end_seq.setGeometry(0, 0, self.width(), self.height())
@@ -3307,6 +3481,7 @@ class SteelBeamsGame(QWidget):
         msg = {"insolvency": "ASA is insolvent. The board liquidates the company.",
                "woog": "The Woog overrun the probe network. The war is lost."}
         self._log(msg.get(vector, "Game over."), "red")
+        self._auto_export()
         self._game_over_seq.setGeometry(0, 0, self.width(), self.height())
         self._game_over_seq.start(vector, self._restart_run, self._giveup)
 
