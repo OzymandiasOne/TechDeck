@@ -25,6 +25,24 @@ def _build_pixel_studio() -> QWidget:
     return PixelStudio()
 
 
+def _build_test_runner() -> QWidget:
+    from tools.devkit.diagnostics import AutomatedTestsPanel
+    return AutomatedTestsPanel()
+
+
+def _build_ship_readiness() -> QWidget:
+    from tools.devkit.diagnostics import ShipReadinessPanel
+    return ShipReadinessPanel()
+
+
+def _build_pixel_lint() -> QWidget:
+    from tools.devkit.diagnostics import PixelLintPanel
+    return PixelLintPanel()
+
+
 DEV_TOOLS = [
     ToolSpec("pixel_studio", "Pixel Studio", _build_pixel_studio),
+    ToolSpec("automated_tests", "Automated Tests", _build_test_runner),
+    ToolSpec("ship_readiness", "Ship Readiness", _build_ship_readiness),
+    ToolSpec("pixel_lint", "Pixel Style Lint", _build_pixel_lint),
 ]
