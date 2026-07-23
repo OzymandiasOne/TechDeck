@@ -1684,6 +1684,7 @@ class SteelBeamsGame(QWidget):
         self._proj_buttons  = {}     # pid -> QPushButton, updated in place
         self._tick_count    = 0
         self._elapsed       = 0.0
+        self._flow_hints    = {}     # status label -> (last msg, shown-at time)
         # Run telemetry (for balancing): a periodic timeline of the economy + power
         # grid, plus discrete build/phase markers. Exported via the dev terminal
         # `export` command, the dev-only Export Run button, or auto on run end.
@@ -3777,7 +3778,7 @@ class SteelBeamsGame(QWidget):
         self._y_revenue_lbl.setText(
             self._rate("Selling:  ", self._tube_sell_rate) +
             f" / sec   ${fmt(self._tube_rev_rate)}/sec")
-        self._y_status_lbl.setText(self._flow_status(
+        self._set_flow_status(self._y_status_lbl, self._flow_status(
             self.tubes, out, td, "tube", self.price, self.TUBE_VALUE))
         self._y_fab_status_lbl.setText(
             f"Auto-Fabs: {self.auto_fabs}  Mega: {self.mega_fabs}    "
@@ -3832,6 +3833,19 @@ class SteelBeamsGame(QWidget):
                 f"Precision Mill  {fmt_money(self.PRECISION_COST)}  (x2 output)")
         self._prec_btn.setEnabled(not self.precision_done
                                   and self.money >= self.PRECISION_COST)
+
+    FLOW_HINT_S = 5.0               # a status hint shows this long, then clears
+
+    def _set_flow_status(self, label, msg):
+        """Flow-status hints are transient: a NEW status shows for FLOW_HINT_S
+        seconds, then the label clears until the status text changes again —
+        the hint teaches, it doesn't need to nag."""
+        last, t0 = self._flow_hints.get(label, (None, 0.0))
+        if msg != last:
+            self._flow_hints[label] = (msg, self._elapsed)
+            label.setText(msg)
+        elif label.text() and self._elapsed - t0 >= self.FLOW_HINT_S:
+            label.setText("")
 
     def _flow_status(self, inv, out, dem, noun, price, value) -> str:
         """The core supply/demand loop, made legible: are we sold out (make
@@ -4002,7 +4016,7 @@ class SteelBeamsGame(QWidget):
         self._af_revenue_lbl.setText(
             self._rate("Selling:  ", self._af_sell_rate) +
             f" / sec   ${fmt(self._af_rev_rate)}/sec")
-        self._af_status_lbl.setText(self._flow_status(
+        self._set_flow_status(self._af_status_lbl, self._flow_status(
             self.aframes, af_out, ad, "A-Frame", self.af_price, self.af_value))
         self._af_fab_status_lbl.setText(
             f"A-Frame Fabs: {self.af_fabs}    Output: {fmt(af_out)} / sec")
