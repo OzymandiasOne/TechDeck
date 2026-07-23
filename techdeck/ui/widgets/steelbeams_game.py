@@ -2706,11 +2706,14 @@ class SteelBeamsGame(QWidget):
             self._af_sell_rate += (sold_a / dt - self._af_sell_rate) * 0.15
             self._af_rev_rate += (sold_a * self.af_price / dt - self._af_rev_rate) * 0.15
 
-        # ── Ops + innovation (innovation accrues while ops sit at cap)
+        # ── Ops + innovation (innovation accrues while ops sit at cap).
+        # The cap must be REAL (>= 1 server): with 0 servers ops_cap is 0 and
+        # "0 >= 0" would unlock inno instantly with no ops economy at all
+        # (serverless dev-stacking exploit, possible since the empty-team start).
         if self.tech_unlocked:
             gain = self._ops_rate() * dt
             self.ops = min(self.ops + gain, self._ops_cap)
-            if self.ops >= self._ops_cap:
+            if self._ops_cap > 0 and self.ops >= self._ops_cap:
                 if not self.inno_unlocked:
                     self.inno_unlocked = True
                     self._t_inno_lbl.setVisible(True)
