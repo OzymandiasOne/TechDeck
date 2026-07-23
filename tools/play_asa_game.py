@@ -64,11 +64,17 @@ def _grant(g: SteelBeamsGame, pid: str) -> None:
     proj = next((p for p in PROJECTS if p["id"] == pid), None)
     if proj is None or pid in g.completed_projects:
         return
-    if proj.get("cur", "ops") == "ops":
+    cur = proj.get("cur", "ops")
+    if cur == "ops":
         g.ops = max(g.ops, proj["cost"])
+    elif cur == "money":
+        g.money = max(g.money, proj["cost"])
     else:
         g.inno_unlocked = True
         g.inno = max(g.inno, proj["cost"])
+    if g.servers < proj.get("needs_servers", 0):
+        g.servers = proj["needs_servers"]
+        g.rep_total += proj["needs_servers"]
     g._complete_project(pid)
 
 
@@ -158,6 +164,7 @@ def apply_stage(g: SteelBeamsGame, stage: str) -> None:
         _grant(g, "probe_program")     # beat 1: unlocks the final project
         _grant(g, "exit_strategy")     # beat 2: this TRANSFORMS the UI to the probe tabs
         g.servers = 40                 # big ops cap so probe launches don't starve
+        g.rep_total = g.developers + g.servers   # keep the rep books covering the team
         g.probe_trust = 14
         g.money = 1e15
         g.ops = g._ops_cap

@@ -182,9 +182,13 @@ def _px_hash(x: int, y: int, s: int = 0) -> int:
 # Probe-act upgrades (combat, trust research) are NOT projects — they live as
 # buttons on the probe Dev tab, because the Tech Team tab is gone by then.
 PROJECTS = [
-    dict(id="form_tech_team", name="Form the Tech Team", cur="ops", cost=100,
-         requires=set(), unlock="tech_formed",
-         desc="Hire ASA's first dedicated tech staff. +2 reputation."),
+    # Money-priced (cur="money"): the team starts EMPTY (0 devs / 0 servers) and
+    # this grants the first 2 rep to invest - it can't cost ops, because ops
+    # only exist once a developer is hired.
+    dict(id="form_tech_team", name="Form the Tech Team", cur="money", cost=2500,
+         requires=set(), unlock="tech_formed", cost_label="$2,500",
+         desc="Hire ASA's first dedicated tech staff. +2 reputation to invest "
+              "in developers (ops output) or servers (ops capacity)."),
     dict(id="aframe_proto", name="A-Frame Prototype", cur="ops", cost=500,
          requires={"form_tech_team"}, unlock="aframe",
          desc="Engineer A-Frame structures for solar farms. New product line."),
@@ -1591,8 +1595,8 @@ class SteelBeamsGame(QWidget):
         self.tech_unlocked  = False
         self.tech_formed    = False
         self.rep_total      = 0
-        self.developers     = 1
-        self.servers        = 1
+        self.developers     = 0       # the team starts EMPTY - the 2 rep from
+        self.servers        = 0       # forming it are the player's to allocate
         self.ops            = 0.0
         self.ops_mult       = 1.0
         self.inno           = 0.0
@@ -1728,8 +1732,7 @@ class SteelBeamsGame(QWidget):
 
     @property
     def _rep_avail(self) -> int:
-        FREE = 2
-        return self.rep_total - (self.developers + self.servers - FREE)
+        return self.rep_total - (self.developers + self.servers)
 
     def _ai_model_index(self) -> int:
         if "quantum" in self.completed_projects:
@@ -3052,8 +3055,8 @@ class SteelBeamsGame(QWidget):
                   f"{self.servers} servers.")
 
     def _fire_dev(self):
-        if self.developers <= 1:
-            self._log("You keep at least one developer."); return
+        if self.developers <= 0:
+            self._log("No developers to reassign."); return
         self.developers -= 1
         self._log(f"Developer reassigned. {self._rep_avail} reputation now free.")
 
@@ -3064,8 +3067,8 @@ class SteelBeamsGame(QWidget):
         self._log(f"Server added. Memory capacity: {fmt(self._ops_cap)} ops.")
 
     def _fire_srv(self):
-        if self.servers <= 1:
-            self._log("You keep at least one server."); return
+        if self.servers <= 0:
+            self._log("No servers to decommission."); return
         self.servers -= 1
         self._log(f"Server decommissioned. {self._rep_avail} reputation now free. "
                   f"Memory capacity: {fmt(self._ops_cap)} ops.")
@@ -3073,17 +3076,19 @@ class SteelBeamsGame(QWidget):
     def _lose_reputation(self, n) -> tuple:
         """A reputation hit (events call this via the `rep_loss` outcome). Burns
         unspent reputation first; if that leaves the team no longer covered, let
-        people go — developers first, then servers (each freed slot returns 1 rep,
-        floor of one each). Returns (rep_lost, devs_lost, servers_lost) so the event
-        readout can spell out what it cost."""
+        people go — developers first, then servers. Since the team starts empty
+        (every slot is paid rep), a bad enough hit can strip it entirely; the
+        production-milestone rep keeps flowing, so it's a setback, not a lock.
+        Returns (rep_lost, devs_lost, servers_lost) so the event readout can
+        spell out what it cost."""
         n = int(round(n))
         if n <= 0:
             return (0, 0, 0)
         rep0, dev0, srv0 = self.rep_total, self.developers, self.servers
         self.rep_total = max(0, self.rep_total - n)
-        while self._rep_avail < 0 and self.developers > 1:
+        while self._rep_avail < 0 and self.developers > 0:
             self.developers -= 1
-        while self._rep_avail < 0 and self.servers > 1:
+        while self._rep_avail < 0 and self.servers > 0:
             self.servers -= 1
         return (rep0 - self.rep_total, dev0 - self.developers, srv0 - self.servers)
 
@@ -3102,6 +3107,10 @@ class SteelBeamsGame(QWidget):
             if self.ops < cost:
                 self._log(f"Need {fmt(cost)} ops."); return
             self.ops -= cost
+        elif cur == "money":
+            if self.money < cost:
+                self._log(f"Need {fmt_money(cost)}."); return
+            self.money -= cost
         else:
             if self.inno < cost:
                 self._log(f"Need {fmt(cost)} innovation."); return
@@ -3115,7 +3124,8 @@ class SteelBeamsGame(QWidget):
         if unlock == "tech_formed":
             self.tech_formed = True
             self.rep_total += 2
-            self._log("The Tech Team assembles. (+2 rep)")
+            self._log("The Tech Team assembles. (+2 rep) Invest it: developers "
+                      "generate ops, servers store them. You'll want both.")
         elif unlock == "megafab":
             self.megafab_unlocked = True
             self._mega_btn.setVisible(True)
@@ -3971,7 +3981,8 @@ class SteelBeamsGame(QWidget):
         # Refresh affordability in place (no teardown -> hover survives)
         for pid, btn in self._proj_buttons.items():
             proj = next(p for p in PROJECTS if p["id"] == pid)
-            have = self.ops if proj.get("cur", "ops") == "ops" else self.inno
+            cur = proj.get("cur", "ops")
+            have = {"ops": self.ops, "money": self.money}.get(cur, self.inno)
             btn.setEnabled(have >= proj["cost"]
                            and self.servers >= proj.get("needs_servers", 0))
 
