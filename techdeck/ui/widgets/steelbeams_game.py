@@ -1685,6 +1685,7 @@ class SteelBeamsGame(QWidget):
         self._tick_count    = 0
         self._elapsed       = 0.0
         self._flow_hints    = {}     # status label -> (last msg, shown-at time)
+        self._flow_hint_seen = {}    # status label -> {msg: last time it was shown}
         # Run telemetry (for balancing): a periodic timeline of the economy + power
         # grid, plus discrete build/phase markers. Exported via the dev terminal
         # `export` command, the dev-only Export Run button, or auto on run end.
@@ -3835,15 +3836,27 @@ class SteelBeamsGame(QWidget):
                                   and self.money >= self.PRECISION_COST)
 
     FLOW_HINT_S = 5.0               # a status hint shows this long, then clears
+    FLOW_HINT_COOLDOWN_S = 30.0     # a hint already shown won't re-show within this
 
     def _set_flow_status(self, label, msg):
         """Flow-status hints are transient: a NEW status shows for FLOW_HINT_S
         seconds, then the label clears until the status text changes again —
-        the hint teaches, it doesn't need to nag."""
+        the hint teaches, it doesn't need to nag. Each message also carries a
+        per-label cooldown so an economy flapping between two states (SOLD OUT
+        <-> BALANCED on the knife edge) doesn't re-show them on every flip;
+        suppressed repeats refresh the cooldown, so a sustained flap stays
+        quiet and only ~30s of stability re-arms the hints."""
         last, t0 = self._flow_hints.get(label, (None, 0.0))
         if msg != last:
             self._flow_hints[label] = (msg, self._elapsed)
-            label.setText(msg)
+            if msg:
+                seen = self._flow_hint_seen.setdefault(label, {})
+                fresh = (self._elapsed - seen.get(msg, -1e9)
+                         >= self.FLOW_HINT_COOLDOWN_S)
+                seen[msg] = self._elapsed
+                label.setText(msg if fresh else "")
+            else:
+                label.setText("")
         elif label.text() and self._elapsed - t0 >= self.FLOW_HINT_S:
             label.setText("")
 
