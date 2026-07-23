@@ -3041,6 +3041,23 @@ class SteelBeamsGame(QWidget):
         self._log(f"Server decommissioned. {self._rep_avail} reputation now free. "
                   f"Memory capacity: {fmt(self._ops_cap)} ops.")
 
+    def _lose_reputation(self, n) -> tuple:
+        """A reputation hit (events call this via the `rep_loss` outcome). Burns
+        unspent reputation first; if that leaves the team no longer covered, let
+        people go — developers first, then servers (each freed slot returns 1 rep,
+        floor of one each). Returns (rep_lost, devs_lost, servers_lost) so the event
+        readout can spell out what it cost."""
+        n = int(round(n))
+        if n <= 0:
+            return (0, 0, 0)
+        rep0, dev0, srv0 = self.rep_total, self.developers, self.servers
+        self.rep_total = max(0, self.rep_total - n)
+        while self._rep_avail < 0 and self.developers > 1:
+            self.developers -= 1
+        while self._rep_avail < 0 and self.servers > 1:
+            self.servers -= 1
+        return (rep0 - self.rep_total, dev0 - self.developers, srv0 - self.servers)
+
     def _complete_project(self, pid: str):
         proj = next((p for p in PROJECTS if p["id"] == pid), None)
         if proj is None or pid in self.completed_projects:

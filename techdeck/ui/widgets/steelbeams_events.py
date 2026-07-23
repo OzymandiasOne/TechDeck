@@ -20,6 +20,8 @@ Outcome primitives (a list per automatic event / per responsive option):
     ("log",       text, color)       game._log(text, color)
     ("gamble",    p, then[], else[]) with prob p apply then[], else else[]
     ("chain",     event_id, delay_s) schedule a follow-up responsive event
+    ("rep_loss",  n)                 a reputation hit: burns unspent rep, then lets
+                                     developers go, then servers (game._lose_reputation)
 
 Levers a ("mod", ...) may target (the game getters multiply in EventEngine.mod(lever)):
     steel_cost, tube_demand, af_demand, prod_mult, power_drain, power_recharge,
@@ -87,6 +89,19 @@ def describe_effects(applied) -> str:
             parts.append(f"{ATTR_LABELS.get(eff[1], eff[1])} {eff[2]:+,.0f}")
         elif k == "mul_attr":
             parts.append(f"{ATTR_LABELS.get(eff[1], eff[1])} {_fmt_pct(eff[2])} (permanent)")
+        elif k == "rep_result":
+            rep, devs, srv = eff[1], eff[2], eff[3]
+            if rep <= 0:
+                continue
+            lost = []
+            if devs:
+                lost.append(f"{devs} developer{'s' if devs != 1 else ''}")
+            if srv:
+                lost.append(f"{srv} server{'s' if srv != 1 else ''}")
+            tail = f" ({' and '.join(lost)} let go)" if lost else ""
+            parts.append(f"reputation -{rep}{tail}")
+        elif k == "rep_loss":          # unresolved fallback (shouldn't normally appear)
+            parts.append(f"reputation -{int(round(eff[1]))}")
         elif k == "flag":
             parts.append("a lasting change")
         elif k == "chain":
@@ -494,7 +509,7 @@ AFRAME_RESP = [
                   outcomes=[("delta_pct", "money", -0.03),
                             ("gamble", 0.55,
                              [("mod", "power_recharge", 1.4, 99999.0), ("log", "Their engineers, and secrets, defect.", "lime")],
-                             [("delta_pct", "money", -0.12), ("mod", "tube_demand", 0.9, 90.0),
+                             [("delta_pct", "money", -0.12), ("rep_loss", 2),
                               ("log", "Lawsuit. Reputation dinged.", "red")])],
                   endings={"RUTHLESS": 2}),
              dict(label="Fund them, hands-off",
@@ -686,7 +701,7 @@ DRONE_RESP = [
              dict(label="Deny everything, keep them on",
                   outcomes=[("gamble", 0.5,
                              [("mul_attr", "gd_mult", 1.6), ("log", "You get away with it. This time.", "slate")],
-                             [("mod", "tube_demand", 0.7, 150.0), ("log", "Exposed. Reputation tanks.", "red")])],
+                             [("rep_loss", 4), ("log", "Exposed. Reputation tanks.", "red")])],
                   endings={"RUTHLESS": 2, "CASHOUT": 1}),
          ]),
     dict(id="dr_monopoly", gate="drones_unlocked", name="The Delivery Monopoly", art="drones",
@@ -813,7 +828,7 @@ GRID_RESP = [
              dict(label="Blame the grid operator",
                   outcomes=[("gamble", 0.5,
                              [("delta_pct", "money", 0.05), ("log", "They eat it. You profit.", "slate")],
-                             [("mod", "tube_demand", 0.8, 120.0), ("log", "Proven false. Reputation collapse.", "red")])],
+                             [("rep_loss", 4), ("log", "Proven false. Reputation collapse.", "red")])],
                   endings={"RUTHLESS": 2}),
          ]),
     dict(id="gr_fusion", gate="power_unlocked", name="The Fusion Pitch", art="grid",
@@ -1089,6 +1104,13 @@ class EventEngine:
             elif kind == "gamble":
                 self.apply(game, eff[2] if random.random() < eff[1] else eff[3], applied)
                 continue   # the branch's leaves are already collected; don't record the gamble
+            elif kind == "rep_loss":
+                # A reputation hit cascades (unspent rep -> developers -> servers);
+                # record the ACTUAL result so the readout can spell out what it cost.
+                res = game._lose_reputation(eff[1])
+                if applied is not None:
+                    applied.append(("rep_result",) + tuple(res))
+                continue
             elif kind == "chain":
                 self._chains.append((eff[1], eff[2]))
             if applied is not None and kind != "log":
