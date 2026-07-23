@@ -35,7 +35,9 @@ from PySide6.QtGui import (
     QFont, QPainter, QImage, QColor, QBrush, QPen, QShortcut, QKeySequence,
 )
 
-from techdeck.ui.widgets.steelbeams_events import EventEngine, phase_of
+from techdeck.ui.widgets.steelbeams_events import (
+    EventEngine, phase_of, describe_effects, active_mod_labels,
+)
 
 
 def _load_woogy_pixmap(target: int = 112):
@@ -1798,6 +1800,16 @@ class SteelBeamsGame(QWidget):
         self._stats_bar.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
         root.addWidget(self._stats_bar)
 
+        # Active Effects strip — a live readout of the timed modifiers events apply,
+        # with countdowns, so an event's ongoing consequence is visible instead of a
+        # one-line flavor log you can't act on. Hidden when nothing is active.
+        self._effects_bar = QLabel("")
+        self._effects_bar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._effects_bar.setWordWrap(True)
+        self._effects_bar.setFont(QFont("Consolas", 8))
+        self._effects_bar.setVisible(False)
+        root.addWidget(self._effects_bar)
+
         self.tabs = QTabWidget()
 
         # Every tab is wrapped in a scroll area so tall content scrolls instead of
@@ -2353,9 +2365,14 @@ class SteelBeamsGame(QWidget):
             return
         event = m.ev_data
         try:
-            self._events.choose(self, event, idx)
+            applied = self._events.choose(self, event, idx)
             opt = event["options"][idx]
             self._log(f"[{event['name']}] {opt.get('label', '')}.", "cyan")
+            readout = describe_effects(applied)
+            # Spell out what actually changed — the flavor line ("Reputation collapse")
+            # never said which lever, how much, or for how long.
+            self._log(f"    → {readout}." if readout else "    → no lasting effect.",
+                      "silver")
         finally:
             m.hide()
             m.deleteLater()
@@ -3649,6 +3666,18 @@ class SteelBeamsGame(QWidget):
                 seg.append(self._cspan(pk, f"PWR {fmt(self.power)}/{fmt(self._power_max())}"))
         sep = f"<span style='color:{PAL['slate']}'> &#183; </span>"
         self._stats_bar.setText(sep.join(seg))
+
+        # Active Effects strip — the live consequence of events (timed modifiers +
+        # countdowns, then permanent ones). Colored: temporary = orange, permanent = slate.
+        mods = active_mod_labels(self._events.active_mods)   # temporary first
+        if mods:
+            shown, extra = mods[:6], len(mods) - 6            # cap so it can't grow unbounded
+            chips = [self._cspan("orange" if temp else "slate", txt) for txt, temp in shown]
+            if extra > 0:
+                chips.append(self._cspan("slate", f"+{extra} more"))
+            self._effects_bar.setText(
+                self._cspan("silver", "Active Effects: ") + sep.join(chips))
+        self._effects_bar.setVisible(bool(mods))
 
         cw = self.tabs.currentWidget()
         if cw is self._yard_tab:            self._update_yard()

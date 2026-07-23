@@ -32,6 +32,77 @@ import random
 AXES = ("RUTHLESS", "HUMANE", "EMPIRE", "CASHOUT", "STEEL", "SINGULARITY")
 
 
+# ── Human-readable effect readouts ──────────────────────────────────────────
+# Event flavor ("Reputation collapse.") never told the player WHAT changed, by how
+# much, or for how long. These map the internal levers/attrs to plain labels so the
+# game can print a mechanical readout on every event and show a live "Active Effects"
+# strip. Keep the labels honest — they are the player's only window into the sim.
+LEVER_LABELS = {
+    "tube_demand": "tube demand", "af_demand": "A-frame demand",
+    "steel_cost": "steel cost", "prod_mult": "production",
+    "power_drain": "power drain", "power_recharge": "solar recharge",
+    "ai_income": "AI trading income", "ops_rate": "ops rate",
+    "enemy_growth": "Woog reinforcement", "price_ceiling": "price ceiling",
+    "stock_bias": "stock trend",
+}
+ATTR_LABELS = {
+    "money": "cash", "tubes": "tubes", "steel": "steel", "aframes": "A-frames",
+    "panels": "solar panels", "ops": "ops", "probes": "probes",
+    "rep_total": "reputation", "developers": "developers", "servers": "servers",
+    "enemy_vessels": "enemy fleet", "explored": "survey", "probe_trust": "probe trust",
+    "inno": "innovation", "solar_fields": "solar fields",
+    # permanent multiplier attrs read as their in-fiction lever
+    "gp_mult": "production", "gd_mult": "tube demand", "af_d_mult": "A-frame demand",
+}
+
+
+def _fmt_pct(mult) -> str:
+    """0.8 -> '-20%', 1.8 -> '+80%', 0.0 -> 'halted'."""
+    if mult == 0:
+        return "halted"
+    return f"{(mult - 1.0) * 100:+.0f}%"
+
+
+def _fmt_secs(secs) -> str:
+    return "ongoing" if secs >= 9999 else f"for {int(round(secs))}s"
+
+
+def describe_effects(applied) -> str:
+    """Turn a list of APPLIED primitives (gambles already resolved) into a terse
+    plain-language readout, e.g. 'tube demand -20% for 120s, cash -10%'."""
+    parts = []
+    for eff in applied or ():
+        k = eff[0]
+        if k == "mod":
+            parts.append(f"{LEVER_LABELS.get(eff[1], eff[1])} {_fmt_pct(eff[2])} "
+                         f"{_fmt_secs(eff[3])}")
+        elif k == "delta_pct":
+            parts.append(f"{ATTR_LABELS.get(eff[1], eff[1])} {eff[2] * 100:+.0f}%")
+        elif k == "delta":
+            parts.append(f"{ATTR_LABELS.get(eff[1], eff[1])} {eff[2]:+,.0f}")
+        elif k == "mul_attr":
+            parts.append(f"{ATTR_LABELS.get(eff[1], eff[1])} {_fmt_pct(eff[2])} (permanent)")
+        elif k == "flag":
+            parts.append("a lasting change")
+        elif k == "chain":
+            parts.append("a follow-up looms")
+    return ", ".join(parts)
+
+
+def active_mod_labels(active_mods):
+    """Live 'Active Effects' strip: (text, is_temporary) per current timed modifier,
+    temporary (counting-down) ones first so the urgent, confusing bits lead."""
+    tmp, perm = [], []
+    for m in active_mods:
+        lab = LEVER_LABELS.get(m["lever"], m["lever"])
+        if m["t"] >= 9999:
+            perm.append((f"{lab} {_fmt_pct(m['mult'])}", False))
+        else:
+            tmp.append((f"{lab} {_fmt_pct(m['mult'])} {int(round(m['t']))}s", True))
+    tmp.sort()
+    return tmp + perm
+
+
 def phase_of(game) -> str:
     """EARLY (on-ramp) → MID → LATE, pinned to existing game flags."""
     if getattr(game, "probe_phase", False):
@@ -992,7 +1063,10 @@ class EventEngine:
         self.active_mods.append({"lever": lever, "mult": mult, "t": secs})
 
     # -- outcome resolution ---------------------------------------------
-    def apply(self, game, effects):
+    def apply(self, game, effects, applied=None):
+        """Apply outcome primitives. If `applied` is a list, each concrete effect
+        actually applied is appended to it (gambles resolved), so the caller can
+        show the player a mechanical readout of what really changed."""
         for eff in effects or ():
             kind = eff[0]
             if kind == "delta":
@@ -1008,16 +1082,22 @@ class EventEngine:
             elif kind == "log":
                 game._log(eff[1], eff[2] if len(eff) > 2 else None)
             elif kind == "gamble":
-                self.apply(game, eff[2] if random.random() < eff[1] else eff[3])
+                self.apply(game, eff[2] if random.random() < eff[1] else eff[3], applied)
+                continue   # the branch's leaves are already collected; don't record the gamble
             elif kind == "chain":
                 self._chains.append((eff[1], eff[2]))
+            if applied is not None and kind != "log":
+                applied.append(eff)
 
     def choose(self, game, event, opt_index):
-        """Resolve a responsive option: tally endings + apply outcomes."""
+        """Resolve a responsive option: tally endings + apply outcomes. Returns the
+        list of concrete effects applied (for the mechanical readout)."""
         opt = event["options"][opt_index]
         for axis, w in (opt.get("endings") or {}).items():
             self.axes[axis] = self.axes.get(axis, 0) + w
-        self.apply(game, opt.get("outcomes"))
+        applied = []
+        self.apply(game, opt.get("outcomes"), applied)
+        return applied
 
     # -- eligibility -----------------------------------------------------
     @staticmethod
@@ -1070,10 +1150,14 @@ class EventEngine:
             self._auto_t = random.uniform(AUTO_MIN_S, AUTO_MAX_S) * scale
             ev = self._pick(self._eligible(game, AUTO_EVENTS))
             if ev is not None:
-                self.apply(game, ev.get("effects"))
+                applied = []
+                self.apply(game, ev.get("effects"), applied)
                 lg = ev.get("log")
                 if lg:
                     game._log(lg[0], lg[1] if len(lg) > 1 else None)
+                readout = describe_effects(applied)
+                if readout:
+                    game._log(f"    → {readout}.", "silver")
 
         # responsive events (returned for the widget to show)
         self._resp_t -= dt
