@@ -548,10 +548,17 @@ class ConsoleWidget(QWidget, ThemeAware):
         else:
             self._gt_result = None
 
-    def request_directory(self, title: str = "Select Folder", start_dir: str = ""):
-        """Show the native pick-a-folder dialog and BLOCK until the user
-        chooses. Same worker-thread contract as request_selection. Returns the
-        picked path string, or None if the user cancelled.
+    def request_directory(self, title: str = "Select Folder", start_dir: str = "",
+                          style=None):
+        """Show the pick-a-folder dialog and BLOCK until the user chooses.
+        Same worker-thread contract as request_selection. Returns the picked
+        path string, or None if the user cancelled.
+
+        ``style="chopper_gunner"`` opens the MW2 chopper-gunner picker
+        (crosshair cursor + lock-on + railgun kill-cam overlay —
+        chopper_picker.py) instead of the native dialog. The professional
+        theme, and any failure inside the effect, silently fall back to the
+        native dialog — the toy must never block a run.
 
         Prefer this (via sdk.request_directory) over making users paste a
         folder path into the console.
@@ -563,7 +570,7 @@ class ConsoleWidget(QWidget, ThemeAware):
                 "request_directory() cannot be called from main GUI thread"
             )
 
-        self._dir_args = (str(title), str(start_dir or ""))
+        self._dir_args = (str(title), str(start_dir or ""), style)
         self._dir_result = None
 
         # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
@@ -581,10 +588,24 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     @Slot()
     def _directory_gui(self):
-        """GUI-thread half of request_directory: run the native folder dialog."""
+        """GUI-thread half of request_directory: run the folder dialog.
+        chopper_gunner style → the kill-cam picker, unless the professional
+        theme is active or ANYTHING in it fails (then the native dialog)."""
         from PySide6.QtWidgets import QFileDialog
 
-        title, start_dir = self._dir_args
+        title, start_dir, style = self._dir_args
+        if style == "chopper_gunner":
+            try:
+                from techdeck.core.settings import SettingsManager
+                if not SettingsManager().is_professional():
+                    from techdeck.ui.widgets.chopper_picker import (
+                        pick_folder_chopper,
+                    )
+                    self._dir_result = pick_folder_chopper(
+                        self.window(), title, start_dir)
+                    return
+            except Exception:
+                pass  # any failure: fall through to the native dialog
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 

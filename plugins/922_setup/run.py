@@ -302,7 +302,10 @@ def _pick_batch_folder(params: dict, cancel_event):
             start_dir = str(root)
     except Exception:
         pass
-    raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
+    # chopper_gunner: the MW2 kill-cam picker (crosshair, lock-on, railgun).
+    # Professional theme / older TechDeck / any effect failure → native dialog.
+    raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir,
+                                style="chopper_gunner")
     if cancel_event.is_set():
         return None, None
     if not raw:

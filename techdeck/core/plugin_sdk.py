@@ -419,11 +419,17 @@ def request_text(params: dict, prompt: str) -> str:
 
 
 def request_directory(params: dict, title: str = "Select Folder",
-                      start_dir: str = "") -> Optional[str]:
-    """Ask the user to pick a folder via the native directory dialog (opened
-    on the GUI thread by the console), falling back to a pasted-path stdin
-    prompt when run standalone. Returns the chosen path string, or None if
-    the user cancelled / entered nothing.
+                      start_dir: str = "", style: Optional[str] = None) -> Optional[str]:
+    """Ask the user to pick a folder via the directory dialog (opened on the
+    GUI thread by the console), falling back to a pasted-path stdin prompt
+    when run standalone. Returns the chosen path string, or None if the user
+    cancelled / entered nothing.
+
+    ``style="chopper_gunner"`` requests the MW2 kill-cam picker (922 Setup's
+    batch prompt). The console downgrades it to the native dialog under the
+    professional theme or on any effect failure; an older console without
+    the ``style`` parameter is handled here (TypeError → plain call), so a
+    new plugin drop on an old TechDeck still works.
 
     Prefer this over making users paste folder paths through request_text —
     per-run folders (a batch folder, a ROOT of orders) should be clicked,
@@ -431,6 +437,12 @@ def request_directory(params: dict, title: str = "Select Folder",
     """
     console = params.get("console")
     if console is not None and hasattr(console, "request_directory"):
+        if style:
+            try:
+                return console.request_directory(title, start_dir, style)
+            except TypeError:
+                # Older console signature without style (version tolerance).
+                return console.request_directory(title, start_dir)
         return console.request_directory(title, start_dir)
     raw = input(f"{title} (paste path): ").strip().strip('"')
     return raw or None
