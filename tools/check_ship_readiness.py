@@ -433,7 +433,11 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
             repo_f = plugin_dir / fname
             inst_f = installed / fname
             if repo_f.is_file() and inst_f.is_file():
-                if repo_f.read_bytes() != inst_f.read_bytes():
+                # Normalize line endings: git checks out CRLF while Copy-Item /
+                # installer copies may be LF - that's not real drift.
+                repo_b = repo_f.read_bytes().replace(b"\r\n", b"\n")
+                inst_b = inst_f.read_bytes().replace(b"\r\n", b"\n")
+                if repo_b != inst_b:
                     warnings.append(
                         f"{pid}: installed copy of {fname} in LOCALAPPDATA differs "
                         f"from the repo - the repo version is what ships. If you "
