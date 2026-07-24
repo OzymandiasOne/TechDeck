@@ -67,6 +67,40 @@ def test_plugin_id_migration_remaps_dedupes_and_drops_retired(tmp_path):
         "922_lst_organizer", "qa_gemba_analyzer"]
 
 
+def test_total_runs_backfilled_from_family_tallies(tmp_path):
+    """The pre-singleton settings race froze total_runs while the shell-written
+    family_runs kept climbing (A.T.'s 'first four achievements never
+    progress'). Migration raises total_runs to the family-tally floor, shifts
+    the tree planting stamp by the same delta (growth unchanged), and is
+    idempotent."""
+    doc = {
+        "version": 1,
+        "current_profile": DEFAULT_PROFILE_NAME,
+        "profiles": {DEFAULT_PROFILE_NAME: {"tiles": []}},
+        "settings": {
+            "theme": "dark",
+            "total_runs": 2,                       # frozen by the race
+            "family_runs": {"911": 40, "922": 55, "General": 5},
+            "tree_planted_runs": 1,
+        },
+        "plugin_settings": {},
+        "plugin_stats": {},
+    }
+    (tmp_path / "settings.json").write_text(json.dumps(doc), encoding="utf-8")
+    s = SettingsManager(settings_dir=tmp_path)
+
+    assert s.get_total_runs() == 100                # raised to the floor
+    assert s.data["settings"]["tree_planted_runs"] == 99  # shifted by delta=98
+
+    # Idempotent + monotonic: reload changes nothing, and a healthy file
+    # (total >= family sum) is left alone.
+    again = SettingsManager(settings_dir=tmp_path)
+    assert again.get_total_runs() == 100
+    again.increment_plugin_runs("911_setup")
+    third = SettingsManager(settings_dir=tmp_path)
+    assert third.get_total_runs() == 101
+
+
 def test_ticket_economy_clamps(tmp_path):
     s = SettingsManager(settings_dir=tmp_path)
     s.add_tickets(-10_000)

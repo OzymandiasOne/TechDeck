@@ -344,7 +344,37 @@ class SettingsManager:
         if self.data.get("settings", {}).get("theme") == "salmon":
             self.data["settings"]["theme"] = "cherry_blossom"
 
+        # Repair total_runs frozen by the pre-singleton settings race
+        self._backfill_total_runs()
+
         self.save()
+
+    def _backfill_total_runs(self) -> None:
+        """Repair a total_runs counter frozen by the pre-singleton settings race.
+
+        Before SettingsManager became a shared singleton, the executor's
+        worker-thread total_runs bump was silently reverted by the shell's
+        stale-snapshot ticket write after every run — so total_runs sat frozen
+        while the shell-written family_runs tallies kept climbing (reported as
+        the first four achievements never progressing while the family ones
+        did). Those family tallies are a trustworthy floor: every tallied run
+        was also a total run. Monotonic and idempotent — only ever raises
+        total_runs; once repaired, both counters advance together and this is
+        a no-op. The tree's planting stamp shifts by the same delta so the
+        repair doesn't instantly fast-forward its growth.
+        """
+        settings = self.data.setdefault("settings", {})
+        family_runs = settings.get("family_runs", {})
+        if not isinstance(family_runs, dict):
+            return
+        floor = sum(int(v) for v in family_runs.values())
+        current = int(settings.get("total_runs", 0))
+        if floor <= current:
+            return
+        delta = floor - current
+        settings["total_runs"] = floor
+        if "tree_planted_runs" in settings:
+            settings["tree_planted_runs"] = int(settings["tree_planted_runs"]) + delta
     
     def _migrate_blank_profile(self) -> None:
         """Migrate legacy blank profile key to Default profile."""
