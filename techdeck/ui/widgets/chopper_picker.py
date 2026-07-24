@@ -32,7 +32,8 @@ import random
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QListView, QWidget
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QImage, QPainter, QPen, QPixmap, QRadialGradient,
+    QColor, QCursor, QFont, QImage, QLinearGradient, QPainter, QPen, QPixmap,
+    QRadialGradient,
 )
 
 # Slow-motion factor locked in the mockup: same trajectories, ~55% speed,
@@ -51,6 +52,7 @@ _AIM_TICK_MS = 33                    # lighter cadence while just aiming
 _FLIGHT_MS = 1000
 _KNOCKOUT_TICKS = 45
 _SHAKE_MS = 350
+_CRT_MS = 480          # CRT power-off collapse when the picker closes
 
 
 class _SkipFilter(QObject):
@@ -176,6 +178,7 @@ class GunnerOverlay(QWidget):
         self._mono = QFont("Consolas", 10)
         self._ambient = None           # (player, audio_out) for the looping bed
         self._lock_sfx_done = False    # lock-on sound fires once per acquisition
+        self._crt_cb = None            # callback to run when the CRT close ends
         self._t0 = 0.0                 # ms since burst began (for puffs)
 
         self._timer = QTimer(self)
@@ -290,6 +293,9 @@ class GunnerOverlay(QWidget):
                         self._dialog.move(self._dialog_home)
             if self._knock_ticks <= 0 and not self._parts:
                 self._finish()
+        elif self._state == "crt":
+            if self._elapsed >= _CRT_MS:
+                self._end_crt()
         self.update()
 
     def _begin_burst(self):
@@ -403,13 +409,20 @@ class GunnerOverlay(QWidget):
             if app is not None:
                 app.removeEventFilter(flt)
             self._skip_filter = None
-        self._state = "done"
-        self._dialog.setWindowOpacity(1.0)
-        if self._dialog_home is not None:
-            self._dialog.move(self._dialog_home)
-        self._callout, self._callout_alert = "TRANSMISSION RESTORED", False
+        # CRT power-off: the feed collapses to a point, THEN the dialog closes
+        # and the path returns. The dialog hides under the black CRT frame.
+        self._crt_cb = cb
+        self._state = "crt"
+        self._elapsed = 0.0
+        self._dialog.setWindowOpacity(0.0)
         self.update()
-        QTimer.singleShot(250, cb)
+
+    def _end_crt(self):
+        """CRT collapse finished — hand the picked path back (closes dialog)."""
+        cb, self._crt_cb = getattr(self, "_crt_cb", None), None
+        self._state = "done"
+        if cb is not None:
+            cb()
 
     # ── painting ─────────────────────────────────────────────────────────
 
@@ -417,6 +430,11 @@ class GunnerOverlay(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
+
+        if self._state == "crt":
+            self._paint_crt(p, w, h)
+            p.end()
+            return
 
         if self._state != "done":
             self._paint_hud(p, w, h)
@@ -584,6 +602,33 @@ class GunnerOverlay(QWidget):
             p.fillRect(QRectF(random.random() * 120 - 60, ty, w, 1.5),
                        QColor(255, 255, 255, 140))
 
+    def _paint_crt(self, p: QPainter, w: int, h: int):
+        """Old-CRT power-off: the feed snaps to a bright horizontal line, that
+        line collapses to a central dot, and the dot flashes out to black."""
+        p.fillRect(self.rect(), QColor(0, 0, 0))
+        t = min(1.0, self._elapsed / _CRT_MS)
+        cx, cy = w / 2.0, h / 2.0
+        white = QColor(236, 246, 255)
+        if t < 0.42:                       # vertical collapse → a thin line
+            a = t / 0.42
+            bar_h = max(3.0, (1.0 - a) ** 1.5 * h)
+            glow = QLinearGradient(0, cy - bar_h, 0, cy + bar_h)
+            glow.setColorAt(0.0, QColor(236, 246, 255, 0))
+            glow.setColorAt(0.5, QColor(236, 246, 255, 90))
+            glow.setColorAt(1.0, QColor(236, 246, 255, 0))
+            p.fillRect(QRectF(0, cy - bar_h, w, bar_h * 2), glow)
+            p.fillRect(QRectF(0, cy - bar_h / 2, w, bar_h), white)
+        elif t < 0.85:                     # horizontal collapse → a dot
+            a = (t - 0.42) / 0.43
+            bar_w = max(4.0, (1.0 - a) ** 1.7 * w)
+            p.fillRect(QRectF(cx - bar_w / 2, cy - 1.5, bar_w, 3.0), white)
+        else:                              # dot flash, then black
+            a = (t - 0.85) / 0.15
+            r = 3.0 * (1.0 - a) + 1.0
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(255, 255, 255, int(255 * (1.0 - a))))
+            p.drawEllipse(QPointF(cx, cy), r, r)
+
 
 class _ChopperDialog(QFileDialog):
     """Non-native directory picker that fires the kill-cam before accepting."""
@@ -603,9 +648,22 @@ class _ChopperDialog(QFileDialog):
         self._overlay = overlay
         view = self.findChild(QListView, "listView")
         if view is not None:
+            # Auto-target on hover: sweeping the crosshair over a folder row
+            # selects it (which drives the lock-on), so you designate by
+            # pointing, not just clicking. Needs mouse tracking for `entered`.
+            view.setMouseTracking(True)
+            view.viewport().setMouseTracking(True)
+            view.entered.connect(self._on_hover)
             sel = view.selectionModel()
             if sel is not None:
                 sel.selectionChanged.connect(lambda *_: self._on_pick(view))
+
+    def _on_hover(self, index):
+        if self._firing or not index.isValid():
+            return
+        view = self.findChild(QListView, "listView")
+        if view is not None:
+            view.setCurrentIndex(index)   # → selectionChanged → _on_pick lock-on
 
     def _on_pick(self, view):
         idxs = view.selectionModel().selectedIndexes()

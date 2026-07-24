@@ -37,7 +37,7 @@ def _wait_for(pred, timeout_ms=2000):
 
 
 def test_fire_sequence_runs_to_done(qapp):
-    """flight → burst (particles + glitch fire together) → done, dialog restored."""
+    """flight → burst (particles + glitch fire together) → CRT close → done."""
     dlg, overlay = _make_overlay(qapp)
     overlay._impact = QRectF(0, 0, 800, 600).center()
     done = []
@@ -49,29 +49,35 @@ def test_fire_sequence_runs_to_done(qapp):
     assert overlay._puffs                    # dust haze spawned
     assert overlay._knock_ticks > 0          # glitch fires WITH the impact
 
-    _drive(overlay, 400)                     # burst + glitch play out
+    # Burst settles → _finish enters the CRT collapse (dialog hidden under it).
+    _saw_crt = False
+    for _ in range(400):
+        if overlay._state == "done":
+            break
+        overlay._tick()
+        if overlay._state == "crt":
+            _saw_crt = True
+    assert _saw_crt                          # CRT power-off phase ran
     assert overlay._state == "done"
-    assert dlg.windowOpacity() == 1.0        # glitch flicker restored
-
-    assert _wait_for(lambda: done == [True])  # _finish delivers cb after 250 ms
+    assert _wait_for(lambda: done == [True])  # cb delivered when CRT ends
 
     overlay._timer.stop()
     overlay.deleteLater()
     dlg.deleteLater()
 
 
-def test_skip_jumps_to_done(qapp):
-    """Any-key skip mid-flight: immediate completion, no stranded FX."""
+def test_skip_then_crt_close(qapp):
+    """Any-key skip clears FX and still plays the CRT close before finishing."""
     dlg, overlay = _make_overlay(qapp)
     overlay._impact = QRectF(0, 0, 800, 600).center()
     done = []
     overlay.fire(lambda: done.append(True))
     _drive(overlay, 5)
     overlay.skip()
-    assert overlay._state == "done"
     assert not overlay._parts and not overlay._smoke and not overlay._puffs
-    assert dlg.windowOpacity() == 1.0
-
+    assert overlay._state == "crt"           # skip goes straight to the CRT close
+    _drive(overlay, 60)                      # let the CRT collapse finish
+    assert overlay._state == "done"
     assert _wait_for(lambda: done == [True])
 
     overlay._timer.stop()
