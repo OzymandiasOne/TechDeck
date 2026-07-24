@@ -29,6 +29,35 @@ radius/ID/OD, and bend angle), **Bend Deduction** (OSSB / bend allowance / bend
 deduction), and **Material Weight** (by sheet size or area) - with more being added one
 at a time.
 
+### Feedback Fixes
+
+Changes in this release that came directly from submitted feedback - thank you, and
+keep it coming.
+
+- *"The Move Ticket Omit cover page doesn't identify its batch and nest, and the
+  Material Type is left blank once the move tickets are removed."* - The cover is now
+  stamped with the batch and nest in bold red beneath the Quality Requirements block,
+  and the blank Material Type cell is filled in automatically from the removed move
+  tickets. Applies to 911 Remove Ticket and the 911 Setup print-packet step that uses
+  it.
+
+- *"Inspection sheets should include a QF-QU-09 slot for every piece, with the hull
+  code shown under each part number."* - 911 Setup now generates one inspection slot
+  per piece with the hull code under each part number, and the blank template tab is
+  hidden in the finished workbook.
+
+- *"There should be an easier way to submit suggestions."* - A **Submit Feedback**
+  button now sits at the bottom of the left sidebar, one click away from anywhere in
+  the app.
+
+- *"The Batch Repeater should only pull orders whose numbers match exactly."* - Repeat
+  matching is now exact end-to-end, so an order can no longer partially match a
+  similarly-numbered one (e.g. -H1 picking up -H11) - only true repeats are pulled.
+
+- *"The ASA game's sleeping animation needs work, and there aren't enough ways to
+  influence A-Frame demand when tube surplus piles up."* - The sleeping animation was
+  redrawn, and new gameplay levers let you influence A-Frame demand directly.
+
 ---
 
 ## What's New in v0.8.6.8
