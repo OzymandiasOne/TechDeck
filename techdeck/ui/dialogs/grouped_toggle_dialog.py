@@ -36,6 +36,28 @@ from PySide6.QtCore import Qt
 from techdeck.ui.dialogs.selection_dialog import _glyph_path
 
 
+class _StageTree(QTreeWidget):
+    """QTreeWidget that expands/collapses a top-level group ONLY when its NAME
+    is clicked — never when its checkbox is ticked. So turning a stage on/off
+    never changes what's unfolded (checkbox = run/skip; name = show options)."""
+
+    def mouseReleaseEvent(self, event):
+        pos = event.position().toPoint()
+        idx = self.indexAt(pos)
+        super().mouseReleaseEvent(event)   # let the base toggle the checkbox
+        if not idx.isValid():
+            return
+        item = self.itemFromIndex(idx)
+        if item is None or item.parent() is not None or item.childCount() == 0:
+            return
+        # Ignore the checkbox indicator + the expand arrow (left edge); only a
+        # click on the label text folds/unfolds the group.
+        r = self.visualRect(idx)
+        if pos.x() <= r.left() + 24:
+            return
+        item.setExpanded(not item.isExpanded())
+
+
 class GroupedToggleDialog(QDialog):
     """Tree of checkable groups with per-group option toggles."""
 
@@ -81,7 +103,7 @@ class GroupedToggleDialog(QDialog):
         line.setStyleSheet(f"color: {self.theme.divider};")
         layout.addWidget(line)
 
-        self.tree = QTreeWidget()
+        self.tree = _StageTree()
         self.tree.setHeaderHidden(True)
         self.tree.setRootIsDecorated(True)
         self.tree.setIndentation(22)
@@ -114,9 +136,9 @@ class GroupedToggleDialog(QDialog):
                 child.setData(0, self._KEY_ROLE, ckey)
                 self._children[gkey][ckey] = child
 
-        # Groups start collapsed — clicking the name reveals the options.
+        # Groups start collapsed — clicking the name (handled by _StageTree)
+        # reveals the options; ticking the checkbox never changes the fold.
         self.tree.itemChanged.connect(self._on_item_changed)
-        self.tree.itemClicked.connect(self._on_item_clicked)
 
         button_row = QHBoxLayout()
         self.count_label = QLabel()
@@ -147,20 +169,15 @@ class GroupedToggleDialog(QDialog):
 
     # --- interaction ----------------------------------------------------------
 
-    def _on_item_clicked(self, item, column):
-        """Clicking a group's NAME (not just the arrow) expands/collapses it."""
-        if item.parent() is None and item.childCount():
-            item.setExpanded(not item.isExpanded())
-
     def _on_item_changed(self, item, column):
         if self._suppress:
             return
         if item.parent() is None:
             gkey = item.data(0, self._KEY_ROLE)
             self._apply_child_enable(gkey)
-            # Unfolding on enable makes "what did I just turn on?" visible.
-            if item.checkState(0) == Qt.CheckState.Checked and item.childCount():
-                item.setExpanded(True)
+            # Ticking a stage on/off only greys/ungreys its options — it never
+            # folds or unfolds the group (that's the name-click's job). An
+            # unchecked stage therefore stays collapsed and skipped.
         self._update_count()
 
     def _apply_child_enable(self, gkey: str):
