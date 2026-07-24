@@ -195,19 +195,28 @@ class PluginSettingsWidget(QWidget):
         
         return spin_box
     
-    def _create_boolean_field(self, field: Dict[str, Any]) -> QCheckBox:
-        """Create boolean checkbox field."""
+    def _create_boolean_field(self, field: Dict[str, Any]) -> QWidget:
+        """Create boolean field as an animated on/off toggle switch.
+
+        The switch carries no text (the field's label sits above and the
+        description below, like every other field). Wrapped in a left-aligned
+        row and tagged so _get_widget_value can find it via findChild."""
+        from techdeck.ui.widgets.toggle_switch import ToggleSwitch
         field_key = field['key']
-        checkbox = QCheckBox(field.get('description', ''))
-        
-        # Set current value
+
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        switch = ToggleSwitch()
+        switch.setObjectName(f"{field_key}_input")
         current_value = self.current_values.get(field_key, field.get('default', False))
-        checkbox.setChecked(bool(current_value))
-        
-        # Connect change signal
-        checkbox.stateChanged.connect(self._on_value_changed)
-        
-        return checkbox
+        switch.setChecked(bool(current_value))
+        switch.toggled.connect(self._on_value_changed)
+
+        row.addWidget(switch)
+        row.addStretch(1)
+        return container
     
     def _create_choice_field(self, field: Dict[str, Any]) -> QComboBox:
         """Create choice dropdown field."""
@@ -364,7 +373,11 @@ class PluginSettingsWidget(QWidget):
         elif field_type == 'number':
             return widget.value() if isinstance(widget, (QSpinBox, QDoubleSpinBox)) else 0
         elif field_type == 'boolean':
-            return widget.isChecked() if isinstance(widget, QCheckBox) else False
+            if isinstance(widget, QCheckBox):          # legacy plain checkbox
+                return widget.isChecked()
+            from techdeck.ui.widgets.toggle_switch import ToggleSwitch
+            switch = widget.findChild(ToggleSwitch, f"{field_key}_input")
+            return switch.isChecked() if switch else False
         elif field_type == 'choice':
             return widget.currentData() if isinstance(widget, QComboBox) else None
         elif field_type in ('file', 'directory'):
