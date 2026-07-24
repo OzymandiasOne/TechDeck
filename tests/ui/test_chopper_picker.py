@@ -37,20 +37,21 @@ def _wait_for(pred, timeout_ms=2000):
 
 
 def test_fire_sequence_runs_to_done(qapp):
-    """flight → burst (particles spawn) → knockout → done, dialog restored."""
+    """flight → burst (particles + glitch fire together) → done, dialog restored."""
     dlg, overlay = _make_overlay(qapp)
     overlay._impact = QRectF(0, 0, 800, 600).center()
     done = []
     overlay.fire(lambda: done.append(True))
 
     _drive(overlay, 70)                      # ≈1.1 s: flight ends, burst begins
-    assert overlay._state in ("burst", "knockout")
+    assert overlay._state == "burst"
     assert len(overlay._parts) > 500         # the 840-fragment burst spawned
     assert overlay._puffs                    # dust haze spawned
+    assert overlay._knock_ticks > 0          # glitch fires WITH the impact
 
-    _drive(overlay, 400)                     # burst + knockout play out
+    _drive(overlay, 400)                     # burst + glitch play out
     assert overlay._state == "done"
-    assert dlg.windowOpacity() == 1.0        # knockout flicker restored
+    assert dlg.windowOpacity() == 1.0        # glitch flicker restored
 
     assert _wait_for(lambda: done == [True])  # _finish delivers cb after 250 ms
 

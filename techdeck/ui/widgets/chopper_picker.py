@@ -45,10 +45,10 @@ _TARGET = QColor(224, 72, 60)        # designator red
 _TICK_MS = 16                        # ~60 fps during the fire sequence
 _AIM_TICK_MS = 33                    # lighter cadence while just aiming
 
-# Fire-sequence beat timings (ms). Flight is real time; the burst and the
-# knockout stretch by 1/DT like the mockup.
+# Fire-sequence beat timings (ms). Flight is real time; the burst plays in
+# slow motion (1/DT). The transmission glitch fires WITH the detonation and
+# lasts _KNOCKOUT_TICKS frames, overlapping the front of the debris burst.
 _FLIGHT_MS = 1000
-_KNOCKOUT_DELAY_MS = int(900 / DT)
 _KNOCKOUT_TICKS = 45
 _SHAKE_MS = 350
 
@@ -255,7 +255,7 @@ class GunnerOverlay(QWidget):
 
     def skip(self):
         """Any key mid-sequence: jump straight to the end, restore, finish."""
-        if self._state in ("flight", "burst", "knockout"):
+        if self._state in ("flight", "burst"):
             self._parts, self._smoke, self._puffs = [], [], []
             self._knock_ticks, self._flash = 0, 0.0
             self._finish()
@@ -280,14 +280,15 @@ class GunnerOverlay(QWidget):
             self._step_particles()
             if self._flash > 0:
                 self._flash = max(0.0, self._flash - dt_ms / 220.0 * 0.8)
-            if self._knock_pending and self._elapsed >= _KNOCKOUT_DELAY_MS:
-                self._knock_pending = False
-                self._state = "knockout"
-                self._knock_ticks = _KNOCKOUT_TICKS
-        elif self._state == "knockout":
-            self._step_particles()
-            self._knock_tick()
-            if self._knock_ticks <= 0:
+            # Transmission glitch runs concurrently with the detonation, then
+            # the feed restores and the debris keeps settling underneath.
+            if self._knock_ticks > 0:
+                self._knock_tick()
+                if self._knock_ticks <= 0:
+                    self._dialog.setWindowOpacity(1.0)
+                    if self._dialog_home is not None:
+                        self._dialog.move(self._dialog_home)
+            if self._knock_ticks <= 0 and not self._parts:
                 self._finish()
         self.update()
 
@@ -296,7 +297,7 @@ class GunnerOverlay(QWidget):
         self._elapsed = 0.0
         self._t0 = 0.0
         self._flash = 0.8
-        self._knock_pending = True
+        self._knock_ticks = _KNOCKOUT_TICKS   # glitch fires WITH the impact
         from techdeck.core.audio_manager import SOUND_CHOPPER_IMPACT
         self._sfx(SOUND_CHOPPER_IMPACT)  # detonation on the folder
         self._callout, self._callout_alert = "IMPACT CONFIRMED", True
@@ -421,10 +422,9 @@ class GunnerOverlay(QWidget):
             self._paint_hud(p, w, h)
         if self._state == "aim" and self._lock_rect is not None:
             self._paint_lock(p)
-        if self._state in ("flight", "burst", "knockout") \
-                and self._lock_rect is not None:
+        if self._state in ("flight", "burst") and self._lock_rect is not None:
             self._paint_lock(p, frozen=True)
-        if self._state in ("burst", "knockout"):
+        if self._state == "burst":
             self._paint_fx(p)
         if self._state != "done":
             # Persistent grey film grain over the whole feed (incl. the dialog),
@@ -432,7 +432,7 @@ class GunnerOverlay(QWidget):
             p.setOpacity(0.10)
             p.drawPixmap(self.rect(), random.choice(self._grain))
             p.setOpacity(1.0)
-        if self._state == "knockout":
+        if self._knock_ticks > 0:
             self._paint_static(p, w, h)
         if self._flash > 0:
             p.fillRect(self.rect(), QColor(255, 255, 255,
