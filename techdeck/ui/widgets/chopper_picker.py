@@ -174,11 +174,45 @@ class GunnerOverlay(QWidget):
         self._smoke_pm = _smoke_sprite()
         self._grain = _grain_tiles()   # always-on grey film-grain veil
         self._mono = QFont("Consolas", 10)
+        self._ambient = None           # (player, audio_out) for the looping bed
+        self._lock_sfx_done = False    # lock-on sound fires once per acquisition
         self._t0 = 0.0                 # ms since burst began (for puffs)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(_AIM_TICK_MS)
+
+    # ── audio (never allowed to break the picker) ────────────────────────
+
+    def _sfx(self, sound_id: str):
+        """Fire a one-shot picker sound; silent no-op on any failure."""
+        try:
+            from techdeck.core.audio_manager import get_audio_manager
+            get_audio_manager().play(sound_id)
+        except Exception:
+            pass
+
+    def start_ambient(self):
+        """Begin the looping gunship-interior bed at half volume (the user's
+        '50% quieter' ask). Called from pick_folder_chopper, not __init__, so
+        headless sequence tests never spin up the mp3 loop."""
+        try:
+            from techdeck.core.audio_manager import (
+                get_audio_manager, SOUND_CHOPPER_AMBIENT,
+            )
+            self._ambient = get_audio_manager().play_music_stoppable(
+                SOUND_CHOPPER_AMBIENT, loop=True, volume_scale=0.5)
+        except Exception:
+            self._ambient = None
+
+    def stop_ambient(self):
+        """Stop the ambient bed (idempotent; safe to call more than once)."""
+        amb, self._ambient = self._ambient, None
+        if amb is not None:
+            try:
+                amb[0].stop()
+            except Exception:
+                pass
 
     # ── public API (driven by the dialog) ────────────────────────────────
 
@@ -194,6 +228,7 @@ class GunnerOverlay(QWidget):
         self._lock_rect = rect.adjusted(-8, -6, 8, 6)
         self._lock_anim = 0.0
         self._lock_solid = False
+        self._lock_sfx_done = False
         self._callout, self._callout_alert = "ACQUIRING…", True
         self._lock_name = name
 
@@ -214,6 +249,8 @@ class GunnerOverlay(QWidget):
         if app is not None:
             app.installEventFilter(self._skip_filter)
         self._shake(self._dialog, 7)   # recoil
+        from techdeck.core.audio_manager import SOUND_CHOPPER_FIRE
+        self._sfx(SOUND_CHOPPER_FIRE)  # railgun shot
         self._timer.start(_TICK_MS)
 
     def skip(self):
@@ -260,6 +297,8 @@ class GunnerOverlay(QWidget):
         self._t0 = 0.0
         self._flash = 0.8
         self._knock_pending = True
+        from techdeck.core.audio_manager import SOUND_CHOPPER_IMPACT
+        self._sfx(SOUND_CHOPPER_IMPACT)  # detonation on the folder
         self._callout, self._callout_alert = "IMPACT CONFIRMED", True
         x, y = self._impact.x(), self._impact.y()
         # ~840 fine tumbling fragments (1–2 px) flung far enough to cross the
@@ -356,6 +395,7 @@ class GunnerOverlay(QWidget):
         if self._on_done is None:
             return
         cb, self._on_done = self._on_done, None
+        self.stop_ambient()
         flt = getattr(self, "_skip_filter", None)
         if flt is not None:
             app = QApplication.instance()
@@ -442,6 +482,10 @@ class GunnerOverlay(QWidget):
                 self._lock_solid = True
                 self._callout = f"TARGET LOCKED — {self._lock_name}"
                 self._callout_alert = False
+                if not self._lock_sfx_done:
+                    self._lock_sfx_done = True
+                    from techdeck.core.audio_manager import SOUND_CHOPPER_LOCK
+                    self._sfx(SOUND_CHOPPER_LOCK)
         a, b = self._lock_from, self._lock_rect
         if a is None or b is None:
             return
@@ -622,10 +666,12 @@ def pick_folder_chopper(parent, title: str, start_dir: str = ""):
     overlay = GunnerOverlay(dlg, screen.geometry())
     dlg.attach_overlay(overlay)
     overlay.show()
+    overlay.start_ambient()            # looping gunship bed while the picker is up
     try:
         accepted = dlg.exec() == QDialog.DialogCode.Accepted
         files = dlg.selectedFiles()
     finally:
+        overlay.stop_ambient()         # covers the cancel path (no _finish)
         overlay._timer.stop()
         overlay.close()
         overlay.deleteLater()

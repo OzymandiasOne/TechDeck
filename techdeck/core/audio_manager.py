@@ -30,6 +30,12 @@ SOUND_UI_SELECT = "ui_select"    # selecting / buying anything
 SOUND_UI_CLAIM = "ui_claim"      # claiming achievement tickets
 SOUND_GAME_START = "game_start"  # launching a game (ASA: The Video Game, etc.)
 
+# ── Chopper-gunner folder picker (922 Setup) ────────────────────────────────
+SOUND_CHOPPER_FIRE = "chopper_fire"        # railgun shot / recoil
+SOUND_CHOPPER_IMPACT = "chopper_impact"    # detonation on the folder
+SOUND_CHOPPER_LOCK = "chopper_lock"        # designator lock-on
+SOUND_CHOPPER_AMBIENT = "chopper_ambient"  # looping gunship interior bed (mp3)
+
 # ── My House / Garden (UFO 50 "pet" SFX) ────────────────────────────────────
 SOUND_PET_DOOR_OPEN = "pet_door_open"    # facade lifts to reveal interior
 SOUND_PET_DOOR_CLOSE = "pet_door_close"  # facade drops back down
@@ -82,6 +88,11 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_PET_BOOK: "sfx__petBook00.wav",
     SOUND_PET_COOK: "sfx__petCook00.wav",
     SOUND_PET_SLEEP: "sfx__petFallAsleep00.wav",
+    # Chopper-gunner picker
+    SOUND_CHOPPER_FIRE: "chopper_fire.wav",
+    SOUND_CHOPPER_IMPACT: "chopper_impact.wav",
+    SOUND_CHOPPER_LOCK: "chopper_lock.wav",
+    SOUND_CHOPPER_AMBIENT: "chopper_ambient.mp3",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 
@@ -190,10 +201,16 @@ class AudioManager:
             Q_ARG(str, sound_id),
         )
 
-    def play_music_stoppable(self, sound_id: str) -> Optional[tuple]:
-        """Play a longer audio file via QMediaPlayer (buffered, no skipping).
+    def play_music_stoppable(self, sound_id: str, *, loop: bool = False,
+                             volume_scale: float = 1.0) -> Optional[tuple]:
+        """Play a longer audio file via QMediaPlayer (buffered, no skipping;
+        handles mp3, unlike the WAV-only QSoundEffect path).
         Returns (QMediaPlayer, QAudioOutput) so the caller can call player.stop().
-        Caller must keep both objects alive for the duration of playback."""
+        Caller must keep both objects alive for the duration of playback.
+
+        ``loop=True`` loops forever (for ambient beds). ``volume_scale`` is a
+        0.0–1.0 multiplier on the app volume for this one track — e.g. 0.5 to
+        run an ambient bed at half the normal level."""
         from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
         if not self._enabled:
             return None
@@ -207,7 +224,9 @@ class AudioManager:
         player = QMediaPlayer()
         audio_out = QAudioOutput()
         player.setAudioOutput(audio_out)
-        audio_out.setVolume(self._volume)
+        audio_out.setVolume(self._volume * max(0.0, min(1.0, volume_scale)))
+        if loop:
+            player.setLoops(QMediaPlayer.Loops.Infinite)
         player.setSource(QUrl.fromLocalFile(str(path)))
         player.play()
         return (player, audio_out)
