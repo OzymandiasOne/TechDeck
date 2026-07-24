@@ -289,11 +289,10 @@ class GunnerOverlay(QWidget):
             # the feed restores and the debris keeps settling underneath.
             if self._knock_ticks > 0:
                 self._knock_tick()
-                if self._knock_ticks <= 0:
-                    self._dialog.setWindowOpacity(1.0)
-                    if self._dialog_home is not None:
-                        self._dialog.move(self._dialog_home)
-            if self._knock_ticks <= 0 and not self._parts:
+            # As soon as the glitch ends, go to the after-action screen — the
+            # static's last frames mask the debris, so no dead pause waiting
+            # for every fragment to settle.
+            if self._knock_ticks <= 0:
                 self._finish()
         elif self._state == "aar":
             if self._elapsed >= _AAR_MS:
@@ -417,6 +416,7 @@ class GunnerOverlay(QWidget):
             self._skip_filter = None
         self._crt_cb = cb
         self._elapsed = 0.0
+        self._parts, self._smoke, self._puffs = [], [], []   # burst is over
         # Dialog dissolves into the static feed; the sequence then holds on the
         # "TARGET NEUTRALIZED" after-action screen (unless skipped) before the
         # CRT power-off collapses it and the path returns.
