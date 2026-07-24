@@ -52,6 +52,7 @@ _AIM_TICK_MS = 33                    # lighter cadence while just aiming
 _FLIGHT_MS = 1000
 _KNOCKOUT_TICKS = 45
 _SHAKE_MS = 350
+_AAR_MS = 1500         # "TARGET NEUTRALIZED" after-action hold before the close
 _CRT_MS = 480          # CRT power-off collapse when the picker closes
 
 
@@ -179,6 +180,7 @@ class GunnerOverlay(QWidget):
         self._ambient = None           # (player, audio_out) for the looping bed
         self._lock_sfx_done = False    # lock-on sound fires once per acquisition
         self._crt_cb = None            # callback to run when the CRT close ends
+        self._aar_path = ""            # picked path, shown on the TARGET NEUTRALIZED screen
         self._t0 = 0.0                 # ms since burst began (for puffs)
 
         self._timer = QTimer(self)
@@ -261,7 +263,7 @@ class GunnerOverlay(QWidget):
         if self._state in ("flight", "burst"):
             self._parts, self._smoke, self._puffs = [], [], []
             self._knock_ticks, self._flash = 0, 0.0
-            self._finish()
+            self._finish(aar=False)   # skipped: go straight to the CRT close
 
     # ── state machine ────────────────────────────────────────────────────
 
@@ -293,6 +295,10 @@ class GunnerOverlay(QWidget):
                         self._dialog.move(self._dialog_home)
             if self._knock_ticks <= 0 and not self._parts:
                 self._finish()
+        elif self._state == "aar":
+            if self._elapsed >= _AAR_MS:
+                self._state = "crt"      # after-action hold done → CRT power-off
+                self._elapsed = 0.0
         elif self._state == "crt":
             if self._elapsed >= _CRT_MS:
                 self._end_crt()
@@ -398,7 +404,7 @@ class GunnerOverlay(QWidget):
                               lambda dx=dx, dy=dy: dlg.move(home.x() + dx,
                                                             home.y() + dy))
 
-    def _finish(self):
+    def _finish(self, aar: bool = True):
         if self._on_done is None:
             return
         cb, self._on_done = self._on_done, None
@@ -409,12 +415,17 @@ class GunnerOverlay(QWidget):
             if app is not None:
                 app.removeEventFilter(flt)
             self._skip_filter = None
-        # CRT power-off: the feed collapses to a point, THEN the dialog closes
-        # and the path returns. The dialog hides under the black CRT frame.
         self._crt_cb = cb
-        self._state = "crt"
         self._elapsed = 0.0
+        # Dialog dissolves into the static feed; the sequence then holds on the
+        # "TARGET NEUTRALIZED" after-action screen (unless skipped) before the
+        # CRT power-off collapses it and the path returns.
         self._dialog.setWindowOpacity(0.0)
+        if aar:
+            self._callout, self._callout_alert = "TRANSMISSION RESTORED", False
+            self._state = "aar"
+        else:
+            self._state = "crt"
         self.update()
 
     def _end_crt(self):
@@ -431,6 +442,10 @@ class GunnerOverlay(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
 
+        if self._state == "aar":
+            self._paint_aar(p, w, h)
+            p.end()
+            return
         if self._state == "crt":
             self._paint_crt(p, w, h)
             p.end()
@@ -602,6 +617,40 @@ class GunnerOverlay(QWidget):
             p.fillRect(QRectF(random.random() * 120 - 60, ty, w, 1.5),
                        QColor(255, 255, 255, 140))
 
+    def _paint_aar(self, p: QPainter, w: int, h: int):
+        """After-action screen: the dialog has dissolved into a dark static
+        feed; show the HUD dressing + 'TARGET NEUTRALIZED' and the picked
+        path, mirroring the mockup, before the CRT power-off."""
+        p.fillRect(self.rect(), QColor(6, 8, 6))            # dark feed
+        p.setOpacity(0.16)                                  # grainy static bed
+        p.drawPixmap(self.rect(), random.choice(self._grain))
+        p.setOpacity(1.0)
+        self._paint_hud(p, w, h)
+        cy = h / 2.0
+        a = min(1.0, self._elapsed / 220.0)                 # fade the readout in
+        big = QFont(self._mono)
+        big.setPointSize(22)
+        big.setBold(True)
+        big.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 9.0)
+        p.setFont(big)
+        col = QColor(_RANGE)
+        col.setAlphaF(a)
+        p.setPen(col)
+        p.drawText(QRectF(0, cy - 46, w, 44),
+                   Qt.AlignmentFlag.AlignHCenter, "TARGET NEUTRALIZED")
+        sub = QFont(self._mono)
+        sub.setPointSize(11)
+        sub.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
+        p.setFont(sub)
+        col2 = QColor(_HUD)
+        col2.setAlphaF(a * 0.85)
+        p.setPen(col2)
+        raw = (self._aar_path or "").replace("/", "\\")
+        parts = [x for x in raw.split("\\") if x]
+        disp = ("...\\" + "\\".join(parts[-3:])) if len(parts) > 3 else raw
+        p.drawText(QRectF(0, cy + 6, w, 24),
+                   Qt.AlignmentFlag.AlignHCenter, f"PATH ACQUIRED    {disp}")
+
     def _paint_crt(self, p: QPainter, w: int, h: int):
         """Old-CRT power-off: the feed snaps to a bright horizontal line, that
         line collapses to a central dot, and the dot flashes out to black."""
@@ -703,6 +752,8 @@ class _ChopperDialog(QFileDialog):
             if self._overlay._lock_rect is None:
                 centre = self._overlay.map_rect(self.geometry()).center()
                 self._overlay._impact = centre
+            sel = self.selectedFiles()
+            self._overlay._aar_path = sel[0] if sel else ""
             self.setEnabled(False)     # freeze the UI for the kill-cam
             self._overlay.fire(self._complete)
             return

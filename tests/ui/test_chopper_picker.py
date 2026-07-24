@@ -37,7 +37,7 @@ def _wait_for(pred, timeout_ms=2000):
 
 
 def test_fire_sequence_runs_to_done(qapp):
-    """flight → burst (particles + glitch fire together) → CRT close → done."""
+    """flight → burst (particles + glitch together) → AAR → CRT close → done."""
     dlg, overlay = _make_overlay(qapp)
     overlay._impact = QRectF(0, 0, 800, 600).center()
     done = []
@@ -49,15 +49,15 @@ def test_fire_sequence_runs_to_done(qapp):
     assert overlay._puffs                    # dust haze spawned
     assert overlay._knock_ticks > 0          # glitch fires WITH the impact
 
-    # Burst settles → _finish enters the CRT collapse (dialog hidden under it).
-    _saw_crt = False
-    for _ in range(400):
+    # Burst settles → TARGET NEUTRALIZED after-action hold → CRT collapse.
+    seen = set()
+    for _ in range(600):
         if overlay._state == "done":
             break
         overlay._tick()
-        if overlay._state == "crt":
-            _saw_crt = True
-    assert _saw_crt                          # CRT power-off phase ran
+        seen.add(overlay._state)
+    assert "aar" in seen                     # after-action screen shown
+    assert "crt" in seen                     # CRT power-off phase ran
     assert overlay._state == "done"
     assert _wait_for(lambda: done == [True])  # cb delivered when CRT ends
 
