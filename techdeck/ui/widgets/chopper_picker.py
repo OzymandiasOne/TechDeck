@@ -205,8 +205,8 @@ class GunnerOverlay(QWidget):
             from techdeck.core.audio_manager import (
                 get_audio_manager, SOUND_CHOPPER_AMBIENT,
             )
-            self._ambient = get_audio_manager().play_music_stoppable(
-                SOUND_CHOPPER_AMBIENT, loop=True, volume_scale=0.5)
+            self._ambient = get_audio_manager().play_loop_effect(
+                SOUND_CHOPPER_AMBIENT, volume_scale=0.5)
         except Exception:
             self._ambient = None
 
@@ -215,7 +215,7 @@ class GunnerOverlay(QWidget):
         amb, self._ambient = self._ambient, None
         if amb is not None:
             try:
-                amb[0].stop()
+                amb.stop()
             except Exception:
                 pass
 

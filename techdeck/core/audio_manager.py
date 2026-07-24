@@ -92,7 +92,7 @@ _SOUND_FILES: Dict[str, str] = {
     SOUND_CHOPPER_FIRE: "chopper_fire.wav",
     SOUND_CHOPPER_IMPACT: "chopper_impact.wav",
     SOUND_CHOPPER_LOCK: "chopper_lock.wav",
-    SOUND_CHOPPER_AMBIENT: "chopper_ambient.mp3",
+    SOUND_CHOPPER_AMBIENT: "chopper_ambient.wav",
     **{f"moth_voice_{i}": f"voice{i}.wav" for i in range(1, 12)},
 }
 
@@ -230,6 +230,32 @@ class AudioManager:
         player.setSource(QUrl.fromLocalFile(str(path)))
         player.play()
         return (player, audio_out)
+
+    def play_loop_effect(self, sound_id: str, *, volume_scale: float = 1.0):
+        """Loop a WAV forever via QSoundEffect (no QMediaPlayer/ffmpeg backend,
+        so no codec banner in the console and reliable in the frozen build).
+        Returns the QSoundEffect (call .stop() to end it) or None. Use for
+        short ambient beds; ``volume_scale`` multiplies the app volume."""
+        if not self._enabled:
+            return None
+        filename = _SOUND_FILES.get(sound_id)
+        if not filename:
+            return None
+        path = _sounds_dir() / filename
+        if not path.exists():
+            return None
+
+        effect = QSoundEffect()
+        effect.setLoopCount(int(QSoundEffect.Infinite.value))
+        effect.setVolume(self._volume * max(0.0, min(1.0, volume_scale)))
+        effect.setSource(QUrl.fromLocalFile(str(path)))
+        if effect.status() == QSoundEffect.Status.Ready:
+            effect.play()
+        else:
+            effect.statusChanged.connect(
+                lambda: effect.play()
+                if effect.status() == QSoundEffect.Status.Ready else None)
+        return effect
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
