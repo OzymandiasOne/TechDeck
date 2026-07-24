@@ -37,14 +37,19 @@ keep it coming.
 - *"The Move Ticket Omit cover page doesn't identify its batch and nest, and the
   Material Type is left blank once the move tickets are removed."* - The cover is now
   stamped with the batch and nest in bold red beneath the Quality Requirements block,
-  and the blank Material Type cell is filled in automatically from the removed move
-  tickets. Applies to 911 Remove Ticket and the 911 Setup print-packet step that uses
-  it.
+  and the blank Material Type cell is filled in automatically (in black, matching the
+  form) from the removed move tickets. Applies to 911 Remove Ticket and the 911 Setup
+  print-packet step that uses it.
 
 - *"Inspection sheets should include a QF-QU-09 slot for every piece, with the hull
   code shown under each part number."* - 911 Setup now generates one inspection slot
   per piece with the hull code under each part number, and the blank template tab is
   hidden in the finished workbook.
+
+- *"Please put the scribe-verification Word doc in a folder like PRODUCTION
+  PAPERWORK."* - 911 Setup now files the QF-QU-15 scribe-verification doc into a
+  **PRODUCTION PAPERWORK** subfolder of each nest folder instead of dropping it loose
+  (re-running on an existing batch moves the old loose copy in, too).
 
 - *"There should be an easier way to submit suggestions."* - A **Submit Feedback**
   button now sits at the bottom of the left sidebar, one click away from anywhere in

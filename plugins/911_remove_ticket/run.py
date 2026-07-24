@@ -13,6 +13,9 @@ v1.1.0 (QA-requested): the output's first page is stamped with
 under the Quality Requirements grid, and the Material Type cell — blank on
 every packet cover — is filled with the MATERIAL value read off the move
 ticket pages before they are removed.
+
+v1.1.1: the Material Type fill is black (form-data look); only the
+batch/nest stamp stays red.
 """
 
 import re
@@ -33,7 +36,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # centered, Century Gothic bold, under the Quality Requirements section.
@@ -41,6 +44,9 @@ STAMP_FONT_FILE = Path(r"C:\Windows\Fonts\GOTHICB.TTF")  # Century Gothic Bold
 STAMP_FONT_NAME = "CentGoBd"
 STAMP_COLOR = (1, 0, 0)
 STAMP_FONTSIZE = 16
+# Material Type fill is black (2026-07-24) so it reads as form data, not a
+# stamp; only the batch/nest stamp is red.
+MATERIAL_COLOR = (0, 0, 0)
 MATERIAL_FONTSIZE = 12
 BATCH_NEST_TEXT = "BATCH {batch} - NEST {nest}"
 
@@ -149,7 +155,7 @@ def _stamp_first_page(page, batch, nest, material, log) -> list:
             rect = fitz.Rect(cx - 70, row_top - 2, cx + 70, row_top + 22)
             leftover = page.insert_textbox(
                 rect, material, fontsize=MATERIAL_FONTSIZE, fontname=fontname,
-                fontfile=fontfile, color=STAMP_COLOR, align=fitz.TEXT_ALIGN_CENTER)
+                fontfile=fontfile, color=MATERIAL_COLOR, align=fitz.TEXT_ALIGN_CENTER)
             if leftover < 0:
                 warnings.append(f"material {material!r} did not fit the Material Type cell")
         elif occupied:

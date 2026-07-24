@@ -10,7 +10,8 @@ Automates the full 911 QTDR batch setup workflow:
      until the user submits.
   3. Create a subfolder per selected nest inside the batch folder
   4. Copy "911 BATCH _.xlsx" template into each nest folder, rename it, and
-     drop the scribe-verification doc (QF-QU-15 ... SHAPES.docx) into each
+     drop the scribe-verification doc (QF-QU-15 ... SHAPES.docx) into a
+     PRODUCTION PAPERWORK subfolder of each
   5. Copy Working Forecast List -> extract rows for each nest -> paste into
      NEST sheet cols A-C starting row 4
   6. Parse the nest's own NEST PACKAGES packet PDF -> read the labeled
@@ -93,9 +94,11 @@ v1.3.0 changes
     stays blank.
 
   - Scribe-verification doc: "QF-QU-15 REV B - SCRIBE VERIFICATION -
-    SHAPES.docx" is copied from the SACO template dir into every generated
-    nest folder (one copy per nest -- skipped if already present). Missing
-    source is logged as a warning and does not abort the run.
+    SHAPES.docx" is copied from the SACO template dir into a
+    "PRODUCTION PAPERWORK" subfolder of every generated nest folder (one copy
+    per nest -- skipped if already present; a loose copy in the nest root
+    from an earlier version is moved into the subfolder). Missing source is
+    logged as a warning and does not abort the run.
 
 v1.3.1 changes
   - Nests are sorted in Windows Explorer ascending order (StrCmpLogicalW
@@ -195,9 +198,11 @@ def _windows_natural_sorted(values: list) -> list:
 _DEFAULT_TEMPLATE_SUBDIR = "03 - Processing Forms & Templates\\00 - SACO"
 _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 
-# Scribe-verification form dropped into every generated nest folder. Lives in
-# the same SACO template directory as the 911 BATCH template (template_dir).
+# Scribe-verification form dropped into a PRODUCTION PAPERWORK subfolder of
+# every generated nest folder (subfolder per user feedback 2026-07-21). Lives
+# in the same SACO template directory as the 911 BATCH template (template_dir).
 _SCRIBE_DOC_FILENAME = "QF-QU-15 REV B - SCRIBE VERIFICATION - SHAPES.docx"
+_SCRIBE_SUBFOLDER = "PRODUCTION PAPERWORK"
 
 
 def _base_qtdr(override: str = "") -> Path:
@@ -1492,13 +1497,22 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"  Copied -> {dest_name}")
 
         if scribe_available:
-            scribe_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
+            scribe_dir = batch_folder / nest / _SCRIBE_SUBFOLDER
+            scribe_dest = scribe_dir / _SCRIBE_DOC_FILENAME
+            # Earlier versions dropped the doc loose in the nest root;
+            # relocate such a copy instead of duplicating it.
+            legacy_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
             if scribe_dest.exists():
                 log(f"  Scribe doc already in {nest} -- skipped")
             else:
                 try:
-                    shutil.copy2(scribe_src, scribe_dest)
-                    log(f"  Scribe doc -> {nest}")
+                    scribe_dir.mkdir(exist_ok=True)
+                    if legacy_dest.exists():
+                        legacy_dest.replace(scribe_dest)
+                        log(f"  Scribe doc moved -> {nest}\\{_SCRIBE_SUBFOLDER}")
+                    else:
+                        shutil.copy2(scribe_src, scribe_dest)
+                        log(f"  Scribe doc -> {nest}\\{_SCRIBE_SUBFOLDER}")
                 except Exception as e:
                     log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
 
