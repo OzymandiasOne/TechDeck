@@ -688,6 +688,7 @@ class _ChopperDialog(QFileDialog):
         self.setOptions(QFileDialog.Option.DontUseNativeDialog
                         | QFileDialog.Option.ShowDirsOnly)
         self.setViewMode(QFileDialog.ViewMode.List)
+        self.setLabelText(QFileDialog.DialogLabel.Accept, "Execute")
         self.setCursor(_crosshair_cursor())
         self._overlay = None
         self._sequence_done = False
