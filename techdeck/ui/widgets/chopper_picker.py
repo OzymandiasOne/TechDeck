@@ -693,6 +693,7 @@ class _ChopperDialog(QFileDialog):
         self._overlay = None
         self._sequence_done = False
         self._firing = False
+        self._committed = False   # True once a folder is clicked: hover stops moving the lock
 
     def attach_overlay(self, overlay: GunnerOverlay):
         self._overlay = overlay
@@ -704,16 +705,34 @@ class _ChopperDialog(QFileDialog):
             view.setMouseTracking(True)
             view.viewport().setMouseTracking(True)
             view.entered.connect(self._on_hover)
+            view.clicked.connect(self._on_click)   # a click pins the lock
             sel = view.selectionModel()
             if sel is not None:
                 sel.selectionChanged.connect(lambda *_: self._on_pick(view))
+        # Navigating to a different folder re-opens hover targeting.
+        self.directoryEntered.connect(self._on_dir_changed)
 
     def _on_hover(self, index):
-        if self._firing or not index.isValid():
+        # Sweep-to-target — but only until the user commits with a click.
+        if self._firing or self._committed or not index.isValid():
             return
         view = self.findChild(QListView, "listView")
         if view is not None:
             view.setCurrentIndex(index)   # → selectionChanged → _on_pick lock-on
+
+    def _on_click(self, index):
+        # Explicit click: pin the lock to this row; hover no longer moves it.
+        if self._firing or not index.isValid():
+            return
+        self._committed = True
+        view = self.findChild(QListView, "listView")
+        if view is not None:
+            view.setCurrentIndex(index)
+
+    def _on_dir_changed(self, _path):
+        self._committed = False
+        if self._overlay is not None:
+            self._overlay.clear_lock()
 
     def _on_pick(self, view):
         idxs = view.selectionModel().selectedIndexes()
