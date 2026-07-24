@@ -32,7 +32,7 @@ import random
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QListView, QWidget
 from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import (
-    QColor, QCursor, QFont, QPainter, QPen, QPixmap, QRadialGradient,
+    QColor, QCursor, QFont, QImage, QPainter, QPen, QPixmap, QRadialGradient,
 )
 
 # Slow-motion factor locked in the mockup: same trajectories, ~55% speed,
@@ -91,6 +91,21 @@ def _crosshair_cursor() -> QCursor:
         p.drawLine(c + gap, c, size - 3, c)
     p.end()
     return QCursor(pm, c, c)
+
+
+def _grain_tiles(count: int = 8, w: int = 640, h: int = 360) -> list:
+    """Pre-render a handful of grey-noise tiles once; the paint loop cycles
+    them scaled to full screen for the always-on 'thermal feed' film grain
+    (the persistent grey static veil from the mockup). Cheap: one scaled
+    blit per frame instead of per-pixel noise every frame."""
+    import os
+    tiles = []
+    for _ in range(count):
+        buf = os.urandom(w * h)     # w*h random grey bytes
+        img = QImage(bytes(buf), w, h, w,
+                     QImage.Format.Format_Grayscale8).copy()  # detach from buf
+        tiles.append(QPixmap.fromImage(img))
+    return tiles
 
 
 def _smoke_sprite() -> QPixmap:
@@ -157,6 +172,7 @@ class GunnerOverlay(QWidget):
         self._knock_ticks = 0
         self._knock_pending = False
         self._smoke_pm = _smoke_sprite()
+        self._grain = _grain_tiles()   # always-on grey film-grain veil
         self._mono = QFont("Consolas", 10)
         self._t0 = 0.0                 # ms since burst began (for puffs)
 
@@ -370,6 +386,12 @@ class GunnerOverlay(QWidget):
             self._paint_lock(p, frozen=True)
         if self._state in ("burst", "knockout"):
             self._paint_fx(p)
+        if self._state != "done":
+            # Persistent grey film grain over the whole feed (incl. the dialog),
+            # a fresh random tile each frame so it crawls like real static.
+            p.setOpacity(0.10)
+            p.drawPixmap(self.rect(), random.choice(self._grain))
+            p.setOpacity(1.0)
         if self._state == "knockout":
             self._paint_static(p, w, h)
         if self._flash > 0:
