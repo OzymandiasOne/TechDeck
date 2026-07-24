@@ -85,6 +85,39 @@ def test_skip_then_crt_close(qapp):
     dlg.deleteLater()
 
 
+def test_confirm_lock_flickers_and_decays(qapp):
+    """A committed click triggers the confirm flicker over the existing lock."""
+    from PySide6.QtCore import QRectF as _R
+    dlg, overlay = _make_overlay(qapp)
+    rect = _R(200, 150, 180, 36)
+    overlay.set_lock(rect, "BATCH 504")
+    overlay._lock_rect = rect
+    assert overlay._confirm_ticks == 0
+
+    overlay.confirm_lock()
+    assert overlay._confirm_ticks > 0                 # flicker armed
+    assert overlay._lock_solid                        # snapped to solid lock
+    assert "CONFIRMED" in overlay._callout
+
+    for _ in range(20):                               # flicker decays to nothing
+        overlay._tick()
+    assert overlay._confirm_ticks == 0
+
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
+def test_confirm_lock_noop_without_lock(qapp):
+    dlg, overlay = _make_overlay(qapp)
+    overlay._lock_rect = None
+    overlay.confirm_lock()
+    assert overlay._confirm_ticks == 0                # nothing to confirm
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
 class _OldConsole:
     """A console predating the style parameter."""
 

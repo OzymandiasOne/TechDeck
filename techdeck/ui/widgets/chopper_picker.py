@@ -165,6 +165,7 @@ class GunnerOverlay(QWidget):
         self._lock_from = None
         self._lock_anim = 1.0          # 0→1 convergence progress
         self._lock_solid = False
+        self._confirm_ticks = 0        # brief lock flicker when a folder is clicked
 
         # FX particle state (ported 1:1 from the approved mockup).
         self._parts: list = []
@@ -242,6 +243,18 @@ class GunnerOverlay(QWidget):
         if self._state == "aim":
             self._callout, self._callout_alert = "DESIGNATE TARGET FOLDER", False
 
+    def confirm_lock(self):
+        """Explicit click committed this folder — flicker the lock brackets and
+        upgrade the callout to TARGET CONFIRMED (a transient flash over the
+        existing lock, not a change to its steady look)."""
+        if self._lock_rect is None:
+            return
+        self._lock_anim = 1.0
+        self._lock_solid = True
+        self._confirm_ticks = 12       # ~0.4s of blink at the aim cadence
+        self._callout = f"TARGET CONFIRMED — {getattr(self, '_lock_name', '')}"
+        self._callout_alert = False
+
     def fire(self, on_done):
         """Accept pressed with a lock: recoil now, impact after the flight."""
         self._on_done = on_done
@@ -275,6 +288,8 @@ class GunnerOverlay(QWidget):
         self.raise_()
         dt_ms = self._timer.interval()
         self._elapsed += dt_ms
+        if self._confirm_ticks > 0:
+            self._confirm_ticks -= 1
 
         if self._state == "flight":
             if self._elapsed >= 350 and self._callout != "ROUND AWAY":
@@ -528,17 +543,25 @@ class GunnerOverlay(QWidget):
                    a.y() + (b.y() - a.y()) * ease,
                    a.width() + (b.width() - a.width()) * ease,
                    a.height() + (b.height() - a.height()) * ease)
-        pen = QPen(_RANGE if self._lock_solid else _TARGET)
-        pen.setWidthF(2.5)
+        # Commit flicker: on the "on" phase of the blink, flash the brackets
+        # bright white and thicker; between phases they read as the normal lock.
+        flashing = self._confirm_ticks > 0 and (self._confirm_ticks // 2) % 2 == 1
+        if flashing:
+            pen = QPen(QColor(255, 255, 255))
+            pen.setWidthF(4.0)
+        else:
+            pen = QPen(_RANGE if self._lock_solid else _TARGET)
+            pen.setWidthF(2.5)
         p.setPen(pen)
-        s = 15
+        s = 18 if flashing else 15
         for (cx, cy, sx, sy) in (
                 (r.left(), r.top(), 1, 1), (r.right(), r.top(), -1, 1),
                 (r.left(), r.bottom(), 1, -1), (r.right(), r.bottom(), -1, -1)):
             p.drawLine(QPointF(cx, cy), QPointF(cx + s * sx, cy))
             p.drawLine(QPointF(cx, cy), QPointF(cx, cy + s * sy))
         p.setFont(self._mono)
-        p.drawText(QPointF(r.left(), r.top() - 6), "LOCK")
+        p.drawText(QPointF(r.left(), r.top() - 6),
+                   "CONFIRMED" if self._confirm_ticks > 0 else "LOCK")
 
     def _paint_fx(self, p: QPainter):
         # Dust puffs (under everything)
@@ -728,6 +751,8 @@ class _ChopperDialog(QFileDialog):
         view = self.findChild(QListView, "listView")
         if view is not None:
             view.setCurrentIndex(index)
+        if self._overlay is not None:
+            self._overlay.confirm_lock()   # flicker to confirm the selection
 
     def _on_dir_changed(self, _path):
         self._committed = False
