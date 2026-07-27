@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from techdeck.ui.theme_aware import ThemeAware
-from tools.devkit.todo_board.model import BoardStore, load_feedback
+from tools.devkit.todo_board.model import (
+    BoardStore, load_feedback, flush_writebacks,
+)
 from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME
 
 COLUMN_WIDTH = 290
@@ -299,6 +301,7 @@ class TodoBoard(QWidget, ThemeAware):
         # them into its toolbar slot.
         self._status = QLabel("", self)
         self._status_ok = True
+        self._writeback_ok = True
         self._add_bucket_btn = QPushButton("+ Bucket", self)
         self._add_bucket_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_bucket_btn.clicked.connect(self._on_add_bucket)
@@ -326,19 +329,41 @@ class TodoBoard(QWidget, ThemeAware):
     # ---- data / rebuild --------------------------------------------------
 
     def _sync_and_rebuild(self):
+        # Flush BEFORE reading so the reload reflects the statuses we just
+        # wrote (and pending write-backs retry on every Refresh).
+        wb_note = self._flush_writebacks()
         load = load_feedback()
         added = self.store.sync(load)
         if load.ok:
             parts = [f"{len(load.feedback)} open", f"{len(load.archive)} archived"]
             if added:
                 parts.append(f"+{added} new")
+            if wb_note:
+                parts.append(wb_note)
             self._status.setText("  ·  ".join(parts))
-            self._status_ok = True
+            self._status_ok = self._writeback_ok
         else:
             self._status.setText("⚠ " + load.message)
             self._status_ok = False
         self._style_status()
         self.rebuild_all()
+
+    def _flush_writebacks(self) -> str:
+        """Run a write-back flush if anything is pending; returns a short note
+        for the status line ('' when there was nothing to do)."""
+        self._writeback_ok = True
+        if not self.store.pending_writebacks():
+            return ""
+        res = flush_writebacks(self.store)
+        if not res.ok:
+            self._writeback_ok = False
+            return f"⚠ {res.attempted} write-back(s) pending — {res.message}"
+        bits = []
+        if res.written:
+            bits.append(f"{res.written} status(es) written")
+        if res.missing:
+            bits.append(f"{res.missing} row(s) not on Feedback sheet (archived?)")
+        return ", ".join(bits)
 
     def _style_status(self):
         # Neutral, legible text — the accent read as an error in warm themes.
@@ -394,6 +419,14 @@ class TodoBoard(QWidget, ThemeAware):
 
     def _on_card_dropped(self, key: str, bucket_id: str, index: int):
         self.store.move_card(key, bucket_id, index)
+        # A drop into/out of Done or Won't Do queues a Status write-back —
+        # flush it now (moves between working buckets queue nothing, so this
+        # touches the workbook only when a status actually changes).
+        note = self._flush_writebacks()
+        if note:
+            self._status.setText(note)
+            self._status_ok = self._writeback_ok
+            self._style_status()
         self._schedule_rebuild()
 
     def _on_card_deleted(self, key: str):

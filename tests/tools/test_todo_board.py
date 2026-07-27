@@ -160,3 +160,110 @@ def test_board_builds_with_stubbed_feedback(qapp, tmp_path, monkeypatch):
     # theme rebuild must not raise
     board.apply_theme()
     qapp.processEvents()
+
+
+# ---- write-back ------------------------------------------------------------
+
+def _make_telemetry_workbook(path, rows):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Feedback"
+    ws.append(["Timestamp", "User", "Machine", "Suggestion",
+               "Which Feature", "TechDeck Version", "Status"])
+    for row in rows:
+        ws.append(row)
+    arch = wb.create_sheet("Archive")
+    arch.append(["Timestamp", "User", "Machine", "Suggestion",
+                 "Which Feature", "TechDeck Version", "Status"])
+    wb.save(path)
+
+
+def _status_cell(path, row=2):
+    import openpyxl
+    wb = openpyxl.load_workbook(path)
+    try:
+        return wb["Feedback"].cell(row=row, column=7).value
+    finally:
+        wb.close()
+
+
+def test_writeback_done_then_restore(tmp_path, monkeypatch):
+    from tools.devkit.todo_board.model import flush_writebacks, load_feedback
+    xlsx = tmp_path / "TechDeck Telemetry.xlsx"
+    _make_telemetry_workbook(xlsx, [
+        ["2026-07-01 10:00:00", "amy", "M1", "add dark mode",
+         "Shell", "0.8.6", "Needs Review"]])
+    monkeypatch.setenv("TECHDECK_TELEMETRY_XLSX", str(xlsx))
+    store = BoardStore(path=tmp_path / "b.json")
+    load = load_feedback()
+    assert load.ok
+    store.sync(load)
+    key = store.bucket("todo")["cards"][0]
+
+    store.move_card(key, "done", 0)
+    assert store.pending_writebacks() == [(key, "Complete")]
+    res = flush_writebacks(store)
+    assert res.ok and res.written == 1
+    assert _status_cell(xlsx) == "Complete"
+    assert store.cards[key]["written_status"] == "Complete"
+    assert store.pending_writebacks() == []           # idempotent — no re-write
+
+    store.move_card(key, "todo", 0)                   # drag back out
+    res = flush_writebacks(store)
+    assert res.ok and res.written == 1
+    assert _status_cell(xlsx) == "Needs Review"
+    assert store.cards[key]["written_status"] == ""
+
+
+def test_writeback_manual_edit_wins_on_restore(tmp_path, monkeypatch):
+    import openpyxl
+    from tools.devkit.todo_board.model import flush_writebacks, load_feedback
+    xlsx = tmp_path / "TechDeck Telemetry.xlsx"
+    _make_telemetry_workbook(xlsx, [
+        ["2026-07-01 10:00:00", "amy", "M1", "add dark mode",
+         "Shell", "0.8.6", "Needs Review"]])
+    monkeypatch.setenv("TECHDECK_TELEMETRY_XLSX", str(xlsx))
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(load_feedback())
+    key = store.bucket("todo")["cards"][0]
+
+    store.move_card(key, "wont_do", 0)
+    assert flush_writebacks(store).written == 1
+    assert _status_cell(xlsx) == "Won't Do"
+
+    # Maintainer overrides the cell in Excel...
+    wb = openpyxl.load_workbook(xlsx)
+    wb["Feedback"].cell(row=2, column=7).value = "Deferred"
+    wb.save(xlsx)
+    wb.close()
+
+    # ...so dragging back out must NOT stomp it.
+    store.move_card(key, "todo", 0)
+    res = flush_writebacks(store)
+    assert res.ok and res.written == 0 and res.adopted == 1
+    assert _status_cell(xlsx) == "Deferred"
+    assert store.cards[key]["written_status"] == ""   # cleared; not retried
+    assert store.pending_writebacks() == []
+
+
+def test_writeback_adopts_row_missing_from_sheet(tmp_path, monkeypatch):
+    from tools.devkit.todo_board.model import flush_writebacks
+    xlsx = tmp_path / "TechDeck Telemetry.xlsx"
+    _make_telemetry_workbook(xlsx, [])                # header only — row archived
+    monkeypatch.setenv("TECHDECK_TELEMETRY_XLSX", str(xlsx))
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+    res = flush_writebacks(store)
+    assert res.ok and res.missing == 1 and res.written == 0
+    assert store.cards[key]["written_status"] == "Complete"   # adopted
+    assert store.pending_writebacks() == []           # never stuck pending
+
+
+def test_writeback_skips_manual_and_archive_cards(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.add_manual_card("done", "hand-written task")
+    store.sync(_load(archive=[_entry(3, "922 Kitting", "archive")]))  # lands in done
+    assert store.pending_writebacks() == []

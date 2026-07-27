@@ -14,6 +14,18 @@ Two jobs:
    organised. Each card snapshots its source fields at creation, so a card
    survives even if its telemetry row is later edited, archived, or deleted.
 
+3. Write STATUS back to the workbook (``flush_writebacks``): a card dropped in
+   Done / Won't Do sets its Feedback-sheet row's Status cell to Complete /
+   Won't Do; dragging it back out restores "Needs Review" — but only when the
+   cell still holds the value WE wrote (a manual edit in Excel always wins).
+   Only the Status cell of existing rows is ever touched — rows are never
+   added, moved, or deleted, so this cannot collide with the Power Automate
+   flow, which only APPENDS rows (docs/USAGE_TELEMETRY.md). Each card records
+   ``written_status`` (the value we last wrote) only after the file save
+   lands, making the flush idempotent and safe to retry — a locked workbook
+   (open in Excel) just leaves the write-back pending for the next drop or
+   Refresh.
+
 Column lookups go by header NAME, never a fixed index (Hard Rule 1).
 """
 
@@ -35,13 +47,25 @@ STATE_VERSION = 1
 
 TODO_BUCKET_ID = "todo"
 DONE_BUCKET_ID = "done"
+WONT_DO_BUCKET_ID = "wont_do"
 
 DEFAULT_BUCKETS = [
     {"id": TODO_BUCKET_ID, "name": "To-Do"},
     {"id": "in_progress", "name": "In Progress"},
     {"id": DONE_BUCKET_ID, "name": "Done"},
-    {"id": "wont_do", "name": "Won't Do"},
+    {"id": WONT_DO_BUCKET_ID, "name": "Won't Do"},
 ]
+
+# Status values written back to the Feedback sheet. Complete/Needs Review match
+# the sheet's existing triage dropdown; add "Won't Do" to the dropdown list in
+# Excel once so it isn't flagged by validation.
+STATUS_COMPLETE = "Complete"
+STATUS_WONT_DO = "Won't Do"
+STATUS_NEEDS_REVIEW = "Needs Review"
+WRITEBACK_STATUS_BY_BUCKET = {
+    DONE_BUCKET_ID: STATUS_COMPLETE,
+    WONT_DO_BUCKET_ID: STATUS_WONT_DO,
+}
 
 _WORKBOOK_NAME = "TechDeck Telemetry.xlsx"
 _FEEDBACK_SHEET = "Feedback"
@@ -188,6 +212,156 @@ def load_feedback() -> FeedbackLoad:
 
 
 # ---------------------------------------------------------------------------
+# Write-back (Status cells only — never rows; see module docstring)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class WritebackResult:
+    """Outcome of one flush attempt, for the board's status line."""
+    attempted: int = 0    # pending items going in
+    written: int = 0      # Status cells actually changed in the file
+    adopted: int = 0      # already-correct cells / manual edits left alone
+    missing: int = 0      # rows no longer on the Feedback sheet (archived?)
+    ok: bool = True       # False = nothing persisted; retry later
+    message: str = ""
+
+
+def _locate_header(ws) -> tuple[Optional[int], dict[str, int]]:
+    """Find the Feedback header row: (1-based row index, {header: 1-based col}).
+    Scans by NAME (Hard Rules 1+2), capped to the top of the sheet — the header
+    is row 1 in practice, never thousands of rows down."""
+    for r, row in enumerate(ws.iter_rows(values_only=True), start=1):
+        cells = {str(c).strip().lower(): i + 1
+                 for i, c in enumerate(row) if c is not None}
+        if "timestamp" in cells and "suggestion" in cells:
+            return r, cells
+        if r >= 50:
+            break
+    return None, {}
+
+
+def flush_writebacks(store: "BoardStore") -> WritebackResult:
+    """Write pending Status changes into the Feedback sheet. Never raises.
+
+    Atomic + idempotent: the edited workbook is saved to a temp file and
+    os.replace'd over the original, and each card's ``written_status`` is
+    persisted only AFTER that replace lands — a locked/cloud-only workbook
+    leaves everything pending for the next attempt. Rows that no longer exist
+    on the sheet (edited, or manually cut to Archive) are adopted without a
+    write so they don't stay pending forever.
+    """
+    pending = store.pending_writebacks()
+    res = WritebackResult(attempted=len(pending))
+    if not pending:
+        return res
+    path = telemetry_workbook_path()
+    if path is None:
+        res.ok = False
+        res.message = "telemetry workbook not found"
+        return res
+    try:
+        from techdeck.core import plugin_sdk as sdk
+        wb = sdk.load_workbook_resilient(path)   # write mode
+    except Exception as exc:
+        logger.warning("Dev Board write-back: could not open %s: %s", path, exc)
+        res.ok = False
+        res.message = str(exc)
+        return res
+
+    dirty = False
+    landed: dict[str, str] = {}   # card key -> new written_status ("" = clear)
+    try:
+        if _FEEDBACK_SHEET not in wb.sheetnames:
+            res.ok = False
+            res.message = f"no '{_FEEDBACK_SHEET}' sheet"
+            return res
+        ws = wb[_FEEDBACK_SHEET]
+        header_row, cols = _locate_header(ws)
+        status_col = cols.get("status")
+        if header_row is None or status_col is None:
+            res.ok = False
+            res.message = "Feedback sheet has no Status column"
+            return res
+
+        # Index sheet rows by the same identity the cards use.
+        row_by_key: dict[str, int] = {}
+        for r in range(header_row + 1, ws.max_row + 1):
+            def val(name):
+                idx = cols.get(name)
+                return None if idx is None else ws.cell(row=r, column=idx).value
+            suggestion = val("suggestion")
+            title = "" if suggestion is None else str(suggestion).strip()
+            if not title:
+                continue
+            user = val("user")
+            user = "" if user is None else str(user).strip()
+            row_by_key[_card_key(_iso(val("timestamp")), user, title)] = r
+
+        for key, desired in pending:
+            card = store.cards.get(key)
+            if card is None:
+                continue
+            r = row_by_key.get(key)
+            if r is None:
+                # Row edited or manually moved to Archive — adopt and move on.
+                res.missing += 1
+                landed[key] = "" if desired == STATUS_NEEDS_REVIEW else desired
+                continue
+            current = ws.cell(row=r, column=status_col).value
+            current = "" if current is None else str(current).strip()
+            written = card.get("written_status") or ""
+            if desired == STATUS_NEEDS_REVIEW:
+                # Restore only over OUR value; a manual edit in Excel wins.
+                if current == written:
+                    ws.cell(row=r, column=status_col).value = STATUS_NEEDS_REVIEW
+                    dirty = True
+                    res.written += 1
+                else:
+                    res.adopted += 1
+                landed[key] = ""
+            else:
+                if current == desired:
+                    res.adopted += 1     # already there (manual or earlier write)
+                else:
+                    ws.cell(row=r, column=status_col).value = desired
+                    dirty = True
+                    res.written += 1
+                landed[key] = desired
+
+        if dirty:
+            tmp = path.with_name(path.stem + ".writeback.tmp.xlsx")
+            wb.save(tmp)
+            try:
+                os.replace(tmp, path)
+            except Exception as exc:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                logger.warning("Dev Board write-back: could not replace %s: %s",
+                               path, exc)
+                res.ok = False
+                res.written = 0
+                res.message = ("workbook is open in Excel — close it and Refresh"
+                               if isinstance(exc, PermissionError) else str(exc))
+                return res
+    finally:
+        wb.close()
+
+    # Only now — after the file write landed (or none was needed) — record what
+    # we own, so a failed save retries cleanly next time.
+    changed = False
+    for key, new_written in landed.items():
+        card = store.cards.get(key)
+        if card is not None and (card.get("written_status") or "") != new_written:
+            card["written_status"] = new_written
+            changed = True
+    if changed:
+        store.save()
+    return res
+
+
+# ---------------------------------------------------------------------------
 # Board state (persistent overlay)
 # ---------------------------------------------------------------------------
 
@@ -264,6 +438,7 @@ class BoardStore:
             "orig_status": e.orig_status, "source": e.source,
             "labels": [e.which_feature] if e.which_feature else [],
             "checklist": [], "dismissed": False,
+            "written_status": "",   # last Status value WE wrote to the sheet
         }
 
     def sync(self, load: FeedbackLoad) -> int:
@@ -292,6 +467,36 @@ class BoardStore:
         if added:
             self.save()
         return added
+
+    # ---- write-back ------------------------------------------------------
+
+    def pending_writebacks(self) -> list[tuple[str, str]]:
+        """Cards whose Feedback-sheet Status should change, as
+        ``[(card_key, desired_status)]``.
+
+        - In a terminal bucket (Done / Won't Do) and we haven't recorded a
+          successful write of that value yet -> write the mapped status.
+        - NOT in a terminal bucket but ``written_status`` says we previously
+          wrote one -> restore ``Needs Review`` (the flush only actually writes
+          it if the cell still holds our value — manual edits win).
+
+        Only telemetry-backed live rows participate: manual cards have no row,
+        and archive-sourced cards live on the Archive sheet we never write.
+        """
+        out: list[tuple[str, str]] = []
+        for b in self.buckets:
+            target = WRITEBACK_STATUS_BY_BUCKET.get(b["id"])
+            for key in b["cards"]:
+                card = self.cards.get(key)
+                if card is None or card.get("source") != "feedback":
+                    continue
+                written = card.get("written_status") or ""
+                if target is not None:
+                    if written != target:
+                        out.append((key, target))
+                elif written:
+                    out.append((key, STATUS_NEEDS_REVIEW))
+        return out
 
     # ---- card mutations --------------------------------------------------
 
