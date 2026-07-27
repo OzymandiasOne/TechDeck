@@ -23,7 +23,7 @@ from techdeck.ui.theme_aware import ThemeAware
 from tools.devkit.todo_board.model import BoardStore, load_feedback
 from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME
 
-COLUMN_WIDTH = 320
+COLUMN_WIDTH = 290
 
 
 class _CardList(QWidget):
@@ -42,7 +42,7 @@ class _CardList(QWidget):
         self.setAcceptDrops(True)
         self._v = QVBoxLayout(self)
         self._v.setContentsMargins(8, 8, 8, 8)
-        self._v.setSpacing(8)
+        self._v.setSpacing(14)
         self._v.addStretch(1)
 
         # Indicator is a free child (NOT in the layout) positioned with
