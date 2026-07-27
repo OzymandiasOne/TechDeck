@@ -329,10 +329,10 @@ class TodoBoard(QWidget, ThemeAware):
         load = load_feedback()
         added = self.store.sync(load)
         if load.ok:
-            msg = load.message
+            parts = [f"{len(load.feedback)} open", f"{len(load.archive)} archived"]
             if added:
-                msg += f"  ·  +{added} new"
-            self._status.setText(msg)
+                parts.append(f"+{added} new")
+            self._status.setText("  ·  ".join(parts))
             self._status_ok = True
         else:
             self._status.setText("⚠ " + load.message)
@@ -341,7 +341,8 @@ class TodoBoard(QWidget, ThemeAware):
         self.rebuild_all()
 
     def _style_status(self):
-        color = self._pal.accent if self._status_ok else self._pal.warning
+        # Neutral, legible text — the accent read as an error in warm themes.
+        color = self._pal.text if self._status_ok else self._pal.warning
         self._status.setStyleSheet(f"color: {color}; font-size: 9pt;")
 
     def devkit_toolbar_actions(self):
