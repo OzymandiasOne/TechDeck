@@ -40,6 +40,27 @@ from techdeck.ui.widgets.steelbeams_events import (
 )
 
 
+def _load_event_art(event_id: str, scale: int = 2):
+    """The 96x64 .tdart scene panel for a responsive event, rendered crisp at
+    2x (192x128 — sits centered in the modal's 148px art slot). None when the
+    event has no scene file (or anything fails), so the modal falls back to
+    the tinted placeholder."""
+    if not event_id:
+        return None
+    try:
+        from techdeck.ui import pixel_art
+        if getattr(sys, "frozen", False):
+            base = Path(sys._MEIPASS) / "assets" / "sprites"
+        else:
+            base = Path(__file__).resolve().parents[3] / "assets" / "sprites"
+        path = base / "events" / f"{event_id}.tdart"
+        if not path.exists():
+            return None
+        return pixel_art.render_file(path, scale=scale)
+    except Exception:
+        return None
+
+
 def _load_woogy_pixmap(target: int = 112):
     """Woogy's portrait for the message box — the same .tdart sprite the Emporium
     uses, rendered crisp (nearest-neighbor) at roughly `target` px. None if the
@@ -286,7 +307,7 @@ _CONVERSION_LOG = [
 _FLAVOR_LINES = [
     "A safety meeting is held about the last safety meeting.",
     "The suggestion box is full. It contains one suggestion, submitted 400 times.",
-    "Someone reheats fish in the break-room microwave. Morale becomes a lagging indicator.",
+    "Dave reheats fish in the break-room microwave. Morale becomes a lagging indicator.",
     "The forklift beeps in reverse. It has not moved in six hours.",
     "A steel beam is certified. It certifies you back. You feel judged.",
     "Corporate rebrands the color grey to 'Signature Grey.' Nothing else changes.",
@@ -301,7 +322,7 @@ _FLAVOR_LINES = [
     "IT closes your ticket as 'working as intended.' It is not working as intended.",
     "The break-room clock is nine minutes fast. Nobody fixes it; nobody is late.",
     "A team-building exercise concludes. The team is now aware of each other.",
-    "The fire drill goes well. The fire is rescheduled.",
+    "The fire drill goes well. One employee fired. The actual fire is rescheduled.",
     "Accounting finds a rounding error in your favor, then rounds it back.",
     "A fresh coat of paint is applied to the old coat of paint.",
     "The mission-critical spreadsheet is opened by two people at once. Both flee.",
@@ -1298,13 +1319,21 @@ class EventModal(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(title)
 
-        art = QLabel(f"[ {event.get('art', 'scene')} ]")
+        art = QLabel()
         art.setFixedHeight(148)
         art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tint = self._ART_TINT.get(event.get("art", ""), "#333340")
-        art.setStyleSheet(
-            f"background:{tint};border:2px solid #55556a;border-radius:6px;"
-            "color:#99a; font-family:Consolas; font-size:10px;")
+        pix = _load_event_art(event.get("id", ""))
+        if pix is not None:
+            art.setPixmap(pix)
+            art.setStyleSheet(
+                "background:#101018;border:2px solid #55556a;border-radius:6px;")
+        else:
+            # no scene file — the original tinted placeholder
+            art.setText(f"[ {event.get('art', 'scene')} ]")
+            tint = self._ART_TINT.get(event.get("art", ""), "#333340")
+            art.setStyleSheet(
+                f"background:{tint};border:2px solid #55556a;border-radius:6px;"
+                "color:#99a; font-family:Consolas; font-size:10px;")
         lay.addWidget(art)
 
         desc = QLabel(event.get("desc", ""))
