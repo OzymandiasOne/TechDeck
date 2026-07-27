@@ -1,4 +1,4 @@
-"""Card, label-chip, and checklist widgets for the DevKit To-Do Board.
+"""Card, label-chip, and checklist widgets for the DevKit Dev Board.
 
 `TaskCard` is the Teams-style card: colored label chips, a title, a meta line,
 and an inline checklist whose items strike through when ticked. It is also the

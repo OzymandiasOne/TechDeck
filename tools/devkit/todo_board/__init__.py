@@ -1,4 +1,4 @@
-"""DevKit To-Do Board — a Teams-style bucket + card board for working the
+"""DevKit Dev Board — a Teams-style bucket + card board for working the
 feedback backlog.
 
 Cards are auto-generated from the maintainer's telemetry workbook (one card per

@@ -1,4 +1,4 @@
-"""Tests for the DevKit To-Do Board (source-only dev tool).
+"""Tests for the DevKit Dev Board (source-only dev tool).
 
 Data-layer tests use a temp state file; widget tests use the offscreen `qapp`
 and stub `load_feedback` so they never read the maintainer's real telemetry
@@ -27,7 +27,7 @@ def _load(feedback=(), archive=()) -> FeedbackLoad:
 def test_todo_board_is_default_devkit_page():
     from tools.devkit.registry import DEV_TOOLS
     assert DEV_TOOLS[0].key == "todo_board"        # mounts first => default page
-    assert DEV_TOOLS[0].label == "To-Do Board"
+    assert DEV_TOOLS[0].label == "Dev Board"
 
 
 # ---- data layer ------------------------------------------------------------

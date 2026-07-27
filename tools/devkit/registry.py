@@ -47,7 +47,7 @@ def _build_pixel_lint() -> QWidget:
 
 
 DEV_TOOLS = [
-    ToolSpec("todo_board", "To-Do Board", _build_todo_board),
+    ToolSpec("todo_board", "Dev Board", _build_todo_board),
     ToolSpec("pixel_studio", "Pixel Studio", _build_pixel_studio),
     ToolSpec("automated_tests", "Automated Tests", _build_test_runner),
     ToolSpec("ship_readiness", "Ship Readiness", _build_ship_readiness),

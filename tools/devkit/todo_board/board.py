@@ -1,4 +1,4 @@
-"""The DevKit To-Do Board widget — Teams-style buckets + cards over the feedback
+"""The DevKit Dev Board widget — Teams-style buckets + cards over the feedback
 backlog.
 
 Layout: a header bar (Refresh / Add bucket / status) over a horizontally
@@ -281,7 +281,7 @@ class BucketColumn(QFrame):
 
 
 class TodoBoard(QWidget, ThemeAware):
-    """The DevKit To-Do Board tool (mounted first in the DevKit picker)."""
+    """The DevKit Dev Board tool (mounted first in the DevKit picker)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

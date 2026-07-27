@@ -1,4 +1,4 @@
-"""Data layer for the DevKit To-Do Board.
+"""Data layer for the DevKit Dev Board.
 
 Two jobs:
 
@@ -175,7 +175,7 @@ def load_feedback() -> FeedbackLoad:
         from techdeck.core import plugin_sdk as sdk
         wb = sdk.load_workbook_resilient(path, read_only=True, data_only=True)
     except Exception as exc:  # locked / placeholder / corrupt — report, don't crash
-        logger.warning("To-Do Board: could not read %s: %s", path, exc)
+        logger.warning("Dev Board: could not read %s: %s", path, exc)
         return FeedbackLoad(path=path, message=str(exc))
     try:
         feedback = _read_sheet(wb, _FEEDBACK_SHEET, "feedback")
@@ -217,7 +217,7 @@ class BoardStore:
                 self.buckets = data.get("buckets") or []
                 self.cards = data.get("cards") or {}
             except Exception as exc:
-                logger.warning("To-Do Board: state unreadable (%s); starting fresh", exc)
+                logger.warning("Dev Board: state unreadable (%s); starting fresh", exc)
                 self.buckets, self.cards = [], {}
         if not self.buckets:
             self.buckets = [dict(b, cards=[]) for b in DEFAULT_BUCKETS]
