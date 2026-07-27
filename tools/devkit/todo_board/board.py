@@ -13,6 +13,7 @@ theme change (ThemeAware). Source-only — never in the frozen build.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea,
     QPushButton, QToolButton, QMenu, QInputDialog, QMessageBox, QSizePolicy,
@@ -31,6 +32,10 @@ class _CardList(QWidget):
 
     dropped = Signal(str, int)   # card key, insert index
 
+    AUTOSCROLL_ZONE = 52       # px from the viewport edge that starts scrolling
+    AUTOSCROLL_MAX = 20        # px per tick at the very edge (ramps from 1)
+    AUTOSCROLL_INTERVAL = 15   # ms between scroll ticks
+
     def __init__(self, palette, parent=None):
         super().__init__(parent)
         self._pal = palette
@@ -47,6 +52,19 @@ class _CardList(QWidget):
         self._indicator.setStyleSheet(
             f"background-color: {palette.accent}; border-radius: 1px;")
         self._indicator.hide()
+
+        # Auto-scroll while a drag hovers near the top/bottom edge. A timer
+        # drives it because drag-move events stop firing when the cursor holds
+        # still in the zone.
+        self._scroll = None
+        self._autoscroll_v = 0
+        self._autoscroll_timer = QTimer(self)
+        self._autoscroll_timer.setInterval(self.AUTOSCROLL_INTERVAL)
+        self._autoscroll_timer.timeout.connect(self._on_autoscroll_tick)
+
+    def set_scroll_area(self, scroll):
+        """Wire the owning QScrollArea so drag-near-edge can auto-scroll it."""
+        self._scroll = scroll
 
     def add_card(self, card: TaskCard):
         self._v.insertWidget(self._v.count() - 1, card)  # before the stretch
@@ -86,6 +104,45 @@ class _CardList(QWidget):
         self._indicator.show()
         self._indicator.raise_()
 
+    # ---- auto-scroll near the edges while dragging ----------------------
+
+    def _update_autoscroll(self):
+        if self._scroll is None:
+            return
+        vp = self._scroll.viewport()
+        y = vp.mapFromGlobal(QCursor.pos()).y()
+        zone, height = self.AUTOSCROLL_ZONE, vp.height()
+        v = 0
+        if y < zone:
+            v = -max(1, round(self.AUTOSCROLL_MAX * (zone - y) / zone))
+        elif y > height - zone:
+            v = max(1, round(self.AUTOSCROLL_MAX * (y - (height - zone)) / zone))
+        self._autoscroll_v = v
+        if v and not self._autoscroll_timer.isActive():
+            self._autoscroll_timer.start()
+        elif not v and self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
+    def _on_autoscroll_tick(self):
+        if not self._autoscroll_v or self._scroll is None:
+            self._stop_autoscroll()
+            return
+        sb = self._scroll.verticalScrollBar()
+        new = max(sb.minimum(), min(sb.maximum(), sb.value() + self._autoscroll_v))
+        if new == sb.value():
+            return  # already at the end in this direction
+        sb.setValue(new)
+        # The content moved under a stationary cursor — refresh the indicator.
+        y = self.mapFromGlobal(QCursor.pos()).y()
+        self._show_indicator(self._gap_y(self._index_at(y), self._cards()))
+
+    def _stop_autoscroll(self):
+        self._autoscroll_v = 0
+        if self._autoscroll_timer.isActive():
+            self._autoscroll_timer.stop()
+
+    # ---- drop target ----------------------------------------------------
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(CARD_MIME):
             event.acceptProposedAction()
@@ -96,13 +153,16 @@ class _CardList(QWidget):
         y = event.position().toPoint().y()
         idx = self._index_at(y)
         self._show_indicator(self._gap_y(idx, self._cards()))
+        self._update_autoscroll()
         event.acceptProposedAction()
 
     def dragLeaveEvent(self, event):
         self._indicator.hide()
+        self._stop_autoscroll()
 
     def dropEvent(self, event):
         self._indicator.hide()
+        self._stop_autoscroll()
         if not event.mimeData().hasFormat(CARD_MIME):
             return
         key = bytes(event.mimeData().data(CARD_MIME)).decode("utf-8")
@@ -177,9 +237,13 @@ class BucketColumn(QFrame):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # No visible scrollbar — the mouse wheel and drag-near-edge auto-scroll
+        # move a long column instead.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self._list)
         scroll.setStyleSheet("QScrollArea { background: transparent; }")
         self._list.setStyleSheet("background: transparent;")
+        self._list.set_scroll_area(scroll)
         outer.addWidget(scroll, 1)
 
     def _icon_btn_qss(self) -> str:

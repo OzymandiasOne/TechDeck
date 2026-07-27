@@ -12,6 +12,7 @@ board via the `deleted` signal so it can rebuild.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QMimeData, QPoint
@@ -19,6 +20,7 @@ from PySide6.QtGui import QDrag, QFont, QColor
 from PySide6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QToolButton, QCheckBox,
     QLineEdit, QMenu, QApplication, QWidget, QInputDialog,
+    QGraphicsDropShadowEffect,
 )
 
 from techdeck.ui.widgets.flow_layout import FlowLayout
@@ -59,6 +61,15 @@ def _readable_on(hex_color: str) -> str:
     c = QColor(hex_color)
     luminance = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255
     return "#1A1A1A" if luminance > 0.6 else "#FFFFFF"
+
+
+def _parse_shadow(rgba: str) -> QColor:
+    """Parse an ``rgba(r, g, b, a)`` palette shadow string into a QColor."""
+    m = re.match(r"rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)", rgba or "")
+    if m:
+        return QColor(int(m[1]), int(m[2]), int(m[3]),
+                      max(70, int(float(m[4]) * 255)))
+    return QColor(0, 0, 0, 80)
 
 
 def _format_date(date_iso: str) -> str:
@@ -208,6 +219,13 @@ class TaskCard(QFrame):
         self._checklist_v.setSpacing(4)
         self._outer.addWidget(self._checklist_host)
 
+        # Soft drop shadow so the card lifts off the bucket tray.
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(16)
+        shadow.setOffset(0, 3)
+        shadow.setColor(_parse_shadow(palette.shadow))
+        self.setGraphicsEffect(shadow)
+
         self._render()
 
     # ---- rendering -------------------------------------------------------
@@ -333,8 +351,9 @@ class TaskCard(QFrame):
     # ---- theming ---------------------------------------------------------
 
     def _apply_frame_style(self):
+        # Lighter than the bucket tray + a drop shadow so cards stand out.
         self.setStyleSheet(
-            f"#todoCard {{ background-color: {self._pal.surface}; "
+            f"#todoCard {{ background-color: {self._pal.surface_hover}; "
             f"border: 1px solid {self._pal.border}; border-radius: 8px; }}"
             f"#todoCard:hover {{ border-color: {self._pal.accent}; }}")
 
