@@ -1,11 +1,12 @@
 """
 DevKit page — the source-only developer-tools surface.
 
-A left-nav page (below Settings, visible only in dev mode). One slim toolbar
-hosts the tool switcher — the selected tool's name doubles as the page title —
-plus any action widgets the mounted tool contributes via
-`devkit_toolbar_actions()`; below it the selected tool mounts flush inside
-TechDeck (no framed picker, no rounded corners).
+A left-nav page (below Settings, visible only in dev mode). A full-width header
+BAR (surface, with a divider under it) hosts the tool switcher — the selected
+tool's name doubles as the page title — plus any action widgets the mounted tool
+contributes via `devkit_toolbar_actions()`. The selected tool then mounts flush
+edge-to-edge below the bar (no framed picker, no inset panel, no rounded
+corners), so the header reads as a header and the tool as the canvas.
 
 This page is only ever constructed in source builds (the shell gates it on
 techdeck.ui.dev_mode.is_dev_build), so importing the source-only tools/devkit
@@ -20,7 +21,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 
 from techdeck.core.settings import SettingsManager
-from techdeck.ui.theme import get_current_palette
+from techdeck.ui.theme_manager import get_theme_manager
 
 
 class DevKitPage(QWidget):
@@ -33,20 +34,24 @@ class DevKitPage(QWidget):
         self._loaded: dict = {}   # registry index -> built widget
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 14, 20, 14)
-        outer.setSpacing(12)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # Unified toolbar: the tool name is the title, the combo switches tools,
-        # and the right side hosts the mounted tool's own action widgets. Bare
-        # QLabel/QComboBox inherit the themed text color from the app cascade.
-        bar = QHBoxLayout()
-        bar.setSpacing(12)
+        # Header bar — a defined surface band the controls sit ON, with a
+        # divider under it. Full-width and square (no rounded corners, no inset
+        # frame), so nothing reads as a cut-out.
+        self._header = QWidget()
+        self._header.setObjectName("devkitHeader")
+        hbar = QHBoxLayout(self._header)
+        hbar.setContentsMargins(20, 10, 20, 10)
+        hbar.setSpacing(12)
+
         self._title = QLabel("")
         title_font = QFont()
-        title_font.setPointSize(16)
+        title_font.setPointSize(15)
         title_font.setBold(True)
         self._title.setFont(title_font)
-        bar.addWidget(self._title)
+        hbar.addWidget(self._title)
 
         self.combo = QComboBox()
         self.combo.setMinimumHeight(30)
@@ -56,27 +61,37 @@ class DevKitPage(QWidget):
         # Selecting a tool mounts it directly. The initial tool mounts on first
         # show (currentIndexChanged doesn't fire for the starting index).
         self.combo.currentIndexChanged.connect(self._mount_tool)
-        bar.addWidget(self.combo)
-        bar.addStretch()
+        hbar.addWidget(self.combo)
+        hbar.addStretch()
 
         # Right-side slot filled from the mounted tool's devkit_toolbar_actions().
         self._action_slot = QWidget()
         self._action_layout = QHBoxLayout(self._action_slot)
         self._action_layout.setContentsMargins(0, 0, 0, 0)
         self._action_layout.setSpacing(8)
-        bar.addWidget(self._action_slot)
-        outer.addLayout(bar)
+        hbar.addWidget(self._action_slot)
+        outer.addWidget(self._header)
 
-        # Host — the selected tool mounts here, flush (no frame / rounded
-        # corners, so nothing shows through the corners). Built once and cached
-        # so re-selecting a tool keeps its state.
+        # Host — the selected tool mounts here, flush and full-bleed. Built once
+        # and cached so re-selecting a tool keeps its state.
         self.host = QStackedWidget()
         self._placeholder = QLabel("Select a tool to load it here.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _pal = get_current_palette(self.settings.get_theme())
-        self._placeholder.setStyleSheet(f"color: {_pal.text_secondary}; font-size: 13px;")
         self.host.addWidget(self._placeholder)
         outer.addWidget(self.host, 1)
+
+        self._restyle()
+        get_theme_manager().theme_changed.connect(lambda _name: self._restyle())
+
+    def _restyle(self):
+        pal = get_theme_manager().get_current_palette()
+        # Header sits on `surface` with a divider; the tool canvas below is the
+        # app `background`, so the two read as header + content, not a cut-out.
+        self._header.setStyleSheet(
+            f"#devkitHeader {{ background-color: {pal.surface}; "
+            f"border-bottom: 1px solid {pal.border}; }}")
+        self._placeholder.setStyleSheet(
+            f"color: {pal.text_secondary}; font-size: 13px;")
 
     def showEvent(self, event):
         super().showEvent(event)

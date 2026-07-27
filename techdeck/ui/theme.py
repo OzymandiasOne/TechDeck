@@ -594,8 +594,22 @@ QComboBox QAbstractItemView {{
     background-color: {theme.surface};
     color: {theme.text};
     border: 1px solid {theme.border};
-    selection-background-color: {theme.tile_selected};
+    border-radius: 6px;
+    padding: 3px;
     outline: none;
+}}
+
+QComboBox QAbstractItemView::item {{
+    border: none;
+    border-radius: 4px;
+    padding: 5px 8px;
+    margin: 1px 2px;
+}}
+
+QComboBox QAbstractItemView::item:selected,
+QComboBox QAbstractItemView::item:hover {{
+    background-color: {theme.tile_selected};
+    color: {theme.text};
 }}
 
 /* ===== Input Fields ===== */
