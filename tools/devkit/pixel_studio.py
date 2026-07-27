@@ -32,6 +32,7 @@ from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 from techdeck.ui import pixel_art
+from techdeck.ui.theme_aware import ThemeAware
 from tools.pixel_editor import Canvas, _DEFAULT_PALETTE, _CHAR_POOL
 
 
@@ -131,18 +132,18 @@ def _theme_surface(theme_name: str) -> str:
 
 
 # ── shared canvas panel (tools + palette + status) ───────────────────────────
-class _CanvasPanel(QWidget):
+class _CanvasPanel(QWidget, ThemeAware):
     """Base for the paint modes: the reused Canvas engine flanked by a tools
     rail (left) and palette rail (right), plus a status line. Subclasses supply
     the top-bar action set via _build_action_bar() and may extend the body via
-    _build_body()."""
+    _build_body(). Theme-aware: every color comes from the active palette and
+    re-applies on a live theme switch."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        from techdeck.ui.theme_manager import get_theme_manager
-        pal = get_theme_manager().get_current_palette()
-        self._icon_color = pal.text
-        self._accent = pal.accent
+        self._pal = self.get_current_palette()
+        self._icon_color = self._pal.text
+        self._accent = self._pal.accent
 
         self.canvas = Canvas()
         self.canvas.color_picked.connect(self._on_pick)
@@ -151,7 +152,6 @@ class _CanvasPanel(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll.setStyleSheet("QScrollArea { background: #1e1e1e; border: none; }")
 
         # Action bar — hosted by the studio's top bar (not this panel).
         self.action_bar = self._build_action_bar()
@@ -162,10 +162,49 @@ class _CanvasPanel(QWidget):
         root.addLayout(self._build_body(), 1)
 
         self.status = QLabel("Ready")
-        self.status.setStyleSheet("color: #888; font-size: 11px;")
         root.addWidget(self.status)
 
+        self.setup_theme_awareness()   # subscribes + styles/swatches once
+
+    def apply_theme(self):
+        pal = self.get_current_palette()
+        self._pal = pal
+        self._icon_color = pal.text
+        self._accent = pal.accent
+        # Recessed per-theme work surface behind the artboard (never a
+        # hardcoded dark gray — it clashed on light themes).
+        self.scroll.setStyleSheet(
+            f"QScrollArea {{ background: {pal.console_bg}; "
+            f"border: 1px solid {pal.border}; }}")
+        self.status.setStyleSheet(
+            f"color: {pal.text_secondary}; font-size: 11px;")
+        tool_style = self._tool_btn_qss()
+        for name, b in self.tool_buttons.items():
+            b.setIcon(_svg_icon(_TOOL_ICONS[name], self._icon_color))
+            b.setStyleSheet(tool_style)
+        nav_style = self._nav_btn_qss()
+        for name, b in self._nav_buttons:
+            b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color))
+            b.setStyleSheet(nav_style)
         self._rebuild_swatches()
+
+    def _tool_btn_qss(self) -> str:
+        return f"""
+            QPushButton {{ background: transparent;
+                           border: 1px solid {self._pal.border_strong};
+                           border-radius: 6px; }}
+            QPushButton:hover {{ background: rgba(127, 127, 127, 0.15); }}
+            QPushButton:checked {{ background: rgba(127, 127, 127, 0.28);
+                                   border: 2px solid {self._accent}; }}
+        """
+
+    def _nav_btn_qss(self) -> str:
+        return f"""
+            QPushButton {{ background: transparent;
+                           border: 1px solid {self._pal.border_strong};
+                           border-radius: 6px; }}
+            QPushButton:hover {{ background: rgba(127, 127, 127, 0.15); }}
+        """
 
     # ---- overridable hooks ---------------------------------------------------
     def _build_action_bar(self) -> QWidget:
@@ -192,13 +231,7 @@ class _CanvasPanel(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
 
         v.addWidget(self._heading("Tools"))
-        tool_style = f"""
-            QPushButton {{ background: transparent; border: 1px solid #444;
-                           border-radius: 6px; }}
-            QPushButton:hover {{ background: rgba(127, 127, 127, 0.15); }}
-            QPushButton:checked {{ background: rgba(127, 127, 127, 0.28);
-                                   border: 2px solid {self._accent}; }}
-        """
+        tool_style = self._tool_btn_qss()
         grid = QGridLayout()
         grid.setSpacing(4)
         self.tool_group = QButtonGroup(self)
@@ -220,13 +253,10 @@ class _CanvasPanel(QWidget):
         v.addLayout(grid)
         self.tool_buttons["pencil"].setChecked(True)
 
-        nav_style = """
-            QPushButton { background: transparent; border: 1px solid #444;
-                          border-radius: 6px; }
-            QPushButton:hover { background: rgba(127, 127, 127, 0.15); }
-        """
+        nav_style = self._nav_btn_qss()
         urow = QHBoxLayout()
         urow.setSpacing(4)
+        self._nav_buttons = []
         for name, slot in (("undo", self.canvas.undo), ("redo", self.canvas.redo)):
             b = QPushButton()
             b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 22))
@@ -236,6 +266,7 @@ class _CanvasPanel(QWidget):
             b.setStyleSheet(nav_style)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(slot)
+            self._nav_buttons.append((name, b))
             urow.addWidget(b)
         urow.addStretch()
         v.addLayout(urow)
@@ -329,12 +360,13 @@ class _CanvasPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         for ch, hexval in self.canvas.palette.items():
-            # No text — just the colour; a white border marks the selection.
+            # No text — just the colour; an accent border marks the selection.
             b = QPushButton()
             b.setFixedHeight(22)
             b.setToolTip(hexval)
             selected = (ch == self.canvas.active_char)
-            border = "3px solid #ffffff" if selected else "1px solid #555"
+            border = (f"3px solid {self._accent}" if selected
+                      else f"1px solid {self._pal.border_strong}")
             b.setStyleSheet(f"background:{hexval}; border:{border}; border-radius:4px;")
             b.clicked.connect(lambda _c, c=ch: self._select_char(c))
             self.swatch_box.addWidget(b)
@@ -500,6 +532,17 @@ class _TileIconPanel(_CanvasPanel):
             cell = max(2, min((vp.width() - 4) // w, (vp.height() - 4) // h))
             self.canvas.set_zoom(cell)
 
+    def apply_theme(self):
+        super().apply_theme()
+        pal = self._pal
+        self._preview_note.setStyleSheet(
+            f"color: {pal.text_secondary}; font-size: 10px;")
+        for tile in self._preview_labels.values():
+            tile.setStyleSheet(
+                f"border: 1px solid {pal.border}; border-radius: 4px;")
+        for name in self._preview_names:
+            name.setStyleSheet(f"font-size: 10px; color: {pal.text_secondary};")
+
     def _build_action_bar(self):
         bar = QWidget()
         row = QHBoxLayout(bar)
@@ -555,26 +598,25 @@ class _TileIconPanel(_CanvasPanel):
         v = QVBoxLayout(side)
         v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(self._heading("Preview"))
-        note = QLabel("Recolored per theme by luminance rank — draw with tonal "
-                      "contrast.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #888; font-size: 10px;")
-        v.addWidget(note)
+        self._preview_note = QLabel(
+            "Recolored per theme by luminance rank — draw with tonal contrast.")
+        self._preview_note.setWordWrap(True)
+        v.addWidget(self._preview_note)
 
         grid = QGridLayout()
         grid.setSpacing(8)
         self._preview_labels = {}
+        self._preview_names = []
         for i, theme in enumerate(_preview_themes()):
             cell = QVBoxLayout()
             cell.setSpacing(2)
             tile = QLabel()
             tile.setFixedSize(64, 64)
             tile.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            tile.setStyleSheet("border: 1px solid #333; border-radius: 4px;")
             self._preview_labels[theme] = tile
             name = QLabel(theme.replace("_", " ").title())
-            name.setStyleSheet("font-size: 10px; color: #999;")
             name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._preview_names.append(name)
             cell.addWidget(tile, alignment=Qt.AlignmentFlag.AlignCenter)
             cell.addWidget(name)
             holder = QWidget()
@@ -752,8 +794,11 @@ class _PlacementPanel(QWidget):
             m.SCALE = 2   # fit the whole scene in the embed area
             page.setWidget(getattr(m, cls)())
         except Exception as exc:
+            from techdeck.ui.theme_manager import get_theme_manager
             err = QLabel(f"Could not load {label}:\n{exc}")
-            err.setStyleSheet("color: #cc6666; padding: 20px;")
+            err.setStyleSheet(
+                f"color: {get_theme_manager().get_current_palette().error}; "
+                f"padding: 20px;")
             err.setWordWrap(True)
             page.setWidget(err)
 

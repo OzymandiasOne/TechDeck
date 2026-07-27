@@ -180,6 +180,10 @@ class TaskCard(QFrame):
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(4)
         self._labels_host = QWidget()
+        # Plain QWidget containers paint the global page background — must be
+        # transparent or they show as wrong-colored patches on the card fill.
+        self._labels_host.setObjectName("cardLabels")
+        self._labels_host.setStyleSheet("#cardLabels { background: transparent; }")
         self._labels_flow = FlowLayout(self._labels_host, margin=0, hspacing=4, vspacing=4)
         top.addWidget(self._labels_host, 1)
 
@@ -214,6 +218,8 @@ class TaskCard(QFrame):
 
         # --- checklist section (rebuilt in place) ---
         self._checklist_host = QWidget()
+        self._checklist_host.setObjectName("cardChecklist")
+        self._checklist_host.setStyleSheet("#cardChecklist { background: transparent; }")
         self._checklist_v = QVBoxLayout(self._checklist_host)
         self._checklist_v.setContentsMargins(0, 2, 0, 0)
         self._checklist_v.setSpacing(4)

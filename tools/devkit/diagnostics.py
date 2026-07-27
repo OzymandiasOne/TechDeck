@@ -27,8 +27,12 @@ from PySide6.QtGui import QFont
 
 ROOT = Path(__file__).resolve().parents[2]
 
-_GREEN = "#22C55E"
-_RED = "#EF4444"
+
+def _pal():
+    """The active theme palette — verdict colors follow the theme (success /
+    error roles) instead of fixed hexes that clash on some themes."""
+    from techdeck.ui.theme_manager import get_theme_manager
+    return get_theme_manager().get_current_palette()
 
 
 class _DiagnosticsPanel(QWidget):
@@ -123,7 +127,7 @@ class _DiagnosticsPanel(QWidget):
     def _on_finished(self, exit_code, exit_status):
         self._on_output()  # flush any buffered tail
         if exit_status == QProcess.ExitStatus.CrashExit:
-            self._set_status("STOPPED", _RED)
+            self._set_status("STOPPED", _pal().error)
         else:
             self._set_status(*self._verdict(exit_code))
         self._teardown()
@@ -132,13 +136,13 @@ class _DiagnosticsPanel(QWidget):
         """(status text, color) for a normal exit — override to phrase what a
         nonzero exit means for this check."""
         if exit_code == 0:
-            return "PASSED", _GREEN
-        return f"FAILED (exit {exit_code})", _RED
+            return "PASSED", _pal().success
+        return f"FAILED (exit {exit_code})", _pal().error
 
     def _on_error(self, error):
         # finished() does not fire for FailedToStart — clean up here.
         if error == QProcess.ProcessError.FailedToStart:
-            self._set_status("FAILED TO START", _RED)
+            self._set_status("FAILED TO START", _pal().error)
             self._teardown()
 
     def _teardown(self):
@@ -229,5 +233,5 @@ class PixelLintPanel(_DiagnosticsPanel):
         # Exit 1 means the ART failed the style spec, not that the linter
         # broke — phrase it so a FAIL verdict isn't read as a tool error.
         if exit_code == 0:
-            return "PASS (any warnings are in the log)", _GREEN
-        return "STYLE FINDINGS — the art fails the style spec (see log)", _RED
+            return "PASS (any warnings are in the log)", _pal().success
+        return "STYLE FINDINGS — the art fails the style spec (see log)", _pal().error
