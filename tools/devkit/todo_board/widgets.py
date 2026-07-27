@@ -173,7 +173,7 @@ class TaskCard(QFrame):
         top.addWidget(self._labels_host, 1)
 
         self._menu_btn = QToolButton()
-        self._menu_btn.setText("⋯")   # ⋯
+        self._menu_btn.setText("···")   # middle dots — in-font on Segoe UI
         self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._menu_btn.setStyleSheet(
             f"QToolButton {{ color: {palette.text_secondary}; background: transparent; "
@@ -257,7 +257,7 @@ class TaskCard(QFrame):
         items = c.get("checklist", [])
         if items:
             done = sum(1 for i in items if i.get("done"))
-            progress = QLabel(f"✓ {done}/{len(items)}")
+            progress = QLabel(f"{done} / {len(items)} done")
             pf = QFont()
             pf.setPointSize(8)
             pf.setBold(True)

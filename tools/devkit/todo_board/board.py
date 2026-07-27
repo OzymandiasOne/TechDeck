@@ -162,7 +162,7 @@ class BucketColumn(QFrame):
         header.addWidget(add_btn)
 
         menu_btn = QToolButton()
-        menu_btn.setText("⋯")
+        menu_btn.setText("···")
         menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         menu_btn.setStyleSheet(self._icon_btn_qss())
         menu_btn.clicked.connect(lambda: self._open_menu(menu_btn))
