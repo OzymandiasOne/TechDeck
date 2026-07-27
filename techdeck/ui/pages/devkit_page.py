@@ -65,7 +65,13 @@ class DevKitPage(QWidget):
         hbar.addStretch()
 
         # Right-side slot filled from the mounted tool's devkit_toolbar_actions().
+        # Must be transparent: the global stylesheet paints bare QWidgets with
+        # the page background, which shows as a wrong-colored patch on the
+        # surface-colored header bar.
         self._action_slot = QWidget()
+        self._action_slot.setObjectName("devkitActionSlot")
+        self._action_slot.setStyleSheet(
+            "#devkitActionSlot { background: transparent; }")
         self._action_layout = QHBoxLayout(self._action_slot)
         self._action_layout.setContentsMargins(0, 0, 0, 0)
         self._action_layout.setSpacing(8)
