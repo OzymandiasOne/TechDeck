@@ -91,8 +91,10 @@ class DevKitPage(QWidget):
 
     def _restyle(self):
         pal = get_theme_manager().get_current_palette()
-        # Header sits on `surface` with a divider; the tool canvas below is the
-        # app `background`, so the two read as header + content, not a cut-out.
+        # Header sits on `surface` with a divider under it. The tool canvas
+        # below (the QStackedWidget host) ALSO renders `surface` — the app
+        # sheet's late `QFrame` rule covers QStackedWidget — so the divider is
+        # what separates header from content.
         self._header.setStyleSheet(
             f"#devkitHeader {{ background-color: {pal.surface}; "
             f"border-bottom: 1px solid {pal.border}; }}")

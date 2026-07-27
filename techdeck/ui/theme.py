@@ -692,6 +692,15 @@ QLabel {{
     color: {theme.text};
 }}
 
+/* ===== Checkables ===== */
+/* No background rule of their own means they fall through to the global
+   QWidget background — a wrong-colored rectangle when they sit on a surface
+   panel. They are text + indicator; the fill should always be the parent's. */
+QCheckBox, QRadioButton {{
+    background: transparent;
+    color: {theme.text};
+}}
+
 /* ===== Splitter ===== */
 QSplitter::handle {{
     background-color: {theme.divider};

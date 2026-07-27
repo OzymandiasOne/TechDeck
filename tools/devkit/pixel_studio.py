@@ -317,7 +317,13 @@ class _CanvasPanel(QWidget, ThemeAware):
         pal_scroll.setWidgetResizable(True)
         pal_scroll.setWidget(self.swatch_host)
         pal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        pal_scroll.setStyleSheet("QScrollArea { border: none; }")
+        # The app sheet paints scroll viewports/contents with the page
+        # background — transparent so the rail shows through instead of a
+        # wrong-colored strip under the swatches.
+        pal_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget { background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }")
         v.addWidget(pal_scroll, 1)
         prow = QHBoxLayout()
         add = QPushButton("+ Add")
@@ -620,6 +626,8 @@ class _TileIconPanel(_CanvasPanel):
             cell.addWidget(tile, alignment=Qt.AlignmentFlag.AlignCenter)
             cell.addWidget(name)
             holder = QWidget()
+            holder.setObjectName("previewCell")
+            holder.setStyleSheet("#previewCell { background: transparent; }")
             holder.setLayout(cell)
             grid.addWidget(holder, i // 2, i % 2)
         v.addLayout(grid)
@@ -768,6 +776,12 @@ class _PlacementPanel(QWidget):
             tabrow.addWidget(b)
             page = QScrollArea()
             page.setWidgetResizable(False)
+            # Keep the area around the embedded placer on the panel surface
+            # instead of the page-background fill the app sheet gives
+            # scroll viewports.
+            page.setStyleSheet(
+                "QScrollArea { background: transparent; border: none; }"
+                "QScrollArea > QWidget { background: transparent; }")
             self.stack.addWidget(page)
         tabrow.addStretch()
         root.addLayout(tabrow)
@@ -842,6 +856,12 @@ class PixelStudio(QWidget):
 
             panel = self._make_panel(key)
             self.stack.addWidget(panel)
+            # Action bars are plain QWidget containers — left alone they paint
+            # the global page background and show as a wrong-colored strip
+            # inside the surface-colored action host.
+            panel.action_bar.setObjectName("studioActionBar")
+            panel.action_bar.setStyleSheet(
+                "#studioActionBar { background: transparent; }")
             self.action_host.addWidget(panel.action_bar)
 
         root.addLayout(top)

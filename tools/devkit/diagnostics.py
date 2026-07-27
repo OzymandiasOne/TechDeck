@@ -25,23 +25,21 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtGui import QFont
 
+from techdeck.ui.theme_aware import ThemeAware
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _pal():
-    """The active theme palette — verdict colors follow the theme (success /
-    error roles) instead of fixed hexes that clash on some themes."""
-    from techdeck.ui.theme_manager import get_theme_manager
-    return get_theme_manager().get_current_palette()
-
-
-class _DiagnosticsPanel(QWidget):
+class _DiagnosticsPanel(QWidget, ThemeAware):
     """Shared runner: a controls row + Run/Stop, streaming a subprocess's
-    merged output into a monospace log with a pass/fail status line."""
+    merged output into a monospace log with a pass/fail status line. Verdict
+    colors are palette ROLES ('success'/'error') resolved at paint time, so a
+    live theme switch restyles the log and the last verdict correctly."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._process = None
+        self._status_role = None   # None | 'success' | 'error'
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
@@ -64,7 +62,6 @@ class _DiagnosticsPanel(QWidget):
         outer.addLayout(controls)
 
         self.status = QLabel("Ready.")
-        self.status.setStyleSheet("font-weight: 600;")
         outer.addWidget(self.status)
 
         self.output = QPlainTextEdit()
@@ -74,6 +71,18 @@ class _DiagnosticsPanel(QWidget):
         mono.setPointSize(9)
         self.output.setFont(mono)
         outer.addWidget(self.output, 1)
+
+        self.setup_theme_awareness()
+
+    def apply_theme(self):
+        pal = self.get_current_palette()
+        # Console treatment for the log — otherwise it renders invisibly flush
+        # with the panel surface.
+        self.output.setStyleSheet(
+            f"QPlainTextEdit {{ background-color: {pal.console_bg}; "
+            f"color: {pal.console_text}; border: 1px solid {pal.border}; "
+            f"border-radius: 6px; }}")
+        self._restyle_status()
 
     # ── subclass contract ────────────────────────────────────────────────
 
@@ -127,22 +136,22 @@ class _DiagnosticsPanel(QWidget):
     def _on_finished(self, exit_code, exit_status):
         self._on_output()  # flush any buffered tail
         if exit_status == QProcess.ExitStatus.CrashExit:
-            self._set_status("STOPPED", _pal().error)
+            self._set_status("STOPPED", "error")
         else:
             self._set_status(*self._verdict(exit_code))
         self._teardown()
 
     def _verdict(self, exit_code) -> tuple:
-        """(status text, color) for a normal exit — override to phrase what a
-        nonzero exit means for this check."""
+        """(status text, palette role) for a normal exit — override to phrase
+        what a nonzero exit means for this check."""
         if exit_code == 0:
-            return "PASSED", _pal().success
-        return f"FAILED (exit {exit_code})", _pal().error
+            return "PASSED", "success"
+        return f"FAILED (exit {exit_code})", "error"
 
     def _on_error(self, error):
         # finished() does not fire for FailedToStart — clean up here.
         if error == QProcess.ProcessError.FailedToStart:
-            self._set_status("FAILED TO START", _pal().error)
+            self._set_status("FAILED TO START", "error")
             self._teardown()
 
     def _teardown(self):
@@ -152,8 +161,14 @@ class _DiagnosticsPanel(QWidget):
         self.run_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
-    def _set_status(self, text, color):
+    def _set_status(self, text, role):
+        self._status_role = role
         self.status.setText(text)
+        self._restyle_status()
+
+    def _restyle_status(self):
+        pal = self.get_current_palette()
+        color = {"success": pal.success, "error": pal.error}.get(self._status_role)
         self.status.setStyleSheet(
             f"font-weight: 600; color: {color};" if color else "font-weight: 600;")
 
@@ -233,5 +248,5 @@ class PixelLintPanel(_DiagnosticsPanel):
         # Exit 1 means the ART failed the style spec, not that the linter
         # broke — phrase it so a FAIL verdict isn't read as a tool error.
         if exit_code == 0:
-            return "PASS (any warnings are in the log)", _pal().success
-        return "STYLE FINDINGS — the art fails the style spec (see log)", _pal().error
+            return "PASS (any warnings are in the log)", "success"
+        return "STYLE FINDINGS — the art fails the style spec (see log)", "error"
