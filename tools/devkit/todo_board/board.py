@@ -188,9 +188,9 @@ class BucketColumn(QFrame):
         self.setObjectName("bucketCol")
         self.setFixedWidth(COLUMN_WIDTH)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet(
-            "#bucketCol { background-color: rgba(127,127,127,0.06); "
-            "border-radius: 10px; }")
+        # Transparent tray — cards float on the page background (Teams-style),
+        # which reads cleaner than tinted rectangles, especially on light themes.
+        self.setStyleSheet("#bucketCol { background: transparent; }")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(6, 8, 6, 6)
@@ -290,30 +290,21 @@ class TodoBoard(QWidget, ThemeAware):
         self._rebuild_pending = False
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(12, 10, 12, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(4, 4, 4, 4)
+        outer.setSpacing(0)
 
-        # --- header bar ---
-        bar = QHBoxLayout()
-        bar.setSpacing(10)
-        self._title = QLabel("To-Do Board")
-        tf = self._title.font()
-        tf.setPointSize(15)
-        tf.setBold(True)
-        self._title.setFont(tf)
-        bar.addWidget(self._title)
-        self._status = QLabel("")
-        bar.addWidget(self._status)
-        bar.addStretch()
-        self._add_bucket_btn = QPushButton("+ Bucket")
+        # Toolbar controls live in the DevKit page's unified toolbar (handed over
+        # via devkit_toolbar_actions), not a header of our own — so the board
+        # area is just the buckets. Created here unparented; the page reparents
+        # them into its toolbar slot.
+        self._status = QLabel("", self)
+        self._status_ok = True
+        self._add_bucket_btn = QPushButton("+ Bucket", self)
         self._add_bucket_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_bucket_btn.clicked.connect(self._on_add_bucket)
-        bar.addWidget(self._add_bucket_btn)
-        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn = QPushButton("Refresh", self)
         self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh_btn.clicked.connect(self._sync_and_rebuild)
-        bar.addWidget(self._refresh_btn)
-        outer.addLayout(bar)
 
         # --- columns in a horizontal scroll ---
         self._cols_host = QWidget()
@@ -342,12 +333,20 @@ class TodoBoard(QWidget, ThemeAware):
             if added:
                 msg += f"  ·  +{added} new"
             self._status.setText(msg)
-            self._status.setStyleSheet(
-                f"color: {self._pal.text_secondary}; font-size: 9pt;")
+            self._status_ok = True
         else:
             self._status.setText("⚠ " + load.message)
-            self._status.setStyleSheet(f"color: {self._pal.warning}; font-size: 9pt;")
+            self._status_ok = False
+        self._style_status()
         self.rebuild_all()
+
+    def _style_status(self):
+        color = self._pal.accent if self._status_ok else self._pal.warning
+        self._status.setStyleSheet(f"color: {color}; font-size: 9pt;")
+
+    def devkit_toolbar_actions(self):
+        """Widgets the DevKit page hosts in its unified toolbar (right side)."""
+        return [self._status, self._add_bucket_btn, self._refresh_btn]
 
     def _schedule_rebuild(self):
         """Rebuild on the next event-loop turn, coalescing multiple calls. Also
@@ -450,7 +449,7 @@ class TodoBoard(QWidget, ThemeAware):
 
     def apply_theme(self):
         self._pal = self.get_current_palette()
-        self._title.setStyleSheet(f"color: {self._pal.text};")
+        self._style_status()
         btn_qss = (
             f"QPushButton {{ background-color: {self._pal.surface}; "
             f"color: {self._pal.text}; border: 1px solid {self._pal.border}; "

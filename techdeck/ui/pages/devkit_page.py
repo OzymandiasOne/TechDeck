@@ -1,9 +1,11 @@
 """
 DevKit page — the source-only developer-tools surface.
 
-A left-nav page (below Settings, visible only in dev mode) that hosts a tool
-picker + Run button and an embedded area where the selected tool mounts INSIDE
-TechDeck. Seeded with the Pixel Studio; the tool list is tools/devkit/registry.
+A left-nav page (below Settings, visible only in dev mode). One slim toolbar
+hosts the tool switcher — the selected tool's name doubles as the page title —
+plus any action widgets the mounted tool contributes via
+`devkit_toolbar_actions()`; below it the selected tool mounts flush inside
+TechDeck (no framed picker, no rounded corners).
 
 This page is only ever constructed in source builds (the shell gates it on
 techdeck.ui.dev_mode.is_dev_build), so importing the source-only tools/devkit
@@ -12,9 +14,10 @@ package here is safe — it never runs in a frozen exe.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QStackedWidget, QMessageBox, QFrame,
+    QStackedWidget, QMessageBox,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 
 from techdeck.core.settings import SettingsManager
 from techdeck.ui.theme import get_current_palette
@@ -30,56 +33,50 @@ class DevKitPage(QWidget):
         self._loaded: dict = {}   # registry index -> built widget
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 16, 20, 16)
+        outer.setContentsMargins(20, 14, 20, 14)
         outer.setSpacing(12)
 
-        title = QLabel("DevKit")
-        title.setStyleSheet("font-size: 22px; font-weight: bold;")
-        outer.addWidget(title)
+        # Unified toolbar: the tool name is the title, the combo switches tools,
+        # and the right side hosts the mounted tool's own action widgets. Bare
+        # QLabel/QComboBox inherit the themed text color from the app cascade.
+        bar = QHBoxLayout()
+        bar.setSpacing(12)
+        self._title = QLabel("")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        self._title.setFont(title_font)
+        bar.addWidget(self._title)
 
-        # Picker bar — a distinct control strip so it's clear the tool window
-        # begins below it.
-        picker = QFrame()
-        picker.setObjectName("devkitPicker")
-        picker.setStyleSheet(
-            "#devkitPicker { background: rgba(127, 127, 127, 0.10); "
-            "border: 1px solid rgba(127, 127, 127, 0.25); border-radius: 8px; }")
-        row = QHBoxLayout(picker)
-        row.setContentsMargins(12, 8, 12, 8)
-        row.setSpacing(10)
-        tool_label = QLabel("Tool")
-        tool_label.setStyleSheet("font-weight: 600; background: transparent; border: none;")
-        row.addWidget(tool_label)
         self.combo = QComboBox()
-        self.combo.setMinimumHeight(34)
-        self.combo.setMinimumWidth(240)
+        self.combo.setMinimumHeight(30)
+        self.combo.setMinimumWidth(170)
         for tool in self._tools:
             self.combo.addItem(tool.label)
-        # Selecting a tool mounts it directly — no separate Run click. The
-        # initial tool mounts on first show (currentIndexChanged doesn't fire
-        # for the starting index).
+        # Selecting a tool mounts it directly. The initial tool mounts on first
+        # show (currentIndexChanged doesn't fire for the starting index).
         self.combo.currentIndexChanged.connect(self._mount_tool)
-        row.addWidget(self.combo)
-        row.addStretch()
-        outer.addWidget(picker)
+        bar.addWidget(self.combo)
+        bar.addStretch()
 
-        # Tool window — the selected tool mounts inside this framed area, built
-        # once and cached so re-selecting a tool keeps its state.
-        host_frame = QFrame()
-        host_frame.setObjectName("devkitHost")
-        host_frame.setStyleSheet(
-            "#devkitHost { border: 1px solid rgba(127, 127, 127, 0.25); "
-            "border-radius: 8px; }")
-        host_layout = QVBoxLayout(host_frame)
-        host_layout.setContentsMargins(2, 2, 2, 2)
+        # Right-side slot filled from the mounted tool's devkit_toolbar_actions().
+        self._action_slot = QWidget()
+        self._action_layout = QHBoxLayout(self._action_slot)
+        self._action_layout.setContentsMargins(0, 0, 0, 0)
+        self._action_layout.setSpacing(8)
+        bar.addWidget(self._action_slot)
+        outer.addLayout(bar)
+
+        # Host — the selected tool mounts here, flush (no frame / rounded
+        # corners, so nothing shows through the corners). Built once and cached
+        # so re-selecting a tool keeps its state.
         self.host = QStackedWidget()
         self._placeholder = QLabel("Select a tool to load it here.")
         self._placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         _pal = get_current_palette(self.settings.get_theme())
         self._placeholder.setStyleSheet(f"color: {_pal.text_secondary}; font-size: 13px;")
         self.host.addWidget(self._placeholder)
-        host_layout.addWidget(self.host)
-        outer.addWidget(host_frame, 1)
+        outer.addWidget(self.host, 1)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -103,3 +100,20 @@ class DevKitPage(QWidget):
             self._loaded[idx] = widget
             self.host.addWidget(widget)
         self.host.setCurrentWidget(widget)
+        self._title.setText(tool.label.upper())
+        self._populate_actions(widget)
+
+    def _populate_actions(self, widget):
+        """Move the mounted tool's toolbar action widgets into the shared slot.
+        The widgets are owned by their tool (which is cached), so we detach —
+        never delete — the previous tool's actions."""
+        while self._action_layout.count():
+            item = self._action_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+        getter = getattr(widget, "devkit_toolbar_actions", None)
+        if callable(getter):
+            for w in getter():
+                self._action_layout.addWidget(w)
+                w.show()
