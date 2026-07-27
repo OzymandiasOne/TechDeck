@@ -631,6 +631,14 @@ QFrame {{
     border-radius: 10px;
 }}
 
+/* The QFrame card rule above also matches its subclasses (QScrollArea,
+   QStackedWidget) and — being LAST at equal specificity — silently overrides
+   their earlier border-radius: 0px, rounding page hosts and scroll areas so
+   the page background peeks through at the corners. Re-assert square. */
+QScrollArea, QStackedWidget {{
+    border-radius: 0px;
+}}
+
 /* ===== Scrollbars ===== */
 QScrollBar:vertical {{
     background-color: {theme.background};
