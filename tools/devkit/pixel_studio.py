@@ -59,6 +59,27 @@ _TOOL_ICONS = {
         "M3 21v-3l9-9",
         "M14 6l4 4 3-3a2.83 2.83 0 0 0-4-4l-3 3z",
     ],
+    # Marquee: corner brackets (scan-style) read as a selection rectangle.
+    "select": [
+        "M3 7V5a2 2 0 0 1 2-2h2",
+        "M17 3h2a2 2 0 0 1 2 2v2",
+        "M21 17v2a2 2 0 0 1-2 2h-2",
+        "M7 21H5a2 2 0 0 1-2-2v-2",
+    ],
+    # Lasso: freeform loop with a rope tail + cinch ring.
+    "lasso": [
+        "M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8"
+        "-4.5 8-10 8a12 12 0 0 1-5-1",
+        "M7 22a5 5 0 0 1-2-4",
+        "M2 18a3 3 0 1 0 6 0a3 3 0 1 0 -6 0",
+    ],
+}
+
+_TOOL_TIPS = {
+    "select": "Select (rectangle) — drag inside the selection to move its "
+              "pixels; arrows nudge, Del clears, Esc deselects",
+    "lasso": "Lasso (freeform) — close a loop to select; drag inside to move "
+             "its pixels",
 }
 
 # Undo / redo as back / forward arrows.
@@ -236,13 +257,14 @@ class _CanvasPanel(QWidget, ThemeAware):
         grid.setSpacing(4)
         self.tool_group = QButtonGroup(self)
         self.tool_buttons = {}
-        for i, name in enumerate(("pencil", "eraser", "fill", "eyedropper")):
+        for i, name in enumerate(("pencil", "eraser", "fill", "eyedropper",
+                                  "select", "lasso")):
             b = QPushButton()
             b.setCheckable(True)
             b.setIcon(_svg_icon(_TOOL_ICONS[name], self._icon_color))
             b.setIconSize(QSize(22, 22))
             b.setFixedSize(44, 44)
-            b.setToolTip(name.capitalize())
+            b.setToolTip(_TOOL_TIPS.get(name, name.capitalize()))
             b.setStyleSheet(tool_style)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(lambda _c, n=name: self._select_tool(n))
@@ -380,7 +402,7 @@ class _CanvasPanel(QWidget, ThemeAware):
 
     def _select_char(self, ch):
         self.canvas.active_char = ch
-        if self.canvas.tool in ("eraser", "eyedropper"):
+        if self.canvas.tool in ("eraser", "eyedropper", "select", "lasso"):
             self._select_tool("pencil")
         self._rebuild_swatches()
 

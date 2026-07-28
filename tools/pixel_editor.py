@@ -11,7 +11,9 @@ Run it:
     python tools/pixel_editor.py path/to/sprite.tdart      (open a file)
 
 Tools:  Pencil (paint active color) · Eraser (transparent) · Fill (flood) ·
-        Eyedropper (pick a cell's color as active).
+        Eyedropper (pick a cell's color as active) · Select (rectangle) ·
+        Lasso (freeform). With a selection: drag inside it to move the pixels,
+        arrow keys nudge, Delete clears, Escape (or a click outside) deselects.
 Mouse:  left-drag paints. The checkerboard shows transparency.
 Files:  New (set size) · Open · Save / Save As (.tdart) · Copy as Python
         (puts a PALETTE + ART snippet on the clipboard for legacy widgets).
@@ -32,8 +34,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QMessageBox, QButtonGroup, QFrame, QSpinBox,
     QDialog, QDialogButtonBox, QFormLayout,
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QPainter, QColor, QPixmap, QImage
+from PySide6.QtCore import Qt, Signal, QSize, QPoint
+from PySide6.QtGui import QPainter, QColor, QPen, QPixmap, QImage
 
 from techdeck.ui import pixel_art
 
@@ -51,6 +53,29 @@ _DEFAULT_PALETTE = {
     "b": "#3f6fd8", "y": "#f4c430", "c": "#3fd0d8", "p": "#7b4fff",
     "s": "#b8c0cc",
 }
+
+
+def _line_cells(a, b):
+    """Bresenham: every cell on the segment a→b (inclusive). Used to close the
+    gaps a fast lasso drag leaves between sampled cells."""
+    x0, y0 = a
+    x1, y1 = b
+    dx, dy = abs(x1 - x0), -abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    err = dx + dy
+    out = []
+    while True:
+        out.append((x0, y0))
+        if (x0, y0) == (x1, y1):
+            return out
+        e2 = 2 * err
+        if e2 >= dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
+            err += dx
+            y0 += sy
 
 
 # ── Image → .tdart import ────────────────────────────────────────────────────
@@ -146,10 +171,18 @@ class Canvas(QWidget):
     def __init__(self, w=32, h=32, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # Esc/arrows/Delete
         self.cell_px = 16
         self.show_grid = True
         self.symmetry = False     # 4-fold rotational mirror for spinners
         self.brush_size = 1       # N x N pencil/eraser block
+        # Selection / move state (select + lasso tools).
+        self.selection = None     # committed selection: set of (x, y) cells
+        self._sel_path = None     # in-progress lasso trail (list of cells)
+        self._sel_anchor = None   # rect-select drag anchor cell
+        self._sel_cur = None      # rect-select drag current cell
+        self._float = None        # mid-move lift: {"cells", "dx", "dy", "pushed"}
+        self._move_anchor = None  # cell the move drag started on
         self.tool = "pencil"
         self.active_char = "k"
         self.palette = dict(_DEFAULT_PALETTE)
@@ -158,11 +191,24 @@ class Canvas(QWidget):
         self._redo = []
         self._resize_to_grid()
 
+    # ---- tool (leaving select/lasso drops the selection) ---------------------
+    @property
+    def tool(self):
+        return self._tool
+
+    @tool.setter
+    def tool(self, name):
+        self._tool = name
+        if name not in ("select", "lasso"):
+            self._clear_selection()
+            self.unsetCursor()
+
     # ---- model ---------------------------------------------------------------
     def grid_size(self):
         return (len(self.rows[0]) if self.rows else 0, len(self.rows))
 
     def new_grid(self, w, h):
+        self._clear_selection()
         self.rows = [["." for _ in range(w)] for _ in range(h)]
         self._undo.clear()
         self._redo.clear()
@@ -171,6 +217,7 @@ class Canvas(QWidget):
         self.modified.emit()
 
     def load(self, data):
+        self._clear_selection()
         data = pixel_art.normalize(data)
         self.palette = dict(data["palette"]) or dict(_DEFAULT_PALETTE)
         self.rows = [list(r) for r in data["rows"]]
@@ -189,6 +236,7 @@ class Canvas(QWidget):
         Losslessly de-scales an over-large import (where each art pixel is an
         NxN block of identical cells) back toward native resolution without any
         resampling/distortion. Returns (old, new) sizes."""
+        self._clear_selection()
         old = self.grid_size()
         rows = ["".join(r) for r in self.rows]
         kept_rows = []
@@ -218,6 +266,7 @@ class Canvas(QWidget):
         w, h = self.grid_size()
         if w == 0 or h == 0 or (nw == w and nh == h):
             return
+        self._clear_selection()
         new = []
         for ty in range(nh):
             sy = min(h - 1, ty * h // nh)
@@ -233,6 +282,7 @@ class Canvas(QWidget):
         scaling the existing art — room for details that overflow the edges."""
         if top == bottom == left == right == 0:
             return
+        self._clear_selection()
         w, _ = self.grid_size()
         nw = w + left + right
         new = [["."] * nw for _ in range(top)]
@@ -253,6 +303,7 @@ class Canvas(QWidget):
         w, h = self.grid_size()
         if top + bottom >= h or left + right >= w:
             return False
+        self._clear_selection()
         self.rows = [list(r)[left:w - right] for r in self.rows[top:h - bottom]]
         self._resize_to_grid()
         self.update()
@@ -273,6 +324,7 @@ class Canvas(QWidget):
     def undo(self):
         if not self._undo:
             return
+        self._clear_selection()
         self._redo.append(self._snapshot())
         self.rows = self._undo.pop()
         self._resize_to_grid()
@@ -282,6 +334,7 @@ class Canvas(QWidget):
     def redo(self):
         if not self._redo:
             return
+        self._clear_selection()
         self._undo.append(self._snapshot())
         self.rows = self._redo.pop()
         self._resize_to_grid()
@@ -336,7 +389,180 @@ class Canvas(QWidget):
                 p.drawLine(x * cp, 0, x * cp, h * cp)
             for y in range(h + 1):
                 p.drawLine(0, y * cp, w * cp, y * cp)
+
+        # --- selection overlays (drawn over the grid) ---
+        if self._float:
+            fdx, fdy = self._float["dx"], self._float["dy"]
+            for (x, y), ch in self._float["cells"].items():
+                if ch in self.palette:
+                    p.fillRect((x + fdx) * cp, (y + fdy) * cp, cp, cp,
+                               QColor(self.palette[ch]))
+        sel = self._display_selection()
+        if sel:
+            self._draw_marquee_edges(p, sel)
+        if self._sel_anchor is not None and self._sel_cur is not None:
+            ax, ay = self._sel_anchor
+            cx, cy = self._sel_cur
+            x0, x1 = sorted((ax, cx))
+            y0, y1 = sorted((ay, cy))
+            rect = (x0 * cp, y0 * cp, (x1 - x0 + 1) * cp, (y1 - y0 + 1) * cp)
+            for pen in self._marquee_pens():
+                p.setPen(pen)
+                p.drawRect(*rect)
+        if self._sel_path and len(self._sel_path) > 1:
+            pts = [QPoint(x * cp + cp // 2, y * cp + cp // 2)
+                   for x, y in self._sel_path]
+            for pen in self._marquee_pens():
+                p.setPen(pen)
+                p.drawPolyline(pts)
         p.end()
+
+    @staticmethod
+    def _marquee_pens():
+        """Solid dark under dashed light — visible on any pixel color."""
+        dark = QPen(QColor(0, 0, 0, 200), 1)
+        light = QPen(QColor(255, 255, 255, 230), 1)
+        light.setStyle(Qt.PenStyle.DashLine)
+        return (dark, light)
+
+    def _draw_marquee_edges(self, p, sel):
+        """Outline a cell mask: every edge between a selected cell and an
+        unselected neighbour."""
+        cp = self.cell_px
+        segs = []
+        for (x, y) in sel:
+            if (x, y - 1) not in sel:
+                segs.append((x * cp, y * cp, (x + 1) * cp, y * cp))
+            if (x, y + 1) not in sel:
+                segs.append((x * cp, (y + 1) * cp, (x + 1) * cp, (y + 1) * cp))
+            if (x - 1, y) not in sel:
+                segs.append((x * cp, y * cp, x * cp, (y + 1) * cp))
+            if (x + 1, y) not in sel:
+                segs.append(((x + 1) * cp, y * cp, (x + 1) * cp, (y + 1) * cp))
+        for pen in self._marquee_pens():
+            p.setPen(pen)
+            for s in segs:
+                p.drawLine(*s)
+
+    # ---- selection / move (select + lasso tools) -----------------------------
+    def _clear_selection(self):
+        """Drop all selection/move state. Any mid-drag float is discarded (its
+        pre-lift snapshot is already on the undo stack, so nothing is lost)."""
+        if (self.selection or self._sel_path or self._sel_anchor is not None
+                or self._float):
+            self.selection = None
+            self._sel_path = None
+            self._sel_anchor = None
+            self._sel_cur = None
+            self._float = None
+            self._move_anchor = None
+            self.update()
+
+    def _clamped_cell(self, pos):
+        """The nearest in-grid cell to `pos` — drags may leave the widget."""
+        w, h = self.grid_size()
+        x = max(0, min(w - 1, pos.x() // self.cell_px))
+        y = max(0, min(h - 1, pos.y() // self.cell_px))
+        return (int(x), int(y))
+
+    def _display_selection(self):
+        """The selection as drawn/hit-tested — offset while a move floats."""
+        if not self.selection:
+            return None
+        if self._float:
+            dx, dy = self._float["dx"], self._float["dy"]
+            return {(x + dx, y + dy) for (x, y) in self.selection}
+        return self.selection
+
+    def _begin_move(self, cell):
+        """Lift the selection's opaque pixels off the grid into a floating
+        layer. One undo snapshot covers the whole lift-drag-anchor move."""
+        cells = {}
+        for (x, y) in self.selection:
+            ch = self.rows[y][x]
+            if ch not in pixel_art.TRANSPARENT_CHARS and ch in self.palette:
+                cells[(x, y)] = ch
+        pushed = bool(cells)
+        if pushed:
+            self.push_undo()
+            for (x, y) in cells:
+                self.rows[y][x] = "."
+        self._float = {"cells": cells, "dx": 0, "dy": 0, "pushed": pushed}
+        self._move_anchor = cell
+
+    def _anchor_float(self):
+        """Stamp the floating pixels down at their offset and move the
+        selection marquee with them (clipped to the grid)."""
+        f, self._float = self._float, None
+        self._move_anchor = None
+        dx, dy = f["dx"], f["dy"]
+        w, h = self.grid_size()
+        for (x, y), ch in f["cells"].items():
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h:
+                self.rows[ny][nx] = ch
+        self.selection = {(x + dx, y + dy) for (x, y) in self.selection
+                          if 0 <= x + dx < w and 0 <= y + dy < h} or None
+        if (dx, dy) == (0, 0):
+            if f["pushed"]:
+                self._undo.pop()   # nothing moved — drop the no-op snapshot
+        elif f["cells"]:
+            self.modified.emit()
+        self.update()
+
+    def _lasso_mask(self, path):
+        """Rasterize a closed freeform path into a cell mask: the drawn
+        boundary (gap-free via Bresenham) plus everything it encloses, found by
+        flood-filling the OUTSIDE of the boundary's padded bounding box."""
+        boundary = set()
+        pts = list(path) + [path[0]]
+        for a, b in zip(pts, pts[1:]):
+            boundary.update(_line_cells(a, b))
+        xs = [x for x, _ in boundary]
+        ys = [y for _, y in boundary]
+        x0, x1 = min(xs) - 1, max(xs) + 1
+        y0, y1 = min(ys) - 1, max(ys) + 1
+        outside = set()
+        stack = [(x0, y0)]
+        while stack:
+            c = stack.pop()
+            x, y = c
+            if not (x0 <= x <= x1 and y0 <= y <= y1):
+                continue
+            if c in outside or c in boundary:
+                continue
+            outside.add(c)
+            stack += [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
+        w, h = self.grid_size()
+        return {(x, y)
+                for x in range(max(0, x0), min(w, x1 + 1))
+                for y in range(max(0, y0), min(h, y1 + 1))
+                if (x, y) not in outside}
+
+    def nudge_selection(self, dx, dy):
+        """Move the selected pixels one step (arrow keys). Each nudge is its
+        own undoable lift-and-stamp."""
+        if not self.selection or self._float:
+            return
+        self._begin_move((0, 0))
+        self._float["dx"], self._float["dy"] = dx, dy
+        self._anchor_float()
+
+    def delete_selection(self):
+        """Clear every pixel inside the selection to transparent."""
+        if not self.selection:
+            return
+        self.push_undo()
+        changed = False
+        for (x, y) in self.selection:
+            if self.rows[y][x] != ".":
+                self.rows[y][x] = "."
+                changed = True
+        if changed:
+            self.update()
+            self.modified.emit()
+        else:
+            self._undo.pop()
 
     # ---- interaction ---------------------------------------------------------
     def _cell_at(self, pos):
@@ -347,6 +573,22 @@ class Canvas(QWidget):
         return None
 
     def mousePressEvent(self, evt):
+        if self.tool in ("select", "lasso"):
+            if evt.button() != Qt.MouseButton.LeftButton:
+                return
+            cell = self._clamped_cell(evt.position().toPoint())
+            sel = self._display_selection()
+            if sel and cell in sel:
+                self._begin_move(cell)      # grab: drag moves the pixels
+            else:
+                self._clear_selection()     # start a fresh selection drag
+                self._sel_anchor = cell
+                if self.tool == "lasso":
+                    self._sel_path = [cell]
+                else:
+                    self._sel_cur = cell
+            self.update()
+            return
         cell = self._cell_at(evt.position().toPoint())
         if not cell:
             return
@@ -367,9 +609,67 @@ class Canvas(QWidget):
         cell = self._cell_at(evt.position().toPoint())
         if cell:
             self.cell_hovered.emit(*cell)
+        if self.tool in ("select", "lasso"):
+            c = self._clamped_cell(evt.position().toPoint())
+            if evt.buttons() & Qt.MouseButton.LeftButton:
+                if self._float is not None:
+                    self._float["dx"] = c[0] - self._move_anchor[0]
+                    self._float["dy"] = c[1] - self._move_anchor[1]
+                    self.update()
+                elif self._sel_path is not None:
+                    if self._sel_path[-1] != c:
+                        self._sel_path.append(c)
+                        self.update()
+                elif self._sel_anchor is not None and self._sel_cur != c:
+                    self._sel_cur = c
+                    self.update()
+            else:
+                sel = self._display_selection()
+                self.setCursor(Qt.CursorShape.SizeAllCursor
+                               if sel and c in sel
+                               else Qt.CursorShape.ArrowCursor)
+            return
         if cell and (evt.buttons() & Qt.MouseButton.LeftButton) \
                 and self.tool in ("pencil", "eraser"):
             self._paint(cell)
+
+    def mouseReleaseEvent(self, evt):
+        if evt.button() != Qt.MouseButton.LeftButton \
+                or self.tool not in ("select", "lasso"):
+            return super().mouseReleaseEvent(evt)
+        if self._float is not None:
+            self._anchor_float()
+        elif self._sel_path is not None:
+            if len(self._sel_path) > 2:
+                self.selection = self._lasso_mask(self._sel_path) or None
+            self._sel_path = None
+        elif self._sel_anchor is not None and self._sel_cur is not None:
+            if self._sel_anchor != self._sel_cur:   # a plain click deselects
+                ax, ay = self._sel_anchor
+                cx, cy = self._sel_cur
+                x0, x1 = sorted((ax, cx))
+                y0, y1 = sorted((ay, cy))
+                self.selection = {(x, y) for x in range(x0, x1 + 1)
+                                  for y in range(y0, y1 + 1)}
+        self._sel_anchor = None
+        self._sel_cur = None
+        self.update()
+
+    def keyPressEvent(self, evt):
+        if self.tool in ("select", "lasso") and self.selection:
+            delta = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
+                     Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)
+                     }.get(evt.key())
+            if delta:
+                self.nudge_selection(*delta)
+                return
+            if evt.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+                self.delete_selection()
+                return
+            if evt.key() == Qt.Key.Key_Escape:
+                self._clear_selection()
+                return
+        super().keyPressEvent(evt)
 
     def wheelEvent(self, evt):
         # Ctrl + wheel zooms; a plain wheel falls through to the scroll area.
@@ -496,7 +796,7 @@ class Editor(QMainWindow):
         v.addWidget(self._heading("Tools"))
         self.tool_group = QButtonGroup(self)
         self.tool_buttons = {}
-        for name in ("pencil", "eraser", "fill", "eyedropper"):
+        for name in ("pencil", "eraser", "fill", "eyedropper", "select", "lasso"):
             b = QPushButton(name.capitalize())
             b.setCheckable(True)
             b.clicked.connect(lambda _c, n=name: self._select_tool(n))
@@ -615,8 +915,8 @@ class Editor(QMainWindow):
     def _select_char(self, ch):
         self.canvas.active_char = ch
         # Picking a color means you want to draw with it, so leave any
-        # non-painting tool (eraser/eyedropper) and return to the pencil.
-        if self.canvas.tool in ("eraser", "eyedropper"):
+        # non-painting tool (eraser/eyedropper/select/lasso) for the pencil.
+        if self.canvas.tool in ("eraser", "eyedropper", "select", "lasso"):
             self._select_tool("pencil")
         self._rebuild_swatches()
 
