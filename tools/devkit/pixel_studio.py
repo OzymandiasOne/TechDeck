@@ -59,6 +59,18 @@ _TOOL_ICONS = {
         "M3 21v-3l9-9",
         "M14 6l4 4 3-3a2.83 2.83 0 0 0-4-4l-3 3z",
     ],
+    # Line: diagonal stroke with endpoint dots.
+    "line": [
+        "M6.5 17.5 17.5 6.5",
+        "M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
+        "M17 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
+    ],
+    # Spline: an S-curve through two control-point dots.
+    "spline": [
+        "M4 18C8 6 16 18 20 6",
+        "M2 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
+        "M18 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0",
+    ],
     # Marquee: corner brackets (scan-style) read as a selection rectangle.
     "select": [
         "M3 7V5a2 2 0 0 1 2-2h2",
@@ -76,6 +88,11 @@ _TOOL_ICONS = {
 }
 
 _TOOL_TIPS = {
+    "line": "Line — drag from start to end (live preview), release to paint; "
+            "honors brush size + symmetry, Esc cancels mid-drag",
+    "spline": "Spline — click to drop points along a smooth curve; Enter / "
+              "double-click / right-click paints it, Esc cancels; honors "
+              "brush size + symmetry",
     "select": "Select (rectangle) — drag inside the selection to move its "
               "pixels; Ctrl+C/Ctrl+V copy/paste, arrows nudge, Del clears, "
               "Esc deselects",
@@ -110,7 +127,7 @@ _NAV_ICONS = {
 
 _NAV_TIPS = {
     "undo": "Undo (Ctrl+Z / Ctrl+U)",
-    "redo": "Redo (Ctrl+Y)",
+    "redo": "Redo (Ctrl+Y / Ctrl+R)",
     "flip_h": "Mirror horizontally (Ctrl+H) — selection if present, else canvas",
     "flip_v": "Mirror vertically (Ctrl+Shift+H) — selection if present, else canvas",
     "rot_cw": "Rotate 90 CW (Ctrl+]) — selection if present, else canvas",
@@ -288,7 +305,7 @@ class _CanvasPanel(QWidget, ThemeAware):
         self.tool_group = QButtonGroup(self)
         self.tool_buttons = {}
         for i, name in enumerate(("pencil", "eraser", "fill", "eyedropper",
-                                  "select", "lasso")):
+                                  "line", "spline", "select", "lasso")):
             b = QPushButton()
             b.setCheckable(True)
             b.setIcon(_svg_icon(_TOOL_ICONS[name], self._icon_color))

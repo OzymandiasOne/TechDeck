@@ -11,7 +11,10 @@ Run it:
     python tools/pixel_editor.py path/to/sprite.tdart      (open a file)
 
 Tools:  Pencil (paint active color) · Eraser (transparent) · Fill (flood) ·
-        Eyedropper (pick a cell's color as active) · Select (rectangle) ·
+        Eyedropper (pick a cell's color as active) · Line (drag start→end,
+        live preview, paints on release) · Spline (click to drop points on a
+        smooth curve, Enter / double-click / right-click paints it, Esc
+        cancels; both honor brush size + symmetry) · Select (rectangle) ·
         Lasso (freeform). With a selection: drag inside it to move the pixels,
         arrow keys nudge, Delete clears, Escape (or a click outside) deselects,
         Ctrl+C copies and Ctrl+V pastes the copy back as a floating selection
@@ -25,7 +28,7 @@ Edit:   Resize (scale art) · Reduce duplicate lines · Add / remove lines
         (signed per-side count: positive adds transparent lines, negative crops) ·
         Mirror H/V (Ctrl+H / Ctrl+Shift+H) · Rotate 90 CW/CCW (Ctrl+] / Ctrl+[)
         — transforms apply to the selection when one exists, else the whole
-        canvas. Undo is Ctrl+Z or Ctrl+U; redo Ctrl+Y or Ctrl+Shift+Z.
+        canvas. Undo is Ctrl+Z or Ctrl+U; redo Ctrl+Y, Ctrl+R or Ctrl+Shift+Z.
 """
 
 import sys
@@ -87,6 +90,39 @@ def _line_cells(a, b):
         if e2 <= dx:
             err += dx
             y0 += sy
+
+
+def _spline_cells(pts):
+    """Every cell on a smooth Catmull-Rom curve through `pts` (in order,
+    gap-free). One point is itself; two points fall back to a straight line."""
+    pts = [p for i, p in enumerate(pts) if i == 0 or p != pts[i - 1]]
+    if len(pts) == 1:
+        return [pts[0]]
+    if len(pts) == 2:
+        return _line_cells(pts[0], pts[1])
+    ext = [pts[0]] + pts + [pts[-1]]   # clamp ends so the curve hits them
+    samples = []
+    for i in range(len(pts) - 1):
+        (x0, y0), (x1, y1), (x2, y2), (x3, y3) = ext[i:i + 4]
+        steps = 4 * max(abs(x2 - x1), abs(y2 - y1), 1)
+        last = i == len(pts) - 2
+        for s in range(steps + (1 if last else 0)):
+            t = s / steps
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * (2 * x1 + (x2 - x0) * t
+                       + (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2
+                       + (3 * x1 - x0 - 3 * x2 + x3) * t3)
+            y = 0.5 * (2 * y1 + (y2 - y0) * t
+                       + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2
+                       + (3 * y1 - y0 - 3 * y2 + y3) * t3)
+            samples.append((round(x), round(y)))
+    cells = []
+    for c in samples:
+        if not cells:
+            cells.append(c)
+        elif c != cells[-1]:
+            cells.extend(_line_cells(cells[-1], c)[1:])   # bridge any gap
+    return cells
 
 
 # ── Image → .tdart import ────────────────────────────────────────────────────
@@ -195,6 +231,11 @@ class Canvas(QWidget):
         self._sel_cur = None      # rect-select drag current cell
         self._float = None        # mid-move lift: {"cells", "dx", "dy", "pushed"}
         self._move_anchor = None  # cell the move drag started on
+        # Line / spline in-progress state (previewed, painted on commit).
+        self._line_anchor = None  # line drag start cell
+        self._line_cur = None     # line drag current cell
+        self._spline_pts = None   # placed spline points (list of cells)
+        self._spline_hover = None # hover cell — previews the next segment
         self.tool = "pencil"
         self.active_char = "k"
         self.palette = dict(_DEFAULT_PALETTE)
@@ -214,6 +255,8 @@ class Canvas(QWidget):
         if name not in ("select", "lasso"):
             self._clear_selection()
             self.unsetCursor()
+        if name not in ("line", "spline"):
+            self._clear_stroke()
 
     # ---- model ---------------------------------------------------------------
     def grid_size(self):
@@ -517,6 +560,23 @@ class Canvas(QWidget):
             for pen in self._marquee_pens():
                 p.setPen(pen)
                 p.drawPolyline(pts)
+
+        # --- line / spline preview (the exact cells a commit would paint) ---
+        path = None
+        if self.tool == "line" and self._line_anchor is not None:
+            path = _line_cells(self._line_anchor, self._line_cur)
+        elif self.tool == "spline" and self._spline_pts:
+            path = _spline_cells(self._spline_preview_pts())
+        if path:
+            ghost = QColor(self.palette.get(self.active_char, "#ffffff"))
+            ghost.setAlpha(170)
+            for (x, y) in self._stroke_cells(path):
+                p.fillRect(x * cp, y * cp, cp, cp, ghost)
+        if self.tool == "spline" and self._spline_pts:
+            for pen in self._marquee_pens():   # mark the placed points
+                p.setPen(pen)
+                for (x, y) in self._spline_pts:
+                    p.drawRect(x * cp, y * cp, cp - 1, cp - 1)
         p.end()
 
     @staticmethod
@@ -743,6 +803,58 @@ class Canvas(QWidget):
         else:
             self._undo.pop()
 
+    # ---- line / spline strokes -----------------------------------------------
+    def _clear_stroke(self):
+        """Drop any in-progress line drag / spline point trail."""
+        if (self._line_anchor is not None or self._spline_pts is not None
+                or self._spline_hover is not None):
+            self._line_anchor = None
+            self._line_cur = None
+            self._spline_pts = None
+            self._spline_hover = None
+            self.update()
+
+    def _stroke_cells(self, cells):
+        """Expand a path of cells through the brush and symmetry into the
+        final in-grid cell set the stroke would paint."""
+        w, h = self.grid_size()
+        out = set()
+        for cell in cells:
+            for bx, by in self._brush_cells(*cell):
+                for x, y in self._sym_cells(bx, by):
+                    if 0 <= x < w and 0 <= y < h:
+                        out.add((x, y))
+        return out
+
+    def _commit_stroke(self, cells):
+        """Paint the active color along `cells` (brush + symmetry applied) as
+        one undoable step. No-op strokes leave the undo stack untouched."""
+        new = self.active_char
+        targets = [(x, y) for (x, y) in self._stroke_cells(cells)
+                   if self.rows[y][x] != new]
+        if not targets:
+            return
+        self.push_undo()
+        for (x, y) in targets:
+            self.rows[y][x] = new
+        self.update()
+        self.modified.emit()
+
+    def _spline_preview_pts(self):
+        """The placed spline points plus the hover cell as a tentative next
+        point, so the curve follows the mouse before each click."""
+        pts = list(self._spline_pts)
+        if self._spline_hover is not None and \
+                (not pts or self._spline_hover != pts[-1]):
+            pts.append(self._spline_hover)
+        return pts
+
+    def commit_spline(self):
+        """Paint the pending spline (Enter / double-click / right-click)."""
+        if self._spline_pts:
+            self._commit_stroke(_spline_cells(list(self._spline_pts)))
+        self._clear_stroke()
+
     # ---- interaction ---------------------------------------------------------
     def _cell_at(self, pos):
         x, y = pos.x() // self.cell_px, pos.y() // self.cell_px
@@ -768,6 +880,27 @@ class Canvas(QWidget):
                     self._sel_path = [cell]
                 else:
                     self._sel_cur = cell
+            self.update()
+            return
+        if self.tool == "line":
+            if evt.button() != Qt.MouseButton.LeftButton:
+                return
+            c = self._clamped_cell(evt.position().toPoint())
+            self._line_anchor = c
+            self._line_cur = c
+            self.update()
+            return
+        if self.tool == "spline":
+            if evt.button() == Qt.MouseButton.RightButton:
+                self.commit_spline()
+                return
+            if evt.button() != Qt.MouseButton.LeftButton:
+                return
+            c = self._clamped_cell(evt.position().toPoint())
+            if self._spline_pts is None:
+                self._spline_pts = []
+            if not self._spline_pts or self._spline_pts[-1] != c:
+                self._spline_pts.append(c)
             self.update()
             return
         cell = self._cell_at(evt.position().toPoint())
@@ -810,11 +943,34 @@ class Canvas(QWidget):
                                if sel and c in sel
                                else Qt.CursorShape.ArrowCursor)
             return
+        if self.tool == "line":
+            if self._line_anchor is not None \
+                    and (evt.buttons() & Qt.MouseButton.LeftButton):
+                c = self._clamped_cell(evt.position().toPoint())
+                if c != self._line_cur:
+                    self._line_cur = c
+                    self.update()
+            return
+        if self.tool == "spline":
+            c = self._clamped_cell(evt.position().toPoint())
+            if c != self._spline_hover:
+                self._spline_hover = c
+                if self._spline_pts:
+                    self.update()
+            return
         if cell and (evt.buttons() & Qt.MouseButton.LeftButton) \
                 and self.tool in ("pencil", "eraser"):
             self._paint(cell)
 
     def mouseReleaseEvent(self, evt):
+        if evt.button() == Qt.MouseButton.LeftButton and self.tool == "line" \
+                and self._line_anchor is not None:
+            cells = _line_cells(self._line_anchor, self._line_cur)
+            self._line_anchor = None
+            self._line_cur = None
+            self._commit_stroke(cells)
+            self.update()
+            return
         if evt.button() != Qt.MouseButton.LeftButton \
                 or self.tool not in ("select", "lasso"):
             return super().mouseReleaseEvent(evt)
@@ -836,6 +992,14 @@ class Canvas(QWidget):
         self._sel_cur = None
         self.update()
 
+    def mouseDoubleClickEvent(self, evt):
+        # Double-click paints the pending spline (its first press already
+        # placed the final point).
+        if self.tool == "spline" and evt.button() == Qt.MouseButton.LeftButton:
+            self.commit_spline()
+            return
+        super().mouseDoubleClickEvent(evt)
+
     def keyPressEvent(self, evt):
         # Canvas-level shortcuts so the embedded studio (no menu bar) gets
         # them too; in the standalone editor the menu actions fire first.
@@ -845,7 +1009,8 @@ class Canvas(QWidget):
             if key == Qt.Key.Key_U or (key == Qt.Key.Key_Z and not shift):
                 self.undo()
                 return
-            if key == Qt.Key.Key_Y or (key == Qt.Key.Key_Z and shift):
+            if key in (Qt.Key.Key_Y, Qt.Key.Key_R) \
+                    or (key == Qt.Key.Key_Z and shift):
                 self.redo()
                 return
             op = {Qt.Key.Key_H: "flip_v" if shift else "flip_h",
@@ -854,6 +1019,17 @@ class Canvas(QWidget):
             if op:
                 self.transform(op)
                 return
+        if self.tool == "spline" and self._spline_pts:
+            if evt.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self.commit_spline()
+                return
+            if evt.key() == Qt.Key.Key_Escape:
+                self._clear_stroke()
+                return
+        if self.tool == "line" and self._line_anchor is not None \
+                and evt.key() == Qt.Key.Key_Escape:
+            self._clear_stroke()
+            return
         if self.tool in ("select", "lasso") \
                 and evt.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if evt.key() == Qt.Key.Key_C and self.copy_selection():
@@ -989,7 +1165,8 @@ class Editor(QMainWindow):
         editm.addAction("Undo", self.canvas.undo).setShortcuts(
             [QKeySequence("Ctrl+Z"), QKeySequence("Ctrl+U")])
         editm.addAction("Redo", self.canvas.redo).setShortcuts(
-            [QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+            [QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+R"),
+             QKeySequence("Ctrl+Shift+Z")])
         editm.addSeparator()
         for label, op, sc in [
             ("Mirror Horizontal", "flip_h", "Ctrl+H"),
@@ -999,7 +1176,8 @@ class Editor(QMainWindow):
         ]:
             editm.addAction(label, lambda o=op: self._transform(o)).setShortcut(sc)
         editm.addSeparator()
-        editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
+        # Ctrl+R belongs to Redo now; Resize moved to Ctrl+Shift+R.
+        editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+Shift+R")
         editm.addAction("Reduce duplicate lines", self.reduce_lines)
         editm.addAction("Add / remove lines...", self.resize_edges)
 
@@ -1011,7 +1189,8 @@ class Editor(QMainWindow):
         v.addWidget(self._heading("Tools"))
         self.tool_group = QButtonGroup(self)
         self.tool_buttons = {}
-        for name in ("pencil", "eraser", "fill", "eyedropper", "select", "lasso"):
+        for name in ("pencil", "eraser", "fill", "eyedropper", "line", "spline",
+                     "select", "lasso"):
             b = QPushButton(name.capitalize())
             b.setCheckable(True)
             b.clicked.connect(lambda _c, n=name: self._select_tool(n))

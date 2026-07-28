@@ -118,6 +118,67 @@ def test_transform_selection_rotation_reanchors_into_grid(qapp):
     assert all(c.rows[y][0] == "k" for y in (1, 2, 3))
 
 
+def test_line_commit_paints_bresenham(qapp):
+    from tools.pixel_editor import Canvas, _line_cells
+    c = Canvas(8, 8)
+    c.tool = "line"
+    c.active_char = "k"
+    c._commit_stroke(_line_cells((0, 0), (7, 3)))
+    painted = {(x, y) for y in range(8) for x in range(8)
+               if c.rows[y][x] == "k"}
+    assert painted == set(_line_cells((0, 0), (7, 3)))
+    c.undo()
+    assert all(ch == "." for r in c.rows for ch in r)
+
+
+def test_line_respects_brush_size(qapp):
+    from tools.pixel_editor import Canvas, _line_cells
+    c = Canvas(8, 8)
+    c.tool = "line"
+    c.active_char = "k"
+    c.brush_size = 3
+    c._commit_stroke(_line_cells((2, 2), (5, 2)))
+    # A 3px brush on a horizontal line covers rows 1-3 across cols 1-6.
+    assert all(c.rows[y][x] == "k" for y in (1, 2, 3) for x in range(1, 7))
+
+
+def test_spline_cells_hits_every_point_gap_free(qapp):
+    from tools.pixel_editor import _spline_cells
+    pts = [(0, 7), (4, 0), (8, 7), (12, 0)]
+    cells = _spline_cells(pts)
+    for pt in pts:
+        assert pt in cells
+    for a, b in zip(cells, cells[1:]):     # 8-connected, no gaps
+        assert max(abs(a[0] - b[0]), abs(a[1] - b[1])) <= 1
+    assert _spline_cells([(3, 3)]) == [(3, 3)]
+    assert set(_spline_cells([(0, 0), (3, 3)])) == {(0, 0), (1, 1), (2, 2), (3, 3)}
+
+
+def test_spline_commit_and_cancel(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(8, 8)
+    c.tool = "spline"
+    c.active_char = "k"
+    c._spline_pts = [(0, 4), (3, 1), (7, 4)]
+    c.commit_spline()
+    assert c._spline_pts is None
+    assert c.rows[4][0] == "k" and c.rows[1][3] == "k" and c.rows[4][7] == "k"
+    c.undo()
+    assert all(ch == "." for r in c.rows for ch in r)
+    c._spline_pts = [(0, 0), (5, 5)]
+    c._clear_stroke()                       # Esc: no paint, no undo entry
+    assert c._spline_pts is None and c._undo == []
+
+
+def test_leaving_stroke_tool_clears_pending_state(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(8, 8)
+    c.tool = "spline"
+    c._spline_pts = [(1, 1), (4, 4)]
+    c.tool = "pencil"
+    assert c._spline_pts is None
+
+
 def test_add_color_reuses_existing(qapp):
     from tools.pixel_editor import Canvas
     c = Canvas(2, 2)
