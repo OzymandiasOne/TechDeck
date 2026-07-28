@@ -474,7 +474,7 @@ def build_dxf_index(iges_folder, log, cancel_event=None):
     return index, suspect, multilayer, empty
 
 
-VERSION = "2.7.3"
+VERSION = "2.8.0"
 
 # We reproduce EVERY batch-list column verbatim, in its native order, then
 # append our own generated columns after them. The batch list's own 'Material'
@@ -494,7 +494,8 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
                   "",   # deliberate BLANK spacer column: clean visual division
                         # between the live estimate and the old LI reference
                   "Feed Rate (IPM)", "LI Est Min/PC", "LI Est Min/WO",
-                  "LI Est Cut Hours"]
+                  "LI Est Cut Hours",
+                  "EB Machine", "EB Fuel"]
 # 'Remnant Length'/'Remnant Width' are the nest sheet's page-1 Length/Width --
 # the remnant's dimensions -- filled ONLY on rows whose batch-list 'Rem Used'
 # (AA) is populated (a remnant was used); blank otherwise.
@@ -522,6 +523,10 @@ GENERATED_COLS = ["Division", "Process", "Thickness (in)",
 # request (v2.7.0: "keep the original runtimes, moved to a separate location on
 # the right"). LI Est Min/PC = Linear In/PC / Feed Rate; the chain matches the
 # old Equation column. Populated only for plate rows that resolve a DXF.
+# 'EB Machine' / 'EB Fuel' (v2.8.0) close the table: the packet's page-1
+# header-table Machine (labelled 'Gantry' on some packets) and Fuel cells --
+# per-NEST values repeated on the nest's rows, read positionally by
+# _page1_value_below (the flat text interleaves that table's cells).
 # The linear-inch measurement columns (Linear In/PC, Total Linear In,
 # Multi-Layered, LI Dev (SD)) stay in place -- they're geometry facts, not
 # runtimes. 'Multi-Layered' = Y/N (does
@@ -838,6 +843,31 @@ def _page1_source_code(page1_text: str):
     return None
 
 
+def _page1_value_below(words, label_texts):
+    """The value cell directly BELOW a page-1 header-table label ('Machine' /
+    'Gantry' / 'Fuel'), read positionally from the page's word boxes
+    (fitz get_text('words') tuples: x0, y0, x1, y1, text, ...). The flat text
+    extraction interleaves this table's cells out of label order, so line
+    scanning can't pair them. Takes the topmost word matching a label, then
+    the first text line that starts below it within one row height and
+    horizontally centered on the label's column; the row-height cap keeps a
+    blank cell from reading the next row's labels ('Source Code'). Verified
+    on all 142 Award 8/9/10 packets (both the 'Gantry' and 'Machine' label
+    variants). Returns None when the label or its value is missing."""
+    cands = [w for w in words if w[4].strip().lower() in label_texts]
+    if not cands:
+        return None
+    lab = min(cands, key=lambda w: w[1])
+    lab_cx = (lab[0] + lab[2]) / 2
+    below = [w for w in words if w[1] > lab[3] - 1 and w[1] < lab[3] + 15
+             and abs((w[0] + w[2]) / 2 - lab_cx) < 70]
+    if not below:
+        return None
+    top = min(w[1] for w in below)
+    line = sorted((w for w in below if w[1] - top < 3), key=lambda w: w[0])
+    return " ".join(w[4] for w in line).strip() or None
+
+
 def _parse_size(full_text: str):
     """Return (stock_L, stock_W) from a part-sketch 'SIZE:' field, normalized
     L=max, W=min. Thickness-only sizes (e.g. '0.375 THICK') -> (None, None).
@@ -959,11 +989,15 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
            "sheet_length": None, "sheet_width": None,
            "batch_lengths": None, "summary_malformed": False,
            "mat_size": None, "mat_type": None,
-           "orders": None, "source_code": None}
+           "orders": None, "source_code": None,
+           "machine": None, "fuel": None}
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
     doc = fitz.open(str(pdf_path))
     try:
         pages = [p.get_text() for p in doc]
+        # Word boxes for page 1 only: the Machine/Fuel header table needs
+        # position-based reads (the flat text interleaves its cells).
+        words1 = doc[0].get_text("words") if doc.page_count else []
     finally:
         doc.close()
     full = "\n".join(pages)
@@ -985,6 +1019,11 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
     m = _CUT_METHOD_RE.search(page1)
     if m:
         out["process"] = m.group(1).upper().replace("  ", " ")
+
+    # EB Machine / EB Fuel: the page-1 header table's Machine (labelled
+    # 'Gantry' on some packets) and Fuel cells, read positionally.
+    out["machine"] = _page1_value_below(words1, ("machine", "gantry"))
+    out["fuel"] = _page1_value_below(words1, ("fuel",))
 
     # Material: REMNANT 'TYPE:' OR part-sketch 'MATL:' OR move-ticket 'MATERIAL:'.
     out["material"] = (_labeled_value(full, "TYPE")
@@ -2163,6 +2202,10 @@ def run(params: dict, progress_callback, cancel_event):
             out_row["Plate Weight"] = (pdfd or {}).get("plate_weight") if pdfd else None
             out_row["Mil Spec"] = (pdfd or {}).get("mil_spec") if pdfd else None
             out_row["MT Material"] = (pdfd or {}).get("mt_material") if pdfd else None
+            # Per-NEST machine/fuel from the packet's page-1 header table,
+            # repeated on the nest's rows (like Thickness).
+            out_row["EB Machine"] = pdfd.get("machine") if pdfd else None
+            out_row["EB Fuel"] = pdfd.get("fuel") if pdfd else None
 
             flags = []
             # LI Dev (SD) is filled in after all rows are built (needs the mean/std
