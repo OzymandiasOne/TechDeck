@@ -233,16 +233,31 @@ def _select_nests(params, batch_number: str, nest_infos: dict[str, dict]):
 # ---------------------------------------------------------------------------
 
 def _pick_source(sources: list[dict], qtdr_root: Path,
-                 target_batch: str, target_nest: str) -> tuple[dict, Path] | None:
-    """First MPL row (skipping the target nest itself) whose folder exists."""
-    for src in sources:
-        if (src["batch"].upper() == target_batch.upper()
-                and src["nest"].upper() == target_nest.upper()):
-            continue
+                 target_batch: str, target_nest: str):
+    """First MPL row (skipping the target nest itself) whose folder exists.
+
+    Returns ("ok", src, src_dir) on success, or a reason when nothing is
+    usable — the two failure modes are very different and must be reported
+    differently (bit the V092 diagnosis, 2026-07-28):
+
+    * ("self_only", None): every row points back at the target nest itself —
+      the batch was already catalogued when the MPL was built, so the "match"
+      is the part's own catalog entry, not a repeat.
+    * ("missing", first_candidate): a genuine other-nest source exists in the
+      list but its folder is gone from disk.
+    """
+    candidates = [
+        src for src in sources
+        if not (src["batch"].upper() == target_batch.upper()
+                and src["nest"].upper() == target_nest.upper())
+    ]
+    if not candidates:
+        return ("self_only", None)
+    for src in candidates:
         src_dir = qtdr_root / Path(src["rel"])
         if src_dir.is_dir():
-            return src, src_dir
-    return None
+            return ("ok", src, src_dir)
+    return ("missing", candidates[0])
 
 
 def _copy_part(src_dir: Path, dest_dir: Path, exts: set[str], overwrite: bool,
@@ -368,6 +383,16 @@ def run(params, progress_callback, cancel_event):
     mpl_index = _load_mpl_index(mpl_path, log)
     log(f"  {sum(len(v) for v in mpl_index.values())} catalogued parts, "
         f"{len(mpl_index)} unique DYPNs")
+    # Heads-up when the target batch is itself a catalogued SOURCE (it was
+    # already in progress/shipped when the MPL was built): its parts will
+    # match their own catalog rows, which are not repeats (bit V092).
+    self_rows = sum(
+        1 for rows in mpl_index.values() for s in rows
+        if s["batch"].upper() == batch_number.upper())
+    if self_rows:
+        log(f"  Note: {batch_number} is itself catalogued in the parts list "
+            f"({self_rows} part(s)) - matches pointing back at the same nest "
+            f"are not repeats and will be skipped.")
     progress_callback(10)
 
     if cancel_event.is_set():
@@ -455,6 +480,7 @@ def run(params, progress_callback, cancel_event):
     total_parts = 0
     total_files = 0
     total_new = 0
+    total_self_cat = 0
     total_missing_src = 0
     total_errors = 0
 
@@ -503,13 +529,19 @@ def run(params, progress_callback, cancel_event):
                 continue  # new part - not a repeat, nothing to pull
 
             picked = _pick_source(sources, qtdr_root, batch_number, nest_name)
-            if picked is None:
+            if picked[0] == "self_only":
+                log(f"  {dypn} - only catalogued from this nest itself (this "
+                    f"batch is already in the parts list) - not a repeat")
+                total_self_cat += 1
+                continue
+            if picked[0] == "missing":
+                cand = picked[1]
                 log(f"  {dypn} - in the parts list but its source folder is "
-                    f"missing (was {sources[0]['batch']} {sources[0]['nest']})")
+                    f"missing from disk (was {cand['batch']} {cand['nest']})")
                 total_missing_src += 1
                 continue
 
-            src, src_dir = picked
+            _, src, src_dir = picked
             try:
                 copied, skipped = _copy_part(
                     src_dir, repeat_root / src_dir.name, exts, overwrite,
@@ -545,8 +577,10 @@ def run(params, progress_callback, cancel_event):
     log(f"Files copied    : {total_files}")
     if total_new:
         log(f"New parts (not in the parts list): {total_new}")
+    if total_self_cat:
+        log(f"Own catalog entries (this batch, not repeats): {total_self_cat}")
     if total_missing_src:
-        log(f"Missing sources : {total_missing_src}")
+        log(f"Missing source folders: {total_missing_src}")
     if total_errors:
         log(f"Errors          : {total_errors}")
     log("=" * 50)
