@@ -62,6 +62,62 @@ def test_undo_redo(qapp):
     assert c.rows[0][0] == "k"
 
 
+def test_transform_canvas_flips_and_rotates(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(3, 2)
+    c.rows = [list("kw."), list("...")]
+    c.transform("flip_h")
+    assert ["".join(r) for r in c.rows] == [".wk", "..."]
+    c.undo()
+    c.transform("flip_v")
+    assert ["".join(r) for r in c.rows] == ["...", "kw."]
+    c.undo()
+    c.transform("rot_cw")          # 3x2 -> 2x3
+    assert ["".join(r) for r in c.rows] == [".k", ".w", ".."]
+    c.transform("rot_ccw")         # inverse restores the original
+    assert ["".join(r) for r in c.rows] == ["kw.", "..."]
+
+
+def test_transform_noop_pushes_no_undo(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(2, 2)
+    c.rows = [list("kk"), list("kk")]    # symmetric every way
+    c.transform("flip_h")
+    c.transform("rot_cw")
+    assert c._undo == []
+
+
+def test_transform_selection_only(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(4, 4)
+    c.rows[0][0] = "k"                   # inside the selection
+    c.rows[3][3] = "w"                   # outside — must not move
+    c.tool = "select"
+    c.selection = {(x, y) for x in range(2) for y in range(2)}
+    c.transform("flip_h")
+    assert c.rows[0][1] == "k" and c.rows[0][0] == "."
+    assert c.rows[3][3] == "w"
+    assert c.selection == {(x, y) for x in range(2) for y in range(2)}
+    c.transform("rot_cw")                # 2x2 CW: top-right -> bottom-right
+    assert c.rows[1][1] == "k"
+    c.undo()
+    assert c.rows[0][1] == "k"
+
+
+def test_transform_selection_rotation_reanchors_into_grid(qapp):
+    from tools.pixel_editor import Canvas
+    c = Canvas(4, 4)
+    # A 3-wide x 1-tall strip on the bottom row: rotating CW makes it 1x3,
+    # which must shift up to stay on the grid instead of clipping.
+    for x in range(3):
+        c.rows[3][x] = "k"
+    c.tool = "select"
+    c.selection = {(x, 3) for x in range(3)}
+    c.transform("rot_cw")
+    assert c.selection == {(0, 1), (0, 2), (0, 3)}
+    assert all(c.rows[y][0] == "k" for y in (1, 2, 3))
+
+
 def test_add_color_reuses_existing(qapp):
     from tools.pixel_editor import Canvas
     c = Canvas(2, 2)

@@ -83,10 +83,38 @@ _TOOL_TIPS = {
              "its pixels; Ctrl+C/Ctrl+V copy/paste",
 }
 
-# Undo / redo as back / forward arrows.
+# Undo / redo as back / forward arrows, plus the mirror/rotate transforms
+# (Lucide flip-horizontal / flip-vertical / rotate-cw / rotate-ccw).
 _NAV_ICONS = {
     "undo": ["M19 12H5", "M12 19l-7-7 7-7"],
     "redo": ["M5 12h14", "M12 5l7 7-7 7"],
+    "flip_h": [
+        "M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3",
+        "M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3",
+        "M12 20v2", "M12 14v2", "M12 8v2", "M12 2v2",
+    ],
+    "flip_v": [
+        "M21 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v3",
+        "M21 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3",
+        "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2",
+    ],
+    "rot_cw": [
+        "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8",
+        "M21 3v5h-5",
+    ],
+    "rot_ccw": [
+        "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8",
+        "M3 3v5h5",
+    ],
+}
+
+_NAV_TIPS = {
+    "undo": "Undo (Ctrl+Z / Ctrl+U)",
+    "redo": "Redo (Ctrl+Y)",
+    "flip_h": "Mirror horizontally (Ctrl+H) — selection if present, else canvas",
+    "flip_v": "Mirror vertically (Ctrl+Shift+H) — selection if present, else canvas",
+    "rot_cw": "Rotate 90 CW (Ctrl+]) — selection if present, else canvas",
+    "rot_ccw": "Rotate 90 CCW (Ctrl+[) — selection if present, else canvas",
 }
 
 
@@ -281,19 +309,33 @@ class _CanvasPanel(QWidget, ThemeAware):
         urow = QHBoxLayout()
         urow.setSpacing(4)
         self._nav_buttons = []
-        for name, slot in (("undo", self.canvas.undo), ("redo", self.canvas.redo)):
+
+        def nav_btn(name, slot):
             b = QPushButton()
             b.setIcon(_svg_icon(_NAV_ICONS[name], self._icon_color, 22))
             b.setIconSize(QSize(22, 22))
             b.setFixedSize(44, 44)
-            b.setToolTip(name.capitalize())
+            b.setToolTip(_NAV_TIPS.get(name, name.capitalize()))
             b.setStyleSheet(nav_style)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.clicked.connect(slot)
             self._nav_buttons.append((name, b))
-            urow.addWidget(b)
+            return b
+
+        for name, slot in (("undo", self.canvas.undo), ("redo", self.canvas.redo)):
+            urow.addWidget(nav_btn(name, slot))
         urow.addStretch()
         v.addLayout(urow)
+
+        v.addWidget(self._heading("Transform"))
+        tgrid = QGridLayout()
+        tgrid.setSpacing(4)
+        for i, op in enumerate(("flip_h", "flip_v", "rot_cw", "rot_ccw")):
+            tgrid.addWidget(
+                nav_btn(op, lambda _c=False, o=op: self._transform(o)),
+                i // 2, i % 2)
+        tgrid.setColumnStretch(2, 1)
+        v.addLayout(tgrid)
 
         v.addStretch()
 
@@ -443,6 +485,9 @@ class _CanvasPanel(QWidget, ThemeAware):
     def _toggle_grid(self):
         self.canvas.show_grid = not self.canvas.show_grid
         self.canvas.update()
+
+    def _transform(self, op):
+        self.status.setText(self.canvas.transform(op))
 
     # ---- signals -------------------------------------------------------------
     def _on_pick(self, ch):

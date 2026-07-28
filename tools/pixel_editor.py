@@ -22,7 +22,10 @@ Files:  New (set size) · Open · Save / Save As (.tdart) · Copy as Python
         (puts a PALETTE + ART snippet on the clipboard for legacy widgets).
         Open/Save default to tools/pixel_playground.
 Edit:   Resize (scale art) · Reduce duplicate lines · Add / remove lines
-        (signed per-side count: positive adds transparent lines, negative crops).
+        (signed per-side count: positive adds transparent lines, negative crops) ·
+        Mirror H/V (Ctrl+H / Ctrl+Shift+H) · Rotate 90 CW/CCW (Ctrl+] / Ctrl+[)
+        — transforms apply to the selection when one exists, else the whole
+        canvas. Undo is Ctrl+Z or Ctrl+U; redo Ctrl+Y or Ctrl+Shift+Z.
 """
 
 import sys
@@ -38,7 +41,7 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout,
 )
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
-from PySide6.QtGui import QPainter, QColor, QPen, QPixmap, QImage
+from PySide6.QtGui import QPainter, QColor, QPen, QPixmap, QImage, QKeySequence
 
 from techdeck.ui import pixel_art
 
@@ -318,6 +321,96 @@ class Canvas(QWidget):
         self.update()
         self.modified.emit()
         return True
+
+    # ---- mirror / rotate -----------------------------------------------------
+    _XFORM_LABELS = {
+        "flip_h": "Mirrored horizontally", "flip_v": "Mirrored vertically",
+        "rot_cw": "Rotated 90 CW", "rot_ccw": "Rotated 90 CCW",
+    }
+
+    def transform(self, op):
+        """Mirror/rotate: 'flip_h' | 'flip_v' | 'rot_cw' | 'rot_ccw'. Applies
+        to the selection when one exists (about its bounding box), otherwise
+        to the whole canvas. Returns a status message for the caller."""
+        if self._float is not None:
+            self._anchor_float()   # commit an airborne paste/move first
+        label = self._XFORM_LABELS[op]
+        if self.selection:
+            self._transform_selection(op)
+            return f"{label} (selection)"
+        self._transform_canvas(op)
+        return label
+
+    def _transform_canvas(self, op):
+        if not self.rows:
+            return
+        self.push_undo()
+        if op == "flip_h":
+            new = [list(reversed(r)) for r in self.rows]
+        elif op == "flip_v":
+            new = [r[:] for r in reversed(self.rows)]
+        elif op == "rot_cw":
+            new = [list(t) for t in zip(*self.rows[::-1])]
+        else:   # rot_ccw
+            new = [list(t) for t in zip(*self.rows)][::-1]
+        if new == self.rows:
+            self._undo.pop()   # symmetric art — nothing changed
+            return
+        self.rows = new
+        self._resize_to_grid()
+        self.update()
+        self.modified.emit()
+
+    def _transform_selection(self, op):
+        """Remap the selection's pixels (and its mask) about the selection's
+        bounding box. Rotating a non-square selection keeps its top-left,
+        shifted only as far as needed to stay on the grid; pixels that still
+        don't fit are clipped."""
+        xs = [x for x, _ in self.selection]
+        ys = [y for _, y in self.selection]
+        x0, y0 = min(xs), min(ys)
+        bw = max(xs) - x0 + 1
+        bh = max(ys) - y0 + 1
+
+        def remap(x, y):
+            rx, ry = x - x0, y - y0
+            if op == "flip_h":
+                return bw - 1 - rx, ry
+            if op == "flip_v":
+                return rx, bh - 1 - ry
+            if op == "rot_cw":
+                return bh - 1 - ry, rx
+            return ry, bw - 1 - rx      # rot_ccw
+
+        nw, nh = (bh, bw) if op in ("rot_cw", "rot_ccw") else (bw, bh)
+        w, h = self.grid_size()
+        ox = max(0, min(x0, w - nw))
+        oy = max(0, min(y0, h - nh))
+
+        lifted = {}
+        for (x, y) in self.selection:
+            ch = self.rows[y][x]
+            if ch not in pixel_art.TRANSPARENT_CHARS and ch in self.palette:
+                lifted[(x, y)] = ch
+        if lifted:
+            self.push_undo()
+            for (x, y) in lifted:
+                self.rows[y][x] = "."
+            for (x, y), ch in lifted.items():
+                nx, ny = remap(x, y)
+                tx, ty = ox + nx, oy + ny
+                if 0 <= tx < w and 0 <= ty < h:
+                    self.rows[ty][tx] = ch
+            if self.rows == self._undo[-1]:
+                self._undo.pop()   # symmetric — nothing changed
+            else:
+                self.modified.emit()
+        self.selection = {
+            (ox + nx, oy + ny)
+            for nx, ny in (remap(x, y) for (x, y) in self.selection)
+            if 0 <= ox + nx < w and 0 <= oy + ny < h
+        } or None
+        self.update()
 
     # ---- undo / redo (stroke-level) -----------------------------------------
     def _snapshot(self):
@@ -744,6 +837,23 @@ class Canvas(QWidget):
         self.update()
 
     def keyPressEvent(self, evt):
+        # Canvas-level shortcuts so the embedded studio (no menu bar) gets
+        # them too; in the standalone editor the menu actions fire first.
+        if evt.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            key = evt.key()
+            shift = bool(evt.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if key == Qt.Key.Key_U or (key == Qt.Key.Key_Z and not shift):
+                self.undo()
+                return
+            if key == Qt.Key.Key_Y or (key == Qt.Key.Key_Z and shift):
+                self.redo()
+                return
+            op = {Qt.Key.Key_H: "flip_v" if shift else "flip_h",
+                  Qt.Key.Key_BracketRight: "rot_cw",
+                  Qt.Key.Key_BracketLeft: "rot_ccw"}.get(key)
+            if op:
+                self.transform(op)
+                return
         if self.tool in ("select", "lasso") \
                 and evt.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if evt.key() == Qt.Key.Key_C and self.copy_selection():
@@ -876,8 +986,18 @@ class Editor(QMainWindow):
                 act.setShortcut(sc)
 
         editm = bar.addMenu("&Edit")
-        editm.addAction("Undo", self.canvas.undo).setShortcut("Ctrl+Z")
-        editm.addAction("Redo", self.canvas.redo).setShortcut("Ctrl+Y")
+        editm.addAction("Undo", self.canvas.undo).setShortcuts(
+            [QKeySequence("Ctrl+Z"), QKeySequence("Ctrl+U")])
+        editm.addAction("Redo", self.canvas.redo).setShortcuts(
+            [QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
+        editm.addSeparator()
+        for label, op, sc in [
+            ("Mirror Horizontal", "flip_h", "Ctrl+H"),
+            ("Mirror Vertical", "flip_v", "Ctrl+Shift+H"),
+            ("Rotate 90 CW", "rot_cw", "Ctrl+]"),
+            ("Rotate 90 CCW", "rot_ccw", "Ctrl+["),
+        ]:
+            editm.addAction(label, lambda o=op: self._transform(o)).setShortcut(sc)
         editm.addSeparator()
         editm.addAction("Resize (scale art)...", self.resize_canvas).setShortcut("Ctrl+R")
         editm.addAction("Reduce duplicate lines", self.reduce_lines)
@@ -908,6 +1028,20 @@ class Editor(QMainWindow):
         urow.addWidget(undo_btn)
         urow.addWidget(redo_btn)
         v.addLayout(urow)
+
+        v.addWidget(self._heading("Transform"))
+        for pairs in (
+            (("Mirror H", "flip_h", "Ctrl+H"), ("Mirror V", "flip_v", "Ctrl+Shift+H")),
+            (("Rot CW", "rot_cw", "Ctrl+]"), ("Rot CCW", "rot_ccw", "Ctrl+[")),
+        ):
+            trow = QHBoxLayout()
+            for label, op, sc in pairs:
+                b = QPushButton(label)
+                b.setToolTip(f"{label} ({sc}) — applies to the selection if "
+                             "there is one, else the whole canvas")
+                b.clicked.connect(lambda _c, o=op: self._transform(o))
+                trow.addWidget(b)
+            v.addLayout(trow)
 
         brow = QHBoxLayout()
         brow.addWidget(QLabel("Brush"))
@@ -1014,6 +1148,9 @@ class Editor(QMainWindow):
         if self.canvas.tool in ("eraser", "eyedropper", "select", "lasso"):
             self._select_tool("pencil")
         self._rebuild_swatches()
+
+    def _transform(self, op):
+        self.statusBar().showMessage(self.canvas.transform(op))
 
     def resize_canvas(self):
         w, h = self.canvas.grid_size()
