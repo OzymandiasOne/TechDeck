@@ -1,7 +1,8 @@
 r"""
 911 Repeater Plugin
 ===================
-v3.0.0 — MPL-driven repeat pull, rebuilt around the modern 911 workflow.
+v3.1.0 — MPL-driven repeat pull, rebuilt around the modern 911 workflow.
+Batch selection is a folder pick (Sentry Drone kill-cam picker) as of 3.1.0.
 
 Finds repeat parts for a 911 QTDR batch by looking each nest's DYPNs up in
 the 911 MASTER PARTS LIST (compiled from completed nests by
@@ -15,8 +16,13 @@ There is no batch-level repeats folder — repeats land per nest. The legacy
 NC / inspection-library grabbing (v1–v2) is gone with the workflow it served.
 
 Workflow:
-  1. Prompt for batch number (e.g. V109, S045)
-  2. Locate the LIVE batch folder directly under the 911 QTDR root
+  1. Resolve the 911 QTDR root (Settings override, else auto-detect)
+  2. Pick the LIVE batch folder directly under it — Sentry Drone kill-cam
+     picker (crosshair/lock-on/railgun) unless the settings toggle is off /
+     professional theme / effect failure → native dialog. Batch number =
+     the folder's name (e.g. V109, S045); the pick seeds the family-shared
+     batch cache, and a cache hit from an earlier 911 plugin in a multi-run
+     skips the picker entirely
   3. Load the MASTER PARTS LIST (Settings override, else the REPEATER folder)
      and index DYPN -> source nest folders
   4. For each nest subfolder (nest-number-shaped names only), read DYPNs from
@@ -264,20 +270,7 @@ def run(params, progress_callback, cancel_event):
     progress_callback(0)
 
     # ------------------------------------------------------------------ #
-    # Step 1 - Prompt for batch number
-    # ------------------------------------------------------------------ #
-    batch_number = sdk.request_batch_number(
-        params, "Enter Batch Number (e.g. V109, S045):"
-    ).strip().upper()
-
-    if not batch_number:
-        log("No batch number entered - aborting.")
-        return
-
-    log(f"Batch         : {batch_number}")
-
-    # ------------------------------------------------------------------ #
-    # Step 2 - Resolve the QTDR root + live batch folder
+    # Step 1 - Resolve the QTDR root
     # ------------------------------------------------------------------ #
     qtdr_root = sdk.resolve_911_qtdr_root(settings.get("qtdr_base_path", ""))
     if qtdr_root is None or not qtdr_root.exists():
@@ -287,13 +280,50 @@ def run(params, progress_callback, cancel_event):
             "Settings → Apps → 911 Batch Repeater, then run again.")
     log(f"911 QTDR root : {qtdr_root}")
 
-    batch_folder = sdk.find_911_batch_folder(qtdr_root, batch_number)
-    if batch_folder is None:
-        raise sdk.UserFacingError(
-            f"Couldn't find batch folder '{batch_number}' under the 911 QTDR "
-            f"root.\n  {qtdr_root}",
-            "Double-check the batch number and that the folder exists there, "
-            "then run again.")
+    # ------------------------------------------------------------------ #
+    # Step 2 - Pick the batch folder (batch number = the folder's name)
+    # ------------------------------------------------------------------ #
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("911", {}).get("batch_number")
+    if cached:
+        # An earlier 911 plugin in this multi-run already answered — reuse it
+        # silently instead of re-prompting (Hard Rule 10).
+        batch_number = sdk.normalize_911_batch(cached)
+        log(f"Batch         : {batch_number} (shared from an earlier plugin)")
+        batch_folder = sdk.find_911_batch_folder(qtdr_root, batch_number)
+        if batch_folder is None:
+            raise sdk.UserFacingError(
+                f"Couldn't find batch folder '{batch_number}' under the 911 "
+                f"QTDR root.\n  {qtdr_root}",
+                "Double-check the batch number and that the folder exists "
+                "there, then run again.")
+    else:
+        # Sentry Drone mode (settings toggle, default on): the targeting-drone
+        # picker (crosshair, lock-on, railgun). Off → a normal folder dialog.
+        # Professional theme / older TechDeck / any effect failure also fall back.
+        use_drone = bool(settings.get("sentry_drone", True))
+        raw = sdk.request_directory(
+            params, "Select the 911 batch folder", str(qtdr_root),
+            style="chopper_gunner" if use_drone else None)
+        if cancel_event.is_set():
+            return
+        if not raw:
+            log("Folder selection cancelled - nothing was run.")
+            cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+            return
+        batch_folder = Path(raw)
+        batch_number = sdk.normalize_911_batch(batch_folder.name)
+        if not batch_folder.is_dir() or not re.fullmatch(r"[A-Z0-9]+", batch_number):
+            raise sdk.UserFacingError(
+                f"'{batch_folder.name}' doesn't look like a 911 batch folder.",
+                "Run again and pick the batch's own folder directly under the "
+                "911 QTDR root (named like the batch, e.g. V109 or S045).")
+        # Seed the family batch cache immediately: the folder the user just
+        # picked IS this run's batch, so same-family plugins never re-prompt.
+        if shared_state is not None:
+            shared_state.setdefault("911", {})["batch_number"] = batch_number
+        log(f"Batch         : {batch_number}")
+
     log(f"Batch folder  : {batch_folder}")
     progress_callback(5)
 
