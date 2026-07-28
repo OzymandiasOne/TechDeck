@@ -1,8 +1,8 @@
 {
   "id": "911_batch_repeater",
   "name": "911 Batch Repeater",
-  "description": "Finds repeat parts for a 911 QTDR batch via the 911 MASTER PARTS LIST (compiled from completed nests). Pick the batch folder (Sentry Drone kill-cam picker), then a nest-selection window - pick which nests to run and toggle per nest what it grabs (SolidWorks models, part PDFs, overwrite) - then copies each repeat part's CAD folder from its completed source nest into a REPEAT folder inside the target nest.",
-  "version": "3.1.0",
+  "description": "Finds repeat parts for a 911 QTDR batch via the 911 MASTER PARTS LIST (compiled from completed nests). The two-phase Sentry Drone picker locks the batch folder, zooms inside, then multi-locks the nests to run before striking them - or, with the drone off, a folder dialog plus a nest-selection window with per-nest grab toggles (SolidWorks models, part PDFs, overwrite). Copies each repeat part's CAD folder from its completed source nest into a REPEAT folder inside the target nest.",
+  "version": "3.2.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,

@@ -448,6 +448,33 @@ def request_directory(params: dict, title: str = "Select Folder",
     return raw or None
 
 
+def request_nest_targets(params: dict, title: str, start_dir: str = "",
+                         target_pattern: Optional[str] = None):
+    """Two-phase Sentry-Drone folder pick (911 Batch Repeater): the user
+    TARGETs a batch folder, the drone optics zoom inside it, then multi-locks
+    subfolder targets and EXECUTEs a strike across them. Returns a tuple
+    ``(status, batch_path, names)``:
+
+    * ``"ok"`` — picked; names are the locked subfolder names, in lock order.
+    * ``"cancelled"`` — the user backed out; treat it as a run cancel.
+    * ``"unavailable"`` — headless, an older TechDeck without the console
+      method, the professional theme, or any picker failure. Fall back to a
+      classic folder dialog + your own selection window — never block on this.
+
+    ``target_pattern`` (regex, case-insensitive) limits which subfolder names
+    can be locked in phase 2 (e.g. the nest-number regex, Hard Rule 3).
+    """
+    console = params.get("console")
+    if console is None or not hasattr(console, "request_target_folders"):
+        return ("unavailable", "", [])
+    try:
+        status, path, names = console.request_target_folders(
+            title, start_dir, target_pattern)
+        return (status, path, list(names))
+    except Exception:
+        return ("unavailable", "", [])
+
+
 def show_warning(params: dict, title: str, text: str) -> None:
     """Show a modal warning popup (console GUI thread) and block until the
     user acknowledges it. Use for problems the user must see before moving

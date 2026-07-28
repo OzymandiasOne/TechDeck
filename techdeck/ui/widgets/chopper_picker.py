@@ -24,13 +24,32 @@ Entry point: :func:`pick_folder_chopper` (GUI thread only). Reached via
 ``console.request_directory`` → ``console._directory_gui``, which gates on
 the professional theme (native dialog instead) and falls back to the native
 dialog on ANY failure here — the toy must never block a 922 run.
+
+Second entry: :func:`pick_nest_targets_chopper` — the 911 Batch Repeater's
+TWO-PHASE variant. Phase 1 is the same lock-on but the accept button reads
+"Target" and nothing is destroyed: the feed wipes, the optics retask INTO
+the chosen batch folder (its nest subfolders zoom in from a pulled-back
+view, lock sound on the retask and again when the zoom settles), then phase
+2 lets the user click-lock MULTIPLE nest folders — each gets its own
+persistent designator + lock sound; clicking a locked row releases it —
+before "Execute" walks a strike across every locked target in quick
+succession, ending on the static + "TARGETS NEUTRALIZED" screen. Returns
+(batch_path, [nest names]). Reached via
+``sdk.request_nest_targets`` → ``console.request_target_folders``; there is
+NO internal native fallback — the console reports "unavailable" and the
+plugin falls back to its classic dialog + nest-selection window.
 """
 
 import math
+import os
 import random
+import re
 
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QListView, QWidget
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import (
+    QEvent, QModelIndex, QObject, QPersistentModelIndex, QPoint, QPointF,
+    QRect, QRectF, Qt, QTimer,
+)
 from PySide6.QtGui import (
     QColor, QCursor, QFont, QImage, QLinearGradient, QPainter, QPen, QPixmap,
     QRadialGradient,
@@ -54,6 +73,12 @@ _KNOCKOUT_TICKS = 45
 _SHAKE_MS = 350
 _AAR_MS = 1500         # "TARGET NEUTRALIZED" after-action hold before the close
 _CRT_MS = 480          # CRT power-off collapse when the picker closes
+
+# Two-phase (911 Repeater) beat timings.
+_WIPE_MS = 420         # retask wipe: scanline band sweeps the blanked feed
+_ZOOM_MS = 520         # optics zoom-in on the batch folder's contents
+_ZOOM_FROM = 0.55      # zoom starts pulled back to 55% and settles at 1:1
+_SALVO_STAGGER_MS = 300   # gap between successive strikes in an Execute salvo
 
 
 class _SkipFilter(QObject):
@@ -182,7 +207,20 @@ class GunnerOverlay(QWidget):
         self._lock_sfx_done = False    # lock-on sound fires once per acquisition
         self._crt_cb = None            # callback to run when the CRT close ends
         self._aar_path = ""            # picked path, shown on the TARGET NEUTRALIZED screen
+        self._aar_title = "TARGET NEUTRALIZED"   # salvo swaps in the plural
+        self._aar_extra = ""           # optional extra AAR readout line (salvo count)
         self._t0 = 0.0                 # ms since burst began (for puffs)
+
+        # Two-phase (911 Repeater) state.
+        self._targets = []             # persistent phase-2 locks: [(QRectF, name)]
+        self._targets_provider = None  # dialog callback → fresh rects each aim tick
+        self._show_target_count = False
+        self._salvo = []               # scheduled Execute strikes (burst state)
+        self._wipe_mid_cb = None
+        self._wipe_done_cb = None
+        self._zoom_pm = None           # grabbed dialog frame animated in 'zoom'
+        self._zoom_rect = QRectF()
+        self._zoom_done_cb = None
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -255,6 +293,74 @@ class GunnerOverlay(QWidget):
         self._callout = f"TARGET CONFIRMED — {getattr(self, '_lock_name', '')}"
         self._callout_alert = False
 
+    def set_callout(self, text: str, alert: bool = False):
+        """Set the HUD status line directly (phase-2 target feedback)."""
+        self._callout, self._callout_alert = text, alert
+
+    def play_lock_sfx(self):
+        """One-shot lock sound for the retask/zoom beats (guarded like _sfx)."""
+        try:
+            from techdeck.core.audio_manager import SOUND_CHOPPER_LOCK
+            self._sfx(SOUND_CHOPPER_LOCK)
+        except Exception:
+            pass
+
+    def set_targets(self, targets):
+        """Replace the persistent phase-2 lock set: [(QRectF, name)]."""
+        self._targets = list(targets)
+
+    def set_targets_provider(self, fn):
+        """Register a callback returning fresh target rects — re-run every aim
+        tick so the designators ride along when the list scrolls."""
+        self._targets_provider = fn
+
+    def begin_wipe(self, on_mid, on_done):
+        """Phase-1→2 retask wipe: the feed blanks to static and a bright
+        scanline band sweeps down it. on_mid fires once at the halfway point
+        (the dialog swaps its directory behind the static); on_done when the
+        band clears — the overlay then HOLDS dark until begin_zoom."""
+        self._state = "wipe"
+        self._elapsed = 0.0
+        self._wipe_mid_cb = on_mid
+        self._wipe_done_cb = on_done
+        self._callout, self._callout_alert = "RETASKING OPTICS…", True
+        self._timer.start(_TICK_MS)
+
+    def begin_zoom(self, pixmap: QPixmap, dest_rect: QRectF, on_done):
+        """Satellite zoom-in: the freshly-grabbed dialog frame (already showing
+        the batch folder's nests) scales up from pulled-back to 1:1 over the
+        darkened feed, then the real dialog shows through seamlessly."""
+        self._state = "zoom"
+        self._elapsed = 0.0
+        self._zoom_pm = pixmap
+        self._zoom_rect = QRectF(dest_rect)
+        self._zoom_done_cb = on_done
+        self._callout, self._callout_alert = "OPTICS ZOOM — ACQUIRING GRID", False
+        self._timer.start(_TICK_MS)
+
+    def fire_salvo(self, points, on_done):
+        """Execute pressed with N locked targets: one recoil/shot, then the
+        strikes walk across the targets in quick succession; the transmission
+        knockout rides on the LAST impact."""
+        self._on_done = on_done
+        self._state = "flight"
+        self._elapsed = 0.0
+        self._callout, self._callout_alert = "FIRING FOR EFFECT", True
+        self._dialog_home = self._dialog.pos()
+        self._skip_filter = _SkipFilter(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self._skip_filter)
+        self._shake(self._dialog, 7)   # recoil
+        from techdeck.core.audio_manager import SOUND_CHOPPER_FIRE
+        self._sfx(SOUND_CHOPPER_FIRE)  # railgun shot
+        n = max(1, len(points))
+        frags = max(200, 840 // n)     # split the debris budget across strikes
+        self._salvo = [{"at": i * _SALVO_STAGGER_MS, "pt": QPointF(pt),
+                        "frags": frags, "fired": False}
+                       for i, pt in enumerate(points)]
+        self._timer.start(_TICK_MS)
+
     def fire(self, on_done):
         """Accept pressed with a lock: recoil now, impact after the flight."""
         self._on_done = on_done
@@ -276,6 +382,7 @@ class GunnerOverlay(QWidget):
         if self._state in ("flight", "burst"):
             self._parts, self._smoke, self._puffs = [], [], []
             self._knock_ticks, self._flash = 0, 0.0
+            self._salvo = []
             self._finish(aar=False)   # skipped: go straight to the CRT close
 
     # ── state machine ────────────────────────────────────────────────────
@@ -291,12 +398,53 @@ class GunnerOverlay(QWidget):
         if self._confirm_ticks > 0:
             self._confirm_ticks -= 1
 
+        if self._state == "aim" and self._targets_provider is not None:
+            # Phase 2: re-resolve the persistent lock rects so the designators
+            # ride along when the list scrolls. Cheap for a handful of nests.
+            try:
+                self._targets = list(self._targets_provider())
+            except Exception:
+                pass
+
         if self._state == "flight":
             if self._elapsed >= 350 and self._callout != "ROUND AWAY":
                 self._callout = "ROUND AWAY"
             if self._elapsed >= _FLIGHT_MS:
                 self._begin_burst()
+        elif self._state == "wipe":
+            if self._elapsed >= _WIPE_MS / 2 and self._wipe_mid_cb is not None:
+                cb, self._wipe_mid_cb = self._wipe_mid_cb, None
+                cb()
+            if self._elapsed >= _WIPE_MS:
+                # Hold dark until begin_zoom — never flash the raw dialog
+                # between the wipe and the zoom.
+                self._state = "hold"
+                self._elapsed = 0.0
+                cb, self._wipe_done_cb = self._wipe_done_cb, None
+                if cb is not None:
+                    cb()
+        elif self._state == "zoom":
+            if self._elapsed >= _ZOOM_MS:
+                self._zoom_pm = None
+                self._state = "aim"
+                self._elapsed = 0.0
+                self._timer.start(_AIM_TICK_MS)
+                cb, self._zoom_done_cb = self._zoom_done_cb, None
+                if cb is not None:
+                    cb()
         elif self._state == "burst":
+            # Salvo: walk the strikes across the locked targets on schedule;
+            # the knockout glitch rides on the LAST impact.
+            if self._salvo:
+                for i, s in enumerate(self._salvo):
+                    if not s["fired"] and self._elapsed >= s["at"]:
+                        s["fired"] = True
+                        last = all(x["fired"] for x in self._salvo)
+                        self._detonate(s["pt"].x(), s["pt"].y(), s["frags"],
+                                       knockout=last)
+                        self._callout = (
+                            "ALL TARGETS SERVICED" if last
+                            else f"IMPACT {i + 1} OF {len(self._salvo)}")
             self._step_particles()
             if self._flash > 0:
                 self._flash = max(0.0, self._flash - dt_ms / 220.0 * 0.8)
@@ -306,8 +454,8 @@ class GunnerOverlay(QWidget):
                 self._knock_tick()
             # As soon as the glitch ends, go to the after-action screen — the
             # static's last frames mask the debris, so no dead pause waiting
-            # for every fragment to settle.
-            if self._knock_ticks <= 0:
+            # for every fragment to settle. (A salvo waits for its last strike.)
+            if self._knock_ticks <= 0 and all(s["fired"] for s in self._salvo):
                 self._finish()
         elif self._state == "aar":
             if self._elapsed >= _AAR_MS:
@@ -322,15 +470,22 @@ class GunnerOverlay(QWidget):
         self._state = "burst"
         self._elapsed = 0.0
         self._t0 = 0.0
+        # A salvo's strikes are scheduled by _tick (first lands within a
+        # frame); the classic single shot detonates immediately.
+        if not self._salvo:
+            self._detonate(self._impact.x(), self._impact.y(), 840,
+                           knockout=True)
+
+    def _detonate(self, x: float, y: float, frags: int, knockout: bool):
         self._flash = 0.8
-        self._knock_ticks = _KNOCKOUT_TICKS   # glitch fires WITH the impact
+        if knockout:
+            self._knock_ticks = _KNOCKOUT_TICKS   # glitch fires WITH the impact
         from techdeck.core.audio_manager import SOUND_CHOPPER_IMPACT
         self._sfx(SOUND_CHOPPER_IMPACT)  # detonation on the folder
         self._callout, self._callout_alert = "IMPACT CONFIRMED", True
-        x, y = self._impact.x(), self._impact.y()
-        # ~840 fine tumbling fragments (1–2 px) flung far enough to cross the
+        # Fine tumbling fragments (1–2 px) flung far enough to cross the
         # window; a vertical z-axis pop scales them toward the camera.
-        for _ in range(840):
+        for _ in range(frags):
             a = random.random() * math.tau
             life = int((40 + random.random() * 40) / DT)
             w = 1 + random.random()
@@ -344,7 +499,8 @@ class GunnerOverlay(QWidget):
                 "life": life, "max": life,
                 "warm": random.random() < 0.3,
             })
-        # Dirt/dust haze under the fragments.
+        # Dirt/dust haze under the fragments. Starts are offset by the burst
+        # clock so later salvo strikes still get their full puff schedule.
         for i in range(8):
             a = random.random() * math.tau
             d = random.random() * 55
@@ -352,9 +508,10 @@ class GunnerOverlay(QWidget):
                 "x": x + math.cos(a) * d, "y": y + math.sin(a) * d * 0.5,
                 "r0": 14.0, "r1": 70 + random.random() * 90,
                 "a0": 0.10 + random.random() * 0.07,
-                "start": i * 70 / DT, "dur": (850 + random.random() * 550) / DT,
+                "start": self._t0 + i * 70 / DT,
+                "dur": (850 + random.random() * 550) / DT,
             })
-        self._shake(self._dialog, 7)
+        self._shake(self._dialog, 7 if knockout else 5)
 
     def _step_particles(self):
         self._t0 += self._timer.interval()
@@ -465,12 +622,41 @@ class GunnerOverlay(QWidget):
             self._paint_crt(p, w, h)
             p.end()
             return
+        if self._state == "wipe":
+            self._paint_wipe(p, w, h)
+            self._paint_hud(p, w, h)
+            p.setOpacity(0.16)
+            p.drawPixmap(self.rect(), random.choice(self._grain))
+            p.setOpacity(1.0)
+            p.end()
+            return
+        if self._state == "hold":
+            # Dark feed between the wipe and the zoom — the dialog must never
+            # flash through while its directory swaps/populates.
+            p.fillRect(self.rect(), QColor(6, 8, 6))
+            self._paint_hud(p, w, h)
+            p.setOpacity(0.16)
+            p.drawPixmap(self.rect(), random.choice(self._grain))
+            p.setOpacity(1.0)
+            p.end()
+            return
+        if self._state == "zoom":
+            self._paint_zoom(p, w, h)
+            self._paint_hud(p, w, h)
+            p.setOpacity(0.10)
+            p.drawPixmap(self.rect(), random.choice(self._grain))
+            p.setOpacity(1.0)
+            p.end()
+            return
 
         if self._state != "done":
             self._paint_hud(p, w, h)
+        if self._state in ("aim", "flight", "burst") and self._targets:
+            self._paint_targets(p)
         if self._state == "aim" and self._lock_rect is not None:
             self._paint_lock(p)
-        if self._state in ("flight", "burst") and self._lock_rect is not None:
+        if self._state in ("flight", "burst") and self._lock_rect is not None \
+                and not self._salvo:
             self._paint_lock(p, frozen=True)
         if self._state == "burst":
             self._paint_fx(p)
@@ -521,6 +707,12 @@ class GunnerOverlay(QWidget):
         p.drawText(QRectF(0, h - 74, w - 40, 40),
                    Qt.AlignmentFlag.AlignRight,
                    "RAILGUN CHARGED\nROUNDS ∞")
+        # Bottom-left target tally (phase 2 of the two-phase pick)
+        if self._show_target_count:
+            p.setPen(_RANGE)
+            p.drawText(QRectF(40, h - 74, w - 80, 40),
+                       Qt.AlignmentFlag.AlignLeft,
+                       f"TARGETS DESIGNATED  {len(self._targets)}")
 
     def _paint_lock(self, p: QPainter, frozen: bool = False):
         # Converge from the wide box to the tight one with a hint of overshoot.
@@ -553,15 +745,75 @@ class GunnerOverlay(QWidget):
             pen = QPen(_RANGE if self._lock_solid else _TARGET)
             pen.setWidthF(2.5)
         p.setPen(pen)
-        s = 18 if flashing else 15
+        self._draw_bracket_corners(p, r, 18 if flashing else 15)
+        p.setFont(self._mono)
+        p.drawText(QPointF(r.left(), r.top() - 6),
+                   "CONFIRMED" if self._confirm_ticks > 0 else "LOCK")
+
+    @staticmethod
+    def _draw_bracket_corners(p: QPainter, r: QRectF, s: float):
         for (cx, cy, sx, sy) in (
                 (r.left(), r.top(), 1, 1), (r.right(), r.top(), -1, 1),
                 (r.left(), r.bottom(), 1, -1), (r.right(), r.bottom(), -1, -1)):
             p.drawLine(QPointF(cx, cy), QPointF(cx + s * sx, cy))
             p.drawLine(QPointF(cx, cy), QPointF(cx, cy + s * sy))
+
+    def _paint_targets(self, p: QPainter):
+        """Persistent phase-2 locks: solid rangefinder-yellow brackets with a
+        LOCK index tag on every designated nest row."""
+        pen = QPen(_RANGE)
+        pen.setWidthF(2.5)
         p.setFont(self._mono)
-        p.drawText(QPointF(r.left(), r.top() - 6),
-                   "CONFIRMED" if self._confirm_ticks > 0 else "LOCK")
+        for i, (r, _name) in enumerate(self._targets, 1):
+            p.setPen(pen)
+            self._draw_bracket_corners(p, r, 15)
+            p.drawText(QPointF(r.left(), r.top() - 6), f"LOCK {i}")
+
+    def _paint_wipe(self, p: QPainter, w: int, h: int):
+        """Retask wipe: blank the feed to near-black static and sweep one
+        bright scanline band down it."""
+        t = min(1.0, self._elapsed / _WIPE_MS)
+        p.fillRect(self.rect(), QColor(6, 8, 6, 238))
+        p.setPen(Qt.PenStyle.NoPen)
+        for _ in range(7):             # coarse interference bands
+            bh = 5 + random.random() * 30
+            by = random.random() * h
+            g = int(120 + random.random() * 110)
+            p.fillRect(QRectF(0, by, w, bh),
+                       QColor(g, 255, g, int((0.08 + random.random() * 0.22) * 255)))
+        band_y = t * (h + 120) - 60    # sweeps fully off both edges
+        glow = QLinearGradient(0, band_y - 60, 0, band_y + 60)
+        glow.setColorAt(0.0, QColor(236, 246, 255, 0))
+        glow.setColorAt(0.5, QColor(236, 246, 255, 120))
+        glow.setColorAt(1.0, QColor(236, 246, 255, 0))
+        p.fillRect(QRectF(0, band_y - 60, w, 120), glow)
+        p.fillRect(QRectF(0, band_y - 2, w, 4), QColor(236, 246, 255, 220))
+
+    def _paint_zoom(self, p: QPainter, w: int, h: int):
+        """Optics zoom-in: the grabbed dialog frame scales from pulled-back to
+        1:1 exactly over the real dialog's geometry, so the live widget shows
+        through seamlessly when the state flips back to aim."""
+        p.fillRect(self.rect(), QColor(6, 8, 6))
+        pm = self._zoom_pm
+        if pm is None or pm.isNull():
+            return
+        t = min(1.0, self._elapsed / _ZOOM_MS)
+        ease = 1 - (1 - t) ** 3
+        sc = _ZOOM_FROM + (1.0 - _ZOOM_FROM) * ease
+        r = self._zoom_rect
+        zw, zh = r.width() * sc, r.height() * sc
+        c = r.center()
+        dest = QRectF(c.x() - zw / 2, c.y() - zh / 2, zw, zh)
+        p.drawPixmap(dest, pm, QRectF(pm.rect()))
+        # Reticle frame around the feed while the optics settle.
+        pen = QPen(_RANGE)
+        pen.setWidthF(2)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(dest.adjusted(-3, -3, 3, 3))
+        p.setFont(self._mono)
+        p.drawText(QPointF(dest.left(), dest.top() - 8),
+                   f"ZOOM {1.0 / max(sc, 0.01):.1f}X")
 
     def _paint_fx(self, p: QPainter):
         # Dust puffs (under everything)
@@ -660,7 +912,7 @@ class GunnerOverlay(QWidget):
         col.setAlphaF(a)
         p.setPen(col)
         p.drawText(QRectF(0, cy - 46, w, 44),
-                   Qt.AlignmentFlag.AlignHCenter, "TARGET NEUTRALIZED")
+                   Qt.AlignmentFlag.AlignHCenter, self._aar_title)
         sub = QFont(self._mono)
         sub.setPointSize(11)
         sub.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.0)
@@ -673,6 +925,9 @@ class GunnerOverlay(QWidget):
         disp = ("...\\" + "\\".join(parts[-3:])) if len(parts) > 3 else raw
         p.drawText(QRectF(0, cy + 6, w, 24),
                    Qt.AlignmentFlag.AlignHCenter, f"PATH ACQUIRED    {disp}")
+        if self._aar_extra:
+            p.drawText(QRectF(0, cy + 32, w, 24),
+                       Qt.AlignmentFlag.AlignHCenter, self._aar_extra)
 
     def _paint_crt(self, p: QPainter, w: int, h: int):
         """Old-CRT power-off: the feed snaps to a bright horizontal line, that
@@ -702,21 +957,48 @@ class GunnerOverlay(QWidget):
             p.drawEllipse(QPointF(cx, cy), r, r)
 
 
-class _ChopperDialog(QFileDialog):
-    """Non-native directory picker that fires the kill-cam before accepting."""
+class _DblClickBlocker(QObject):
+    """Swallows double-clicks on the file list during phase 2 — a dbl-click
+    would navigate INTO the nest folder (and double-toggle its lock)."""
 
-    def __init__(self, parent, title: str, start_dir: str):
+    def eventFilter(self, obj, event):
+        return event.type() == QEvent.Type.MouseButtonDblClick
+
+
+class _ChopperDialog(QFileDialog):
+    """Non-native directory picker that fires the kill-cam before accepting.
+
+    ``two_phase=True`` (911 Repeater): accept reads "Target" first — accepting
+    retasks the optics INTO the picked folder (wipe + zoom) instead of firing,
+    then clicks multi-lock subfolder targets (``target_pattern`` filters which
+    names are lockable) and "Execute" walks a strike across all of them.
+    Results land in ``_batch_path`` + ``_target_names``.
+    """
+
+    def __init__(self, parent, title: str, start_dir: str,
+                 two_phase: bool = False, target_pattern: str | None = None):
         super().__init__(parent, title, start_dir or "")
         self.setFileMode(QFileDialog.FileMode.Directory)
         self.setOptions(QFileDialog.Option.DontUseNativeDialog
                         | QFileDialog.Option.ShowDirsOnly)
         self.setViewMode(QFileDialog.ViewMode.List)
-        self.setLabelText(QFileDialog.DialogLabel.Accept, "Execute")
+        self._two_phase = bool(two_phase)
+        self.setLabelText(QFileDialog.DialogLabel.Accept,
+                          "Target" if self._two_phase else "Execute")
         self.setCursor(_crosshair_cursor())
         self._overlay = None
         self._sequence_done = False
         self._firing = False
         self._committed = False   # True once a folder is clicked: hover stops moving the lock
+        # Two-phase state.
+        self._target_re = (re.compile(target_pattern, re.IGNORECASE)
+                           if target_pattern else None)
+        self._phase = 1
+        self._retasking = False   # wipe/zoom in progress: input frozen
+        self._batch_path = ""
+        self._targets: dict = {}  # name -> QPersistentModelIndex (insertion order)
+        self._target_names: list = []
+        self._dbl_blocker = _DblClickBlocker(self)
 
     def attach_overlay(self, overlay: GunnerOverlay):
         self._overlay = overlay
@@ -734,19 +1016,26 @@ class _ChopperDialog(QFileDialog):
                 sel.selectionChanged.connect(lambda *_: self._on_pick(view))
         # Navigating to a different folder re-opens hover targeting.
         self.directoryEntered.connect(self._on_dir_changed)
+        if self._two_phase:
+            overlay.set_targets_provider(self._target_rects)
 
     def _on_hover(self, index):
         # Sweep-to-target — but only until the user commits with a click.
-        if self._firing or self._committed or not index.isValid():
+        # (Phase 2 never commits: hover keeps tracking between lock toggles.)
+        if self._firing or self._retasking or self._committed \
+                or not index.isValid():
             return
         view = self.findChild(QListView, "listView")
         if view is not None:
             view.setCurrentIndex(index)   # → selectionChanged → _on_pick lock-on
 
     def _on_click(self, index):
-        # Explicit click: pin the lock to this row; hover no longer moves it.
-        if self._firing or not index.isValid():
+        if self._firing or self._retasking or not index.isValid():
             return
+        if self._two_phase and self._phase == 2:
+            self._toggle_target(index)
+            return
+        # Explicit click: pin the lock to this row; hover no longer moves it.
         self._committed = True
         view = self.findChild(QListView, "listView")
         if view is not None:
@@ -754,7 +1043,57 @@ class _ChopperDialog(QFileDialog):
         if self._overlay is not None:
             self._overlay.confirm_lock()   # flicker to confirm the selection
 
-    def _on_dir_changed(self, _path):
+    def _toggle_target(self, index):
+        """Phase 2: click locks a nest row (persistent designator + lock
+        sound); clicking a locked row releases it; non-nest names bounce."""
+        name = str(index.data() or "")
+        ov = self._overlay
+        if not name or ov is None:
+            return
+        if name in self._targets:
+            del self._targets[name]
+            ov.set_targets(self._target_rects())
+            ov.set_callout(f"TARGET RELEASED — {name}")
+            return
+        if self._target_re is not None and not self._target_re.match(name):
+            ov.set_callout(f"INVALID TARGET — {name} IS NOT A NEST", alert=True)
+            return
+        self._targets[name] = QPersistentModelIndex(index)
+        ov.set_targets(self._target_rects())
+        ov.confirm_lock()              # flicker the aim brackets on this row
+        ov.play_lock_sfx()
+        ov.set_callout(
+            f"TARGET LOCKED — {name}   ({len(self._targets)} DESIGNATED)")
+
+    def _target_rects(self):
+        """Fresh overlay-local rects for every locked target still visible in
+        the list (scrolled-away rows drop their designator until they're back)."""
+        out = []
+        view = self.findChild(QListView, "listView")
+        if view is None or self._overlay is None:
+            return out
+        for name, pidx in self._targets.items():
+            if not pidx.isValid():
+                continue
+            vr = view.visualRect(QModelIndex(pidx))
+            if not vr.isValid() or not view.viewport().rect().intersects(vr):
+                continue
+            tl = view.viewport().mapToGlobal(vr.topLeft())
+            rect = self._overlay.map_rect(QRect(tl, vr.size()))
+            out.append((rect.adjusted(-8, -6, 8, 6), name))
+        return out
+
+    def _on_dir_changed(self, path):
+        if self._two_phase and self._phase == 2:
+            if self._retasking:
+                return
+            # Phase 2 is pinned to the batch folder — snap any navigation
+            # (double-click, sidebar, typed path) straight back.
+            if os.path.normcase(os.path.normpath(str(path))) != \
+                    os.path.normcase(os.path.normpath(self._batch_path)):
+                QTimer.singleShot(
+                    0, lambda: self.setDirectory(self._batch_path))
+            return
         self._committed = False
         if self._overlay is not None:
             self._overlay.clear_lock()
@@ -784,7 +1123,23 @@ class _ChopperDialog(QFileDialog):
     def done(self, result):
         if (result == QDialog.DialogCode.Accepted and self._overlay is not None
                 and not self._sequence_done):
-            if self._firing:
+            if self._firing or self._retasking:
+                return
+            if self._two_phase and self._phase == 1:
+                # "Target": no destruction — retask the optics into the folder.
+                sel = self.selectedFiles()
+                if not sel:
+                    return
+                self._begin_retask(sel[0])
+                return
+            if self._two_phase:
+                # Phase 2 "Execute": salvo across every locked target.
+                if not self._targets:
+                    self._overlay.set_callout(
+                        "NO TARGETS DESIGNATED — CLICK A NEST TO LOCK",
+                        alert=True)
+                    return
+                self._fire_salvo()
                 return
             self._firing = True
             # Re-resolve the locked row NOW — scrolling or dragging the
@@ -803,6 +1158,87 @@ class _ChopperDialog(QFileDialog):
             self._overlay.fire(self._complete)
             return
         super().done(result)
+
+    # ── two-phase retask (phase 1 "Target" → wipe → zoom → phase 2) ──────
+
+    def _begin_retask(self, batch_path: str):
+        ov = self._overlay
+        if ov is None:
+            return
+        self._retasking = True
+        self._batch_path = batch_path
+        self.setEnabled(False)         # frozen behind the wipe/zoom
+        ov.set_callout("TARGET DESIGNATED — RETASKING OPTICS", alert=True)
+        ov.begin_wipe(self._retask_mid, self._retask_wipe_done)
+
+    def _retask_mid(self):
+        """Halfway through the wipe (feed fully blanked): swap the dialog into
+        the batch folder and flip the controls to phase 2."""
+        self._phase = 2
+        self._committed = False
+        self.setDirectory(self._batch_path)
+        view = self.findChild(QListView, "listView")
+        if view is not None:
+            if view.selectionModel() is not None:
+                view.selectionModel().clear()
+            view.viewport().installEventFilter(self._dbl_blocker)
+        self.setLabelText(QFileDialog.DialogLabel.Accept, "Execute")
+        ov = self._overlay
+        if ov is None:
+            return
+        ov.clear_lock()
+        ov._show_target_count = True
+        ov.play_lock_sfx()             # beat 1: sensor switched to the subfolders
+
+    def _retask_wipe_done(self):
+        # Give the file model a beat to populate the new directory before the
+        # frame is grabbed — the overlay holds dark in the meantime.
+        QTimer.singleShot(160, self._start_zoom)
+
+    def _start_zoom(self):
+        ov = self._overlay
+        if ov is None:
+            return
+        pm = self.grab()               # dialog frame, already showing the nests
+        dest = ov.map_rect(QRect(self.mapToGlobal(QPoint(0, 0)), self.size()))
+        ov.begin_zoom(pm, dest, self._finish_retask)
+
+    def _finish_retask(self):
+        self._retasking = False
+        self.setEnabled(True)
+        ov = self._overlay
+        if ov is None:
+            return
+        ov.play_lock_sfx()             # beat 2: zoom settled at 1:1
+        ov.set_callout("DESIGNATE NEST TARGETS — CLICK TO LOCK")
+
+    # ── two-phase execute ────────────────────────────────────────────────
+
+    def _fire_salvo(self):
+        ov = self._overlay
+        if ov is None:
+            return
+        self._firing = True
+        self._target_names = list(self._targets.keys())
+        rects = {name: r for r, name in self._target_rects()}
+        view = self.findChild(QListView, "listView")
+        if view is not None:
+            vp = view.viewport()
+            fallback = ov.map_rect(
+                QRect(vp.mapToGlobal(vp.rect().topLeft()),
+                      vp.rect().size())).center()
+        else:
+            fallback = ov.map_rect(self.geometry()).center()
+        # Scrolled-away targets strike the list centre instead of off-screen.
+        points = [rects[n].center() if n in rects else fallback
+                  for n in self._target_names]
+        ov.clear_lock()
+        ov._aar_title = "TARGETS NEUTRALIZED"
+        ov._aar_path = self._batch_path
+        ov._aar_extra = (f"{len(points)} TARGET"
+                         f"{'S' if len(points) != 1 else ''} DESTROYED")
+        self.setEnabled(False)         # freeze the UI for the kill-cam
+        ov.fire_salvo(points, self._complete)
 
     def _complete(self):
         self._sequence_done = True
@@ -832,4 +1268,33 @@ def pick_folder_chopper(parent, title: str, start_dir: str = ""):
         dlg.deleteLater()
     if accepted and files:
         return files[0]
+    return None
+
+
+def pick_nest_targets_chopper(parent, title: str, start_dir: str = "",
+                              target_pattern: str | None = None):
+    """GUI-thread entry for the two-phase Sentry-Drone pick (911 Repeater):
+    TARGET the batch folder, the optics wipe + zoom inside it, multi-lock
+    nest folders, then Execute walks a strike across all of them. Returns
+    (batch_path, [locked folder names]) or None on cancel. Raises on
+    construction failure — the console catches anything and reports
+    "unavailable" so the plugin falls back to its classic flow."""
+    dlg = _ChopperDialog(parent, title, start_dir, two_phase=True,
+                         target_pattern=target_pattern)
+    screen = (parent.screen() if parent is not None
+              else QApplication.primaryScreen())
+    overlay = GunnerOverlay(dlg, screen.geometry())
+    dlg.attach_overlay(overlay)
+    overlay.show()
+    overlay.start_ambient()            # looping gunship bed while the picker is up
+    try:
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+    finally:
+        overlay.stop_ambient()         # covers the cancel path (no _finish)
+        overlay._timer.stop()
+        overlay.close()
+        overlay.deleteLater()
+        dlg.deleteLater()
+    if accepted and dlg._batch_path and dlg._target_names:
+        return dlg._batch_path, list(dlg._target_names)
     return None

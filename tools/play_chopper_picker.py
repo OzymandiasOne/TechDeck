@@ -10,6 +10,11 @@ fireworks.
 Usage (from the repo root, dev environment):
     python tools/play_chopper_picker.py               # opens at your home dir
     python tools/play_chopper_picker.py "C:\\some\\dir" # opens at a start dir
+    python tools/play_chopper_picker.py --nests [dir]  # 911 Repeater two-phase
+        pick: "Target" the batch folder -> wipe + zoom inside -> click-lock
+        multiple subfolders -> "Execute" salvo. Prints the batch + locked
+        names. (The dev harness locks ANY subfolder name; the real plugin
+        passes the nest regex so only nest-shaped names lock.)
 
 This is a dev tool: it bypasses the professional-theme gate (which in the
 real app downgrades 922 Setup's prompt to the native dialog).
@@ -28,13 +33,26 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 def main() -> int:
-    start_dir = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~")
+    args = [a for a in sys.argv[1:] if a != "--nests"]
+    two_phase = "--nests" in sys.argv[1:]
+    start_dir = args[0] if args else os.path.expanduser("~")
     app = QApplication.instance() or QApplication(sys.argv)
     try:
         from techdeck.ui.theme_manager import get_theme_manager
         get_theme_manager().set_theme("dark")
     except Exception:
         pass  # unthemed non-native dialog is fine for a dev harness
+
+    if two_phase:
+        from techdeck.ui.widgets.chopper_picker import pick_nest_targets_chopper
+        res = pick_nest_targets_chopper(
+            None, "Select the 911 batch folder", start_dir)
+        if res:
+            print(f"PATH ACQUIRED: {res[0]}")
+            print(f"TARGETS NEUTRALIZED: {', '.join(res[1])}")
+        else:
+            print("FIRE MISSION ABORTED (cancelled)")
+        return 0
 
     from techdeck.ui.widgets.chopper_picker import pick_folder_chopper
     path = pick_folder_chopper(None, "Select the 922 batch folder", start_dir)

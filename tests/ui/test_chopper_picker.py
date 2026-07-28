@@ -154,3 +154,117 @@ def test_sdk_no_style_uses_two_arg_call():
     result = sdk.request_directory({"console": console}, "t", "")
     assert result == "C:/new-console-path"
     assert console.style_seen is None
+
+
+# ── two-phase (911 Repeater) sequence tests ──────────────────────────────
+
+
+def test_wipe_holds_dark_then_zoom_reaches_aim(qapp):
+    """wipe (mid-callback fires once) → hold → zoom → aim; the dialog is
+    never exposed between the wipe and the zoom."""
+    from PySide6.QtCore import QRectF as _R
+    from PySide6.QtGui import QPixmap
+    dlg, overlay = _make_overlay(qapp)
+    beats = []
+    overlay.begin_wipe(lambda: beats.append("mid"), lambda: beats.append("done"))
+    assert overlay._state == "wipe"
+    _drive(overlay, 60)                       # ≈1 s: wipe is long over
+    assert beats == ["mid", "done"]           # each beat fired exactly once
+    assert overlay._state == "hold"           # holds dark until begin_zoom
+
+    overlay.begin_zoom(QPixmap(100, 80), _R(100, 100, 400, 300),
+                       lambda: beats.append("zoomed"))
+    assert overlay._state == "zoom"
+    _drive(overlay, 60)
+    assert beats[-1] == "zoomed"
+    assert overlay._state == "aim"
+
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
+def test_salvo_strikes_all_targets_then_done(qapp):
+    """fire_salvo: staggered impacts across every point, knockout on the
+    last, then the TARGETS NEUTRALIZED AAR and the CRT close."""
+    from PySide6.QtCore import QPointF
+    dlg, overlay = _make_overlay(qapp)
+    pts = [QPointF(200, 150), QPointF(200, 200), QPointF(200, 250)]
+    overlay._aar_title = "TARGETS NEUTRALIZED"
+    overlay._aar_extra = "3 TARGETS DESTROYED"
+    done = []
+    overlay.fire_salvo(pts, lambda: done.append(True))
+    assert len(overlay._salvo) == 3
+
+    _drive(overlay, 70)                       # flight ends, first strike lands
+    assert overlay._state == "burst"
+    seen = set()
+    for _ in range(800):
+        if overlay._state == "done":
+            break
+        overlay._tick()
+        seen.add(overlay._state)
+    assert all(s["fired"] for s in overlay._salvo)
+    assert "aar" in seen and "crt" in seen
+    assert overlay._state == "done"
+    assert _wait_for(lambda: done == [True])
+
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
+def test_salvo_skip_clears_and_closes(qapp):
+    """Any-key skip mid-salvo drops the remaining strikes and still closes."""
+    from PySide6.QtCore import QPointF
+    dlg, overlay = _make_overlay(qapp)
+    done = []
+    overlay.fire_salvo([QPointF(100, 100), QPointF(100, 200)],
+                       lambda: done.append(True))
+    _drive(overlay, 5)
+    overlay.skip()
+    assert overlay._salvo == []
+    assert overlay._state == "crt"
+    _drive(overlay, 60)
+    assert overlay._state == "done"
+    assert _wait_for(lambda: done == [True])
+
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
+class _TargetConsole:
+    """Console with the two-phase request_target_folders method."""
+
+    def __init__(self, result):
+        self._result = result
+        self.args_seen = None
+
+    def request_target_folders(self, title, start_dir, target_pattern):
+        self.args_seen = (title, start_dir, target_pattern)
+        return self._result
+
+
+def test_sdk_nest_targets_ok_passes_through():
+    console = _TargetConsole(("ok", "C:/qtdr/V109", ["504100", "504101"]))
+    status, path, names = sdk.request_nest_targets(
+        {"console": console}, "t", "C:/qtdr", target_pattern=r"\d+")
+    assert (status, path, names) == ("ok", "C:/qtdr/V109", ["504100", "504101"])
+    assert console.args_seen == ("t", "C:/qtdr", r"\d+")
+
+
+def test_sdk_nest_targets_unavailable_without_console_method():
+    """Old console (no request_target_folders) and headless both report
+    unavailable so the plugin falls back to its classic flow."""
+    assert sdk.request_nest_targets({"console": _OldConsole()}, "t")[0] == \
+        "unavailable"
+    assert sdk.request_nest_targets({}, "t")[0] == "unavailable"
+
+
+def test_sdk_nest_targets_unavailable_on_error():
+    class _Boom:
+        def request_target_folders(self, *a):
+            raise RuntimeError("picker exploded")
+    assert sdk.request_nest_targets({"console": _Boom()}, "t")[0] == \
+        "unavailable"

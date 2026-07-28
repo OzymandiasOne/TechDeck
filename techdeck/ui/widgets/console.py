@@ -609,6 +609,66 @@ class ConsoleWidget(QWidget, ThemeAware):
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 
+    def request_target_folders(self, title: str = "Select Folder",
+                               start_dir: str = "", target_pattern=None):
+        """Two-phase Sentry-Drone pick (911 Batch Repeater): phase 1 TARGETs a
+        batch folder, the optics zoom inside it, phase 2 multi-locks subfolder
+        targets (``target_pattern`` regex filters lockable names) and Execute
+        strikes them all. BLOCKs (same worker-thread contract as
+        request_directory). Returns a tuple:
+
+        ``("ok", batch_path, [names])`` | ``("cancelled", "", [])`` |
+        ``("unavailable", "", [])`` — professional theme or any failure inside
+        the picker. Unlike request_directory there is NO native fallback here;
+        the CALLER falls back (classic dialog + its own selection window).
+        """
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_target_folders() cannot be called from main GUI thread"
+            )
+
+        self._tf_args = (str(title), str(start_dir or ""), target_pattern)
+        self._tf_result = ("unavailable", "", [])
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_target_folders_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._tf_result
+
+    @Slot()
+    def _target_folders_gui(self):
+        """GUI-thread half of request_target_folders: run the two-phase picker.
+        Professional theme or ANY failure → ("unavailable", ...) so the plugin
+        falls back to its classic flow."""
+        title, start_dir, pattern = self._tf_args
+        try:
+            from techdeck.core.settings import SettingsManager
+            if SettingsManager().is_professional():
+                self._tf_result = ("unavailable", "", [])
+                return
+            from techdeck.ui.widgets.chopper_picker import (
+                pick_nest_targets_chopper,
+            )
+            res = pick_nest_targets_chopper(
+                self.window(), title, start_dir, pattern)
+        except Exception:
+            self._tf_result = ("unavailable", "", [])
+            return
+        if res is None:
+            self._tf_result = ("cancelled", "", [])
+        else:
+            self._tf_result = ("ok", res[0], list(res[1]))
+
     def show_warning(self, title: str, text: str):
         """Show a modal warning popup and BLOCK until the user acknowledges it.
         Same worker-thread contract as request_selection/request_directory —
