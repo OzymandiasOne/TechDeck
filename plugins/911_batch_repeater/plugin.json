@@ -1,8 +1,8 @@
 {
   "id": "911_batch_repeater",
   "name": "911 Batch Repeater",
-  "description": "Finds repeat parts for a 911 QTDR batch. Reads DYPN numbers from each nest's 911 Batch Excel, then opens a nest-selection window where you pick which nests to run and toggle exactly what the repeater grabs per nest (NC files, inspection PDFs, batch/nest restamp, overwrite). Matches against the Master Parts Library (.NC) and Master Inspection Library (PDFs) and copies into per-nest repeats folders.",
-  "version": "2.0.0",
+  "description": "Finds repeat parts for a 911 QTDR batch via the 911 MASTER PARTS LIST (compiled from completed nests). Opens a nest-selection window - pick which nests to run and toggle per nest what it grabs (SolidWorks models, part PDFs, overwrite) - then copies each repeat part's CAD folder from its completed source nest into a REPEAT folder inside the target nest.",
+  "version": "3.0.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -13,8 +13,17 @@
         "key": "qtdr_base_path",
         "type": "directory",
         "label": "911 QTDR Root",
-        "description": "Root containing '04 - Notes - Protocols - Tutorials \\ TECH SERVICES \\ REPEATER'. Leave blank to auto-detect '911 QTDR' under your OneDrive Pilot Program folder.",
+        "description": "The 911 QTDR folder (live batch folders + the REPEATER folder under 04 - Notes - Protocols - Tutorials \\ TECH SERVICES). Leave blank to auto-detect under your OneDrive Pilot Program folder.",
         "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 911 QTDR",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "mpl_path",
+        "type": "file",
+        "label": "Master Parts List",
+        "description": "The 911 MASTER PARTS LIST.xlsx to look repeat parts up in. Leave blank to use the copy in the REPEATER folder.",
+        "placeholder": "Auto: REPEATER \\ 911 MASTER PARTS LIST.xlsx",
         "required": false,
         "default": ""
       }

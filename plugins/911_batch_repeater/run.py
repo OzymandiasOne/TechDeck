@@ -1,33 +1,34 @@
-"""
+r"""
 911 Repeater Plugin
 ===================
-Finds repeat parts for a 911 QTDR batch by cross-referencing DYPN numbers
-from each nest's 911 Batch Excel against the Master Parts and Inspection
-Libraries.
+v3.0.0 — MPL-driven repeat pull, rebuilt around the modern 911 workflow.
 
-Output structure per nest:
-  <batch>/<nest>/NC Repeats/          <- .NC files
-  <batch>/<nest>/Inspection Repeats/  <- PDFs with batch/nest text updated
+Finds repeat parts for a 911 QTDR batch by looking each nest's DYPNs up in
+the 911 MASTER PARTS LIST (compiled from completed nests by
+tools/build_911_mpl.py; lives in the REPEATER folder). A repeat part's
+CAD-AND-SHOP-PRINTS folder (SolidWorks model + drawing + PDF) is copied from
+the completed source nest into a REPEAT folder INSIDE the target nest:
+
+  911 QTDR\{batch}\{nest}\REPEAT\{DYPN}\{DYPN}.pdf / .SLDPRT / .SLDDRW
+
+There is no batch-level repeats folder — repeats land per nest. The legacy
+NC / inspection-library grabbing (v1–v2) is gone with the workflow it served.
 
 Workflow:
-  1. Prompt for batch number (e.g. V071)
-  2. Locate batch folder under the REPEATER root
-  3. For each nest subfolder, read DYPNs from NEST sheet col K
-  4. Show the nest-selection window (v2.0.0): every nest with DYPNs is a
-     checkable row (same look as 911 Setup's nest picker); clicking a nest's
-     NAME expands that nest's grab options -- Grab NC files / Grab inspection
-     PDFs / Update batch+nest text on copied PDFs / Overwrite existing
-     copies. Nests whose repeats folders already hold files are flagged.
-     Cancelling the window runs nothing. Headless (CLI/test) the optional
-     'nests' list and 'grab' option-override dict select the work; default =
-     all nests with the default options.
-  5. Match each chosen nest's DYPNs against the Master Parts Library (.NC)
-     and Master Inspection Library (.pdf), honoring that nest's grab options
-     (libraries are only indexed if some selected nest wants them)
-  6. Copy matches into per-nest output folders under REPEATER/<batch>/<nest>/
-  7. In each copied PDF, find the old "batch nest" pair and replace with the
-     new values (skipped when the nest's restamp option is off)
-  8. Report summary (copy/edit errors end the run with a warning outcome)
+  1. Prompt for batch number (e.g. V109, S045)
+  2. Locate the LIVE batch folder directly under the 911 QTDR root
+  3. Load the MASTER PARTS LIST (Settings override, else the REPEATER folder)
+     and index DYPN -> source nest folders
+  4. For each nest subfolder (nest-number-shaped names only), read DYPNs from
+     the nest's 911 BATCH workbook — NEST sheet, DYPN column found by header
+  5. Nest-selection window: checkable nest rows (part + repeat counts, a flag
+     when REPEAT already has files; all start unchecked); clicking a nest's
+     NAME expands its grab options — SolidWorks models / part PDFs /
+     overwrite. Cancelling runs nothing. Headless: 'nests' list + 'grab'
+     option-override dict; default = all nests, default options.
+  6. Per selected nest, copy each repeat DYPN's files (per that nest's
+     options) from its source nest into {nest}\REPEAT\{DYPN}\
+  7. Report summary (copy errors end the run with a warning outcome)
 """
 
 import re
@@ -42,35 +43,62 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
+MPL_FILENAME = "911 MASTER PARTS LIST.xlsx"
 
-def _repeater_root(qtdr_override: str = "") -> Path | None:
-    """REPEATER folder under the 911 QTDR root. A configured override wins;
-    otherwise auto-discovers the QTDR root across all OneDrive path variants;
-    returns None if it can't be found."""
-    qtdr = sdk.resolve_911_qtdr_root(qtdr_override)
-    if qtdr is None:
-        return None
-    return (
-        qtdr
-        / "04 - Notes - Protocols - Tutorials"
-        / "TECH SERVICES"
-        / "REPEATER"
-    )
+# Nest-number-shaped folder names (Hard Rule 3) — filters out support folders
+# like NEST PACKAGES / DTSV FILES / WPDD SKETCHES in the batch folder.
+_NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Master Parts List
 # ---------------------------------------------------------------------------
 
-# Matches e.g. "S025 P07750", "V086 P07685", "V071 P08001"
-_BATCH_NEST_RE = re.compile(r'[VS]\d{2,4}\s+P0\d+', re.IGNORECASE)
+def _default_mpl_path(qtdr_root: Path) -> Path:
+    return (qtdr_root / "04 - Notes - Protocols - Tutorials" / "TECH SERVICES"
+            / "REPEATER" / MPL_FILENAME)
 
+
+def _load_mpl_index(mpl_path: Path, log) -> dict[str, list[dict]]:
+    """DYPN (upper) -> [{'batch','nest','status','rel'}] from the MPL."""
+    wb = sdk.load_workbook_resilient(mpl_path, data_only=True, log=log)
+    try:
+        ws = wb.active
+        header_row, cols = sdk.find_header_row(ws, ["DYPN", "SOURCE FOLDER"])
+        if header_row is None:
+            raise sdk.UserFacingError(
+                f"{mpl_path.name} has no DYPN / SOURCE FOLDER header row.",
+                "Rebuild the list with tools/build_911_mpl.py (its layout may "
+                "have been edited).")
+        c_dypn = cols.get("DYPN")
+        c_batch = cols.get("BATCH")
+        c_nest = cols.get("NEST")
+        c_status = cols.get("STATUS")
+        c_rel = cols.get("SOURCE FOLDER")
+
+        index: dict[str, list[dict]] = {}
+        for row in range(header_row + 1, ws.max_row + 1):
+            dypn = ws.cell(row, c_dypn).value
+            rel = ws.cell(row, c_rel).value if c_rel else None
+            if not dypn or not rel:
+                continue
+            index.setdefault(str(dypn).strip().upper(), []).append({
+                "batch": str(ws.cell(row, c_batch).value or "").strip() if c_batch else "",
+                "nest": str(ws.cell(row, c_nest).value or "").strip() if c_nest else "",
+                "status": str(ws.cell(row, c_status).value or "").strip() if c_status else "",
+                "rel": str(rel).strip(),
+            })
+        return index
+    finally:
+        wb.close()
+
+
+# ---------------------------------------------------------------------------
+# Nest discovery
+# ---------------------------------------------------------------------------
 
 def _find_nest_excel(nest_folder: Path, batch_number: str, nest_number: str) -> Path | None:
-    expected = nest_folder / f"911 Batch {batch_number} {nest_number}.xlsx"
+    expected = nest_folder / f"911 BATCH {batch_number} {nest_number}.xlsx"
     if expected.exists():
         return expected
     candidates = [
@@ -80,15 +108,22 @@ def _find_nest_excel(nest_folder: Path, batch_number: str, nest_number: str) -> 
     return candidates[0] if candidates else None
 
 
-def _read_dypns(excel_path: Path) -> list[str]:
-    wb = sdk.load_workbook_resilient(excel_path, data_only=True)
+def _read_dypns(excel_path: Path, log) -> list[str]:
+    """DYPNs from the nest workbook's NEST sheet, column found by header name."""
+    wb = sdk.load_workbook_resilient(excel_path, data_only=True, log=log)
     try:
         if "NEST" not in wb.sheetnames:
             return []
         ws = wb["NEST"]
+        header_row, cols = sdk.find_header_row(ws, ["DYPN"])
+        if header_row is None:
+            return []
+        col = cols.get("DYPN")
+        if col is None:
+            return []
         dypns = []
-        for row in range(3, ws.max_row + 1):
-            val = ws.cell(row, 11).value  # column K
+        for row in range(header_row + 1, ws.max_row + 1):
+            val = ws.cell(row, col).value
             if val is not None:
                 stripped = str(val).strip()
                 if stripped:
@@ -98,171 +133,52 @@ def _read_dypns(excel_path: Path) -> list[str]:
         wb.close()
 
 
-def _build_library_index(library_dir: Path, extension: str, cancel_event=None) -> dict[str, Path]:
-    index: dict[str, Path] = {}
-    if not library_dir.exists():
-        return index
-    ext_lower = extension.lower()
-    # The MASTER PARTS / INSPECTION libraries can hold thousands of files on a
-    # OneDrive tree; poll so Cancel responds during the listing (Hard Rule 11).
-    for i, f in enumerate(library_dir.iterdir()):
-        if i % 64 == 0:
-            sdk.raise_if_cancelled(cancel_event)
-        if f.is_file() and f.suffix.lower() == ext_lower:
-            index[f.stem.upper()] = f
-    return index
-
-
-def _find_match_rect(line: dict, fitz) -> object | None:
-    """
-    Given a text line dict from get_text('dict'), find the bounding rect
-    covering all spans that form the regex match.
-    """
-    spans = line.get("spans", [])
-    if not spans:
-        return None
-
-    offsets = []
-    pos = 0
-    for span in spans:
-        offsets.append(pos)
-        pos += len(span["text"])
-
-    full_text = "".join(s["text"] for s in spans)
-    m = _BATCH_NEST_RE.search(full_text)
-    if not m:
-        return None
-
-    match_start, match_end = m.start(), m.end()
-
-    involved = []
-    for i, span in enumerate(spans):
-        s_start = offsets[i]
-        s_end = s_start + len(span["text"])
-        if s_start < match_end and s_end > match_start:
-            involved.append(span)
-
-    if not involved:
-        return None
-
-    x0 = min(s["bbox"][0] for s in involved)
-    y0 = min(s["bbox"][1] for s in involved)
-    x1 = max(s["bbox"][2] for s in involved)
-    y1 = max(s["bbox"][3] for s in involved)
-    return fitz.Rect(x0, y0, x1, y1)
-
-
-def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, log) -> bool:
-    """
-    Find the single old "batch nest" pair in the PDF and replace with
-    "new_batch new_nest". Overwrites the file in place.
-    Returns True if a replacement was made.
-    """
-    import fitz  # PyMuPDF
-
-    replacement = f"{new_batch} {new_nest}"
-    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-    doc = fitz.open(str(pdf_path))
-    replaced = False
-
-    try:
-        for page in doc:
-            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
-            for block in blocks:
-                if block.get("type") != 0:
-                    continue
-                for line in block.get("lines", []):
-                    line_text = "".join(s["text"] for s in line.get("spans", []))
-                    if not _BATCH_NEST_RE.search(line_text):
-                        continue
-
-                    old_text = _BATCH_NEST_RE.search(line_text).group(0)
-                    log(f"    Found '{old_text}' -> '{replacement}'")
-
-                    match_rect = _find_match_rect(line, fitz)
-                    if match_rect is None:
-                        log(f"    WARNING: Could not locate rect for '{old_text}' - skipping")
-                        continue
-
-                    font_size = line["spans"][0]["size"] if line["spans"] else 10
-
-                    page.add_redact_annot(match_rect, fill=(1, 1, 1))
-                    page.apply_redactions()
-                    page.insert_text(
-                        (match_rect.x0, match_rect.y1 - 1),
-                        replacement,
-                        fontsize=font_size,
-                        color=(0, 0, 0),
-                    )
-                    replaced = True
-                    break
-                if replaced:
-                    break
-            if replaced:
-                break
-
-        if replaced:
-            # Save to a temp file then replace - required when using redactions
-            tmp = pdf_path.with_suffix(".tmp.pdf")
-            doc.save(str(tmp), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
-            doc.close()
-            tmp.replace(pdf_path)
-            return True
-        else:
-            log(f"    WARNING: No batch/nest pattern found in PDF - file unchanged")
-    finally:
-        if not doc.is_closed:
-            doc.close()
-
-    return replaced
-
-
 # ---------------------------------------------------------------------------
 # Nest selection window
 # ---------------------------------------------------------------------------
 
 # Per-nest grab options shown under each nest row in the selection window.
 _GRAB_CHILDREN = [
-    {"key": "nc",        "label": "Grab NC files (.NC)",                            "checked": True},
-    {"key": "pdf",       "label": "Grab inspection PDFs",                           "checked": True},
-    {"key": "restamp",   "label": "Update batch/nest text on copied PDFs",          "checked": True},
-    {"key": "overwrite", "label": "Overwrite copies already in the repeats folders", "checked": False},
+    {"key": "models",    "label": "Grab SolidWorks models (.SLDPRT + .SLDDRW)", "checked": True},
+    {"key": "pdf",       "label": "Grab part PDFs",                             "checked": True},
+    {"key": "overwrite", "label": "Overwrite files already in REPEAT",          "checked": False},
 ]
 
 _DEFAULT_GRAB = {c["key"]: c["checked"] for c in _GRAB_CHILDREN}
 
-
-def _has_existing_repeats(out_root: Path, nest: str) -> bool:
-    """True if this nest's output folders already hold any files."""
-    for sub in ("NC Repeats", "Inspection Repeats"):
-        d = out_root / nest / sub
-        try:
-            if d.is_dir() and any(d.iterdir()):
-                return True
-        except OSError:
-            pass
-    return False
+# Which file extensions each grab option covers.
+_MODEL_EXTS = {".sldprt", ".slddrw"}
+_PDF_EXTS = {".pdf"}
 
 
-def _select_nests(params, batch_number: str, nest_dypns: dict[str, list[str]],
-                  existing: set[str]):
+def _has_repeat_files(nest_dir: Path) -> bool:
+    """True if this nest's REPEAT folder already holds anything."""
+    d = nest_dir / "REPEAT"
+    try:
+        return d.is_dir() and any(d.iterdir())
+    except OSError:
+        return False
+
+
+def _select_nests(params, batch_number: str, nest_infos: dict[str, dict]):
     """
     Show the nest/options window (nests as checkable rows, each expanding to
-    its grab options). Returns [(nest, options_dict)] in nest order for the
-    checked nests, an empty list if nothing was checked, or None on cancel.
-    Headless: 'nests' (list) picks a subset and 'grab' (dict) overrides the
-    option defaults for every nest.
+    its grab options). ``nest_infos`` is {nest: {'dypns', 'repeats', 'has_repeat'}}.
+    Returns [(nest, options_dict)] in nest order for the checked nests, an
+    empty list if nothing was checked, or None on cancel. Headless: 'nests'
+    (list) picks a subset and 'grab' (dict) overrides the option defaults.
     """
     console = params.get("console")
-    order = list(nest_dypns.keys())
+    order = list(nest_infos.keys())
 
     if console is not None and hasattr(console, "request_grouped_toggles"):
         groups = []
         for nest in order:
-            n = len(nest_dypns[nest])
-            label = f"{nest}   ({n} part{'s' if n != 1 else ''})"
-            if nest in existing:
-                label += "  - has repeats already"
+            info = nest_infos[nest]
+            n, r = len(info["dypns"]), info["repeats"]
+            label = f"{nest}   ({n} part{'s' if n != 1 else ''}, {r} repeat{'s' if r != 1 else ''})"
+            if info["has_repeat"]:
+                label += "  - REPEAT folder has files"
             groups.append({
                 # Like 911 Setup's nest picker, nests start unchecked.
                 "key": nest, "label": label, "checked": False,
@@ -294,6 +210,42 @@ def _select_nests(params, batch_number: str, nest_dypns: dict[str, list[str]],
 
 
 # ---------------------------------------------------------------------------
+# Copying
+# ---------------------------------------------------------------------------
+
+def _pick_source(sources: list[dict], qtdr_root: Path,
+                 target_batch: str, target_nest: str) -> tuple[dict, Path] | None:
+    """First MPL row (skipping the target nest itself) whose folder exists."""
+    for src in sources:
+        if (src["batch"].upper() == target_batch.upper()
+                and src["nest"].upper() == target_nest.upper()):
+            continue
+        src_dir = qtdr_root / Path(src["rel"])
+        if src_dir.is_dir():
+            return src, src_dir
+    return None
+
+
+def _copy_part(src_dir: Path, dest_dir: Path, exts: set[str], overwrite: bool,
+               log, cancel_event) -> tuple[int, int]:
+    """Copy src files whose suffix is in exts into dest_dir. -> (copied, skipped)"""
+    copied = skipped = 0
+    for f in sorted(src_dir.iterdir()):
+        sdk.raise_if_cancelled(cancel_event)
+        if not f.is_file() or f.suffix.lower() not in exts:
+            continue
+        dest = dest_dir / f.name
+        if dest.exists() and not overwrite:
+            skipped += 1
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        sdk.ensure_local(f, log=log)  # OneDrive placeholder -> download (Hard Rule 13)
+        shutil.copy2(f, dest)
+        copied += 1
+    return copied, skipped
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -308,7 +260,7 @@ def run(params, progress_callback, cancel_event):
     # Step 1 - Prompt for batch number
     # ------------------------------------------------------------------ #
     batch_number = sdk.request_batch_number(
-        params, "Enter Batch Number (e.g. V072, S045):"
+        params, "Enter Batch Number (e.g. V109, S045):"
     ).strip().upper()
 
     if not batch_number:
@@ -318,40 +270,53 @@ def run(params, progress_callback, cancel_event):
     log(f"Batch         : {batch_number}")
 
     # ------------------------------------------------------------------ #
-    # Step 2 - Resolve and validate paths
+    # Step 2 - Resolve the QTDR root + live batch folder
     # ------------------------------------------------------------------ #
-    repeater_root = _repeater_root(settings.get("qtdr_base_path", ""))
-    if repeater_root is None or not repeater_root.exists():
+    qtdr_root = sdk.resolve_911_qtdr_root(settings.get("qtdr_base_path", ""))
+    if qtdr_root is None or not qtdr_root.exists():
         raise sdk.UserFacingError(
-            "Couldn't find the 911 QTDR REPEATER folder.",
+            "Couldn't find the 911 QTDR folder.",
             "Make sure OneDrive is synced, or set the 911 QTDR root in "
             "Settings → Apps → 911 Batch Repeater, then run again.")
-    log(f"Repeater root : {repeater_root}")
+    log(f"911 QTDR root : {qtdr_root}")
 
-    parts_lib = repeater_root / "MASTER PARTS LIBRARY"
-    insp_lib = repeater_root / "MASTER INSPECTION LIBRARY"
-
-    # ------------------------------------------------------------------ #
-    # Step 3 - Locate batch folder in QTDR
-    # ------------------------------------------------------------------ #
-    batch_folder = sdk.find_911_batch_folder(repeater_root, batch_number)
+    batch_folder = sdk.find_911_batch_folder(qtdr_root, batch_number)
     if batch_folder is None:
         raise sdk.UserFacingError(
-            f"Couldn't find batch folder '{batch_number}' in the REPEATER "
-            f"directory.\n  {repeater_root}",
+            f"Couldn't find batch folder '{batch_number}' under the 911 QTDR "
+            f"root.\n  {qtdr_root}",
             "Double-check the batch number and that the folder exists there, "
             "then run again.")
-
     log(f"Batch folder  : {batch_folder}")
     progress_callback(5)
+
+    # ------------------------------------------------------------------ #
+    # Step 3 - Load the Master Parts List
+    # ------------------------------------------------------------------ #
+    mpl_override = str(settings.get("mpl_path", "") or "").strip()
+    mpl_path = Path(mpl_override) if mpl_override else _default_mpl_path(qtdr_root)
+    if not mpl_path.exists():
+        raise sdk.UserFacingError(
+            f"Couldn't find the 911 MASTER PARTS LIST.\n  {mpl_path}",
+            "Make sure OneDrive is synced (the list lives in the REPEATER "
+            "folder), or point at it in Settings → Apps → 911 Batch Repeater. "
+            "A TechDeck admin can rebuild it with tools/build_911_mpl.py.")
+
+    log(f"Parts list    : {mpl_path.name}")
+    mpl_index = _load_mpl_index(mpl_path, log)
+    log(f"  {sum(len(v) for v in mpl_index.values())} catalogued parts, "
+        f"{len(mpl_index)} unique DYPNs")
+    progress_callback(10)
 
     if cancel_event.is_set():
         return
 
     # ------------------------------------------------------------------ #
-    # Step 4 - Collect DYPNs per nest
+    # Step 4 - Collect DYPNs (and repeat counts) per nest
     # ------------------------------------------------------------------ #
-    nest_folders = sorted([d for d in batch_folder.iterdir() if d.is_dir()])
+    nest_folders = sorted(
+        d for d in batch_folder.iterdir()
+        if d.is_dir() and _NEST_RE.match(d.name))
 
     if not nest_folders:
         log(f"No nest subfolders found in {batch_folder.name}. Has 911 Setup been run?")
@@ -359,7 +324,7 @@ def run(params, progress_callback, cancel_event):
 
     log(f"Nest folders  : {len(nest_folders)} found")
 
-    nest_dypns: dict[str, list[str]] = {}
+    nest_infos: dict[str, dict] = {}
 
     for nest_dir in nest_folders:
         sdk.raise_if_cancelled(cancel_event)
@@ -367,25 +332,30 @@ def run(params, progress_callback, cancel_event):
         excel_path = _find_nest_excel(nest_dir, batch_number, nest_name)
 
         if excel_path is None:
-            log(f"  [{nest_name}] WARNING: No 911 Batch Excel found - skipping")
+            log(f"  [{nest_name}] WARNING: No 911 BATCH Excel found - skipping")
             continue
 
         try:
-            dypns = _read_dypns(excel_path)
+            dypns = _read_dypns(excel_path, log)
         except Exception as exc:
             log(f"  [{nest_name}] WARNING: Could not read Excel ({exc}) - skipping")
             continue
 
         if not dypns:
-            log(f"  [{nest_name}] No DYPNs in NEST col K")
+            log(f"  [{nest_name}] No DYPNs found in the NEST sheet")
             continue
 
-        log(f"  [{nest_name}] DYPNs: {', '.join(dypns)}")
-        nest_dypns[nest_name] = dypns
+        repeats = sum(1 for d in dypns if d.strip().upper() in mpl_index)
+        log(f"  [{nest_name}] {len(dypns)} DYPNs, {repeats} in the parts list")
+        nest_infos[nest_name] = {
+            "dypns": dypns,
+            "repeats": repeats,
+            "has_repeat": _has_repeat_files(nest_dir),
+        }
 
-    progress_callback(20)
+    progress_callback(25)
 
-    if not nest_dypns:
+    if not nest_infos:
         log("No DYPNs found across any nest - nothing to do.")
         return
 
@@ -395,12 +365,7 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     # Step 5 - Nest-selection window (which nests + what to grab)
     # ------------------------------------------------------------------ #
-    existing = {n for n in nest_dypns
-                if _has_existing_repeats(repeater_root / batch_number, n)}
-    if existing:
-        log(f"Repeats exist : {', '.join(n for n in nest_dypns if n in existing)}")
-
-    selection = _select_nests(params, batch_number, nest_dypns, existing)
+    selection = _select_nests(params, batch_number, nest_infos)
 
     if selection is None:
         log("Nest selection cancelled - nothing was run.")
@@ -412,47 +377,15 @@ def run(params, progress_callback, cancel_event):
         return
 
     log(f"Running nests : {', '.join(n for n, _ in selection)}")
-    progress_callback(25)
-
-    # ------------------------------------------------------------------ #
-    # Step 6 - Build library indexes once (only the ones some nest wants)
-    # ------------------------------------------------------------------ #
-    need_nc = any(o.get("nc", True) for _, o in selection)
-    need_pdf = any(o.get("pdf", True) for _, o in selection)
-
-    nc_index: dict[str, Path] = {}
-    pdf_index: dict[str, Path] = {}
-
-    if need_nc:
-        if not parts_lib.exists():
-            raise sdk.UserFacingError(
-                f"Couldn't find the MASTER PARTS LIBRARY folder.\n  {parts_lib}",
-                "Make sure OneDrive is synced, then run again.")
-        log("Indexing Master Parts Library...")
-        nc_index = _build_library_index(parts_lib, ".NC", cancel_event)
-        log(f"  .NC files found  : {len(nc_index)}")
-
-    if need_pdf:
-        if not insp_lib.exists():
-            raise sdk.UserFacingError(
-                f"Couldn't find the MASTER INSPECTION LIBRARY folder.\n  {insp_lib}",
-                "Make sure OneDrive is synced, then run again.")
-        log("Indexing Master Inspection Library...")
-        pdf_index = _build_library_index(insp_lib, ".pdf", cancel_event)
-        log(f"  .pdf files found : {len(pdf_index)}")
-
     progress_callback(30)
 
-    if cancel_event.is_set():
-        return
-
     # ------------------------------------------------------------------ #
-    # Step 7 - Per nest: match, copy, edit PDFs (per that nest's options)
+    # Step 6 - Per nest: look up repeats, copy into {nest}\REPEAT\{DYPN}\
     # ------------------------------------------------------------------ #
-    total_nc = 0
-    total_pdf = 0
-    total_edited = 0
+    total_parts = 0
+    total_files = 0
     total_new = 0
+    total_missing_src = 0
     total_errors = 0
 
     for nest_idx, (nest_name, opts) in enumerate(selection):
@@ -460,113 +393,96 @@ def run(params, progress_callback, cancel_event):
             log("Cancelled by user.")
             return
 
-        want_nc = opts.get("nc", True)
+        want_models = opts.get("models", True)
         want_pdf = opts.get("pdf", True)
-        want_restamp = opts.get("restamp", True)
         overwrite = opts.get("overwrite", False)
 
-        dypns = nest_dypns[nest_name]
+        exts: set[str] = set()
+        if want_models:
+            exts |= _MODEL_EXTS
+        if want_pdf:
+            exts |= _PDF_EXTS
+
+        dypns = nest_infos[nest_name]["dypns"]
         grabbing = [name for flag, name in
-                    ((want_nc, "NC files"), (want_pdf, "inspection PDFs")) if flag]
+                    ((want_models, "models"), (want_pdf, "PDFs")) if flag]
         log(f"\n[{nest_name}] Processing {len(dypns)} DYPNs "
             f"(grabbing {' + '.join(grabbing) if grabbing else 'nothing'}"
             f"{', overwrite on' if overwrite else ''})...")
 
-        if not grabbing:
+        if not exts:
             log(f"  [{nest_name}] Both grab options are off - nothing to do here.")
             continue
 
-        nc_out = repeater_root / batch_number / nest_name / "NC Repeats"
-        insp_out = repeater_root / batch_number / nest_name / "Inspection Repeats"
-        if want_nc:
-            nc_out.mkdir(parents=True, exist_ok=True)
-        if want_pdf:
-            insp_out.mkdir(parents=True, exist_ok=True)
+        nest_dir = batch_folder / nest_name
+        repeat_root = nest_dir / "REPEAT"
 
         seen: set[str] = set()
-        nest_nc = nest_pdf = nest_edited = nest_errors = 0
+        nest_parts = nest_files = nest_errors = 0
 
         for dypn in dypns:
             sdk.raise_if_cancelled(cancel_event)
-            dypn_key = dypn.upper()
+            dypn_key = dypn.strip().upper()
             if dypn_key in seen:
                 continue
             seen.add(dypn_key)
 
-            # Copy NC
-            if want_nc:
-                nc_src = nc_index.get(dypn_key)
-                if nc_src is None:
-                    log(f"  {dypn} - not in parts library (new part)")
-                    total_new += 1
-                else:
-                    nc_dest = nc_out / nc_src.name
-                    try:
-                        if nc_dest.exists() and not overwrite:
-                            log(f"  {dypn} - NC already exists, skipping")
-                        else:
-                            sdk.ensure_local(nc_src, log=log)  # Hard Rule 13
-                            shutil.copy2(nc_src, nc_dest)
-                            nest_nc += 1
-                            log(f"  {dypn} - NC copied")
-                    except Exception as exc:
-                        log(f"  {dypn} - ERROR copying NC: {exc}")
-                        nest_errors += 1
+            sources = mpl_index.get(dypn_key)
+            if not sources:
+                total_new += 1
+                continue  # new part - not a repeat, nothing to pull
 
-            # Copy and edit PDF
-            if want_pdf:
-                pdf_src = pdf_index.get(dypn_key)
-                if pdf_src is None:
-                    log(f"  {dypn} - no PDF in Inspection Library")
-                    continue
+            picked = _pick_source(sources, qtdr_root, batch_number, nest_name)
+            if picked is None:
+                log(f"  {dypn} - in the parts list but its source folder is "
+                    f"missing (was {sources[0]['batch']} {sources[0]['nest']})")
+                total_missing_src += 1
+                continue
 
-                pdf_dest = insp_out / pdf_src.name
-                try:
-                    if pdf_dest.exists() and not overwrite:
-                        log(f"  {dypn} - PDF already exists, skipping")
-                    else:
-                        sdk.ensure_local(pdf_src, log=log)  # Hard Rule 13
-                        shutil.copy2(pdf_src, pdf_dest)
-                        nest_pdf += 1
-                        if want_restamp:
-                            log(f"  {dypn} - PDF copied, updating batch/nest text...")
-                            if _replace_batch_nest_in_pdf(pdf_dest, batch_number, nest_name, log):
-                                nest_edited += 1
-                        else:
-                            log(f"  {dypn} - PDF copied (batch/nest text left as-is)")
-                except Exception as exc:
-                    log(f"  {dypn} - ERROR with PDF: {exc}")
-                    nest_errors += 1
+            src, src_dir = picked
+            try:
+                copied, skipped = _copy_part(
+                    src_dir, repeat_root / src_dir.name, exts, overwrite,
+                    log, cancel_event)
+                if copied:
+                    nest_parts += 1
+                    nest_files += copied
+                    log(f"  {dypn} - {copied} file(s) from {src['batch']} {src['nest']}"
+                        f"{f' ({skipped} kept)' if skipped else ''}")
+                elif skipped:
+                    log(f"  {dypn} - already in REPEAT, skipping")
+            except Exception as exc:
+                log(f"  {dypn} - ERROR copying: {exc}")
+                nest_errors += 1
 
-        log(f"  [{nest_name}] NC: {nest_nc} copied | PDF: {nest_pdf} copied, {nest_edited} edited")
-        total_nc += nest_nc
-        total_pdf += nest_pdf
-        total_edited += nest_edited
+        log(f"  [{nest_name}] {nest_parts} repeat part(s), {nest_files} file(s) -> REPEAT")
+        total_parts += nest_parts
+        total_files += nest_files
         total_errors += nest_errors
 
         progress_callback(30 + int((nest_idx + 1) / len(selection) * 65))
 
     # ------------------------------------------------------------------ #
-    # Step 8 - Summary
+    # Step 7 - Summary
     # ------------------------------------------------------------------ #
     progress_callback(100)
     log("\n" + "=" * 50)
     log("REPEATER SUMMARY")
     log("=" * 50)
-    log(f"Batch          : {batch_number}")
-    log(f"Nests processed: {len(selection)}")
-    log(f"NC files copied: {total_nc}")
-    log(f"PDFs copied    : {total_pdf}")
-    log(f"PDFs edited    : {total_edited}")
+    log(f"Batch           : {batch_number}")
+    log(f"Nests processed : {len(selection)}")
+    log(f"Repeat parts    : {total_parts}")
+    log(f"Files copied    : {total_files}")
     if total_new:
-        log(f"New parts (no NC): {total_new}")
+        log(f"New parts (not in the parts list): {total_new}")
+    if total_missing_src:
+        log(f"Missing sources : {total_missing_src}")
     if total_errors:
-        log(f"Errors         : {total_errors}")
-    log(f"\nOutput root    : {repeater_root / batch_number}")
+        log(f"Errors          : {total_errors}")
     log("=" * 50)
     log("Done." if total_errors == 0 else f"Done with {total_errors} error(s).")
 
     if total_errors and hasattr(sdk, "set_run_outcome"):
         sdk.set_run_outcome(
             params, sdk.RUN_OUTCOME_WARNING,
-            f"{total_errors} file(s) failed to copy or edit - see the log above.")
+            f"{total_errors} file(s) failed to copy - see the log above.")
