@@ -2,7 +2,8 @@
 911 Repeater Plugin
 ===================
 Finds repeat parts for a 911 QTDR batch by cross-referencing DYPN numbers
-from each nest's 911 Batch Excel against the Master Parts and Inspection Libraries.
+from each nest's 911 Batch Excel against the Master Parts and Inspection
+Libraries.
 
 Output structure per nest:
   <batch>/<nest>/NC Repeats/          <- .NC files
@@ -10,12 +11,23 @@ Output structure per nest:
 
 Workflow:
   1. Prompt for batch number (e.g. V071)
-  2. Locate batch folder under 911 QTDR root
+  2. Locate batch folder under the REPEATER root
   3. For each nest subfolder, read DYPNs from NEST sheet col K
-  4. Match each DYPN against Master Parts Library (.NC) and Inspection Library (.pdf)
-  5. Copy matches into per-nest output folders under REPEATER/<batch>/<nest>/
-  6. In each copied PDF, find the old "batch nest" pair and replace with new values
-  7. Report summary
+  4. Show the nest-selection window (v2.0.0): every nest with DYPNs is a
+     checkable row (same look as 911 Setup's nest picker); clicking a nest's
+     NAME expands that nest's grab options -- Grab NC files / Grab inspection
+     PDFs / Update batch+nest text on copied PDFs / Overwrite existing
+     copies. Nests whose repeats folders already hold files are flagged.
+     Cancelling the window runs nothing. Headless (CLI/test) the optional
+     'nests' list and 'grab' option-override dict select the work; default =
+     all nests with the default options.
+  5. Match each chosen nest's DYPNs against the Master Parts Library (.NC)
+     and Master Inspection Library (.pdf), honoring that nest's grab options
+     (libraries are only indexed if some selected nest wants them)
+  6. Copy matches into per-nest output folders under REPEATER/<batch>/<nest>/
+  7. In each copied PDF, find the old "batch nest" pair and replace with the
+     new values (skipped when the nest's restamp option is off)
+  8. Report summary (copy/edit errors end the run with a warning outcome)
 """
 
 import re
@@ -186,6 +198,8 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
                     break
                 if replaced:
                     break
+            if replaced:
+                break
 
         if replaced:
             # Save to a temp file then replace - required when using redactions
@@ -204,12 +218,87 @@ def _replace_batch_nest_in_pdf(pdf_path: Path, new_batch: str, new_nest: str, lo
 
 
 # ---------------------------------------------------------------------------
+# Nest selection window
+# ---------------------------------------------------------------------------
+
+# Per-nest grab options shown under each nest row in the selection window.
+_GRAB_CHILDREN = [
+    {"key": "nc",        "label": "Grab NC files (.NC)",                            "checked": True},
+    {"key": "pdf",       "label": "Grab inspection PDFs",                           "checked": True},
+    {"key": "restamp",   "label": "Update batch/nest text on copied PDFs",          "checked": True},
+    {"key": "overwrite", "label": "Overwrite copies already in the repeats folders", "checked": False},
+]
+
+_DEFAULT_GRAB = {c["key"]: c["checked"] for c in _GRAB_CHILDREN}
+
+
+def _has_existing_repeats(out_root: Path, nest: str) -> bool:
+    """True if this nest's output folders already hold any files."""
+    for sub in ("NC Repeats", "Inspection Repeats"):
+        d = out_root / nest / sub
+        try:
+            if d.is_dir() and any(d.iterdir()):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def _select_nests(params, batch_number: str, nest_dypns: dict[str, list[str]],
+                  existing: set[str]):
+    """
+    Show the nest/options window (nests as checkable rows, each expanding to
+    its grab options). Returns [(nest, options_dict)] in nest order for the
+    checked nests, an empty list if nothing was checked, or None on cancel.
+    Headless: 'nests' (list) picks a subset and 'grab' (dict) overrides the
+    option defaults for every nest.
+    """
+    console = params.get("console")
+    order = list(nest_dypns.keys())
+
+    if console is not None and hasattr(console, "request_grouped_toggles"):
+        groups = []
+        for nest in order:
+            n = len(nest_dypns[nest])
+            label = f"{nest}   ({n} part{'s' if n != 1 else ''})"
+            if nest in existing:
+                label += "  - has repeats already"
+            groups.append({
+                # Like 911 Setup's nest picker, nests start unchecked.
+                "key": nest, "label": label, "checked": False,
+                "children": [dict(c) for c in _GRAB_CHILDREN],
+            })
+        result = sdk.request_grouped_toggles(
+            params, groups,
+            window_title=f"911 Batch Repeater - Batch {batch_number}",
+            header="Select Nests to Run",
+            subtext=("Check the nests to process. Click a nest's name to "
+                     "choose exactly what the repeater grabs for it."),
+            run_button_text="Run Repeater",
+        )
+        if result is None:
+            return None
+        return [(nest, result[nest]["options"]) for nest in order
+                if result.get(nest, {}).get("enabled")]
+
+    # No console (CLI/test): honor explicit overrides, else all nests.
+    override = params.get("nests")
+    if override:
+        wanted = {str(x).strip().upper() for x in override}
+        chosen = [n for n in order if n.upper() in wanted]
+    else:
+        chosen = order
+    opts = dict(_DEFAULT_GRAB)
+    opts.update(params.get("grab") or {})
+    return [(nest, dict(opts)) for nest in chosen]
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
 def run(params, progress_callback, cancel_event):
     log = params.get("log", print)
-    console = params.get("console", None)
     settings = params.get("settings", {}) or {}
 
     log("911 Repeater starting...")
@@ -242,16 +331,6 @@ def run(params, progress_callback, cancel_event):
     parts_lib = repeater_root / "MASTER PARTS LIBRARY"
     insp_lib = repeater_root / "MASTER INSPECTION LIBRARY"
 
-    if not parts_lib.exists():
-        raise sdk.UserFacingError(
-            f"Couldn't find the MASTER PARTS LIBRARY folder.\n  {parts_lib}",
-            "Make sure OneDrive is synced, then run again.")
-
-    if not insp_lib.exists():
-        raise sdk.UserFacingError(
-            f"Couldn't find the MASTER INSPECTION LIBRARY folder.\n  {insp_lib}",
-            "Make sure OneDrive is synced, then run again.")
-
     # ------------------------------------------------------------------ #
     # Step 3 - Locate batch folder in QTDR
     # ------------------------------------------------------------------ #
@@ -270,23 +349,7 @@ def run(params, progress_callback, cancel_event):
         return
 
     # ------------------------------------------------------------------ #
-    # Step 4 - Build library indexes once
-    # ------------------------------------------------------------------ #
-    log("Indexing Master Parts Library...")
-    nc_index = _build_library_index(parts_lib, ".NC", cancel_event)
-    log(f"  .NC files found  : {len(nc_index)}")
-
-    log("Indexing Master Inspection Library...")
-    pdf_index = _build_library_index(insp_lib, ".pdf", cancel_event)
-    log(f"  .pdf files found : {len(pdf_index)}")
-
-    progress_callback(10)
-
-    if cancel_event.is_set():
-        return
-
-    # ------------------------------------------------------------------ #
-    # Step 5 - Collect DYPNs per nest
+    # Step 4 - Collect DYPNs per nest
     # ------------------------------------------------------------------ #
     nest_folders = sorted([d for d in batch_folder.iterdir() if d.is_dir()])
 
@@ -320,7 +383,7 @@ def run(params, progress_callback, cancel_event):
         log(f"  [{nest_name}] DYPNs: {', '.join(dypns)}")
         nest_dypns[nest_name] = dypns
 
-    progress_callback(30)
+    progress_callback(20)
 
     if not nest_dypns:
         log("No DYPNs found across any nest - nothing to do.")
@@ -330,7 +393,61 @@ def run(params, progress_callback, cancel_event):
         return
 
     # ------------------------------------------------------------------ #
-    # Step 6 - Per nest: match, copy, edit PDFs
+    # Step 5 - Nest-selection window (which nests + what to grab)
+    # ------------------------------------------------------------------ #
+    existing = {n for n in nest_dypns
+                if _has_existing_repeats(repeater_root / batch_number, n)}
+    if existing:
+        log(f"Repeats exist : {', '.join(n for n in nest_dypns if n in existing)}")
+
+    selection = _select_nests(params, batch_number, nest_dypns, existing)
+
+    if selection is None:
+        log("Nest selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: don't count as a successful (ticket-earning) run
+        return
+    if not selection:
+        log("No nests selected - nothing to do.")
+        cancel_event.set()  # nothing ran: don't count as a successful (ticket-earning) run
+        return
+
+    log(f"Running nests : {', '.join(n for n, _ in selection)}")
+    progress_callback(25)
+
+    # ------------------------------------------------------------------ #
+    # Step 6 - Build library indexes once (only the ones some nest wants)
+    # ------------------------------------------------------------------ #
+    need_nc = any(o.get("nc", True) for _, o in selection)
+    need_pdf = any(o.get("pdf", True) for _, o in selection)
+
+    nc_index: dict[str, Path] = {}
+    pdf_index: dict[str, Path] = {}
+
+    if need_nc:
+        if not parts_lib.exists():
+            raise sdk.UserFacingError(
+                f"Couldn't find the MASTER PARTS LIBRARY folder.\n  {parts_lib}",
+                "Make sure OneDrive is synced, then run again.")
+        log("Indexing Master Parts Library...")
+        nc_index = _build_library_index(parts_lib, ".NC", cancel_event)
+        log(f"  .NC files found  : {len(nc_index)}")
+
+    if need_pdf:
+        if not insp_lib.exists():
+            raise sdk.UserFacingError(
+                f"Couldn't find the MASTER INSPECTION LIBRARY folder.\n  {insp_lib}",
+                "Make sure OneDrive is synced, then run again.")
+        log("Indexing Master Inspection Library...")
+        pdf_index = _build_library_index(insp_lib, ".pdf", cancel_event)
+        log(f"  .pdf files found : {len(pdf_index)}")
+
+    progress_callback(30)
+
+    if cancel_event.is_set():
+        return
+
+    # ------------------------------------------------------------------ #
+    # Step 7 - Per nest: match, copy, edit PDFs (per that nest's options)
     # ------------------------------------------------------------------ #
     total_nc = 0
     total_pdf = 0
@@ -338,18 +455,33 @@ def run(params, progress_callback, cancel_event):
     total_new = 0
     total_errors = 0
 
-    nest_list = list(nest_dypns.items())
-    for nest_idx, (nest_name, dypns) in enumerate(nest_list):
+    for nest_idx, (nest_name, opts) in enumerate(selection):
         if cancel_event.is_set():
             log("Cancelled by user.")
             return
 
-        log(f"\n[{nest_name}] Processing {len(dypns)} DYPNs...")
+        want_nc = opts.get("nc", True)
+        want_pdf = opts.get("pdf", True)
+        want_restamp = opts.get("restamp", True)
+        overwrite = opts.get("overwrite", False)
+
+        dypns = nest_dypns[nest_name]
+        grabbing = [name for flag, name in
+                    ((want_nc, "NC files"), (want_pdf, "inspection PDFs")) if flag]
+        log(f"\n[{nest_name}] Processing {len(dypns)} DYPNs "
+            f"(grabbing {' + '.join(grabbing) if grabbing else 'nothing'}"
+            f"{', overwrite on' if overwrite else ''})...")
+
+        if not grabbing:
+            log(f"  [{nest_name}] Both grab options are off - nothing to do here.")
+            continue
 
         nc_out = repeater_root / batch_number / nest_name / "NC Repeats"
         insp_out = repeater_root / batch_number / nest_name / "Inspection Repeats"
-        nc_out.mkdir(parents=True, exist_ok=True)
-        insp_out.mkdir(parents=True, exist_ok=True)
+        if want_nc:
+            nc_out.mkdir(parents=True, exist_ok=True)
+        if want_pdf:
+            insp_out.mkdir(parents=True, exist_ok=True)
 
         seen: set[str] = set()
         nest_nc = nest_pdf = nest_edited = nest_errors = 0
@@ -361,44 +493,50 @@ def run(params, progress_callback, cancel_event):
                 continue
             seen.add(dypn_key)
 
-            nc_src = nc_index.get(dypn_key)
-            if nc_src is None:
-                log(f"  {dypn} - not in parts library (new part, skipped)")
-                total_new += 1
-                continue
-
             # Copy NC
-            nc_dest = nc_out / nc_src.name
-            try:
-                if nc_dest.exists():
-                    log(f"  {dypn} - NC already exists, skipping")
+            if want_nc:
+                nc_src = nc_index.get(dypn_key)
+                if nc_src is None:
+                    log(f"  {dypn} - not in parts library (new part)")
+                    total_new += 1
                 else:
-                    shutil.copy2(nc_src, nc_dest)
-                    nest_nc += 1
-                    log(f"  {dypn} - NC copied")
-            except Exception as exc:
-                log(f"  {dypn} - ERROR copying NC: {exc}")
-                nest_errors += 1
+                    nc_dest = nc_out / nc_src.name
+                    try:
+                        if nc_dest.exists() and not overwrite:
+                            log(f"  {dypn} - NC already exists, skipping")
+                        else:
+                            sdk.ensure_local(nc_src, log=log)  # Hard Rule 13
+                            shutil.copy2(nc_src, nc_dest)
+                            nest_nc += 1
+                            log(f"  {dypn} - NC copied")
+                    except Exception as exc:
+                        log(f"  {dypn} - ERROR copying NC: {exc}")
+                        nest_errors += 1
 
             # Copy and edit PDF
-            pdf_src = pdf_index.get(dypn_key)
-            if pdf_src is None:
-                log(f"  {dypn} - no PDF in Inspection Library (NC only)")
-                continue
+            if want_pdf:
+                pdf_src = pdf_index.get(dypn_key)
+                if pdf_src is None:
+                    log(f"  {dypn} - no PDF in Inspection Library")
+                    continue
 
-            pdf_dest = insp_out / pdf_src.name
-            try:
-                if pdf_dest.exists():
-                    log(f"  {dypn} - PDF already exists, skipping")
-                else:
-                    shutil.copy2(pdf_src, pdf_dest)
-                    nest_pdf += 1
-                    log(f"  {dypn} - PDF copied, updating batch/nest text...")
-                    if _replace_batch_nest_in_pdf(pdf_dest, batch_number, nest_name, log):
-                        nest_edited += 1
-            except Exception as exc:
-                log(f"  {dypn} - ERROR with PDF: {exc}")
-                nest_errors += 1
+                pdf_dest = insp_out / pdf_src.name
+                try:
+                    if pdf_dest.exists() and not overwrite:
+                        log(f"  {dypn} - PDF already exists, skipping")
+                    else:
+                        sdk.ensure_local(pdf_src, log=log)  # Hard Rule 13
+                        shutil.copy2(pdf_src, pdf_dest)
+                        nest_pdf += 1
+                        if want_restamp:
+                            log(f"  {dypn} - PDF copied, updating batch/nest text...")
+                            if _replace_batch_nest_in_pdf(pdf_dest, batch_number, nest_name, log):
+                                nest_edited += 1
+                        else:
+                            log(f"  {dypn} - PDF copied (batch/nest text left as-is)")
+                except Exception as exc:
+                    log(f"  {dypn} - ERROR with PDF: {exc}")
+                    nest_errors += 1
 
         log(f"  [{nest_name}] NC: {nest_nc} copied | PDF: {nest_pdf} copied, {nest_edited} edited")
         total_nc += nest_nc
@@ -406,17 +544,17 @@ def run(params, progress_callback, cancel_event):
         total_edited += nest_edited
         total_errors += nest_errors
 
-        progress_callback(30 + int((nest_idx + 1) / len(nest_list) * 65))
+        progress_callback(30 + int((nest_idx + 1) / len(selection) * 65))
 
     # ------------------------------------------------------------------ #
-    # Step 7 - Summary
+    # Step 8 - Summary
     # ------------------------------------------------------------------ #
     progress_callback(100)
     log("\n" + "=" * 50)
     log("REPEATER SUMMARY")
     log("=" * 50)
     log(f"Batch          : {batch_number}")
-    log(f"Nests processed: {len(nest_dypns)}")
+    log(f"Nests processed: {len(selection)}")
     log(f"NC files copied: {total_nc}")
     log(f"PDFs copied    : {total_pdf}")
     log(f"PDFs edited    : {total_edited}")
@@ -427,3 +565,8 @@ def run(params, progress_callback, cancel_event):
     log(f"\nOutput root    : {repeater_root / batch_number}")
     log("=" * 50)
     log("Done." if total_errors == 0 else f"Done with {total_errors} error(s).")
+
+    if total_errors and hasattr(sdk, "set_run_outcome"):
+        sdk.set_run_outcome(
+            params, sdk.RUN_OUTCOME_WARNING,
+            f"{total_errors} file(s) failed to copy or edit - see the log above.")
