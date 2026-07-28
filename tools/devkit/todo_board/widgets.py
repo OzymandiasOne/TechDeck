@@ -15,8 +15,10 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal, QMimeData, QPoint
-from PySide6.QtGui import QDrag, QFont, QFontMetrics, QColor
+from PySide6.QtCore import Qt, Signal, QMimeData, QPoint, QPointF, QSize
+from PySide6.QtGui import (
+    QDrag, QFont, QFontMetrics, QColor, QIcon, QPainter, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QToolButton, QCheckBox,
     QLineEdit, QMenu, QApplication, QWidget, QInputDialog,
@@ -70,6 +72,24 @@ def _parse_shadow(rgba: str) -> QColor:
         return QColor(int(m[1]), int(m[2]), int(m[3]),
                       max(70, int(float(m[4]) * 255)))
     return QColor(0, 0, 0, 80)
+
+
+def _check_icon(color: str, size: int = 12) -> QIcon:
+    """A painted checkmark icon — Segoe UI has no U+2713, so a text glyph
+    renders as tofu (same gotcha as the ··· menu dots)."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    pen = QPen(QColor(color), max(1.6, size / 6.5))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    s = size
+    p.drawPolyline([QPointF(s * 0.2, s * 0.55), QPointF(s * 0.42, s * 0.78),
+                    QPointF(s * 0.8, s * 0.25)])
+    p.end()
+    return QIcon(pm)
 
 
 def _format_date(date_iso: str) -> str:
@@ -284,15 +304,15 @@ class TaskCard(QFrame):
     def _style_done_btn(self, done: bool):
         pal = self._pal
         if done:
-            self._done_btn.setText("✓")
+            self._done_btn.setIcon(_check_icon("#FFFFFF"))
+            self._done_btn.setIconSize(QSize(12, 12))
             self._done_btn.setStyleSheet(
                 f"QToolButton {{ background-color: {pal.success}; "
                 f"border: 2px solid {pal.success}; border-radius: 9px; "
-                f"color: #FFFFFF; font-size: 11px; font-weight: bold; "
                 f"padding: 0px; }}")
             self._done_btn.setToolTip("Mark not done (expands the card)")
         else:
-            self._done_btn.setText("")
+            self._done_btn.setIcon(QIcon())
             self._done_btn.setStyleSheet(
                 f"QToolButton {{ background: transparent; "
                 f"border: 2px solid {pal.text_secondary}; border-radius: 9px; }}"
