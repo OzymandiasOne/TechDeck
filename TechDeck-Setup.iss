@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.9 - Icon overhaul (10 redrawn tile icons + game cartridge) + pixel-editor UX; SSPO Award Review v2.7.x throughput estimate; 922 Setup v2.3.x Batch Folder Setup stage + per-stage tickets
+; Version 0.8.6.10 - 911 Batch Repeater v3 MPL rebuild + Sentry Drone picker; cooperative cancel + truthful run outcomes; settings-race fix + achievements backfill; SHA-256-verified updates; Award Review v2.8 EB Machine/Fuel; ASA event system
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.9"
+#define MyAppVersion "0.8.6.10"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

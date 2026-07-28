@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.9 - Icon Overhaul
+# TechDeck v0.8.6.10 - Repeater Rebuild + Sentry Drone
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
@@ -6,28 +6,49 @@ the `.exe`.
 
 ---
 
-## What's New in v0.8.6.9
+## What's New in v0.8.6.10
 
-**Sharper tile icons across the board.** Ten of the app's hand-drawn tile icons were
-redrawn for a cleaner, more consistent look - calculator, copy, lamp, magnifier, ruler,
-stamp, toolbox, QR, scissors, plus the ASA game's cartridge. They recolor correctly in
-every theme. Purely visual; nothing about how the tools work changed.
+**911 Batch Repeater v3 - rebuilt around the Master Parts List.** Repeats are no longer
+found by scanning old batch folders: the Repeater now looks up every part in each nest
+against the 911 Master Parts List (compiled from all completed nests) and copies each
+repeat part's CAD files - SolidWorks model, drawing, and PDF - from its completed source
+nest into a **REPEAT** folder inside the target nest, organized per part. A new
+nest-selection window lets you expand any nest and toggle exactly what it grabs (models,
+PDFs, overwrite existing). And when a nest turns up no repeats, the report now tells you
+why: its parts are genuinely new to the catalog, or their source folder couldn't be
+found. (The old NC-file and inspection-library grabbing is retired.)
 
-**Runtime estimate reworked (SSPO Award Review).** The primary plate-cut estimate is now
-derived from actual production throughput (pieces per hour) rather than the older
-feed-rate model, with the thickness break tuned per shop feedback and a matching
-Analysis sheet.
+**Cancel works everywhere, and the run banner tells the truth.** Every app now checks
+for cancellation inside its long loops, so Cancel stops a run promptly - mid-scan,
+mid-batch, mid-PDF - instead of waiting for the current sweep to finish. An app that
+finishes with skipped stages or a failed step now ends with a visible WARNING instead of
+a green checkmark, and the end-of-run banner reflects the real mix of outcomes. Closing
+TechDeck while an app is running now asks first, then gives the run a moment to stop at
+a safe point instead of cutting it off mid-write.
 
-**922 Setup gains a Batch Folder Setup stage** at the front of the run, and awards
-tickets per stage completed (5 each). Multi-PPN orders now get their work-packet PDF
-placed in every relevant folder.
+**Settings saves fixed.** A race between two parts of the app could silently revert
+just-saved settings; saving is now atomic and race-free. (The same bug had frozen
+several achievements - see Feedback Fixes.) TechDeck also gained its first automated
+test suite, guarding this and the rest of the core run logic on every build.
 
-**New app: Sheet Metal Calculators** - A library of shop calculators behind a simple
-picker. Pick a calculator on the left, fill in the fields, get the result live. Three
-to start - **Flat Length** (bend-allowance flat length from K-factor, thickness, inside
-radius/ID/OD, and bend angle), **Bend Deduction** (OSSB / bend allowance / bend
-deduction), and **Material Weight** (by sheet size or area) - with more being added one
-at a time.
+**Safer updates.** The auto-updater now verifies the downloaded installer's SHA-256
+fingerprint before running it, so a corrupted or tampered download can never launch.
+
+**911 SSPO Award Review v2.8** - Two new columns close out the output table: **EB
+Machine** and **EB Fuel**, read from each nest packet's front-page header table (the
+Machine/Gantry and Fuel cells) and repeated on that nest's rows - verified across all
+142 packets of Awards 8, 9, and 10.
+
+**Sentry Drone targeting.** Batch picking got an upgrade: 922 Setup's batch pick, and
+the 911 Batch Repeater's batch + nest pick, now run through a Sentry Drone overlay -
+lock onto the batch folder, zoom inside, lock as many nests as you want, then execute
+the strike (locked nests run with the default grabs). Full sound design included. It's
+on by default and toggleable in Settings ("Sentry Drone mode"); the Professional theme -
+or any hiccup in the effect - falls back to the standard Windows picker automatically.
+
+**UI polish** - On/off options in app Settings render as proper toggle switches; ticking
+a stage's checkbox in 922 Setup's master window no longer pops the stage open; the 911
+LST Organizer got its own theme-aware folder icon.
 
 ### Feedback Fixes
 
@@ -59,9 +80,73 @@ keep it coming.
   matching is now exact end-to-end, so an order can no longer partially match a
   similarly-numbered one (e.g. -H1 picking up -H11) - only true repeats are pulled.
 
-- *"The ASA game's sleeping animation needs work, and there aren't enough ways to
-  influence A-Frame demand when tube surplus piles up."* - The sleeping animation was
-  redrawn, and new gameplay levers let you influence A-Frame demand directly.
+- *"The first four achievements never make any progress, while the rest keep
+  climbing."* - Root cause found: the settings bug above was reverting the app's
+  total-run counter on every run, freezing exactly the achievements that read it. It's
+  fixed, and the lost progress heals automatically the first time this version starts.
+
+- *"The ASA game's doesn't have enough ways to influence A-Frame demand when tube surplus piles up."* 
+  - The sleeping animation was redrawn, and new gameplay levers let you influence A-Frame demand 
+  directly. Plus, a few more things...
+
+- *"Solar panels in the ASA game should have more uses beyond powering the server."* -
+  Solar fields now anchor the reworked power economy: the trading AI and the drone
+  fleet both draw real power that solar has to supply, and the late game builds on it
+  from there.
+
+- *"The Help & Feedback text is hard to read in some themes."* - Secondary text
+  everywhere now takes its color from the active theme instead of a fixed gray, and
+  updates immediately on theme change.
+
+---
+
+## What's New in v0.8.6.9
+
+**Sharper tile icons across the board.** Ten of the app's hand-drawn tile icons were
+redrawn for a cleaner, more consistent look - calculator, copy, lamp, magnifier, ruler,
+stamp, toolbox, QR, scissors, plus the ASA game's cartridge. They recolor correctly in
+every theme. Purely visual; nothing about how the tools work changed.
+
+**Runtime estimate reworked (SSPO Award Review).** The primary plate-cut estimate is now
+derived from actual production throughput (pieces per hour) rather than the older
+feed-rate model, with the thickness break tuned per shop feedback and a matching
+Analysis sheet.
+
+**922 Setup gains a Batch Folder Setup stage** at the front of the run, and awards
+tickets per stage completed (5 each). Multi-PPN orders now get their work-packet PDF
+placed in every relevant folder.
+
+**New app: Sheet Metal Calculators** - A library of shop calculators behind a simple
+picker. Pick a calculator on the left, fill in the fields, get the result live. Three
+to start - **Flat Length** (bend-allowance flat length from K-factor, thickness, inside
+radius/ID/OD, and bend angle), **Bend Deduction** (OSSB / bend allowance / bend
+deduction), and **Material Weight** (by sheet size or area) - with more being added one
+at a time.
+
+**922 LST Organizer v3** - Rewritten matching end to end: aggressive filename
+normalization with order-PO and suffix fallbacks, EXTRA files (on disk but not on the
+batch PO) called out, and one color-coded PDF report reconciling the PO's tube count
+(total / oversized / target-standard) against what was actually pulled. Anything it
+can't confidently place lands in a Needs Review folder instead of being guessed at.
+
+**922 Batch Repeater v2.4** - Now keeps the 922 Master Parts List up to date on every
+run: writes the batch's PO column and folds each order into the MASTER PARTS catalog
+(how many times every part has been made, in which batches, and under what alternate
+names), and the MPL gained a formula-driven ANALYSIS sheet of stats and charts.
+
+**922 Pallet Stamper v1.2** - Stamps that fail on the first pass are retried after the
+main run, and anything that still can't be stamped is listed in a manual-stamp report
+instead of being silently skipped.
+
+**Errors in plain English** - Common user-fixable failures across every app now end
+with a clear problem-plus-fix message instead of a technical traceback - including a
+workbook you have open in Excel, which now names the file to close and re-run. Failures
+that can't be self-diagnosed point to the retry / debug-report path.
+
+**General family** - Apps that belong to no production family (QR Code Generator, Batch
+Auditor, Customer DXF Quoting, Sheet Metal Calculators) now wear a visible General
+badge instead of sitting in an unlabeled bucket. Also fixed: 911 LST Organizer reads
+multi-nest 1D cutting diagrams with spaced nest prefixes correctly.
 
 ---
 

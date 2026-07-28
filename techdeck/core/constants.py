@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.9"  # Icon overhaul (10 redrawn tile icons + game cartridge) + pixel-editor UX; SSPO Award Review v2.7.x throughput estimate; 922 Setup v2.3.x Batch Folder Setup stage + per-stage tickets
+APP_VERSION = "0.8.6.10"  # 911 Batch Repeater v3 MPL rebuild + Sentry Drone picker; cooperative cancel + truthful run outcomes; settings-race fix + achievements backfill; SHA-256-verified updates; Award Review v2.8 EB Machine/Fuel; ASA event system
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
