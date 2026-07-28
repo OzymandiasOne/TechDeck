@@ -623,6 +623,18 @@ class SettingsManager:
         presentations."""
         return self.get_theme() == "professional"
 
+    def get_dev_mode_enabled(self) -> bool:
+        """Persisted state of the Home dev-mode toggle. Only source builds read
+        this (techdeck.ui.dev_mode gates on is_dev_build) — a frozen exe never
+        consults it, so a stray true can't surface DevKit in a shipped build."""
+        return bool(self.data.get("settings", {}).get("dev_mode", False))
+
+    def set_dev_mode_enabled(self, enabled: bool) -> None:
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["dev_mode"] = bool(enabled)
+        self.save()
+
     # Library page tile sort. "alphabetical" sorts by plugin display name;
     # "family" groups by 911 -> 922 -> General, alphabetical within each group.
     _LIBRARY_SORT_MODES = ("alphabetical", "family")

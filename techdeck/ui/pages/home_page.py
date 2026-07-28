@@ -97,8 +97,8 @@ class HomePage(QWidget, ThemeAware):
         profile_layout.addWidget(self.profile_combo)
         profile_layout.addStretch()
         # Dev-mode toggle (source builds only). Switches the shell into dev
-        # mode, which reveals the DevKit page in the left nav. Session-only —
-        # resets off each launch. Never constructed in a frozen exe, so a
+        # mode, which reveals the DevKit page in the left nav. Persists across
+        # sessions (settings.json). Never constructed in a frozen exe, so a
         # shipped build has no way to reach DevKit.
         from techdeck.ui.dev_mode import is_dev_build, get_dev_mode
         if is_dev_build():
@@ -107,7 +107,8 @@ class HomePage(QWidget, ThemeAware):
             self.dev_switch = ToggleSwitch()
             self.dev_switch.setToolTip(
                 "Developer mode (source builds only): reveals the DevKit page "
-                "in the sidebar. Resets off each launch.")
+                "in the sidebar. Remembered between sessions.")
+            self.dev_switch.setChecked(get_dev_mode().is_active())
             self.dev_switch.toggled.connect(get_dev_mode().set_active)
             profile_layout.addWidget(self._dev_label)
             profile_layout.addWidget(self.dev_switch)
