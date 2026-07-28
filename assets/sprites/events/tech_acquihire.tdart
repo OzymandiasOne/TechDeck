@@ -1,23 +1,7 @@
 {
   "format": "tdart",
   "version": 1,
-  "palette": {
-    "b": "#1a1c2c",
-    "y": "#ffcd75",
-    "t": "#257179",
-    "s": "#41a6f6",
-    "c": "#73eff7",
-    "w": "#f4f4f4",
-    "v": "#94b0c2",
-    "a": "#566c86",
-    "d": "#333c57",
-    "W": "#ffffff",
-    "Y": "#ffe9b3",
-    "U": "#4d7fe0",
-    "S": "#7cc4f8",
-    "D": "#252d45",
-    "1": "#f0ab5e"
-  },
+  "palette": {"b": "#1a1c2c", "y": "#ffcd75", "t": "#257179", "s": "#41a6f6", "c": "#73eff7", "w": "#f4f4f4", "v": "#94b0c2", "a": "#566c86", "d": "#333c57", "W": "#ffffff", "Y": "#ffe9b3", "U": "#4d7fe0", "S": "#7cc4f8", "D": "#252d45", "1": "#f0ab5e"},
   "rows": [
     "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
     "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",

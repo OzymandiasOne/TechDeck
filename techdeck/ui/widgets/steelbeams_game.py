@@ -41,10 +41,10 @@ from techdeck.ui.widgets.steelbeams_events import (
 
 
 def _load_event_art(event_id: str, scale: int = 2):
-    """The 96x64 .tdart scene panel for a responsive event, rendered crisp at
-    2x (192x128 — sits centered in the modal's 148px art slot). None when the
-    event has no scene file (or anything fails), so the modal falls back to
-    the tinted placeholder."""
+    """The 260x74 widescreen .tdart scene panel for a responsive event,
+    rendered crisp at 2x (520x148 — fills the modal's art slot edge-to-edge).
+    None when the event has no scene file (or anything fails), so the modal
+    falls back to the tinted placeholder."""
     if not event_id:
         return None
     try:
