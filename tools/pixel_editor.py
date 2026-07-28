@@ -13,7 +13,10 @@ Run it:
 Tools:  Pencil (paint active color) · Eraser (transparent) · Fill (flood) ·
         Eyedropper (pick a cell's color as active) · Select (rectangle) ·
         Lasso (freeform). With a selection: drag inside it to move the pixels,
-        arrow keys nudge, Delete clears, Escape (or a click outside) deselects.
+        arrow keys nudge, Delete clears, Escape (or a click outside) deselects,
+        Ctrl+C copies and Ctrl+V pastes the copy back as a floating selection
+        (drag it into place; it stamps down on release / click-out; the
+        clipboard survives file loads, so copy-across-files works).
 Mouse:  left-drag paints. The checkerboard shows transparency.
 Files:  New (set size) · Open · Save / Save As (.tdart) · Copy as Python
         (puts a PALETTE + ART snippet on the clipboard for legacy widgets).
@@ -53,6 +56,11 @@ _DEFAULT_PALETTE = {
     "b": "#3f6fd8", "y": "#f4c430", "c": "#3fd0d8", "p": "#7b4fff",
     "s": "#b8c0cc",
 }
+
+
+# Selection clipboard (Ctrl+C / Ctrl+V). Module-level so it survives file
+# loads and is shared by every Canvas in the process (copy across files/modes).
+_CLIPBOARD = None   # {"cells": {(dx, dy): char}, "palette": {char: hex}, "origin": (x, y)}
 
 
 def _line_cells(a, b):
@@ -167,6 +175,7 @@ class Canvas(QWidget):
     cell_hovered = Signal(int, int)
     color_picked = Signal(str)   # emits a palette char when the eyedropper hits
     modified = Signal()
+    palette_changed = Signal()   # paste added colors — swatch rails re-sync
 
     def __init__(self, w=32, h=32, parent=None):
         super().__init__(parent)
@@ -477,6 +486,12 @@ class Canvas(QWidget):
     def _begin_move(self, cell):
         """Lift the selection's opaque pixels off the grid into a floating
         layer. One undo snapshot covers the whole lift-drag-anchor move."""
+        if self._float is not None:
+            # Already floating (a fresh paste): keep the pixels airborne and
+            # rebase the anchor so the drag continues from the current offset.
+            self._move_anchor = (cell[0] - self._float["dx"],
+                                 cell[1] - self._float["dy"])
+            return
         cells = {}
         for (x, y) in self.selection:
             ch = self.rows[y][x]
@@ -496,6 +511,10 @@ class Canvas(QWidget):
         f, self._float = self._float, None
         self._move_anchor = None
         dx, dy = f["dx"], f["dy"]
+        # A move-float snapshotted at lift; a paste-float leaves the grid
+        # untouched until this stamp, so its snapshot happens here.
+        if not f["pushed"] and f["cells"]:
+            self.push_undo()
         w, h = self.grid_size()
         for (x, y), ch in f["cells"].items():
             nx, ny = x + dx, y + dy
@@ -503,9 +522,8 @@ class Canvas(QWidget):
                 self.rows[ny][nx] = ch
         self.selection = {(x + dx, y + dy) for (x, y) in self.selection
                           if 0 <= x + dx < w and 0 <= y + dy < h} or None
-        if (dx, dy) == (0, 0):
-            if f["pushed"]:
-                self._undo.pop()   # nothing moved — drop the no-op snapshot
+        if f["pushed"] and (dx, dy) == (0, 0):
+            self._undo.pop()   # lifted and dropped in place — a no-op
         elif f["cells"]:
             self.modified.emit()
         self.update()
@@ -541,12 +559,80 @@ class Canvas(QWidget):
 
     def nudge_selection(self, dx, dy):
         """Move the selected pixels one step (arrow keys). Each nudge is its
-        own undoable lift-and-stamp."""
-        if not self.selection or self._float:
+        own undoable lift-and-stamp; a floating paste just shifts in the air."""
+        if not self.selection:
+            return
+        if self._float is not None:
+            self._float["dx"] += dx
+            self._float["dy"] += dy
+            self.update()
             return
         self._begin_move((0, 0))
         self._float["dx"], self._float["dy"] = dx, dy
         self._anchor_float()
+
+    def copy_selection(self) -> bool:
+        """Ctrl+C: capture the selection's opaque pixels (with their colors)
+        into the module clipboard. Copies the floating pixels if a paste/move
+        is still airborne."""
+        global _CLIPBOARD
+        if not self.selection:
+            return False
+        if self._float is not None:
+            fdx, fdy = self._float["dx"], self._float["dy"]
+            cells = {(x + fdx, y + fdy): ch
+                     for (x, y), ch in self._float["cells"].items()}
+        else:
+            cells = {}
+            for (x, y) in self.selection:
+                ch = self.rows[y][x]
+                if ch not in pixel_art.TRANSPARENT_CHARS and ch in self.palette:
+                    cells[(x, y)] = ch
+        if not cells:
+            return False
+        x0 = min(x for x, _ in cells)
+        y0 = min(y for _, y in cells)
+        _CLIPBOARD = {
+            "cells": {(x - x0, y - y0): ch for (x, y), ch in cells.items()},
+            "palette": {ch: self.palette[ch] for ch in set(cells.values())},
+            "origin": (x0, y0),
+        }
+        return True
+
+    def paste_clipboard(self) -> bool:
+        """Ctrl+V: drop the clipboard back in as a FLOATING selection at its
+        source spot (clamped into the canvas) — drag/nudge it into place, then
+        release/click-out/Ctrl+V-again stamps it. Colors are matched into this
+        canvas's palette by hex (added if missing), so pasting across files
+        keeps the art intact."""
+        clip = _CLIPBOARD
+        if not clip or not clip["cells"]:
+            return False
+        if self._float is not None:
+            self._anchor_float()   # commit an airborne paste before the next
+        w, h = self.grid_size()
+        cw = max(x for x, _ in clip["cells"]) + 1
+        chh = max(y for _, y in clip["cells"]) + 1
+        ox, oy = clip["origin"]
+        ox = max(0, min(ox, w - cw))
+        oy = max(0, min(oy, h - chh))
+        before = set(self.palette)
+        charmap = {ch: self.add_color(hexval)
+                   for ch, hexval in clip["palette"].items()}
+        cells = {}
+        for (dx, dy), ch in clip["cells"].items():
+            nc = charmap.get(ch)
+            tx, ty = ox + dx, oy + dy
+            if nc and 0 <= tx < w and 0 <= ty < h:
+                cells[(tx, ty)] = nc
+        if set(self.palette) != before:
+            self.palette_changed.emit()
+        if not cells:
+            return False
+        self.selection = set(cells)
+        self._float = {"cells": cells, "dx": 0, "dy": 0, "pushed": False}
+        self.update()
+        return True
 
     def delete_selection(self):
         """Clear every pixel inside the selection to transparent."""
@@ -581,6 +667,8 @@ class Canvas(QWidget):
             if sel and cell in sel:
                 self._begin_move(cell)      # grab: drag moves the pixels
             else:
+                if self._float is not None:
+                    self._anchor_float()    # click-out commits a floating paste
                 self._clear_selection()     # start a fresh selection drag
                 self._sel_anchor = cell
                 if self.tool == "lasso":
@@ -656,6 +744,12 @@ class Canvas(QWidget):
         self.update()
 
     def keyPressEvent(self, evt):
+        if self.tool in ("select", "lasso") \
+                and evt.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if evt.key() == Qt.Key.Key_C and self.copy_selection():
+                return
+            if evt.key() == Qt.Key.Key_V and self.paste_clipboard():
+                return
         if self.tool in ("select", "lasso") and self.selection:
             delta = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
                      Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1)
@@ -744,6 +838,7 @@ class Editor(QMainWindow):
         self.canvas.modified.connect(self._on_modified)
         self.canvas.cell_hovered.connect(self._on_hover)
         self.canvas.color_picked.connect(lambda ch: self._select_char(ch))
+        self.canvas.palette_changed.connect(self._rebuild_swatches)
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)

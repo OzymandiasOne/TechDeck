@@ -77,9 +77,10 @@ _TOOL_ICONS = {
 
 _TOOL_TIPS = {
     "select": "Select (rectangle) — drag inside the selection to move its "
-              "pixels; arrows nudge, Del clears, Esc deselects",
+              "pixels; Ctrl+C/Ctrl+V copy/paste, arrows nudge, Del clears, "
+              "Esc deselects",
     "lasso": "Lasso (freeform) — close a loop to select; drag inside to move "
-             "its pixels",
+             "its pixels; Ctrl+C/Ctrl+V copy/paste",
 }
 
 # Undo / redo as back / forward arrows.
@@ -169,6 +170,7 @@ class _CanvasPanel(QWidget, ThemeAware):
         self.canvas = Canvas()
         self.canvas.color_picked.connect(self._on_pick)
         self.canvas.cell_hovered.connect(self._on_hover)
+        self.canvas.palette_changed.connect(self._rebuild_swatches)
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)
