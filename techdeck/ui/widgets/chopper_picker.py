@@ -78,7 +78,15 @@ _CRT_MS = 480          # CRT power-off collapse when the picker closes
 _WIPE_MS = 420         # retask wipe: scanline band sweeps the blanked feed
 _ZOOM_MS = 520         # optics zoom-in on the batch folder's contents
 _ZOOM_FROM = 0.55      # zoom starts pulled back to 55% and settles at 1:1
-_SALVO_STAGGER_MS = 300   # gap between successive strikes in an Execute salvo
+
+# Execute salvo: irregular barrage gaps (not a metronome) — mostly this base
+# range, with roughly 1 in 4 rounds landing as a tight double-tap behind the
+# previous one. Impact loudness ramps up per strike and caps on the 5th.
+_SALVO_GAP_MS = (220, 420)        # normal gap between strikes
+_SALVO_DOUBLETAP_MS = (110, 160)  # occasional near-overlapping pair
+_SALVO_DOUBLETAP_CHANCE = 0.25
+_SALVO_VOL_START = 0.6            # first strike's impact volume scale
+_SALVO_VOL_STEP = 0.1             # + per strike, capped at 1.0 (the 5th)
 
 
 class _SkipFilter(QObject):
@@ -228,11 +236,11 @@ class GunnerOverlay(QWidget):
 
     # ── audio (never allowed to break the picker) ────────────────────────
 
-    def _sfx(self, sound_id: str):
+    def _sfx(self, sound_id: str, volume_scale: float = 1.0):
         """Fire a one-shot picker sound; silent no-op on any failure."""
         try:
             from techdeck.core.audio_manager import get_audio_manager
-            get_audio_manager().play(sound_id)
+            get_audio_manager().play(sound_id, volume_scale=volume_scale)
         except Exception:
             pass
 
@@ -340,8 +348,10 @@ class GunnerOverlay(QWidget):
 
     def fire_salvo(self, points, on_done):
         """Execute pressed with N locked targets: one recoil/shot, then the
-        strikes walk across the targets in quick succession; the transmission
-        knockout rides on the LAST impact."""
+        strikes walk across the targets as an irregular barrage — jittered
+        gaps with the odd double-tap, each impact slightly louder than the
+        last (capped on the 5th) — and the transmission knockout rides on
+        the LAST impact."""
         self._on_done = on_done
         self._state = "flight"
         self._elapsed = 0.0
@@ -356,9 +366,19 @@ class GunnerOverlay(QWidget):
         self._sfx(SOUND_CHOPPER_FIRE)  # railgun shot
         n = max(1, len(points))
         frags = max(200, 840 // n)     # split the debris budget across strikes
-        self._salvo = [{"at": i * _SALVO_STAGGER_MS, "pt": QPointF(pt),
-                        "frags": frags, "fired": False}
-                       for i, pt in enumerate(points)]
+        self._salvo = []
+        t = 0.0
+        for i, pt in enumerate(points):
+            if i:
+                if random.random() < _SALVO_DOUBLETAP_CHANCE:
+                    lo, hi = _SALVO_DOUBLETAP_MS
+                else:
+                    lo, hi = _SALVO_GAP_MS
+                t += lo + random.random() * (hi - lo)
+            self._salvo.append({
+                "at": t, "pt": QPointF(pt), "frags": frags, "fired": False,
+                "vol": min(1.0, _SALVO_VOL_START + _SALVO_VOL_STEP * i),
+            })
         self._timer.start(_TICK_MS)
 
     def fire(self, on_done):
@@ -441,7 +461,8 @@ class GunnerOverlay(QWidget):
                         s["fired"] = True
                         last = all(x["fired"] for x in self._salvo)
                         self._detonate(s["pt"].x(), s["pt"].y(), s["frags"],
-                                       knockout=last)
+                                       knockout=last,
+                                       impact_volume=s.get("vol", 1.0))
                         self._callout = (
                             "ALL TARGETS SERVICED" if last
                             else f"IMPACT {i + 1} OF {len(self._salvo)}")
@@ -476,12 +497,14 @@ class GunnerOverlay(QWidget):
             self._detonate(self._impact.x(), self._impact.y(), 840,
                            knockout=True)
 
-    def _detonate(self, x: float, y: float, frags: int, knockout: bool):
+    def _detonate(self, x: float, y: float, frags: int, knockout: bool,
+                  impact_volume: float = 1.0):
         self._flash = 0.8
         if knockout:
             self._knock_ticks = _KNOCKOUT_TICKS   # glitch fires WITH the impact
         from techdeck.core.audio_manager import SOUND_CHOPPER_IMPACT
-        self._sfx(SOUND_CHOPPER_IMPACT)  # detonation on the folder
+        # Detonation on the folder — a salvo ramps this up strike by strike.
+        self._sfx(SOUND_CHOPPER_IMPACT, volume_scale=impact_volume)
         self._callout, self._callout_alert = "IMPACT CONFIRMED", True
         # Fine tumbling fragments (1–2 px) flung far enough to cross the
         # window; a vertical z-axis pop scales them toward the camera.

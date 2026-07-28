@@ -156,11 +156,12 @@ class AudioManager:
         self._enabled = enabled
         self._volume = max(0, min(100, volume)) / 100.0
 
-    def play(self, sound_id: str) -> None:
+    def play(self, sound_id: str, *, volume_scale: float = 1.0) -> None:
         """
         Play a named sound. A fresh QSoundEffect is created each call so that
         audio device changes are always reflected. Silent no-op if disabled or
-        file missing.
+        file missing. ``volume_scale`` is a 0.0–1.0 multiplier on the app
+        volume for this one shot (e.g. a drone-strike barrage ramping up).
         """
         if not self._enabled:
             return
@@ -172,7 +173,7 @@ class AudioManager:
             return
 
         effect = QSoundEffect()
-        effect.setVolume(self._volume)
+        effect.setVolume(self._volume * max(0.0, min(1.0, volume_scale)))
         effect.setSource(QUrl.fromLocalFile(str(path)))
         self._active.append(effect)
 

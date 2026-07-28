@@ -214,6 +214,31 @@ def test_salvo_strikes_all_targets_then_done(qapp):
     dlg.deleteLater()
 
 
+def test_salvo_volume_ramps_and_gaps_jitter(qapp):
+    """Impact volume climbs 0.6 → 1.0 (capped on the 5th strike) and the
+    barrage gaps are irregular but inside the double-tap/normal bounds."""
+    from PySide6.QtCore import QPointF
+    from techdeck.ui.widgets import chopper_picker as cp
+    dlg, overlay = _make_overlay(qapp)
+    overlay.fire_salvo([QPointF(0, i * 10) for i in range(7)], lambda: None)
+
+    vols = [s["vol"] for s in overlay._salvo]
+    assert vols == [0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0]
+
+    times = [s["at"] for s in overlay._salvo]
+    assert times[0] == 0.0
+    gaps = [b - a for a, b in zip(times, times[1:])]
+    lo = cp._SALVO_DOUBLETAP_MS[0]
+    hi = cp._SALVO_GAP_MS[1]
+    assert all(lo <= g <= hi for g in gaps), gaps
+
+    overlay.skip()                      # tidy up without playing it out
+    _drive(overlay, 60)
+    overlay._timer.stop()
+    overlay.deleteLater()
+    dlg.deleteLater()
+
+
 def test_salvo_skip_clears_and_closes(qapp):
     """Any-key skip mid-salvo drops the remaining strikes and still closes."""
     from PySide6.QtCore import QPointF
