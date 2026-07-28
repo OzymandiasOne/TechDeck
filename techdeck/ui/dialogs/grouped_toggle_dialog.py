@@ -22,6 +22,12 @@ Pallet Stamper master window). Reached from plugin worker threads via
                     "checked": True}]},
      ...]
 
+A child spec may carry ``"disabled": True`` — the row renders greyed and can
+never be checked, even while its parent is enabled (mirrors SelectionDialog's
+``disabled_items``: advertise a shut-down or not-yet-built option without
+letting anyone select it). Disabled children always report False in
+``result_map()``. First used by the 911 Batch Repeater's retired legacy grabs.
+
 ``result_map()`` returns::
 
     {"teams_setup": {"enabled": True, "options": {"labels": True}}, ...}
@@ -112,6 +118,7 @@ class GroupedToggleDialog(QDialog):
 
         self._parents: dict[str, QTreeWidgetItem] = {}
         self._children: dict[str, dict[str, QTreeWidgetItem]] = {}
+        self._disabled_children: dict[str, set[str]] = {}
         for group in self._groups:
             gkey = group["key"]
             parent = QTreeWidgetItem(self.tree)
@@ -124,15 +131,24 @@ class GroupedToggleDialog(QDialog):
             parent.setData(0, self._KEY_ROLE, gkey)
             self._parents[gkey] = parent
             self._children[gkey] = {}
+            self._disabled_children[gkey] = set()
             for child_spec in group.get("children", []):
                 ckey = child_spec["key"]
                 child = QTreeWidgetItem(parent)
                 child.setText(0, child_spec.get("label", ckey))
-                child.setFlags(Qt.ItemFlag.ItemIsUserCheckable
-                               | Qt.ItemFlag.ItemIsEnabled)
-                child.setCheckState(
-                    0, Qt.CheckState.Checked if child_spec.get("checked", True)
-                    else Qt.CheckState.Unchecked)
+                if child_spec.get("disabled"):
+                    # No ItemIsEnabled → Qt renders the row (and its checkbox)
+                    # greyed and ignores clicks; _apply_child_enable keeps it
+                    # that way even while the parent is checked.
+                    self._disabled_children[gkey].add(ckey)
+                    child.setFlags(Qt.ItemFlag.ItemIsUserCheckable)
+                    child.setCheckState(0, Qt.CheckState.Unchecked)
+                else:
+                    child.setFlags(Qt.ItemFlag.ItemIsUserCheckable
+                                   | Qt.ItemFlag.ItemIsEnabled)
+                    child.setCheckState(
+                        0, Qt.CheckState.Checked if child_spec.get("checked", True)
+                        else Qt.CheckState.Unchecked)
                 child.setData(0, self._KEY_ROLE, ckey)
                 self._children[gkey][ckey] = child
 
@@ -188,9 +204,9 @@ class GroupedToggleDialog(QDialog):
         enabled = parent.checkState(0) == Qt.CheckState.Checked
         self._suppress = True
         try:
-            for child in self._children[gkey].values():
+            for ckey, child in self._children[gkey].items():
                 flags = Qt.ItemFlag.ItemIsUserCheckable
-                if enabled:
+                if enabled and ckey not in self._disabled_children[gkey]:
                     flags |= Qt.ItemFlag.ItemIsEnabled
                 child.setFlags(flags)
         finally:
@@ -214,7 +230,8 @@ class GroupedToggleDialog(QDialog):
                 "enabled": (self._parents[gkey].checkState(0)
                             == Qt.CheckState.Checked),
                 "options": {
-                    ckey: child.checkState(0) == Qt.CheckState.Checked
+                    ckey: (ckey not in self._disabled_children[gkey]
+                           and child.checkState(0) == Qt.CheckState.Checked)
                     for ckey, child in self._children[gkey].items()
                 },
             }

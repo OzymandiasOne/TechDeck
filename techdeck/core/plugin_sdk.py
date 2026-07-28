@@ -485,7 +485,8 @@ def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[di
             # Older console signature without these kwargs (version tolerance).
             return console.request_grouped_toggles(groups)
     return {g["key"]: {"enabled": bool(g.get("checked", True)),
-                       "options": {c["key"]: bool(c.get("checked", True))
+                       "options": {c["key"]: (not c.get("disabled")
+                                              and bool(c.get("checked", True)))
                                    for c in g.get("children", [])}}
             for g in groups}
 

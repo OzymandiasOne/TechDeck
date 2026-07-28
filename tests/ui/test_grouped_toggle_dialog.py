@@ -47,6 +47,32 @@ def test_uncheck_stays_collapsed_and_skipped(qapp):
     dlg.deleteLater()
 
 
+def test_disabled_child_stays_greyed_and_reports_false(qapp):
+    groups = [{"key": "stage", "label": "Repeater", "checked": False,
+               "children": [
+                   {"key": "live", "label": "Grab models", "checked": True},
+                   {"key": "nc", "label": "Grab NC files - offline for now",
+                    "checked": False, "disabled": True}]}]
+    dlg = GroupedToggleDialog(groups)
+    dlg.show()
+    qapp.processEvents()
+
+    parent = dlg._parents["stage"]
+    live = dlg._children["stage"]["live"]
+    nc = dlg._children["stage"]["nc"]
+
+    parent.setCheckState(0, Qt.CheckState.Checked)
+    qapp.processEvents()
+    assert live.flags() & Qt.ItemFlag.ItemIsEnabled      # live option enabled
+    assert not (nc.flags() & Qt.ItemFlag.ItemIsEnabled)  # disabled stays greyed
+
+    nc.setCheckState(0, Qt.CheckState.Checked)           # defensive: forced check
+    result = dlg.result_map()["stage"]["options"]
+    assert result == {"live": True, "nc": False}         # still reports False
+
+    dlg.deleteLater()
+
+
 def test_name_click_expands_checkbox_click_does_not(qapp):
     dlg = _dialog(qapp)
     parent = dlg._parents["stage"]

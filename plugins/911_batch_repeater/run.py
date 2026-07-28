@@ -138,13 +138,20 @@ def _read_dypns(excel_path: Path, log) -> list[str]:
 # ---------------------------------------------------------------------------
 
 # Per-nest grab options shown under each nest row in the selection window.
+# The legacy grabs (NC files, inspection PDFs — the v1/v2 system) are shown
+# greyed-out and unselectable: the CAD pull is the repeater's only live
+# function for now. run() never reads their keys.
 _GRAB_CHILDREN = [
     {"key": "models",    "label": "Grab SolidWorks models (.SLDPRT + .SLDDRW)", "checked": True},
     {"key": "pdf",       "label": "Grab part PDFs",                             "checked": True},
     {"key": "overwrite", "label": "Overwrite files already in REPEAT",          "checked": False},
+    {"key": "nc",        "label": "Grab NC files (.NC)      - offline for now",
+     "checked": False, "disabled": True},
+    {"key": "insp",      "label": "Grab inspection PDFs      - offline for now",
+     "checked": False, "disabled": True},
 ]
 
-_DEFAULT_GRAB = {c["key"]: c["checked"] for c in _GRAB_CHILDREN}
+_DEFAULT_GRAB = {c["key"]: c["checked"] for c in _GRAB_CHILDREN if not c.get("disabled")}
 
 # Which file extensions each grab option covers.
 _MODEL_EXTS = {".sldprt", ".slddrw"}
