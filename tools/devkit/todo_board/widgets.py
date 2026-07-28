@@ -16,7 +16,7 @@ import re
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QMimeData, QPoint
-from PySide6.QtGui import QDrag, QFont, QColor
+from PySide6.QtGui import QDrag, QFont, QFontMetrics, QColor
 from PySide6.QtWidgets import (
     QFrame, QLabel, QVBoxLayout, QHBoxLayout, QToolButton, QCheckBox,
     QLineEdit, QMenu, QApplication, QWidget, QInputDialog,
@@ -96,10 +96,14 @@ class LabelChip(QFrame):
         row = QHBoxLayout(self)
         row.setContentsMargins(7, 1, 3, 1)
         row.setSpacing(2)
-        lbl = QLabel(text)
         f = QFont()
         f.setPointSize(8)
         f.setBold(True)
+        # Elide long labels — a chip's minimum width is its full text, and one
+        # wide chip forces the whole card list past the fixed column width.
+        fm = QFontMetrics(f)
+        lbl = QLabel(fm.elidedText(text, Qt.TextElideMode.ElideRight, 190))
+        lbl.setToolTip(text)
         lbl.setFont(f)
         lbl.setStyleSheet(f"color: {fg}; background: transparent;")
         row.addWidget(lbl)
@@ -210,6 +214,10 @@ class TaskCard(QFrame):
 
         # --- meta (user · date · source) ---
         self._meta = QLabel()
+        # Wrap, don't overflow — a one-line meta's minimum width is its full
+        # text ("A.T. · Jul 15 · archived" > the 290px column), which
+        # widened the card list past the viewport and clipped every card.
+        self._meta.setWordWrap(True)
         mf = QFont()
         mf.setPointSize(8)
         self._meta.setFont(mf)

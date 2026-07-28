@@ -12,7 +12,7 @@ theme change (ThemeAware). Source-only — never in the frozen build.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea,
@@ -67,6 +67,14 @@ class _CardList(QWidget):
     def set_scroll_area(self, scroll):
         """Wire the owning QScrollArea so drag-near-edge can auto-scroll it."""
         self._scroll = scroll
+
+    def minimumSizeHint(self):
+        # The column is fixed-width and its h-scrollbar is off, so a wide card
+        # (long chip, unbroken word) must never widen the list past the
+        # viewport — extra width just clips. Claim zero minimum width so the
+        # resizable scroll area sizes us exactly to the viewport and the
+        # word-wrapped labels wrap to fit instead.
+        return QSize(0, super().minimumSizeHint().height())
 
     def add_card(self, card: TaskCard):
         self._v.insertWidget(self._v.count() - 1, card)  # before the stretch
