@@ -540,6 +540,13 @@ class BoardStore:
             self.cards[key]["title"] = title.strip()
             self.save()
 
+    def set_done(self, key: str, done: bool):
+        """Card-level completion (the Teams-style collapse). Independent of
+        which bucket the card sits in — it only drives the card's rendering."""
+        if key in self.cards:
+            self.cards[key]["done"] = bool(done)
+            self.save()
+
     # ---- labels ----------------------------------------------------------
 
     def add_label(self, key: str, label: str):

@@ -464,6 +464,40 @@ QScrollArea > QWidget > QWidget {{
     border-radius: 0px;
 }}
 
+/* ===== Menus ===== */
+/* QMenu never inherits a usable look from the QWidget rule: on Win11 Qt gives
+   unstyled menus a translucent popup window, so without explicit rules the
+   items float transparently over whatever is behind them (first seen on the
+   Dev Board card menus). */
+QMenu {{
+    background-color: {theme.surface};
+    color: {theme.text};
+    border: 1px solid {theme.border_strong};
+    border-radius: 6px;
+    padding: 4px;
+}}
+
+QMenu::item {{
+    background: transparent;
+    padding: 6px 24px 6px 12px;
+    border-radius: 4px;
+}}
+
+QMenu::item:selected {{
+    background-color: {theme.surface_hover};
+    color: {theme.accent};
+}}
+
+QMenu::item:disabled {{
+    color: {theme.text_secondary};
+}}
+
+QMenu::separator {{
+    height: 1px;
+    background-color: {theme.border};
+    margin: 4px 8px;
+}}
+
 /* ===== Buttons ===== */
 QPushButton {{
     background-color: {theme.surface};

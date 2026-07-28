@@ -132,6 +132,17 @@ class _ChecklistRow(QWidget):
         self.box = QCheckBox()
         self.box.setChecked(done)
         self.box.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Teams-style round check, drawn explicitly — the default indicator is
+        # near-invisible on dark themes, which hid "how do I complete a task?".
+        self.box.setStyleSheet(
+            f"QCheckBox {{ background: transparent; }}"
+            f"QCheckBox::indicator {{ width: 14px; height: 14px; "
+            f"border: 2px solid {palette.text_secondary}; border-radius: 9px; "
+            f"background: transparent; }}"
+            f"QCheckBox::indicator:hover {{ border-color: {palette.success}; }}"
+            f"QCheckBox::indicator:checked {{ "
+            f"background-color: {palette.success}; "
+            f"border-color: {palette.success}; }}")
         self.box.toggled.connect(lambda _c: on_toggle())
         row.addWidget(self.box, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -202,7 +213,15 @@ class TaskCard(QFrame):
         top.addWidget(self._menu_btn, 0, Qt.AlignmentFlag.AlignTop)
         self._outer.addLayout(top)
 
-        # --- title ---
+        # --- title row: done-circle (Teams-style) + title ---
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(7)
+        self._done_btn = QToolButton()
+        self._done_btn.setFixedSize(18, 18)
+        self._done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._done_btn.clicked.connect(self._on_toggle_done)
+        title_row.addWidget(self._done_btn, 0, Qt.AlignmentFlag.AlignTop)
         self._title = QLabel()
         self._title.setWordWrap(True)
         tf = QFont()
@@ -210,7 +229,8 @@ class TaskCard(QFrame):
         tf.setWeight(QFont.Weight.DemiBold)
         self._title.setFont(tf)
         self._title.setStyleSheet(f"color: {palette.text}; background: transparent;")
-        self._outer.addWidget(self._title)
+        title_row.addWidget(self._title, 1)
+        self._outer.addLayout(title_row)
 
         # --- meta (user · date · source) ---
         self._meta = QLabel()
@@ -249,10 +269,40 @@ class TaskCard(QFrame):
 
     def _render(self):
         c = self._card()
+        done = bool(c.get("done"))
         self._title.setText(c.get("title", ""))
+        self._title.setStyleSheet(
+            f"color: {self._pal.text_secondary if done else self._pal.text}; "
+            f"background: transparent;")
+        self._style_done_btn(done)
         self._render_meta(c)
+        if done:
+            self._meta.setVisible(False)   # collapsed card: title + summary only
         self._render_labels(c)
         self._render_checklist(c)
+
+    def _style_done_btn(self, done: bool):
+        pal = self._pal
+        if done:
+            self._done_btn.setText("✓")
+            self._done_btn.setStyleSheet(
+                f"QToolButton {{ background-color: {pal.success}; "
+                f"border: 2px solid {pal.success}; border-radius: 9px; "
+                f"color: #FFFFFF; font-size: 11px; font-weight: bold; "
+                f"padding: 0px; }}")
+            self._done_btn.setToolTip("Mark not done (expands the card)")
+        else:
+            self._done_btn.setText("")
+            self._done_btn.setStyleSheet(
+                f"QToolButton {{ background: transparent; "
+                f"border: 2px solid {pal.text_secondary}; border-radius: 9px; }}"
+                f"QToolButton:hover {{ border-color: {pal.success}; }}")
+            self._done_btn.setToolTip("Mark done (collapses the card)")
+
+    def _on_toggle_done(self):
+        done = not bool(self._card().get("done"))
+        self.store.set_done(self.key, done)
+        self._render()
 
     def _render_meta(self, c: dict):
         bits = []
@@ -297,6 +347,12 @@ class TaskCard(QFrame):
             accent = self._pal.success if done == len(items) else self._pal.text_secondary
             progress.setStyleSheet(f"color: {accent}; background: transparent;")
             self._checklist_v.addWidget(progress)
+        if c.get("done"):
+            # Collapsed (Teams-style): just the progress summary — no task
+            # rows, no add field.
+            self._checklist_host.setVisible(bool(items))
+            return
+        self._checklist_host.setVisible(True)
         for idx, item in enumerate(items):
             self._checklist_v.addWidget(_ChecklistRow(
                 item.get("text", ""), item.get("done", False), self._pal,
@@ -339,6 +395,8 @@ class TaskCard(QFrame):
 
     def _open_menu(self):
         menu = QMenu(self)
+        act_done = menu.addAction(
+            "Mark not done" if self._card().get("done") else "Mark done")
         act_label = menu.addAction("Add label…")
         act_rename = None
         if self._card().get("source") == "manual":
@@ -348,7 +406,9 @@ class TaskCard(QFrame):
         chosen = menu.exec(self._menu_btn.mapToGlobal(self._menu_btn.rect().bottomLeft()))
         if chosen is None:
             return
-        if chosen == act_label:
+        if chosen == act_done:
+            self._on_toggle_done()
+        elif chosen == act_label:
             text, ok = QInputDialog.getText(self, "Add label", "Label:")
             if ok and text.strip():
                 self.store.add_label(self.key, text.strip())
