@@ -843,6 +843,15 @@ def _page1_source_code(page1_text: str):
     return None
 
 
+# Date-shaped words ('May' / '23,' / '2026' / '1:39' / 'PM') -- the 'Date
+# Package Printed' cell is the Fuel cell's right-hand neighbour, so these are
+# the likeliest junk to drift into a value column window; dismiss them.
+_DATE_WORD_RE = re.compile(
+    r'^(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|'
+    r'Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?|'
+    r'\d{1,2},?|\d{4}|\d{1,2}:\d{2}|[AP]M)$', re.IGNORECASE)
+
+
 def _page1_value_below(words, label_texts):
     """The value cell directly BELOW a page-1 header-table label ('Machine' /
     'Gantry' / 'Fuel'), read positionally from the page's word boxes
@@ -851,16 +860,19 @@ def _page1_value_below(words, label_texts):
     scanning can't pair them. Takes the topmost word matching a label, then
     the first text line that starts below it within one row height and
     horizontally centered on the label's column; the row-height cap keeps a
-    blank cell from reading the next row's labels ('Source Code'). Verified
-    on all 142 Award 8/9/10 packets (both the 'Gantry' and 'Machine' label
-    variants). Returns None when the label or its value is missing."""
+    blank cell from reading the next row's labels ('Source Code'), and
+    date-shaped words are dismissed so the neighbouring 'Date Package
+    Printed' value can never bleed in. Verified on all 142 Award 8/9/10
+    packets (both the 'Gantry' and 'Machine' label variants). Returns None
+    when the label or its value is missing."""
     cands = [w for w in words if w[4].strip().lower() in label_texts]
     if not cands:
         return None
     lab = min(cands, key=lambda w: w[1])
     lab_cx = (lab[0] + lab[2]) / 2
     below = [w for w in words if w[1] > lab[3] - 1 and w[1] < lab[3] + 15
-             and abs((w[0] + w[2]) / 2 - lab_cx) < 70]
+             and abs((w[0] + w[2]) / 2 - lab_cx) < 70
+             and not _DATE_WORD_RE.match(w[4].strip())]
     if not below:
         return None
     top = min(w[1] for w in below)
