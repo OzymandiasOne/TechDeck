@@ -209,7 +209,8 @@ class IconAssigner(QWidget):
     def _populate_plugins(self):
         self.plugin_list.clear()
         for plugin in self._plugins:
-            item = QListWidgetItem(f"{plugin.name}   · {plugin.id}")
+            item = QListWidgetItem(plugin.name)
+            item.setToolTip(plugin.id)
             item.setData(Qt.ItemDataRole.UserRole, plugin)
             item.setIcon(QIcon(self._plugin_pixmap(plugin)))
             self.plugin_list.addItem(item)
