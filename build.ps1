@@ -3,7 +3,8 @@
 
 param(
     [switch]$SkipInstaller,
-    [switch]$SkipVerification
+    [switch]$SkipVerification,
+    [switch]$SkipTests
 )
 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -28,7 +29,7 @@ if ($versionLine) {
 }
 
 # Step 1: Clean previous builds
-Write-Host "`n[1/7] Cleaning previous builds..." -ForegroundColor Yellow
+Write-Host "`n[1/8] Cleaning previous builds..." -ForegroundColor Yellow
 if (Test-Path "build") { 
     Remove-Item -Recurse -Force "build" 
     Write-Host "  [OK] Cleaned build directory" -ForegroundColor Green
@@ -39,7 +40,7 @@ if (Test-Path "dist") {
 }
 
 # Step 2: Verify source files exist
-Write-Host "`n[2/7] Verifying source files..." -ForegroundColor Yellow
+Write-Host "`n[2/8] Verifying source files..." -ForegroundColor Yellow
 $requiredFiles = @(
     "TechDeck.spec",
     "techdeck\__main__.py",
@@ -64,11 +65,26 @@ if ($missingFiles.Count -gt 0) {
 }
 Write-Host "  [OK] All required source files present" -ForegroundColor Green
 
-# Step 3: Ship-readiness gate - every plugin import must exist in the frozen
+# Step 3: Test suite gate - the frozen exe ships to a locked-down environment
+# with no way to hotfix, so a failing suite must never build. -SkipTests exists
+# for emergency local iteration only; CI runs the same suite on every push.
+if (-not $SkipTests) {
+    Write-Host "`n[3/8] Running test suite..." -ForegroundColor Yellow
+    python -m pytest -q
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [FAIL] Test suite failed - fix the failing tests before building (or -SkipTests to bypass)" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  [OK] Test suite passed" -ForegroundColor Green
+} else {
+    Write-Host "`n[3/8] Skipping test suite" -ForegroundColor Gray
+}
+
+# Step 4: Ship-readiness gate - every plugin import must exist in the frozen
 # bundle (hiddenimports / app import graph), manifests must be valid, and every
 # plugin must load through PluginLoader. Catches works-in-dev-only failures
 # BEFORE they ship (e.g. the v0.8.6 plugin_window miss).
-Write-Host "`n[3/7] Running ship-readiness check..." -ForegroundColor Yellow
+Write-Host "`n[4/8] Running ship-readiness check..." -ForegroundColor Yellow
 python tools\check_ship_readiness.py --load
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [FAIL] Ship-readiness check failed - fix the errors above before building" -ForegroundColor Red
@@ -76,8 +92,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] Ship-readiness check passed" -ForegroundColor Green
 
-# Step 4: Run PyInstaller
-Write-Host "`n[4/7] Running PyInstaller..." -ForegroundColor Yellow
+# Step 5: Run PyInstaller
+Write-Host "`n[5/8] Running PyInstaller..." -ForegroundColor Yellow
 Write-Host "  This may take 2-5 minutes..." -ForegroundColor Gray
 
 pyinstaller TechDeck.spec --clean 2>&1 | Out-Null
@@ -88,8 +104,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] PyInstaller completed successfully" -ForegroundColor Green
 
-# Step 5: Verify build output
-Write-Host "`n[5/7] Verifying build output..." -ForegroundColor Yellow
+# Step 6: Verify build output
+Write-Host "`n[6/8] Verifying build output..." -ForegroundColor Yellow
 
 $exePath = "dist\TechDeck\TechDeck.exe"
 if (-not (Test-Path $exePath)) {
@@ -132,9 +148,9 @@ Write-Host "  [OK] All critical assets included" -ForegroundColor Green
 $assetCount = (Get-ChildItem -Path "dist\TechDeck\_internal\assets" -Recurse -File).Count
 Write-Host "  [OK] Total assets bundled: $assetCount files" -ForegroundColor Green
 
-# Step 6: Build Inno Setup installer
+# Step 7: Build Inno Setup installer
 if (-not $SkipInstaller) {
-    Write-Host "`n[6/7] Building Inno Setup installer..." -ForegroundColor Yellow
+    Write-Host "`n[7/8] Building Inno Setup installer..." -ForegroundColor Yellow
 
     $isccPaths = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -167,11 +183,11 @@ if (-not $SkipInstaller) {
         Write-Host "  [WARN] Inno Setup not found - skipping installer" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "`n[6/7] Skipping installer build" -ForegroundColor Gray
+    Write-Host "`n[7/8] Skipping installer build" -ForegroundColor Gray
 }
 
-# Step 7: Summary
-Write-Host "`n[7/7] Build Summary" -ForegroundColor Yellow
+# Step 8: Summary
+Write-Host "`n[8/8] Build Summary" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Version: v$version" -ForegroundColor Green
 Write-Host "  Executable: $exePath ($exeSize MB)" -ForegroundColor Green
@@ -191,7 +207,6 @@ Write-Host ""
 # Next steps
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "  1. Test: .\dist\TechDeck\TechDeck.exe" -ForegroundColor White
-Write-Host "  2. Commit: git add . && git commit -m 'v$version'" -ForegroundColor White
-Write-Host "  3. Release: Create GitHub release v$version" -ForegroundColor White
-Write-Host "  4. Update: manifest.json to version $version" -ForegroundColor White
+Write-Host "  2. Release pipeline (commit/tag/push, GitHub Release, manifest):" -ForegroundColor White
+Write-Host "     see .claude\skills\techdeck-release" -ForegroundColor White
 Write-Host ""
