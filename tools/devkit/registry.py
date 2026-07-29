@@ -31,6 +31,11 @@ def _build_pixel_studio() -> QWidget:
     return PixelStudio()
 
 
+def _build_icon_assigner() -> QWidget:
+    from tools.devkit.icon_assigner import IconAssigner
+    return IconAssigner()
+
+
 def _build_test_runner() -> QWidget:
     from tools.devkit.diagnostics import AutomatedTestsPanel
     return AutomatedTestsPanel()
@@ -49,6 +54,7 @@ def _build_pixel_lint() -> QWidget:
 DEV_TOOLS = [
     ToolSpec("todo_board", "Dev Board", _build_todo_board),
     ToolSpec("pixel_studio", "Pixel Studio", _build_pixel_studio),
+    ToolSpec("icon_assigner", "Icon Assigner", _build_icon_assigner),
     ToolSpec("automated_tests", "Automated Tests", _build_test_runner),
     ToolSpec("ship_readiness", "Ship Readiness", _build_ship_readiness),
     ToolSpec("pixel_lint", "Pixel Style Lint", _build_pixel_lint),
