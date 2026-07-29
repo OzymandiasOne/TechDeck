@@ -2,7 +2,7 @@
   "id": "customer_dxf_analysis",
   "name": "Customer DXF Analysis",
   "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus hole/profile offsetting - grow every hole's diameter and shrink the outer profile per side (defaults 1/16\"), for the loaded file via Adjust Dimensions or for a whole folder at once.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "author": "Anthony Sieben",
   "family": "General",
   "requires_admin": false,

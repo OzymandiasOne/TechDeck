@@ -193,8 +193,14 @@ def _build_arc(groups, full_circle=False):
         a1 = math.radians(float(g.get(51, 360.0)))
         sweep = (a1 - a0) % math.tau or math.tau
         etype = "ARC"
-    return {"type": etype, "layer": g.get(8, "0"),
-            "points": _arc_points(cx, cy, r, a0, sweep), "length": r * sweep}
+    ent = {"type": etype, "layer": g.get(8, "0"),
+           "points": _arc_points(cx, cy, r, a0, sweep), "length": r * sweep}
+    if full_circle:
+        # Holes read as a diameter on the floor, so CIRCLEs DISPLAY as one
+        # (label/tooltip/table); length stays the circumference - that is
+        # what the linear-inch cut totals must keep counting.
+        ent["dia"] = 2.0 * r
+    return ent
 
 
 def _build_lwpolyline(groups):
@@ -1428,7 +1434,8 @@ class AnalysisWindow(PluginWindow):
         right_layout.addLayout(assign_row)
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["#", "Layer", "Type", "Length (in)"])
+        self.table.setHorizontalHeaderLabels(
+            ["#", "Layer", "Type", "Length / Ø (in)"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1527,6 +1534,10 @@ class AnalysisWindow(PluginWindow):
 
     def _entity_tooltip(self, idx):
         e = self.entities[idx]
+        if "dia" in e:
+            return (f"#{idx + 1}  {e['type']} on {e['layer']}\n"
+                    f"Diameter: {e['dia']:.4f} in\n"
+                    f"(cut length: {e['length']:.4f} in)")
         return (f"#{idx + 1}  {e['type']} on {e['layer']}\n"
                 f"Length: {e['length']:.4f} in")
 
@@ -1556,7 +1567,9 @@ class AnalysisWindow(PluginWindow):
             self.items.append(item)
 
             mid = pts[len(pts) // 2]
-            label = QGraphicsSimpleTextItem(f"{e['length']:.3f}\"")
+            label = QGraphicsSimpleTextItem(
+                f"Ø{e['dia']:.3f}\"" if "dia" in e
+                else f"{e['length']:.3f}\"")
             label.setBrush(QBrush(color))
             label.setFlag(QGraphicsItem.ItemIgnoresTransformations)
             label.setPos(mid[0], -mid[1])
@@ -1618,7 +1631,9 @@ class AnalysisWindow(PluginWindow):
         self.table.clearSelection()
         self.table.setRowCount(len(self.entities))
         for idx, e in enumerate(self.entities):
-            cells = [str(idx + 1), e["layer"], e["type"], f"{e['length']:.4f}"]
+            cells = [str(idx + 1), e["layer"], e["type"],
+                     f"Ø{e['dia']:.4f}" if "dia" in e
+                     else f"{e['length']:.4f}"]
             for col, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 if col in (0, 3):
