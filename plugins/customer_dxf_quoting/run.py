@@ -74,7 +74,10 @@ def _decode_dxf(path):
         raise ValueError("Binary DXF files are not supported - re-export as ASCII DXF.")
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
-            return data.decode(enc), enc
+            # Never hand "utf-8-sig" back as the WRITE encoding: on write it
+            # always emits a BOM, and a DXF must start with a bare group code
+            # (AutoCAD/SolidWorks reject a BOM-prefixed file as incomplete).
+            return data.decode(enc), ("utf-8" if enc == "utf-8-sig" else enc)
         except UnicodeDecodeError:
             continue
     raise ValueError("Could not decode file - is this a DXF?")

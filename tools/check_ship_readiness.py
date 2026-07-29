@@ -44,6 +44,12 @@ Checks (E = error, fails the build; W = warning):
       with their family ("911 Setup" -> 911_setup, "QA Gemba Analyzer" ->
       qa_gemba_analyzer), Games ids get a "game_" prefix, and family-less
       ("General") plugins are just the slug of their name.
+  E10 no writing with codec "utf-8-sig" - on write it always emits a BOM, and
+      BOM-intolerant machine-read formats (DXF must start with a bare group
+      code) reject the output as corrupt/"incomplete". Flags both the literal
+      write and the decode-candidate-loop idiom that returns the raw codec
+      name for later reuse as the write encoding (bit DXF Offset Tool +
+      Customer DXF Quoting export, 2026-07-29).
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -83,6 +89,15 @@ USER_PATH_RE = re.compile(r"[A-Za-z]:\\+Users\\+(?!Public)[A-Za-z0-9_.\- ]+", re
 # targets; request_batch_number / request_text are intentionally NOT here.
 BATCH_BYPASS_CALLS = {"input", "request_input", "get_console_input"}
 BATCH_PROMPT_RE = re.compile(r"batch\s*number", re.IGNORECASE)
+
+# E10: "utf-8-sig" is read-safe (strips a BOM if present) but write-hostile
+# (always EMITS one). A decode loop like
+#     for enc in ("utf-8-sig", ...): return data.decode(enc), enc
+# hands the sig codec to a later write, silently BOM-prefixing the output.
+UTF8SIG_ROUNDTRIP_RE = re.compile(r"\.decode\((\w+)\)\s*,\s*\1\b")
+UTF8SIG_WRITE_LINE_RE = re.compile(
+    r"""(?:\bopen\([^)\n]*["'][wax][tb+]*["']|\bwrite_text\()[^\n]*utf[-_]8[-_]sig""",
+    re.IGNORECASE)
 
 
 def _is_main_guard(node: ast.AST) -> bool:
@@ -370,6 +385,24 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 f"answer is reused by same-family plugins in a multi-run "
                 f"(use sdk.request_text if a non-shared prompt is intended)"
             )
+
+        # --- BOM-writing "utf-8-sig" round-trip (E10)
+        if "utf-8-sig" in src or "utf_8_sig" in src:
+            if UTF8SIG_ROUNDTRIP_RE.search(src):
+                errors.append(
+                    f"{pid}: {rel} decodes with a candidate list including "
+                    f"'utf-8-sig' and returns that codec name for reuse - a "
+                    f"later write with it prepends a BOM, corrupting "
+                    f"BOM-intolerant formats like DXF. Map it to 'utf-8' "
+                    f"before returning (bit DXF Offset Tool, 2026-07)"
+                )
+            for line_no, line in enumerate(src.splitlines(), 1):
+                if UTF8SIG_WRITE_LINE_RE.search(line):
+                    errors.append(
+                        f"{pid}: {rel}:{line_no} writes a file with encoding "
+                        f"'utf-8-sig' - that always emits a BOM; write "
+                        f"'utf-8' instead"
+                    )
 
         fp, tp, rel_count = extract_imports(py_file, "", module_map)
 
