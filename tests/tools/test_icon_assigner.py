@@ -120,6 +120,13 @@ def test_patch_missing_block_raises(tmp_path):
 # IconAssigner widget flow
 # ---------------------------------------------------------------------------
 
+def _row_for_id(w, plugin_id):
+    from PySide6.QtCore import Qt
+    return next(
+        i for i in range(w.plugin_list.count())
+        if w.plugin_list.item(i).data(Qt.ItemDataRole.UserRole).id == plugin_id)
+
+
 def _fake_plugins():
     return [
         SimpleNamespace(id="911_setup", name="911 Setup", family="911",
@@ -136,8 +143,8 @@ def test_widget_stages_and_reverts(qapp):
     assert w.gallery.item(0).text() == MONOGRAM_LABEL
 
     # select the DXF Offset Tool row (no saved key) and stage an icon
-    row = next(i for i in range(2)
-               if "dxf_offset_tool" in w.plugin_list.item(i).text())
+    # (list text is the display name only — the id lives in UserRole/tooltip)
+    row = _row_for_id(w, "dxf_offset_tool")
     w.plugin_list.setCurrentRow(row)
     target = next(w.gallery.item(i) for i in range(w.gallery.count())
                   if w.gallery.item(i).text() == "blueprint")
@@ -157,8 +164,7 @@ def test_widget_save_writes_source_and_syncs(qapp, icon_module_copy,
     import tools.devkit.icon_assigner as ia
     monkeypatch.setattr(ia, "ICON_MODULE_PATH", icon_module_copy)
     w = IconAssigner(plugins=_fake_plugins())
-    row = next(i for i in range(2)
-               if "dxf_offset_tool" in w.plugin_list.item(i).text())
+    row = _row_for_id(w, "dxf_offset_tool")
     w.plugin_list.setCurrentRow(row)
     target = next(w.gallery.item(i) for i in range(w.gallery.count())
                   if w.gallery.item(i).text() == "blueprint")
