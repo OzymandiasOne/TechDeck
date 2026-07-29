@@ -49,7 +49,7 @@ PLUGIN_ICON_KEYS = {
     "922_batch_repeater":   "copy",
     "batch_auditor":        "badge",
     "qr_code_generator":    "qr",
-    "customer_dxf_quoting": "blueprint",
+    "customer_dxf_analysis": "blueprint",
     "qa_gemba_analyzer":    "magnifier",
     "911_sspo_invoicing_prep": "scrooge_mcduck",
     "902_dxf_prep":         "ruler",

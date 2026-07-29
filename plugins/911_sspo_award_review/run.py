@@ -117,14 +117,14 @@ from openpyxl.chart.label import DataLabelList
 # comes from the order's IGES DXF vector geometry; the feed rate is looked up by
 # thickness in one combined chart, rounding UP to the next listed thickness so
 # oddball thicknesses stay covered. TODO: centralize this parser into plugin_sdk
-# (customer_dxf_quoting + this module carry copies).
+# (customer_dxf_analysis + this module carry copies).
 # ══════════════════════════════════════════════════════════════════════════
 
 # Work order token in DXF filenames (PART.REV.WORKORDER) + the batch list. Two
 # SigmaNest formats: current "X4549775"/"BK514922" (1-2 letters + 5-8 digits) and
 # legacy "3X24-398"; same form 911_setup's summary parser uses.
 WO_RE = re.compile(r"(?:[A-Z]{1,2}\d{5,8}|\d[A-Z]\d+-\d+)", re.I)
-# Layers that are reference-only and never count as cut (matches customer_dxf_quoting).
+# Layers that are reference-only and never count as cut (matches customer_dxf_analysis).
 # Only these NAMED reference layers are dropped; ALL numeric geometry layers count.
 # Confirmed by shop validation in SigmaNest (5 award parts, 2026-07-09): the cut is
 # spread across every numeric layer (1/2 carry perimeter+holes inconsistently, 4/5

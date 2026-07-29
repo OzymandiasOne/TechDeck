@@ -37,7 +37,9 @@ _PLUGIN_ID_RENAMES = {
     # stale tile for one launch.
     "911_linear_inch_calc": "911_sspo_award_review",   # renamed 2026-06-04
     "911_runtime_estimator": "911_sspo_award_review",  # renamed 2026-07-13
-    "linear_inch_calculator": "customer_dxf_quoting",  # renamed 2026-06-10
+    "linear_inch_calculator": "customer_dxf_analysis",  # renamed 2026-06-10 (via customer_dxf_quoting)
+    # 2026-07-29: absorbed the (never-released) DXF Offset Tool and renamed
+    "customer_dxf_quoting": "customer_dxf_analysis",
     # 2026-07-02 naming convention: id = family-prefixed snake_case of the
     # Library name (911_/922_/qa_/game_; family-less plugins unprefixed).
     "pricing_backup_splitter": "911_sspo_invoicing_prep",      # one-off drop-in copies

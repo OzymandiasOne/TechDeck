@@ -1,0 +1,48 @@
+{
+  "id": "customer_dxf_analysis",
+  "name": "Customer DXF Analysis",
+  "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus hole/profile offsetting - grow every hole's diameter and shrink the outer profile per side (defaults 1/16\"), for the loaded file via Adjust Dimensions or for a whole folder at once.",
+  "version": "2.0.0",
+  "author": "Anthony Sieben",
+  "family": "General",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "timeout": 1800,
+  "settings": {
+    "fields": [
+      {
+        "key": "default_dxf",
+        "type": "file",
+        "label": "Default DXF File",
+        "description": "Optional DXF to open automatically in the viewer. Leave blank to pick a file each time.",
+        "placeholder": "C:\\path\\to\\part.DXF",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "hole_increase",
+        "type": "number",
+        "label": "Hole diameter increase (inches)",
+        "description": "How much bigger each hole's DIAMETER gets when offsetting. Default 0.0625 (1/16\").",
+        "required": false,
+        "default": 0.0625
+      },
+      {
+        "key": "edge_offset",
+        "type": "number",
+        "label": "Plate edge offset per side (inches)",
+        "description": "How far each edge of the outer profile moves inward when offsetting. Default 0.0625 (1/16\") - a 12x12 plate becomes 11.875x11.875.",
+        "required": false,
+        "default": 0.0625
+      },
+      {
+        "key": "holes_layer",
+        "type": "string",
+        "label": "Layer name for holes",
+        "description": "Hole geometry is moved to this layer in the OFFSET output DXF.",
+        "required": false,
+        "default": "HOLES"
+      }
+    ]
+  }
+}
