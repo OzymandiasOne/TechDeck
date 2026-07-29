@@ -39,6 +39,9 @@ installer_output/
 # Scratch buffer the placer/nav editor tools write for copy-paste back into source.
 tools/placement_export.py
 
-# Claude Code local state (ignore everything under .claude EXCEPT shared project skills)
+# Claude Code local state (ignore everything under .claude EXCEPT shared project
+# skills and the public-publish pipeline; .claude/ never reaches the public repo
+# regardless - publish_public.ps1 strips it from the pushed history)
 .claude/*
 !.claude/skills/
+!.claude/publish/
