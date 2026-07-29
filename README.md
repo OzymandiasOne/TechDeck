@@ -1,4 +1,7 @@
 # TechDeck v0.8.6.10 - Repeater Rebuild + Sentry Drone
+
+[![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
+
 **TechDeck** is a standalone Windows desktop application that delivers automation tools
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
@@ -566,3 +569,39 @@ Explorer and on pinned shortcuts.
 | Customer DXF Analysis | Interactive DXF viewer for quoting - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut - plus dimension adjustment: grow every hole's diameter and shrink the outer profile per side (defaults 1/16", adjustable), for the open file via the Adjust Dimensions dialog or for a whole folder of DXFs at once, each written out as "name OFFSET.dxf" with everything else untouched |
 | Sheet Metal Calculators | GUI plugin - a library of shop calculators behind a picker, each defined by a simple field-list + formula so new ones drop in easily. Calculators: Flat Length (bend-allowance flat length from K-factor, thickness, inside radius/ID/OD, and bend angle), Bend Deduction (OSSB / bend allowance / bend deduction), and Material Weight (by sheet size or area) |
 | QR Code Generator | GUI plugin - dual-tab QR library and generator |
+
+---
+
+## Development & Testing
+
+TechDeck is a Python 3.13 / PySide6 app, frozen to a standalone exe with PyInstaller +
+Inno Setup for a locked-down corporate environment (users cannot install Python).
+
+```powershell
+# install dev dependencies (runtime pins + test toolchain)
+python -m pip install -r requirements-dev.txt
+
+# run the app in dev mode (no build required)
+python -m techdeck
+
+# run the test suite
+python -m pytest
+
+# with coverage
+python -m pytest --cov=techdeck --cov=tools --cov-report=term
+```
+
+The suite (`tests/`) runs Qt headless (`QT_QPA_PLATFORM=offscreen`, set in
+`conftest.py`) and covers the plugin executor, the plugin SDK, settings persistence,
+the auto-updater (including SHA-256 installer verification), and widget behavior for
+the main UI surfaces.
+
+**Quality gates.** Every push runs the suite on a Windows runner via GitHub Actions
+([tests.yml](.github/workflows/tests.yml)), along with `tools/check_ship_readiness.py`
+- a custom static gate that walks every plugin's import graph and verifies each import
+exists in the frozen bundle's `hiddenimports`, validates plugin manifests, and loads
+every plugin through the real `PluginLoader`. The same two gates run locally in
+`build.ps1`, so a build that would fail in the field never produces an installer.
+
+Releases are built locally (`.\build.ps1`), published as GitHub Releases, and
+distributed by an in-app auto-updater driven by a version manifest on GitHub Pages.
