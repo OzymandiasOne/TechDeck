@@ -609,6 +609,100 @@ class ConsoleWidget(QWidget, ThemeAware):
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 
+    def request_file(self, title: str = "Select File", start_dir: str = "",
+                     name_filter: str = ""):
+        """Show the native pick-a-file dialog and BLOCK until the user chooses.
+        Same worker-thread contract as request_directory. Returns the picked
+        file path string, or None if the user cancelled. ``name_filter`` is a
+        QFileDialog filter like ``"DXF files (*.dxf)"``."""
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_file() cannot be called from main GUI thread"
+            )
+
+        self._file_args = (str(title), str(start_dir or ""),
+                           str(name_filter or ""))
+        self._file_result = None
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_file_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._file_result
+
+    @Slot()
+    def _file_gui(self):
+        """GUI-thread half of request_file: run the native open-file dialog."""
+        from PySide6.QtWidgets import QFileDialog
+
+        title, start_dir, name_filter = self._file_args
+        path, _selected = QFileDialog.getOpenFileName(
+            self.window(), title, start_dir, name_filter)
+        self._file_result = path or None
+
+    def request_choice(self, title: str, prompt: str, options):
+        """Show a modal popup with one button per option and BLOCK until the
+        user picks one. Same worker-thread contract as request_directory.
+        Returns the chosen option string, or None if the user cancelled or
+        closed the popup. Use for a small pick-one decision that should be a
+        dialog, not an in-console prompt (via sdk.request_choice, which adds
+        the headless fallback)."""
+        from PySide6.QtCore import QThread
+
+        if QThread.currentThread() == self.thread():
+            raise RuntimeError(
+                "request_choice() cannot be called from main GUI thread"
+            )
+
+        self._choice_args = (str(title), str(prompt),
+                             [str(o) for o in options])
+        self._choice_result = None
+
+        # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
+        self.waiting_for_input = True
+        try:
+            QMetaObject.invokeMethod(
+                self,
+                "_choice_gui",
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
+        finally:
+            self.waiting_for_input = False
+
+        return self._choice_result
+
+    @Slot()
+    def _choice_gui(self):
+        """GUI-thread half of request_choice: modal message box with one
+        button per option (plus Cancel). The app stylesheet themes it."""
+        from PySide6.QtWidgets import QMessageBox
+
+        title, prompt, options = self._choice_args
+        box = QMessageBox(self.window())
+        box.setWindowTitle(title)
+        box.setText(prompt)
+        box.setIcon(QMessageBox.Icon.Question)
+        buttons = [box.addButton(o, QMessageBox.ButtonRole.AcceptRole)
+                   for o in options]
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(buttons[0])
+        box.exec()
+        clicked = box.clickedButton()
+        for opt, btn in zip(options, buttons):
+            if btn is clicked:
+                self._choice_result = opt
+                return
+        self._choice_result = None
+
     def request_target_folders(self, title: str = "Select Folder",
                                start_dir: str = "", target_pattern=None):
         """Two-phase Sentry-Drone pick (911 Batch Repeater): phase 1 TARGETs a

@@ -448,6 +448,47 @@ def request_directory(params: dict, title: str = "Select Folder",
     return raw or None
 
 
+def request_file(params: dict, title: str = "Select File", start_dir: str = "",
+                 name_filter: str = "") -> Optional[str]:
+    """Ask the user to pick a FILE via the native open-file dialog (opened on
+    the GUI thread by the console; same blocking contract as
+    request_directory), falling back to a pasted-path stdin prompt when run
+    standalone or on an older TechDeck without the console method. Returns
+    the chosen path string, or None if the user cancelled.
+
+    ``name_filter`` is a QFileDialog filter, e.g. ``"DXF files (*.dxf)"``.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_file"):
+        return console.request_file(title, start_dir, name_filter)
+    raw = input(f"{title} (paste path): ").strip().strip('"')
+    return raw or None
+
+
+def request_choice(params: dict, title: str, prompt: str,
+                   options) -> Optional[str]:
+    """Ask the user to pick ONE option via a modal popup with a button per
+    option (GUI thread; same blocking contract as request_directory).
+    Returns the chosen option string, or None on cancel. Headless, or on an
+    older TechDeck without the console method, it falls back to a numbered
+    stdin prompt. Use for a small pick-one decision that deserves a dialog
+    instead of an in-console prompt (first used by DXF Offset Tool's
+    single-file-vs-folder question).
+    """
+    options = [str(o) for o in options]
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_choice"):
+        return console.request_choice(title, prompt, options)
+    menu = "  ".join(f"[{i + 1}] {o}" for i, o in enumerate(options))
+    raw = input(f"{prompt} {menu} > ").strip()
+    if raw.isdigit() and 1 <= int(raw) <= len(options):
+        return options[int(raw) - 1]
+    for o in options:
+        if raw.lower() == o.lower():
+            return o
+    return None
+
+
 def request_nest_targets(params: dict, title: str, start_dir: str = "",
                          target_pattern: Optional[str] = None):
     """Two-phase Sentry-Drone folder pick (911 Batch Repeater): the user

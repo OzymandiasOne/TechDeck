@@ -770,19 +770,41 @@ def run(params: dict, progress_callback, cancel_event):
                 "Fix or clear the 'Single DXF file' setting in Settings > Apps.")
         files = [src]
     else:
-        folder = sdk.request_directory(params, "Select the folder of DXF files")
-        if not folder:
-            if hasattr(cancel_event, "set"):
-                cancel_event.set()
-            return
-        root = Path(folder)
-        files = sorted(p for p in root.iterdir()
-                       if p.suffix.lower() == ".dxf"
-                       and not p.stem.upper().endswith(" OFFSET"))
-        if not files:
-            raise sdk.UserFacingError(
-                "The folder has no DXF files in it.",
-                "Pick the folder that holds the part DXFs.")
+        # Popup first: one file or a whole folder? (Older TechDeck without
+        # request_choice/request_file falls back to the folder-only flow.)
+        mode = "Whole folder"
+        if hasattr(sdk, "request_choice") and hasattr(sdk, "request_file"):
+            mode = sdk.request_choice(
+                params, "DXF Offset Tool",
+                "Offset a single DXF file, or every DXF in a folder?",
+                ["Single file", "Whole folder"])
+            if mode is None:
+                if hasattr(cancel_event, "set"):
+                    cancel_event.set()
+                return
+        if mode == "Single file":
+            picked = sdk.request_file(params, "Select the DXF file",
+                                      name_filter="DXF files (*.dxf)")
+            if not picked:
+                if hasattr(cancel_event, "set"):
+                    cancel_event.set()
+                return
+            files = [Path(picked)]
+        else:
+            folder = sdk.request_directory(
+                params, "Select the folder of DXF files")
+            if not folder:
+                if hasattr(cancel_event, "set"):
+                    cancel_event.set()
+                return
+            root = Path(folder)
+            files = sorted(p for p in root.iterdir()
+                           if p.suffix.lower() == ".dxf"
+                           and not p.stem.upper().endswith(" OFFSET"))
+            if not files:
+                raise sdk.UserFacingError(
+                    "The folder has no DXF files in it.",
+                    "Pick the folder that holds the part DXFs.")
 
     log(f"Offsetting {len(files)} DXF file(s): holes +{hole_increase:.4f}\" dia, "
         f"profile -{edge_offset:.4f}\" per side, holes -> layer {holes_layer}.")
