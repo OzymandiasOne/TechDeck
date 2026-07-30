@@ -692,6 +692,21 @@ def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
     return None, {}
 
 
+def visible_sheetnames(wb) -> list:
+    """Sheet names whose state is 'visible', in workbook order.
+
+    Use this instead of wb.sheetnames whenever SCANNING a workbook for a
+    data sheet — by name pattern or by headers. Pricing/PO workbooks often
+    carry hidden staging sheets (FORMING, PRICING, template copies) whose
+    headers also satisfy the scan, and iterating wb.sheetnames silently
+    reads one of those instead of the real sheet (bit 902 DXF Prep: batch
+    4130's tab was 'PO- 4130', the name regex missed it, and the fallback
+    scan read the hidden 3-row FORMING sheet). Exact-name lookups don't
+    need this — sheet names are unique whether hidden or not.
+    """
+    return [n for n in wb.sheetnames if wb[n].sheet_state == "visible"]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 922 tube materials + PO (QF-QU-09) reading
 #

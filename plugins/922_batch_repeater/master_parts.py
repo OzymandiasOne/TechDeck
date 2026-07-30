@@ -201,7 +201,9 @@ def parse_po_sheet(path: Path, log=None) -> Tuple[List[Dict[str, Any]], List[str
     warnings: List[str] = []
     wb = sdk.load_workbook_resilient(path, log=log, read_only=True, data_only=True)
     try:
-        names = sorted(wb.sheetnames,
+        # Visible sheets only: REV C copies can carry hidden staging/"PASTE
+        # HERE" sheets whose headers also match - the scan must not read one.
+        names = sorted(sdk.visible_sheetnames(wb),
                        key=lambda s: 0 if s.strip().casefold() == "po" else 1)
         ws, hdr, hmap = None, None, {}
         for s in names:

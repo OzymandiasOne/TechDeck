@@ -665,7 +665,9 @@ def _locate_forecast(forecast_wb, log):
             ws = forecast_wb[name]
             break
     if ws is None:                       # tolerate a renamed-but-recognizable sheet
-        for name in forecast_wb.sheetnames:
+        # Fuzzy fallback scans VISIBLE sheets only - a hidden old copy
+        # ("Copy of 911 Forecast") must never shadow the live sheet.
+        for name in sdk.visible_sheetnames(forecast_wb):
             low = name.lower()
             if "911" in low and "forecast" in low:
                 ws = forecast_wb[name]

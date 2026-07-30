@@ -111,9 +111,14 @@ def _load_po_rows(pricing_path: Path, log):
     wb = sdk.load_workbook_resilient(pricing_path, log=log,
                                      read_only=True, data_only=True)
     try:
-        po_sheets = [n for n in wb.sheetnames
-                     if re.match(r"^PO[-_ ]?\d+", n.strip(), re.IGNORECASE)]
-        sheet_names = po_sheets or list(wb.sheetnames)
+        # Scan VISIBLE sheets only: pricing workbooks carry hidden staging
+        # sheets (FORMING, PRICING, ...) whose headers also match, and the
+        # fallback below must never read one of those. [-_ ]* tolerates any
+        # separator run in the tab name ('PO-4130', 'PO- 4130', 'PO 4130').
+        visible = sdk.visible_sheetnames(wb)
+        po_sheets = [n for n in visible
+                     if re.match(r"^PO[-_ ]*\d+", n.strip(), re.IGNORECASE)]
+        sheet_names = po_sheets or visible
 
         for name in sheet_names:
             ws = wb[name]
@@ -147,6 +152,10 @@ def _load_po_rows(pricing_path: Path, log):
             if skipped:
                 log(f"  (skipped {len(skipped)} non-part row(s) on '{name}', "
                     f"e.g. {skipped[0][:40]!r})")
+            if not po_sheets:
+                log(f"  WARNING: no PO-#### sheet in {pricing_path.name} - "
+                    f"using '{name}' (first visible sheet with DYPN + QTY "
+                    f"ORDERED headers). Verify this is the right sheet!")
             log(f"  PO sheet '{name}': {len(rows)} part rows, "
                 f"{len({d for d, _ in rows})} distinct DYPNs")
             return batch, rows

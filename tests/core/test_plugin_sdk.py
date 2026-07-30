@@ -164,3 +164,16 @@ def test_as_user_facing_walks_cause_chain():
             raise RuntimeError("wrapped") from e
     except RuntimeError as outer:
         assert plugin_sdk.as_user_facing(outer) is inner
+
+
+# ── visible_sheetnames (hidden staging sheets must not win sheet scans) ─────
+def test_visible_sheetnames_filters_hidden():
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.active.title = "FORMING"
+    wb.active.sheet_state = "hidden"
+    wb.create_sheet("PO- 4130")
+    hidden2 = wb.create_sheet("PRICING")
+    hidden2.sheet_state = "veryHidden"
+    wb.create_sheet("Notes")
+    assert plugin_sdk.visible_sheetnames(wb) == ["PO- 4130", "Notes"]

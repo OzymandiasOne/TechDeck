@@ -2,7 +2,7 @@
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
   "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Labels each repeat's Teams card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "🔄",
