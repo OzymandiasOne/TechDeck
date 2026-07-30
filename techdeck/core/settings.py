@@ -651,7 +651,21 @@ class SettingsManager:
             self.data["settings"] = {}
         self.data["settings"]["library_sort_mode"] = mode
         self.save()
-    
+
+    # ---- Feedback "Which Feature?" list state -------------------------------
+    # Reconciliation state for the Submit Feedback dropdown (see
+    # techdeck.core.feedback_features): the last-seen live plugin roster plus a
+    # retired-entry map with per-entry version-update counters. Stored as an
+    # opaque blob at the top level of settings.json.
+
+    def get_feedback_feature_state(self) -> Dict[str, Any]:
+        state = self.data.get("feedback_features")
+        return state if isinstance(state, dict) else {}
+
+    def set_feedback_feature_state(self, state: Dict[str, Any]) -> None:
+        self.data["feedback_features"] = dict(state)
+        self.save()
+
     # ========== Plugin Settings ==========
     
     def get_plugin_settings(self, plugin_id: str) -> Dict[str, Any]:

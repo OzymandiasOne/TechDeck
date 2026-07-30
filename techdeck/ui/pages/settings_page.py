@@ -250,7 +250,8 @@ class SettingsPage(QWidget, ThemeAware):
     def _open_feedback_dialog(self):
         """Open the Submit Feedback modal from inside Settings."""
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
-        dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
+        dlg = FeedbackDialog(parent=self.window(), settings=self.settings,
+                             plugin_loader=self.plugin_loader)
         dlg.exec()
 
     def _generate_debug_report(self):

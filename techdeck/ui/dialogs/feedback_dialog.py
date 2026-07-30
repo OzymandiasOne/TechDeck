@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from techdeck.core.feedback_writer import submit_feedback
+from techdeck.core.feedback_features import get_feature_options
 from techdeck.ui.utils import make_tinted_svg_copy
 
 logger = logging.getLogger(__name__)
@@ -31,25 +32,20 @@ logger = logging.getLogger(__name__)
 class FeedbackDialog(QDialog):
     """Modal dialog: Which Feature + Suggestion -> append to shared workbook."""
 
-    # Drop-down options for "Which Feature?". Keep in sync with the values
-    # already in use in TechDeck_Suggestions.xlsx column B for consistency.
+    # Fallback options for "Which Feature?" — used ONLY if the live app-library
+    # list can't be built. The real dropdown is generated dynamically from the
+    # installed plugins so it never goes stale (new apps auto-appear, retired
+    # ones linger as "(RETIRED)"); see techdeck.core.feedback_features.
     FEATURE_OPTIONS = [
         "TechDeck (General)",
-        "911 Setup",
-        "911 Batch Repeater",
-        "922 Pallet Stamper",
-        "922 Batch Repeater",
-        "922 LST Organizer",
-        "911 PO PDF Extractor",
-        "911 Sketch Extractor",
-        "QR Code Generator",
         "New - Suggestion Box",
         "Other",
     ]
 
-    def __init__(self, parent=None, settings=None):
+    def __init__(self, parent=None, settings=None, plugin_loader=None):
         super().__init__(parent)
         self.settings = settings   # SettingsManager, for the ticket reward
+        self.plugin_loader = plugin_loader   # shared loader when the caller has one
 
         self.setWindowTitle("Submit Feedback")
         self.setModal(True)
@@ -91,10 +87,18 @@ class FeedbackDialog(QDialog):
         line.setStyleSheet(f"color: {self.theme.divider};")
         layout.addWidget(line)
 
-        # Which Feature?
+        # Which Feature? — built live from the installed app library so the list
+        # never goes stale (new plugins auto-appear; retired ones show as
+        # "(RETIRED)" until purged). Falls back to the static list on any error.
         layout.addWidget(self._field_label("Which Feature?"))
         self.feature_combo = QComboBox()
-        self.feature_combo.addItems(self.FEATURE_OPTIONS)
+        try:
+            options = get_feature_options(self.settings, self.plugin_loader)
+        except Exception:
+            logger.exception("Feedback: could not build live feature list; "
+                             "using fallback options")
+            options = self.FEATURE_OPTIONS
+        self.feature_combo.addItems(options)
         self.feature_combo.setMinimumHeight(32)
         self.feature_combo.setStyleSheet(self._combo_qss())
         layout.addWidget(self.feature_combo)
