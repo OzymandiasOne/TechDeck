@@ -67,6 +67,18 @@ WRITEBACK_STATUS_BY_BUCKET = {
     WONT_DO_BUCKET_ID: STATUS_WONT_DO,
 }
 
+
+def _status_target_bucket(status: str) -> Optional[str]:
+    """Bucket a Feedback-sheet Status value implies, or None for open/working
+    statuses (Needs Review / Deferred / blank). Mirrors WRITEBACK_STATUS_BY_BUCKET
+    in reverse so board <-> telemetry stay consistent."""
+    s = (status or "").strip().lower()
+    if s == STATUS_COMPLETE.lower():
+        return DONE_BUCKET_ID
+    if s == STATUS_WONT_DO.lower():
+        return WONT_DO_BUCKET_ID
+    return None
+
 _WORKBOOK_NAME = "TechDeck Telemetry.xlsx"
 _FEEDBACK_SHEET = "Feedback"
 _ARCHIVE_SHEET = "Archive"
@@ -467,6 +479,56 @@ class BoardStore:
         if added:
             self.save()
         return added
+
+    def apply_external_status(self, load: "FeedbackLoad") -> int:
+        """Reflect completion that happened OUTSIDE the board — a maintainer
+        marked a Feedback row Complete/Won't Do, or the row was archived — by
+        moving the matching card into Done / Won't Do. This is what makes
+        "mark these tasks complete" (done in the workbook, not by dragging)
+        actually move the cards.
+
+        Rules that keep it from fighting the user:
+          * Only cards still in a WORKING bucket advance; a card already parked
+            in a terminal bucket (Done / Won't Do) is left where the user put it,
+            and nothing is ever pulled back OUT of a terminal bucket.
+          * Only telemetry-backed cards (source == "feedback") react; manual
+            cards are untouched.
+          * The applied status is recorded as ``written_status`` so the
+            write-back treats it as already in sync (no redundant rewrite), while
+            a later drag OUT still correctly restores "Needs Review".
+
+        Returns the number of cards moved.
+        """
+        if not load.ok:
+            return 0
+        target_by_key: dict[str, str] = {}
+        for e in load.feedback:
+            bucket_id = _status_target_bucket(e.orig_status)
+            if bucket_id is not None:
+                target_by_key[e.key] = bucket_id
+        for e in load.archive:
+            target_by_key[e.key] = DONE_BUCKET_ID   # archived == complete
+
+        moved = 0
+        for key, target in target_by_key.items():
+            card = self.cards.get(key)
+            if card is None or card.get("source") != "feedback":
+                continue
+            cur = self.bucket_of(key)
+            if cur is None or cur["id"] == target:
+                continue
+            if cur["id"] in (DONE_BUCKET_ID, WONT_DO_BUCKET_ID):
+                continue   # respect the terminal bucket the user chose
+            dst = self.bucket(target)
+            if dst is None:
+                continue
+            cur["cards"].remove(key)
+            dst["cards"].append(key)
+            card["written_status"] = WRITEBACK_STATUS_BY_BUCKET.get(target, "")
+            moved += 1
+        if moved:
+            self.save()
+        return moved
 
     # ---- write-back ------------------------------------------------------
 

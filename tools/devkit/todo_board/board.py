@@ -342,10 +342,16 @@ class TodoBoard(QWidget, ThemeAware):
         wb_note = self._flush_writebacks()
         load = load_feedback()
         added = self.store.sync(load)
+        # Reflect completions made OUTSIDE the board (a Feedback row marked
+        # Complete / Won't Do, or archived) by moving those cards into Done /
+        # Won't Do — cards the user has already parked terminally are left alone.
+        moved = self.store.apply_external_status(load)
         if load.ok:
             parts = [f"{len(load.feedback)} open", f"{len(load.archive)} archived"]
             if added:
                 parts.append(f"+{added} new")
+            if moved:
+                parts.append(f"{moved} auto-filed")
             if wb_note:
                 parts.append(wb_note)
             self._status.setText("  ·  ".join(parts))
@@ -396,6 +402,13 @@ class TodoBoard(QWidget, ThemeAware):
         self.rebuild_all()
 
     def rebuild_all(self):
+        # Preserve the horizontal scroll offset. Tearing the columns down and
+        # rebuilding destroys the dragged card (its source was hidden mid-drag),
+        # so focus falls onto a freshly-created card and QScrollArea scrolls to
+        # reveal it — which yanked the board to the far right on every drop.
+        # Capture the offset now and restore it once the new layout has settled.
+        h_scroll = self._cols_scroll.horizontalScrollBar().value()
+
         # Tear down existing columns.
         while self._cols_layout.count():
             item = self._cols_layout.takeAt(0)
@@ -422,6 +435,15 @@ class TodoBoard(QWidget, ThemeAware):
             self._cols_layout.addWidget(col)
             self._columns[bucket["id"]] = col
         self._cols_layout.addStretch(1)   # left-pack the columns
+
+        # Restore the horizontal offset — now, and again after the event loop
+        # settles (a focused child's ensureVisible fires slightly later and
+        # would otherwise win, scrolling us to the far right).
+        def _restore_h():
+            bar = self._cols_scroll.horizontalScrollBar()
+            bar.setValue(min(h_scroll, bar.maximum()))
+        _restore_h()
+        QTimer.singleShot(0, _restore_h)
 
     # ---- card intents ----------------------------------------------------
 

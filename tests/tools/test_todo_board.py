@@ -112,6 +112,77 @@ def test_reconcile_files_orphan_cards(tmp_path):
     assert store.bucket_of("ghost") is not None      # placed, not lost
 
 
+# ---- external status sync (mark-complete-off-board -> Done) ----------------
+
+def _same_key(key: str, status: str, source: str = "feedback") -> FeedbackEntry:
+    """A feedback/archive row for an EXISTING card key, with a chosen Status."""
+    return FeedbackEntry(
+        key=key, title="suggestion 1", user="tester",
+        date_iso="2026-07-21T09:00:00", which_feature="911 Setup",
+        version="0.8.6.9", orig_status=status, source=source)
+
+
+def test_external_complete_moves_todo_card_to_done(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    moved = store.apply_external_status(_load(feedback=[_same_key(key, "Complete")]))
+    assert moved == 1
+    assert key in store.bucket("done")["cards"]
+    assert key not in store.bucket("todo")["cards"]
+    # Recorded as in-sync so the write-back doesn't redundantly rewrite it.
+    assert store.cards[key]["written_status"] == "Complete"
+    assert (key, "Complete") not in store.pending_writebacks()
+
+
+def test_external_archive_moves_existing_card_to_done(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    # Row was moved to the Archive sheet off-board.
+    moved = store.apply_external_status(
+        _load(archive=[_same_key(key, "Complete", source="archive")]))
+    assert moved == 1
+    assert key in store.bucket("done")["cards"]
+
+
+def test_external_wont_do_moves_to_wont_do(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    moved = store.apply_external_status(_load(feedback=[_same_key(key, "Won't Do")]))
+    assert moved == 1
+    assert key in store.bucket("wont_do")["cards"]
+
+
+def test_external_status_respects_terminal_placement(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "wont_do", 0)               # user parked it terminally
+    moved = store.apply_external_status(_load(feedback=[_same_key(key, "Complete")]))
+    assert moved == 0                                 # not yanked out of Won't Do
+    assert key in store.bucket("wont_do")["cards"]
+
+
+def test_external_status_leaves_working_buckets_when_open(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "in_progress", 0)
+    moved = store.apply_external_status(_load(feedback=[_same_key(key, "Needs Review")]))
+    assert moved == 0                                 # open status -> no move
+    assert key in store.bucket("in_progress")["cards"]
+
+
+def test_external_status_ignores_manual_cards(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    mkey = store.add_manual_card("todo", "hand-written")
+    moved = store.apply_external_status(_load(feedback=[_same_key(mkey, "Complete")]))
+    assert moved == 0                                 # manual cards never auto-move
+    assert mkey in store.bucket("todo")["cards"]
+
+
 # ---- widgets ---------------------------------------------------------------
 
 def test_label_color_mapping():
