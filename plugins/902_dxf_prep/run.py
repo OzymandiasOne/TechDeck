@@ -50,14 +50,19 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
-# A valid 902 part number (DYPN): 1-2 letters, digits, then one or more dash
-# segments (e.g. H4130810-484, R4533683-5-3). Rejects footer/junk rows like
-# "NAME OF VENDOR REPRESENTATIVE" (spaces / no dash segment).
-_PART_RE = re.compile(r"^[A-Z]{1,2}\d{4,}(?:-[A-Z0-9]+)+$", re.IGNORECASE)
+# A valid 902 part number (DYPN): dash-separated alphanumeric segments that
+# contain at least one digit overall. Shapes seen on real POs: H4130810-484 /
+# R4533683-5-3 (letter prefix + digits), 263500220-5001 (all-numeric head),
+# H5730805A230-1 / H5731304C49-13 (letters embedded mid-number), LTG-2213AE
+# (letter-only head, digits in a later segment). The digit requirement plus
+# no-spaces/no-underscores is what rejects footer/junk rows like
+# "NAME OF VENDOR REPRESENTATIVE".
+_PART_RE = re.compile(r"^(?=[A-Z0-9-]*\d)[A-Z0-9]{2,16}(?:-[A-Z0-9]+)+$",
+                      re.IGNORECASE)
 
 # Suffix tokens SigmaNest's export appends to a DYPN, stripped right-to-left:
 # _FLAT-PATTERN#1, a lone revision letter (_A), or a trailing number (_2).

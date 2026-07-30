@@ -2,7 +2,7 @@
   "id": "902_dxf_prep",
   "name": "902 DXF Prep",
   "description": "Batch DXF cleanup & prep for Boost 902 part files. Pop-up process picker (all selected by default) runs any combination of: IGES CONVERT folder + QTY sheet, DXF rename/sort for AutoCAD review, recombine + reconcile against the PO spreadsheet (extras moved to EXTRA, missing parts listed, (Nx) quantity prefixes).",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "author": "Anthony Sieben",
   "family": "902",
   "requires_admin": false,

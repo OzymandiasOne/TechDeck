@@ -1,10 +1,16 @@
-"""Regression tests for 902 DXF Prep's PO-sheet selection.
+"""Regression tests for 902 DXF Prep's PO-sheet selection + part-number scheme.
 
 Batch 4130 (2026-07-30): the pricing workbook's PO tab was named 'PO- 4130'
 (hyphen AND space) and the old ^PO[-_ ]?\\d+ regex missed it, so the fallback
 scan read a hidden 3-row FORMING staging sheet instead of the 231-row PO
 sheet — three "successful" runs built a 3-part QTY workbook. The fix widens
 the separator match to [-_ ]* and restricts every scan to visible sheets.
+
+Same day, a PO carried part numbers the original 1-2-letters+digits DYPN
+scheme rejected (263500220-5001, H5730805A230-1, H5731304C49-13, LTG-2213AE):
+every one was flagged "unrecognized filename" and dumped in EXTRA\\ while the
+PO-row filter skipped them too. _PART_RE now accepts any dash-separated
+alphanumeric ID containing a digit.
 """
 
 import importlib.util
@@ -68,6 +74,48 @@ def test_po_tab_separator_variants_all_match(tmp_path, plugin, tab):
     batch, rows = plugin._load_po_rows(path, log=lambda m: None)
     assert batch == "4131"
     assert len(rows) == 1
+
+
+# ── Part-number scheme ──────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("pn", [
+    # legacy 1-2 letters + digits + dash segments
+    "H4130810-484", "R4533683-5-3", "K5731417-325", "R4140922-1M",
+    # all-numeric head (first seen on the 2026-07-30 PO)
+    "263500220-5001", "263500220-7001", "263511908-301",
+    # letters embedded mid-number
+    "H5730805A230-1", "H5731304C49-13", "H5731304C49-19",
+    # letter-only head, digits in a later segment
+    "LTG-2213AE", "LTG-2213N", "LTG-2213V",
+])
+def test_part_re_accepts_real_po_part_numbers(plugin, pn):
+    assert plugin._PART_RE.match(pn)
+    assert plugin._PART_RE.match(pn.lower())
+
+
+@pytest.mark.parametrize("junk", [
+    "NAME OF VENDOR REPRESENTATIVE",   # footer prose (spaces)
+    "TOTAL",                           # no dash segment
+    "LTG-ABC",                         # no digit anywhere
+    "N/A", "",                         # slash / empty
+    "SEE NOTE 1",
+])
+def test_part_re_still_rejects_junk_rows(plugin, junk):
+    assert not plugin._PART_RE.match(junk)
+
+
+@pytest.mark.parametrize("stem,expected", [
+    # export rev + counter suffixes strip down to the PO part number
+    ("H5731304C49-13_A_1", "H5731304C49-13"),
+    ("LTG-2213AE_E_1", "LTG-2213AE"),
+    ("LTG-2213N_FLAT-PATTERN#1", "LTG-2213N"),
+    ("(4x) 263500220-5001", "263500220-5001"),
+    # already-clean names come back unchanged
+    ("263511908-301", "263511908-301"),
+    ("H5730805A230-1", "H5730805A230-1"),
+])
+def test_clean_stem_resolves_new_pn_shapes(plugin, stem, expected):
+    assert plugin.clean_stem(stem) == expected
 
 
 def test_fallback_scan_skips_hidden_sheets_and_warns(tmp_path, plugin):
