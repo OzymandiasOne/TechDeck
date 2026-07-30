@@ -392,6 +392,10 @@ class BoardStore:
         self.path = Path(path) if path else _state_path()
         self.buckets: list[dict] = []   # [{id, name, cards: [key, ...]}]
         self.cards: dict[str, dict] = {}
+        # Keys the user has "cleared" off the board (completed items acknowledged
+        # and hidden). Remembered so the archived telemetry rows behind them
+        # don't just re-sync back in; a row that later reopens resurrects.
+        self.cleared: set[str] = set()
         self._load()
 
     # ---- persistence -----------------------------------------------------
@@ -402,9 +406,10 @@ class BoardStore:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 self.buckets = data.get("buckets") or []
                 self.cards = data.get("cards") or {}
+                self.cleared = set(data.get("cleared") or [])
             except Exception as exc:
                 logger.warning("Dev Board: state unreadable (%s); starting fresh", exc)
-                self.buckets, self.cards = [], {}
+                self.buckets, self.cards, self.cleared = [], {}, set()
         if not self.buckets:
             self.buckets = [dict(b, cards=[]) for b in DEFAULT_BUCKETS]
         for b in self.buckets:
@@ -412,7 +417,8 @@ class BoardStore:
         self._reconcile()
 
     def save(self):
-        payload = {"version": STATE_VERSION, "buckets": self.buckets, "cards": self.cards}
+        payload = {"version": STATE_VERSION, "buckets": self.buckets,
+                   "cards": self.cards, "cleared": sorted(self.cleared)}
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
@@ -465,13 +471,19 @@ class BoardStore:
         for e in sorted(load.feedback, key=lambda x: x.sort_key):
             if e.key in self.cards:
                 continue
+            if e.key in self.cleared:
+                # Cleared earlier. Resurrect only if it's genuinely open again
+                # (reopened) — a still-terminal row stays cleared.
+                if _status_target_bucket(e.orig_status) is not None:
+                    continue
+                self.cleared.discard(e.key)
             self.cards[e.key] = self._new_card(e)
             if todo is not None:
                 todo["cards"].insert(0, e.key)  # oldest first -> newest ends on top
             added += 1
         for e in sorted(load.archive, key=lambda x: x.sort_key):
-            if e.key in self.cards:
-                continue
+            if e.key in self.cards or e.key in self.cleared:
+                continue  # cleared archived rows stay off the board
             self.cards[e.key] = self._new_card(e)
             if done is not None:
                 done["cards"].append(e.key)
@@ -479,6 +491,26 @@ class BoardStore:
         if added:
             self.save()
         return added
+
+    def clear_bucket(self, bucket_id: str) -> int:
+        """Remove every card in ``bucket_id`` from the board and remember the keys.
+
+        Meant for the terminal buckets (Done / Won't Do): the telemetry rows stay
+        on the Archive sheet — the record of record — so nothing is truly lost;
+        this just clears the pile off the board. Remembered keys keep the
+        archived rows from re-syncing, but a row that later reopens (returns to an
+        open status) still comes back via ``sync``. Returns the count removed.
+        """
+        b = self.bucket(bucket_id)
+        if b is None or not b["cards"]:
+            return 0
+        keys = list(b["cards"])
+        for key in keys:
+            self.cards.pop(key, None)
+            self.cleared.add(key)
+        b["cards"] = []
+        self.save()
+        return len(keys)
 
     def apply_external_status(self, load: "FeedbackLoad") -> int:
         """Reflect completion that happened OUTSIDE the board — a maintainer

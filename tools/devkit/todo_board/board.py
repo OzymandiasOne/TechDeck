@@ -22,10 +22,15 @@ from PySide6.QtWidgets import (
 from techdeck.ui.theme_aware import ThemeAware
 from tools.devkit.todo_board.model import (
     BoardStore, load_feedback, flush_writebacks,
+    DONE_BUCKET_ID, WONT_DO_BUCKET_ID,
 )
 from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME
 
 COLUMN_WIDTH = 290
+# Terminal buckets accumulate forever, so cap how many cards render and offer a
+# one-click clear. Older completed cards live on in the telemetry Archive.
+TERMINAL_BUCKETS = (DONE_BUCKET_ID, WONT_DO_BUCKET_ID)
+TERMINAL_CAP = 20
 
 
 class _CardList(QWidget):
@@ -190,6 +195,7 @@ class BucketColumn(QFrame):
     rename_requested = Signal(str)
     delete_requested = Signal(str)
     move_requested = Signal(str, int)      # bucket_id, delta (-1 / +1)
+    clear_requested = Signal(str)          # bucket_id — clear all cards off board
 
     def __init__(self, bucket: dict, palette, parent=None):
         super().__init__(parent)
@@ -256,6 +262,22 @@ class BucketColumn(QFrame):
         self._list.set_scroll_area(scroll)
         outer.addWidget(scroll, 1)
 
+        # Overflow footer: on a capped terminal bucket, shows "+N older — Clear"
+        # and clears the whole bucket off the board when clicked. Hidden until a
+        # bucket actually overflows.
+        self._overflow = QToolButton()
+        self._overflow.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._overflow.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self._overflow.setToolTip(
+            "Clear completed cards off the board (they stay in the telemetry Archive)")
+        self._overflow.setStyleSheet(
+            f"QToolButton {{ color: {self._pal.text_secondary}; background: transparent; "
+            f"border: none; padding: 4px; font-size: 9pt; }}"
+            f"QToolButton:hover {{ color: {self._pal.accent}; }}")
+        self._overflow.clicked.connect(lambda: self.clear_requested.emit(self.bucket_id))
+        self._overflow.hide()
+        outer.addWidget(self._overflow)
+
     def _icon_btn_qss(self) -> str:
         return (f"QToolButton {{ color: {self._pal.text_secondary}; "
                 f"background: transparent; border: none; font-size: 15px; "
@@ -268,6 +290,14 @@ class BucketColumn(QFrame):
     def set_count(self, n: int):
         self._count.setText(str(n))
 
+    def set_overflow(self, hidden: int):
+        """Show/hide the '+N older — Clear' footer for a capped bucket."""
+        if hidden > 0:
+            self._overflow.setText(f"＋{hidden} older  ·  Clear completed")
+            self._overflow.show()
+        else:
+            self._overflow.hide()
+
     def _open_menu(self, anchor):
         menu = QMenu(self)
         act_add = menu.addAction("Add card…")
@@ -276,6 +306,8 @@ class BucketColumn(QFrame):
         act_left = menu.addAction("Move left")
         act_right = menu.addAction("Move right")
         menu.addSeparator()
+        act_clear = (menu.addAction("Clear completed cards…")
+                     if self.bucket_id in TERMINAL_BUCKETS else None)
         act_delete = menu.addAction("Delete bucket")
         chosen = menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
         if chosen == act_add:
@@ -286,6 +318,8 @@ class BucketColumn(QFrame):
             self.move_requested.emit(self.bucket_id, -1)
         elif chosen == act_right:
             self.move_requested.emit(self.bucket_id, 1)
+        elif act_clear is not None and chosen == act_clear:
+            self.clear_requested.emit(self.bucket_id)
         elif chosen == act_delete:
             self.delete_requested.emit(self.bucket_id)
 
@@ -313,6 +347,11 @@ class TodoBoard(QWidget, ThemeAware):
         self._add_bucket_btn = QPushButton("+ Bucket", self)
         self._add_bucket_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_bucket_btn.clicked.connect(self._on_add_bucket)
+        self._clear_btn = QPushButton("Clear completed", self)
+        self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_btn.setToolTip(
+            "Clear the Done bucket off the board — items stay in the telemetry Archive")
+        self._clear_btn.clicked.connect(self._on_clear_completed)
         self._refresh_btn = QPushButton("Refresh", self)
         self._refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._refresh_btn.clicked.connect(self._sync_and_rebuild)
@@ -386,7 +425,7 @@ class TodoBoard(QWidget, ThemeAware):
 
     def devkit_toolbar_actions(self):
         """Widgets the DevKit page hosts in its unified toolbar (right side)."""
-        return [self._status, self._add_bucket_btn, self._refresh_btn]
+        return [self._status, self._add_bucket_btn, self._clear_btn, self._refresh_btn]
 
     def _schedule_rebuild(self):
         """Rebuild on the next event-loop turn, coalescing multiple calls. Also
@@ -425,13 +464,22 @@ class TodoBoard(QWidget, ThemeAware):
             col.rename_requested.connect(self._on_rename_bucket)
             col.delete_requested.connect(self._on_delete_bucket)
             col.move_requested.connect(self._on_move_bucket)
-            for key in bucket["cards"]:
-                if key not in self.store.cards:
-                    continue
+            col.clear_requested.connect(self._on_clear_bucket)
+
+            keys = [k for k in bucket["cards"] if k in self.store.cards]
+            # Terminal buckets accumulate forever — render only the most recent
+            # TERMINAL_CAP (newest are appended, so the tail) and surface the rest
+            # behind a "+N older — Clear" footer.
+            if bucket["id"] in TERMINAL_BUCKETS and len(keys) > TERMINAL_CAP:
+                shown, hidden = keys[-TERMINAL_CAP:], len(keys) - TERMINAL_CAP
+            else:
+                shown, hidden = keys, 0
+            for key in shown:
                 card = TaskCard(self.store, key, self._pal)
                 card.deleted.connect(self._on_card_deleted)
                 col.add_card_widget(card)
-            col.set_count(len(bucket["cards"]))
+            col.set_count(len(keys))
+            col.set_overflow(hidden)
             self._cols_layout.addWidget(col)
             self._columns[bucket["id"]] = col
         self._cols_layout.addStretch(1)   # left-pack the columns
@@ -468,6 +516,25 @@ class TodoBoard(QWidget, ThemeAware):
         if ok and text.strip():
             self.store.add_manual_card(bucket_id, text.strip())
             self._schedule_rebuild()
+
+    def _on_clear_completed(self):
+        """Toolbar button — clear the Done bucket off the board."""
+        self._on_clear_bucket(DONE_BUCKET_ID)
+
+    def _on_clear_bucket(self, bucket_id: str):
+        b = self.store.bucket(bucket_id)
+        if b is None or not b["cards"]:
+            return
+        n = len(b["cards"])
+        resp = QMessageBox.question(
+            self, "Clear completed",
+            f"Clear {n} card(s) from '{b['name']}' off the board?\n\n"
+            f"They stay in the telemetry Archive (the record of record) — this "
+            f"only removes them from the board.")
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+        self.store.clear_bucket(bucket_id)
+        self._schedule_rebuild()
 
     # ---- bucket intents --------------------------------------------------
 
@@ -521,6 +588,7 @@ class TodoBoard(QWidget, ThemeAware):
             f"QPushButton:hover {{ border-color: {self._pal.accent}; "
             f"color: {self._pal.accent}; }}")
         self._add_bucket_btn.setStyleSheet(btn_qss)
+        self._clear_btn.setStyleSheet(btn_qss)
         self._refresh_btn.setStyleSheet(btn_qss)
         # Re-render columns/cards in the new palette.
         self.rebuild_all()

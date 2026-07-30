@@ -183,6 +183,55 @@ def test_external_status_ignores_manual_cards(tmp_path):
     assert mkey in store.bucket("todo")["cards"]
 
 
+# ---- clear completed (Done pile) -------------------------------------------
+
+def test_clear_bucket_empties_and_remembers(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(archive=[_entry(1, "911 Setup", "archive"),
+                              _entry(2, "922 Kitting", "archive")]))
+    assert len(store.bucket("done")["cards"]) == 2
+    removed = store.clear_bucket("done")
+    assert removed == 2
+    assert store.bucket("done")["cards"] == []
+    assert store.cleared == {"archive1", "archive2"}
+
+
+def test_cleared_archived_rows_do_not_resync(tmp_path):
+    load = _load(archive=[_entry(1, "911 Setup", "archive")])
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(load)
+    store.clear_bucket("done")
+    assert store.sync(load) == 0                       # stays cleared, not re-added
+    assert store.bucket("done")["cards"] == []
+
+
+def test_cleared_state_persists_across_reload(tmp_path):
+    load = _load(archive=[_entry(1, "911 Setup", "archive")])
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(load)
+    store.clear_bucket("done")
+    reloaded = BoardStore(path=tmp_path / "b.json")
+    assert "archive1" in reloaded.cleared
+    assert reloaded.sync(load) == 0                    # still suppressed after reload
+
+
+def test_cleared_item_resurrects_when_reopened(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(archive=[_entry(1, "911 Setup", "archive")]))
+    store.clear_bucket("done")
+    # The same item comes back as an OPEN feedback row (reopened).
+    reopened = _same_key("archive1", "Needs Review", source="feedback")
+    added = store.sync(_load(feedback=[reopened]))
+    assert added == 1
+    assert "archive1" in store.bucket("todo")["cards"]
+    assert "archive1" not in store.cleared
+
+
+def test_clear_bucket_no_op_when_empty(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    assert store.clear_bucket("done") == 0
+
+
 # ---- widgets ---------------------------------------------------------------
 
 def test_label_color_mapping():
