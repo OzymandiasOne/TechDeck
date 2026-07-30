@@ -23,6 +23,9 @@ new hiddenimports. ASCII DXF only.
 """
 
 import math
+import os
+import re
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -31,7 +34,8 @@ from PySide6.QtWidgets import (
     QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, QGraphicsView,
     QGraphicsScene, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsItem,
     QSplitter, QFileDialog, QMessageBox, QGroupBox, QAbstractItemView,
-    QDialog, QDialogButtonBox, QFormLayout, QLineEdit
+    QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QStackedWidget,
+    QScrollArea
 )
 from PySide6.QtCore import Qt, QRect, QRectF, QTimer, QItemSelectionModel
 from PySide6.QtGui import (QPen, QBrush, QColor, QPainter, QPainterPath,
@@ -1162,6 +1166,48 @@ def _unit_scale(insunits, log):
     return 1.0
 
 
+# ---------------------------------------------------------------------------
+# Customer guideline offsets (Offsets.docx, 2025-05-13)
+# ---------------------------------------------------------------------------
+# Interior holes/slots/cutouts are increased to absorb plasma bevel and
+# lead-in/lead-out deformity; the amount depends on PLATE THICKNESS and the
+# outer profile is never touched. Two per-feature rules ride on top of the
+# band table: stop increasing once a feature measures TWICE the plate
+# thickness (big openings give slag room and cut accurately as-is), and the
+# minimum acceptable diameter/width is HALF the plate thickness (flagged,
+# never resized). A feature's "measure" is a circle's diameter or a
+# cutout's width (smallest bounding-box dimension).
+#
+# NOTE: the customer doc contradicts itself at exactly 0.375 plate - the
+# typed table says Medium starts at 0.500 (0.375 -> Grande, +1/32 dia)
+# while the embedded spreadsheet image says Medium is 0.375-1.125 (+1/16).
+# Implemented per the TYPED table; flip _MEDIUM_MIN to 0.375 if the
+# customer rules the other way.
+_MEDIUM_MIN = 0.500
+GUIDELINE_BANDS = [  # (min thickness inclusive, band name, per-side offset)
+    (0.188, "Grande", 0.0156),
+    (_MEDIUM_MIN, "Medium", 0.0313),
+    (1.250, "Venti", 0.0468),
+]
+GUIDELINE_MAX_THICKNESS = 3.0   # "3 and UP" -> no offset (special scenarios
+                                # go through the manual Adjust Dimensions)
+
+
+def guideline_band(thickness):
+    """(band_name, per_side_offset) for a plate thickness in inches, or
+    None when the guidelines call for no offset (under 0.188, or 3" and
+    up). Bands are half-open breakpoints - plate gauges are discrete, so
+    the gaps in the customer's table can't occur, but any value still
+    resolves deterministically."""
+    if thickness >= GUIDELINE_MAX_THICKNESS - 1e-9:
+        return None
+    band = None
+    for tmin, name, per_side in GUIDELINE_BANDS:
+        if thickness >= tmin - 1e-9:
+            band = (name, per_side)
+    return band
+
+
 def measure_dxf(src):
     """Read-only analysis for the Adjust Dimensions dialog.
 
@@ -1189,51 +1235,96 @@ def measure_dxf(src):
             "warnings": warnings}
 
 
-def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log):
-    """Offset one DXF; writes dest. Returns a stats dict."""
+def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
+                thickness=None):
+    """Offset one DXF; writes dest. Returns a stats dict.
+
+    Manual mode (thickness=None): every hole/cutout grows by hole_increase
+    diameter and the outer profile pulls in edge_offset per side.
+    Guideline mode (thickness in inches): per-feature decisions from the
+    customer offset table - the band amount for that plate thickness, no
+    increase once a feature measures 2x the thickness, features under the
+    1/2-thickness minimum flagged in stats["below_min"], and the outer
+    profile left untouched.
+    """
     parsed = _parse(src)
     scale = _unit_scale(parsed["insunits"], log)
-    grow = (hole_increase / 2.0) * scale    # radial growth per hole
-    shrink = edge_offset * scale            # per-side profile offset
-
     circles, loop_info, warnings = _classify(parsed)
-    stats = {"holes": 0, "cutouts": 0, "profiles": 0, "warnings": warnings}
+
+    stats = {"holes": 0, "cutouts": 0, "profiles": 0, "unchanged": 0,
+             "below_min": [], "band": None, "warnings": warnings}
     replace = {}
 
-    # Circles: holes grow; a standalone circle IS a round plate - it shrinks.
+    if thickness is None:
+        def grow_for(measure):
+            return (hole_increase / 2.0) * scale
+        shrink = edge_offset * scale            # per-side profile offset
+    else:
+        band = guideline_band(thickness)
+        stats["band"] = band[0] if band else "no offset for this thickness"
+        t_du = thickness * scale                # thickness in drawing units
+        per_side_du = (band[1] * scale) if band else 0.0
+
+        def grow_for(measure):
+            if band is None or measure >= 2.0 * t_du - 1e-9:
+                return 0.0                      # the 2x-thickness cap
+            return per_side_du
+        shrink = 0.0                            # guidelines never touch the profile
+
+    def check_minimum(measure):
+        if thickness is not None and measure < 0.5 * (thickness * scale) - 1e-9:
+            stats["below_min"].append(measure / scale)  # report in inches
+
+    # Circles: holes grow; a standalone circle IS a round plate (profile).
     for c in circles:
         if c["is_hole"]:
-            new_r = c["r"] + grow
-            if new_r <= 0:
-                raise LoopOffsetError(
-                    f"Shrinking hole R{c['r']:.4f} by {-grow:.4f} would "
-                    "invert it.")
-            replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+            measure = 2.0 * c["r"]
+            check_minimum(measure)
+            grow = grow_for(measure)
+            if grow:
+                new_r = c["r"] + grow
+                if new_r <= 0:
+                    raise LoopOffsetError(
+                        f"Shrinking hole R{c['r']:.4f} by {-grow:.4f} would "
+                        "invert it.")
+                replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+                stats["holes"] += 1
+            else:
+                stats["unchanged"] += 1
             _relayer(c, holes_layer, replace, warnings)
-            stats["holes"] += 1
         else:
-            new_r = c["r"] - shrink
-            if new_r <= 0:
-                raise LoopOffsetError(
-                    f"Shrinking circle R{c['r']:.4f} by {shrink:.4f} would "
-                    "invert it.")
-            replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+            if shrink:
+                new_r = c["r"] - shrink
+                if new_r <= 0:
+                    raise LoopOffsetError(
+                        f"Shrinking circle R{c['r']:.4f} by {shrink:.4f} "
+                        "would invert it.")
+                replace[2 * c["gi"][40] + 1] = _fmt(new_r)
             stats["profiles"] += 1
 
     # Loops: cutouts expand their opening; outer profiles pull inward.
     for li in loop_info:
         interior_left = li["area"] > 0
         if li["is_cutout"]:
-            s = -grow if interior_left else grow      # expand the opening
-        else:
-            s = shrink if interior_left else -shrink  # pull edges inward
-        new_segs = _offset_loop(li["segs"], s)
-        _patch_segments(new_segs, replace)
-        if li["is_cutout"]:
+            b = li["bbox"]
+            measure = min(b[2] - b[0], b[3] - b[1])   # a slot's WIDTH
+            check_minimum(measure)
+            grow = grow_for(measure)
+            if grow:
+                s = -grow if interior_left else grow  # expand the opening
+                new_segs = _offset_loop(li["segs"], s)
+                _patch_segments(new_segs, replace)
+                stats["cutouts"] += 1
+            else:
+                new_segs = li["segs"]
+                stats["unchanged"] += 1
             for ent in {id(seg["src"][1]): seg["src"][1] for seg in new_segs}.values():
                 _relayer(ent, holes_layer, replace, warnings)
-            stats["cutouts"] += 1
         else:
+            if shrink:
+                s = shrink if interior_left else -shrink  # pull edges inward
+                new_segs = _offset_loop(li["segs"], s)
+                _patch_segments(new_segs, replace)
             b = li["bbox"]
             stats["profiles"] += 1
             stats["profile_size"] = (b[2] - b[0], b[3] - b[1])
@@ -1267,15 +1358,44 @@ def _log_offset_stats(log, src, dest, stats, edge_offset):
         bits.append(f"{stats['holes']} hole(s) grown")
     if stats["cutouts"]:
         bits.append(f"{stats['cutouts']} cutout(s) grown")
+    if stats.get("unchanged"):
+        bits.append(f"{stats['unchanged']} left unchanged (>=2x thickness)")
     if stats["profiles"]:
         size = stats.get("profile_size")
-        bits.append("profile shrunk"
-                    + (f" ({size[0]:.4g} x {size[1]:.4g} -> "
-                       f"{size[0] - 2 * edge_offset:.4g} x "
-                       f"{size[1] - 2 * edge_offset:.4g})" if size else ""))
-    log(f"  {src.name} -> {dest.name}: " + ", ".join(bits))
+        if edge_offset:
+            bits.append("profile shrunk"
+                        + (f" ({size[0]:.4g} x {size[1]:.4g} -> "
+                           f"{size[0] - 2 * edge_offset:.4g} x "
+                           f"{size[1] - 2 * edge_offset:.4g})" if size else ""))
+        else:
+            bits.append("profile untouched")
+    if stats.get("band"):
+        bits.append(f"band: {stats['band']}")
+    log(f"  {src.name} -> {dest.name}: " + (", ".join(bits) or "no changes"))
+    for m in stats.get("below_min", []):
+        log(f"    WARNING: an interior feature measures {m:.4f}\" - below "
+            f"the customer's 1/2-thickness minimum.")
     for w in stats["warnings"]:
         log(f"    NOTE: {w}")
+
+
+def _parse_thickness(text):
+    """Plate thickness in inches from user text - decimals ('0.500', '.5')
+    or fractions ('1/2', '1 1/4', '1-1/4'). None when invalid or <= 0."""
+    t = (text or "").strip().replace('"', "")
+    m = re.match(r"^(\d+)[ -](\d+)/(\d+)$", t)
+    if m:
+        whole, num, den = (int(g) for g in m.groups())
+        return (whole + num / den) if den else None
+    m = re.match(r"^(\d+)/(\d+)$", t)
+    if m:
+        num, den = int(m.group(1)), int(m.group(2))
+        return (num / den) if (den and num) else None
+    try:
+        v = float(t)
+    except ValueError:
+        return None
+    return v if v > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -1356,14 +1476,22 @@ class AnalysisWindow(PluginWindow):
         self.resize(1320, 840)
         self._log = log
         self._on_success = on_success  # success chime; fired on a successful DXF export
-        self._settings = settings or {}  # Adjust Dimensions dialog defaults
+        self._settings = settings or {}  # dialog defaults + saved preferences
         self.entities = []
         self.layer_colors = {}
         self.items = []        # QGraphicsPathItem per entity
         self.labels = []       # QGraphicsSimpleTextItem per entity
         self.layer_checks = {}
         self._geom_rect = QRectF()
-        self._source_path = None
+        self._source_path = None   # what the viewer parsed (temp when offset)
+        self._orig_path = None     # the file Save overwrites
+        self._temp_path = None     # offset temp copy shown for review
+        self._offsets_applied = False
+        self._queue = []           # original paths queued for review
+        self._queue_idx = -1
+        self._automated = False
+        self._thicknesses = {}     # original path -> thickness (inches)
+        self._thick_edits = {}
         self._build_ui()
 
     # ----- UI construction -------------------------------------------------
@@ -1379,11 +1507,21 @@ class AnalysisWindow(PluginWindow):
         self.btn_open.clicked.connect(self.open_file_dialog)
         self.btn_fit = QPushButton("Fit View")
         self.btn_fit.clicked.connect(self.fit_view)
+        self.btn_save = QPushButton("Save")
+        self.btn_save.setToolTip(
+            "OVERWRITE the original file with what you see - applied "
+            "offsets plus any layer reassignments")
+        self.btn_save.setEnabled(False)
+        self.btn_save.clicked.connect(self.save_over_original)
         self.btn_export = QPushButton("Export DXF...")
         self.btn_export.setToolTip(
             "Save a copy of the DXF with the current layer assignments")
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self.export_dxf)
+        self.btn_next = QPushButton("Next ▶")
+        self.btn_next.setToolTip("Skip to the next queued file without saving")
+        self.btn_next.setVisible(False)
+        self.btn_next.clicked.connect(self._advance_queue)
         self.btn_adjust = QPushButton("Adjust Dimensions...")
         self.btn_adjust.setToolTip(
             "Grow/shrink the hole diameters and offset the outer profile, "
@@ -1394,13 +1532,18 @@ class AnalysisWindow(PluginWindow):
         self.chk_labels.setChecked(True)
         self.chk_labels.toggled.connect(self._update_label_visibility)
         self.lbl_file = QLabel("No file loaded")
+        self.lbl_offsets = QLabel("")   # "Offsets applied" / "No offsets applied"
         toolbar.addWidget(self.btn_open)
         toolbar.addWidget(self.btn_fit)
+        toolbar.addWidget(self.btn_save)
         toolbar.addWidget(self.btn_export)
         toolbar.addWidget(self.btn_adjust)
+        toolbar.addWidget(self.btn_next)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.chk_labels)
         toolbar.addStretch(1)
+        toolbar.addWidget(self.lbl_offsets)
+        toolbar.addSpacing(16)
         toolbar.addWidget(self.lbl_file)
         root.addLayout(toolbar)
 
@@ -1460,7 +1603,198 @@ class AnalysisWindow(PluginWindow):
         splitter.setSizes([800, 500])
         root.addWidget(splitter, 1)
 
-        self.set_content(container)
+        # Page 0 = the plate-thickness entry form (automated offsets),
+        # page 1 = the viewer. start_flow() picks the starting page.
+        self.stack = QStackedWidget()
+        self.stack.addWidget(self._build_thickness_page())
+        self.stack.addWidget(container)
+        self.stack.setCurrentIndex(1)
+        self.set_content(self.stack)
+
+    def _build_thickness_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(10)
+        self.lbl_thick_title = QLabel("Enter plate thickness")
+        self.lbl_thick_title.setStyleSheet("font-size: 17px; font-weight: bold;")
+        layout.addWidget(self.lbl_thick_title)
+        hint = QLabel(
+            'Thickness in inches - decimals ("0.500") or fractions ("1/2", '
+            '"1 1/4") both work. Offsets follow the customer guideline '
+            'table; features already measuring twice the plate thickness '
+            'are left alone, and under-0.188" or 3"-and-up plate gets no '
+            "increase.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        self._thick_form = QFormLayout(host)
+        scroll.setWidget(host)
+        layout.addWidget(scroll, 1)
+        btn_row = QHBoxLayout()
+        self.btn_thick_continue = QPushButton("Apply offsets")
+        self.btn_thick_continue.setEnabled(False)
+        self.btn_thick_continue.clicked.connect(self._thickness_submit)
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.close)
+        btn_row.addStretch(1)
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(self.btn_thick_continue)
+        layout.addLayout(btn_row)
+        return page
+
+    # ----- review flow (single or queued batch) -----------------------------
+
+    def start_flow(self, files, automated):
+        """Begin a review pass over `files` (original paths). Automated mode
+        collects every plate thickness first (one page, all files at once),
+        then offsets each file onto a temp copy for review; Save / Export /
+        Next advance through the queue either way."""
+        self._queue = [str(f) for f in files]
+        self._queue_idx = -1
+        self._automated = automated
+        self._thicknesses = {}
+        self.btn_next.setVisible(len(self._queue) > 1)
+        if automated:
+            self._populate_thickness_rows()
+            self.stack.setCurrentIndex(0)
+        else:
+            self.stack.setCurrentIndex(1)
+            self._advance_queue()
+
+    def _populate_thickness_rows(self):
+        while self._thick_form.rowCount():
+            self._thick_form.removeRow(0)
+        self._thick_edits = {}
+        many = len(self._queue) > 1
+        self.lbl_thick_title.setText(
+            f"Enter plate thickness for each file ({len(self._queue)} files)"
+            if many else
+            f"Enter plate thickness - {Path(self._queue[0]).name}")
+        for p in self._queue:
+            edit = QLineEdit()
+            edit.setPlaceholderText("e.g. 0.500 or 1/2")
+            edit.textChanged.connect(self._thickness_validate)
+            self._thick_form.addRow(Path(p).name, edit)
+            self._thick_edits[p] = edit
+        if self._thick_edits:
+            next(iter(self._thick_edits.values())).setFocus()
+        self._thickness_validate()
+
+    def _thickness_validate(self):
+        self.btn_thick_continue.setEnabled(
+            bool(self._thick_edits)
+            and all(_parse_thickness(e.text()) is not None
+                    for e in self._thick_edits.values()))
+
+    def _thickness_submit(self):
+        for p, e in self._thick_edits.items():
+            t = _parse_thickness(e.text())
+            if t is None:
+                return
+            self._thicknesses[p] = t
+        self.stack.setCurrentIndex(1)
+        self._advance_queue()
+
+    def _advance_queue(self):
+        self._queue_idx += 1
+        if self._queue_idx >= len(self._queue):
+            if len(self._queue) > 1:
+                self._log("Batch review complete - every file has been shown.")
+                self._set_offsets_status("done")
+            self.btn_next.setVisible(False)
+            self._queue = []
+            self._queue_idx = -1
+            return
+        orig = self._queue[self._queue_idx]
+        self._open_for_review(orig, self._thicknesses.get(orig))
+
+    def _open_for_review(self, orig_path, thickness):
+        """Show one file in the viewer - offset onto a temp copy first when
+        automated mode collected a thickness for it."""
+        self._cleanup_temp()
+        self._orig_path = orig_path
+        self._offsets_applied = False
+        show_path = orig_path
+        stats = None
+        if self._automated and thickness is not None:
+            try:
+                sdk.ensure_local(orig_path, log=self._log)
+                fd, tmp = tempfile.mkstemp(suffix=".dxf", prefix="tdk_offset_")
+                os.close(fd)
+                stats = process_dxf(
+                    orig_path, tmp, 0.0, 0.0,
+                    (self._settings.get("holes_layer")
+                     or DEFAULT_HOLES_LAYER).strip(),
+                    self._log, thickness=thickness)
+                self._temp_path = tmp
+                show_path = tmp
+                self._offsets_applied = True
+                _log_offset_stats(self._log, Path(orig_path), Path(orig_path),
+                                  stats, 0.0)
+            except (LoopOffsetError, ValueError) as e:
+                self._log(f"  OFFSETS FAILED for {Path(orig_path).name}: {e}")
+                QMessageBox.warning(
+                    self, "Customer DXF Analysis",
+                    f"Could not apply offsets to {Path(orig_path).name}:\n"
+                    f"{e}\n\nShowing the ORIGINAL file un-offset.")
+        self.load_dxf(show_path, display_name=Path(orig_path).name)
+        if self._offsets_applied:
+            self._set_offsets_status("applied", stats=stats,
+                                     thickness=thickness)
+        elif self._automated and thickness is not None:
+            self._set_offsets_status("failed")
+        else:
+            self._set_offsets_status("none")
+
+    def _set_offsets_status(self, state, stats=None, thickness=None):
+        """The toolbar verdict label: green check when offsets were applied,
+        amber when nothing was touched, red when they failed."""
+        if state == "applied":
+            head = "<span style='color:#43A047;'>✓ Offsets applied</span>"
+            bits = []
+            if thickness is not None and stats and stats.get("band"):
+                bits.append(f"{thickness:g}\" plate, {stats['band']}")
+            if stats:
+                n = stats["holes"] + stats["cutouts"]
+                if n:
+                    bits.append(f"{n} increased")
+                if stats.get("unchanged"):
+                    bits.append(f"{stats['unchanged']} left (≥2×t)")
+            text = head
+            if bits:
+                text += (" <span style='color:#9E9E9E;'>("
+                         + " · ".join(bits) + ")</span>")
+            if stats and stats.get("below_min"):
+                text += (f" <span style='color:#E53935;'>⚠ "
+                         f"{len(stats['below_min'])} below 1/2-t minimum"
+                         f"</span>")
+            self.lbl_offsets.setText(text)
+        elif state == "failed":
+            self.lbl_offsets.setText(
+                "<span style='color:#E53935;'>⚠ Offsets failed - "
+                "showing original</span>")
+        elif state == "done":
+            self.lbl_offsets.setText(
+                "<span style='color:#43A047;'>✓ Batch review "
+                "complete</span>")
+        else:
+            self.lbl_offsets.setText(
+                "<span style='color:#FFB300;'>No offsets applied</span>")
+
+    def _cleanup_temp(self):
+        if self._temp_path:
+            try:
+                os.unlink(self._temp_path)
+            except OSError:
+                pass
+            self._temp_path = None
+
+    def closeEvent(self, event):
+        self._cleanup_temp()
+        super().closeEvent(event)
 
     # ----- file loading -----------------------------------------------------
 
@@ -1469,9 +1803,19 @@ class AnalysisWindow(PluginWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open DXF", start_dir, "DXF files (*.dxf);;All files (*.*)")
         if path:
+            # A manual open leaves any review queue behind and shows the
+            # file exactly as it is on disk - no offsets.
+            self._queue = []
+            self._queue_idx = -1
+            self.btn_next.setVisible(False)
+            self._cleanup_temp()
+            self._orig_path = path
+            self._offsets_applied = False
+            self.stack.setCurrentIndex(1)
             self.load_dxf(path)
+            self._set_offsets_status("none")
 
-    def load_dxf(self, path):
+    def load_dxf(self, path, display_name=None):
         try:
             sdk.ensure_local(path, log=self._log)
             entities, layer_colors, skipped, insunits = parse_dxf(path)
@@ -1487,10 +1831,15 @@ class AnalysisWindow(PluginWindow):
         self.entities = entities
         self.layer_colors = layer_colors
         self._source_path = path
+        if self._orig_path is None:
+            self._orig_path = path
         self.btn_export.setEnabled(True)
         self.btn_adjust.setEnabled(True)
+        self.btn_save.setEnabled(True)
 
-        self.lbl_file.setText(Path(path).name)
+        pos = (f"   ({self._queue_idx + 1} of {len(self._queue)})"
+               if len(self._queue) > 1 else "")
+        self.lbl_file.setText((display_name or Path(path).name) + pos)
         self._populate_scene()
         self._populate_layer_checks()
         self._refresh_assign_combo()
@@ -1510,7 +1859,7 @@ class AnalysisWindow(PluginWindow):
         if insunits not in (None, 0, 1):
             self._log(f"NOTE: DXF $INSUNITS={insunits} (not inches) - "
                       "totals are in drawing units.")
-        self._log_summary(path)
+        self._log_summary(display_name or path)
 
     def _log_summary(self, path):
         self._log(f"Loaded {Path(path).name}: {len(self.entities)} entities")
@@ -1761,11 +2110,15 @@ class AnalysisWindow(PluginWindow):
                                f"   ({len(ents)} entities)")
 
     def export_dxf(self):
-        """Save a copy of the loaded DXF with the current layer assignments."""
+        """Save a copy of what you see (offsets, if applied, plus the
+        current layer assignments) to a picked path. In a batch review the
+        queue advances to the next file afterward."""
         if not self._source_path or not self.entities:
             return
-        src = Path(self._source_path)
-        default = str(src.with_name(f"{src.stem} - Reassigned.dxf"))
+        orig = Path(self._orig_path or self._source_path)
+        default = str(orig.with_name(
+            f"{orig.stem} OFFSET.dxf" if self._offsets_applied
+            else f"{orig.stem} - Reassigned.dxf"))
         dest, _ = QFileDialog.getSaveFileName(
             self, "Export DXF", default, "DXF files (*.dxf)")
         if not dest:
@@ -1784,6 +2137,57 @@ class AnalysisWindow(PluginWindow):
                   f"({changed} reassigned line(s) written back)")
         if callable(self._on_success):
             self._on_success()
+        if self._queue:
+            self._advance_queue()
+
+    def save_over_original(self):
+        """OVERWRITE the original file with the current state - applied
+        offsets plus any layer reassignments. Advances the batch queue."""
+        if not self._orig_path or not self.entities:
+            return
+        if not self._confirm_overwrite():
+            return
+        try:
+            text, enc = export_with_layers(self._source_path, self.entities)
+            Path(self._orig_path).write_text(text, encoding=enc, newline="")
+        except Exception as e:
+            QMessageBox.critical(self, "Customer DXF Analysis",
+                                 f"Save failed:\n{e}")
+            self._log(f"Save failed: {e}")
+            return
+        self._log(f"Saved {Path(self._orig_path).name} - original overwritten"
+                  + (" with offsets applied" if self._offsets_applied else "")
+                  + ".")
+        if callable(self._on_success):
+            self._on_success()
+        if self._queue:
+            self._advance_queue()
+
+    def _confirm_overwrite(self):
+        """The overwrite warning, with a persisted don't-ask-me-again."""
+        if bool(self._settings.get("suppress_overwrite_warning")):
+            return True
+        box = QMessageBox(self)
+        box.setWindowTitle("Customer DXF Analysis")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"Save will OVERWRITE the original file:\n\n"
+                    f"{self._orig_path}\n\nThere is no undo.")
+        box.setStandardButtons(QMessageBox.StandardButton.Save
+                               | QMessageBox.StandardButton.Cancel)
+        chk = QCheckBox("Don't ask me this again")
+        box.setCheckBox(chk)
+        if box.exec() != QMessageBox.StandardButton.Save:
+            return False
+        if chk.isChecked():
+            self._settings["suppress_overwrite_warning"] = True
+            try:
+                from techdeck.core.settings import SettingsManager
+                SettingsManager().set_plugin_setting(
+                    "customer_dxf_analysis",
+                    "suppress_overwrite_warning", True)
+            except Exception:
+                pass  # session-only suppression still honored
+        return True
 
     def open_adjust_dialog(self):
         """Adjust the hole/profile dimensions of the loaded file and write
@@ -1803,7 +2207,13 @@ class AnalysisWindow(PluginWindow):
                                      self._on_success)
         dlg.exec()
         if dlg.written_path and dlg.chk_open.isChecked():
+            # The OFFSET output becomes the viewed document; Save now
+            # overwrites IT (it's already a copy of the original).
+            self._cleanup_temp()
+            self._orig_path = str(dlg.written_path)
+            self._offsets_applied = True
             self.load_dxf(str(dlg.written_path))
+            self._set_offsets_status("applied")
 
     def fit_view(self):
         if not self._geom_rect.isNull():
@@ -1961,77 +2371,37 @@ def _num(settings, key, default):
         return default
 
 
-def _ask_mode():
-    """Single-vs-folder popup. run() executes on the MAIN Qt thread
-    (requires_main_thread), where the console's request_choice - a
-    worker-thread marshal - raises; a direct QMessageBox is the same UX.
-    Returns "Single file" / "Whole folder", or None on cancel."""
+def _ask_mode(settings):
+    """Single-vs-folder popup with the "Automated offsets" toggle. run()
+    executes on the MAIN Qt thread (requires_main_thread), where the
+    console's request_choice - a worker-thread marshal - raises; a direct
+    QMessageBox is the same UX. Returns (mode, automated); mode is None on
+    cancel. The toggle's last state persists across runs."""
     box = QMessageBox()
     box.setWindowTitle("Customer DXF Analysis")
-    box.setText("Analyze a single DXF file, or offset every DXF in a folder?")
+    box.setText("Analyze a single DXF file, or review every DXF in a folder?")
     box.setIcon(QMessageBox.Icon.Question)
     options = ["Single file", "Whole folder"]
     buttons = [box.addButton(o, QMessageBox.ButtonRole.AcceptRole)
                for o in options]
     box.addButton(QMessageBox.StandardButton.Cancel)
     box.setDefaultButton(buttons[0])
+    chk = QCheckBox("Automated offsets (customer guideline table)")
+    chk.setChecked(bool(settings.get("automated_offsets_last", True)))
+    box.setCheckBox(chk)
     box.exec()
+    automated = chk.isChecked()
+    try:
+        from techdeck.core.settings import SettingsManager
+        SettingsManager().set_plugin_setting(
+            "customer_dxf_analysis", "automated_offsets_last", automated)
+    except Exception:
+        pass  # remembering the toggle is best-effort
     clicked = box.clickedButton()
     for opt, btn in zip(options, buttons):
         if btn is clicked:
-            return opt
-    return None
-
-
-def _run_batch(folder, settings, log, progress_callback, cancel_event, params):
-    """Offset every DXF directly in `folder` (the old DXF Offset Tool batch
-    flow) using the Settings > Apps offsets. Inputs already ending " OFFSET"
-    (or "_OFFSET" - hand-renamed outputs exist in the wild) are skipped, so
-    reruns are idempotent."""
-    hole_increase = _num(settings, "hole_increase", DEFAULT_HOLE_INCREASE)
-    edge_offset = _num(settings, "edge_offset", DEFAULT_EDGE_OFFSET)
-    holes_layer = (settings.get("holes_layer") or DEFAULT_HOLES_LAYER).strip()
-
-    files = sorted(p for p in folder.iterdir()
-                   if p.suffix.lower() == ".dxf"
-                   and not p.stem.upper().endswith((" OFFSET", "_OFFSET")))
-    if not files:
-        raise sdk.UserFacingError(
-            "The folder has no DXF files in it.",
-            "Pick the folder that holds the part DXFs.")
-
-    log(f"Offsetting {len(files)} DXF file(s): holes +{hole_increase:.4f}\" dia, "
-        f"profile -{edge_offset:.4f}\" per side, holes -> layer {holes_layer}.")
-
-    done, failed = 0, 0
-    for i, src in enumerate(files):
-        sdk.raise_if_cancelled(cancel_event)
-        dest = src.with_name(f"{src.stem} OFFSET.dxf")
-        try:
-            sdk.ensure_local(src, log=log)
-            stats = process_dxf(str(src), str(dest), hole_increase,
-                                edge_offset, holes_layer, log)
-        except (LoopOffsetError, ValueError) as exc:
-            failed += 1
-            log(f"  SKIPPED {src.name}: {exc}")
-            continue
-        done += 1
-        _log_offset_stats(log, src, dest, stats, edge_offset)
-        progress_callback(int((i + 1) / len(files) * 100))
-
-    if failed and hasattr(sdk, "set_run_outcome"):
-        sdk.set_run_outcome(
-            params, sdk.RUN_OUTCOME_PARTIAL,
-            f"{failed} of {len(files)} file(s) skipped - see notes above.")
-    if done == 0:
-        raise sdk.UserFacingError(
-            "No DXF could be processed - every file was skipped.",
-            "Check the notes above; the files may use unsupported geometry.")
-    on_success = params.get("on_success")
-    if callable(on_success):
-        # GUI-thread plugin: the shell suppresses its auto chime, so the
-        # batch path must fire the success chime itself (plugin Hard Rule).
-        on_success()
+            return opt, automated
+    return None, automated
 
 
 def run(params: dict, progress_callback, cancel_event):
@@ -2040,13 +2410,26 @@ def run(params: dict, progress_callback, cancel_event):
     settings = params.get("settings", {})
 
     progress_callback(5)
-    mode = _ask_mode()
+    mode, automated = _ask_mode(settings)
     if mode is None:
         if hasattr(cancel_event, "set"):
             cancel_event.set()
         return
 
-    if mode == "Whole folder":
+    if mode == "Single file":
+        default = (settings.get("default_dxf") or "").strip()
+        if default and Path(default).is_file():
+            files = [default]
+        else:
+            picked, _ = QFileDialog.getOpenFileName(
+                None, "Open DXF", str(Path.home() / "Downloads"),
+                "DXF files (*.dxf);;All files (*.*)")
+            if not picked:
+                if hasattr(cancel_event, "set"):
+                    cancel_event.set()
+                return
+            files = [picked]
+    else:
         folder = QFileDialog.getExistingDirectory(
             None, "Select the folder of DXF files",
             str(Path.home() / "Downloads"))
@@ -2054,21 +2437,24 @@ def run(params: dict, progress_callback, cancel_event):
             if hasattr(cancel_event, "set"):
                 cancel_event.set()
             return
-        _run_batch(Path(folder), settings, log, progress_callback,
-                   cancel_event, params)
-        return
+        # Outputs of the old batch flow (" OFFSET"/"_OFFSET" stems) are
+        # never queued for re-offsetting.
+        files = sorted(str(p) for p in Path(folder).iterdir()
+                       if p.suffix.lower() == ".dxf"
+                       and not p.stem.upper().endswith((" OFFSET", "_OFFSET")))
+        if not files:
+            raise sdk.UserFacingError(
+                "The folder has no DXF files in it.",
+                "Pick the folder that holds the part DXFs.")
 
-    log("Opening Customer DXF Analysis...")
+    log("Opening Customer DXF Analysis - automated offsets "
+        + ("ON" if automated else "OFF")
+        + (f", {len(files)} file(s) queued" if len(files) > 1 else "")
+        + "...")
     progress_callback(10)
     _window = AnalysisWindow(log=log, on_success=params.get("on_success"),
                              settings=settings)
     _window.show()
-
-    default = (settings.get("default_dxf") or "").strip()
-    if default and Path(default).is_file():
-        _window.load_dxf(default)
-    else:
-        _window.open_file_dialog()
-
+    _window.start_flow(files, automated)
     progress_callback(100)
     log("Customer DXF Analysis window opened.")

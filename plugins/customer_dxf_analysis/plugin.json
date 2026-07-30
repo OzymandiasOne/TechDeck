@@ -1,8 +1,8 @@
 {
   "id": "customer_dxf_analysis",
   "name": "Customer DXF Analysis",
-  "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus hole/profile offsetting - grow every hole's diameter and shrink the outer profile per side (defaults 1/16\"), for the loaded file via Adjust Dimensions or for a whole folder at once.",
-  "version": "2.0.1",
+  "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus automated customer-guideline offsets - enter the plate thickness and every hole/cutout is increased per the customer's band table (2x-thickness cap, below-minimum warnings), then review each file and Save over the original or Export a copy. Batch mode queues a whole folder for one-by-one review. Manual amounts remain available via Adjust Dimensions.",
+  "version": "2.1.0",
   "author": "Anthony Sieben",
   "family": "General",
   "requires_admin": false,
@@ -22,16 +22,16 @@
       {
         "key": "hole_increase",
         "type": "number",
-        "label": "Hole diameter increase (inches)",
-        "description": "How much bigger each hole's DIAMETER gets when offsetting. Default 0.0625 (1/16\").",
+        "label": "Manual hole diameter increase (inches)",
+        "description": "Default for the MANUAL Adjust Dimensions dialog (automated offsets use the customer guideline table instead). Default 0.0625 (1/16\").",
         "required": false,
         "default": 0.0625
       },
       {
         "key": "edge_offset",
         "type": "number",
-        "label": "Plate edge offset per side (inches)",
-        "description": "How far each edge of the outer profile moves inward when offsetting. Default 0.0625 (1/16\") - a 12x12 plate becomes 11.875x11.875.",
+        "label": "Manual plate edge offset per side (inches)",
+        "description": "Default for the MANUAL Adjust Dimensions dialog (automated offsets never touch the outer profile). Default 0.0625 (1/16\").",
         "required": false,
         "default": 0.0625
       },
@@ -42,6 +42,14 @@
         "description": "Hole geometry is moved to this layer in the OFFSET output DXF.",
         "required": false,
         "default": "HOLES"
+      },
+      {
+        "key": "suppress_overwrite_warning",
+        "type": "boolean",
+        "label": "Skip the Save overwrite warning",
+        "description": "When on, Save overwrites the original DXF without asking first. Set automatically by the warning's 'Don't ask me this again' checkbox; turn back off here to get the warning again.",
+        "required": false,
+        "default": false
       }
     ]
   }
