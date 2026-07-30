@@ -29,6 +29,8 @@ Flow:
   6. POST one JSON payload to a Power Automate webhook, which find-or-creates
      the ordered bucket list (HOLD / BATCH {n} / MODEL CHECK / 7000 / SHOP
      READY, left to right) and creates the tasks in the D922 PIPELINE plan.
+     Cards are POSTED in reverse folder order (_order_for_planner) so Planner,
+     which top-inserts each new task, shows the bucket A-Z top-to-bottom.
      With no webhook URL (or dry_run on) it just previews the payload and
      writes it to disk for inspection.
 
@@ -67,6 +69,11 @@ pick now happens ONCE up front (orchestrator level) and feeds every stage.
 
 v2.3.1: an order spanning several PPNs (several folders) gets its work
 packet PDF placed in EVERY one of its folders, not just the first.
+
+v2.3.3: Teams cards now read A-Z top-to-bottom in the bucket. Planner
+top-inserts each new task, so posting folders A-Z made the bucket read Z-A
+(user report); cards are now posted in reverse (_order_for_planner) so the
+alphabetically-first card lands on top.
 """
 from __future__ import annotations
 
@@ -82,7 +89,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.3.1"
+VERSION = "2.3.3"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -283,6 +290,19 @@ def _build_cards(template: dict, batch: str, folders: list[str],
     return cards
 
 
+def _order_for_planner(cards: list[dict]) -> list[dict]:
+    """Order the cards for POSTING so the bucket reads A-Z top-to-bottom.
+
+    Planner's "Create a task" inserts each new card at the TOP of its bucket, so
+    posting the folders in natural A-Z order makes the bucket read Z-A (reported
+    by C.D. 2026-07-27, "THEY'RE Z-A ... AND THATS MESSED UP"). Posting in
+    reverse means the alphabetically-FIRST folder is created LAST and lands on
+    top -> the bucket reads A-Z. Cards are built A-Z (labels/logs/preview stay
+    natural); only the post order is flipped.
+    """
+    return list(reversed(cards))
+
+
 def _write_preview(payload: dict, log) -> None:
     """Save the built payload next to TechDeck's data for inspection."""
     sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
@@ -407,8 +427,9 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
     payload = {
         "plan": template.get("plan", "D922 PIPELINE"),
         "batch": batch,
-        "buckets": buckets,
-        "tasks": cards,
+        # Posted in reverse so Planner (which top-inserts each new card) shows the
+        # bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
+        "tasks": _order_for_planner(cards),
     }
 
     log(f"\nBuckets (left to right): {', '.join(buckets)}")
