@@ -564,6 +564,12 @@ class MainWindow(QMainWindow):
     
     def _on_plugin_completed(self, plugin_id: str):
         """Handle plugin completion."""
+        # Print any still-buffered plugin output FIRST. Worker log lines sit in
+        # RunController's _log_buffer until its 50ms drain timer fires, while
+        # this handler is queued directly at completion — without a flush the
+        # ✅/ticket/talkback block prints, THEN the timer delivers the plugin's
+        # last lines underneath it. The banner must be the run's last word.
+        self._flush_plugin_logs()
         plugin = self.home_page.plugin_loader.get_plugin(plugin_id)
         plugin_name = plugin.name if plugin else plugin_id
         
