@@ -2,7 +2,7 @@
   "id": "customer_dxf_analysis",
   "name": "Customer DXF Analysis",
   "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus automated customer-guideline offsets - enter the plate thickness and every hole/cutout is increased per the customer's band table (2x-thickness cap, below-minimum warnings), then review each file and Save over the original or Export a copy. Batch mode queues a whole folder for one-by-one review. Manual amounts remain available via Adjust Dimensions.",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "Anthony Sieben",
   "family": "General",
   "requires_admin": false,

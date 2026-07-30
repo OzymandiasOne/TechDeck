@@ -37,7 +37,8 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QStackedWidget,
     QScrollArea
 )
-from PySide6.QtCore import Qt, QRect, QRectF, QTimer, QItemSelectionModel
+from PySide6.QtCore import (Qt, QEvent, QRect, QRectF, QTimer,
+                            QItemSelectionModel)
 from PySide6.QtGui import (QPen, QBrush, QColor, QPainter, QPainterPath,
                            QPixmap, QIcon, QTransform)
 
@@ -1491,6 +1492,7 @@ class AnalysisWindow(PluginWindow):
         self._queue = []           # original paths queued for review
         self._queue_idx = -1
         self._automated = False
+        self._flow_active = False  # a start_flow review pass is running
         self._thicknesses = {}     # original path -> thickness (inches)
         self._thick_edits = {}
         self._build_ui()
@@ -1511,7 +1513,7 @@ class AnalysisWindow(PluginWindow):
         self.btn_save = QPushButton("Save")
         self.btn_save.setToolTip(
             "OVERWRITE the original file with what you see - applied "
-            "offsets plus any layer reassignments")
+            "offsets plus any layer reassignments (Enter)")
         self.btn_save.setEnabled(False)
         self.btn_save.clicked.connect(self.save_over_original)
         self.btn_export = QPushButton("Export DXF...")
@@ -1622,10 +1624,10 @@ class AnalysisWindow(PluginWindow):
         layout.addWidget(self.lbl_thick_title)
         hint = QLabel(
             'Thickness in inches - decimals ("0.500") or fractions ("1/2", '
-            '"1 1/4") both work. Offsets follow the customer guideline '
-            'table; features already measuring twice the plate thickness '
-            'are left alone, and under-0.188" or 3"-and-up plate gets no '
-            "increase.")
+            '"1 1/4") both work; press Enter to apply. Offsets follow the '
+            "customer guideline table; features already measuring twice "
+            'the plate thickness are left alone, and under-0.188" or '
+            '3"-and-up plate gets no increase.')
         hint.setWordWrap(True)
         layout.addWidget(hint)
         scroll = QScrollArea()
@@ -1656,6 +1658,7 @@ class AnalysisWindow(PluginWindow):
         self._queue = [str(f) for f in files]
         self._queue_idx = -1
         self._automated = automated
+        self._flow_active = True
         self._thicknesses = {}
         self.btn_next.setVisible(len(self._queue) > 1)
         if automated:
@@ -1678,6 +1681,12 @@ class AnalysisWindow(PluginWindow):
             edit = QLineEdit()
             edit.setPlaceholderText("e.g. 0.500 or 1/2")
             edit.textChanged.connect(self._thickness_validate)
+            # Enter is handled through an event FILTER, not returnPressed:
+            # QLineEdit deliberately doesn't consume Return (dialog default
+            # buttons rely on that), so the same keypress would propagate to
+            # the window handler - which, right after submit, is on the
+            # viewer page and would instantly Save the first file.
+            edit.installEventFilter(self)
             self._thick_form.addRow(Path(p).name, edit)
             self._thick_edits[p] = edit
         if self._thick_edits:
@@ -1690,6 +1699,28 @@ class AnalysisWindow(PluginWindow):
             and all(_parse_thickness(e.text()) is not None
                     for e in self._thick_edits.values()))
 
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.KeyPress
+                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
+                and any(obj is e for e in self._thick_edits.values())):
+            self._thickness_enter(obj)
+            return True  # consumed - never reaches keyPressEvent below
+        return super().eventFilter(obj, event)
+
+    def _thickness_enter(self, edit=None):
+        """Enter in a thickness box submits once every box parses;
+        otherwise it jumps to the next box that still needs a value."""
+        if self.btn_thick_continue.isEnabled():
+            self._thickness_submit()
+            return
+        edits = list(self._thick_edits.values())
+        start = edits.index(edit) + 1 if edit in edits else 0
+        for e in edits[start:] + edits[:start]:
+            if _parse_thickness(e.text()) is None:
+                e.setFocus()
+                e.selectAll()
+                return
+
     def _thickness_submit(self):
         for p, e in self._thick_edits.items():
             t = _parse_thickness(e.text())
@@ -1697,6 +1728,7 @@ class AnalysisWindow(PluginWindow):
                 return
             self._thicknesses[p] = t
         self.stack.setCurrentIndex(1)
+        self.stack.currentWidget().setFocus()  # so Enter now reaches Save
         self._advance_queue()
 
     def _advance_queue(self):
@@ -1708,6 +1740,10 @@ class AnalysisWindow(PluginWindow):
             self.btn_next.setVisible(False)
             self._queue = []
             self._queue_idx = -1
+            if self._flow_active:
+                # The review flow is over ("save and end") - close up.
+                self._flow_active = False
+                self.close()
             return
         orig = self._queue[self._queue_idx]
         self._open_for_review(orig, self._thicknesses.get(orig))
@@ -1797,6 +1833,21 @@ class AnalysisWindow(PluginWindow):
         self._cleanup_temp()
         super().closeEvent(event)
 
+    def keyPressEvent(self, event):
+        """Enter drives the review flow: on the thickness page it submits
+        (the boxes' returnPressed handles the focused case); in the viewer
+        it saves - and Save advances the queue / ends the flow, so a
+        batch is Enter, Enter, Enter... straight through."""
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            if self.stack.currentIndex() == 1 and self.btn_save.isEnabled():
+                self.save_over_original()
+                return
+            if (self.stack.currentIndex() == 0
+                    and self.btn_thick_continue.isEnabled()):
+                self._thickness_submit()
+                return
+        super().keyPressEvent(event)
+
     # ----- file loading -----------------------------------------------------
 
     def open_file_dialog(self):
@@ -1808,6 +1859,7 @@ class AnalysisWindow(PluginWindow):
             # file exactly as it is on disk - no offsets.
             self._queue = []
             self._queue_idx = -1
+            self._flow_active = False
             self.btn_next.setVisible(False)
             self._cleanup_temp()
             self._orig_path = path
@@ -2175,6 +2227,9 @@ class AnalysisWindow(PluginWindow):
                     f"{self._orig_path}\n\nThere is no undo.")
         box.setStandardButtons(QMessageBox.StandardButton.Save
                                | QMessageBox.StandardButton.Cancel)
+        # Enter confirms - the whole flow is drivable from the keyboard
+        # (thickness, Enter, Enter to save each plate).
+        box.setDefaultButton(QMessageBox.StandardButton.Save)
         chk = QCheckBox("Don't ask me this again")
         box.setCheckBox(chk)
         if box.exec() != QMessageBox.StandardButton.Save:
