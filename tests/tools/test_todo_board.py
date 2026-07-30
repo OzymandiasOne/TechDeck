@@ -242,6 +242,21 @@ def test_label_color_mapping():
     assert label_color("Custom Tag") == label_color("Custom Tag")   # stable
 
 
+def test_menu_stylesheet_is_opaque_and_themed():
+    """The card / bucket menus set their own QMenu style so Win11 doesn't render
+    them with a translucent popup (the app-wide rule doesn't reach a menu whose
+    parent carries its own stylesheet)."""
+    from types import SimpleNamespace
+    from tools.devkit.todo_board.widgets import menu_stylesheet
+    pal = SimpleNamespace(surface="#111111", text="#EEEEEE", border_strong="#444444",
+                          surface_hover="#222222", accent="#00AAFF",
+                          text_secondary="#888888", border="#333333")
+    qss = menu_stylesheet(pal)
+    assert "QMenu {" in qss and "background-color: #111111" in qss   # opaque bg
+    assert "QMenu::item:selected" in qss and "#00AAFF" in qss
+    assert "QMenu::separator" in qss
+
+
 def test_task_card_renders_title_labels_checklist(qapp, tmp_path):
     from techdeck.ui.theme_manager import get_theme_manager
     from tools.devkit.todo_board.widgets import TaskCard, LabelChip

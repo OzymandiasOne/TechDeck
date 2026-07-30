@@ -24,7 +24,7 @@ from tools.devkit.todo_board.model import (
     BoardStore, load_feedback, flush_writebacks,
     DONE_BUCKET_ID, WONT_DO_BUCKET_ID,
 )
-from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME
+from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME, menu_stylesheet
 
 COLUMN_WIDTH = 290
 # Terminal buckets accumulate forever, so cap how many cards render and offer a
@@ -300,6 +300,7 @@ class BucketColumn(QFrame):
 
     def _open_menu(self, anchor):
         menu = QMenu(self)
+        menu.setStyleSheet(menu_stylesheet(self._pal))
         act_add = menu.addAction("Add card…")
         act_rename = menu.addAction("Rename bucket…")
         menu.addSeparator()

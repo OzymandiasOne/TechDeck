@@ -29,6 +29,28 @@ from techdeck.ui.widgets.flow_layout import FlowLayout
 
 CARD_MIME = "application/x-techdeck-todocard"
 
+
+def menu_stylesheet(pal) -> str:
+    """Explicit QMenu look, applied to each menu instance.
+
+    theme.py already carries an app-wide ``QMenu`` rule, but a menu parented to a
+    widget that has its OWN ``setStyleSheet`` (the cards and bucket columns both
+    do) doesn't reliably inherit it — on Win11 Qt then shows the popup with a
+    translucent background, so the items float transparently. Setting the style
+    on the menu widget itself guarantees an opaque, themed menu regardless of the
+    cascade."""
+    return (
+        f"QMenu {{ background-color: {pal.surface}; color: {pal.text}; "
+        f"border: 1px solid {pal.border_strong}; border-radius: 6px; padding: 4px; }}"
+        f"QMenu::item {{ background: transparent; padding: 6px 24px 6px 12px; "
+        f"border-radius: 4px; }}"
+        f"QMenu::item:selected {{ background-color: {pal.surface_hover}; "
+        f"color: {pal.accent}; }}"
+        f"QMenu::item:disabled {{ color: {pal.text_secondary}; }}"
+        f"QMenu::separator {{ height: 1px; background-color: {pal.border}; "
+        f"margin: 4px 8px; }}"
+    )
+
 # Family colors match the Home tile badges; everything else gets a stable color
 # from a small chip palette so a given label is always the same hue.
 _FAMILY_COLORS = {
@@ -415,6 +437,7 @@ class TaskCard(QFrame):
 
     def _open_menu(self):
         menu = QMenu(self)
+        menu.setStyleSheet(menu_stylesheet(self._pal))
         act_done = menu.addAction(
             "Mark not done" if self._card().get("done") else "Mark done")
         act_label = menu.addAction("Add label…")
