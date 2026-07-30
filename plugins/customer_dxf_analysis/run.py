@@ -1178,11 +1178,12 @@ def _unit_scale(insunits, log):
 # never resized). A feature's "measure" is a circle's diameter or a
 # cutout's width (smallest bounding-box dimension).
 #
-# NOTE: the customer doc contradicts itself at exactly 0.375 plate - the
-# typed table says Medium starts at 0.500 (0.375 -> Grande, +1/32 dia)
-# while the embedded spreadsheet image says Medium is 0.375-1.125 (+1/16).
-# Implemented per the TYPED table; flip _MEDIUM_MIN to 0.375 if the
-# customer rules the other way.
+# Customer rulings (2026-07-30, via their contact):
+# - The doc's TYPED table governs; the embedded spreadsheet image was "an
+#   info dump for reference". So Medium starts at 0.500 and exactly-0.375
+#   plate is Grande (+1/32 dia), per _MEDIUM_MIN below.
+# - The 2x-thickness cap tests the INITIAL, pre-offset measure: a feature
+#   under the cap gets the full increase even if the result lands past 2t.
 _MEDIUM_MIN = 0.500
 GUIDELINE_BANDS = [  # (min thickness inclusive, band name, per-side offset)
     (0.188, "Grande", 0.0156),
