@@ -874,7 +874,7 @@ def _load_omit_stamp_helpers(log):
 
 def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
                             dest_path: Path, log, batch: str = "",
-                            material_hint: str = "") -> bool:
+                            material_hint: str = "", difficulty=None) -> bool:
     """
     Build the MOVE TICKET OMIT PDF for a nest.
 
@@ -928,7 +928,8 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
 
         if stamps:
             material = " / ".join(sorted(materials)) or (material_hint or "")
-            for w in stamps._stamp_first_page(doc[0], batch, nest_number, material, log):
+            for w in stamps._stamp_first_page(doc[0], batch, nest_number, material,
+                                              log, difficulty):
                 log(f"  WARNING: {w}")
 
         doc.save(str(dest_path), garbage=3, deflate=True)
@@ -1318,6 +1319,36 @@ def _find_template_911(template_dir: Path) -> Path:
 # Main run() function -- TechDeck plugin interface
 # ---------------------------------------------------------------------------
 
+def _dialog_groups() -> list:
+    """The master window's plain-data spec (sdk.request_grouped_toggles).
+
+    Grouped by ARTEFACT rather than by the numbered internal steps, because
+    steps 5-7 all write into the same NEST sheet and are meaningless apart.
+    "Difficulty label" is a child of PDF Stamping and defaults ON (C.D.,
+    2026-07-31).
+    """
+    return [
+        {"key": "folder_setup",
+         "label": "Nest Folder Setup",
+         "checked": True,
+         "children": []},
+        {"key": "nest_data",
+         "label": "Nest Workbook Data (forecast, mil spec, batch list)",
+         "checked": True,
+         "children": []},
+        {"key": "inspection_sheets",
+         "label": "Inspection Sheets",
+         "checked": True,
+         "children": []},
+        {"key": "pdf_stamping",
+         "label": "PDF Stamping (Move Ticket Omit)",
+         "checked": True,
+         "children": [
+             {"key": "difficulty", "label": "Difficulty label", "checked": True},
+         ]},
+    ]
+
+
 def run(params: dict, progress_callback, cancel_event: threading.Event):
     """
     TechDeck plugin entry point.
@@ -1330,6 +1361,52 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     """
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
+
+    # ------------------------------------------------------------------ #
+    # Master toggle window (v1.7.0) -- same GroupedToggleDialog pattern as
+    # 922 Setup, so both setups are driven by a checklist of what to run.
+    #
+    # The steps are far more interdependent than 922's stages: nothing below
+    # "Nest Folder Setup" can run on a batch that has never been set up. The
+    # stages are here so a RE-RUN can redo one part (most often just the PDF
+    # stamping) without repeating the whole batch, and each stage warns rather
+    # than crashing when its inputs are missing.
+    # ------------------------------------------------------------------ #
+    stages = sdk.request_grouped_toggles(
+        params, _dialog_groups(),
+        window_title="911 Setup",
+        header="911 Setup - Select Actions",
+        subtext=("Uncheck anything you do not want to run. Re-running a batch "
+                 "with only PDF Stamping checked re-stamps the packets without "
+                 "touching the nest workbooks."),
+        run_button_text="Run 911 Setup")
+    if stages is None:
+        log("Cancelled - nothing was run.")
+        return
+
+    def _on(key):
+        return bool((stages.get(key) or {}).get("enabled"))
+
+    def _opt(key, child, default=True):
+        g = stages.get(key) or {}
+        return bool((g.get("options") or {}).get(child, default))
+
+    do_folders = _on("folder_setup")
+    do_nest_data = _on("nest_data")
+    do_inspection = _on("inspection_sheets")
+    do_stamping = _on("pdf_stamping")
+    stamp_difficulty = do_stamping and _opt("pdf_stamping", "difficulty", True)
+
+    enabled = [n for n, f in (("Nest Folder Setup", do_folders),
+                              ("Nest Workbook Data", do_nest_data),
+                              ("Inspection Sheets", do_inspection),
+                              ("PDF Stamping", do_stamping)) if f]
+    if not enabled:
+        log("No actions selected - nothing to do.")
+        return
+    log("Actions: " + " -> ".join(enabled))
+    if do_stamping:
+        log(f"  Difficulty label: {'ON' if stamp_difficulty else 'OFF'}")
 
     # ------------------------------------------------------------------ #
     # Read configurable paths from settings.
@@ -1458,11 +1535,19 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     # Step 3 -- Create nest subfolders
     # ------------------------------------------------------------------ #
-    log("Creating nest folders...")
-    for nest in nest_numbers:
-        nest_dir = batch_folder / nest
-        nest_dir.mkdir(exist_ok=True)
-        log(f"  Folder: {nest_dir.name}")
+    if do_folders:
+        log("Creating nest folders...")
+        for nest in nest_numbers:
+            nest_dir = batch_folder / nest
+            nest_dir.mkdir(exist_ok=True)
+            log(f"  Folder: {nest_dir.name}")
+    else:
+        log("[skipped] Nest Folder Setup unchecked.")
+        missing = [n for n in nest_numbers if not (batch_folder / n).is_dir()]
+        if missing:
+            log(f"  WARNING: {len(missing)} nest folder(s) do not exist and were "
+                f"NOT created: {', '.join(missing[:10])}"
+                + (" ..." if len(missing) > 10 else ""))
 
     progress_callback(15)
     if cancel_event.is_set():
@@ -1471,52 +1556,67 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     # Step 4 -- Copy & rename 911 BATCH template into each nest folder
     # ------------------------------------------------------------------ #
-    log("Copying 911 BATCH template...")
-    template_dir = _template_dir(qtdr_override, template_subdir)
-
-    if not template_dir.exists():
-        raise FileNotFoundError(
-            f"Template directory not found: {template_dir}\n"
-            f"Check the 'Template Subfolder' setting for this plugin."
-        )
-
-    template_path = _find_template_911(template_dir)
-    log(f"Template      : {template_path.name}")
-
-    # Scribe-verification doc copied into each nest folder (one copy per nest).
-    # Sourced from the same SACO template dir; missing source is non-fatal.
-    scribe_src = template_dir / _SCRIBE_DOC_FILENAME
-    scribe_available = scribe_src.exists()
-    if not scribe_available:
-        log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
-
+    # NOTE: copying the template OVERWRITES an existing nest workbook. That is
+    # the intended behaviour for a first run, but it is why this is gated on
+    # "Nest Folder Setup" — unchecking it is what makes a re-run (e.g. to
+    # re-stamp the packets) safe, because the filled-in workbooks survive.
     nest_excel_paths = {}
-    for nest in nest_numbers:
-        dest_name = f"911 BATCH {batch_number} {nest}.xlsx"
-        dest_path = batch_folder / nest / dest_name
-        shutil.copy2(template_path, dest_path)
-        nest_excel_paths[nest] = dest_path
-        log(f"  Copied -> {dest_name}")
+    scribe_available = False
+    if not do_folders:
+        log("[skipped] 911 BATCH template copy (nest workbooks left untouched).")
+        for nest in nest_numbers:
+            dest_path = batch_folder / nest / f"911 BATCH {batch_number} {nest}.xlsx"
+            nest_excel_paths[nest] = dest_path
+        absent = [n for n, p in nest_excel_paths.items() if not p.exists()]
+        if absent:
+            log(f"  WARNING: no existing nest workbook for {len(absent)} nest(s): "
+                f"{', '.join(absent[:10])}" + (" ..." if len(absent) > 10 else ""))
+    else:
+        log("Copying 911 BATCH template...")
+        template_dir = _template_dir(qtdr_override, template_subdir)
 
-        if scribe_available:
-            scribe_dir = batch_folder / nest / _SCRIBE_SUBFOLDER
-            scribe_dest = scribe_dir / _SCRIBE_DOC_FILENAME
-            # Earlier versions dropped the doc loose in the nest root;
-            # relocate such a copy instead of duplicating it.
-            legacy_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
-            if scribe_dest.exists():
-                log(f"  Scribe doc already in {nest} -- skipped")
-            else:
-                try:
-                    scribe_dir.mkdir(exist_ok=True)
-                    if legacy_dest.exists():
-                        legacy_dest.replace(scribe_dest)
-                        log(f"  Scribe doc moved -> {nest}\\{_SCRIBE_SUBFOLDER}")
-                    else:
-                        shutil.copy2(scribe_src, scribe_dest)
-                        log(f"  Scribe doc -> {nest}\\{_SCRIBE_SUBFOLDER}")
-                except Exception as e:
-                    log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
+        if not template_dir.exists():
+            raise FileNotFoundError(
+                f"Template directory not found: {template_dir}\n"
+                f"Check the 'Template Subfolder' setting for this plugin."
+            )
+
+        template_path = _find_template_911(template_dir)
+        log(f"Template      : {template_path.name}")
+
+        # Scribe-verification doc copied into each nest folder (one copy per
+        # nest). Same SACO template dir; a missing source is non-fatal.
+        scribe_src = template_dir / _SCRIBE_DOC_FILENAME
+        scribe_available = scribe_src.exists()
+        if not scribe_available:
+            log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
+
+        for nest in nest_numbers:
+            dest_name = f"911 BATCH {batch_number} {nest}.xlsx"
+            dest_path = batch_folder / nest / dest_name
+            shutil.copy2(template_path, dest_path)
+            nest_excel_paths[nest] = dest_path
+            log(f"  Copied -> {dest_name}")
+
+            if scribe_available:
+                scribe_dir = batch_folder / nest / _SCRIBE_SUBFOLDER
+                scribe_dest = scribe_dir / _SCRIBE_DOC_FILENAME
+                # Earlier versions dropped the doc loose in the nest root;
+                # relocate such a copy instead of duplicating it.
+                legacy_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
+                if scribe_dest.exists():
+                    log(f"  Scribe doc already in {nest} -- skipped")
+                else:
+                    try:
+                        scribe_dir.mkdir(exist_ok=True)
+                        if legacy_dest.exists():
+                            legacy_dest.replace(scribe_dest)
+                            log(f"  Scribe doc moved -> {nest}\\{_SCRIBE_SUBFOLDER}")
+                        else:
+                            shutil.copy2(scribe_src, scribe_dest)
+                            log(f"  Scribe doc -> {nest}\\{_SCRIBE_SUBFOLDER}")
+                    except Exception as e:
+                        log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
 
     progress_callback(20)
     if cancel_event.is_set():
@@ -1558,6 +1658,21 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     qty_unverified = []   # (nest, dypn, wo, batch qty) -- not in packet summary
     missing_forecast = []  # nests with no forecast row (cols A-C left blank)
     total_nests = len(nest_numbers)
+
+    # -- Difficulty ratings: read the schedule ONCE for the whole batch -----
+    # Owned by the sibling 911_remove_ticket (the single home of the stamp
+    # helpers), so the lookup and the colour legend live in one place.
+    diff_map, diff_problem, unrated_nests = {}, "", []
+    _stamps = None
+    if do_stamping and stamp_difficulty:
+        _stamps = _load_omit_stamp_helpers(log)
+        if _stamps is not None and hasattr(_stamps, "_load_difficulty_map"):
+            diff_map, diff_problem = _stamps._load_difficulty_map(params, log)
+        else:
+            diff_problem = ("The 911 Remove Ticket helpers could not be loaded, "
+                            "so no difficulty labels were stamped.")
+        if diff_problem:
+            log(f"  WARNING: {diff_problem.splitlines()[0]}")
     for nest_idx, nest in enumerate(nest_numbers):
         if cancel_event.is_set():
             break
@@ -1570,63 +1685,73 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         wb = sdk.load_workbook_resilient(nest_excel, log=log)
         nest_ws = wb["NEST"]
 
-        # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------
-        log(f"  [Step 5] Extracting forecast rows for {nest}...")
-        forecast_rows = _copy_forecast_rows(
-            forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols, nest)
-        if not forecast_rows:
-            missing_forecast.append(nest)
-            log(f"  WARNING: No forecast rows found for nest {nest} in the "
-                f"'{forecast_ws.title}' sheet (column "
-                f"{get_column_letter(forecast_nest_col)}).")
+        # Steps 5-7 all write into the same NEST sheet, so they are one
+        # toggle. matl_type still feeds Step 9's material fill, so it is read
+        # from the packet even when the workbook write is skipped.
+        mil_spec, matl_type, batch_rows = None, None, []
+
+        if not do_nest_data:
+            log("  [skipped] Nest Workbook Data unchecked.")
+            if do_stamping:
+                _, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
         else:
-            log(f"  Found {len(forecast_rows)} forecast rows.")
-            _paste_forecast_into_nest(nest_ws, forecast_rows)
+            # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------
+            log(f"  [Step 5] Extracting forecast rows for {nest}...")
+            forecast_rows = _copy_forecast_rows(
+                forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols, nest)
+            if not forecast_rows:
+                missing_forecast.append(nest)
+                log(f"  WARNING: No forecast rows found for nest {nest} in the "
+                    f"'{forecast_ws.title}' sheet (column "
+                    f"{get_column_letter(forecast_nest_col)}).")
+            else:
+                log(f"  Found {len(forecast_rows)} forecast rows.")
+                _paste_forecast_into_nest(nest_ws, forecast_rows)
 
-        # -- Step 6: PDF -> MIL-S spec (D4) + MATL (E4) ------------------
-        log(f"  [Step 6] Reading MIL SPEC / MATERIAL from nest packet...")
-        mil_spec, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
+            # -- Step 6: PDF -> MIL-S spec (D4) + MATL (E4) ------------------
+            log(f"  [Step 6] Reading MIL SPEC / MATERIAL from nest packet...")
+            mil_spec, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
 
-        if mil_spec:
-            nest_ws.cell(4, 4).value = mil_spec   # D4
-            log(f"  MIL Spec -> D4: {mil_spec}")
-        else:
-            log(f"  WARNING: MIL spec not found in nest packet.")
+            if mil_spec:
+                nest_ws.cell(4, 4).value = mil_spec   # D4
+                log(f"  MIL Spec -> D4: {mil_spec}")
+            else:
+                log(f"  WARNING: MIL spec not found in nest packet.")
 
-        if matl_type:
-            nest_ws.cell(4, 5).value = matl_type  # E4
-            log(f"  Material -> E4: {matl_type}")
-        else:
-            log(f"  WARNING: MATERIAL not found in nest packet (left blank).")
+            if matl_type:
+                nest_ws.cell(4, 5).value = matl_type  # E4
+                log(f"  Material -> E4: {matl_type}")
+            else:
+                log(f"  WARNING: MATERIAL not found in nest packet (left blank).")
 
-        # -- Step 7: BATCH LIST -> NEST cols F-K, starting row 4 ---------
-        log(f"  [Step 7] Extracting batch rows for {nest}...")
-        try:
-            batch_rows = _get_batch_rows_for_nest(batch_list_path, nest,
-                                                  qty_col_override=qty_col)
-        except ValueError as e:
-            log(f"  WARNING: {e} -- skipping batch data for {nest}")
-            batch_rows = []
+            # -- Step 7: BATCH LIST -> NEST cols F-K, starting row 4 ---------
+            log(f"  [Step 7] Extracting batch rows for {nest}...")
+            try:
+                batch_rows = _get_batch_rows_for_nest(batch_list_path, nest,
+                                                      qty_col_override=qty_col)
+            except ValueError as e:
+                log(f"  WARNING: {e} -- skipping batch data for {nest}")
+                batch_rows = []
 
-        if not batch_rows:
-            log(f"  WARNING: No batch rows found for nest {nest}.")
-        else:
-            log(f"  Found {len(batch_rows)} batch rows.")
-            _paste_batch_rows_into_nest(nest_ws, batch_rows)
+            if not batch_rows:
+                log(f"  WARNING: No batch rows found for nest {nest}.")
+            else:
+                log(f"  Found {len(batch_rows)} batch rows.")
+                _paste_batch_rows_into_nest(nest_ws, batch_rows)
 
-            # Residual QTY check: even the verified column can disagree
-            # with the packet on individual rows -- highlight those cells
-            # and collect them for the end-of-run summary.
-            _flag_qty_mismatches(nest_ws, batch_rows,
-                                 packet_qtys.get(nest) or {}, nest,
-                                 nest_excel.name, log,
-                                 qty_mismatches, qty_unverified)
+                # Residual QTY check: even the verified column can disagree
+                # with the packet on individual rows -- highlight those cells
+                # and collect them for the end-of-run summary.
+                _flag_qty_mismatches(nest_ws, batch_rows,
+                                     packet_qtys.get(nest) or {}, nest,
+                                     nest_excel.name, log,
+                                     qty_mismatches, qty_unverified)
 
-        # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
-        num_parts = len(batch_rows)
-        if num_parts > 1:
-            _fill_nest_part_rows(nest_ws, num_parts)
-            log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
+            # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
+            num_parts = len(batch_rows)
+            if num_parts > 1:
+                _fill_nest_part_rows(nest_ws, num_parts)
+                log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
 
         # -- Step 8a: Collect part rows (WO / DYPN / qty) from NEST ------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
@@ -1645,21 +1770,34 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # openpyxl's copy_worksheet drops conditional formatting rules
         # on copy (verified: 350 CF rules on template -> 0 on copy).
         # Excel's native Sheet.Copy preserves them.
-        if part_rows:
+        if part_rows and do_inspection:
             log(f"  Building {len(part_rows)} inspection sheet(s) via Excel...")
             try:
                 _build_inspection_sheets_via_excel(nest_excel, part_rows, log)
             except Exception as e:
                 log(f"  ERROR: Excel COM inspection sheet build failed: {e}")
                 raise
+        elif part_rows:
+            log("  [skipped] Inspection Sheets unchecked.")
 
         log(f"  Done: {nest_excel.name}")
 
         # -- Step 9: Build MOVE TICKET OMIT PDF (remove MOVE TICKET pages, keep MIL-SPEC/HULL) --
-        log(f"  [Step 9] Extracting drawings for {nest}...")
-        drawings_dest = batch_folder / nest / f"{nest} MOVE TICKET OMIT.pdf"
-        _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log,
-                               batch=batch_number, material_hint=matl_type or "")
+        if do_stamping:
+            log(f"  [Step 9] Extracting drawings for {nest}...")
+            drawings_dest = batch_folder / nest / f"{nest} MOVE TICKET OMIT.pdf"
+            difficulty = None
+            if stamp_difficulty and not diff_problem and _stamps is not None:
+                difficulty = _stamps._lookup_difficulty(diff_map, nest)
+                if difficulty:
+                    log(f"  Difficulty: {difficulty}")
+                else:
+                    unrated_nests.append(str(nest))
+            _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log,
+                                   batch=batch_number, material_hint=matl_type or "",
+                                   difficulty=difficulty)
+        else:
+            log("  [skipped] PDF Stamping unchecked.")
 
         pct = 30 + int(65 * (nest_idx + 1) / total_nests)
         progress_callback(pct)
@@ -1668,6 +1806,24 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # Cleanup
     # ------------------------------------------------------------------ #
     forecast_wb.close()
+
+    # ------------------------------------------------------------------ #
+    # Difficulty disclaimer -- nothing is printed on a packet whose nest has
+    # no rating, so the omission is surfaced in a popup the user must dismiss
+    # rather than a log line that scrolls past (C.D. 2026-07-31).
+    # ------------------------------------------------------------------ #
+    if do_stamping and stamp_difficulty and (diff_problem or unrated_nests):
+        if diff_problem:
+            body = diff_problem
+        else:
+            shown = "\n".join(f"  - {n}" for n in unrated_nests[:25])
+            body = (f"{len(unrated_nests)} of {total_nests} nest(s) were stamped "
+                    f"WITHOUT a difficulty label because the nest has no rating "
+                    f"colour on the EB 922 Schedule (CURRENT PIPELINE, column E), "
+                    f"is marked N/A, or is not listed:\n\n{shown}"
+                    + ("\n  ..." if len(unrated_nests) > 25 else "")
+                    + "\n\nEverything else on those packets stamped normally.")
+        sdk.show_warning(params, "Difficulty label - not stamped", body)
 
     # ------------------------------------------------------------------ #
     # Forecast-coverage summary -- a missing forecast row leaves NEST cols
