@@ -5,6 +5,19 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "General",
+  "details": {
+    "setup": [
+      "None needed - just open it. Have your numbers ready (thickness, radius, material, and so on)."
+    ],
+    "how_it_works": [
+      "Pick a calculator from the left list; the form on the right rebuilds for it.",
+      "Enter the inputs and the result updates as you type; some field labels and rows change based on your other choices.",
+      "Calculators included: Flat Length, Bend Deduction, and Material Weight (more get added over time)."
+    ],
+    "output": [
+      "The calculated result (or a small table of results) shown live - nothing is saved to a file."
+    ]
+  },
   "icon": "icon.png",
   "requires_admin": false,
   "requires_main_thread": true,

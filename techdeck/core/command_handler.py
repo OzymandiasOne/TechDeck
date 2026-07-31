@@ -3,6 +3,7 @@ TechDeck Command Handler
 Processes console commands and returns responses.
 """
 
+import logging
 import random
 import sys
 import threading
@@ -15,6 +16,8 @@ from techdeck.core.audio_manager import (
     get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
 )
 # _rave_player and _rave_audio_out are stored as instance attrs to prevent GC during playback
+
+logger = logging.getLogger(__name__)
 
 
 def _images_dir() -> Path:
@@ -77,6 +80,7 @@ class CommandHandler:
             '/clear': self._cmd_clear,
             '/version': self._cmd_version,
             '/info': self._cmd_info,
+            '/moredetails': self._cmd_moredetails,
             '/dash': self._cmd_dash,
             '/pause': self._cmd_pause,
             '/resume': self._cmd_resume,
@@ -125,6 +129,7 @@ class CommandHandler:
             "  /clear           - Clear console output\n"
             "  /version         - Show TechDeck version\n"
             "  /info            - Describe the selected tile(s)\n"
+            "  /moredetails     - Full details for the selected tile(s); /moredetails all for every app\n"
             "  /dash            - Reopen the Dashboard tab\n"
             "  /pause           - Pause the current run at its input prompt\n"
             "  /resume          - Resume a paused run (or load the shelved one)\n"
@@ -277,6 +282,79 @@ class CommandHandler:
         while lines and lines[-1] == "":
             lines.pop()
         self.console.append_system("\n".join(lines))
+
+    # ------------------------------------------------------------------ #
+    #  /moredetails — deep, instructional write-up in a scrollable pop-up
+    # ------------------------------------------------------------------ #
+
+    # Family display order for the full-catalog listing.
+    _DETAIL_FAMILY_ORDER = {
+        "902": 0, "911": 1, "922": 2, "QA": 3, "General": 4, "Games": 5,
+    }
+
+    def _cmd_moredetails(self, args: str):
+        """Open the scrollable App Details pop-up.
+
+        No argument -> the tile(s) currently selected on Home (mirrors /info).
+        `/moredetails all` -> every installed app (locked/unpurchased ones
+        hidden, matching the Library), grouped by family.
+        """
+        mw = self.main_window
+        if mw is None or not hasattr(mw, "home_page"):
+            self.console.append_error("Home page not available.")
+            return
+        home = mw.home_page
+        loader = getattr(home, "plugin_loader", None)
+        if loader is None:
+            self.console.append_error("Plugin list not available.")
+            return
+
+        if args.strip().lower() == "all":
+            plugins = self._all_plugins_for_details(loader)
+        else:
+            selected = sorted(home.selected_tiles)
+            if not selected:
+                self.console.append_system(
+                    "No apps selected. Click one or more tiles on Home, then "
+                    "run /moredetails - or run /moredetails all for every app."
+                )
+                return
+            plugins = [loader.get_plugin(t) for t in selected]
+            plugins = [p for p in plugins if p is not None]
+
+        if not plugins:
+            self.console.append_system("No apps to show.")
+            return
+
+        try:
+            from techdeck.ui.dialogs.details_dialog import DetailsDialog
+            dlg = DetailsDialog(plugins, parent=mw)
+        except Exception:
+            logger.exception("Could not open the App Details dialog")
+            self.console.append_error("Couldn't open the details window.")
+            return
+        # Keep a reference so the non-modal dialog isn't garbage-collected.
+        self._details_dialog = dlg
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _all_plugins_for_details(self, loader):
+        """Every installed app, family-grouped, with locked-and-unpurchased
+        apps hidden (same visibility rule the Library uses)."""
+        out = []
+        for p in loader.get_all_plugins():
+            if getattr(p, "locked", False):
+                try:
+                    if self.settings is None or not self.settings.is_unlocked(p.id):
+                        continue
+                except Exception:
+                    continue
+            out.append(p)
+        out.sort(key=lambda p: (
+            self._DETAIL_FAMILY_ORDER.get(getattr(p, "family", ""), 99),
+            (p.name or "").lower()))
+        return out
 
     # ------------------------------------------------------------------ #
     #  /admin — toggle admin mode (reveals + enables the gated commands)

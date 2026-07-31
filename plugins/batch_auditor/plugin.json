@@ -5,6 +5,18 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "General",
+  "details": {
+    "setup": [
+      "Sync the 911 and/or 922 folders. Know the batch line you want to check - the audit is read-only and changes nothing."
+    ],
+    "how_it_works": [
+      "Pick the batch. The app checks each readiness item - orders & prints, LST, run time, forming, pallets, kitting - for a 911 or 922 batch.",
+      "It renders the results as a dashboard of KPI cards and charts plus a text summary."
+    ],
+    "output": [
+      "A readiness dashboard and summary showing which steps are done and what's still missing, before the batch hits the floor."
+    ]
+  },
   "requires_admin": false,
   "timeout": 1800,
   "settings": {

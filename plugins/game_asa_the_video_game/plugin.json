@@ -5,6 +5,18 @@
   "version": "2.3.0",
   "author": "Anthony Sieben",
   "family": "Games",
+  "details": {
+    "setup": [
+      "None - buy it at Woogy's Emporium with tickets to unlock it, then launch it from the Library."
+    ],
+    "how_it_works": [
+      "An incremental-strategy game: grow American Steel from the yard through tech, drones, and space, then convert the universe.",
+      "Manage a power economy and make choices along the way that steer the ending."
+    ],
+    "output": [
+      "It's a game - no work files. Reach one of the endings, then rest or start a new universe."
+    ]
+  },
   "icon": "icon.tdart",
   "requires_admin": false,
   "requires_main_thread": true,

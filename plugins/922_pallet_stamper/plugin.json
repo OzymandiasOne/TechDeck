@@ -5,6 +5,20 @@
   "version": "1.2.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder. The batch's order folders should each hold their work-packet PDF.",
+      "The 'PO H{n} Pallet & Rod Organizer.xlsx' must be in the batch's Documentation folder - the pallet numbers come from its Pallet Organizer sheet.",
+      "Close the work-packet PDFs if they're open in a viewer, so they can be re-saved with the stamp."
+    ],
+    "how_it_works": [
+      "Enter the batch number. The app reads which order goes on which pallet from the organizer.",
+      "For each order folder it stamps the work-packet PDF's first page with 'Batch {n} Pallet {n}' in red, replacing any old stamp."
+    ],
+    "output": [
+      "Each order's work-packet PDF stamped with its batch and pallet, and a summary of what was stamped, skipped, or needs a hand-stamp."
+    ]
+  },
   "icon": "📦",
   "requires_admin": false,
   "settings": {

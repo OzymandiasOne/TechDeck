@@ -5,6 +5,20 @@
   "version": "1.1.1",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Have the folder of nest PDFs ready (usually a NEST PACKAGES folder). You can pick it each run or set it in Settings.",
+      "Keep the standard '{batch} / NEST PACKAGES' folder layout so the batch and nest fill into the cover stamp automatically."
+    ],
+    "how_it_works": [
+      "Pick the PDF folder and choose which PDFs to process (or all of them).",
+      "Each PDF loses its MOVE TICKET pages - MIL-SPEC and HULL pages are always kept.",
+      "The first page is stamped 'BATCH {batch} - NEST {nest}', and the blank Material Type cell is filled from the move tickets before they're removed."
+    ],
+    "output": [
+      "A '{name} Move Ticket Omit.pdf' for each PDF, saved in a 'Move Ticket Omit' subfolder. Your originals are never changed."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": false,
   "timeout": 300,

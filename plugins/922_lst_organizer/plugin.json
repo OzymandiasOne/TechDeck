@@ -5,6 +5,19 @@
   "version": "3.0.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "The batch needs its QF-QU-09 PO workbook in the Documentation folder, and the tube .lst files under the order folders' 7000 folders."
+    ],
+    "how_it_works": [
+      "The app gathers the batch's tube .lst files and files each into a folder by source material.",
+      "It reconciles the PO's tube count (total, oversized, target standard) against what was actually pulled, resolving odd filenames and order-folder fallbacks."
+    ],
+    "output": [
+      "Tube .lst files sorted into per-material folders, a color-coded 'LST Report - Batch {n}.pdf' reconciliation, and a Needs Review folder for anything unresolved."
+    ]
+  },
   "icon": "📋",
   "requires_admin": false,
   "settings": {

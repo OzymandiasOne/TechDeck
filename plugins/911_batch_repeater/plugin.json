@@ -5,6 +5,22 @@
   "version": "3.2.1",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Sync the '911 QTDR' folder. The batch you're repeating into must already be set up (its nest folders exist).",
+      "Make sure the 911 Master Parts List in the REPEATER folder is up to date - the app looks up repeat parts in it.",
+      "The completed source nests need their CAD-AND-SHOP-PRINTS folders on disk (models + PDFs) so there's something to copy."
+    ],
+    "how_it_works": [
+      "Target the batch, then lock the nests you want repeats for (Sentry Drone mode gives the two-phase picker; turn it off in Settings for a plain dialog).",
+      "For each selected nest it looks up every part's number in the Master Parts List and finds the completed nest that already made it.",
+      "It copies each repeat part's SolidWorks models and PDF from that source nest into the target nest's REPEAT folder."
+    ],
+    "output": [
+      "A REPEAT folder inside each selected nest, with one subfolder per repeat part holding its models and PDF.",
+      "A run summary of what was pulled, what had no usable source, and what was only ever made in this nest."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": false,
   "settings": {

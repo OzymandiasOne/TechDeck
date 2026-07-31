@@ -5,6 +5,21 @@
   "version": "2.8.0",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Have the award package folder ready - the ROOT whose subfolders are the order folders (this runs pre-batch).",
+      "Each order needs its NEST PACKAGES packet PDFs and batch list; the plate cut-time reference columns also use the IGES DXFs.",
+      "You pick the ROOT when it runs; wrapper / extraction folders around the orders are handled automatically."
+    ],
+    "how_it_works": [
+      "Pick the award ROOT. The app reads stock, material, and thickness from the packet PDFs and batch list.",
+      "It estimates plate cut time from actual shop throughput (pieces per hour by thickness), keeps the exact linear-inch times as reference columns, and rolls it all up in a pivot.",
+      "It also builds a Shape Ft Req sheet for receiving and a Working Forecast Input sheet ready to paste into the forecast."
+    ],
+    "output": [
+      "One workbook with Plates and Non-Plates sheets, a real Excel pivot of cut hours per nest, a Shape Ft Req sheet, and a Working Forecast Input sheet."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": false,
   "settings": {

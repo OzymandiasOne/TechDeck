@@ -5,6 +5,19 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "The batch's order folders and the Pallet & Rod Organizer need to be in place (run 922 Setup first)."
+    ],
+    "how_it_works": [
+      "The app discovers formed-plate PDFs three ways: by filename, by the PO NOTES, and by analyzing the PDF layout.",
+      "It copies and merges the formed-plate PDFs and fills in the Bent Plates sheet of the Pallet & Rod Organizer."
+    ],
+    "output": [
+      "Merged formed-plate PDFs and a populated Bent Plates sheet in the Pallet & Rod Organizer (which Kitting then reads)."
+    ]
+  },
   "requires_admin": false,
   "timeout": 900,
   "settings": {

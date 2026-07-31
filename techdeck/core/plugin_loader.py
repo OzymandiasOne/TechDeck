@@ -84,6 +84,7 @@ class Plugin:
     timeout: Optional[int] = None  # Per-plugin timeout override (None = use executor default)
     family: str = FAMILY_GENERAL
     locked: bool = False  # purchasable: hidden in the Library until is_unlocked(id)
+    details: Optional[dict] = None  # rich /moredetails content: {setup, how_it_works, output}
 
 class PluginLoader:
     """
@@ -224,6 +225,8 @@ class PluginLoader:
                     timeout=metadata.get('timeout', None),
                     family=family,
                     locked=metadata.get('locked', False),
+                    details=metadata.get('details') if isinstance(
+                        metadata.get('details'), dict) else None,
                 )
                 
                 # Check for duplicate plugin IDs

@@ -5,6 +5,19 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "Run FormingFinder first so the Bent Plates sheet is filled - Kitting reads it to detect formed plates."
+    ],
+    "how_it_works": [
+      "The app formats the kitting paperwork for the whole batch and applies the batch color formatting.",
+      "It detects formed plates from the Bent Plates sheet and merges all the kit pages into one PDF."
+    ],
+    "output": [
+      "A single merged, color-formatted kitting PDF for the batch, ready to print."
+    ]
+  },
   "requires_admin": false,
   "timeout": 1200,
   "settings": {

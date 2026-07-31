@@ -5,6 +5,19 @@
   "version": "2.3.0",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Have the folder of part-sketch PDF packets ready - you pick it each run.",
+      "Make sure the PDFs are synced locally so they can be read."
+    ],
+    "how_it_works": [
+      "Pick the folder of packets.",
+      "The app reads each part sketch and extracts its data into a 17-column layout, consolidating weights and checking the values."
+    ],
+    "output": [
+      "An Excel workbook with the 17-column sketch data and combined weight, a validation report, and organized output folders."
+    ]
+  },
   "icon": "📐",
   "requires_admin": false,
   "settings": {

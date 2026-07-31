@@ -5,6 +5,21 @@
   "version": "2.4.1",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder. The new batch's order folders should already exist (922 Setup's folder step).",
+      "Keep '922 MPL.xlsx' in place - the app reads the PO matrix from it and also updates it.",
+      "For card tagging, the D922 Planner and the repeat-tagger flow need to be set up."
+    ],
+    "how_it_works": [
+      "Enter the batch. The app finds which orders were made in a prior batch (repeats) and lets you pick which to pull.",
+      "It copies each repeat's order folder into REPEAT BATCHES and distributes that repeat's CAD prints and binder into the matching current order folders.",
+      "It tags each repeat's Teams card REPEAT and moves it to MODEL CHECK, and folds the batch into the 922 Master Parts List."
+    ],
+    "output": [
+      "A REPEAT BATCHES folder with the pulled repeats, CAD and binders distributed to matching orders, updated Teams cards, and an updated 922 MPL."
+    ]
+  },
   "icon": "🔄",
   "requires_admin": false,
   "timeout": 3600,

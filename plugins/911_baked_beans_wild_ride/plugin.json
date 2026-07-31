@@ -5,6 +5,21 @@
   "version": "1.2.7",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Fill out the 'NC style baked beans' calc workbooks first - one .xlsm per part, filled from the Vacam NC files.",
+      "Open and save each calc sheet in Excel at least once so its totals calculate; un-calculated sheets get flagged instead of read as zero.",
+      "Put all the calc workbooks in one folder - that folder is also where the result is saved."
+    ],
+    "how_it_works": [
+      "Pick the folder of filled calc sheets.",
+      "The app reads each sheet's totals (bevels, complex bevels, cut linear inches) and the batch, nest, and part from the sheet.",
+      "It consolidates everything into one review list, sorted by batch, nest, and part, with a live totals row."
+    ],
+    "output": [
+      "A '{batch} {nest} NC Baked Beans.xlsx' review list in that same folder, with any un-calculated sheets flagged in the Notes column."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": false,
   "timeout": 600,

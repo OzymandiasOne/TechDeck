@@ -5,6 +5,20 @@
   "version": "2.0.2",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Sync the '911 QTDR' folder. Have the nest's PRODUCTION PAPERWORK folder ready - you pick it when the app runs.",
+      "That folder needs the nest's 1D cutting-pattern PDF (its name contains '1D'; the '1D POST' post-cut revision is never used)."
+    ],
+    "how_it_works": [
+      "Pick the nest's PRODUCTION PAPERWORK folder. The app reads the 1D diagram to see exactly which parts that nest cuts.",
+      "It finds each part's .lst file (foreign parts are traced back to their own nest by looking on disk, not the PDF header) and copies them in."
+    ],
+    "output": [
+      "The parts' .lst files gathered into an LST folder under PRODUCTION PAPERWORK, plus a pull-list text file.",
+      "A blocking popup if any nests couldn't be found or any .lst files are missing."
+    ]
+  },
   "icon": "📋",
   "requires_admin": false,
   "settings": {

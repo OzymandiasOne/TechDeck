@@ -5,6 +5,20 @@
   "version": "2.1.1",
   "author": "Anthony Sieben",
   "family": "General",
+  "details": {
+    "setup": [
+      "Have the customer DXF file (or a folder of them) ready - you pick it when the app opens.",
+      "For automated offsets, know each part's plate thickness; you enter them up front."
+    ],
+    "how_it_works": [
+      "Choose a single file or a whole folder, and whether to apply automated offsets.",
+      "The viewer shows the geometry layer-colored with per-line lengths and a total linear-inch count; you can reassign layers and adjust dimensions.",
+      "With automated offsets on, it applies the customer's thickness-based hole and cutout offsets to a temp copy for review."
+    ],
+    "output": [
+      "A reviewed DXF - Save overwrites the original, Export writes an offset copy - plus the linear-inch totals for quoting."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": true,
   "timeout": 1800,

@@ -5,6 +5,22 @@
   "version": "2.1.1",
   "author": "Anthony Sieben",
   "family": "911",
+  "details": {
+    "setup": [
+      "Have the SSPO pricing workbook ready - you pick the file when the app opens.",
+      "Keep the Working Forecast List synced; the app pulls each nest's PO and PO Line from it."
+    ],
+    "how_it_works": [
+      "Pick the pricing workbook. The app splits it into one workbook per Batch + Nest.",
+      "Each split gets a Pricing Back Up tab (with a total-per-work-order sum) and an ASA Invoice Supplement tab.",
+      "It reads the PO / PO Line from a temp copy of the forecast (never the live file) and links prices through, so a corrected price flows to the grand total."
+    ],
+    "output": [
+      "One 'BATCH NEST Pricing Back Up.xlsx' per nest, each in its own 'BATCH NEST Invoicing Docs' subfolder.",
+      "A top-level 'D911 Workorder Close Outs {date}.xlsx' with every row's Scheduling Group set to Closed.",
+      "The output folder opens in Explorer when it's done."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": true,
   "timeout": 300,

@@ -5,6 +5,19 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "The batch's LST reference files go in the 'Batch {N} - Documentation' LST folder, and the CNC machine-time PDFs live in the orders' 7000 folders."
+    ],
+    "how_it_works": [
+      "Enter the batch number. The app scans the 7000 folders for CNC machine-time PDFs and matches them to the LST reference files.",
+      "It sums the machine times and adds a 40% buffer."
+    ],
+    "output": [
+      "A 'Run Time Estimate - Batch {N}.txt' in the LST folder with the part count, total time, and the buffered final hours."
+    ]
+  },
   "requires_admin": false,
   "settings": {
     "fields": [

@@ -5,6 +5,18 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "General",
+  "details": {
+    "setup": [
+      "None needed - it's a self-contained tool. Optionally set a default output folder in Settings."
+    ],
+    "how_it_works": [
+      "Open the app. On the generator tab, enter a URL, text, or contact info and the QR code is created.",
+      "The library tab keeps the codes you've generated so you can find and reuse them."
+    ],
+    "output": [
+      "A saved QR-code image you can drop into paperwork, plus a library of the codes you've made."
+    ]
+  },
   "icon": "🔲",
   "requires_admin": false,
   "requires_main_thread": true,

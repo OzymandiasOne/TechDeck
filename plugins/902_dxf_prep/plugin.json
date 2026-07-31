@@ -5,6 +5,24 @@
   "version": "1.4.0",
   "author": "Anthony Sieben",
   "family": "902",
+  "details": {
+    "setup": [
+      "Have the batch's part-files folder ready - either the SigmaNest DXF export or the EB folder that holds the IGES and un-cleaned DXFs side by side. You pick this folder when the app runs.",
+      "Make sure the batch's PO pricing spreadsheet is in that folder or its parent - the app reads the part list and quantities from it.",
+      "Do the SigmaNest VM import/export and the AutoCAD Layer-12 macro pass yourself; those steps stay manual and happen between the app's steps."
+    ],
+    "how_it_works": [
+      "Pick the working folder, then choose which of the three steps to run (all are checked by default, so one run walks the whole workflow).",
+      "Step 1 builds the IGES CONVERT folder and writes a QTY sheet listing each part and how many are needed.",
+      "Step 2 renames the exported DXFs to clean part numbers and sorts them into folders of 25 for AutoCAD review.",
+      "Step 3 recombines the folders and reconciles them against the PO - extras go to an EXTRA folder, missing parts are listed, and multi-quantity parts get an (Nx) prefix."
+    ],
+    "output": [
+      "An IGES CONVERT folder and a '{batch} QTY.xlsx' sheet at the batch root.",
+      "DXFs renamed to part numbers, sorted into numbered subfolders, then recombined.",
+      "A '{batch} - MISSING PARTS.txt' report and an EXTRA folder for anything not on the PO."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": false,
   "timeout": 1800

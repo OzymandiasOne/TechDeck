@@ -5,6 +5,20 @@
   "version": "1.0.0",
   "author": "Anthony Sieben",
   "family": "QA",
+  "details": {
+    "setup": [
+      "Sync the 'ASA Quality Management System' library so the shared Gemba rework log is reachable (each QA laptop needs it synced).",
+      "No setup data is needed - the first run creates an empty log if none exists."
+    ],
+    "how_it_works": [
+      "Click 'Log Rework' to add a rework event (batch, part, material, recut, missing material, failure mode).",
+      "The dashboard charts the log - pie, column, and stacked - with time-window, group-by, and threshold toggles, and refreshes as new entries land.",
+      "'Open Rework Log' opens the shared workbook in Excel for hand edits."
+    ],
+    "output": [
+      "One row appended per rework event in the shared log, a live Gemba dashboard, and a one-click 'Gemba Pack' PDF for the meeting."
+    ]
+  },
   "requires_admin": false,
   "requires_main_thread": true,
   "timeout": 1800,
