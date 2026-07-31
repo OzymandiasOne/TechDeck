@@ -2,9 +2,25 @@
   "id": "922_setup",
   "name": "922 Setup",
   "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Batch Folder Setup (order folders from the REV C PO sheet, per-order PO workbook copy, work-packet PDFs filed in), Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order via a Power Automate webhook), Batch Repeater (pull repeats, distribute CAD/binders, label REPEAT cards), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
-  "version": "2.3.3",
+  "version": "2.4.0",
   "author": "Anthony Sieben",
   "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder. The batch's folder (e.g. Batch 487) needs its Documentation folder with the 'PO H{n} QF-QU-09 REV C' workbook.",
+      "Drop the batch's work-packet PDFs into a 'Work Packets' folder inside the batch folder, each PDF's name containing its order number.",
+      "For pallet labels and stamping, the Pallet & Rod Organizer must be in the Documentation folder."
+    ],
+    "how_it_works": [
+      "Pick the batch folder, then choose which stages to run in the toggle window (they run top to bottom).",
+      "Batch Folder Setup builds an order folder per order and files the work-packet PDFs in; Generate Teams Cards posts the D922 pipeline buckets and one card per order.",
+      "Pallet Stamper stamps each order's work packet with its batch and pallet, then Batch Repeater pulls repeats from prior batches. Stamping runs before the repeater on purpose, so repeats never get stamped."
+    ],
+    "output": [
+      "Order folders built and filled, Teams cards posted to the D922 PIPELINE plan, work packets stamped, and repeat orders pulled into a REPEAT BATCHES folder.",
+      "Each stage you run earns tickets (all four = 20)."
+    ]
+  },
   "requires_admin": false,
   "timeout": 3600,
   "settings": {

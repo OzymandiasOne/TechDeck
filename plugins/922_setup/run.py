@@ -89,7 +89,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.3.3"
+VERSION = "2.4.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -683,8 +683,10 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
 # Orchestration — the consolidated 922 Setup
 # ─────────────────────────────────────────────────────────────────────────────
 # One tile runs the whole 922 batch-prep sequence behind a master toggle
-# window: 922 Teams Setup (this file's original job) -> 922 Batch Repeater ->
-# 922 Pallet Stamper. The sibling plugins' code is NOT duplicated — their
+# window: Batch Folder Setup -> Generate Teams Cards -> 922 Pallet Stamper ->
+# 922 Batch Repeater. Stamping runs BEFORE the Repeater so repeat orders (and
+# the repeat binders the Repeater distributes into the root order folders) are
+# never stamped. The sibling plugins' code is NOT duplicated — their
 # installed run.py files are imported at run time from the plugins dir this
 # file lives in, and each runs with its OWN saved settings
 # (sdk.plugin_settings). The standalone Repeater/Stamper tiles keep working
@@ -716,6 +718,10 @@ def _dialog_groups() -> list:
              {"key": "materials", "label": "Apply source material labels",
               "checked": False},
          ]},
+        {"key": "pallet_stamper",
+         "label": "Pallet Stamper",
+         "checked": True,
+         "children": []},
         {"key": "batch_repeater",
          "label": "Batch Repeater",
          "checked": True,
@@ -725,10 +731,6 @@ def _dialog_groups() -> list:
              {"key": "tag", "label": "Label REPEAT cards in Teams",
               "checked": True},
          ]},
-        {"key": "pallet_stamper",
-         "label": "Pallet Stamper",
-         "checked": True,
-         "children": []},
     ]
 
 
@@ -812,7 +814,7 @@ def run(params: dict, progress_callback, cancel_event):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return
 
-    order = ["folder_setup", "teams_setup", "batch_repeater", "pallet_stamper"]
+    order = ["folder_setup", "teams_setup", "pallet_stamper", "batch_repeater"]
     enabled = [k for k in order if choices.get(k, {}).get("enabled")]
     if not enabled:
         log("No stages selected - nothing was run.")
@@ -883,7 +885,25 @@ def run(params: dict, progress_callback, cancel_event):
                 "Continuing with the remaining stages.")
         progress_callback(hi)
 
-    # --- Stage 2: Batch Repeater --------------------------------------------
+    # --- Stage 2: Pallet Stamper --------------------------------------------
+    # Runs BEFORE the Batch Repeater on purpose. At this point every order
+    # folder holds exactly its own work-packet PDF, and neither the REPEAT
+    # BATCHES folder nor the repeat binders the Repeater distributes into the
+    # root order folders exist yet -- so the stamp always lands on the right PDF
+    # and repeat content is never stamped. (Reversing these two stages was the
+    # fix for repeats getting stamped.)
+    if "pallet_stamper" in enabled and not cancel_event.is_set():
+        lo, hi = slices["pallet_stamper"]
+        _run_sibling_stage(
+            "922_pallet_stamper", "Pallet Stamper", params, shared_state,
+            _scaled(progress_callback, lo, hi), cancel_event,
+        )
+        if cancel_event.is_set():
+            return
+        stages_done += 1
+        progress_callback(hi)
+
+    # --- Stage 3: Batch Repeater --------------------------------------------
     if "batch_repeater" in enabled and not cancel_event.is_set():
         lo, hi = slices["batch_repeater"]
         opts = choices["batch_repeater"]["options"]
@@ -892,18 +912,6 @@ def run(params: dict, progress_callback, cancel_event):
             _scaled(progress_callback, lo, hi), cancel_event,
             stage_options={"distribute": opts.get("distribute", True),
                            "tag": opts.get("tag", True)},
-        )
-        if cancel_event.is_set():
-            return
-        stages_done += 1
-        progress_callback(hi)
-
-    # --- Stage 3: Pallet Stamper --------------------------------------------
-    if "pallet_stamper" in enabled and not cancel_event.is_set():
-        lo, hi = slices["pallet_stamper"]
-        _run_sibling_stage(
-            "922_pallet_stamper", "Pallet Stamper", params, shared_state,
-            _scaled(progress_callback, lo, hi), cancel_event,
         )
         if cancel_event.is_set():
             return
