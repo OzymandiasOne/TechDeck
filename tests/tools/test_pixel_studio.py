@@ -53,3 +53,38 @@ def test_studio_builds_all_three_modes(qapp):
     icon = s.stack.widget(1)
     assert icon.canvas.grid_size() == (32, 32)
     assert len(icon._preview_labels) == 6
+
+
+def test_sprite_mode_has_layers_tile_icon_does_not(qapp):
+    """Layers belong to whole-sprite authoring. Tile Icon edits ONE 32x32 grid
+    written back into a generator script, so a stack has nothing to save into."""
+    from tools.devkit.pixel_studio import _SpritePanel, _TileIconPanel
+    sp = _SpritePanel()
+    assert sp.SHOW_LAYERS is True
+    assert hasattr(sp, "layer_list")
+    ti = _TileIconPanel()
+    assert ti.SHOW_LAYERS is False
+    assert not hasattr(ti, "layer_list")
+
+
+def test_sprite_layer_rail_tracks_the_stack(qapp):
+    from tools.devkit.pixel_studio import _SpritePanel
+    sp = _SpritePanel()
+    sp.canvas.add_layer("second")
+    sp.canvas.add_layer("third")
+    sp._refresh_layers()
+    # the list shows the stack reversed — topmost first
+    assert [sp.layer_list.item(r).text()
+            for r in range(sp.layer_list.count())] == ["third", "second", "Layer 1"]
+    sp.layer_list.setCurrentRow(2)          # click the bottom row
+    assert sp.canvas.layer.name == "Layer 1"
+
+
+def test_sprite_layer_visibility_toggle(qapp):
+    from PySide6.QtCore import Qt
+    from tools.devkit.pixel_studio import _SpritePanel
+    sp = _SpritePanel()
+    sp.canvas.add_layer("second")
+    sp._refresh_layers()
+    sp.layer_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+    assert sp.canvas.layers[1].visible is False

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QGridLayout, QPushButton, QLabel,
     QScrollArea, QButtonGroup, QFrame, QStackedWidget, QComboBox,
     QFileDialog, QColorDialog, QMessageBox, QInputDialog, QSizePolicy,
+    QListWidget, QListWidgetItem, QSlider,
 )
 from PySide6.QtCore import Qt, QSize, QByteArray, QTimer
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
@@ -246,6 +247,14 @@ class _CanvasPanel(QWidget, ThemeAware):
             f"border: 1px solid {pal.border}; }}")
         self.status.setStyleSheet(
             f"color: {pal.text_secondary}; font-size: 11px;")
+        if getattr(self, "layer_path_lbl", None) is not None:
+            self.layer_path_lbl.setStyleSheet(
+                f"color: {pal.text_secondary}; font-size: 10px;")
+            self.layer_list.setStyleSheet(
+                f"QListWidget {{ background: {pal.console_bg}; "
+                f"color: {pal.text}; border: 1px solid {pal.border}; }}"
+                f"QListWidget::item:selected {{ background: {pal.accent}; }}")
+            self._refresh_layers()   # re-tint the dirty badges
         tool_style = self._tool_btn_qss()
         for name, b in self.tool_buttons.items():
             b.setIcon(_svg_icon(_TOOL_ICONS[name], self._icon_color))
@@ -283,8 +292,200 @@ class _CanvasPanel(QWidget, ThemeAware):
         body.setSpacing(8)
         body.addWidget(self._build_tools_rail())
         body.addWidget(self.scroll, 1)
+        if self.SHOW_LAYERS:
+            body.addWidget(self._build_layers_rail())
         body.addWidget(self._build_palette_rail())
         return body
+
+    # ---- layers rail ---------------------------------------------------------
+    # Only modes that author a whole multi-part sprite get this. Tile Icon does
+    # not: it edits ONE 32x32 grid that is written back into a generator script,
+    # so a stack has nothing to save into.
+    SHOW_LAYERS = False
+
+    def _build_layers_rail(self):
+        """Stack list, topmost first. Painting always goes to the active layer;
+        each layer keeps its own file so Save All writes them back in place."""
+        side = QFrame()
+        side.setFixedWidth(178)
+        v = QVBoxLayout(side)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(self._heading("Layers"))
+
+        self.layer_list = QListWidget()
+        self.layer_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.layer_list.currentRowChanged.connect(self._layer_row_selected)
+        self.layer_list.itemChanged.connect(self._layer_item_changed)
+        self.layer_list.model().rowsMoved.connect(self._layer_rows_moved)
+        self.layer_list.setToolTip(
+            "Click to make a layer active — painting always goes to the active "
+            "layer.\nTick to show/hide. Double-click to rename. Drag to reorder.")
+        v.addWidget(self.layer_list, 1)
+
+        orow = QHBoxLayout()
+        orow.setSpacing(4)
+        orow.addWidget(QLabel("Opacity"))
+        self.op_slider = QSlider(Qt.Orientation.Horizontal)
+        self.op_slider.setRange(0, 100)
+        self.op_slider.setValue(100)
+        self.op_slider.setToolTip("View only — never affects what is saved.")
+        self.op_slider.valueChanged.connect(self._layer_opacity_changed)
+        self.op_label = QLabel("100%")
+        self.op_label.setFixedWidth(34)
+        orow.addWidget(self.op_slider, 1)
+        orow.addWidget(self.op_label)
+        v.addLayout(orow)
+
+        for pairs in (
+            (("+ Open", self._open_as_layer), ("+ New", self._new_layer)),
+            (("Up", lambda: self._move_layer(-1)),
+             ("Down", lambda: self._move_layer(1))),
+            (("Dupe", self._duplicate_layer), ("Delete", self._delete_layer)),
+        ):
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            for label, slot in pairs:
+                b = QPushButton(label)
+                b.clicked.connect(slot)
+                row.addWidget(b)
+            v.addLayout(row)
+        save_all = QPushButton("Save All Layers")
+        save_all.setToolTip("Write every layer back to its own file.")
+        save_all.clicked.connect(self._save_all_layers)
+        v.addWidget(save_all)
+
+        self.layer_path_lbl = QLabel("")
+        self.layer_path_lbl.setWordWrap(True)
+        v.addWidget(self.layer_path_lbl)
+        self.canvas.layers_changed.connect(self._refresh_layers)
+        self._syncing_layers = False
+        QTimer.singleShot(0, self._refresh_layers)
+        return side
+
+    def _refresh_layers(self):
+        if not self.SHOW_LAYERS or not hasattr(self, "layer_list"):
+            return
+        self._syncing_layers = True
+        self.layer_list.clear()
+        for lay in reversed(self.canvas.layers):
+            it = QListWidgetItem(lay.name)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                        | Qt.ItemFlag.ItemIsEditable)
+            it.setCheckState(Qt.CheckState.Checked if lay.visible
+                             else Qt.CheckState.Unchecked)
+            if lay.dirty:
+                it.setForeground(QColor(self._pal.accent))
+            self.layer_list.addItem(it)
+        self.layer_list.setCurrentRow(
+            len(self.canvas.layers) - 1 - self.canvas.active)
+        lay = self.canvas.layer
+        self.op_slider.blockSignals(True)
+        self.op_slider.setValue(int(round(lay.opacity * 100)))
+        self.op_slider.blockSignals(False)
+        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
+        self.layer_path_lbl.setText(lay.path.name if lay.path else "(no file yet)")
+        self._syncing_layers = False
+
+    def _layer_row_selected(self, row):
+        if self._syncing_layers or row < 0:
+            return
+        self.canvas.set_active(len(self.canvas.layers) - 1 - row)
+
+    def _layer_item_changed(self, item):
+        if self._syncing_layers:
+            return
+        i = len(self.canvas.layers) - 1 - self.layer_list.row(item)
+        if not (0 <= i < len(self.canvas.layers)):
+            return
+        lay = self.canvas.layers[i]
+        lay.visible = item.checkState() == Qt.CheckState.Checked
+        if item.text() and item.text() != lay.name:
+            lay.name = item.text()
+        self.canvas.update()
+
+    def _layer_rows_moved(self, *_a):
+        if self._syncing_layers:
+            return
+        names = [self.layer_list.item(r).text()
+                 for r in range(self.layer_list.count())]
+        by_name = {lay.name: lay for lay in self.canvas.layers}
+        if len(by_name) != len(self.canvas.layers):
+            self._refresh_layers()      # duplicate names — cannot map safely
+            return
+        active = self.canvas.layer
+        self.canvas.layers = [by_name[n] for n in reversed(names) if n in by_name]
+        self.canvas.active = self.canvas.layers.index(active)
+        self.canvas.update()
+        self._refresh_layers()
+
+    def _layer_opacity_changed(self, val):
+        if self._syncing_layers:
+            return
+        self.canvas.layer.opacity = val / 100.0
+        self.op_label.setText(f"{val}%")
+        self.canvas.update()
+
+    def _move_layer(self, delta):
+        # the list is reversed, so "up" in the list is +1 in the stack
+        if self.canvas.move_layer(self.canvas.active, -delta):
+            self._refresh_layers()
+
+    def _new_layer(self):
+        self.canvas.add_layer()
+        self._refresh_layers()
+
+    def _duplicate_layer(self):
+        src = self.canvas.layer
+        self.canvas.add_layer(f"{src.name} copy",
+                              [list(r) for r in src.rows], dict(src.palette))
+        self._refresh_layers()
+
+    def _delete_layer(self):
+        lay = self.canvas.layer
+        if lay.dirty and QMessageBox.question(
+                self, "Delete layer",
+                f"'{lay.name}' has unsaved edits. Delete it anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        if not self.canvas.remove_layer(self.canvas.active):
+            QMessageBox.information(self, "Delete layer",
+                                    "The last layer can't be deleted.")
+            return
+        self._refresh_layers()
+
+    def _open_as_layer(self):
+        fn, _ = QFileDialog.getOpenFileName(
+            self, "Open as layer", str(_playground_dir()),
+            "TechDeck Art (*.tdart)")
+        if not fn:
+            return
+        path = Path(fn)
+        try:
+            data = pixel_art.load(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Open failed", str(e))
+            return
+        _, padded = self.canvas.load_as_layer(data, path.stem, path)
+        self._rebuild_swatches()
+        self._refresh_layers()
+        self.status.setText(f"Added layer '{path.stem}'"
+                            + (" — canvas padded to fit" if padded else ""))
+
+    def _save_all_layers(self):
+        saved, skipped = 0, []
+        for lay in self.canvas.layers:
+            if lay.path is None:
+                skipped.append(lay.name)
+                continue
+            pixel_art.save(lay.path, lay.data())
+            lay.dirty = False
+            saved += 1
+        self._refresh_layers()
+        msg = f"Saved {saved} layer(s)"
+        if skipped:
+            msg += f" — no file yet for: {', '.join(skipped)}"
+        self.status.setText(msg)
 
     def _on_appearance_changed(self):
         """Called when the drawn result changes via a palette edit / preset —
@@ -524,11 +725,19 @@ class _CanvasPanel(QWidget, ThemeAware):
 
 # ── Sprite mode ─────────────────────────────────────────────────────────────
 class _SpritePanel(_CanvasPanel):
-    """.tdart authoring."""
+    """.tdart authoring — the mode that gets the layer stack, so multi-part
+    sprites can be edited overlapping while each part keeps its own file."""
+
+    SHOW_LAYERS = True
 
     def __init__(self, parent=None):
         self.path: "Path | None" = None
         super().__init__(parent)
+        self.canvas.modified.connect(self._on_canvas_modified)
+
+    def _on_canvas_modified(self):
+        self.canvas.layer.dirty = True
+        self._refresh_layers()
 
     def _build_action_bar(self):
         bar = QWidget()
@@ -562,12 +771,14 @@ class _SpritePanel(_CanvasPanel):
         if not fn:
             return
         try:
-            self.canvas.load(pixel_art.load(Path(fn)))
+            self.canvas.load(pixel_art.load(Path(fn)), name=Path(fn).stem,
+                             path=Path(fn))
         except Exception as e:
             QMessageBox.critical(self, "Open failed", str(e))
             return
         self.path = Path(fn)
         self._rebuild_swatches()
+        self._refresh_layers()
         self.status.setText(f"Opened {self.path.name}")
 
     def _save(self):
