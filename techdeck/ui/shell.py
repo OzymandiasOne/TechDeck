@@ -1112,4 +1112,10 @@ class MainWindow(QMainWindow):
         for pid in active:
             executor.wait_for_completion(pid, timeout=3.0)
 
+        # Stamp the session snapshot as a deliberate shutdown. Anything else —
+        # kill, crash, freeze-then-restart — leaves clean_exit false, which is
+        # how the next debug report knows the last session died on its feet.
+        from techdeck.core import hang_watchdog
+        hang_watchdog.mark_clean_exit()
+
         event.accept()

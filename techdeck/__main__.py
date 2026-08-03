@@ -198,6 +198,14 @@ def main():
     window = MainWindow(settings)
     _log_step("MainWindow constructed")
 
+    # Arm crash + hang capture. Must come after the window exists (it owns the
+    # UI-thread heartbeat) and before anything the user can drive. Rotates the
+    # previous session's state snapshot aside, so a restart-to-clear-a-freeze
+    # no longer destroys the record of what froze.
+    from techdeck.core import hang_watchdog
+    hang_watchdog.start(window)
+    _log_step("hang watchdog armed")
+
     window.show()
     _log_step("MainWindow.show() called")
 

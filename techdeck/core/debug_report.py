@@ -10,6 +10,17 @@ blind at least once:
 
   System / versions   - is the running exe the version we think it is?
                         (registry install version vs APP_VERSION vs exe mtime)
+  Previous session    - what the LAST process was doing when it ended, and
+                        whether it ended on purpose. The section that survives
+                        "it locked up so I restarted it" — everything live is
+                        gone by then, but hang_watchdog rotated that session's
+                        final snapshot to last_session.json before this one
+                        started (running plugins, how long each had been
+                        silent, open prompt, open modal dialog).
+  Hang / crash dumps  - hang.log: faulthandler's output for a hard crash (in a
+                        frozen windowed build there is no stderr, so this is
+                        the ONLY trace), plus all-thread stack dumps taken by
+                        the watchdog when the UI thread stops heartbeating.
   OneDrive discovery  - where did OneDrive put the Pilot Program library on
                         THIS machine, and which resolver candidate hit?
                         (the v0.8.6 "Could not locate"/"Workbook Not Found" class)
@@ -330,6 +341,53 @@ def _collect_logs() -> list[str]:
     return lines
 
 
+def _collect_previous_session() -> list[str]:
+    """What the LAST session was doing when it ended — the section that
+    survives 'it froze so I restarted it'. clean_exit False means that process
+    was killed / crashed / hung rather than closed."""
+    from techdeck.core import hang_watchdog
+    prev = hang_watchdog.previous_session()
+    if prev is None:
+        return ["<no previous session snapshot — first run since the watchdog "
+                "shipped, or the logs dir was cleared>"]
+    clean = prev.get("clean_exit")
+    lines = [
+        f"Ended cleanly:    {clean}"
+        + ("" if clean else "   <-- killed, crashed, or frozen-then-restarted"),
+        f"Session started:  {prev.get('session_started')}",
+        f"Last written:     {prev.get('written')}   (pid {prev.get('pid')})",
+        f"UI thread stale:  {prev.get('ui_thread_stale_s')}s at that moment",
+    ]
+    for key in ("page", "kit", "active_plugins", "silent_for_s", "run_elapsed_s",
+                "queue", "paused", "is_running", "waiting_for_input",
+                "input_prompt", "modal_dialog", "spinner_active"):
+        if key in prev:
+            lines.append(f"  {key:<18} {prev[key]}")
+    return lines
+
+
+def _collect_hang_log() -> list[str]:
+    """Stack dumps: hard crashes (faulthandler) and UI-thread hangs caught in
+    the act by the watchdog thread."""
+    from techdeck.core import hang_watchdog
+    path = hang_watchdog.hang_log_path()
+    if not path.is_file():
+        return ["<no hang.log — no crash or hang has been captured>"]
+    try:
+        body = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as exc:
+        return [f"hang.log unreadable: {exc}"]
+    lines = [f"File: {path}  ({path.stat().st_size:,} bytes)"]
+    cap = 500
+    if len(body) > cap:
+        lines.append(f"--- hang.log (last {cap} of {len(body)} lines) ---")
+        body = body[-cap:]
+    else:
+        lines.append(f"--- hang.log (complete, {len(body)} lines) ---")
+    lines.extend(body)
+    return lines
+
+
 def _collect_ui_probe(main_window) -> list[str]:
     if main_window is None:
         return ["<no main window reference - skipped>"]
@@ -506,6 +564,9 @@ def generate_debug_report(main_window=None) -> Path:
             lines.extend("  " + l for l in traceback.format_exc().splitlines())
 
     section("SYSTEM / VERSIONS", _collect_system)
+    # Second, deliberately: after "it froze so I restarted it" this is the only
+    # section describing the session that actually broke.
+    section("PREVIOUS SESSION (state at exit)", _collect_previous_session)
     section("ENVIRONMENT", _collect_environment)
     section("ONEDRIVE / LIBRARY DISCOVERY", _collect_onedrive_discovery)
     section("PLUGINS (validated on this machine)", _collect_plugins)
@@ -515,6 +576,7 @@ def generate_debug_report(main_window=None) -> Path:
     section("SETTINGS SNAPSHOT", _collect_settings)
     section("DISK / PERMISSIONS", _collect_disk)
     section("LIVE UI PROBE", lambda: _collect_ui_probe(main_window))
+    section("HANG / CRASH STACK DUMPS", _collect_hang_log)
     section("LOGS", _collect_logs)
     lines.append("")
     lines.append("=== END OF REPORT " + "=" * 46)
