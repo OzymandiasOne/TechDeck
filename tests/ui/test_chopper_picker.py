@@ -271,23 +271,45 @@ class _TargetConsole:
         return self._result
 
 
-def test_sdk_nest_targets_ok_passes_through():
+def _armed(monkeypatch):
+    """Pretend the Sentry Drone is owned + switched on for this plugin, which
+    is what every drone path now gates on (techdeck.core.sentry_mode)."""
+    from techdeck.core import sentry_mode
+    monkeypatch.setattr(sentry_mode, "is_enabled", lambda pid, settings=None: True)
+
+
+def test_sdk_nest_targets_ok_passes_through(monkeypatch):
+    _armed(monkeypatch)
     console = _TargetConsole(("ok", "C:/qtdr/V109", ["504100", "504101"]))
     status, path, names = sdk.request_nest_targets(
-        {"console": console}, "t", "C:/qtdr", target_pattern=r"\d+")
+        {"console": console, "plugin_id": "911_batch_repeater"},
+        "t", "C:/qtdr", target_pattern=r"\d+")
     assert (status, path, names) == ("ok", "C:/qtdr/V109", ["504100", "504101"])
     assert console.args_seen == ("t", "C:/qtdr", r"\d+")
 
 
-def test_sdk_nest_targets_unavailable_without_console_method():
+def test_sdk_nest_targets_unavailable_when_drone_not_enabled():
+    """Drone not bought / not switched on for this app: the console is never
+    even consulted, and the plugin falls back to its classic flow."""
+    console = _TargetConsole(("ok", "C:/qtdr/V109", ["504100"]))
+    assert sdk.request_nest_targets(
+        {"console": console, "plugin_id": "911_batch_repeater"}, "t")[0] == \
+        "unavailable"
+    assert console.args_seen is None
+
+
+def test_sdk_nest_targets_unavailable_without_console_method(monkeypatch):
     """Old console (no request_target_folders) and headless both report
     unavailable so the plugin falls back to its classic flow."""
+    _armed(monkeypatch)
     assert sdk.request_nest_targets({"console": _OldConsole()}, "t")[0] == \
         "unavailable"
     assert sdk.request_nest_targets({}, "t")[0] == "unavailable"
 
 
-def test_sdk_nest_targets_unavailable_on_error():
+def test_sdk_nest_targets_unavailable_on_error(monkeypatch):
+    _armed(monkeypatch)
+
     class _Boom:
         def request_target_folders(self, *a):
             raise RuntimeError("picker exploded")
