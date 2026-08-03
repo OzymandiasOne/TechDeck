@@ -7,9 +7,9 @@ the equipped-star badge, marquee bulbs, sprite-font pixmap helpers, and the
 frameless PixelDialog message box. This module is that shared layer — pages
 import it instead of reaching into each other's privates.
 
-Sprites are editable .tdart files (assets/sprites/, authored by
-tools/generate_bubbles.py and repaintable in tools/pixel_editor.py); PNG
-furniture/backgrounds live in assets/garden.
+Sprites are editable .tdart files (assets/sprites/, repaintable in the Pixel
+Studio or tools/pixel_editor.py); PNG furniture/backgrounds live in
+assets/garden.
 """
 
 import math
@@ -175,7 +175,7 @@ def _draw_bubble(p, rect, sprite, *, shadow=None, offset=(3, 4), alpha=0.45):
     """Render a 9-slice word-bubble sprite to fit `rect` (corners crisp, middle
     stretched), under an optional soft drop shadow taken from the bubble's own
     silhouette — so the shadow always matches whatever the .tdart is repainted
-    to. Bubbles are authored by tools/generate_bubbles.py and editable in the
+    to. Bubbles live in assets/sprites/bubble_*.tdart and are editable in the
     pixel editor."""
     if sprite is None:
         return

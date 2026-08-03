@@ -109,7 +109,7 @@ class EmporiumPage(QWidget):
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
         self._woogy = _load_pixmap("woogy.tdart", 230)
         self._cabinet = _load_pixmap("arcade_cabinet.tdart", 64)
-        # 9-slice word-bubble panels (editable .tdart; see tools/generate_bubbles.py)
+        # 9-slice word-bubble panels (editable .tdart in assets/sprites/)
         self._bubbles = {
             "tile": _load_art("bubble_tile.tdart"),
             "banner": _load_art("bubble_banner.tdart"),
@@ -474,8 +474,8 @@ class EmporiumPage(QWidget):
             self._woogy_h = target
         return self._woogy_scaled
 
-    # Native cabinet metrics (cells) — kept in sync with the .tdart art built by
-    # tools/generate_arcade_cabinet.py (W x H = 48 x 76).
+    # Native cabinet metrics (cells) — kept in sync with the .tdart art in
+    # assets/sprites/arcade_cabinet.tdart (W x H = 48 x 76).
     _CAB_W, _CAB_H = 48, 76
     _SCREEN = (13, 21, 22, 20)        # x, y, w, h of the animated screen face
     _MARQUEE_BULBS = (range(8, 41, 4), 3)   # bulb x-cells, row
