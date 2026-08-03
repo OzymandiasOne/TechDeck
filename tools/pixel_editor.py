@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QColorDialog, QInputDialog,
     QScrollArea, QMessageBox, QButtonGroup, QFrame, QSpinBox,
     QDialog, QDialogButtonBox, QFormLayout,
+    QListWidget, QListWidgetItem, QSlider,
 )
 from PySide6.QtCore import Qt, Signal, QSize, QPoint
 from PySide6.QtGui import QPainter, QColor, QPen, QPixmap, QImage, QKeySequence
@@ -208,15 +209,144 @@ def image_to_tdart(img: QImage, block: int):
     return {"palette": palette, "rows": rows}, note
 
 
+class Layer:
+    """One sheet in the stack: its own grid, palette, file and undo history.
+
+    Layers exist so multi-part art (a beyblade's top / bottom / centre, a
+    character's body / clothes / face) can be edited AS IT WILL BE SEEN --
+    overlapping on one canvas -- while each part stays a separate file that
+    saves back to its own path.
+    """
+
+    def __init__(self, name="Layer", rows=None, palette=None, path=None):
+        self.name = name
+        self.rows = rows if rows is not None else []
+        self.palette = dict(palette or _DEFAULT_PALETTE)
+        self.path = Path(path) if path else None
+        self.visible = True
+        self.opacity = 1.0
+        self.dirty = False
+        self.undo = []
+        self.redo = []
+
+    def size(self):
+        return (len(self.rows[0]) if self.rows else 0, len(self.rows))
+
+    def data(self):
+        rows = ["".join(r) for r in self.rows]
+        used = set("".join(rows)) - set(pixel_art.TRANSPARENT_CHARS)
+        return {"format": "tdart", "version": 1,
+                "palette": {k: v for k, v in self.palette.items() if k in used},
+                "rows": rows}
+
+
 class Canvas(QWidget):
-    """The editable pixel grid."""
+    """The editable pixel grid — a stack of Layers drawn bottom to top.
+
+    `rows`, `palette`, `_undo` and `_redo` are properties onto the ACTIVE
+    layer, so every tool, transform and selection routine keeps working on one
+    grid exactly as before and knows nothing about the stack.
+    """
 
     cell_hovered = Signal(int, int)
     color_picked = Signal(str)   # emits a palette char when the eyedropper hits
     modified = Signal()
     palette_changed = Signal()   # paste added colors — swatch rails re-sync
+    layers_changed = Signal()    # stack added/removed/reordered/renamed
+
+    # ---- the stack ----------------------------------------------------------
+    @property
+    def layer(self):
+        return self.layers[self.active]
+
+    @property
+    def rows(self):
+        return self.layer.rows
+
+    @rows.setter
+    def rows(self, v):
+        self.layer.rows = v
+
+    @property
+    def palette(self):
+        return self.layer.palette
+
+    @palette.setter
+    def palette(self, v):
+        self.layer.palette = v
+
+    @property
+    def _undo(self):
+        return self.layer.undo
+
+    @property
+    def _redo(self):
+        return self.layer.redo
+
+    def set_active(self, i):
+        if 0 <= i < len(self.layers) and i != self.active:
+            self.active = i
+            if self.active_char not in self.palette:
+                self.active_char = next(iter(self.palette), "k")
+            self._clear_selection()
+            self.palette_changed.emit()
+            self.layers_changed.emit()
+            self.update()
+
+    def add_layer(self, name=None, rows=None, palette=None, path=None,
+                  above=True):
+        """Insert a layer, sized to match the stack. Returns its index."""
+        w, h = self.grid_size()
+        if rows is None:
+            rows = [["." for _ in range(w)] for _ in range(h)]
+        n = len(self.layers)
+        lay = Layer(name or f"Layer {n + 1}", rows, palette, path)
+        at = self.active + 1 if above else self.active
+        self.layers.insert(at, lay)
+        self.active = at
+        self._clear_selection()
+        self.palette_changed.emit()
+        self.layers_changed.emit()
+        self.update()
+        return at
+
+    def remove_layer(self, i):
+        if len(self.layers) <= 1:
+            return False
+        self.layers.pop(i)
+        self.active = min(self.active, len(self.layers) - 1)
+        self._clear_selection()
+        self.palette_changed.emit()
+        self.layers_changed.emit()
+        self.update()
+        return True
+
+    def move_layer(self, i, delta):
+        j = i + delta
+        if not (0 <= i < len(self.layers) and 0 <= j < len(self.layers)):
+            return False
+        self.layers[i], self.layers[j] = self.layers[j], self.layers[i]
+        if self.active == i:
+            self.active = j
+        elif self.active == j:
+            self.active = i
+        self.layers_changed.emit()
+        self.update()
+        return True
+
+    def pad_all_to(self, w, h):
+        """Grow every layer to at least w x h so the stack stays aligned."""
+        for lay in self.layers:
+            lw, lh = lay.size()
+            for r in lay.rows:
+                r.extend(["."] * (w - lw))
+            for _ in range(h - lh):
+                lay.rows.append(["." for _ in range(w)])
 
     def __init__(self, w=32, h=32, parent=None):
+        self.layers = [Layer("Layer 1",
+                             [["." for _ in range(w)] for _ in range(h)])]
+        self.active = 0
         super().__init__(parent)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)   # Esc/arrows/Delete
@@ -238,10 +368,6 @@ class Canvas(QWidget):
         self._spline_hover = None # hover cell — previews the next segment
         self.tool = "pencil"
         self.active_char = "k"
-        self.palette = dict(_DEFAULT_PALETTE)
-        self.rows = [["." for _ in range(w)] for _ in range(h)]
-        self._undo = []
-        self._redo = []
         self._resize_to_grid()
 
     # ---- tool (leaving select/lasso drops the selection) ---------------------
@@ -263,28 +389,53 @@ class Canvas(QWidget):
         return (len(self.rows[0]) if self.rows else 0, len(self.rows))
 
     def new_grid(self, w, h):
+        """Reset to a single empty layer."""
         self._clear_selection()
-        self.rows = [["." for _ in range(w)] for _ in range(h)]
-        self._undo.clear()
-        self._redo.clear()
+        self.layers = [Layer("Layer 1",
+                             [["." for _ in range(w)] for _ in range(h)])]
+        self.active = 0
         self._resize_to_grid()
         self.update()
+        self.layers_changed.emit()
+        self.palette_changed.emit()
         self.modified.emit()
 
-    def load(self, data):
-        self._clear_selection()
+    def load(self, data, name=None, path=None):
+        """Replace the whole stack with one layer holding `data`."""
         data = pixel_art.normalize(data)
-        self.palette = dict(data["palette"]) or dict(_DEFAULT_PALETTE)
-        self.rows = [list(r) for r in data["rows"]]
-        if not self.rows:
-            self.rows = [["." for _ in range(32)] for _ in range(32)]
-        # Make sure the active char still exists.
+        rows = [list(r) for r in data["rows"]] or \
+               [["." for _ in range(32)] for _ in range(32)]
+        self._clear_selection()
+        self.layers = [Layer(name or "Layer 1", rows,
+                             dict(data["palette"]) or dict(_DEFAULT_PALETTE),
+                             path)]
+        self.active = 0
         if self.active_char not in self.palette:
             self.active_char = next(iter(self.palette), "k")
-        self._undo.clear()
-        self._redo.clear()
         self._resize_to_grid()
         self.update()
+        self.layers_changed.emit()
+
+    def load_as_layer(self, data, name, path=None):
+        """Add `data` as a new layer on top, padding the stack if it is bigger.
+
+        Mismatched sizes are padded, never scaled: rescaling one sheet of a
+        multi-part sprite would silently break its alignment with the others.
+        """
+        data = pixel_art.normalize(data)
+        rows = [list(r) for r in data["rows"]]
+        nw = max((len(r) for r in rows), default=0)
+        nh = len(rows)
+        w, h = self.grid_size()
+        self.pad_all_to(max(w, nw), max(h, nh))
+        w, h = self.grid_size()
+        for r in rows:
+            r.extend(["."] * (w - len(r)))
+        while len(rows) < h:
+            rows.append(["." for _ in range(w)])
+        i = self.add_layer(name, rows, dict(data["palette"]), path)
+        self._resize_to_grid()
+        return i, (nw, nh) != (w, h)
 
     def reduce_duplicate_lines(self):
         """Collapse runs of identical ADJACENT rows and columns into one each.
@@ -293,23 +444,24 @@ class Canvas(QWidget):
         resampling/distortion. Returns (old, new) sizes."""
         self._clear_selection()
         old = self.grid_size()
-        rows = ["".join(r) for r in self.rows]
-        kept_rows = []
-        for r in rows:
-            if not kept_rows or kept_rows[-1] != r:
-                kept_rows.append(r)
-        if kept_rows:
-            h = len(kept_rows)
-            w = len(kept_rows[0])
-            kept_cols, prev = [], None
+        # Decide which lines to keep from the COMPOSITE, then cut every layer
+        # the same way -- deciding per layer would slide them out of register.
+        comp = ["".join(r) for r in self.composite_rows()]
+        keep_y = [y for y, r in enumerate(comp)
+                  if y == 0 or comp[y - 1] != r]
+        if keep_y:
+            w = len(comp[0])
+            keep_x, prev = [], None
             for x in range(w):
-                col = tuple(kept_rows[y][x] for y in range(h))
+                col = tuple(comp[y][x] for y in keep_y)
                 if col != prev:
-                    kept_cols.append(x)
+                    keep_x.append(x)
                     prev = col
-            self.rows = [[kept_rows[y][x] for x in kept_cols] for y in range(h)]
+            for lay in self.layers:
+                lay.rows = [[lay.rows[y][x] for x in keep_x] for y in keep_y]
         else:
-            self.rows = []
+            for lay in self.layers:
+                lay.rows = []
         self._resize_to_grid()
         self.update()
         self.modified.emit()
@@ -322,12 +474,13 @@ class Canvas(QWidget):
         if w == 0 or h == 0 or (nw == w and nh == h):
             return
         self._clear_selection()
-        new = []
-        for ty in range(nh):
-            sy = min(h - 1, ty * h // nh)
-            new.append([self.rows[sy][min(w - 1, tx * w // nw)]
-                        for tx in range(nw)])
-        self.rows = new
+        for lay in self.layers:
+            new = []
+            for ty in range(nh):
+                sy = min(h - 1, ty * h // nh)
+                new.append([lay.rows[sy][min(w - 1, tx * w // nw)]
+                            for tx in range(nw)])
+            lay.rows = new
         self._resize_to_grid()
         self.update()
         self.modified.emit()
@@ -340,11 +493,12 @@ class Canvas(QWidget):
         self._clear_selection()
         w, _ = self.grid_size()
         nw = w + left + right
-        new = [["."] * nw for _ in range(top)]
-        for r in self.rows:
-            new.append(["."] * left + list(r) + ["."] * right)
-        new += [["."] * nw for _ in range(bottom)]
-        self.rows = new
+        for lay in self.layers:
+            new = [["."] * nw for _ in range(top)]
+            for r in lay.rows:
+                new.append(["."] * left + list(r) + ["."] * right)
+            new += [["."] * nw for _ in range(bottom)]
+            lay.rows = new
         self._resize_to_grid()
         self.update()
         self.modified.emit()
@@ -359,7 +513,9 @@ class Canvas(QWidget):
         if top + bottom >= h or left + right >= w:
             return False
         self._clear_selection()
-        self.rows = [list(r)[left:w - right] for r in self.rows[top:h - bottom]]
+        for lay in self.layers:
+            lay.rows = [list(r)[left:w - right]
+                        for r in lay.rows[top:h - bottom]]
         self._resize_to_grid()
         self.update()
         self.modified.emit()
@@ -487,10 +643,52 @@ class Canvas(QWidget):
         self.modified.emit()
 
     def export(self):
-        return {
-            "palette": dict(self.palette),
-            "rows": ["".join(r) for r in self.rows],
-        }
+        """Flatten the visible stack into one sprite.
+
+        Layers own their palettes independently, so the same char can mean
+        different colours on different sheets (top's '7' vs centre's 'w' may
+        even be the same hex under different keys). Merging by char alone would
+        silently recolour the art, so a colliding char is REMAPPED to a free
+        one; identical hexes are folded onto a single key.
+        """
+        merged, by_hex, remap = {}, {}, []
+        for lay in self.layers:
+            m = {}
+            for ch, hx in lay.palette.items():
+                key = hx.lower()
+                if key in by_hex:                    # same colour already in
+                    m[ch] = by_hex[key]
+                elif ch not in merged:               # char free -- keep it
+                    merged[ch] = hx
+                    by_hex[key] = ch
+                    m[ch] = ch
+                else:                                # collision -- rename
+                    free = next((c for c in _CHAR_POOL
+                                 if c not in merged
+                                 and c not in pixel_art.TRANSPARENT_CHARS), None)
+                    if free is None:
+                        m[ch] = ch                   # out of chars; best effort
+                        continue
+                    merged[free] = hx
+                    by_hex[key] = free
+                    m[ch] = free
+            remap.append(m)
+
+        w, h = self.grid_size()
+        out = [["." for _ in range(w)] for _ in range(h)]
+        for lay, m in zip(self.layers, remap):
+            if not lay.visible:
+                continue
+            for y in range(min(h, len(lay.rows))):
+                row = lay.rows[y]
+                for x in range(min(w, len(row))):
+                    ch = row[x]
+                    if ch not in pixel_art.TRANSPARENT_CHARS:
+                        out[y][x] = m.get(ch, ch)
+        rows = ["".join(r) for r in out]
+        used = set("".join(rows)) - set(pixel_art.TRANSPARENT_CHARS)
+        return {"palette": {k: v for k, v in merged.items() if k in used},
+                "rows": rows}
 
     def add_color(self, hexval):
         # Reuse the char if this exact color is already in the palette.
@@ -514,6 +712,22 @@ class Canvas(QWidget):
         self._resize_to_grid()
         self.update()
 
+    def composite_rows(self):
+        """Flatten the visible stack, bottom to top, into one char grid.
+        Opacity is a VIEW property only — it never affects what is saved."""
+        w, h = self.grid_size()
+        out = [["." for _ in range(w)] for _ in range(h)]
+        for lay in self.layers:
+            if not lay.visible:
+                continue
+            for y in range(min(h, len(lay.rows))):
+                row = lay.rows[y]
+                for x in range(min(w, len(row))):
+                    ch = row[x]
+                    if ch not in pixel_art.TRANSPARENT_CHARS:
+                        out[y][x] = ch
+        return out
+
     def paintEvent(self, _evt):
         p = QPainter(self)
         cp = self.cell_px
@@ -522,12 +736,24 @@ class Canvas(QWidget):
         dark = QColor("#2c2c2c")
         for y in range(h):
             for x in range(w):
-                ch = self.rows[y][x]
-                if ch in pixel_art.TRANSPARENT_CHARS or ch not in self.palette:
-                    p.fillRect(x * cp, y * cp, cp, cp,
-                               light if (x + y) % 2 == 0 else dark)
-                else:
-                    p.fillRect(x * cp, y * cp, cp, cp, QColor(self.palette[ch]))
+                p.fillRect(x * cp, y * cp, cp, cp,
+                           light if (x + y) % 2 == 0 else dark)
+        # Draw the stack bottom to top. Each layer's opacity applies to its own
+        # pixels, so a lower sheet stays legible while you work on the one above.
+        for lay in self.layers:
+            if not lay.visible or lay.opacity <= 0.0:
+                continue
+            alpha = int(round(max(0.0, min(1.0, lay.opacity)) * 255))
+            for y in range(min(h, len(lay.rows))):
+                row = lay.rows[y]
+                for x in range(min(w, len(row))):
+                    ch = row[x]
+                    if ch in pixel_art.TRANSPARENT_CHARS or ch not in lay.palette:
+                        continue
+                    col = QColor(lay.palette[ch])
+                    if alpha < 255:
+                        col.setAlpha(alpha)
+                    p.fillRect(x * cp, y * cp, cp, cp, col)
         if self.show_grid and cp >= 6:
             p.setPen(QColor(0, 0, 0, 60))
             for x in range(w + 1):
@@ -1125,6 +1351,8 @@ class Editor(QMainWindow):
         self.canvas.cell_hovered.connect(self._on_hover)
         self.canvas.color_picked.connect(lambda ch: self._select_char(ch))
         self.canvas.palette_changed.connect(self._rebuild_swatches)
+        self.canvas.layers_changed.connect(self._refresh_layers)
+        self._syncing_layers = False
 
         self.scroll = QScrollArea()
         self.scroll.setWidget(self.canvas)
@@ -1135,12 +1363,14 @@ class Editor(QMainWindow):
         row = QHBoxLayout(root)
         row.addWidget(self._build_sidebar())
         row.addWidget(self.scroll, 1)
+        row.addWidget(self._build_layers_panel())
         self.setCentralWidget(root)
 
         self._build_menu()
         self._rebuild_swatches()
+        self._refresh_layers()
         self.statusBar().showMessage("Ready")
-        self.resize(900, 640)
+        self.resize(1180, 700)
 
         if open_path:
             self._open_path(Path(open_path))
@@ -1155,6 +1385,8 @@ class Editor(QMainWindow):
             ("Import Image...", self.import_image, "Ctrl+I"),
             ("Save", self.save_file, "Ctrl+S"),
             ("Save As...", self.save_file_as, "Ctrl+Shift+S"),
+            ("Open as Layer...", self.open_as_layer, "Ctrl+Shift+O"),
+            ("Save All Layers", self.save_all_layers, "Ctrl+Alt+S"),
             ("Copy as Python", self.copy_python, None),
         ]:
             act = filem.addAction(label, slot)
@@ -1281,6 +1513,214 @@ class Editor(QMainWindow):
         self.sym_btn.toggled.connect(self._toggle_symmetry)
         v.addWidget(self.sym_btn)
         return side
+
+    # ---- layers panel --------------------------------------------------------
+    def _build_layers_panel(self):
+        """Stack list: topmost layer at the top, Photoshop-style.
+
+        Multi-part sprites (a beyblade's top / bottom / centre) are edited here
+        as they will be SEEN — overlapping on one canvas — while each part
+        stays its own file and saves back to its own path.
+        """
+        side = QFrame()
+        side.setFixedWidth(230)
+        v = QVBoxLayout(side)
+        v.addWidget(self._heading("Layers"))
+
+        self.layer_list = QListWidget()
+        self.layer_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.layer_list.currentRowChanged.connect(self._layer_row_selected)
+        self.layer_list.itemChanged.connect(self._layer_item_changed)
+        self.layer_list.model().rowsMoved.connect(self._layer_rows_moved)
+        self.layer_list.setToolTip(
+            "Click to make a layer active — painting always goes to the active "
+            "layer.\nTick to show/hide. Double-click the name to rename. "
+            "Drag to reorder.")
+        v.addWidget(self.layer_list, 1)
+
+        orow = QHBoxLayout()
+        orow.addWidget(QLabel("Opacity"))
+        self.op_slider = QSlider(Qt.Orientation.Horizontal)
+        self.op_slider.setRange(0, 100)
+        self.op_slider.setValue(100)
+        self.op_slider.setToolTip("View-only — never affects what is saved.")
+        self.op_slider.valueChanged.connect(self._layer_opacity_changed)
+        self.op_label = QLabel("100%")
+        self.op_label.setFixedWidth(38)
+        orow.addWidget(self.op_slider, 1)
+        orow.addWidget(self.op_label)
+        v.addLayout(orow)
+
+        for pairs in (
+            (("Open as Layer...", self.open_as_layer),
+             ("New Layer", self.new_layer)),
+            (("Move Up", lambda: self._move_layer(-1)),
+             ("Move Down", lambda: self._move_layer(1))),
+            (("Duplicate", self.duplicate_layer),
+             ("Delete", self.delete_layer)),
+            (("Save Layer", self.save_layer),
+             ("Save All Layers", self.save_all_layers)),
+        ):
+            row = QHBoxLayout()
+            for label, slot in pairs:
+                b = QPushButton(label)
+                b.clicked.connect(slot)
+                row.addWidget(b)
+            v.addLayout(row)
+
+        self.layer_path_lbl = QLabel("")
+        self.layer_path_lbl.setWordWrap(True)
+        self.layer_path_lbl.setStyleSheet("color:#888; font-size:10px;")
+        v.addWidget(self.layer_path_lbl)
+        return side
+
+    def _refresh_layers(self):
+        """Rebuild the list from the canvas stack (topmost first)."""
+        self._syncing_layers = True
+        self.layer_list.clear()
+        for lay in reversed(self.canvas.layers):
+            it = QListWidgetItem(lay.name)
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable
+                        | Qt.ItemFlag.ItemIsEditable)
+            it.setCheckState(Qt.CheckState.Checked if lay.visible
+                             else Qt.CheckState.Unchecked)
+            if lay.dirty:
+                it.setForeground(QColor("#e0b040"))
+            self.layer_list.addItem(it)
+        self.layer_list.setCurrentRow(self._row_of(self.canvas.active))
+        lay = self.canvas.layer
+        self.op_slider.blockSignals(True)
+        self.op_slider.setValue(int(round(lay.opacity * 100)))
+        self.op_slider.blockSignals(False)
+        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
+        self.layer_path_lbl.setText(
+            str(lay.path) if lay.path else "(unsaved — Save Layer to give it a file)")
+        self._syncing_layers = False
+
+    def _row_of(self, index):
+        """Stack index -> list row (the list shows the stack reversed)."""
+        return len(self.canvas.layers) - 1 - index
+
+    def _layer_row_selected(self, row):
+        if getattr(self, "_syncing_layers", False) or row < 0:
+            return
+        self.canvas.set_active(self._row_of(row))
+
+    def _layer_item_changed(self, item):
+        if getattr(self, "_syncing_layers", False):
+            return
+        i = self._row_of(self.layer_list.row(item))
+        if not (0 <= i < len(self.canvas.layers)):
+            return
+        lay = self.canvas.layers[i]
+        lay.visible = item.checkState() == Qt.CheckState.Checked
+        if item.text() and item.text() != lay.name:
+            lay.name = item.text()
+        self.canvas.update()
+
+    def _layer_rows_moved(self, *_a):
+        """Drag-reorder: rebuild the stack from the list order (reversed)."""
+        if getattr(self, "_syncing_layers", False):
+            return
+        names = [self.layer_list.item(r).text()
+                 for r in range(self.layer_list.count())]
+        by_name = {lay.name: lay for lay in self.canvas.layers}
+        if len(by_name) != len(self.canvas.layers):
+            self._refresh_layers()      # duplicate names — can't map safely
+            return
+        active = self.canvas.layer
+        self.canvas.layers = [by_name[n] for n in reversed(names)
+                              if n in by_name]
+        self.canvas.active = self.canvas.layers.index(active)
+        self.canvas.update()
+        self._refresh_layers()
+
+    def _layer_opacity_changed(self, val):
+        if getattr(self, "_syncing_layers", False):
+            return
+        self.canvas.layer.opacity = val / 100.0
+        self.op_label.setText(f"{val}%")
+        self.canvas.update()
+
+    def _move_layer(self, delta):
+        # list is reversed, so "up" in the list is +1 in the stack
+        if self.canvas.move_layer(self.canvas.active, -delta):
+            self._refresh_layers()
+
+    def new_layer(self):
+        self.canvas.add_layer()
+        self._on_modified()
+
+    def duplicate_layer(self):
+        src = self.canvas.layer
+        self.canvas.add_layer(f"{src.name} copy",
+                              [list(r) for r in src.rows], dict(src.palette))
+        self._on_modified()
+
+    def delete_layer(self):
+        lay = self.canvas.layer
+        if lay.dirty and QMessageBox.question(
+                self, "Delete layer",
+                f"'{lay.name}' has unsaved edits. Delete it anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        if not self.canvas.remove_layer(self.canvas.active):
+            QMessageBox.information(self, "Delete layer",
+                                    "The last layer can't be deleted.")
+            return
+        self._on_modified()
+
+    def open_as_layer(self):
+        fn, _ = QFileDialog.getOpenFileName(
+            self, "Open as layer", str(self._assets_dir()),
+            "TechDeck Art (*.tdart)")
+        if not fn:
+            return
+        path = Path(fn)
+        try:
+            data = pixel_art.load(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Open failed", str(e))
+            return
+        _, padded = self.canvas.load_as_layer(data, path.stem, path)
+        self._rebuild_swatches()
+        self._refresh_layers()
+        msg = f"Added layer '{path.stem}'"
+        if padded:
+            msg += " — canvas padded to fit (layers are never rescaled)"
+        self.statusBar().showMessage(msg, 6000)
+
+    def save_layer(self):
+        lay = self.canvas.layer
+        if lay.path is None:
+            fn, _ = QFileDialog.getSaveFileName(
+                self, f"Save layer '{lay.name}'",
+                str(self._assets_dir() / f"{lay.name}.tdart"),
+                "TechDeck Art (*.tdart)")
+            if not fn:
+                return
+            lay.path = Path(fn)
+        pixel_art.save(lay.path, lay.data())
+        lay.dirty = False
+        self._refresh_layers()
+        self.statusBar().showMessage(f"Saved {lay.path}", 4000)
+
+    def save_all_layers(self):
+        """Write every layer back to its OWN file — the point of the stack."""
+        saved, skipped = 0, []
+        for lay in self.canvas.layers:
+            if lay.path is None:
+                skipped.append(lay.name)
+                continue
+            pixel_art.save(lay.path, lay.data())
+            lay.dirty = False
+            saved += 1
+        self._refresh_layers()
+        msg = f"Saved {saved} layer(s)"
+        if skipped:
+            msg += f" — no file yet for: {', '.join(skipped)} (use Save Layer)"
+        self.statusBar().showMessage(msg, 8000)
 
     def _heading(self, text):
         lbl = QLabel(text)
@@ -1477,12 +1917,13 @@ class Editor(QMainWindow):
 
     def _open_path(self, path: Path):
         try:
-            self.canvas.load(pixel_art.load(path))
+            self.canvas.load(pixel_art.load(path), name=path.stem, path=path)
         except Exception as e:
             QMessageBox.critical(self, "Open failed", str(e))
             return
         self.path = path
         self._rebuild_swatches()
+        self._refresh_layers()
         self._mark_clean()
 
     def import_image(self):
@@ -1541,6 +1982,8 @@ class Editor(QMainWindow):
         self._write(self.path)
 
     def _write(self, path: Path):
+        """Ctrl+S writes the flattened composite. Individual sheets are saved
+        with Save Layer / Save All Layers, each back to its own file."""
         try:
             pixel_art.save(path, self.canvas.export())
         except Exception as e:
@@ -1564,6 +2007,8 @@ class Editor(QMainWindow):
         return Path(__file__).resolve().parent / "pixel_playground"
 
     def _on_modified(self):
+        self.canvas.layer.dirty = True
+        self._refresh_layers()
         if not self.dirty:
             self.dirty = True
             self._update_title()
