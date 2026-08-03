@@ -98,9 +98,17 @@ def _snapshot(main_window) -> dict:
 
     home = getattr(main_window, "home_page", None)
 
+    # Name the page by which known page it IS or CONTAINS — Home sits inside a
+    # container with the console, so the raw widget type is just "QWidget".
     try:
-        stack = main_window.page_stack
-        state["page"] = type(stack.currentWidget()).__name__
+        current = main_window.page_stack.currentWidget()
+        state["page"] = type(current).__name__
+        for attr in ("home_page", "library_page", "settings_page",
+                     "account_page", "devkit_page"):
+            page = getattr(main_window, attr, None)
+            if page is not None and (page is current or current.isAncestorOf(page)):
+                state["page"] = attr
+                break
     except Exception:
         pass
 
