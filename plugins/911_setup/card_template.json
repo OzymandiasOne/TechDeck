@@ -1,6 +1,6 @@
 {
   "_comment": "Template for the Teams cards created by 911 Setup's 'Generate Teams Cards' stage. Cards are driven by the EB 922 Schedule's CURRENT PIPELINE sheet: every row whose DEPT. is '911' AND whose STATUS is 'NEED TEAMS/SETUP' becomes one card in the MODELING bucket of the SOPO D911 PIPELINE plan. Edit this file to change the cards - no flow change is needed unless the payload SHAPE changes. 'label_map' mirrors the plan's label slots top-to-bottom (category1 = top of the label list); if a label is renamed or reordered IN TEAMS, update it here too.",
-  "plan": "SOPO D911 PIPELINE",
+  "plan": "EB SOPO D911",
   "bucket": "MODELING",
   "title_format": "BATCH: {batch} - NEST: {nest} ({material})",
   "title_format_no_material": "BATCH: {batch} - NEST: {nest}",

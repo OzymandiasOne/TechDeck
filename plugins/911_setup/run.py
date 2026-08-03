@@ -1656,10 +1656,16 @@ def _build_card(row: dict, material: dict, template: dict, label_map: dict,
         "bucket": template.get("bucket", "MODELING"),
         "priority": template.get("priority", "Medium"),
         "status": template.get("status", "Not started"),
-        "dueDate": _due_date_iso(row.get("date")),
         "checklist": checklist,
         "labels": slots,
     }
+    # dueDate is OMITTED, not blanked, when the nest has no scheduled date
+    # (the DATE column also carries HOLD / N/A). The flow feeds this straight
+    # into Planner's Due Date Time; an absent key reads as null and creates
+    # the card with no due date, where an empty STRING fails the action.
+    due = _due_date_iso(row.get("date"))
+    if due:
+        card["dueDate"] = due
     return card, names
 
 
@@ -1766,7 +1772,7 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         f"bucket '{payload['bucket']}':")
     for card, names in zip(cards, card_labels):
         bits = ", ".join(names) if names else "no labels"
-        due = card["dueDate"][:10] if card["dueDate"] else "no due date"
+        due = card["dueDate"][:10] if card.get("dueDate") else "no due date"
         prog = "" if "Program" in card["checklist"] else "  (no Program)"
         log(f"  - {card['title']}   [{bits}]  due {due}{prog}")
 

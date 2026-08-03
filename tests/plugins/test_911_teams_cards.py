@@ -33,7 +33,9 @@ def template():
 
 # ── card_template.json contract ─────────────────────────────────────────────
 def test_template_targets_the_d911_modeling_bucket(template):
-    assert template["plan"] == "SOPO D911 PIPELINE"
+    # The Teams TAB reads "SOPO D911 PIPELINE", but the Planner PLAN the
+    # connector resolves is named "EB SOPO D911" -- flow #3 is bound to that.
+    assert template["plan"] == "EB SOPO D911"
     assert template["bucket"] == "MODELING"
 
 
@@ -181,6 +183,17 @@ def test_program_is_dropped_on_non_tube_stock(st, template):
                                  "Scribe Sheet", "Production"]
     # the rest of the card is untouched (MEDIUM + SAW CUT)
     assert card["labels"] == ["category2", "category4"]
+
+
+def test_unscheduled_nest_omits_duedate_entirely(st, template):
+    """HOLD / N/A in the DATE column must leave the key OUT, not send "" --
+    the flow feeds it straight into Planner's Due Date Time, where an empty
+    string fails the action but an absent key means no due date."""
+    warnings, unlabelled = [], []
+    card, _ = st._build_card(_row(date="HOLD"), {"code": "218004493", "desc": ""},
+                             template, _label_map(st, template),
+                             warnings, unlabelled)
+    assert "dueDate" not in card
 
 
 def test_missing_stock_code_falls_back_to_the_short_title(st, template):
