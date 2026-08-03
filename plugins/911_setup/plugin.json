@@ -1,22 +1,25 @@
 {
   "id": "911_setup",
   "name": "911 Setup",
-  "description": "Automates the full 911 QTDR batch setup behind a checklist of actions to run: creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, generates inspection sheets, and stamps the Move Ticket Omit PDFs (with a toggleable difficulty label). Nest numbers are sourced from the Quote File NEST column.",
-  "version": "1.7.0",
+  "description": "Automates the full 911 QTDR batch setup behind a checklist of actions to run: posts a Teams card for every nest the EB 922 Schedule marks NEED TEAMS/SETUP, creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, generates inspection sheets, and stamps the Move Ticket Omit PDFs (with a toggleable difficulty label). Nest numbers are sourced from the Quote File NEST column.",
+  "version": "1.8.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
     "setup": [
       "Sync the '911 QTDR' folder in OneDrive and make sure the batch's folder (e.g. S035) is there with its BATCH LIST and NEST PACKAGES.",
       "Keep the Working Forecast List up to date and synced - the app pulls each nest's forecast data from it.",
+      "For Teams cards, keep the EB 922 Schedule synced and mark each nest that needs one 'NEED TEAMS/SETUP' in the STATUS column, with its rating colour in the RATING column.",
       "Close any nest workbooks or PDFs from an earlier run that are open in Excel or Acrobat, so the app can overwrite them."
     ],
     "how_it_works": [
+      "Tick the actions to run. Generate Teams Cards runs first and needs no batch number - it cards every 911 nest the schedule marks NEED TEAMS/SETUP.",
       "Enter the batch number, then check which nests to set up (nests already built are flagged).",
       "For each nest it creates the nest folder, copies and fills the 911 Batch template with forecast, material, and quote data, and builds the per-piece inspection sheets.",
       "It also pulls the nest's drawings PDF, removing the MOVE TICKET pages and stamping the cover with the batch and nest."
     ],
     "output": [
+      "One Teams card per waiting nest in the MODELING bucket of the SOPO D911 PIPELINE plan, labelled with its difficulty and its saw/tube-laser machine, due on the schedule's date.",
       "One folder per nest, each with a filled '911 BATCH {batch} {nest}.xlsx' and its inspection sheets.",
       "A '{nest} MOVE TICKET OMIT.pdf' drawings file in each nest folder.",
       "A scribe-verification doc dropped into each nest's PRODUCTION PAPERWORK folder."
@@ -61,6 +64,32 @@
         "placeholder": "Working Forecast List.xlsx",
         "required": false,
         "default": "Working Forecast List.xlsx"
+      },
+      {
+        "key": "schedule_path",
+        "type": "string",
+        "label": "EB 922 Schedule Path",
+        "description": "Full path to 'EB 922 Schedule.xlsx' - the source of the Teams-card work list and the difficulty ratings. Leave blank to auto-detect it under your OneDrive Pilot Program folder.",
+        "placeholder": "Auto-detect: ... \\ 922 QTDR Production Packages \\ 2 - Planning \\ EB 922 Schedule.xlsx",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "card_webhook_url",
+        "type": "string",
+        "label": "Teams Webhook URL",
+        "description": "Power Automate flow that creates the D911 modeling cards. Until this is set the Generate Teams Cards stage runs as a dry run - it logs every card it would create and saves a preview instead of posting.",
+        "placeholder": "Blank = dry run only",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "card_dry_run",
+        "type": "boolean",
+        "label": "Teams cards: dry run (preview only)",
+        "description": "When on, build and log the cards and save a preview JSON, but do not post them. Forced on automatically when no webhook URL is set.",
+        "required": false,
+        "default": false
       }
     ]
   }

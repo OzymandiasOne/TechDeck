@@ -112,9 +112,36 @@ v1.3.1 changes
     cells in D/E overwritten with the literal value; blank A-C cells filled,
     real forecast data preserved). The SCRIBE VERIFICATION sheet mirrors
     NEST via formulas, so it fills automatically once Excel recalculates.
+
+v1.8.0 changes
+  - New FIRST stage, "Generate Teams Cards": one card per nest the EB 922
+    Schedule marks NEED TEAMS/SETUP, posted to the MODELING bucket of the
+    SOPO D911 PIPELINE plan (D922 channel) via a Power Automate webhook --
+    the same indirection 922 Setup uses, so TechDeck never touches Planner.
+
+    The stage is BATCH-INDEPENDENT: its work list is the schedule's
+    CURRENT PIPELINE sheet (DEPT. 911 + STATUS NEED TEAMS/SETUP), which
+    spans whatever batches are queued. It therefore runs BEFORE the batch
+    prompt, and checking it alone is a complete run that never asks for a
+    batch number.
+
+    Card = "BATCH: {batch} - NEST: {nest} ({source material})", due on the
+    schedule's DATE, labelled with its difficulty (SIMPLE / MEDIUM /
+    DIFFICULT, read from the RATING cell's COLOUR by the same sibling
+    911 Remove Ticket helpers that stamp the packet) and its machine
+    (SAW CUT / TUBE LASER, decided from the NOTES text). The "(...)" is
+    the nest's EB source-material stock code, which lives in the batch's
+    own BATCH LIST 'Material' column -- not on the schedule -- so each
+    referenced batch's BATCH LIST is read once and cached.
+
+    The "Program" checklist item is dropped on non-tube stock. Card layout,
+    checklist, label slots and the machine rules all live in the sibling
+    card_template.json; the flow recipe is docs/TEAMS_CARDS.md (flow #3).
 """
 
 import ctypes
+import datetime as _dt
+import json
 import re
 import shutil
 import threading
@@ -1315,6 +1342,471 @@ def _find_template_911(template_dir: Path) -> Path:
     )
 
 
+# ===========================================================================
+# Generate Teams Cards (v1.8.0)
+# ===========================================================================
+# One card per nest that is WAITING to be set up, posted to the MODELING
+# bucket of the SOPO D911 PIPELINE plan (D922 channel) through a Power
+# Automate webhook -- the same "TechDeck never touches Planner directly"
+# pattern 922 Setup uses (flow recipe: docs/TEAMS_CARDS.md, flow #3).
+#
+# The work list is NOT the batch folder: it is the EB 922 Schedule's
+# "CURRENT PIPELINE" sheet, every row where DEPT. is 911 and STATUS is
+# "NEED TEAMS/SETUP". That makes the stage batch-independent -- it cards the
+# whole 911 queue, whichever batch each nest belongs to -- so it runs before
+# (and without) the batch prompt.
+#
+# Per row:
+#   col B "BATCH / NEST"  "V092 503836" -> batch V092, nest 503836
+#   col C "DATE"          -> the card's due date
+#   col D "NOTES"         -> source-material text -> SAW CUT / TUBE LASER
+#                            label, and whether the "Program" checklist item
+#                            applies (tube stock only)
+#   col E "RATING"        -> SIMPLE / MEDIUM / DIFFICULT, read from the CELL
+#                            COLOUR (the cell holds no text) via the sibling
+#                            911 Remove Ticket helpers -- the single home of
+#                            that logic, shared with the packet stamp
+#
+# The "(#)" in the card title is the nest's EB source-material stock code
+# (e.g. 211076345), which lives in the batch's own BATCH LIST 'Material'
+# column -- not on the schedule. Each referenced batch's BATCH LIST is read
+# once and cached.
+# ---------------------------------------------------------------------------
+
+# The 'TechDeck 911 Setup - Create Modeling Cards' Power Automate flow.
+# EMPTY until that flow is built (docs/TEAMS_CARDS.md, flow #3): with no URL
+# the stage forces a dry run, logs every card it WOULD create and writes the
+# payload preview, so nothing posts by accident. Bake the real URL in here
+# once the flow exists (same pattern as 922 Setup's DEFAULT_WEBHOOK_URL).
+DEFAULT_CARD_WEBHOOK_URL = ""
+
+_CARD_PREVIEW_FILENAME = "last_911_setup_payload.json"
+
+# Schedule sheet + the headers we read, all looked up BY NAME (Hard Rules 1-2)
+# -- the live sheet ships them with trailing spaces ('DEPT. ', 'STATUS ').
+_SCHED_SHEET = "CURRENT PIPELINE"
+_SCHED_DEPT = "DEPT."
+_SCHED_KEY = "BATCH / NEST"
+_SCHED_DATE = "DATE"
+_SCHED_NOTES = "NOTES"
+_SCHED_RATING = "RATING"
+_SCHED_STATUS = "STATUS"
+
+
+def _load_card_template() -> dict:
+    """Load card_template.json sitting next to this file."""
+    with open(Path(__file__).with_name("card_template.json"),
+              "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def _norm_text(value) -> str:
+    """Uppercase, whitespace-collapsed form used for every schedule match."""
+    return re.sub(r"\s+", " ", str(value if value is not None else "")).strip().upper()
+
+
+def _norm_status(value) -> str:
+    """_norm_text plus tightened slashes, so a hand-typed 'NEED TEAMS / SETUP'
+    still matches the canonical 'NEED TEAMS/SETUP'."""
+    return re.sub(r"\s*/\s*", "/", _norm_text(value))
+
+
+def _split_batch_nest(value):
+    """'V092 503836' -> ('V092', '503836'); 'V085 S20085' -> ('V085','S20085').
+
+    Batch first, nest LAST -- never a digits-only match, because nests are not
+    always numeric (Hard Rule 3's alphanumeric-nest class). Returns
+    (None, None) when the cell does not carry both halves.
+    """
+    tokens = _norm_text(value).split()
+    if len(tokens) < 2:
+        return None, None
+    return tokens[0], tokens[-1]
+
+
+def _due_date_iso(value) -> str:
+    """Schedule DATE cell -> an ISO-8601 instant Planner accepts, or "".
+
+    Non-dates are expected and fine: the column also carries 'HOLD' and 'N/A'
+    for nests with no scheduled date, which simply means no due date.
+    """
+    if isinstance(value, _dt.datetime):
+        return value.strftime("%Y-%m-%dT00:00:00Z")
+    if isinstance(value, _dt.date):
+        return value.strftime("%Y-%m-%dT00:00:00Z")
+    return ""
+
+
+def _resolve_machine(material_text: str, template: dict):
+    """'SAW CUT' / 'TUBE LASER' / None for a source-material description.
+
+    An explicit '(TL)' / '(SAW)' marker in the note always wins -- the
+    schedule uses it to override the shape's usual machine (e.g.
+    'HSS 3 X 3 X 0.250 TUBE (SAW)'). Otherwise the first shape keyword
+    listed in card_template.json decides. Unrecognised material returns
+    None so the card is created UNLABELLED and reported, rather than
+    guessing a machine.
+    """
+    text = _norm_text(material_text)
+    if not text:
+        return None
+    for marker, machine in (template.get("machine_markers") or {}).items():
+        if re.search(r"\(\s*" + re.escape(_norm_text(marker)) + r"\s*\)", text):
+            return machine
+    for entry in (template.get("machine_shapes") or []):
+        if len(entry) == 2 and entry[0] and _norm_text(entry[0]) in text:
+            return entry[1]
+    return None
+
+
+def _is_tube(material_text: str, template: dict) -> bool:
+    """True when the source material is tube stock (drives the 'Program'
+    checklist item -- a tube-laser program is meaningless on saw stock)."""
+    text = _norm_text(material_text)
+    return any(_norm_text(k) in text
+               for k in (template.get("tube_keywords") or ["TUBE"]))
+
+
+def _read_schedule_rows(params, template, log, cancel_event):
+    """Every CURRENT PIPELINE row that needs a card -> (rows, problem_text).
+
+    ``problem_text`` is non-empty when the whole lookup was unavailable (the
+    schedule is missing, open in Excel, or has no such sheet); the caller
+    reports it and skips the stage rather than posting a half-built payload.
+
+    Each row dict: batch, nest, date, notes, difficulty, excel_row.
+    """
+    stamps = _load_omit_stamp_helpers(log)
+    if stamps is None:
+        return [], ("The 911 Remove Ticket helpers could not be loaded, so the "
+                    "EB 922 Schedule's difficulty colours cannot be read and "
+                    "no Teams cards were created.")
+
+    path = stamps._schedule_path(params)
+    if path is None:
+        return [], ("The EB 922 Schedule workbook could not be found, so no "
+                    "Teams cards were created. Check that the '922 QTDR "
+                    "Production Packages' folder is synced, or set the "
+                    "'EB 922 Schedule' path in this plugin's Settings.")
+    log(f"Schedule      : {path}")
+    try:
+        wb = sdk.load_workbook_resilient(path, log=log, data_only=True)
+    except Exception as exc:
+        return [], (f"The Teams-card work list could not be read from "
+                    f"{path.name}:\n\n{exc}\n\nNo Teams cards were created.")
+
+    try:
+        if _SCHED_SHEET not in wb.sheetnames:
+            return [], (f"{path.name} has no '{_SCHED_SHEET}' sheet, so no "
+                        f"Teams cards were created.")
+        ws = wb[_SCHED_SHEET]
+        hdr_row, hdr = sdk.find_header_row(ws, [_SCHED_KEY, _SCHED_STATUS])
+        if not hdr_row:
+            return [], (f"{path.name} has no row containing both "
+                        f"'{_SCHED_KEY}' and '{_SCHED_STATUS}' on the "
+                        f"'{_SCHED_SHEET}' sheet, so no Teams cards were "
+                        f"created.")
+        c_key = hdr.get(_SCHED_KEY)
+        c_status = hdr.get(_SCHED_STATUS)
+        c_dept = hdr.get(_SCHED_DEPT)
+        c_date = hdr.get(_SCHED_DATE)
+        c_notes = hdr.get(_SCHED_NOTES)
+        c_rating = hdr.get(_SCHED_RATING)
+        theme_rgbs = stamps._theme_rgbs(wb)
+
+        want_dept = _norm_text(template.get("schedule_dept", "911"))
+        want_status = _norm_status(template.get("schedule_status",
+                                                "NEED TEAMS/SETUP"))
+
+        rows = []
+        for r in range(hdr_row + 1, ws.max_row + 1):
+            if r % 64 == 0:
+                sdk.raise_if_cancelled(cancel_event)
+            if c_dept and _norm_text(ws.cell(r, c_dept).value) != want_dept:
+                continue
+            if _norm_status(ws.cell(r, c_status).value) != want_status:
+                continue
+            batch, nest = _split_batch_nest(ws.cell(r, c_key).value)
+            difficulty = None
+            if c_rating:
+                difficulty = stamps._match_fill(
+                    stamps._fill_rgb(ws.cell(r, c_rating), theme_rgbs))
+            rows.append({
+                "excel_row": r,
+                "raw_key": str(ws.cell(r, c_key).value or "").strip(),
+                "batch": batch,
+                "nest": nest,
+                "date": ws.cell(r, c_date).value if c_date else None,
+                "notes": ws.cell(r, c_notes).value if c_notes else None,
+                "difficulty": difficulty,
+            })
+        return rows, ""
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+
+def _read_batch_list_materials(qtdr_root: Path, batch: str, log):
+    """{NEST: {'code': EB stock code, 'desc': description}} for one batch.
+
+    The card title's "(#)" is this stock code -- the schedule does not carry
+    it, the batch's own BATCH LIST does ('Material' column, keyed by
+    'Nest Pkg Nbr'). The description doubles as the source-material fallback
+    for schedule rows whose NOTES cell is blank.
+
+    Returns (mapping, warning_text); an unreadable/absent BATCH LIST yields
+    ({}, why) and the batch's cards are simply created without a code.
+    """
+    batch_folder = qtdr_root / batch
+    if not batch_folder.is_dir():
+        return {}, (f"No batch folder '{batch}' under {qtdr_root} - its cards "
+                    f"have no source-material code.")
+    try:
+        path = _find_batch_list(batch_folder, batch)
+    except FileNotFoundError as exc:
+        return {}, f"{exc} Cards for batch {batch} have no source-material code."
+
+    try:
+        wb = sdk.load_workbook_resilient(path, log=log, data_only=True,
+                                         read_only=True)
+    except Exception as exc:
+        return {}, (f"Could not read {path.name}: {exc} - cards for batch "
+                    f"{batch} have no source-material code.")
+    try:
+        ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb[wb.sheetnames[0]]
+        hdr_row, hdr = sdk.find_header_row(ws, ["NEST PKG NBR", "MATERIAL"])
+        if not hdr_row:
+            return {}, (f"{path.name} has no 'Nest Pkg Nbr' + 'Material' header "
+                        f"row - cards for batch {batch} have no source-material "
+                        f"code.")
+        c_nest = hdr["NEST PKG NBR"]
+        c_mat = hdr["MATERIAL"]
+        c_desc = hdr.get("DESCRIPTION")
+        out: dict = {}
+        for row in ws.iter_rows(min_row=hdr_row + 1, values_only=True):
+            nest = row[c_nest - 1] if c_nest - 1 < len(row) else None
+            key = _norm_text(nest)
+            if not key or key in out:
+                continue
+            code = row[c_mat - 1] if c_mat - 1 < len(row) else None
+            desc = row[c_desc - 1] if c_desc and c_desc - 1 < len(row) else None
+            if code is None and desc is None:
+                continue
+            out[key] = {"code": str(code).strip() if code is not None else "",
+                        "desc": str(desc).strip() if desc is not None else ""}
+        return out, ""
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+
+def _build_card(row: dict, material: dict, template: dict, label_map: dict,
+                warnings: list, unlabelled: list):
+    """One schedule row -> one Teams card dict (plus its label NAMES for the log)."""
+    batch, nest = row["batch"], row["nest"]
+    code = (material or {}).get("code", "")
+    # NOTES is the authority (it carries the (TL)/(SAW) overrides); the BATCH
+    # LIST description is the fallback for the rows planning has not annotated
+    # yet, so a blank NOTES cell still resolves a machine instead of nothing.
+    material_text = str(row.get("notes") or "").strip() or (material or {}).get("desc", "")
+
+    if code:
+        title = template.get("title_format",
+                             "BATCH: {batch} - NEST: {nest} ({material})").format(
+            batch=batch, nest=nest, material=code)
+    else:
+        title = template.get("title_format_no_material",
+                             "BATCH: {batch} - NEST: {nest}").format(
+            batch=batch, nest=nest)
+
+    # Checklist: the tube-only items (Program) drop out on saw stock.
+    checklist = list(template.get("checklist", []))
+    if not _is_tube(material_text, template):
+        tube_only = {_norm_text(t) for t in (template.get("tube_only_checklist") or [])}
+        checklist = [t for t in checklist if _norm_text(t) not in tube_only]
+
+    names = []
+    if row.get("difficulty"):
+        names.append(row["difficulty"])
+    machine = _resolve_machine(material_text, template)
+    if machine:
+        names.append(machine)
+    else:
+        unlabelled.append(f"{batch} {nest}"
+                          + (f" ({material_text})" if material_text else " (no material listed)"))
+
+    slots = []
+    for name in names:
+        slot = label_map.get(_norm_text(name))
+        if slot:
+            slots.append(slot)
+        else:
+            warnings.append(f"No Teams label mapped for '{name}' - skipped on "
+                            f"{batch} {nest} (add it to card_template.json's "
+                            f"label_map AND to the plan's labels).")
+
+    card = {
+        "title": title,
+        "bucket": template.get("bucket", "MODELING"),
+        "priority": template.get("priority", "Medium"),
+        "status": template.get("status", "Not started"),
+        "dueDate": _due_date_iso(row.get("date")),
+        "checklist": checklist,
+        "labels": slots,
+    }
+    return card, names
+
+
+def _run_teams_cards(params: dict, progress_callback, cancel_event,
+                     qtdr_override: str, lo: int = 0, hi: int = 100) -> bool:
+    """The Generate Teams Cards stage. Returns True when the payload posted
+    (or dry-ran) cleanly, False when the stage could not run."""
+    log = params.get("log", print)
+    settings = params.get("settings", {}) or {}
+
+    log(f"\n{'='*50}")
+    log("Generate Teams Cards")
+    log(f"{'='*50}")
+
+    try:
+        template = _load_card_template()
+    except (OSError, json.JSONDecodeError) as exc:
+        log(f"ERROR: could not read card_template.json: {exc}")
+        return False
+
+    def _pct(frac):
+        progress_callback(lo + int((hi - lo) * frac))
+
+    rows, problem = _read_schedule_rows(params, template, log, cancel_event)
+    if problem:
+        log(f"ERROR: {problem}")
+        sdk.show_warning(params, "911 Setup - Teams cards not created", problem)
+        return False
+    if not rows:
+        log(f"No rows on '{_SCHED_SHEET}' are DEPT. "
+            f"{template.get('schedule_dept', '911')} + STATUS "
+            f"'{template.get('schedule_status', 'NEED TEAMS/SETUP')}' - "
+            f"nothing to card.")
+        _pct(1.0)
+        return True
+    log(f"Work list     : {len(rows)} nest(s) marked "
+        f"'{template.get('schedule_status', 'NEED TEAMS/SETUP')}'.")
+    _pct(0.25)
+
+    warnings: list = []
+    unlabelled: list = []
+    skipped = [r for r in rows if not (r["batch"] and r["nest"])]
+    for r in skipped:
+        warnings.append(f"Schedule row {r['excel_row']} ('{r['raw_key']}') does "
+                        f"not read as 'BATCH NEST' - no card created.")
+    rows = [r for r in rows if r["batch"] and r["nest"]]
+
+    # --- Source-material stock codes: one BATCH LIST read per batch ---------
+    qtdr_root = _base_qtdr(qtdr_override)
+    materials: dict = {}
+    for batch in sorted({r["batch"] for r in rows}):
+        sdk.raise_if_cancelled(cancel_event)
+        mapping, warn = _read_batch_list_materials(qtdr_root, batch, log)
+        materials[batch] = mapping
+        if warn:
+            warnings.append(warn)
+    _pct(0.6)
+
+    # --- Build the cards ----------------------------------------------------
+    label_map = {_norm_text(name): slot
+                 for name, slot in (template.get("label_map") or {}).items()}
+    cards, card_labels, no_code = [], [], []
+    for r in rows:
+        sdk.raise_if_cancelled(cancel_event)
+        material = (materials.get(r["batch"]) or {}).get(r["nest"])
+        if not material or not material.get("code"):
+            no_code.append(f"{r['batch']} {r['nest']}")
+        card, names = _build_card(r, material, template, label_map,
+                                  warnings, unlabelled)
+        cards.append(card)
+        card_labels.append(names)
+
+    # A card with no difficulty label looks identical to a rated one at a
+    # glance, so an uncoloured RATING cell is surfaced the same way the packet
+    # stamp surfaces it -- loudly -- rather than passing as a clean run.
+    unrated = [f"{r['batch']} {r['nest']}" for r in rows if not r.get("difficulty")]
+    if unrated:
+        warnings.append(f"No difficulty rating colour on the EB 922 Schedule "
+                        f"(CURRENT PIPELINE, column E) for {len(unrated)} "
+                        f"nest(s), so their cards carry NO difficulty label: "
+                        f"{', '.join(unrated[:15])}"
+                        + (" ..." if len(unrated) > 15 else ""))
+    if no_code:
+        warnings.append(f"No BATCH LIST 'Material' code found for "
+                        f"{len(no_code)} nest(s), so their card titles carry no "
+                        f"'(code)': {', '.join(no_code[:15])}"
+                        + (" ..." if len(no_code) > 15 else ""))
+    if unlabelled:
+        warnings.append(f"No SAW CUT / TUBE LASER label could be decided for "
+                        f"{len(unlabelled)} nest(s) - those cards were created "
+                        f"without a machine label: {'; '.join(unlabelled[:15])}"
+                        + (" ..." if len(unlabelled) > 15 else ""))
+
+    payload = {
+        "plan": template.get("plan", "SOPO D911 PIPELINE"),
+        "bucket": template.get("bucket", "MODELING"),
+        # Posted in REVERSE: Planner's "Create a task" top-inserts each new
+        # card, so posting the schedule order straight through makes the
+        # bucket read bottom-up (same fix as 922 Setup's _order_for_planner).
+        "tasks": list(reversed(cards)),
+    }
+
+    log(f"\nWill create {len(cards)} card(s) in plan '{payload['plan']}', "
+        f"bucket '{payload['bucket']}':")
+    for card, names in zip(cards, card_labels):
+        bits = ", ".join(names) if names else "no labels"
+        due = card["dueDate"][:10] if card["dueDate"] else "no due date"
+        prog = "" if "Program" in card["checklist"] else "  (no Program)"
+        log(f"  - {card['title']}   [{bits}]  due {due}{prog}")
+
+    if warnings:
+        log("\nWarnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "911 Setup - Teams card warnings",
+                         "\n\n".join(warnings))
+    _pct(0.8)
+    if cancel_event.is_set():
+        return False
+
+    # --- Post (or dry-run) --------------------------------------------------
+    url = (settings.get("card_webhook_url", "") or "").strip() or DEFAULT_CARD_WEBHOOK_URL
+    dry_run = bool(settings.get("card_dry_run", False))
+    if not url:
+        log("\nNo Teams card webhook URL is configured - running as a DRY RUN.")
+        log("Build the flow (docs/TEAMS_CARDS.md, flow #3) and paste its URL "
+            "into Settings -> '911 Setup' -> 'Teams Webhook URL'.")
+        dry_run = True
+    elif dry_run:
+        log("\nDry run enabled in Settings -> not posting.")
+
+    if dry_run:
+        sdk.write_payload_preview(payload, _CARD_PREVIEW_FILENAME, log)
+        _pct(1.0)
+        log("\nTeams cards: DONE (dry run - nothing was posted).")
+        return True
+
+    log("\nPosting cards to the webhook...")
+    ok = sdk.post_webhook(url, payload, log)
+    _pct(1.0)
+    if ok:
+        log(f"\nTeams cards: DONE. Requested {len(cards)} card(s) in "
+            f"'{payload['bucket']}'.")
+        log(f"Check the {payload['plan']} tab in the D922 channel to confirm.")
+        return True
+    log("\nTeams cards: FAILED - see the errors above. No cards were created.")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Main run() function -- TechDeck plugin interface
 # ---------------------------------------------------------------------------
@@ -1326,8 +1818,17 @@ def _dialog_groups() -> list:
     steps 5-7 all write into the same NEST sheet and are meaningless apart.
     "Difficulty label" is a child of PDF Stamping and defaults ON (C.D.,
     2026-07-31).
+
+    "Generate Teams Cards" leads, and is the one stage that is NOT about the
+    batch you are setting up: it cards every nest the EB 922 Schedule marks
+    NEED TEAMS/SETUP, so it runs before the batch prompt (v1.8.0). Check it
+    alone and the plugin never asks for a batch number.
     """
     return [
+        {"key": "teams_cards",
+         "label": "Generate Teams Cards (from the EB 922 Schedule)",
+         "checked": True,
+         "children": []},
         {"key": "folder_setup",
          "label": "Nest Folder Setup",
          "checked": True,
@@ -1391,13 +1892,15 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         g = stages.get(key) or {}
         return bool((g.get("options") or {}).get(child, default))
 
+    do_cards = _on("teams_cards")
     do_folders = _on("folder_setup")
     do_nest_data = _on("nest_data")
     do_inspection = _on("inspection_sheets")
     do_stamping = _on("pdf_stamping")
     stamp_difficulty = do_stamping and _opt("pdf_stamping", "difficulty", True)
 
-    enabled = [n for n, f in (("Nest Folder Setup", do_folders),
+    enabled = [n for n, f in (("Generate Teams Cards", do_cards),
+                              ("Nest Folder Setup", do_folders),
                               ("Nest Workbook Data", do_nest_data),
                               ("Inspection Sheets", do_inspection),
                               ("PDF Stamping", do_stamping)) if f]
@@ -1416,6 +1919,26 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     forecast_override = (settings.get("forecast_dir") or "").strip()
     template_subdir   = (settings.get("template_subdir") or "").strip() or _DEFAULT_TEMPLATE_SUBDIR
     forecast_filename = (settings.get("forecast_filename") or "").strip() or _DEFAULT_FORECAST_FILENAME
+
+    # ------------------------------------------------------------------ #
+    # Stage 0 -- Generate Teams Cards (v1.8.0)
+    #
+    # Runs FIRST and independently of the batch: its work list is the EB 922
+    # Schedule's NEED TEAMS/SETUP rows, which span whatever batches happen to
+    # be queued. Checking only this stage is a complete run -- no batch
+    # number is asked for, nothing on disk is touched.
+    # ------------------------------------------------------------------ #
+    batch_stages = do_folders or do_nest_data or do_inspection or do_stamping
+    if do_cards:
+        _run_teams_cards(params, progress_callback, cancel_event,
+                         qtdr_override, lo=0, hi=8 if batch_stages else 100)
+        if cancel_event.is_set():
+            return
+    if not batch_stages:
+        log(f"\n{'='*50}")
+        log("911 Setup complete (Teams cards only).")
+        log(f"{'='*50}")
+        return
 
     # ------------------------------------------------------------------ #
     # Step 1 -- Prompt user for batch number, then resolve batch folder

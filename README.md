@@ -548,7 +548,7 @@ Explorer and on pinned shortcuts.
 | Plugin | Description |
 |---|---|
 | 902 DXF Prep | Batch DXF cleanup and prep for Boost 902 part files - IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles against the PO spreadsheet |
-| 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs |
+| 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs - plus a Teams card for every nest the EB 922 Schedule marks NEED TEAMS/SETUP, posted to the MODELING bucket of the SOPO D911 PIPELINE plan with its difficulty and saw/tube-laser labels and its scheduled due date |
 | 911 Batch Repeater | Finds repeat parts for a 911 batch via the 911 Master Parts List (compiled from completed nests) and copies each repeat's CAD files (SolidWorks model, drawing, and PDF) from its completed source nest into a REPEAT folder inside the target nest. The two-phase Sentry Drone picker (toggleable in Settings) locks the batch folder, zooms inside, then lets you lock multiple nests before striking them - those nests run with the default grabs. With the drone off: a folder dialog plus a nest-selection window where any nest expands to toggle exactly what it grabs (models, PDFs, overwrite existing) |
 | 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets |
 | 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |

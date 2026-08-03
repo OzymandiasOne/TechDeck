@@ -1,0 +1,56 @@
+{
+  "_comment": "Template for the Teams cards created by 911 Setup's 'Generate Teams Cards' stage. Cards are driven by the EB 922 Schedule's CURRENT PIPELINE sheet: every row whose DEPT. is '911' AND whose STATUS is 'NEED TEAMS/SETUP' becomes one card in the MODELING bucket of the SOPO D911 PIPELINE plan. Edit this file to change the cards - no flow change is needed unless the payload SHAPE changes. 'label_map' mirrors the plan's label slots top-to-bottom (category1 = top of the label list); if a label is renamed or reordered IN TEAMS, update it here too.",
+  "plan": "SOPO D911 PIPELINE",
+  "bucket": "MODELING",
+  "title_format": "BATCH: {batch} - NEST: {nest} ({material})",
+  "title_format_no_material": "BATCH: {batch} - NEST: {nest}",
+  "priority": "Medium",
+  "status": "Not started",
+  "checklist": [
+    "Shop Prints",
+    "Inspection Sheet",
+    "Production Packets",
+    "Program",
+    "Cover Sheet",
+    "Scribe Sheet",
+    "Production"
+  ],
+
+  "_comment_tube_only": "Checklist items dropped when the source material is not a tube (a tube-laser program is meaningless on saw stock).",
+  "tube_only_checklist": ["Program"],
+  "tube_keywords": ["TUBE"],
+
+  "_comment_schedule": "Which CURRENT PIPELINE rows become cards. Matched case-insensitively on the stripped cell value.",
+  "schedule_dept": "911",
+  "schedule_status": "NEED TEAMS/SETUP",
+
+  "_comment_machine": "SAW CUT vs TUBE LASER, read off the schedule's NOTES text (column D; falls back to the BATCH LIST 'Description' when NOTES is blank). An explicit '(TL)' / '(SAW)' marker in the note always wins. Otherwise the FIRST 'shape' keyword found - in the order listed here - decides. A material that matches nothing gets no machine label and is reported at the end of the run, rather than guessing.",
+  "machine_markers": {
+    "TL": "TUBE LASER",
+    "TUBE LASER": "TUBE LASER",
+    "SAW": "SAW CUT"
+  },
+  "machine_shapes": [
+    ["TUBE", "TUBE LASER"],
+    ["ANGLE", "TUBE LASER"],
+    ["CHANNEL", "TUBE LASER"],
+    ["CHAN", "TUBE LASER"],
+    ["I SECTION", "TUBE LASER"],
+    ["BEAM", "TUBE LASER"],
+    ["ROUND", "SAW CUT"],
+    ["RD BAR", "SAW CUT"],
+    ["DIA", "SAW CUT"],
+    ["FLAT", "SAW CUT"],
+    ["BAR", "SAW CUT"],
+    ["PLATE", "SAW CUT"]
+  ],
+
+  "_comment_labels": "Slot keys, not names - the flow stays dumb and only sees categoryN. Order here mirrors the plan's label list: 1 DIFFICULT, 2 MEDIUM, 3 SIMPLE, 4 SAW CUT, 5 TUBE LASER.",
+  "label_map": {
+    "DIFFICULT": "category1",
+    "MEDIUM": "category2",
+    "SIMPLE": "category3",
+    "SAW CUT": "category4",
+    "TUBE LASER": "category5"
+  }
+}
