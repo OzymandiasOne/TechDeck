@@ -61,7 +61,7 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 # Hard Rule 3 nest-number regex: accept legacy numeric IDs (503633, P08229) AND
 # alphanumeric IDs that contain a digit (5CDAWK); reject footer/total/junk text.
@@ -473,8 +473,11 @@ def run(params, progress_callback, cancel_event):
     settings = params.get("settings", {}) or {}
 
     start_dir = str(Path.home() / "Downloads")
-    src, _ = QFileDialog.getOpenFileName(
-        None, "Choose the pricing workbook to split", start_dir,
+    # GUI plugin (main thread), so the console's blocking picker is off-limits:
+    # sdk.pick_file_gui gives the same Sentry Drone contract (kill-cam when the
+    # drone is owned + enabled for this app, plain dialog otherwise).
+    src = sdk.pick_file_gui(
+        params, "Choose the pricing workbook to split", start_dir,
         "Excel files (*.xlsx *.xlsm);;All files (*.*)")
     if not src:
         log("No file chosen - nothing to do.")

@@ -999,11 +999,19 @@ class _ChopperDialog(QFileDialog):
     """
 
     def __init__(self, parent, title: str, start_dir: str,
-                 two_phase: bool = False, target_pattern: str | None = None):
+                 two_phase: bool = False, target_pattern: str | None = None,
+                 name_filter: str | None = None):
         super().__init__(parent, title, start_dir or "")
-        self.setFileMode(QFileDialog.FileMode.Directory)
-        self.setOptions(QFileDialog.Option.DontUseNativeDialog
-                        | QFileDialog.Option.ShowDirsOnly)
+        # name_filter set → FILE mode (pick_file_chopper): the rows are files,
+        # so folders stay visible for navigation and only a file can be struck.
+        if name_filter is None:
+            self.setFileMode(QFileDialog.FileMode.Directory)
+            self.setOptions(QFileDialog.Option.DontUseNativeDialog
+                            | QFileDialog.Option.ShowDirsOnly)
+        else:
+            self.setFileMode(QFileDialog.FileMode.ExistingFile)
+            self.setOptions(QFileDialog.Option.DontUseNativeDialog)
+            self.setNameFilter(name_filter)
         self.setViewMode(QFileDialog.ViewMode.List)
         self._two_phase = bool(two_phase)
         self.setLabelText(QFileDialog.DialogLabel.Accept,
@@ -1274,6 +1282,34 @@ def pick_folder_chopper(parent, title: str, start_dir: str = ""):
     path string or None on cancel. Raises on construction failure — the
     console catches anything and falls back to the native dialog."""
     dlg = _ChopperDialog(parent, title, start_dir)
+    screen = (parent.screen() if parent is not None
+              else QApplication.primaryScreen())
+    overlay = GunnerOverlay(dlg, screen.geometry())
+    dlg.attach_overlay(overlay)
+    overlay.show()
+    overlay.start_ambient()            # looping gunship bed while the picker is up
+    try:
+        accepted = dlg.exec() == QDialog.DialogCode.Accepted
+        files = dlg.selectedFiles()
+    finally:
+        overlay.stop_ambient()         # covers the cancel path (no _finish)
+        overlay._timer.stop()
+        overlay.close()
+        overlay.deleteLater()
+        dlg.deleteLater()
+    if accepted and files:
+        return files[0]
+    return None
+
+
+def pick_file_chopper(parent, title: str = "Select File", start_dir: str = "",
+                      name_filter: str = "All Files (*.*)"):
+    """GUI-thread entry: the same kill-cam picker in FILE mode — the strike
+    lands on a file row instead of a folder. Returns the chosen path string or
+    None on cancel; raises on construction failure, so every caller falls back
+    to the native dialog."""
+    dlg = _ChopperDialog(parent, title, start_dir,
+                         name_filter=name_filter or "All Files (*.*)")
     screen = (parent.screen() if parent is not None
               else QApplication.primaryScreen())
     overlay = GunnerOverlay(dlg, screen.geometry())

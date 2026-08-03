@@ -418,6 +418,24 @@ def request_text(params: dict, prompt: str) -> str:
     return input(prompt + " ")
 
 
+def sentry_style(params: dict) -> Optional[str]:
+    """The picker style this plugin should use: ``"chopper_gunner"`` when the
+    user OWNS the Sentry Drone gadget (Woogy's Emporium) AND has switched it on
+    for this app, else None (a normal Explorer dialog).
+
+    Plugins never call this directly — :func:`request_directory` and
+    :func:`request_file` apply it automatically, so a picker plugin gets the
+    drone just by declaring the ``sentry_drone`` field in its plugin.json
+    (see ``techdeck.core.sentry_mode``). It's exported for the GUI-plugin
+    helpers below and for anything that needs to branch on it.
+    """
+    try:
+        from techdeck.core import sentry_mode
+        return sentry_mode.style_for(params.get("plugin_id") or "")
+    except Exception:
+        return None   # headless / standalone: no drone, just the plain dialog
+
+
 def request_directory(params: dict, title: str = "Select Folder",
                       start_dir: str = "", style: Optional[str] = None) -> Optional[str]:
     """Ask the user to pick a folder via the directory dialog (opened on the
@@ -425,16 +443,21 @@ def request_directory(params: dict, title: str = "Select Folder",
     when run standalone. Returns the chosen path string, or None if the user
     cancelled / entered nothing.
 
-    ``style="chopper_gunner"`` requests the MW2 kill-cam picker (922 Setup's
-    batch prompt). The console downgrades it to the native dialog under the
-    professional theme or on any effect failure; an older console without
-    the ``style`` parameter is handled here (TypeError → plain call), so a
-    new plugin drop on an old TechDeck still works.
+    **Sentry Drone is automatic**: leave ``style`` alone and the MW2 kill-cam
+    picker is used whenever the user owns the gadget and has enabled it for
+    this app (:func:`sentry_style`) — plugins don't compute that themselves.
+    Pass ``style=""`` to force the plain dialog for a prompt the drone should
+    never touch. The console independently re-checks ownership, downgrades to
+    the native dialog under the professional theme or on any effect failure,
+    and an older console without the ``style`` parameter is handled here
+    (TypeError → plain call), so a new plugin drop on an old TechDeck works.
 
     Prefer this over making users paste folder paths through request_text —
     per-run folders (a batch folder, a ROOT of orders) should be clicked,
     not typed.
     """
+    if style is None:
+        style = sentry_style(params)
     console = params.get("console")
     if console is not None and hasattr(console, "request_directory"):
         if style:
@@ -449,20 +472,78 @@ def request_directory(params: dict, title: str = "Select Folder",
 
 
 def request_file(params: dict, title: str = "Select File", start_dir: str = "",
-                 name_filter: str = "") -> Optional[str]:
-    """Ask the user to pick a FILE via the native open-file dialog (opened on
-    the GUI thread by the console; same blocking contract as
-    request_directory), falling back to a pasted-path stdin prompt when run
-    standalone or on an older TechDeck without the console method. Returns
-    the chosen path string, or None if the user cancelled.
+                 name_filter: str = "", style: Optional[str] = None) -> Optional[str]:
+    """Ask the user to pick a FILE via the open-file dialog (opened on the GUI
+    thread by the console; same blocking contract as request_directory),
+    falling back to a pasted-path stdin prompt when run standalone or on an
+    older TechDeck without the console method. Returns the chosen path string,
+    or None if the user cancelled.
 
     ``name_filter`` is a QFileDialog filter, e.g. ``"DXF files (*.dxf)"``.
+    Sentry Drone applies automatically, exactly as in request_directory —
+    pass ``style=""`` to force the plain dialog.
     """
+    if style is None:
+        style = sentry_style(params)
     console = params.get("console")
     if console is not None and hasattr(console, "request_file"):
+        if style:
+            try:
+                return console.request_file(title, start_dir, name_filter, style)
+            except TypeError:
+                # Older console signature without style (version tolerance).
+                return console.request_file(title, start_dir, name_filter)
         return console.request_file(title, start_dir, name_filter)
     raw = input(f"{title} (paste path): ").strip().strip('"')
     return raw or None
+
+
+def pick_directory_gui(params: dict, title: str = "Select Folder",
+                       start_dir: str = "", parent=None) -> Optional[str]:
+    """Folder pick for a GUI plugin (``requires_main_thread: true``), where the
+    console's blocking worker-thread helpers can't be used.
+
+    Same Sentry Drone contract as :func:`request_directory` — the kill-cam
+    picker when the gadget is owned + enabled for this app, otherwise (and on
+    the professional theme, or any effect failure) the plain Explorer dialog.
+    Call it on the GUI thread; returns the chosen path or None on cancel.
+    """
+    return _pick_gui(params, title, start_dir, parent, name_filter=None)
+
+
+def pick_file_gui(params: dict, title: str = "Select File", start_dir: str = "",
+                  name_filter: str = "", parent=None) -> Optional[str]:
+    """File pick for a GUI plugin — :func:`pick_directory_gui` for files."""
+    return _pick_gui(params, title, start_dir, parent,
+                     name_filter=name_filter or "All Files (*.*)")
+
+
+def _pick_gui(params: dict, title: str, start_dir: str, parent,
+              name_filter: Optional[str]) -> Optional[str]:
+    """Shared body of the two GUI-plugin pickers: try the drone, then fall back
+    to the native dialog. ANY failure inside the effect falls back — the toy
+    must never block a run."""
+    from PySide6.QtWidgets import QFileDialog
+
+    if sentry_style(params):
+        try:
+            from techdeck.core.settings import SettingsManager
+            if not SettingsManager().is_professional():
+                from techdeck.ui.widgets import chopper_picker
+                if name_filter is None:
+                    picked = chopper_picker.pick_folder_chopper(
+                        parent, title, start_dir)
+                else:
+                    picked = chopper_picker.pick_file_chopper(
+                        parent, title, start_dir, name_filter)
+                return picked or None
+        except Exception:
+            pass   # fall through to the native dialog
+    if name_filter is None:
+        return QFileDialog.getExistingDirectory(parent, title, start_dir) or None
+    path, _selected = QFileDialog.getOpenFileName(parent, title, start_dir,
+                                                  name_filter)
+    return path or None
 
 
 def request_choice(params: dict, title: str, prompt: str,
@@ -499,12 +580,15 @@ def request_nest_targets(params: dict, title: str, start_dir: str = "",
     * ``"ok"`` — picked; names are the locked subfolder names, in lock order.
     * ``"cancelled"`` — the user backed out; treat it as a run cancel.
     * ``"unavailable"`` — headless, an older TechDeck without the console
-      method, the professional theme, or any picker failure. Fall back to a
-      classic folder dialog + your own selection window — never block on this.
+      method, the professional theme, the Sentry Drone gadget not owned /
+      not enabled for this app, or any picker failure. Fall back to a classic
+      folder dialog + your own selection window — never block on this.
 
     ``target_pattern`` (regex, case-insensitive) limits which subfolder names
     can be locked in phase 2 (e.g. the nest-number regex, Hard Rule 3).
     """
+    if not sentry_style(params):
+        return ("unavailable", "", [])
     console = params.get("console")
     if console is None or not hasattr(console, "request_target_folders"):
         return ("unavailable", "", [])

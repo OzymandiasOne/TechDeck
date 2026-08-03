@@ -12,11 +12,18 @@ import qrcode
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget,
     QTableWidgetItem, QPushButton, QLabel, QLineEdit, QComboBox,
-    QFormLayout, QFileDialog, QMessageBox, QTextEdit, QHeaderView,
+    QFormLayout, QMessageBox, QTextEdit, QHeaderView,
     QGroupBox, QSpinBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QPixmap, QIcon, QDesktopServices
+
+try:
+    from techdeck.core import plugin_sdk as sdk
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from techdeck.core import plugin_sdk as sdk
 
 try:
     from techdeck.ui.theme_manager import get_theme_manager
@@ -51,7 +58,8 @@ def run(params: dict, progress_callback, cancel_event):
         progress_callback(10)
 
         global _window
-        _window = QRGeneratorWindow(settings, DATA_FILE, on_success=on_success)
+        _window = QRGeneratorWindow(settings, DATA_FILE, on_success=on_success,
+                                    params=params)
         _window.show()
 
         progress_callback(100)
@@ -65,10 +73,14 @@ def run(params: dict, progress_callback, cancel_event):
 class QRGeneratorWindow(QWidget):
     """Main window for QR Code Generator"""
 
-    def __init__(self, config: dict, data_file: Path, on_success=None):
+    def __init__(self, config: dict, data_file: Path, on_success=None,
+                 params: Optional[dict] = None):
         super().__init__()
         self.config = config
         self.data_file = data_file
+        # The plugin's run() params — carried so the folder browser can offer
+        # the Sentry Drone picker (sdk.pick_directory_gui) when it's enabled.
+        self.params = params or {}
         self.entrypoints = self.load_entrypoints()
         self.current_qr_pixmap = None
         self._on_success = on_success  # callable; fired after each successful QR generation
@@ -364,11 +376,14 @@ class QRGeneratorWindow(QWidget):
         self.input_layout.addWidget(input_group)
 
     def browse_output_folder(self):
-        """Browse for output folder"""
-        folder = QFileDialog.getExistingDirectory(
-            self,
+        """Browse for output folder — via the Sentry Drone picker when the user
+        owns the drone and has switched it on for this app, else the plain
+        Explorer dialog."""
+        folder = sdk.pick_directory_gui(
+            self.params,
             "Select Output Folder",
-            self.output_folder_edit.text()
+            self.output_folder_edit.text(),
+            parent=self,
         )
         if folder:
             self.output_folder_edit.setText(folder)

@@ -320,26 +320,26 @@ def run(params, progress_callback, cancel_event):
                 "Double-check the batch number and that the folder exists "
                 "there, then run again.")
     else:
-        # Sentry Drone mode (settings toggle, default on): the TWO-PHASE
-        # targeting-drone pick — TARGET the batch folder, the optics zoom
-        # inside it, multi-lock nest folders, EXECUTE. The nest picks come
-        # back too, so the drone flow skips the nest-selection window.
-        # Toggle off / professional theme / older TechDeck / any effect
-        # failure → native folder dialog + the classic nest window.
+        # Sentry Drone mode: the TWO-PHASE targeting-drone pick — TARGET the
+        # batch folder, the optics zoom inside it, multi-lock nest folders,
+        # EXECUTE. The nest picks come back too, so the drone flow skips the
+        # nest-selection window. The SDK reports "unavailable" when the drone
+        # isn't owned or isn't switched on for this app (and on the
+        # professional theme / an older TechDeck / any effect failure), which
+        # falls through to the native folder dialog + the classic nest window.
         raw = None
-        if bool(settings.get("sentry_drone", True)):
-            status, tgt_dir, tgt_nests = sdk.request_nest_targets(
-                params, "Select the 911 batch folder", str(qtdr_root),
-                target_pattern=_NEST_RE.pattern)
-            if cancel_event.is_set():
-                return
-            if status == "cancelled":
-                log("Folder selection cancelled - nothing was run.")
-                cancel_event.set()  # user cancel: not a ticket-earning run
-                return
-            if status == "ok":
-                raw = tgt_dir
-                drone_nests = {str(n).strip().upper() for n in tgt_nests}
+        status, tgt_dir, tgt_nests = sdk.request_nest_targets(
+            params, "Select the 911 batch folder", str(qtdr_root),
+            target_pattern=_NEST_RE.pattern)
+        if cancel_event.is_set():
+            return
+        if status == "cancelled":
+            log("Folder selection cancelled - nothing was run.")
+            cancel_event.set()  # user cancel: not a ticket-earning run
+            return
+        if status == "ok":
+            raw = tgt_dir
+            drone_nests = {str(n).strip().upper() for n in tgt_nests}
         if raw is None:   # drone off or unavailable: classic dialog
             raw = sdk.request_directory(
                 params, "Select the 911 batch folder", str(qtdr_root))

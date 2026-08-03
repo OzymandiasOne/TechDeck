@@ -203,19 +203,28 @@ class InventoryTile(QFrame):
                 self._set_btn("EQUIPPED", EMP["equip"], "#7af0a0", False)
             else:
                 self._set_btn("EQUIP", EMP["buy"], EMP["buy_lit_edge"], True)
+        elif self.item["kind"] == "gadget":
+            # A gadget isn't equipped, it's CONFIGURED — the button opens its
+            # own setup window (Sentry Drone: which apps it flies for).
+            self.equipped = False
+            self._set_btn("SET UP", EMP["buy"], EMP["buy_lit_edge"], True)
         else:
             self.equipped = False
             self._set_btn("OWNED", EMP["owned"], EMP["owned"], False)
         self.update()
 
-    def mousePressEvent(self, e):
-        if self.item["kind"] in ("spinner", "background") and not self.equipped:
+    def _activate(self):
+        if self.item["kind"] == "gadget":
+            self.page.configure(self.item)
+        elif self.item["kind"] in ("spinner", "background") and not self.equipped:
             self.page.equip(self.item)
+
+    def mousePressEvent(self, e):
+        self._activate()
         super().mousePressEvent(e)
 
     def _on_action(self):
-        if self.item["kind"] in ("spinner", "background") and not self.equipped:
-            self.page.equip(self.item)
+        self._activate()
 
 
 class MyStuffPage(QWidget):
@@ -311,6 +320,14 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._section_header("Games"))
             self._vbox.addWidget(self._grid(owned_games))
 
+        # Gadgets (owned only) — tools that get SET UP rather than equipped.
+        owned_gadgets = [c for c in CATALOG
+                         if c["kind"] == "gadget" and s.is_unlocked(c["id"])]
+        if owned_gadgets:
+            self._vbox.addWidget(self._section_header("Gadgets"))
+            self._vbox.addWidget(self._grid(owned_gadgets))
+            self._vbox.addWidget(self._hint(self._gadget_hint()))
+
         owned_furniture = [c for c in CATALOG
                            if c["kind"] == "furniture" and s.is_unlocked(c["id"])
                            and not c.get("hidden")]
@@ -345,6 +362,33 @@ class MyStuffPage(QWidget):
     def refresh(self):
         # Ownership can change (a purchase in the Emporium), so rebuild the grids.
         self._build()
+
+    # ---- gadgets -------------------------------------------------------------
+    def _gadget_hint(self):
+        """Live status line under the Gadgets grid: how many apps the Sentry
+        Drone is currently flying for."""
+        from techdeck.core import sentry_mode
+        apps = sentry_mode.compatible_plugins(settings=self.settings)
+        on = [a for a in apps if a["enabled"]]
+        if not apps:
+            return "No installed app supports the Sentry Drone yet."
+        if not on:
+            return (f"Sentry Drone is off for all {len(apps)} apps - "
+                    f"hit SET UP to pick which ones it flies for.")
+        return (f"Sentry Drone is on for {len(on)} of {len(apps)} apps: "
+                + ", ".join(a["name"] for a in on))
+
+    def configure(self, item):
+        """Open a gadget's setup window (Sentry Drone: the per-app loadout)."""
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
+        get_audio_manager().play(SOUND_UI_SELECT)
+        from techdeck.core import sentry_mode
+        if item["id"] != sentry_mode.ITEM_ID:
+            return
+        from techdeck.ui.dialogs.sentry_config_dialog import SentryConfigDialog
+        dlg = SentryConfigDialog(self.settings, parent=self.window())
+        if dlg.exec():
+            self._build()      # refresh the hint line with the new count
 
     # ---- equip ---------------------------------------------------------------
     def equip(self, item):

@@ -16,6 +16,11 @@ CATALOG = [
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
     {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
+    # A GADGET: it doesn't get equipped, it gets CONFIGURED. Owning it unlocks
+    # the kill-cam file/folder picker plus the per-app switches in My Stuff and
+    # in Settings -> Apps (techdeck/core/sentry_mode.py).
+    {"id": "toy_sentry_drone", "name": "Sentry Drone", "category": "toys",
+     "sprite": "sentry_drone.tdart", "cost": 200, "kind": "gadget"},
 
     # --- Friends: companions for My House (kind "friends"; PNG sprites). ---
     {"id": "friend_buddy", "name": "Buddy", "category": "friends",

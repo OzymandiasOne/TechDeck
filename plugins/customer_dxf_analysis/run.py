@@ -2477,8 +2477,10 @@ def run(params: dict, progress_callback, cancel_event):
         if default and Path(default).is_file():
             files = [default]
         else:
-            picked, _ = QFileDialog.getOpenFileName(
-                None, "Open DXF", str(Path.home() / "Downloads"),
+            # sdk.pick_* = the same dialog, plus Sentry Drone when the user
+            # owns the drone and has switched it on for this app.
+            picked = sdk.pick_file_gui(
+                params, "Open DXF", str(Path.home() / "Downloads"),
                 "DXF files (*.dxf);;All files (*.*)")
             if not picked:
                 if hasattr(cancel_event, "set"):
@@ -2486,8 +2488,8 @@ def run(params: dict, progress_callback, cancel_event):
                 return
             files = [picked]
     else:
-        folder = QFileDialog.getExistingDirectory(
-            None, "Select the folder of DXF files",
+        folder = sdk.pick_directory_gui(
+            params, "Select the folder of DXF files",
             str(Path.home() / "Downloads"))
         if not folder:
             if hasattr(cancel_event, "set"):

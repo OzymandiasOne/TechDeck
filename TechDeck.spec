@@ -16,6 +16,11 @@ a = Analysis(
         # "No module named 'techdeck.core.plugin_window'" (bit customer_dxf_quoting).
         'techdeck.core.plugin_sdk',
         'techdeck.core.plugin_window',
+        # Sentry Drone: plugin_sdk lazy-imports both (sentry_style -> sentry_mode;
+        # pick_directory_gui/pick_file_gui -> chopper_picker for GUI plugins).
+        # Both are inside function bodies, so force them in.
+        'techdeck.core.sentry_mode',
+        'techdeck.ui.widgets.chopper_picker',
         # Only imported by the game_asa_the_video_game plugin's run.py (loads at runtime).
         'techdeck.ui.widgets.steelbeams_game',
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',

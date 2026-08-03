@@ -322,12 +322,11 @@ def _pick_batch_folder(params: dict, cancel_event):
             start_dir = str(root)
     except Exception:
         pass
-    # Sentry Drone mode (settings toggle, default on): the targeting-drone
-    # picker (crosshair, lock-on, railgun). Off → a normal folder dialog.
-    # Professional theme / older TechDeck / any effect failure also fall back.
-    use_drone = bool(settings.get("sentry_drone", True))
-    raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir,
-                                style="chopper_gunner" if use_drone else None)
+    # Sentry Drone mode is applied by the SDK: the targeting-drone picker
+    # (crosshair, lock-on, railgun) when the drone is OWNED and switched on for
+    # this app, otherwise a normal folder dialog. Professional theme / older
+    # TechDeck / any effect failure also fall back.
+    raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
     if cancel_event.is_set():
         return None, None
     if not raw:

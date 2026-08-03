@@ -57,6 +57,9 @@ class EmporiumPage(QWidget):
             "WOOGY: WOOGY DON'T KNOW HOW TO PLAY THIS GAME, WOOGY JUST CLICK BUTTONS.",
         "friend_buddy":
             "WOOGY: BUDDY IS A GOOD PIG. TREAT HIM RIGHT AND HE'LL KEEP YOUR YARD COMPANY.",
+        "toy_sentry_drone":
+            "WOOGY: IT FOLLOWS YOU AROUND AND BLOWS UP FOLDERS. WOOGY DOES NOT ASK "
+            "QUESTIONS ABOUT THE MERCHANDISE.",
     }
     GENERIC_COMMENT = "WOOGY: V-VERY GOOD! WOOGY APPROVES."
 
@@ -70,6 +73,9 @@ class EmporiumPage(QWidget):
                  "blows the dust off it, and slides it over with a proud grin."),
         "friends": ("Woogy gives a sharp whistle and {name} trots out from the back, "
                     "snuffling happily. Woogy pats him once and sends him your way."),
+        "gadget": ("Woogy unlocks the case behind the counter, lifts the {name} out "
+                   "with both hands, and sets it down. It powers up, sweeps the room "
+                   "once, and settles on you."),
     }
     GRAB_DEFAULT = ("Woogy grabs the {name} off the shelf with effort and wobbles "
                     "back to the counter. He slides it towards you with a huff.")
@@ -415,6 +421,9 @@ class EmporiumPage(QWidget):
             elif item["kind"] == "game":
                 instr = ("Find it in your Library (Games) and add it to a kit "
                          "to play.")
+            elif item["kind"] == "gadget":
+                instr = ("Open My Stuff and hit SET UP to choose which apps it "
+                         "flies for.")
             else:
                 instr = "Enjoy!"
             PixelDialog.show_message(self, "Sold!", f"{grab} {instr}")

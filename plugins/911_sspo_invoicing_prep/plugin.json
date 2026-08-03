@@ -43,6 +43,15 @@
         "placeholder": "Working Forecast List.xlsx",
         "required": false,
         "default": "Working Forecast List.xlsx"
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

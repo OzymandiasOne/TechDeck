@@ -52,6 +52,10 @@ class PluginSettingsWidget(QWidget):
         self.current_values = current_values
         self.widgets: Dict[str, QWidget] = {}
         self.validators: Dict[str, Callable[[], bool]] = {}
+        # Fields skipped because their unlock hasn't been bought yet. Their
+        # saved value is carried through get_values() untouched, so saving this
+        # page can never silently wipe a setting the user can't see.
+        self.hidden_values: Dict[str, Any] = {}
         # Dimmed labels the host page should restyle with the theme's
         # secondary text color (the #888 default is a fallback only).
         self.secondary_labels: List[tuple] = []
@@ -66,31 +70,52 @@ class PluginSettingsWidget(QWidget):
         
         # Get fields from schema
         fields = self.schema.get('fields', [])
-        
-        if not fields:
-            no_settings_label = QLabel("This plugin has no configurable settings.")
-            no_settings_label.setStyleSheet("color: #888; font-style: italic;")
-            self.secondary_labels.append((no_settings_label, "font-style: italic;"))
-            layout.addWidget(no_settings_label)
-            return
-        
+
         # Create widget for each field
         for field in fields:
             field_widget = self._create_field_widget(field)
             if field_widget:
                 layout.addWidget(field_widget)
-        
+
+        # Nothing visible — no fields at all, or every field is locked behind an
+        # unlock the user hasn't bought.
+        if not self.widgets:
+            no_settings_label = QLabel("This plugin has no configurable settings.")
+            no_settings_label.setStyleSheet("color: #888; font-style: italic;")
+            self.secondary_labels.append((no_settings_label, "font-style: italic;"))
+            layout.addWidget(no_settings_label)
+
         # Add stretch at bottom
         layout.addStretch()
     
+    def _is_locked(self, field: Dict[str, Any]) -> bool:
+        """True when the field declares "hidden_unless_unlocked": "<item_id>"
+        and that Emporium item hasn't been bought — e.g. the Sentry Drone
+        switch, which stays invisible until the drone is owned."""
+        item_id = field.get('hidden_unless_unlocked')
+        if not item_id:
+            return False
+        try:
+            from techdeck.core.settings import SettingsManager
+            return not SettingsManager().is_unlocked(str(item_id))
+        except Exception:
+            return True   # can't confirm ownership: keep it hidden
+
     def _create_field_widget(self, field: Dict[str, Any]) -> Optional[QWidget]:
         """Create a widget for a field based on its type."""
         field_type = field.get('type', 'string')
         field_key = field.get('key')
-        
+
         if not field_key:
             return None
-        
+
+        if self._is_locked(field):
+            # Not rendered — but remember the stored value so a save from this
+            # page round-trips it instead of dropping it.
+            self.hidden_values[field_key] = self.current_values.get(
+                field_key, field.get('default'))
+            return None
+
         # Container for field
         container = QWidget()
         container_layout = QVBoxLayout(container)
@@ -418,18 +443,19 @@ class PluginSettingsWidget(QWidget):
         Returns:
             Dictionary of field_key: value
         """
-        values = {}
-        
+        # Locked-but-stored fields first, so a visible widget always wins.
+        values = dict(self.hidden_values)
+
         # Get field types from schema
         field_types = {
             field['key']: field.get('type', 'string')
             for field in self.schema.get('fields', [])
         }
-        
+
         for field_key, widget in self.widgets.items():
             field_type = field_types.get(field_key, 'string')
             values[field_key] = self._get_widget_value(field_key, widget, field_type)
-        
+
         return values
     
     def get_defaults(self) -> Dict[str, Any]:

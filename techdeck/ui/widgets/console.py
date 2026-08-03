@@ -586,35 +586,54 @@ class ConsoleWidget(QWidget, ThemeAware):
 
         return self._dir_result
 
+    def _sentry_allowed(self, style) -> bool:
+        """May the kill-cam picker run at all? It needs the chopper_gunner
+        style, the Sentry Drone gadget OWNED (Woogy's Emporium), and a
+        non-professional theme. Re-checked here — not just in the SDK — so a
+        stale plugin copy hardcoding the style can't summon a drone the user
+        hasn't bought."""
+        if style != "chopper_gunner":
+            return False
+        try:
+            from techdeck.core import sentry_mode
+            from techdeck.core.settings import SettingsManager
+            return (sentry_mode.is_owned()
+                    and not SettingsManager().is_professional())
+        except Exception:
+            return False
+
     @Slot()
     def _directory_gui(self):
         """GUI-thread half of request_directory: run the folder dialog.
-        chopper_gunner style → the kill-cam picker, unless the professional
-        theme is active or ANYTHING in it fails (then the native dialog)."""
+        chopper_gunner style → the kill-cam picker, unless the drone isn't
+        owned, the professional theme is active, or ANYTHING in it fails
+        (then the native dialog)."""
         from PySide6.QtWidgets import QFileDialog
 
         title, start_dir, style = self._dir_args
-        if style == "chopper_gunner":
+        if self._sentry_allowed(style):
             try:
-                from techdeck.core.settings import SettingsManager
-                if not SettingsManager().is_professional():
-                    from techdeck.ui.widgets.chopper_picker import (
-                        pick_folder_chopper,
-                    )
-                    self._dir_result = pick_folder_chopper(
-                        self.window(), title, start_dir)
-                    return
+                from techdeck.ui.widgets.chopper_picker import (
+                    pick_folder_chopper,
+                )
+                self._dir_result = pick_folder_chopper(
+                    self.window(), title, start_dir)
+                return
             except Exception:
                 pass  # any failure: fall through to the native dialog
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 
     def request_file(self, title: str = "Select File", start_dir: str = "",
-                     name_filter: str = ""):
-        """Show the native pick-a-file dialog and BLOCK until the user chooses.
+                     name_filter: str = "", style=None):
+        """Show the pick-a-file dialog and BLOCK until the user chooses.
         Same worker-thread contract as request_directory. Returns the picked
         file path string, or None if the user cancelled. ``name_filter`` is a
-        QFileDialog filter like ``"DXF files (*.dxf)"``."""
+        QFileDialog filter like ``"DXF files (*.dxf)"``.
+
+        ``style="chopper_gunner"`` opens the Sentry Drone picker in file mode
+        (same ownership / professional-theme / failure fallbacks as
+        request_directory)."""
         from PySide6.QtCore import QThread
 
         if QThread.currentThread() == self.thread():
@@ -623,7 +642,7 @@ class ConsoleWidget(QWidget, ThemeAware):
             )
 
         self._file_args = (str(title), str(start_dir or ""),
-                           str(name_filter or ""))
+                           str(name_filter or ""), style)
         self._file_result = None
 
         # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
@@ -641,10 +660,20 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     @Slot()
     def _file_gui(self):
-        """GUI-thread half of request_file: run the native open-file dialog."""
+        """GUI-thread half of request_file: the Sentry Drone picker in file
+        mode when it's allowed, else the native open-file dialog."""
         from PySide6.QtWidgets import QFileDialog
 
-        title, start_dir, name_filter = self._file_args
+        title, start_dir, name_filter, style = self._file_args
+        if self._sentry_allowed(style):
+            try:
+                from techdeck.ui.widgets.chopper_picker import pick_file_chopper
+                self._file_result = pick_file_chopper(
+                    self.window(), title, start_dir,
+                    name_filter or "All Files (*.*)")
+                return
+            except Exception:
+                pass  # any failure: fall through to the native dialog
         path, _selected = QFileDialog.getOpenFileName(
             self.window(), title, start_dir, name_filter)
         self._file_result = path or None
@@ -742,14 +771,13 @@ class ConsoleWidget(QWidget, ThemeAware):
     @Slot()
     def _target_folders_gui(self):
         """GUI-thread half of request_target_folders: run the two-phase picker.
-        Professional theme or ANY failure → ("unavailable", ...) so the plugin
-        falls back to its classic flow."""
+        Drone not owned, professional theme, or ANY failure →
+        ("unavailable", ...) so the plugin falls back to its classic flow."""
         title, start_dir, pattern = self._tf_args
+        if not self._sentry_allowed("chopper_gunner"):
+            self._tf_result = ("unavailable", "", [])
+            return
         try:
-            from techdeck.core.settings import SettingsManager
-            if SettingsManager().is_professional():
-                self._tf_result = ("unavailable", "", [])
-                return
             from techdeck.ui.widgets.chopper_picker import (
                 pick_nest_targets_chopper,
             )
