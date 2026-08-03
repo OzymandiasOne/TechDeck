@@ -298,6 +298,16 @@ class HomePage(QWidget, ThemeAware):
 
         tile_ids = self.settings.get_profile_tiles()
 
+        # Selection lives in self.selected_tiles, but the cards are rebuilt from
+        # scratch here — so drop any selection whose tile just left the kit, then
+        # re-check the survivors below so the set and the cards always agree.
+        # Without the drop a tile removed in the Library stayed ARMED with no card
+        # to show it, and ran on every subsequent Run Selected (CPENG_TOWERPC
+        # 2026-08-03: 902 DXF Prep, removed from the 'Game' kit, kept starting
+        # alongside the game and popping its folder picker over everything).
+        self.selected_tiles &= set(tile_ids)
+        self._sync_run_button()
+
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
 
@@ -356,6 +366,18 @@ class HomePage(QWidget, ThemeAware):
 
         self._tile_ctrl.set_tiles(order, widgets)
 
+        # Re-check the cards that survived the prune above — set_checked emits
+        # toggled, so flag it as programmatic (no per-tile click sound).
+        if self.selected_tiles:
+            self._restoring = True
+            try:
+                for tid in self.selected_tiles:
+                    card = self.tile_cards.get(tid)
+                    if card is not None:
+                        card.set_checked(True)
+            finally:
+                self._restoring = False
+
         # Staggered entrance for the live PluginCards (missing tiles stay solid).
         for i, tid in enumerate(tid for tid in order if tid in self.tile_cards):
             self.tile_cards[tid].start_entrance(i * 50)
@@ -392,18 +414,28 @@ class HomePage(QWidget, ThemeAware):
             from techdeck.core.audio_manager import get_audio_manager, SOUND_CLICK
             get_audio_manager().play(SOUND_CLICK)
 
+        self._sync_run_button()
+
+    def _sync_run_button(self) -> None:
+        """Match the Run button (enabled state + glow pulse) to the selection.
+
+        Called on every toggle AND after a tile refresh — a refresh can change
+        the selection by pruning tiles that left the kit, and the button must
+        not stay lit for a selection that no longer exists.
+        """
         if self._run.is_running:
             return  # don't disturb button state while plugins are running
 
         has_selection = len(self.selected_tiles) > 0
-        if hasattr(self, 'run_btn') and self.run_btn:
+        # run_btn is wired later by the shell, so this can run before it exists.
+        if getattr(self, 'run_btn', None):
             self.run_btn.setEnabled(has_selection)
-        if hasattr(self, '_btn_pulse') and self._btn_pulse:
+        if getattr(self, '_btn_pulse', None):
             self._btn_pulse.stop()
             self._btn_glow.setBlurRadius(0)
             if has_selection:
                 self._btn_pulse.start()
-    
+
 
     def _on_profile_selected(self, profile_name: str):
         if not profile_name:

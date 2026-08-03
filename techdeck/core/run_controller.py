@@ -15,7 +15,7 @@ import queue as _queue
 
 from PySide6.QtCore import QObject, Signal, QTimer
 
-from techdeck.core.plugin_executor import PluginResult
+from techdeck.core.plugin_executor import PluginResult, get_run_logger
 from techdeck.core.run_session import RunSession
 from techdeck.ui.widgets.plugin_card import PluginCard
 
@@ -89,8 +89,6 @@ class RunController(QObject):
             self.session.queue.clear()
             self.session.shelve_after_current = False
 
-        self.home.run_selected.emit(list(self.home.selected_tiles))
-
         console = None
         parent = self.parent()
         while parent:
@@ -103,12 +101,35 @@ class RunController(QObject):
         # Run plugins in the user-controlled order shown on the Home page
         # (left-to-right, top-to-bottom) — not arbitrary set-iteration order.
         ordered = self.home.settings.get_profile_tiles()
-        self.session.queue = [tid for tid in ordered if tid in self.home.selected_tiles]
-        # Append any selected tiles that aren't in the saved order (defensive;
-        # shouldn't happen, but don't silently drop selections).
-        for tid in self.home.selected_tiles:
-            if tid not in self.session.queue:
-                self.session.queue.append(tid)
+        queue = [tid for tid in ordered if tid in self.home.selected_tiles]
+        # Anything still selected but NOT in the kit is a ghost — a tile removed
+        # from the kit while it was checked. It has no card on Home, so running it
+        # is invisible to the user: on CPENG_TOWERPC (2026-08-03) a removed 902 DXF
+        # Prep started on every run and blocked the whole app behind its modal
+        # folder picker. Home prunes the selection on refresh now; this drops
+        # (never appends) any that still slip through, and says so.
+        ghosts = sorted(tid for tid in self.home.selected_tiles if tid not in queue)
+        if ghosts:
+            self.home.selected_tiles.difference_update(ghosts)
+            get_run_logger().warning(
+                "Dropped %d selected tile(s) not in the current kit: %s",
+                len(ghosts), ", ".join(ghosts),
+            )
+            if console is not None:
+                console.append_system(
+                    "Skipped " + ", ".join(ghosts) +
+                    " — no longer in this kit."
+                )
+        if not queue:
+            # Every selection was a ghost. Bail BEFORE run_selected is emitted:
+            # that signal starts the console spinner, and only all-plugins-done
+            # stops it, so emitting with nothing to run strands it spinning.
+            self.home._sync_run_button()
+            return
+        self.session.queue = queue
+
+        # Announce the real queue (kit order), not the raw selection set.
+        self.home.run_selected.emit(list(queue))
         # Remember the largest multi-run for the "run N at once" achievements.
         self.home.settings.record_run_batch(len(self.session.queue))
         # Reset family-shared scratch state at the start of every multi-run.
