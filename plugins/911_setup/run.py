@@ -1678,6 +1678,56 @@ def _build_card(row: dict, material: dict, template: dict, label_map: dict,
     return card, names
 
 
+# ── Posted-card ledger ──────────────────────────────────────────────────────
+# SECOND line of duplicate defence. The flow itself already drops any card
+# whose exact title is already in the plan (docs/TEAMS_CARDS.md, flow #3 step
+# 7), and that is the authoritative check because it reads the real plan. The
+# ledger is the local half: it stops the plugin from even OFFERING a card it
+# has already posted from this machine, so a re-run's log says "23 already
+# carded" instead of listing 31 cards it silently expects the flow to throw
+# away.
+#
+# Deliberately advisory: delete the file (path is logged on every suppression)
+# to re-offer everything — which is what you want after deleting cards in
+# Planner on purpose. Never written on a dry run or a failed post.
+_LEDGER_FILENAME = "911_setup_posted_cards.json"
+
+
+def _ledger_path() -> Path:
+    import os
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+    return Path(base) / "TechDeck" / _LEDGER_FILENAME
+
+
+def _load_posted_titles(log) -> set:
+    """Titles this machine has already posted. Unreadable ledger -> empty set
+    (degrade to the flow's own dedupe rather than blocking the run)."""
+    path = _ledger_path()
+    if not path.is_file():
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return {str(t) for t in (data.get("titles") or [])}
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        log(f"  (Could not read the posted-card ledger: {exc} - relying on the "
+            f"flow's own duplicate check.)")
+        return set()
+
+
+def _record_posted_titles(titles, log) -> None:
+    """Append successfully-posted titles to the ledger. Failures only log —
+    a ledger write must never fail a run whose cards were created."""
+    path = _ledger_path()
+    merged = sorted(_load_posted_titles(log) | set(titles))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"plan": "EB SOPO D911", "titles": merged}, fh, indent=2)
+    except OSError as exc:
+        log(f"  (Could not update the posted-card ledger: {exc})")
+
+
 def _run_teams_cards(params: dict, progress_callback, cancel_event,
                      qtdr_override: str, lo: int = 0, hi: int = 100) -> bool:
     """The Generate Teams Cards stage. Returns True when the payload posted
@@ -1722,6 +1772,32 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
                         f"not read as 'BATCH NEST' - no card created.")
     rows = [r for r in rows if r["batch"] and r["nest"]]
 
+    # --- No source material listed -> no card (C.D. 2026-08-03) ------------
+    # A nest whose NOTES cell is still blank has not been specified yet, so a
+    # card for it would carry neither a machine label nor a Program decision.
+    # Skip it and say so; it gets a card on a later run, once planning fills
+    # the cell in.
+    if bool(template.get("require_material_notes", True)):
+        no_material = [r for r in rows if not str(r.get("notes") or "").strip()]
+        if no_material:
+            warnings.append(
+                f"No source material in the schedule's NOTES column for "
+                f"{len(no_material)} nest(s) - NO card was created for them. "
+                f"They will be picked up on a later run once the cell is "
+                f"filled in: "
+                + ", ".join(f"{r['batch']} {r['nest']}" for r in no_material[:15])
+                + (" ..." if len(no_material) > 15 else ""))
+        rows = [r for r in rows if str(r.get("notes") or "").strip()]
+    if not rows:
+        log("Every queued nest was skipped - nothing to card.")
+        for w in warnings:
+            log(f"  ! {w}")
+        if warnings:
+            sdk.show_warning(params, "911 Setup - Teams card warnings",
+                             "\n\n".join(warnings))
+        _pct(1.0)
+        return True
+
     # --- Source-material stock codes: one BATCH LIST read per batch ---------
     qtdr_root = _base_qtdr(qtdr_override)
     materials: dict = {}
@@ -1736,32 +1812,76 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
     # --- Build the cards ----------------------------------------------------
     label_map = {_norm_text(name): slot
                  for name, slot in (template.get("label_map") or {}).items()}
-    cards, card_labels, no_code = [], [], []
+
+    # --- No stock code -> no card ------------------------------------------
+    # This is the ONE path that defeats the flow's title-based dedupe: a card
+    # created as "BATCH: x - NEST: y" (BATCH LIST unreadable that run) does not
+    # match "BATCH: x - NEST: y (code)" later, so the next run creates a SECOND
+    # card for the same nest. Skipping is the fix — the nest is re-offered once
+    # the BATCH LIST reads cleanly.
+    require_code = bool(template.get("require_material_code", True))
+    no_code = [r for r in rows
+               if not ((materials.get(r["batch"]) or {}).get(r["nest"]) or {}).get("code")]
+    if no_code:
+        warnings.append(
+            f"No BATCH LIST 'Material' code found for {len(no_code)} nest(s), so "
+            + ("NO card was created for them (a card without the code would not "
+               "match the real one on a later run, and you would end up with two)"
+               if require_code else
+               "their card titles carry no '(code)'")
+            + ": " + ", ".join(f"{r['batch']} {r['nest']}" for r in no_code[:15])
+            + (" ..." if len(no_code) > 15 else ""))
+        if require_code:
+            skip = {(r["batch"], r["nest"]) for r in no_code}
+            rows = [r for r in rows if (r["batch"], r["nest"]) not in skip]
+
+    cards, card_labels = [], []
     for r in rows:
         sdk.raise_if_cancelled(cancel_event)
         material = (materials.get(r["batch"]) or {}).get(r["nest"])
-        if not material or not material.get("code"):
-            no_code.append(f"{r['batch']} {r['nest']}")
         card, names = _build_card(r, material, template, label_map,
                                   warnings, unlabelled)
         cards.append(card)
         card_labels.append(names)
 
+    # --- Drop what this machine has already posted -------------------------
+    already = _load_posted_titles(log)
+    if already:
+        keep = [(c, n) for c, n in zip(cards, card_labels)
+                if c["title"] not in already]
+        suppressed = len(cards) - len(keep)
+        if suppressed:
+            log(f"Already carded: {suppressed} nest(s) were posted from this "
+                f"machine before and are not being re-sent.")
+            log(f"  (Ledger: {_ledger_path()} - delete it to re-offer them.)")
+        cards = [c for c, _ in keep]
+        card_labels = [n for _, n in keep]
+
+    if not cards:
+        log("\nNothing new to card - every queued nest either has no source "
+            "material yet or already has its card.")
+        if warnings:
+            log("\nWarnings:")
+            for w in warnings:
+                log(f"  ! {w}")
+            sdk.show_warning(params, "911 Setup - Teams card warnings",
+                             "\n\n".join(warnings))
+        _pct(1.0)
+        return True
+
     # A card with no difficulty label looks identical to a rated one at a
     # glance, so an uncoloured RATING cell is surfaced the same way the packet
     # stamp surfaces it -- loudly -- rather than passing as a clean run.
-    unrated = [f"{r['batch']} {r['nest']}" for r in rows if not r.get("difficulty")]
+    titles_being_posted = {c["title"] for c in cards}
+    unrated = [f"{r['batch']} {r['nest']}" for r in rows
+               if not r.get("difficulty")
+               and any(r["nest"] in t for t in titles_being_posted)]
     if unrated:
         warnings.append(f"No difficulty rating colour on the EB 922 Schedule "
                         f"(CURRENT PIPELINE, column E) for {len(unrated)} "
                         f"nest(s), so their cards carry NO difficulty label: "
                         f"{', '.join(unrated[:15])}"
                         + (" ..." if len(unrated) > 15 else ""))
-    if no_code:
-        warnings.append(f"No BATCH LIST 'Material' code found for "
-                        f"{len(no_code)} nest(s), so their card titles carry no "
-                        f"'(code)': {', '.join(no_code[:15])}"
-                        + (" ..." if len(no_code) > 15 else ""))
     if unlabelled:
         warnings.append(f"No SAW CUT / TUBE LASER label could be decided for "
                         f"{len(unlabelled)} nest(s) - those cards were created "
@@ -1816,6 +1936,8 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
     ok = sdk.post_webhook(url, payload, log)
     _pct(1.0)
     if ok:
+        # Only on a confirmed 2xx: a failed post must stay re-offerable.
+        _record_posted_titles([c["title"] for c in cards], log)
         log(f"\nTeams cards: DONE. Requested {len(cards)} card(s) in "
             f"'{payload['bucket']}'.")
         log(f"Check the {payload['plan']} tab in the D922 channel to confirm.")

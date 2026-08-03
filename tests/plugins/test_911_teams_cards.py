@@ -9,6 +9,7 @@ on tidied-up samples.
 import datetime as dt
 import importlib.util
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -235,3 +236,89 @@ def test_unmapped_label_name_warns_instead_of_posting_a_bad_slot(st, template):
                              _label_map(st, template), warnings, unlabelled)
     assert card["labels"] == ["category5"]   # machine label still applied
     assert any("CATASTROPHIC" in w for w in warnings)
+
+
+# ── stage-level: what gets skipped, and re-run duplicate protection ─────────
+SCHEDULE = [
+    # a normal, fully-specified nest
+    {"excel_row": 138, "raw_key": "V092 503836", "batch": "V092",
+     "nest": "503836", "date": dt.datetime(2026, 10, 30),
+     "notes": "HSS 6 X 4 X 0.375 TUBE", "difficulty": "SIMPLE"},
+    # NOTES not filled in yet -> no card
+    {"excel_row": 163, "raw_key": "S033 503810", "batch": "S033",
+     "nest": "503810", "date": dt.datetime(2026, 11, 20),
+     "notes": None, "difficulty": None},
+    # BATCH LIST code unreadable -> no card (would duplicate later)
+    {"excel_row": 144, "raw_key": "V094 503893", "batch": "V094",
+     "nest": "503893", "date": dt.datetime(2026, 11, 6),
+     "notes": "HSS 1.5 X 1.5 X 0.250 ANGLE (TL)", "difficulty": "MEDIUM"},
+]
+MATERIALS = {
+    "V092": {"503836": {"code": "218004493", "desc": ""}},
+    "S033": {"503810": {"code": "218019941", "desc": "TUBE ; STL ; 2.000"}},
+    "V094": {},          # nest absent -> no code
+}
+
+
+def _stage(st, tmp_path, monkeypatch, settings=None):
+    """Run the stage with the schedule + BATCH LISTs stubbed out, capturing
+    the payload that would be POSTed. Returns (posted_payloads, log_lines)."""
+    posted, lines = [], []
+    monkeypatch.setattr(st, "_read_schedule_rows",
+                        lambda *a, **k: ([dict(r) for r in SCHEDULE], ""))
+    monkeypatch.setattr(st, "_read_batch_list_materials",
+                        lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
+    monkeypatch.setattr(st, "_ledger_path",
+                        lambda: tmp_path / "911_setup_posted_cards.json")
+    monkeypatch.setattr(st.sdk, "post_webhook",
+                        lambda url, payload, log: posted.append(payload) or True)
+    params = {"log": lines.append, "console": None,
+              "settings": settings if settings is not None else {}}
+    st._run_teams_cards(params, lambda v: None, threading.Event(), "")
+    return posted, lines
+
+
+def test_blank_notes_and_missing_code_are_both_skipped(st, tmp_path, monkeypatch):
+    posted, lines = _stage(st, tmp_path, monkeypatch)
+    assert len(posted) == 1
+    titles = [t["title"] for t in posted[0]["tasks"]]
+    assert titles == ["BATCH: V092 - NEST: 503836 (218004493)"]
+    blob = "\n".join(lines)
+    # both skips are REPORTED, not silent
+    assert "S033 503810" in blob and "NOTES" in blob
+    assert "V094 503893" in blob and "Material" in blob
+
+
+def test_rerun_does_not_repost_what_it_already_created(st, tmp_path, monkeypatch):
+    first, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(first[0]["tasks"]) == 1
+    second, lines = _stage(st, tmp_path, monkeypatch)
+    assert second == []                      # nothing POSTed at all
+    assert "Already carded" in "\n".join(lines)
+
+
+def test_a_failed_post_stays_reofferable(st, tmp_path, monkeypatch):
+    """The ledger records a 2xx only -- a webhook failure must not make the
+    nest look done."""
+    monkeypatch.setattr(st, "_read_schedule_rows",
+                        lambda *a, **k: ([dict(r) for r in SCHEDULE], ""))
+    monkeypatch.setattr(st, "_read_batch_list_materials",
+                        lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
+    monkeypatch.setattr(st, "_ledger_path",
+                        lambda: tmp_path / "911_setup_posted_cards.json")
+    monkeypatch.setattr(st.sdk, "post_webhook", lambda url, payload, log: False)
+    st._run_teams_cards({"log": lambda m: None, "console": None, "settings": {}},
+                        lambda v: None, threading.Event(), "")
+    assert st._load_posted_titles(lambda m: None) == set()
+
+    posted, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted[0]["tasks"]) == 1      # re-offered on the next run
+
+
+def test_dry_run_never_writes_the_ledger(st, tmp_path, monkeypatch):
+    posted, _ = _stage(st, tmp_path, monkeypatch, settings={"card_dry_run": True})
+    assert posted == []
+    assert not (tmp_path / "911_setup_posted_cards.json").exists()
+    # ...so the real run still offers the card
+    posted2, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted2[0]["tasks"]) == 1
