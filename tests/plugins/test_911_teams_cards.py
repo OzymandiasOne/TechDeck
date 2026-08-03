@@ -315,6 +315,19 @@ def test_a_failed_post_stays_reofferable(st, tmp_path, monkeypatch):
     assert len(posted[0]["tasks"]) == 1      # re-offered on the next run
 
 
+def test_ledger_survives_a_bom(st, tmp_path, monkeypatch):
+    """The ledger is documented as user-editable, and anything on Windows that
+    rewrites it (Notepad, PowerShell Out-File -Encoding utf8) adds a BOM.
+    Plain utf-8 rejects that and the whole ledger silently stops suppressing --
+    caught live, 2026-08-03."""
+    led = tmp_path / "911_setup_posted_cards.json"
+    monkeypatch.setattr(st, "_ledger_path", lambda: led)
+    led.write_text('{"titles": ["BATCH: V092 - NEST: 503836 (218004493)"]}',
+                   encoding="utf-8-sig")
+    assert st._load_posted_titles(lambda m: None) == {
+        "BATCH: V092 - NEST: 503836 (218004493)"}
+
+
 def test_dry_run_never_writes_the_ledger(st, tmp_path, monkeypatch):
     posted, _ = _stage(st, tmp_path, monkeypatch, settings={"card_dry_run": True})
     assert posted == []

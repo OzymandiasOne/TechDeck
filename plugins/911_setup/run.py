@@ -1706,7 +1706,11 @@ def _load_posted_titles(log) -> set:
     if not path.is_file():
         return set()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        # utf-8-SIG on the read: the ledger is documented as user-editable
+        # (delete it to re-offer everything), and anything on Windows that
+        # rewrites it — Notepad, PowerShell's Out-File -Encoding utf8 — adds a
+        # BOM that plain utf-8 rejects. Writes stay BOM-less utf-8.
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         return {str(t) for t in (data.get("titles") or [])}
     except (OSError, json.JSONDecodeError, AttributeError) as exc:
