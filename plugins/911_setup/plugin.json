@@ -77,9 +77,9 @@
       {
         "key": "card_webhook_url",
         "type": "string",
-        "label": "Teams Webhook URL",
-        "description": "Power Automate flow that creates the D911 modeling cards. Until this is set the Generate Teams Cards stage runs as a dry run - it logs every card it would create and saves a preview instead of posting.",
-        "placeholder": "Blank = dry run only",
+        "label": "Teams Webhook URL (override)",
+        "description": "Leave blank to use TechDeck's built-in card-creation flow. Only set this to point at a different Power Automate flow (get the URL from that flow's trigger). Use the dry run toggle below to preview without posting.",
+        "placeholder": "Blank = TechDeck's built-in flow",
         "required": false,
         "default": ""
       },

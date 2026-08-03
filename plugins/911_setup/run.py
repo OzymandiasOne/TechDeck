@@ -1373,12 +1373,21 @@ def _find_template_911(template_dir: Path) -> Path:
 # once and cached.
 # ---------------------------------------------------------------------------
 
-# The 'TechDeck 911 Setup - Create Modeling Cards' Power Automate flow.
-# EMPTY until that flow is built (docs/TEAMS_CARDS.md, flow #3): with no URL
-# the stage forces a dry run, logs every card it WOULD create and writes the
-# payload preview, so nothing posts by accident. Bake the real URL in here
-# once the flow exists (same pattern as 922 Setup's DEFAULT_WEBHOOK_URL).
-DEFAULT_CARD_WEBHOOK_URL = ""
+# The 'TechDeck 911 Setup - Create Modeling Cards' Power Automate flow
+# (built + turned on 2026-08-03; recipe in docs/TEAMS_CARDS.md, flow #3).
+# Baked in so a fresh install posts out of the box — the same reason 922 Setup
+# carries its URL as a constant, after v0.8.6.8 shipped with a blank default
+# and silently dry-ran on every machine but the author's. The Settings field
+# is an OVERRIDE (e.g. pointing at a rebuilt/test flow without an app update);
+# the card_dry_run toggle is how you preview without posting. If the flow is
+# ever recreated, update this constant AND ship an app update.
+DEFAULT_CARD_WEBHOOK_URL = (
+    "https://REDACTED-ENVIRONMENT.api"
+    ".powerplatform.com:443/powerautomate/automations/direct/cu/15/workflows/"
+    "REDACTED-WORKFLOW-ID/triggers/manual/paths/invoke"
+    "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=REDACTED"
+)
 
 _CARD_PREVIEW_FILENAME = "last_911_setup_payload.json"
 
