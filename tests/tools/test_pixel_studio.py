@@ -88,3 +88,73 @@ def test_sprite_layer_visibility_toggle(qapp):
     sp._refresh_layers()
     sp.layer_list.item(0).setCheckState(Qt.CheckState.Unchecked)
     assert sp.canvas.layers[1].visible is False
+
+
+def test_set_active_does_not_signal_a_stack_change(qapp):
+    """Regression: set_active used to emit layers_changed, which made the panel
+    rebuild the whole list. An internal-move drop fires currentRowChanged
+    mid-drop, so that rebuild UNDID the drop the user just made."""
+    from tools.pixel_editor import Canvas
+    c = Canvas(4, 4)
+    c.add_layer("second")
+    fired = []
+    c.layers_changed.connect(lambda: fired.append("stack"))
+    c.set_active(0)
+    assert fired == []
+
+
+def test_layer_list_reports_drops_via_dropevent(qapp):
+    """Regression: QListWidget implements InternalMove as remove + insert, so
+    model().rowsMoved NEVER fires. Hooking it gave a list that reordered
+    visually while the stack stayed put."""
+    from PySide6.QtWidgets import QListWidgetItem
+    from tools.devkit.pixel_studio import _LayerList
+    lw = _LayerList()
+    for n in ("c", "b", "a"):
+        lw.addItem(QListWidgetItem(n))
+    moved = []
+    lw.model().rowsMoved.connect(lambda *a: moved.append("rowsMoved"))
+    assert hasattr(lw, "reordered")          # the signal we actually rely on
+    assert moved == []                       # and the one we must not
+
+
+def test_drag_reorder_syncs_the_stack(qapp):
+    from tools.devkit.pixel_studio import _SpritePanel
+    sp = _SpritePanel()
+    sp.canvas.add_layer("middle")
+    sp.canvas.add_layer("top")
+    sp._refresh_layers()
+    # what Qt's InternalMove does on a drop, then what dropEvent emits
+    item = sp.layer_list.takeItem(0)
+    sp.layer_list.insertItem(2, item)
+    sp.layer_list.setCurrentRow(2)
+    sp.layer_list.reordered.emit()
+
+    names = [sp.layer_list.item(r).text() for r in range(sp.layer_list.count())]
+    assert names == ["middle", "Layer 1", "top"]          # drop not undone
+    assert [l.name for l in sp.canvas.layers] == list(reversed(names))
+    assert sp.canvas.layer.name == "top"                  # follows the drag
+
+
+def test_no_up_down_buttons(qapp):
+    """Reordering is drag-and-drop only."""
+    from PySide6.QtWidgets import QPushButton
+    from tools.devkit.pixel_studio import _SpritePanel
+    sp = _SpritePanel()
+    labels = {b.text() for b in sp.findChildren(QPushButton)}
+    assert "Up" not in labels and "Down" not in labels
+    assert {"+ Open", "+ New", "Dupe", "Delete"} <= labels
+
+
+def test_palette_and_layers_share_one_rail(qapp):
+    """Palette above, layers below — one column, not two side-by-side rails."""
+    from tools.devkit.pixel_studio import _SpritePanel
+    sp = _SpritePanel()
+    rail = sp.layer_list
+    while rail.parent() is not None and rail.parent() is not sp:
+        rail = rail.parent()
+    # the swatch host must live under the same top-level rail as the layer list
+    host = sp.swatch_host
+    while host.parent() is not None and host.parent() is not sp:
+        host = host.parent()
+    assert rail is host

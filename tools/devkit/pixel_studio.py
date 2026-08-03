@@ -28,13 +28,29 @@ from PySide6.QtWidgets import (
     QFileDialog, QColorDialog, QMessageBox, QInputDialog, QSizePolicy,
     QListWidget, QListWidgetItem, QSlider,
 )
-from PySide6.QtCore import Qt, QSize, QByteArray, QTimer
+from PySide6.QtCore import Qt, QSize, QByteArray, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 from techdeck.ui import pixel_art
 from techdeck.ui.theme_aware import ThemeAware
 from tools.pixel_editor import Canvas, _DEFAULT_PALETTE, _CHAR_POOL
+
+
+class _LayerList(QListWidget):
+    """QListWidget that reliably reports an internal-move reorder.
+
+    QListWidget implements InternalMove as a remove + insert, so
+    `model().rowsMoved` NEVER fires on a drop -- hooking it silently gives you
+    a list that reorders visually while the underlying stack does not move.
+    Overriding dropEvent is the only dependable signal.
+    """
+
+    reordered = Signal()
+
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        self.reordered.emit()
 
 
 def _playground_dir() -> Path:
@@ -292,10 +308,30 @@ class _CanvasPanel(QWidget, ThemeAware):
         body.setSpacing(8)
         body.addWidget(self._build_tools_rail())
         body.addWidget(self.scroll, 1)
-        if self.SHOW_LAYERS:
-            body.addWidget(self._build_layers_rail())
-        body.addWidget(self._build_palette_rail())
+        body.addWidget(self._build_right_rail())
         return body
+
+    def _build_right_rail(self):
+        """One column on the right: palette on top, layers under it.
+
+        Two side-by-side rails ate the artboard's width for no reason -- they
+        are both narrow lists that stack happily. Layers take roughly half the
+        column via stretch factors, so the split holds at any window height.
+        """
+        if not self.SHOW_LAYERS:
+            return self._build_palette_rail()
+        side = QFrame()
+        side.setFixedWidth(178)
+        v = QVBoxLayout(side)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(6)
+        pal = self._build_palette_rail()
+        pal.setFixedWidth(178)
+        lay = self._build_layers_rail()
+        lay.setFixedWidth(178)
+        v.addWidget(pal, 1)
+        v.addWidget(lay, 1)
+        return side
 
     # ---- layers rail ---------------------------------------------------------
     # Only modes that author a whole multi-part sprite get this. Tile Icon does
@@ -307,16 +343,20 @@ class _CanvasPanel(QWidget, ThemeAware):
         """Stack list, topmost first. Painting always goes to the active layer;
         each layer keeps its own file so Save All writes them back in place."""
         side = QFrame()
-        side.setFixedWidth(178)
         v = QVBoxLayout(side)
         v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(self._heading("Layers"))
 
-        self.layer_list = QListWidget()
+        self.layer_list = _LayerList()
         self.layer_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.layer_list.currentRowChanged.connect(self._layer_row_selected)
         self.layer_list.itemChanged.connect(self._layer_item_changed)
-        self.layer_list.model().rowsMoved.connect(self._layer_rows_moved)
+        # dropEvent, not rowsMoved -- see _LayerList. rowsRemoved is a backstop
+        # for any path that edits the model without a drop; both funnel into the
+        # same idempotent resync, so firing twice is harmless.
+        self.layer_list.reordered.connect(self._resync_stack_from_list)
+        self.layer_list.model().rowsRemoved.connect(
+            lambda *_a: QTimer.singleShot(0, self._resync_stack_from_list))
         self.layer_list.setToolTip(
             "Click to make a layer active — painting always goes to the active "
             "layer.\nTick to show/hide. Double-click to rename. Drag to reorder.")
@@ -338,8 +378,6 @@ class _CanvasPanel(QWidget, ThemeAware):
 
         for pairs in (
             (("+ Open", self._open_as_layer), ("+ New", self._new_layer)),
-            (("Up", lambda: self._move_layer(-1)),
-             ("Down", lambda: self._move_layer(1))),
             (("Dupe", self._duplicate_layer), ("Delete", self._delete_layer)),
         ):
             row = QHBoxLayout()
@@ -378,18 +416,26 @@ class _CanvasPanel(QWidget, ThemeAware):
             self.layer_list.addItem(it)
         self.layer_list.setCurrentRow(
             len(self.canvas.layers) - 1 - self.canvas.active)
-        lay = self.canvas.layer
-        self.op_slider.blockSignals(True)
-        self.op_slider.setValue(int(round(lay.opacity * 100)))
-        self.op_slider.blockSignals(False)
-        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
-        self.layer_path_lbl.setText(lay.path.name if lay.path else "(no file yet)")
+        self._sync_layer_meta()
         self._syncing_layers = False
 
     def _layer_row_selected(self, row):
         if self._syncing_layers or row < 0:
             return
         self.canvas.set_active(len(self.canvas.layers) - 1 - row)
+        self._sync_layer_meta()      # NOT _refresh_layers -- see set_active
+
+    def _sync_layer_meta(self):
+        """Update the opacity/path widgets for the active layer, WITHOUT
+        touching the list itself."""
+        if not hasattr(self, "op_slider"):
+            return
+        lay = self.canvas.layer
+        self.op_slider.blockSignals(True)
+        self.op_slider.setValue(int(round(lay.opacity * 100)))
+        self.op_slider.blockSignals(False)
+        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
+        self.layer_path_lbl.setText(lay.path.name if lay.path else "(no file yet)")
 
     def _layer_item_changed(self, item):
         if self._syncing_layers:
@@ -403,18 +449,31 @@ class _CanvasPanel(QWidget, ThemeAware):
             lay.name = item.text()
         self.canvas.update()
 
-    def _layer_rows_moved(self, *_a):
-        if self._syncing_layers:
+    def _resync_stack_from_list(self):
+        """Rebuild the canvas stack to match the list order (list is reversed:
+        topmost row = top of the stack). Idempotent."""
+        if self._syncing_layers or not hasattr(self, "layer_list"):
             return
         names = [self.layer_list.item(r).text()
                  for r in range(self.layer_list.count())]
         by_name = {lay.name: lay for lay in self.canvas.layers}
-        if len(by_name) != len(self.canvas.layers):
-            self._refresh_layers()      # duplicate names — cannot map safely
+        if len(by_name) != len(self.canvas.layers) or                 sorted(names) != sorted(by_name):
+            self._refresh_layers()   # duplicate/renamed names — cannot map
             return
-        active = self.canvas.layer
-        self.canvas.layers = [by_name[n] for n in reversed(names) if n in by_name]
-        self.canvas.active = self.canvas.layers.index(active)
+        order = [by_name[n] for n in reversed(names)]
+        if order == self.canvas.layers:
+            return                   # nothing actually moved
+        # Take the active layer from the list SELECTION, not from the stale
+        # canvas.active: an internal move removes and re-inserts the row, which
+        # fires currentRowChanged mid-drag and can leave canvas.active pointing
+        # at whatever briefly got selected. The dragged row is the selected one,
+        # and staying on it is what the user expects.
+        row = self.layer_list.currentRow()
+        self.canvas.layers = order
+        if 0 <= row < len(order):
+            self.canvas.active = len(order) - 1 - row
+        else:
+            self.canvas.active = min(self.canvas.active, len(order) - 1)
         self.canvas.update()
         self._refresh_layers()
 
@@ -424,11 +483,6 @@ class _CanvasPanel(QWidget, ThemeAware):
         self.canvas.layer.opacity = val / 100.0
         self.op_label.setText(f"{val}%")
         self.canvas.update()
-
-    def _move_layer(self, delta):
-        # the list is reversed, so "up" in the list is +1 in the stack
-        if self.canvas.move_layer(self.canvas.active, -delta):
-            self._refresh_layers()
 
     def _new_layer(self):
         self.canvas.add_layer()

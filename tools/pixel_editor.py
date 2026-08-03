@@ -252,7 +252,8 @@ class Canvas(QWidget):
     color_picked = Signal(str)   # emits a palette char when the eyedropper hits
     modified = Signal()
     palette_changed = Signal()   # paste added colors — swatch rails re-sync
-    layers_changed = Signal()    # stack added/removed/reordered/renamed
+    layers_changed = Signal()    # stack composition changed (add/remove/reorder)
+    active_changed = Signal()    # only WHICH layer is active changed
 
     # ---- the stack ----------------------------------------------------------
     @property
@@ -284,13 +285,20 @@ class Canvas(QWidget):
         return self.layer.redo
 
     def set_active(self, i):
+        """Change which layer edits go to.
+
+        Deliberately does NOT emit layers_changed: that signal means the STACK
+        composition changed and makes listeners rebuild their whole list. A
+        drag-reorder fires currentRowChanged mid-drop, so rebuilding on a mere
+        selection change would wipe out the drop the user just made.
+        """
         if 0 <= i < len(self.layers) and i != self.active:
             self.active = i
             if self.active_char not in self.palette:
                 self.active_char = next(iter(self.palette), "k")
             self._clear_selection()
             self.palette_changed.emit()
-            self.layers_changed.emit()
+            self.active_changed.emit()
             self.update()
 
     def add_layer(self, name=None, rows=None, palette=None, path=None,
@@ -1588,13 +1596,7 @@ class Editor(QMainWindow):
                 it.setForeground(QColor("#e0b040"))
             self.layer_list.addItem(it)
         self.layer_list.setCurrentRow(self._row_of(self.canvas.active))
-        lay = self.canvas.layer
-        self.op_slider.blockSignals(True)
-        self.op_slider.setValue(int(round(lay.opacity * 100)))
-        self.op_slider.blockSignals(False)
-        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
-        self.layer_path_lbl.setText(
-            str(lay.path) if lay.path else "(unsaved — Save Layer to give it a file)")
+        self._sync_layer_meta()
         self._syncing_layers = False
 
     def _row_of(self, index):
@@ -1605,6 +1607,18 @@ class Editor(QMainWindow):
         if getattr(self, "_syncing_layers", False) or row < 0:
             return
         self.canvas.set_active(self._row_of(row))
+        self._sync_layer_meta()      # NOT _refresh_layers -- see set_active
+
+    def _sync_layer_meta(self):
+        """Opacity/path widgets for the active layer, without touching the
+        list (rebuilding it mid-drag would undo a reorder)."""
+        lay = self.canvas.layer
+        self.op_slider.blockSignals(True)
+        self.op_slider.setValue(int(round(lay.opacity * 100)))
+        self.op_slider.blockSignals(False)
+        self.op_label.setText(f"{int(round(lay.opacity * 100))}%")
+        self.layer_path_lbl.setText(
+            str(lay.path) if lay.path else "(unsaved — Save Layer to give it a file)")
 
     def _layer_item_changed(self, item):
         if getattr(self, "_syncing_layers", False):
