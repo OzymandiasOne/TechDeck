@@ -373,11 +373,9 @@ class MyStuffPage(QWidget):
         if not apps:
             return "No installed app asks you to pick a file or folder yet."
         if not on:
-            return (f"Sentry Drone is off for all {len(apps)} apps - hit SET UP "
-                    f"to choose which ones open their pick-a-file-or-folder "
-                    f"prompt through the drone.")
-        return (f"Sentry Drone handles the pick-a-file-or-folder prompt in "
-                f"{len(on)} of {len(apps)} apps: "
+            return (f"Standing down - all {len(apps)} apps are on the plain "
+                    f"folder dialog. Hit SET UP to arm it.")
+        return (f"Armed for {len(on)} of {len(apps)} apps: "
                 + ", ".join(a["name"] for a in on))
 
     def configure(self, item):

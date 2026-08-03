@@ -2,11 +2,14 @@
 Sentry Drone loadout — pick which apps open their file/folder prompt as the
 kill-cam picker instead of the plain Windows dialog.
 
-Note the framing, in the copy as well as here: the drone does not CHOOSE
-anything. The user still picks the same file or folder themselves; the only
-thing this window changes is which dialog that pick happens in. The first
-wording ("hand their file and folder picking to the drone") read like the
-gadget was some kind of automation — it isn't, and the copy has to say so.
+Copy rule, learned the hard way over two rewrites: the drone does not CHOOSE
+anything — the user still picks the same file or folder themselves, and the
+only thing a switch changes is which dialog that pick happens in. The FIRST
+sentence has to carry that ("These apps ask you to pick a file or folder when
+they run"), because the original wording — "hand their file and folder picking
+to the drone" — read like the gadget was automation. After that sentence the
+copy is allowed to enjoy itself, and should: the rewrite that spelled the
+mechanics out in full was accurate and boring. Honest opener, then swagger.
 
 Opened from the Sentry Drone gadget tile in My Stuff (SET UP). Lists every
 Sentry-compatible app — any plugin whose plugin.json declares the
@@ -88,12 +91,14 @@ class SentryConfigDialog(QDialog):
         # Be plain about what this actually changes: it is the LOOK of the
         # pick-a-file/folder dialog, not what the app does with it. The old
         # wording ("hand their picking to the drone") read like automation.
+        # User-authored copy (verbatim) — the first sentence carries the honest
+        # "you are picking a file or folder" framing, the rest is allowed to
+        # have fun with it. Don't sand this down into a description again.
         subhead = QLabel(
-            "These apps ask you to pick a file or folder when they run. Switch "
-            "one on and that prompt opens as the drone's targeting window "
-            "instead of the plain Windows dialog - you still pick the same thing "
-            "yourself, it just gets a crosshair, a lock-on, and a railgun strike. "
-            "The same switch lives in Settings - Apps."
+            "These apps ask you to pick a file or folder when they run. Toggling "
+            "Drone Strike on changes the standard file selection to a formidable "
+            "drone targeting system. Annihilate your enemies while processing "
+            "your data - and be home before dinner."
         )
         subhead.setWordWrap(True)
         subhead.setStyleSheet(
