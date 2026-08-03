@@ -16,7 +16,7 @@
     "Production"
   ],
 
-  "_comment_tube_only": "Checklist items dropped when the source material is not a tube (a tube-laser program is meaningless on saw stock).",
+  "_comment_tube_only": "Checklist items dropped when the source material is not a tube (a tube-laser program is meaningless on saw stock). 'tube_keywords' is also the FIRST machine test - see machine rules below.",
   "tube_only_checklist": ["Program"],
   "tube_keywords": ["TUBE"],
 
@@ -24,26 +24,9 @@
   "schedule_dept": "911",
   "schedule_status": "NEED TEAMS/SETUP",
 
-  "_comment_machine": "SAW CUT vs TUBE LASER, read off the schedule's NOTES text (column D; falls back to the BATCH LIST 'Description' when NOTES is blank). An explicit '(TL)' / '(SAW)' marker in the note always wins. Otherwise the FIRST 'shape' keyword found - in the order listed here - decides. A material that matches nothing gets no machine label and is reported at the end of the run, rather than guessing.",
-  "machine_markers": {
-    "TL": "TUBE LASER",
-    "TUBE LASER": "TUBE LASER",
-    "SAW": "SAW CUT"
-  },
-  "machine_shapes": [
-    ["TUBE", "TUBE LASER"],
-    ["ANGLE", "TUBE LASER"],
-    ["CHANNEL", "TUBE LASER"],
-    ["CHAN", "TUBE LASER"],
-    ["I SECTION", "TUBE LASER"],
-    ["BEAM", "TUBE LASER"],
-    ["ROUND", "SAW CUT"],
-    ["RD BAR", "SAW CUT"],
-    ["DIA", "SAW CUT"],
-    ["FLAT", "SAW CUT"],
-    ["BAR", "SAW CUT"],
-    ["PLATE", "SAW CUT"]
-  ],
+  "_comment_machine": "SAW CUT vs TUBE LASER, read off the schedule's NOTES text (column D; falls back to the BATCH LIST 'Description' when NOTES is blank). Rule, in order (C.D. 2026-08-03): (1) the material says TUBE -> it IS a tube -> TUBE LASER; (2) otherwise a '(TL)' note means it is going on the tube laser anyway -> TUBE LASER; (3) everything else -> SAW CUT. Shape does NOT imply the tube laser - an angle is an angle. Only a material text that is entirely EMPTY gets no label at all, and that is reported at the end of the run.",
+  "machine_tube_markers": ["TL", "TUBE LASER"],
+  "machine_default": "SAW CUT",
 
   "_comment_labels": "Slot keys, not names - the flow stays dumb and only sees categoryN. Order here mirrors the plan's label list: 1 DIFFICULT, 2 MEDIUM, 3 SIMPLE, 4 SAW CUT, 5 TUBE LASER.",
   "label_map": {

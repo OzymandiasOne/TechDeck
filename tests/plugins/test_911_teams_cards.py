@@ -94,36 +94,39 @@ def test_non_dates_mean_no_due_date(st, cell):
 
 # ── NOTES -> SAW CUT / TUBE LASER ───────────────────────────────────────────
 @pytest.mark.parametrize("notes,expected", [
-    # explicit marker wins over the shape keyword
-    ("HSS 3 X 3 X 0.250 TUBE (SAW)", "SAW CUT"),
+    # 1. says TUBE -> it IS a tube -> tube laser, marker or not
+    ("HSS 2.5 X 2.5 X 0.313 TUBE", "TUBE LASER"),
+    ("HSS 2 X 2 X 0.188 TUBE (TL)", "TUBE LASER"),
+    # 2. not a tube, but flagged (TL) -> going on the tube laser anyway
     ("HSS 1.5 X 1.5 X 0.250 ANGLE (TL)", "TUBE LASER"),
     ("HSS FLAT 2.0 W X 0.375 THK (TL)", "TUBE LASER"),
-    # unmarked -> first shape keyword decides
-    ("HSS 2.5 X 2.5 X 0.313 TUBE", "TUBE LASER"),
-    ("HSS 2.5X2.5X0.312 ANGLE", "TUBE LASER"),
-    ("AL MC3X1.76 CHANNEL", "TUBE LASER"),
+    ("AL CHAN MC3 X 1.76 (TL)", "TUBE LASER"),
+    # 3. everything else saws -- shape does NOT imply the tube laser
+    ("HSS 2.5X2.5X0.312 ANGLE", "SAW CUT"),
+    ("AL MC3X1.76 CHANNEL", "SAW CUT"),
     ("SS CRES316 0.625 RD BAR", "SAW CUT"),
     ("HY-80 1.375 DIA ROUND", "SAW CUT"),
     ("HSS 0.500THK X 6.000W FLAT", "SAW CUT"),
-    # batch-list Description fallback shape (used when NOTES is blank)
+    ("AWAITING MATERIAL AND PO", "SAW CUT"),
+    # batch-list Description fallback wording (used when NOTES is blank)
     ("TUBE ; STL ; 6.000 X 4.000 X 0.375 THK ; FT", "TUBE LASER"),
     ("BAR ; CRES 316L ; 0.625 DIA ; IN", "SAW CUT"),
+    ("ANGLE ; STL ; 2.000 X 2.000 X 0.500 THK ; FT", "SAW CUT"),
 ])
 def test_machine_label_from_material_text(st, template, notes, expected):
     assert st._resolve_machine(notes, template) == expected
 
 
-def test_free_text_in_parens_does_not_beat_the_shape(st, template):
-    """A real note: the parenthetical is a comment, not a machine marker --
-    and it contains 'BARS', which must not out-rank the leading TUBE."""
+def test_free_text_in_parens_is_not_a_marker(st, template):
+    """A real note whose parenthetical is a comment, not a machine flag."""
     assert st._resolve_machine(
         "6.0 X 2.0 X 0.375 TUBE (NEED 2 MORE BARS/PATRIAL)",
         template) == "TUBE LASER"
 
 
-@pytest.mark.parametrize("notes", ["", None, "AWAITING MATERIAL AND PO"])
-def test_unknown_material_gets_no_machine_label(st, template, notes):
-    """No guess: the card is created unlabelled and the run warns."""
+@pytest.mark.parametrize("notes", ["", None, "   "])
+def test_no_material_text_at_all_gets_no_machine_label(st, template, notes):
+    """Only a truly empty cell is unlabelled -- and the run warns about it."""
     assert st._resolve_machine(notes, template) is None
 
 
@@ -176,8 +179,8 @@ def test_program_is_dropped_on_non_tube_stock(st, template):
     assert card["checklist"] == ["Shop Prints", "Inspection Sheet",
                                  "Production Packets", "Cover Sheet",
                                  "Scribe Sheet", "Production"]
-    # the rest of the card is untouched
-    assert card["labels"] == ["category2", "category5"]
+    # the rest of the card is untouched (MEDIUM + SAW CUT)
+    assert card["labels"] == ["category2", "category4"]
 
 
 def test_missing_stock_code_falls_back_to_the_short_title(st, template):
@@ -200,9 +203,11 @@ def test_blank_notes_fall_back_to_the_batch_list_description(st, template):
     assert not unlabelled
 
 
-def test_unresolvable_material_is_reported_not_guessed(st, template):
+def test_no_material_anywhere_is_reported_not_guessed(st, template):
+    """Blank NOTES *and* no batch-list description -> no machine label, and
+    the nest is named in the end-of-run warning."""
     warnings, unlabelled = [], []
-    card, names = st._build_card(_row(notes="AWAITING MATERIAL"),
+    card, names = st._build_card(_row(notes=None),
                                  {"code": "211076345", "desc": ""}, template,
                                  _label_map(st, template), warnings, unlabelled)
     assert names == ["SIMPLE"]

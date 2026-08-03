@@ -1440,23 +1440,25 @@ def _due_date_iso(value) -> str:
 def _resolve_machine(material_text: str, template: dict):
     """'SAW CUT' / 'TUBE LASER' / None for a source-material description.
 
-    An explicit '(TL)' / '(SAW)' marker in the note always wins -- the
-    schedule uses it to override the shape's usual machine (e.g.
-    'HSS 3 X 3 X 0.250 TUBE (SAW)'). Otherwise the first shape keyword
-    listed in card_template.json decides. Unrecognised material returns
-    None so the card is created UNLABELLED and reported, rather than
-    guessing a machine.
+    The rule, in order (C.D. 2026-08-03):
+      1. the material says TUBE -> it IS a tube -> TUBE LASER
+      2. otherwise a '(TL)' note means it is going on the tube laser anyway
+      3. everything else -> SAW CUT
+
+    Shape does NOT imply the tube laser -- an angle is an angle, and the
+    '(TL)' marker is exactly how the schedule flags the exceptions. Only a
+    completely EMPTY material text returns None, so that card is created
+    unlabelled and reported rather than guessed at.
     """
     text = _norm_text(material_text)
     if not text:
         return None
-    for marker, machine in (template.get("machine_markers") or {}).items():
+    if _is_tube(text, template):
+        return "TUBE LASER"
+    for marker in (template.get("machine_tube_markers") or ["TL"]):
         if re.search(r"\(\s*" + re.escape(_norm_text(marker)) + r"\s*\)", text):
-            return machine
-    for entry in (template.get("machine_shapes") or []):
-        if len(entry) == 2 and entry[0] and _norm_text(entry[0]) in text:
-            return entry[1]
-    return None
+            return "TUBE LASER"
+    return template.get("machine_default", "SAW CUT")
 
 
 def _is_tube(material_text: str, template: dict) -> bool:
