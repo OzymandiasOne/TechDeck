@@ -422,8 +422,8 @@ class EmporiumPage(QWidget):
                 instr = ("Find it in your Library (Games) and add it to a kit "
                          "to play.")
             elif item["kind"] == "gadget":
-                instr = ("Open My Stuff and hit SET UP to choose which apps it "
-                         "flies for.")
+                instr = ("Open My Stuff and hit SET UP to choose which apps "
+                         "open their pick-a-file-or-folder prompt through it.")
             else:
                 instr = "Enjoy!"
             PixelDialog.show_message(self, "Sold!", f"{grab} {instr}")

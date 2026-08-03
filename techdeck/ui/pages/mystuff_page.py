@@ -371,15 +371,18 @@ class MyStuffPage(QWidget):
         apps = sentry_mode.compatible_plugins(settings=self.settings)
         on = [a for a in apps if a["enabled"]]
         if not apps:
-            return "No installed app supports the Sentry Drone yet."
+            return "No installed app asks you to pick a file or folder yet."
         if not on:
-            return (f"Sentry Drone is off for all {len(apps)} apps - "
-                    f"hit SET UP to pick which ones it flies for.")
-        return (f"Sentry Drone is on for {len(on)} of {len(apps)} apps: "
+            return (f"Sentry Drone is off for all {len(apps)} apps - hit SET UP "
+                    f"to choose which ones open their pick-a-file-or-folder "
+                    f"prompt through the drone.")
+        return (f"Sentry Drone handles the pick-a-file-or-folder prompt in "
+                f"{len(on)} of {len(apps)} apps: "
                 + ", ".join(a["name"] for a in on))
 
     def configure(self, item):
-        """Open a gadget's setup window (Sentry Drone: the per-app loadout)."""
+        """Open a gadget's setup window (Sentry Drone: which apps open their
+        file/folder prompt as the kill-cam picker)."""
         from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
         get_audio_manager().play(SOUND_UI_SELECT)
         from techdeck.core import sentry_mode

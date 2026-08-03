@@ -1,5 +1,12 @@
 """
-Sentry Drone loadout — pick which apps the drone flies for.
+Sentry Drone loadout — pick which apps open their file/folder prompt as the
+kill-cam picker instead of the plain Windows dialog.
+
+Note the framing, in the copy as well as here: the drone does not CHOOSE
+anything. The user still picks the same file or folder themselves; the only
+thing this window changes is which dialog that pick happens in. The first
+wording ("hand their file and folder picking to the drone") read like the
+gadget was some kind of automation — it isn't, and the copy has to say so.
 
 Opened from the Sentry Drone gadget tile in My Stuff (SET UP). Lists every
 Sentry-compatible app — any plugin whose plugin.json declares the
@@ -78,10 +85,15 @@ class SentryConfigDialog(QDialog):
         header.setStyleSheet("font-size: 18px; font-weight: 600;")
         layout.addWidget(header)
 
+        # Be plain about what this actually changes: it is the LOOK of the
+        # pick-a-file/folder dialog, not what the app does with it. The old
+        # wording ("hand their picking to the drone") read like automation.
         subhead = QLabel(
-            "Choose which apps hand their file and folder picking to the drone. "
-            "Everything else keeps the normal Explorer dialog. Each app's switch "
-            "also lives in Settings - Apps."
+            "These apps ask you to pick a file or folder when they run. Switch "
+            "one on and that prompt opens as the drone's targeting window "
+            "instead of the plain Windows dialog - you still pick the same thing "
+            "yourself, it just gets a crosshair, a lock-on, and a railgun strike. "
+            "The same switch lives in Settings - Apps."
         )
         subhead.setWordWrap(True)
         subhead.setStyleSheet(
@@ -139,8 +151,8 @@ class SentryConfigDialog(QDialog):
 
         if not self._apps:
             empty = QLabel(
-                "No installed app supports the Sentry Drone yet. Apps advertise "
-                "support by declaring a Sentry Drone setting."
+                "None of your installed apps ask you to pick a file or folder, "
+                "so there is nothing for the drone to take over yet."
             )
             empty.setWordWrap(True)
             empty.setStyleSheet(
