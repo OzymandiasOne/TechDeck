@@ -81,6 +81,20 @@ SYSTEM_FEATURES = [
      "Development effort is aimed at the tools operators actually use, and "
      "problems are heard without anyone filing a ticket.",
      "Active"),
+    ("Coordination Card Delivery",
+     "Tools post batch coordination cards straight into the team's planning "
+     "boards, sorted into the correct pipeline stage with labels for "
+     "difficulty, machine routing and pallet, and re-tag repeat orders.",
+     "Batch coordination is set up from the batch data itself rather than "
+     "typed in one card at a time, and it cannot drift out of step with the "
+     "folders the operators actually work from.",
+     "Active"),
+    ("Historical Parts Catalogs",
+     "Compiled parts catalogs covering every past 911 and 922 batch, "
+     "maintained automatically as new batches run.",
+     "Repeat work is found automatically and its existing engineering reused, "
+     "which is the single largest source of avoided effort on the platform.",
+     "Active"),
     ("Diagnostic Snapshot",
      "One click captures a full diagnostic report -- versions, settings, "
      "environment, recent errors -- for support.",
@@ -108,6 +122,38 @@ ENGINEERING = [
      "Interface artwork stays visually consistent as it grows, without "
      "reviewing every asset by eye.",
      "Applied across the full icon and sprite set."),
+    ("Jun 2026", "Shared Prompt Memory", "Usability",
+     "Tools belonging to the same workflow now share their prompt answers "
+     "within a run, so a batch number entered for the first tool is reused by "
+     "every tool after it, and the ship-readiness gate fails any tool that "
+     "asks for a batch number outside that shared path.",
+     "A full batch package is prepared without re-entering the same details at "
+     "each stage, and the class of bug that caused the re-prompting cannot "
+     "return.",
+     "All 911 and 922 tools; enforced by the pre-ship gate."),
+    ("Jul 2026", "Historical Data Compilation", "Data",
+     "Compiled per-piece parts catalogs from the full history of completed "
+     "batches -- 166 historical 922 revision packages and the equivalent 911 "
+     "batch record -- and wired their upkeep into the tools that run each "
+     "batch, so the catalogs stay current without a maintenance step.",
+     "Repeat parts are identified against the real production record rather "
+     "than recollection, which is what makes reusing prior engineering "
+     "dependable enough to rely on.",
+     "19,676 catalogued part rows across the 911 and 922 workflows."),
+    ("Jul 2026", "Measured Estimating Baseline", "Data",
+     "Derived cutting throughput by material thickness from 18.5 months of "
+     "closed work orders and replaced the theoretical feed-rate model with it, "
+     "keeping the geometric calculation alongside as a reference column.",
+     "Award estimates are based on what the shop actually produces, including "
+     "setup and handling, instead of an idealised cutting rate.",
+     "911 award review; both models retained for comparison."),
+    ("Aug 2026", "Record-Keeping Automation", "Process",
+     "Turned maintenance of the platform's tracking workbooks into a scripted, "
+     "idempotent step with the content held in version control, after the "
+     "manual end-of-session update proved to be the step that got skipped.",
+     "The published record of the platform stays current and consistent "
+     "without depending on anyone remembering to update it.",
+     "Both tracking workbooks; roster verified against the live tool set."),
     ("Aug 2026", "Composable Asset System", "Tooling",
      "Rebuilt widget artwork so each item is three independent layers composed "
      "at display time rather than one flattened image, with automated checks "
@@ -123,28 +169,10 @@ ENGINEERING = [
      "Shared text renderer; all catalog surfaces."),
 ]
 
-# ---- AUTOMATION TOOLS :: renames applied BEFORE the upsert -----------------
-TOOL_RENAMES = {
-    "Customer DXF Quoting": "Customer DXF Analysis",
-}
-
-# ---- AUTOMATION TOOLS  (name, what, key automation, status, since) ----------
-AUTOMATION_TOOLS = [
-    ("Sheet Metal Calculators",
-     "A library of shop calculators -- flat length, bend deduction, material "
-     "weight -- behind one picker.",
-     "Driven by a declarative registry: each calculator is a field list plus a "
-     "formula, so adding one is a single data entry with no interface work. "
-     "Native forms with per-input validation.",
-     "Active", "0.8.6.9"),
-    ("Customer DXF Analysis",
-     "Interactive DXF viewer for quoting customer-supplied parts, with "
-     "automated guideline offsets applied per plate thickness.",
-     "Layer-coloured geometry with per-line measurements and total linear "
-     "inches; thickness-banded hole and cutout offsets with cap and minimum "
-     "warnings; saves over the original or exports a copy.",
-     "Active", "0.8.6"),
-]
+# AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
+# wholesale from `sync_workbook_tools.py`. Upserting them was the reason both
+# drifted: an upsert can add a row, but it cannot move one out of the wrong
+# workflow section, rename one in place, or move a shipped item off "Planned".
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
@@ -162,22 +190,27 @@ VERSION_ROWS = [
 # Rows written before the tone rule that still use the in-house currency name.
 # (Left alone: "911 Remove Ticket", "move ticket PDFs" and "IT tickets" -- those
 # are real tool names and manufacturing documents, not the reward currency.)
+#
+# The second group is the tool renames. VERSION HISTORY is a HISTORICAL record,
+# so the name a tool shipped under stays -- but a reader comparing it against
+# AUTOMATION TOOLS cannot tell that "922 FormSeeker" and "922 FormingFinder"
+# are one tool, so the current name is appended once where the old one appears.
 PROSE_FIXES = [
     ("VERSION HISTORY",
      "credits recognition tickets for each stage completed",
      "awards activity credits for each stage completed"),
-]
-
-# ---- ROADMAP  (priority, item, description, workflow, phase) ---------------
-ROADMAP = [
-    ("Medium", "Operator Presence & Nudges",
-     "Show which colleagues are in the platform and allow a lightweight nudge, "
-     "so a batch hand-off does not need a separate message.",
-     "Platform", "Research"),
-    ("Low", "Code Signing Certificate",
-     "Sign the executable and installer so Windows Smart App Control stops "
-     "blocking first run on clean machines.",
-     "Platform", "Planned"),
+    ("VERSION HISTORY", "922 FormSeeker (NEW)",
+     "922 FormSeeker (NEW; now 922 FormingFinder)"),
+    ("VERSION HISTORY", "LST Organizer, PO Packet Extractor, Part Sketch "
+     "Extractor, QR Code Generator",
+     "LST Organizer (now 922 LST Organizer), PO Packet Extractor (now 911 PO "
+     "PDF Extractor), Part Sketch Extractor (now 911 Sketch Extractor), QR "
+     "Code Generator"),
+    ("VERSION HISTORY", "Run Time Estimator, LST Organizer v2.0",
+     "Run Time Estimator (now 922 Runtime Genie), LST Organizer v2.0 (now 922 "
+     "LST Organizer)"),
+    ("VERSION HISTORY", "Customer DXF Quoting (weld measurement",
+     "Customer DXF Quoting (now Customer DXF Analysis; weld measurement"),
 ]
 
 # ---- Process Improvement log :: entries to RENAME (old -> new, desc) --------
@@ -255,7 +288,26 @@ PI_NEW = [
     ("SHEET METAL CALCULATORS", "COMPLETE",
      "GUI PLUGIN HOSTING A LIBRARY OF SHOP CALCULATORS BEHIND ONE PICKER, "
      "DRIVEN BY A DECLARATIVE REGISTRY"),
+    # {tests} is filled from a live pytest collection, not remembered -- see
+    # test_count() in the writer. Any row here may use it.
     ("CONTINUOUS INTEGRATION", "COMPLETE",
      "FULL TEST SUITE RUNS AUTOMATICALLY ON EVERY CODE CHANGE, NOT ONLY BEFORE "
-     "A RELEASE; SUITE GROWN FROM 69 TO 405 TESTS"),
+     "A RELEASE; SUITE GROWN FROM 69 TO {tests} TESTS"),
+    ("TRACKING WORKBOOK AUDIT", "COMPLETE",
+     "FULL AUDIT OF THE PRESENTED RECORD AGAINST THE LIVE TOOL SET: FIVE TOOLS "
+     "WERE FILED UNDER THE WRONG WORKFLOW SECTION, FOUR WERE LISTED UNDER NAMES "
+     "THEY HAD BEEN RENAMED AWAY FROM, AND SHIPPED ROADMAP ITEMS WERE STILL "
+     "MARKED PLANNED; TOOL AND ROADMAP SHEETS NOW REBUILT FROM VERSION CONTROL"),
+    ("ROADMAP 911 COVERAGE", "COMPLETE",
+     "THE ROADMAP SHEET HELD ONLY 922 AND PLATFORM ITEMS, LEAVING THE ENTIRE "
+     "911 PROGRAMME INVISIBLE; NOW COVERS ALL FIVE WORKFLOWS WITH DELIVERED "
+     "ITEMS RETAINED AND PHASED RATHER THAN DROPPED"),
+    ("RECORD ROSTER GUARD", "COMPLETE",
+     "AUTOMATED TEST CROSS-CHECKS THE PRESENTED TOOL ROSTER AGAINST THE ACTUAL "
+     "PLUGIN SET -- FAILS ON A MISSING, INVENTED, RENAMED OR MISFILED TOOL, AND "
+     "ON ANY IN-HOUSE TERM REACHING THE EXTERNALLY-READ WORKBOOK"),
+    ("WORKBOOK FORMATTING PASS", "COMPLETE",
+     "ONE VISUAL VOCABULARY APPLIED ACROSS ALL SIX SHEETS -- TITLE, SECTION, "
+     "HEADER AND BANDED DATA STYLES, COLUMN WIDTHS SIZED TO THE PROSE, AND "
+     "FROZEN HEADER PANES"),
 ]
