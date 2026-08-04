@@ -342,7 +342,6 @@ class MyStuffPage(QWidget):
         if owned_gadgets:
             self._vbox.addWidget(self._section_header("Gadgets"))
             self._vbox.addWidget(self._grid(owned_gadgets))
-            self._vbox.addWidget(self._hint(self._gadget_hint()))
 
         owned_furniture = [c for c in CATALOG
                            if c["kind"] == "furniture" and s.is_unlocked(c["id"])
@@ -380,20 +379,6 @@ class MyStuffPage(QWidget):
         self._build()
 
     # ---- gadgets -------------------------------------------------------------
-    def _gadget_hint(self):
-        """Live status line under the Gadgets grid: how many apps the Sentry
-        Drone is currently flying for."""
-        from techdeck.core import sentry_mode
-        apps = sentry_mode.compatible_plugins(settings=self.settings)
-        on = [a for a in apps if a["enabled"]]
-        if not apps:
-            return "No installed app asks you to pick a file or folder yet."
-        if not on:
-            return (f"Standing down - all {len(apps)} apps are on the plain "
-                    f"folder dialog. Hit SET UP to arm it.")
-        return (f"Armed for {len(on)} of {len(apps)} apps: "
-                + ", ".join(a["name"] for a in on))
-
     def configure(self, item):
         """Open a gadget's setup window (Sentry Drone: which apps open their
         file/folder prompt as the kill-cam picker)."""
