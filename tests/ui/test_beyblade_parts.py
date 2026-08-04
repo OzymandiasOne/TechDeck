@@ -252,3 +252,32 @@ def test_spinner_window_fits_its_art(qapp):
     # sized from the art's reach, so it exceeds the pixmap for a design that
     # paints into the bounding-box corners
     assert win.WINDOW_SIZE > win._pixmap.width()
+
+
+def test_top_speed_follows_the_art_symmetry(qapp):
+    """A sprite with n-fold symmetry looks identical every 360/n degrees, so a
+    frame that turns it more than HALF that period reads as going backward.
+    The cap must therefore come from the ART: 2-fold designs can safely spin
+    twice as fast as the 4-fold built-in one."""
+    import math
+    from techdeck.ui.widgets.fidget_spinner import (
+        FidgetSpinnerWindow, _variant_symmetry)
+    for variant in (None, "spinner_shuriken", "spinner_beyblade",
+                    "bey_tidewing", "bey_nightspur"):
+        win = FidgetSpinnerWindow(variant=variant)
+        fold = _variant_symmetry(variant) if variant else 4
+        per_frame = math.degrees(win.MAX_VELOCITY * win.FRAME)
+        assert per_frame < 180.0 / fold, (
+            f"{variant} would strobe: {per_frame:.1f} deg/frame at {fold}-fold")
+    # and the 2-fold art really is allowed to go faster
+    slow = FidgetSpinnerWindow(variant="spinner_shuriken").MAX_VELOCITY
+    fast = FidgetSpinnerWindow(variant="bey_tidewing").MAX_VELOCITY
+    assert fast > slow * 1.9
+
+
+def test_a_few_clicks_reach_top_speed(qapp):
+    """A fixed impulse needed ~30 clicks once the cap doubled."""
+    from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
+    for variant in (None, "bey_ironclad"):
+        win = FidgetSpinnerWindow(variant=variant)
+        assert 4 <= win.MAX_VELOCITY / win.CLICK_IMPULSE <= 8

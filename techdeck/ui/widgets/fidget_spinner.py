@@ -151,6 +151,28 @@ def _render_spinner_pixmap(colors: dict) -> QPixmap:
     return pm
 
 
+def _variant_symmetry(variant: str) -> int:
+    """Rotational order of an equipped sprite — what sets its strobe-free top
+    speed. Beyblade parts declare 2; anything unmarked is assumed 4-fold like
+    the built-in spinner, which is the conservative (slower) answer."""
+    import sys
+    from pathlib import Path
+    from techdeck.ui import pixel_art, beyblade
+    if beyblade.parse_variant(variant) is not None:
+        return 2
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets" / "sprites"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets" / "sprites"
+    fn = base / f"{variant}.tdart"
+    if not fn.exists():
+        return 4
+    try:
+        return int(pixel_art.load(fn).get("symmetry", 4))
+    except Exception:
+        return 4
+
+
 def _render_variant_pixmap(variant: str):
     """Render an equipped store spinner with its OWN fixed palette (not the
     theme). Returns None if it can't be loaded so the caller falls back to the
@@ -197,14 +219,21 @@ class FidgetSpinnerWindow(QWidget):
     WINDOW_SIZE = max(_ART_H, _ART_W) * CELL
 
     FRAME = 0.016         # seconds per tick (~60fps)
-    FRICTION = 0.9985     # per ~60fps frame — low, so a flick keeps it spinning
-    CLICK_IMPULSE = 3.0   # radians/sec added per click
-    # The art is 4-fold symmetric, so it looks identical every 90 deg. Once the
-    # per-frame rotation reaches ~45 deg the eye reads each step as going
-    # BACKWARD (wagon-wheel strobe), and at 90 deg/frame it looks frozen — that's
-    # the "locks up and slows down" on rapid clicks. Cap the velocity so a frame
-    # never rotates far enough to alias; the spin stays fast but always forward.
-    MAX_VELOCITY = math.radians(44) / FRAME   # ~7.6 rev/s, just under the 45/frame strobe
+    FRICTION = 0.9988     # per ~60fps frame — low, so a flick keeps it spinning
+    # Top speed is set by the ART, not by taste. A sprite with n-fold rotational
+    # symmetry looks identical every 360/n degrees, so once a single frame turns
+    # it more than HALF that period the eye reads each step as going BACKWARD
+    # (wagon-wheel strobe) and at a full period it looks frozen — the old "locks
+    # up when you click fast".
+    #
+    #     4-fold  ->  45 deg/frame  ->  ~7.5 rev/s
+    #     2-fold  ->  90 deg/frame  ->  ~15  rev/s
+    #
+    # The beyblades are 2-fold, so they can safely spin TWICE as fast as the
+    # built-in 4-fold spinner. The cap used to be the 4-fold figure applied to
+    # everything, which left half the available speed on the table for them.
+    STROBE_MARGIN = 0.97          # stay just under the aliasing threshold
+    MAX_VELOCITY = math.radians(44) / FRAME   # 4-fold default; per-instance below
 
     def __init__(self, parent=None, variant=None):
         super().__init__(parent)
@@ -214,8 +243,16 @@ class FidgetSpinnerWindow(QWidget):
         # own .tdart with its own fixed palette; otherwise the default themed
         # spinner is used.
         self._pixmap = _render_variant_pixmap(variant) if variant else None
+        fold = _variant_symmetry(variant) if variant else 4
         if self._pixmap is None:
             self._pixmap = _render_spinner_pixmap(self._theme_colors())
+            fold = 4
+        # Half the symmetry period per frame is where the strobe starts.
+        limit = math.radians(180.0 / fold * self.STROBE_MARGIN)
+        self.MAX_VELOCITY = limit / self.FRAME
+        # Reach top speed in a handful of clicks whatever the cap is, instead
+        # of a fixed impulse that needed ~30 clicks on the faster art.
+        self.CLICK_IMPULSE = self.MAX_VELOCITY / 6.0
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
