@@ -32,12 +32,12 @@
   "machine_tube_markers": ["TL", "TUBE LASER"],
   "machine_default": "SAW CUT",
 
-  "_comment_labels": "Slot keys, not names - the flow stays dumb and only sees categoryN. Order here mirrors the plan's label list: 1 DIFFICULT, 2 MEDIUM, 3 SIMPLE, 4 SAW CUT, 5 TUBE LASER.",
+  "_comment_labels": "Slot keys, not names - the flow stays dumb and only sees categoryN. Order here mirrors the plan's label list top-to-bottom: slot 1 is the UNNAMED Pink default, then 2 DIFFICULT, 3 MEDIUM, 4 SIMPLE, 5 SAW CUT, 6 TUBE LASER. The first live post (2026-08-04) shipped with this map starting at category1 and every card's labels came out shifted one slot (SAW CUT lit up SIMPLE, so cards showed two difficulties) - verify against Teams' label list, which shows UNNAMED slots by their colour name.",
   "label_map": {
-    "DIFFICULT": "category1",
-    "MEDIUM": "category2",
-    "SIMPLE": "category3",
-    "SAW CUT": "category4",
-    "TUBE LASER": "category5"
+    "DIFFICULT": "category2",
+    "MEDIUM": "category3",
+    "SIMPLE": "category4",
+    "SAW CUT": "category5",
+    "TUBE LASER": "category6"
   }
 }

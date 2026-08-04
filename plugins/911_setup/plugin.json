@@ -2,7 +2,7 @@
   "id": "911_setup",
   "name": "911 Setup",
   "description": "Automates the full 911 QTDR batch setup behind a checklist of actions to run: posts a Teams card for every nest the EB 922 Schedule marks NEED TEAMS/SETUP, creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, generates inspection sheets, and stamps the Move Ticket Omit PDFs (with a toggleable difficulty label). Nest numbers are sourced from the Quote File NEST column.",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {

@@ -54,13 +54,16 @@ def test_tube_only_items_are_real_checklist_items(template):
 
 
 def test_label_map_slots_match_the_plans_label_order(template):
-    """Plan label list top-to-bottom is category1..category5."""
+    """Plan label list top-to-bottom: slot 1 is the unnamed Pink default,
+    the named labels start at category2. The first live post (2026-08-04)
+    shipped a map that started at category1 and every card came out one
+    slot off -- SAW CUT lit up SIMPLE, so cards showed two difficulties."""
     assert template["label_map"] == {
-        "DIFFICULT": "category1",
-        "MEDIUM": "category2",
-        "SIMPLE": "category3",
-        "SAW CUT": "category4",
-        "TUBE LASER": "category5",
+        "DIFFICULT": "category2",
+        "MEDIUM": "category3",
+        "SIMPLE": "category4",
+        "SAW CUT": "category5",
+        "TUBE LASER": "category6",
     }
 
 
@@ -166,7 +169,7 @@ def test_tube_card_is_built_end_to_end(st, template):
     assert card["bucket"] == "MODELING"
     assert card["dueDate"] == "2026-10-30T00:00:00Z"
     assert names == ["SIMPLE", "TUBE LASER"]
-    assert card["labels"] == ["category3", "category5"]
+    assert card["labels"] == ["category4", "category6"]
     assert "Program" in card["checklist"]
     assert not warnings and not unlabelled
 
@@ -183,7 +186,7 @@ def test_program_is_dropped_on_non_tube_stock(st, template):
                                  "Production Packets", "Cover Sheet",
                                  "Scribe Sheet", "Production"]
     # the rest of the card is untouched (MEDIUM + SAW CUT)
-    assert card["labels"] == ["category2", "category4"]
+    assert card["labels"] == ["category3", "category5"]
 
 
 def test_unscheduled_nest_omits_duedate_entirely(st, template):
@@ -225,7 +228,7 @@ def test_no_material_anywhere_is_reported_not_guessed(st, template):
                                  {"code": "211076345", "desc": ""}, template,
                                  _label_map(st, template), warnings, unlabelled)
     assert names == ["SIMPLE"]
-    assert card["labels"] == ["category3"]
+    assert card["labels"] == ["category4"]
     assert len(unlabelled) == 1 and "V092 503836" in unlabelled[0]
 
 
@@ -234,7 +237,7 @@ def test_unmapped_label_name_warns_instead_of_posting_a_bad_slot(st, template):
     card, _ = st._build_card(_row(difficulty="CATASTROPHIC"),
                              {"code": "218004493", "desc": ""}, template,
                              _label_map(st, template), warnings, unlabelled)
-    assert card["labels"] == ["category5"]   # machine label still applied
+    assert card["labels"] == ["category6"]   # machine label still applied
     assert any("CATASTROPHIC" in w for w in warnings)
 
 
