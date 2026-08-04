@@ -23,11 +23,11 @@ class StoreTile(QFrame):
     tiles are a fixed size so the grid is uniform; the icon is centred with equal
     spacing to the button above and the name below."""
 
-    SIZE = 150          # width
+    SIZE = 164          # width — wide enough for a 9-letter name at scale 2
     HEIGHT = 216        # uniform height (so 1-line and 3-line names match)
     GAP = 16            # equal gap above/below the icon
     NAME_H = 52         # reserves up to 3 wrapped lines @ scale 2
-    NAME_W = 126
+    NAME_W = 148
 
     def __init__(self, item, page):
         super().__init__()
@@ -42,7 +42,7 @@ class StoreTile(QFrame):
         self._icon_grey = _greyed(self._icon_norm)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setContentsMargins(8, 12, 8, 12)
         lay.setSpacing(0)
 
         self.action_btn = QPushButton()
@@ -113,10 +113,12 @@ class StoreTile(QFrame):
         pm = self._icon_grey if self.owned else self._icon_norm
         if pm is not None:
             self.icon.setPixmap(pm)
-        self.name.setPixmap(_sf().render_wrapped(
+        # render_fitted, not render_wrapped: a name too long for one line at
+        # scale 2 shrinks a step rather than being broken mid-word or clipped.
+        self.name.setPixmap(_sf().render_fitted(
             self.item["name"].upper(), 2,
             EMP["tile_dim"] if self.owned else EMP["tile_text"],
-            max_width=self.NAME_W))
+            self.NAME_W, self.NAME_H))
 
         if not self.owned:
             affordable = s.get_tickets() >= self.item["cost"]

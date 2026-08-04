@@ -28,7 +28,7 @@ CATALOG = [
      "sprite": "beyblade/tidewing", "cost": 140, "kind": "spinner"},
     {"id": "bey_ironclad", "name": "Ironclad", "category": "toys",
      "sprite": "beyblade/ironclad", "cost": 150, "kind": "spinner"},
-    {"id": "bey_forgeheart", "name": "Forgeheart", "category": "toys",
+    {"id": "bey_forgeheart", "name": "Forge Heart", "category": "toys",
      "sprite": "beyblade/forgeheart", "cost": 160, "kind": "spinner"},
     {"id": "bey_verdanox", "name": "Verdanox", "category": "toys",
      "sprite": "beyblade/verdanox", "cost": 170, "kind": "spinner"},

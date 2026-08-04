@@ -86,18 +86,55 @@ class SpriteFont:
 
 
     def wrap_lines(self, text: str, scale: int = 3, max_width: int = 9999) -> list:
-        """Word-wrap `text` into a list of lines that each fit within max_width."""
+        """Word-wrap `text` into lines that each fit within max_width.
+
+        A word longer than max_width is BROKEN rather than emitted whole. The
+        old version accepted the first word of a line unconditionally, so a
+        single long word overflowed and the caller's fixed-width label then
+        clipped it at BOTH ends -- "FORGEHEART" rendered as "ORGEHEAR". Never
+        returning an over-wide line means a label can no longer lose glyphs.
+        """
         lines, cur = [], ""
         for word in text.split(" "):
             trial = (cur + " " + word).strip()
-            if not cur or self.text_width(trial, scale) <= max_width:
+            if self.text_width(trial, scale) <= max_width:
                 cur = trial
-            else:
+                continue
+            if cur:
                 lines.append(cur)
-                cur = word
+                cur = ""
+            while self.text_width(word, scale) > max_width and len(word) > 1:
+                cut = len(word)
+                while cut > 1 and self.text_width(word[:cut], scale) > max_width:
+                    cut -= 1
+                lines.append(word[:cut])
+                word = word[cut:]
+            cur = word
         if cur:
             lines.append(cur)
         return lines or [""]
+
+    def fits(self, text: str, scale: int, max_width: int, max_height: int) -> bool:
+        """Would `text` wrap into max_width x max_height at this scale with
+        every word left WHOLE? A broken word is treated as not fitting, so the
+        caller can try a smaller scale before resorting to a mid-word split."""
+        lines = self.wrap_lines(text, scale, max_width)
+        words = [w for w in text.split(" ") if w]
+        produced = [w for ln in lines for w in ln.split(" ") if w]
+        if produced != words:                     # something got broken
+            return False
+        line_h = GLYPH * scale
+        return len(lines) * line_h + scale * (len(lines) - 1) <= max_height
+
+    def render_fitted(self, text: str, scale: int, color: str,
+                      max_width: int, max_height: int) -> QPixmap:
+        """Render at the largest scale up to `scale` that fits the box with
+        whole words. Shrinking a too-long name beats breaking it across lines
+        at an arbitrary letter ("TELES/COPE") or clipping it."""
+        for sc in range(scale, 0, -1):
+            if self.fits(text, sc, max_width, max_height):
+                return self.render_wrapped(text, sc, color, max_width)
+        return self.render_wrapped(text, 1, color, max_width)
 
     def render_lines(self, lines, scale: int = 3, color: str = "#ffffff") -> QPixmap:
         """Render pre-wrapped lines, horizontally-centred and stacked vertically."""

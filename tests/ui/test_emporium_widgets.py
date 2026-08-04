@@ -152,3 +152,41 @@ def test_emporium_page_still_builds_after_extraction(qapp, tmp_path):
     shown = [t for t in page.tiles if not t.isHidden()]
     assert shown and all(t.item["category"] == "toys" for t in shown)
     page.refresh()   # must not raise
+
+
+def test_no_catalog_name_is_clipped(qapp):
+    """Regression: wrap_lines only split on SPACES and accepted the first word
+    of a line unconditionally, so a single long word overflowed the fixed-width
+    label and got clipped at BOTH ends — "FORGEHEART" rendered as "ORGEHEAR".
+    Thirteen catalog items were affected, not just the new ones."""
+    from techdeck.ui.sprite_font import font
+    from techdeck.ui.widgets.store_tiles import StoreTile
+    from techdeck.ui.emporium_catalog import CATALOG
+    f = font()
+    for item in CATALOG:
+        pm = f.render_fitted(item["name"].upper(), 2, "#ffffff",
+                             StoreTile.NAME_W, StoreTile.NAME_H)
+        assert pm.width() <= StoreTile.NAME_W, f"{item['name']} overflows width"
+        assert pm.height() <= StoreTile.NAME_H, f"{item['name']} overflows height"
+
+
+def test_every_catalog_name_renders_at_full_scale(qapp):
+    """The tile is sized so no name has to shrink — a lone half-size label
+    among full-size ones reads as a mistake."""
+    from techdeck.ui.sprite_font import font
+    from techdeck.ui.widgets.store_tiles import StoreTile
+    from techdeck.ui.emporium_catalog import CATALOG
+    f = font()
+    shrunk = [i["name"] for i in CATALOG
+              if not f.fits(i["name"].upper(), 2, StoreTile.NAME_W, StoreTile.NAME_H)]
+    assert shrunk == [], f"these had to shrink: {shrunk}"
+
+
+def test_wrap_never_returns_an_overwide_line(qapp):
+    """The safety net: even a word with no break opportunity must be split
+    rather than emitted whole, so a label can never lose glyphs."""
+    from techdeck.ui.sprite_font import font
+    f = font()
+    for text in ("SUPERCALIFRAGILISTIC", "AAAAAAAAAAAAAAAAAAAAAAAA", "OK"):
+        for line in f.wrap_lines(text, 2, 100):
+            assert f.text_width(line, 2) <= 100, f"{line!r} overflows"
