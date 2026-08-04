@@ -137,7 +137,8 @@ def test_main_passes_when_value_is_allowlisted(dirty_repo, tmp_path, capsys):
     allow = tmp_path / "allow.txt"
     # dev@example.com is the fixture's own commit identity - a genuine hit
     # from the identity pass, which is exactly what we want the gate to see.
-    allow.write_text("C:\\Users\\RealPerson\ndev@example.com\n", encoding="utf-8")
+    allow.write_text("\n".join(["C:\\Users\\RealPerson",
+                                "dev@example.com"]) + "\n", encoding="utf-8")
     rc = main_with_args(str(dirty_repo), allow)
     assert rc == 0
     assert "RESULT: PASS" in capsys.readouterr().out
