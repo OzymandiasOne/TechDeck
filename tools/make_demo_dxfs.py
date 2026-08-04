@@ -475,16 +475,15 @@ Pick "Whole folder" with the "Automated offsets" box CHECKED, and choose:
 
     {batch}
 
-Six files queue up and the thickness page lists all six at once. Type these
+Five files queue up and the thickness page lists all five at once. Type these
 top to bottom, pressing Enter after each - Enter jumps to the next box, and
 the last Enter submits. Then Enter, Enter, ... walks the review queue.
 
     BRKT-4471-01 Base Plate       0.500   (or 1/2)
-    BRKT-4471-02 Gusset           0.375   (or 3/8)
-    BRKT-4471-03 Slotted Rail     0.250   (or 1/4)
-    BRKT-4471-04 Tube Cap         0.375
-    BRKT-4471-05 Access Cover     0.625   (or 5/8)
-    BRKT-4471-06 Heavy Pad        1.500   (or 1 1/2)
+    BRKT-4471-02 Slotted Rail     0.250   (or 1/4)
+    BRKT-4471-03 Tube Cap         0.375   (or 3/8)
+    BRKT-4471-04 Access Cover     0.625   (or 5/8)
+    BRKT-4471-05 Heavy Pad        1.500   (or 1 1/2)
 
 What each one is there to show:
 
@@ -492,20 +491,17 @@ What each one is there to show:
                    access hole is left alone (it already measures 2x the plate
                    thickness); the 3/16" pilot hole trips the red
                    "1 below 1/2-t minimum" warning.
-  02 Gusset        GRANDE band (+1/32"). The outline is loose LINEs and an ARC
-                   with no polyline at all - the app chains them into a closed
-                   profile by endpoint matching. Chamfer + fillet.
-  03 Slotted Rail  GRANDE band. Three obround slots grow by WIDTH, not length.
-                   The bend line sits on BEND_UP, which is unchecked by default,
-                   so it is drawn but not counted in the linear-inch total -
-                   tick it on to show the total move.
-  04 Tube Cap      The profile IS a circle (round plate). The concentric 2"
+  02 Slotted Rail  GRANDE band (+1/32"). Three obround slots grow by WIDTH, not
+                   length. The bend line sits on BEND_UP, which is unchecked by
+                   default, so it is not counted in the linear-inch total - tick
+                   it on to show the total move.
+  03 Tube Cap      The profile IS a circle (round plate). The concentric 2"
                    bore is over the cap and stays put while the six bolt holes
                    grow - shows containment handles concentric geometry.
-  05 Access Cover  MEDIUM band. Rounded corners, plus a rectangular CUTOUT that
+  04 Access Cover  MEDIUM band. Rounded corners, plus a rectangular CUTOUT that
                    grows on all four sides. The 1/4" vent hole is under the
                    1/2-thickness minimum.
-  06 Heavy Pad     VENTI band (+3/32"). The 3-1/2" bore is past the 2x cap; the
+  05 Heavy Pad     VENTI band (+3/32"). The 3-1/2" bore is past the 2x cap; the
                    1/2" drain hole is under the minimum.
 
 Point out the toolbar verdict on each file: green "Offsets applied", the band
