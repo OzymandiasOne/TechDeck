@@ -147,6 +147,28 @@ ENGINEERING = [
      "Award estimates are based on what the shop actually produces, including "
      "setup and handling, instead of an idealised cutting rate.",
      "911 award review; both models retained for comparison."),
+    ("Jul 2026", "Private-by-Default Publishing", "Security",
+     "Split the codebase's development history from what is published: the "
+     "public copy is rebuilt through a filter that strips internal notes, "
+     "working documents and development tooling, and replaces colleagues' "
+     "names and personal file paths with initials across every commit rather "
+     "than only the latest.",
+     "The platform's source can be shared or open-sourced without exposing "
+     "internal documentation or naming any colleague who did not choose to be "
+     "named.",
+     "Whole published history; enforced before every publish."),
+    ("Aug 2026", "Publishing Scrub Verification", "Security",
+     "Replaced the hand-maintained scrub list with an automated gate. The list "
+     "could only redact names someone had already thought of; scanning the "
+     "filtered history instead found a colleague's home directory in a code "
+     "comment that would otherwise have been published. The gate now scans "
+     "every commit's content, message and author identity across all branches "
+     "and blocks the publish on anything not explicitly allowed. Integration "
+     "endpoint URLs and their signature tokens are scrubbed by the same pass.",
+     "Personal data and working credentials cannot reach a public repository "
+     "through an old commit, which is the failure a review of the current "
+     "files would never catch.",
+     "All commits, all branches; blocking gate on the publish step."),
     ("Aug 2026", "Record-Keeping Automation", "Process",
      "Turned maintenance of the platform's tracking workbooks into a scripted, "
      "idempotent step with the content held in version control, after the "
@@ -310,4 +332,39 @@ PI_NEW = [
      "ONE VISUAL VOCABULARY APPLIED ACROSS ALL SIX SHEETS -- TITLE, SECTION, "
      "HEADER AND BANDED DATA STYLES, COLUMN WIDTHS SIZED TO THE PROSE, AND "
      "FROZEN HEADER PANES"),
+
+    # ---- source control and publishing process -----------------------------
+    ("SOURCE CONTROL - PUBLISHING SPLIT", "COMPLETE",
+     "DEVELOPMENT HISTORY KEPT PRIVATE; THE PUBLIC REPOSITORY RECEIVES A "
+     "FILTERED COPY REBUILT FROM IT. INTERNAL NOTES, WORKING DOCS, DEVELOPMENT "
+     "TOOLING AND ONE-OFF APPS ARE STRIPPED FROM EVERY COMMIT, NOT JUST THE "
+     "LATEST -- A FIX AT THE TIP DOES NOTHING FOR WHAT A MIRROR PUBLISHES"),
+    ("PUBLISHING - PERSONAL DATA SCRUB", "COMPLETE",
+     "COWORKER NAMES AND PERSONAL FILE PATHS ARE REPLACED WITH INITIALS ACROSS "
+     "THE WHOLE PUBLISHED HISTORY BEFORE ANYTHING LEAVES THE BUILDING; NOBODY "
+     "IS NAMED IN THE PUBLIC REPOSITORY WITHOUT CHOOSING TO BE"),
+    ("PUBLISHING - AUTOMATED SCRUB GATE", "COMPLETE",
+     "THE SCRUB LIST WAS A HAND-MAINTAINED SET OF NAMES SOMEONE HAD THOUGHT "
+     "OF, SO IT COULD ONLY CATCH WHAT WAS ALREADY KNOWN. AN ACTUAL SCAN OF THE "
+     "FILTERED HISTORY FOUND A COWORKER HOME DIRECTORY IN A CODE COMMENT THAT "
+     "WOULD OTHERWISE HAVE SHIPPED. TOOLS/CHECK_PUBLISH_SCRUB.PY NOW SCANS "
+     "EVERY COMMIT'S CONTENT, MESSAGE AND AUTHOR IDENTITY ACROSS ALL BRANCHES "
+     "AND BLOCKS THE PUBLISH ON ANYTHING NOT EXPLICITLY ALLOWED"),
+    ("PUBLISHING - CREDENTIAL SCRUB", "COMPLETE",
+     "INTEGRATION ENDPOINT URLS AND THEIR SIGNATURE TOKENS ARE STRIPPED FROM "
+     "THE PUBLISHED HISTORY, SO A WORKING SECRET CANNOT REACH A PUBLIC "
+     "REPOSITORY BY WAY OF AN OLD COMMIT"),
+    ("PUBLISHING - TAG SCOPE CONTROL", "COMPLETE",
+     "RELEASE TAGS ARE NO LONGER PUSHED WHOLESALE: MOST POINT AT COMMITS "
+     "OUTSIDE THE PUBLISHED BRANCH, AND PUSHING THEM WOULD HAVE DRAGGED "
+     "UNPUBLISHED HISTORY INTO THE PUBLIC REPOSITORY BEHIND THE FILTER"),
+    ("CONTINUOUS INTEGRATION - HOSTED RUNNERS", "COMPLETE",
+     "TEST SUITE AND PRE-SHIP READINESS CHECK RUN ON HOSTED WINDOWS RUNNERS "
+     "FOR EVERY PUSH, SO A REGRESSION IS CAUGHT ON A CLEAN MACHINE RATHER THAN "
+     "ONLY ON THE DEVELOPER'S"),
+    ("RELEASE DISTRIBUTION PIPELINE", "COMPLETE",
+     "RELEASES ARE PUBLISHED AS VERSIONED DOWNLOADS WITH THE INSTALLER "
+     "ATTACHED, AND THE IN-APP UPDATER READS A SEPARATE PUBLISHED MANIFEST; "
+     "UPDATING THE MANIFEST IS THE DELIBERATE GO-LIVE STEP, SO A BUILD CAN BE "
+     "PUBLISHED AND VERIFIED BEFORE ANY OPERATOR IS OFFERED IT"),
 ]

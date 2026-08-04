@@ -20,6 +20,7 @@ team and never uses in-house names.
 """
 from __future__ import annotations
 
+import functools
 import shutil
 import sys
 from copy import copy
@@ -60,13 +61,46 @@ def find_row(ws, key, col=1):
     return None
 
 
+def last_data_row(ws):
+    """Last row holding an actual value.
+
+    NOT `ws.max_row`, which counts rows that carry only formatting. The process
+    log has four such rows past its data, so appending at `max_row + 1` left a
+    four-row hole in front of every batch of new entries -- and the hole grew
+    by four each run, because the next run measured from the new maximum.
+    """
+    for r in range(ws.max_row, 0, -1):
+        if any(ws.cell(row=r, column=c).value not in (None, "")
+               for c in range(1, ws.max_column + 1)):
+            return r
+    return 0
+
+
+def close_gaps(ws, first_data_row, log=None):
+    """Delete fully-empty rows sitting BETWEEN data rows.
+
+    Repairs the holes the `max_row` bug already punched. Trailing empty rows
+    are left alone -- those are the sheet's own formatting, not damage.
+    """
+    removed = 0
+    for r in range(last_data_row(ws), first_data_row - 1, -1):
+        if all(ws.cell(row=r, column=c).value in (None, "")
+               for c in range(1, ws.max_column + 1)):
+            ws.delete_rows(r, 1)
+            removed += 1
+    if removed and log is not None:
+        log.append(f"    - closed {removed} empty row(s) left by an "
+                   f"earlier append")
+    return removed
+
+
 def upsert(ws, rows, template_row, ncols, key_col=1, log=None):
     """Update rows whose key exists, append the rest. Returns (updated, added)."""
     updated = added = 0
     for values in rows:
         r = find_row(ws, str(values[key_col - 1]), key_col)
         if r is None:
-            r = ws.max_row + 1
+            r = last_data_row(ws) + 1
             style_from(ws, template_row, r, ncols)
             added += 1
             if log is not None:
@@ -79,20 +113,37 @@ def upsert(ws, rows, template_row, ncols, key_col=1, log=None):
     return updated, added
 
 
+@functools.lru_cache(maxsize=1)
 def test_count():
-    """How many tests the suite actually has, asked of pytest rather than
-    remembered. Returns 0 if collection fails, and the claim is left alone."""
+    """How many tests actually PASS, asked of pytest rather than remembered.
+
+    This runs the suite rather than reading `--collect-only`, for two reasons.
+    The per-file collection summary proved easy to under-count -- a partially
+    consumed line silently drops a whole file's worth, which is how a run
+    reported 396 against a real 415. And "N automated tests, run on every
+    change" is a claim about tests that pass; counting collected ones would
+    keep the number truthful while the suite was red.
+
+    Returns 0 if the run fails or anything is red, and the claim is left alone
+    rather than replaced with a number nobody verified. Cached -- both
+    workbooks cite it, and an 18-second suite run should happen once.
+    """
     import re
     import subprocess
     try:
+        # No -q: pytest.ini already sets `addopts = -q`, and a second one makes
+        # it -qq, which suppresses the very summary line this reads. That is
+        # why an earlier version silently returned 0 on a fully green suite.
         out = subprocess.run(
-            [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+            [sys.executable, "-m", "pytest"],
             cwd=Path(__file__).resolve().parents[1],
-            capture_output=True, text=True, timeout=180).stdout
+            capture_output=True, text=True, timeout=900)
     except (OSError, subprocess.SubprocessError):
         return 0
-    return sum(int(m.group(1))
-               for m in re.finditer(r"^\S+:\s*(\d+)\s*$", out, re.MULTILINE))
+    if out.returncode != 0:
+        return 0
+    m = re.search(r"(\d+) passed", out.stdout.replace("\r", "\n"))
+    return int(m.group(1)) if m else 0
 
 
 def open_workbook(path, **kw):
@@ -337,7 +388,8 @@ def sync_version_controller(write):
         ws = wb[sheet]
         key = 2 if sheet == "ENGINEERING & RELIABILITY" else 1
         log = []
-        u, a = upsert(ws, rows, ws.max_row, ncols, key_col=key, log=log)
+        close_gaps(ws, 4, log)
+        u, a = upsert(ws, rows, last_data_row(ws), ncols, key_col=key, log=log)
         notes.append(f"  {sheet:<26} {u} updated, {a} added")
         notes += log
 
@@ -397,11 +449,12 @@ def sync_process_improvement(write):
             notes.append(f"    ~ {old}  ->  {new}")
     notes.insert(0, f"  Sheet1  {renamed} entries reframed")
 
+    close_gaps(ws, 2, notes)
     tests = test_count()
     rows = [tuple(v.replace("{tests}", str(tests)) if tests else v for v in row)
             for row in C.PI_NEW]
     log = []
-    u, a = upsert(ws, rows, ws.max_row, 3, log=log)
+    u, a = upsert(ws, rows, last_data_row(ws), 3, log=log)
     notes.append(f"  Sheet1  {u} updated, {a} added")
     notes += log
 

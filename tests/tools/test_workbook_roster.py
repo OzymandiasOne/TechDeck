@@ -137,3 +137,26 @@ def test_view_reset_clears_the_saved_scroll_position():
     assert ws.sheet_view.showGridLines is False
     for sel in ws.sheet_view.selection or []:
         assert sel.activeCell == "A3", "selection left below the frozen rows"
+
+
+def test_test_count_does_not_double_quiet_pytest():
+    """pytest.ini already sets `addopts = -q`. Passing another -q makes it -qq,
+    which suppresses the summary line test_count() reads -- so it returned 0 on
+    a fully green suite, and a 0 leaves the sheet's stale number in place.
+
+    Checked statically: actually calling test_count() from inside the suite
+    would spawn the suite recursively.
+    """
+    import inspect
+    import re
+
+    import sync_tracking_workbooks as S
+
+    src = inspect.getsource(S.test_count)
+    cmd = re.search(r"\[sys\.executable[^\]]*\]", src).group(0)
+    assert '"-q"' not in cmd and "'-q'" not in cmd, (
+        f"test_count passes -q on top of pytest.ini's: {cmd}")
+
+    ini = (ROOT / "pytest.ini").read_text(encoding="utf-8")
+    assert "-q" in ini, ("pytest.ini no longer sets -q, so test_count must "
+                         "pass it itself for the summary format it parses")
