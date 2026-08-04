@@ -134,12 +134,26 @@ def _render_spinner_pixmap(colors: dict) -> QPixmap:
 
 
 def _render_variant_pixmap(variant: str):
-    """Render an equipped store spinner from assets/sprites/<variant>.tdart using
-    its OWN fixed palette (not the theme), forced 4-fold symmetric. Returns None
-    if it can't be loaded so the caller falls back to the default spinner."""
+    """Render an equipped store spinner with its OWN fixed palette (not the
+    theme). Returns None if it can't be loaded so the caller falls back to the
+    default spinner.
+
+    `beyblade:` variants are composed at render time from three separate part
+    sprites (top / bottom / centre) so the player can mix parts across designs;
+    the composite is never stored.
+
+    Symmetry is per-sprite. The 4-fold enforcer stamps the top arm into all four
+    quadrants, which is right for the built-in spinner but SHREDS a 180 degree
+    design — so it only runs when the sprite asks for it.
+    """
     import sys
     from pathlib import Path
     from techdeck.ui import pixel_art
+    from techdeck.ui import beyblade
+    choice = beyblade.parse_variant(variant)
+    if choice is not None:
+        data = beyblade.compose(choice)
+        return None if data is None else pixel_art.render(data, scale=CELL)
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS) / "assets" / "sprites"
     else:
@@ -148,7 +162,9 @@ def _render_variant_pixmap(variant: str):
     if not fn.exists():
         return None
     try:
-        data = pixel_art.enforce_4fold_data(pixel_art.load(fn))
+        data = pixel_art.load(fn)
+        if int(data.get("symmetry", 4)) == 4:
+            data = pixel_art.enforce_4fold_data(data)
         return pixel_art.render(data, scale=CELL)
     except Exception:
         return None

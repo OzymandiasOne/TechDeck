@@ -64,11 +64,18 @@ def save(path, data: dict) -> None:
         "palette": dict(data.get("palette", {})),
         "rows": list(data.get("rows", [])),
     }
+    # A sprite that declares its rotational order must keep it across a
+    # save — the pixel editor round-trips through here, and losing the marker
+    # would hand a 2-fold design to the 4-fold enforcer next time it loads.
+    sym = ""
+    if "symmetry" in data:
+        sym = f'  "symmetry": {int(data["symmetry"])},\n'
     text = (
         "{\n"
         f'  "format": "tdart",\n'
         f'  "version": 1,\n'
-        f'  "palette": {json.dumps(out["palette"], ensure_ascii=False)},\n'
+        + sym
+        + f'  "palette": {json.dumps(out["palette"], ensure_ascii=False)},\n'
         '  "rows": [\n'
         + ",\n".join(f"    {json.dumps(r, ensure_ascii=False)}" for r in out["rows"])
         + "\n  ]\n}\n"
@@ -78,12 +85,20 @@ def save(path, data: dict) -> None:
 
 
 def normalize(data: dict) -> dict:
-    """Validate + pad rows to a common width. Returns a clean {palette, rows}."""
+    """Validate + pad rows to a common width. Returns a clean {palette, rows}.
+
+    `symmetry` is carried through when present: a sprite declares its own
+    rotational order (2 = 180 deg, 4 = quarter-turn). Dropping it here would
+    silently hand a 2-fold design to the 4-fold enforcer, which shreds it.
+    """
     palette = dict(data.get("palette", {}))
     rows = list(data.get("rows", []))
     width = max((len(r) for r in rows), default=0)
     rows = [r.ljust(width, ".") for r in rows]
-    return {"palette": palette, "rows": rows}
+    out = {"palette": palette, "rows": rows}
+    if "symmetry" in data:
+        out["symmetry"] = int(data["symmetry"])
+    return out
 
 
 # ── Geometry ────────────────────────────────────────────────────────────────
