@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.10 - Repeater Rebuild + Sentry Drone
+# TechDeck v0.8.6.11 - 911 Teams Cards
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,75 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.11
+
+**911 Setup now creates your modeling cards in Teams.** A new first stage reads the
+`EB 922 Schedule` and posts one card into the **MODELING** bucket of SOPO D911 PIPELINE
+for every current-pipeline row marked DEPT. 911 with a status of NEED TEAMS/SETUP. Each
+card carries the job's difficulty and whether it's a saw-cut or tube-laser job, and the
+`Program` field is left off for anything that isn't tube stock. The stage runs before the
+batch prompt and doesn't need a batch number, so you can tick it on its own and TechDeck
+won't ask for one. Re-running is safe - cards already posted are skipped rather than
+duplicated, and nests with no specified work are passed over.
+
+**911 Setup marks how hard each job is.** Every cover sheet now carries a colour-coded
+SIMPLE / MEDIUM / DIFFICULT label read straight from the schedule's rating column, and
+the setup run finishes with an action checklist so nothing gets missed on handoff. The
+label can be switched off if you don't want it.
+
+**922 Setup stamps pallets before it pulls repeats.** The two stages ran in the wrong
+order, so repeat orders - and the repeat binders distributed into the root order folders
+- could pick up a pallet stamp meant for the current batch. Stamping now finishes first,
+and repeats are left clean.
+
+**902 DXF Prep reads the right sheet, and recognises more part numbers.** It could latch
+onto a hidden FORMING or PRICING staging sheet instead of the real PO sheet - those
+hidden sheets carry the same headers - and silently produce a three-row QTY output. It
+now only ever scans visible sheets. The part-number pattern has also been widened to
+match the schemes actually appearing on real POs.
+
+**Customer DXF Analysis applies customer guideline offsets for you.** Switch on
+**Automated offsets** and enter plate thicknesses once for the whole batch; each file
+then opens with guideline offsets already applied to a working copy - holes and cutouts
+grown by the thickness band, capped at twice thickness, with a warning under half
+thickness, and the outer profile untouched. Save overwrites the original, Export writes a
+copy, and either advances the review queue. Enter now drives the whole review flow, and
+circles are reported by diameter rather than cut length.
+
+**Apps you remove from a kit stay removed.** Taking an app out of a kit could leave it
+still queued to run - the tile was gone from the screen but the selection behind it
+wasn't cleared. Removing an app now actually removes it from the run.
+
+**A freeze now explains itself.** If TechDeck stops responding or closes unexpectedly,
+it captures what it was doing at the time, so a debug report sent after a restart still
+explains the original problem instead of arriving empty.
+
+**At Woogy's Emporium.** The Sentry Drone kill-cam picker is now a gadget you can buy and
+arm per app, rather than something that just happens - My Stuff's SET UP window controls
+which apps use it. Beyblades join the fidget spinner collection, built from swappable
+tops, bottoms and centres, and the spinner art no longer clips or renders oversized on
+the store tiles.
+
+**Also:** a new `/moredetails` console command opens a per-app reference covering setup,
+how each app works and what it outputs; long item names no longer clip on store tiles;
+plugin logs now flush before the completion banner so the banner prints last; and DXF
+exports no longer pick up a byte-order mark that made some machines reject the file.
+
+### Feedback Fixes
+
+*"The text boxes on the 911 cover sheets don't look right."* The cover stamp now matches
+the requested layout - two left-aligned lines with labels (`BATCH: S036`, `NEST: 503884`)
+instead of one centred line - matched to the supplied sample within about a point.
+
+*"The Which Feature list on the feedback form is out of date."* That dropdown is now
+built from the app library at runtime, so new apps appear automatically, and retired ones
+are marked as retired before dropping off entirely.
+
+*"The 922 Teams cards come out in reverse alphabetical order."* Cards are now posted in
+the order that makes the bucket read A-Z top to bottom.
 
 ---
 

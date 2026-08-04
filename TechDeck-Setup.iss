@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.10 - 911 Batch Repeater v3 MPL rebuild + Sentry Drone picker; cooperative cancel + truthful run outcomes; settings-race fix + achievements backfill; SHA-256-verified updates; Award Review v2.8 EB Machine/Fuel; ASA event system
+; Version 0.8.6.11 - 911 Setup Teams cards (D911 MODELING) + difficulty label + action checklist; 922 cards post A-Z + stamp before repeater; 902 DXF Prep hidden-sheet fix + wider PN scheme; Customer DXF Analysis guideline offsets; Sentry Drone purchasable gadget; hang/crash capture; ghost tile selection fix
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.10"
+#define MyAppVersion "0.8.6.11"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

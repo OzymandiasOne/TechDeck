@@ -196,16 +196,37 @@ ENGINEERING = [
 # drifted: an upsert can add a row, but it cannot move one out of the wrong
 # workflow section, rename one in place, or move a shipped item off "Planned".
 
+# ---- VERSION HISTORY :: re-key on release (old key -> new key) --------------
+# A row logged while its work was unreleased is keyed "In Development"; cutting
+# the release turns that key into the version number. Applied BEFORE the upsert
+# so the row is updated in place rather than duplicated.
+VERSION_RENAMES = {
+    "In Development": "0.8.6.11",
+}
+
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("In Development", "Aug 2026", "Feature",
-     "Engagement and personalisation layer expanded: the rewards catalog gains "
-     "a desktop widget line built on a new composable three-layer asset "
-     "system, with an in-app builder for operators to assemble their own "
-     "combinations. Several long-standing interface defects fixed alongside "
-     "it, including truncated catalog names and clipped widget display.",
-     "Desktop Widgets (new line), Widget Builder (new), Sheet Metal "
-     "Calculators, interface text fitting, widget display and sizing fixes"),
+    ("0.8.6.11", "Aug 2026", "Feature",
+     "Task-card creation for the 911 pipeline is now automated: setup reads the "
+     "master schedule and raises one card per job awaiting modeling, carrying "
+     "the job's difficulty rating and machine routing, which removes a manual "
+     "card-entry step from every batch and keeps the board consistent with the "
+     "schedule. Difficulty is also recorded on the printed cover sheets, and "
+     "each setup run closes with a handoff checklist. Batch preparation "
+     "ordering was corrected so repeat orders are no longer stamped for the "
+     "wrong batch; quoting gained automatic application of customer geometry "
+     "guidelines; and a source-data defect that could silently truncate "
+     "quantity output was fixed. Diagnostic capture added for unexpected "
+     "stoppages, so a report sent after a restart still explains the original "
+     "fault. Engagement and personalisation layer expanded: the rewards "
+     "catalog gains a desktop widget line built on a new composable "
+     "three-layer asset system, with an in-app builder for operators to "
+     "assemble their own combinations. Several long-standing interface "
+     "defects fixed alongside it, including truncated catalog names and "
+     "clipped widget display.",
+     "911 Setup, 922 Setup, 902 DXF Prep, Customer DXF Analysis, Desktop "
+     "Widgets (new line), Widget Builder (new), Sheet Metal Calculators, "
+     "interface text fitting, widget display and sizing fixes"),
 ]
 
 # ---- Wording fixes in EXISTING Version Controller prose --------------------

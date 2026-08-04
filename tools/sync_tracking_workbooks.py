@@ -38,7 +38,7 @@ DOCS = Path(__file__).resolve().parents[2] / "Other Documents"
 VC = DOCS / "TechDeck Version Controller.xlsx"
 PI = DOCS / "TECH_PROCESS_IMPROVEMENT.xlsm"
 TODAY = date.today().strftime("%b %d, %Y").replace(" 0", " ")
-CURRENT_VERSION = "0.8.6.10"
+CURRENT_VERSION = "0.8.6.11"
 
 
 # --------------------------------------------------------------------- helpers
@@ -380,6 +380,18 @@ def sync_version_controller(write):
     notes = []
 
     ov = wb["OVERVIEW"]
+
+    # Re-key before the upsert, same as PI_RENAMES: a row logged while the work
+    # was unreleased is keyed "In Development", and cutting the release turns
+    # that key into the version number. Renaming first lets the upsert MATCH it
+    # and update in place - keyed on the new value it would append a second row
+    # and leave the "In Development" one stranded.
+    vh = wb["VERSION HISTORY"]
+    for old, new in C.VERSION_RENAMES.items():
+        r = find_row(vh, old)
+        if r:
+            vh.cell(row=r, column=1).value = new
+            notes.append(f"  VERSION HISTORY            ~ {old}  ->  {new}")
 
     for sheet, rows, ncols in (
             ("VERSION HISTORY", C.VERSION_ROWS, 5),

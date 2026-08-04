@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.10"  # 911 Batch Repeater v3 MPL rebuild + Sentry Drone picker; cooperative cancel + truthful run outcomes; settings-race fix + achievements backfill; SHA-256-verified updates; Award Review v2.8 EB Machine/Fuel; ASA event system
+APP_VERSION = "0.8.6.11"  # 911 Setup Teams cards (D911 MODELING) + difficulty label + action checklist; 922 cards post A-Z + stamp before repeater; 902 DXF Prep hidden-sheet fix + wider PN scheme; Customer DXF Analysis guideline offsets; Sentry Drone purchasable gadget; hang/crash capture; ghost tile selection fix
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
