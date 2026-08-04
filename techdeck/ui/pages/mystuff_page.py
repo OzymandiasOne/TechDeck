@@ -57,6 +57,11 @@ _DEFAULT_SPINNER = {
 # The "use the plain themed spinner" entry — id None clears the equipped variant.
 DEFAULT_SPINNER_ITEM = {"id": None, "name": "Default", "kind": "spinner",
                         "sprite": None}
+# Opens the parts mixer. A synthetic tile rather than a catalog item: it is an
+# ACTION, not something you own, and it only appears once the player has parts
+# to mix.
+BUILD_BEYBLADE_ITEM = {"id": "__build_beyblade__", "name": "Build Your Own",
+                       "kind": "build", "sprite": None}
 # The free default wallpaper (sLibraryBG_4) — always available to re-equip.
 DEFAULT_BACKGROUND_ITEM = {"id": "bg_default", "name": "Red Check",
                            "kind": "background", "sprite": "sLibraryBG_4.png"}
@@ -197,7 +202,10 @@ class InventoryTile(QFrame):
         s = self.page.settings
         self.name.setPixmap(_sf().render_wrapped(self.item["name"].upper(), 2,
                                                 EMP["tile_text"], max_width=self.NAME_W))
-        if self.item["kind"] in ("spinner", "background"):
+        if self.item["kind"] == "build":
+            self.equipped = False
+            self._set_btn("BUILD", EMP["owned"], "#b184e0", True)
+        elif self.item["kind"] in ("spinner", "background"):
             self.equipped = self._is_equipped(s)
             if self.equipped:
                 self._set_btn("EQUIPPED", EMP["equip"], "#7af0a0", False)
@@ -214,7 +222,9 @@ class InventoryTile(QFrame):
         self.update()
 
     def _activate(self):
-        if self.item["kind"] == "gadget":
+        if self.item["kind"] == "build":
+            self.page.build_beyblade()
+        elif self.item["kind"] == "gadget":
             self.page.configure(self.item)
         elif self.item["kind"] in ("spinner", "background") and not self.equipped:
             self.page.equip(self.item)
@@ -308,9 +318,15 @@ class MyStuffPage(QWidget):
         owned_games = [c for c in CATALOG
                        if c["kind"] == "game" and s.is_unlocked(c["id"])]
 
-        # Fidget spinners (always: the Default option + any you own).
+        # Fidget spinners (always: the Default option + any you own). The
+        # builder tile joins them once at least one beyblade is owned, since
+        # mixing needs parts.
+        from techdeck.ui import beyblade as _bb
+        can_build = any(s.is_unlocked(i) for i in _bb.ITEM_DESIGN)
+        extras = [BUILD_BEYBLADE_ITEM] if can_build else []
         self._vbox.addWidget(self._section_header("Fidget Spinners"))
-        self._vbox.addWidget(self._grid([DEFAULT_SPINNER_ITEM] + owned_spinners))
+        self._vbox.addWidget(self._grid([DEFAULT_SPINNER_ITEM] + owned_spinners
+                                        + extras))
         if not owned_spinners:
             self._vbox.addWidget(self._hint(
                 "Buy spinners at Woogy's Emporium to add them here."))
@@ -392,6 +408,16 @@ class MyStuffPage(QWidget):
             self._build()      # refresh the hint line with the new count
 
     # ---- equip ---------------------------------------------------------------
+    def build_beyblade(self):
+        """Open the parts mixer; re-equip and refresh if they build one."""
+        from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
+        get_audio_manager().play(SOUND_UI_SELECT)
+        from techdeck.ui.widgets.beyblade_builder import BeybladeBuilder
+        dlg = BeybladeBuilder(self, self.settings)
+        if dlg.exec():
+            for t in self.tiles:
+                t.refresh()
+
     def equip(self, item):
         from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_SELECT
         get_audio_manager().play(SOUND_UI_SELECT)

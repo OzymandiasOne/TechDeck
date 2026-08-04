@@ -32,7 +32,7 @@ DISPLAY = {
     "tidewing": "Tidewing",
     "verdanox": "Verdanox",
     "nightspur": "Nightspur",
-    "forgeheart": "Forgeheart",
+    "forgeheart": "Forge Heart",
     "ironclad": "Ironclad",
 }
 
