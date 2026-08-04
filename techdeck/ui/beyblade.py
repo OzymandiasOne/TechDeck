@@ -27,11 +27,11 @@ DESIGNS = ("classic", "silver_fang", "tidewing", "verdanox", "nightspur",
            "forgeheart", "ironclad")
 
 DISPLAY = {
-    "classic": "Beyblade",
+    "classic": "Storm Drake",
     "silver_fang": "Silver Fang",
     "tidewing": "Tidewing",
-    "verdanox": "Verdanox",
-    "nightspur": "Nightspur",
+    "verdanox": "Thorn Crown",
+    "nightspur": "Night Spur",
     "forgeheart": "Forge Heart",
     "ironclad": "Ironclad",
 }

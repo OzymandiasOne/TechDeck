@@ -10,12 +10,14 @@ and the placement dev tools (tools/furniture_placer.py etc.).
 """
 
 CATALOG = [
-    # Rebuilt into three layers like the rest, but KEEPS its item id so
-    # existing purchases and equipped saves survive.
-    {"id": "spinner_beyblade", "name": "Beyblade", "category": "toys",
-     "sprite": "beyblade/classic", "cost": 60, "kind": "spinner"},
+    # Shuriken leads: it is the only spinner that is NOT a beyblade, so putting
+    # it first keeps every beyblade contiguous in the store and My Stuff.
     {"id": "spinner_shuriken", "name": "Shuriken", "category": "toys",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
+    # The original item, rebuilt into three layers like the rest. KEEPS its
+    # item id so existing purchases and equipped saves survive the rename.
+    {"id": "spinner_beyblade", "name": "Storm Drake", "category": "toys",
+     "sprite": "beyblade/classic", "cost": 60, "kind": "spinner"},
 
     # Beyblades ship as THREE parts each (top / bottom / centre). Buying one
     # unlocks its three parts for mixing -- a player who owns two can wear one's
@@ -30,9 +32,9 @@ CATALOG = [
      "sprite": "beyblade/ironclad", "cost": 150, "kind": "spinner"},
     {"id": "bey_forgeheart", "name": "Forge Heart", "category": "toys",
      "sprite": "beyblade/forgeheart", "cost": 160, "kind": "spinner"},
-    {"id": "bey_verdanox", "name": "Verdanox", "category": "toys",
+    {"id": "bey_verdanox", "name": "Thorn Crown", "category": "toys",
      "sprite": "beyblade/verdanox", "cost": 170, "kind": "spinner"},
-    {"id": "bey_nightspur", "name": "Nightspur", "category": "toys",
+    {"id": "bey_nightspur", "name": "Night Spur", "category": "toys",
      "sprite": "beyblade/nightspur", "cost": 190, "kind": "spinner"},
     {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
