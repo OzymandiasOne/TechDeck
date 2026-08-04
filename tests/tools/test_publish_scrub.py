@@ -27,8 +27,13 @@ def _find(label_prefix, text):
 # Patterns
 # ---------------------------------------------------------------------------
 
+# NEVER use a real value from replacements.txt as a fixture here. The map
+# rewrites blob content in the published mirror, so a fixture keyed on a
+# scrubbed name becomes its replacement (C:\Users\<user>) in the public copy -
+# which this pattern ignores by design - and the test then passes locally and
+# fails only on the public repo's CI. That is exactly what happened first time.
 @pytest.mark.parametrize("text, expected", [
-    (r"#   C:\Users\<user>\American Steel & Alum", [r"C:\Users\<user>"]),
+    (r"#   C:\Users\RealPerson\American Steel & Alum", [r"C:\Users\RealPerson"]),
     (r"C:\Users\ASiebenmorgen\OneDrive", [r"C:\Users\ASiebenmorgen"]),
     (r"D:\Users\someone.else\x", [r"D:\Users\someone.else"]),
 ])

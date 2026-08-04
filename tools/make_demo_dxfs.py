@@ -204,21 +204,6 @@ def slot_verts(cx, cy, length, width, vertical=False):
             (cx + run, cy + r, 0.0), (cx - run, cy + r, BULGE_180)]
 
 
-def chained_gusset(d, layer, x, y, w, h, fillet, chamfer):
-    """CCW outline from loose LINE + ARC entities (the chaining demo).
-
-    Bottom-left corner filleted, top-right corner chamfered at 45 degrees.
-    Endpoints are computed from one formula each, so they meet exactly.
-    """
-    r, c = fillet, chamfer
-    d.line(layer, (x + r, y), (x + w, y))                  # bottom
-    d.line(layer, (x + w, y), (x + w, y + h - c))          # right
-    d.line(layer, (x + w, y + h - c), (x + w - c, y + h))  # chamfer
-    d.line(layer, (x + w - c, y + h), (x, y + h))          # top
-    d.line(layer, (x, y + h), (x, y + r))                  # left
-    d.arc(layer, (x + r, y + r), r, 180.0, 270.0)          # start (x, y+r) -> end (x+r, y)
-
-
 # ---------------------------------------------------------------------------
 # The parts
 # ---------------------------------------------------------------------------
@@ -231,15 +216,6 @@ def base_plate():
         d.circle("CUT", (cx, cy), 0.5625 / 2)
     d.circle("CUT", (6.0, 4.0), 1.5 / 2)         # >= 2t at 1/2" -> untouched
     d.circle("CUT", (3.0, 6.5), 0.1875 / 2)      # < 1/2 t       -> flagged
-    return d
-
-
-def gusset():
-    """Loose LINE + ARC outline, chained into a loop by endpoint matching."""
-    d = Dxf()
-    chained_gusset(d, "CUT", 0, 0, 8, 6, fillet=1.0, chamfer=2.0)
-    d.circle("CUT", (2.5, 2.0), 0.4375 / 2)
-    d.circle("CUT", (5.5, 3.5), 0.4375 / 2)
     return d
 
 
@@ -319,15 +295,13 @@ def round_flange():
 PARTS = [
     (f"{BATCH_DIR}/BRKT-4471-01 Base Plate.dxf", base_plate, 0.500,
      dict(band="Medium", holes=5, cutouts=0, unchanged=1, profiles=1, below_min=1)),
-    (f"{BATCH_DIR}/BRKT-4471-02 Gusset.dxf", gusset, 0.375,
-     dict(band="Grande", holes=2, cutouts=0, unchanged=0, profiles=1, below_min=0)),
-    (f"{BATCH_DIR}/BRKT-4471-03 Slotted Rail.dxf", slotted_rail, 0.250,
+    (f"{BATCH_DIR}/BRKT-4471-02 Slotted Rail.dxf", slotted_rail, 0.250,
      dict(band="Grande", holes=2, cutouts=3, unchanged=0, profiles=1, below_min=0)),
-    (f"{BATCH_DIR}/BRKT-4471-04 Tube Cap.dxf", tube_cap, 0.375,
+    (f"{BATCH_DIR}/BRKT-4471-03 Tube Cap.dxf", tube_cap, 0.375,
      dict(band="Grande", holes=6, cutouts=0, unchanged=1, profiles=1, below_min=0)),
-    (f"{BATCH_DIR}/BRKT-4471-05 Access Cover.dxf", access_cover, 0.625,
+    (f"{BATCH_DIR}/BRKT-4471-04 Access Cover.dxf", access_cover, 0.625,
      dict(band="Medium", holes=5, cutouts=1, unchanged=0, profiles=1, below_min=1)),
-    (f"{BATCH_DIR}/BRKT-4471-06 Heavy Pad.dxf", heavy_pad, 1.500,
+    (f"{BATCH_DIR}/BRKT-4471-05 Heavy Pad.dxf", heavy_pad, 1.500,
      dict(band="Venti", holes=5, cutouts=0, unchanged=1, profiles=1, below_min=1)),
     ("Customer Sample - Lift Bracket.dxf", lift_bracket, 0.500,
      dict(band="Medium", holes=2, cutouts=1, unchanged=0, profiles=1, below_min=0)),
