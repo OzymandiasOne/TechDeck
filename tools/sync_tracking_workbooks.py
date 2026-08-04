@@ -193,6 +193,27 @@ def _widths(ws, widths):
         ws.column_dimensions[col].width = w
 
 
+def _view(ws, freeze=None):
+    """Set the freeze and CLEAR the saved scroll position.
+
+    A sheet stores where it was last scrolled to as `topLeftCell` on the view,
+    and openpyxl carries that through a rewrite untouched. Combined with a
+    frozen pane the two disagree -- the view says 'open at row 17', the pane
+    says 'the scrollable region starts at row 3' -- and Excel obeys the view,
+    so the sheet opens stranded at the bottom with the rows above it
+    unreachable. Three sheets shipped like that.
+
+    Setting it to None means 'no opinion', and Excel opens at the top.
+    """
+    ws.freeze_panes = freeze
+    ws.sheet_view.topLeftCell = None
+    # Gridlines off everywhere: every cell now carries its own border, and the
+    # sheets disagreed about this before (one had them off, five had them on).
+    ws.sheet_view.showGridLines = False
+    for sel in ws.sheet_view.selection or []:
+        sel.activeCell = sel.sqref = freeze or "A1"
+
+
 def rebuild_tools(wb, notes):
     """AUTOMATION TOOLS is REBUILT, not upserted.
 
@@ -219,7 +240,7 @@ def rebuild_tools(wb, notes):
             r += 1
             n += 1
         r += 1                                  # breathing room between sections
-    ws.freeze_panes = "A2"
+    _view(ws, "A2")
     notes.append(f"  AUTOMATION TOOLS           REBUILT -- {n} tools across "
                  f"{len(T.TOOL_SECTIONS)} workflow sections")
     return n
@@ -245,7 +266,7 @@ def rebuild_roadmap(wb, notes):
                                  pri.get(x[0], 9), x[1]))
     for i, row in enumerate(rows):
         _data(ws, 3 + i, list(row), band=(i % 2 == 1))
-    ws.freeze_panes = "A3"
+    _view(ws, "A3")
     done = sum(1 for x in rows if x[4] == "Delivered")
     notes.append(f"  ROADMAP                    REBUILT -- {len(rows)} items, "
                  f"{done} Delivered")
@@ -279,11 +300,12 @@ def restyle(wb, notes):
             _data(ws, r, [ws.cell(row=r, column=c).value
                           for c in range(1, ncols + 1)], band=band)
             band = not band
-        ws.freeze_panes = f"A{head_row + 1}"
+        _view(ws, f"A{head_row + 1}")
         notes.append(f"  {sheet:<26} restyled")
 
     ov = wb["OVERVIEW"]
     _widths(ov, {"A": 24, "B": 80})
+    _view(ov)
     _title(ov, 1, 2, ov.cell(row=1, column=1).value)
     for r in range(2, ov.max_row + 1):
         label = ov.cell(row=r, column=1).value

@@ -114,3 +114,26 @@ def test_presented_record_uses_no_in_house_names():
     ) + " " + " ".join(str(v).lower() for row in T.ROADMAP_ROWS for v in row)
     for word in banned:
         assert word not in blob, f"in-house term {word!r} in the presented record"
+
+
+def test_view_reset_clears_the_saved_scroll_position():
+    """A sheet remembers where it was last scrolled to as `topLeftCell` on the
+    view, and openpyxl carries that through a rewrite. With a frozen pane the
+    two disagree -- view says 'open at row 17', pane says 'the scrollable
+    region starts at row 3' -- Excel obeys the view, and the sheet opens
+    stranded at the bottom with the rows above unreachable. Three sheets
+    shipped like that before `_view()` existed.
+    """
+    import openpyxl
+
+    import sync_tracking_workbooks as S
+
+    ws = openpyxl.Workbook().active
+    ws.sheet_view.topLeftCell = "A17"          # as if last saved scrolled down
+    S._view(ws, "A3")
+
+    assert ws.sheet_view.topLeftCell is None, "stale scroll position survived"
+    assert ws.freeze_panes == "A3"
+    assert ws.sheet_view.showGridLines is False
+    for sel in ws.sheet_view.selection or []:
+        assert sel.activeCell == "A3", "selection left below the frozen rows"
