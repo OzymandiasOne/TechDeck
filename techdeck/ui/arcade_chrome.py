@@ -82,14 +82,25 @@ def _load_pixmap(name: str, target: int):
         if data is None:
             return None
         w, h = pixel_art.dimensions(data)
-        return pixel_art.render(data, scale=max(1, math.ceil(target / max(w, h, 1))))
+        return pixel_art.render(data, scale=_tile_scale(w, h, target))
     try:
         data = pixel_art.load(_sprites_dir() / name)
     except Exception:
         return None
     w, h = pixel_art.dimensions(data)
-    scale = max(1, math.ceil(target / max(w, h, 1)))
-    return pixel_art.render(data, scale=scale)
+    return pixel_art.render(data, scale=_tile_scale(w, h, target))
+
+
+def _tile_scale(w: int, h: int, target: int) -> int:
+    """Largest INTEGER scale that still fits the tile.
+
+    This used to round UP, so anything larger than half the target overflowed:
+    a 62x62 beyblade took ceil(72/62) = 2 and rendered at 124px, nearly double
+    the 72px budget and visibly bursting out of its tile next to the 43px
+    sprites. Rounding down keeps every sprite inside the tile, and integer-only
+    keeps the pixels crisp.
+    """
+    return max(1, target // max(w, h, 1))
 
 
 # The plain themed fidget spinner (EMP palette) — used as the Toys category icon.

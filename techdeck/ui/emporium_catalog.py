@@ -10,8 +10,10 @@ and the placement dev tools (tools/furniture_placer.py etc.).
 """
 
 CATALOG = [
+    # Rebuilt into three layers like the rest, but KEEPS its item id so
+    # existing purchases and equipped saves survive.
     {"id": "spinner_beyblade", "name": "Beyblade", "category": "toys",
-     "sprite": "spinner_beyblade.tdart", "cost": 60, "kind": "spinner"},
+     "sprite": "beyblade/classic", "cost": 60, "kind": "beyblade"},
     {"id": "spinner_shuriken", "name": "Shuriken", "category": "toys",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
 

@@ -73,7 +73,7 @@ def test_asset_dirs_resolve_from_new_module_location():
 
 def test_load_pixmap_and_greyed(qapp):
     from techdeck.ui.arcade_chrome import _greyed, _load_pixmap
-    pm = _load_pixmap("spinner_beyblade.tdart", 72)
+    pm = _load_pixmap("spinner_shuriken.tdart", 72)
     assert pm is not None and not pm.isNull()
     grey = _greyed(pm)
     assert grey is not None and grey.size() == pm.size()

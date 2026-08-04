@@ -23,10 +23,11 @@ from pathlib import Path
 from techdeck.ui import pixel_art
 
 KINDS = ("bottom", "top", "center")     # composite order: bottom first
-DESIGNS = ("silver_fang", "tidewing", "verdanox", "nightspur",
+DESIGNS = ("classic", "silver_fang", "tidewing", "verdanox", "nightspur",
            "forgeheart", "ironclad")
 
 DISPLAY = {
+    "classic": "Beyblade",
     "silver_fang": "Silver Fang",
     "tidewing": "Tidewing",
     "verdanox": "Verdanox",
@@ -35,7 +36,7 @@ DISPLAY = {
     "ironclad": "Ironclad",
 }
 
-DEFAULT = {"bottom": "silver_fang", "top": "silver_fang", "center": "silver_fang"}
+DEFAULT = {"bottom": "classic", "top": "classic", "center": "classic"}
 
 
 def parts_dir() -> Path:
@@ -141,10 +142,27 @@ def variant_id(choice: dict | None) -> str:
     return VARIANT_PREFIX + "/".join(c[k] for k in KINDS)
 
 
+# Catalog item id -> the design it sells. The original store item keeps its id
+# so existing purchases and equips survive its rebuild into three layers.
+ITEM_DESIGN = {"spinner_beyblade": "classic",
+               **{f"bey_{d}": d for d in DESIGNS if d != "classic"}}
+
+
 def parse_variant(variant: str | None) -> dict | None:
-    """Decode an equipped-spinner id back into a parts selection, or None if it
-    is not a beyblade."""
-    if not variant or not variant.startswith(VARIANT_PREFIX):
+    """Decode an equipped-spinner id into a parts selection, or None if it is
+    not a beyblade.
+
+    Accepts a mixed combination ("beyblade:bottom/top/centre") AND a plain
+    catalog item id, which resolves to that design's stock trio — so buying and
+    equipping from the store needs no special case, and a save from before the
+    rebuild still points at real art.
+    """
+    if not variant:
+        return None
+    if variant in ITEM_DESIGN:
+        d = ITEM_DESIGN[variant]
+        return normalize_choice({k: d for k in KINDS})
+    if not variant.startswith(VARIANT_PREFIX):
         return None
     bits = variant[len(VARIANT_PREFIX):].split("/")
     return normalize_choice(dict(zip(KINDS, bits)))

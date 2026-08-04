@@ -119,12 +119,49 @@ def test_two_fold_art_is_not_force_four_folded(qapp):
 
 
 def test_catalog_lists_every_design(qapp):
+    """Every design is buyable, and every beyblade catalog id resolves to a
+    real design — including the original item, which kept its id through the
+    rebuild so existing purchases survive."""
     from techdeck.ui import beyblade as BB
     from techdeck.ui.emporium_catalog import CATALOG
     ids = {i["id"] for i in CATALOG if i.get("kind") == "beyblade"}
-    assert len(ids) == len(BB.DESIGNS)
+    assert ids == set(BB.ITEM_DESIGN)
+    assert {BB.ITEM_DESIGN[i] for i in ids} == set(BB.DESIGNS)
+    assert BB.ITEM_DESIGN["spinner_beyblade"] == "classic"
+
+
+def test_old_item_ids_still_resolve(qapp):
+    """A save from before the rebuild points at "spinner_beyblade"; it must
+    still render rather than silently falling back to the default spinner."""
+    from techdeck.ui import beyblade as BB
+    choice = BB.parse_variant("spinner_beyblade")
+    assert choice == {k: "classic" for k in BB.KINDS}
+    assert BB.compose(choice) is not None
+
+
+def test_all_spinner_sprites_are_the_same_size(qapp):
+    """Uniform in the shop: a 43px sprite next to a 62px one renders at a
+    different tile scale and looks wrong."""
+    import json
+    from pathlib import Path as _P
+    from techdeck.ui import beyblade as BB
+    sizes = set()
     for d in BB.DESIGNS:
-        assert f"bey_{d}" in ids
+        for k in BB.KINDS:
+            rows = json.loads(BB.part_path(d, k).read_text(encoding="utf-8"))["rows"]
+            sizes.add((max(len(r) for r in rows), len(rows)))
+    shuriken = _P("assets/sprites/spinner_shuriken.tdart")
+    rows = json.loads(shuriken.read_text(encoding="utf-8"))["rows"]
+    sizes.add((max(len(r) for r in rows), len(rows)))
+    assert sizes == {(62, 62)}, f"mixed sprite sizes: {sizes}"
+
+
+def test_tile_scale_never_overflows(qapp):
+    """Regression: the tile scale rounded UP, so a 62px sprite rendered at
+    124px against a 72px budget and burst out of its tile."""
+    from techdeck.ui.arcade_chrome import _tile_scale
+    for size in (16, 32, 43, 62, 72, 96):
+        assert size * _tile_scale(size, size, 72) <= 72 or _tile_scale(size, size, 72) == 1
 
 
 def test_store_tile_can_render_a_beyblade(qapp):
