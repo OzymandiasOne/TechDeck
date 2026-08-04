@@ -72,6 +72,17 @@ def _load_pixmap(name: str, target: int):
         return pm.scaled(w * scale, h * scale,
                          Qt.AspectRatioMode.IgnoreAspectRatio,
                          Qt.TransformationMode.FastTransformation)
+    # "beyblade/<design>" is not a file: a beyblade ships as three separate
+    # part sprites and its preview is composed from them, so the store never
+    # needs a flattened copy of art that exists only as layers.
+    if name.startswith("beyblade/"):
+        from techdeck.ui import beyblade as _bb
+        design = name.split("/", 1)[1]
+        data = _bb.compose({k: design for k in _bb.KINDS})
+        if data is None:
+            return None
+        w, h = pixel_art.dimensions(data)
+        return pixel_art.render(data, scale=max(1, math.ceil(target / max(w, h, 1))))
     try:
         data = pixel_art.load(_sprites_dir() / name)
     except Exception:

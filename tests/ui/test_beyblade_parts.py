@@ -125,3 +125,15 @@ def test_catalog_lists_every_design(qapp):
     assert len(ids) == len(BB.DESIGNS)
     for d in BB.DESIGNS:
         assert f"bey_{d}" in ids
+
+
+def test_store_tile_can_render_a_beyblade(qapp):
+    """The catalog points at "beyblade/<design>", which is NOT a file — the
+    preview has to be composed from the three parts."""
+    from techdeck.ui.arcade_chrome import _load_pixmap
+    from techdeck.ui.emporium_catalog import CATALOG
+    for item in CATALOG:
+        if item.get("kind") != "beyblade":
+            continue
+        pm = _load_pixmap(item["sprite"], 72)
+        assert pm is not None and not pm.isNull(), f"{item['id']} has no preview"
