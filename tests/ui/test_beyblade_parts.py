@@ -208,3 +208,47 @@ def test_default_spinner_matches_the_others(qapp):
         for x in range(n):
             assert _ART[y][x] == _ART[n - 1 - x][y], "default spinner is not 4-fold"
     assert set("".join(_ART)) <= set(".BWRHo"), "unknown slot in SPINNER_ART"
+
+
+def _edge_hits(win, deg):
+    """Opaque pixels landing on the window border once the art is rotated —
+    i.e. art the window would cut off."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtCore import QPointF
+    size = win.WINDOW_SIZE
+    img = QImage(size, size, QImage.Format.Format_ARGB32)
+    img.fill(0)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+    p.translate(size / 2.0, size / 2.0)
+    p.rotate(deg)
+    p.drawPixmap(QPointF(-win._pixmap.width() / 2.0,
+                         -win._pixmap.height() / 2.0), win._pixmap)
+    p.end()
+    return sum(1 for i in range(size)
+               for (x, y) in ((i, 0), (i, size - 1), (0, i), (size - 1, i))
+               if img.pixelColor(x, y).alpha() > 0)
+
+
+def test_spinner_never_clips_while_rotating(qapp):
+    """Regression: the window was sized to the art's BOUNDING BOX, but several
+    designs paint past the inscribed circle (silver_fang reaches r=34 on a
+    62-cell grid whose inscribed radius is 30.5), so those corners swung
+    outside the window and were sliced off mid-spin."""
+    from techdeck.ui import beyblade as BB
+    from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
+    variants = [None, "spinner_shuriken", "spinner_beyblade"] + \
+               [f"bey_{d}" for d in BB.DESIGNS if d != "classic"]
+    for v in variants:
+        win = FidgetSpinnerWindow(variant=v)
+        for angle in (0, 22.5, 45, 60):
+            assert _edge_hits(win, angle) == 0, f"{v} clips at {angle} deg"
+
+
+def test_spinner_window_fits_its_art(qapp):
+    from techdeck.ui.widgets.fidget_spinner import FidgetSpinnerWindow
+    win = FidgetSpinnerWindow(variant="bey_silver_fang")
+    assert win.width() == win.height() == win.WINDOW_SIZE
+    # sized from the art's reach, so it exceeds the pixmap for a design that
+    # paints into the bounding-box corners
+    assert win.WINDOW_SIZE > win._pixmap.width()

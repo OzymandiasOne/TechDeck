@@ -112,7 +112,7 @@ from techdeck.ui.pixel_art import enforce_4fold as _enforce_4fold
 
 # The symmetric grid actually rendered (top arm rotated into all four).
 _ART = _enforce_4fold(SPINNER_ART)
-CELL = 7                                 # px per art cell
+CELL = 5                                 # px per art cell
 _ART_H = len(_ART)
 _ART_W = max(len(r) for r in _ART)
 
@@ -192,6 +192,8 @@ class FidgetSpinnerWindow(QWidget):
     """Frameless, always-on-top pixel-art four-arm spinner. Click to add spin,
     drag to move. Closed via /clear (no double-click-to-close)."""
 
+    # Sized per instance from the ART's own reach, not the grid — see
+    # _content_radius. Kept as a class attr for anything that reads it.
     WINDOW_SIZE = max(_ART_H, _ART_W) * CELL
 
     FRAME = 0.016         # seconds per tick (~60fps)
@@ -221,7 +223,13 @@ class FidgetSpinnerWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        size = max(self._pixmap.width(), self._pixmap.height())
+        # The window must fit the art's SWEEP, not its bounding box. Several
+        # designs paint out past the inscribed circle (silver_fang reaches r=34
+        # on a 62-cell grid whose inscribed radius is 30.5), so those corners
+        # swung outside a bounding-box-sized window and got clipped as it spun.
+        # Measure how far the art actually reaches and size to twice that.
+        size = self._content_diameter()
+        self.WINDOW_SIZE = size
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -274,6 +282,21 @@ class FidgetSpinnerWindow(QWidget):
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+
+    def _content_diameter(self) -> int:
+        """Twice the furthest opaque pixel from the centre, plus a pixel of
+        slack — the smallest square that can never clip the art at any angle."""
+        img = self._pixmap.toImage()
+        w, h = img.width(), img.height()
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = 0.0
+        for y in range(h):
+            for x in range(w):
+                if img.pixelColor(x, y).alpha() > 0:
+                    d = (x - cx) ** 2 + (y - cy) ** 2
+                    if d > best:
+                        best = d
+        return int(math.ceil(math.sqrt(best) * 2)) + 2
 
     def paintEvent(self, event):
         painter = QPainter(self)
