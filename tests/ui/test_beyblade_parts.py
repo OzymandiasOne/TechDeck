@@ -124,7 +124,10 @@ def test_catalog_lists_every_design(qapp):
     rebuild so existing purchases survive."""
     from techdeck.ui import beyblade as BB
     from techdeck.ui.emporium_catalog import CATALOG
-    ids = {i["id"] for i in CATALOG if i.get("kind") == "beyblade"}
+    # Layered items are identified by their sprite path, not a separate kind
+    # (they are ordinary spinners so the existing UI handles them).
+    ids = {i["id"] for i in CATALOG
+           if str(i.get("sprite", "")).startswith("beyblade/")}
     assert ids == set(BB.ITEM_DESIGN)
     assert {BB.ITEM_DESIGN[i] for i in ids} == set(BB.DESIGNS)
     assert BB.ITEM_DESIGN["spinner_beyblade"] == "classic"
@@ -170,7 +173,38 @@ def test_store_tile_can_render_a_beyblade(qapp):
     from techdeck.ui.arcade_chrome import _load_pixmap
     from techdeck.ui.emporium_catalog import CATALOG
     for item in CATALOG:
-        if item.get("kind") != "beyblade":
+        if not str(item.get("sprite", "")).startswith("beyblade/"):
             continue
         pm = _load_pixmap(item["sprite"], 72)
         assert pm is not None and not pm.isNull(), f"{item['id']} has no preview"
+
+
+def test_beyblades_are_spinner_kind(qapp):
+    """A beyblade IS a fidget spinner. Giving it its own `kind` meant every
+    call site that filters on kind == "spinner" skipped it — so a purchased
+    beyblade never showed up in My Stuff."""
+    from techdeck.ui.emporium_catalog import CATALOG
+    kinds = {i["kind"] for i in CATALOG if str(i.get("sprite", "")).startswith("beyblade/")}
+    assert kinds == {"spinner"}
+
+
+def test_owned_beyblades_reach_my_stuff(qapp):
+    """The My Stuff list is built from catalog spinners the player owns."""
+    from techdeck.ui.emporium_catalog import CATALOG
+    owned = {"bey_tidewing", "spinner_beyblade"}
+    listed = [c["id"] for c in CATALOG
+              if c["kind"] == "spinner" and c["id"] in owned]
+    assert sorted(listed) == sorted(owned)
+
+
+def test_default_spinner_matches_the_others(qapp):
+    """The built-in spinner is theme-coloured, so it is authored in semantic
+    slots rather than greys — but it still has to be the same 62x62 size and
+    exactly 4-fold, or it spins with a flicker."""
+    from techdeck.ui.widgets.fidget_spinner import SPINNER_ART, _ART
+    assert len(SPINNER_ART) == 62 and max(len(r) for r in SPINNER_ART) == 62
+    n = len(_ART)
+    for y in range(n):
+        for x in range(n):
+            assert _ART[y][x] == _ART[n - 1 - x][y], "default spinner is not 4-fold"
+    assert set("".join(_ART)) <= set(".BWRHo"), "unknown slot in SPINNER_ART"

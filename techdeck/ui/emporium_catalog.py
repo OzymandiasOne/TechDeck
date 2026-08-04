@@ -13,26 +13,27 @@ CATALOG = [
     # Rebuilt into three layers like the rest, but KEEPS its item id so
     # existing purchases and equipped saves survive.
     {"id": "spinner_beyblade", "name": "Beyblade", "category": "toys",
-     "sprite": "beyblade/classic", "cost": 60, "kind": "beyblade"},
+     "sprite": "beyblade/classic", "cost": 60, "kind": "spinner"},
     {"id": "spinner_shuriken", "name": "Shuriken", "category": "toys",
      "sprite": "spinner_shuriken.tdart", "cost": 100, "kind": "spinner"},
 
     # Beyblades ship as THREE parts each (top / bottom / centre). Buying one
     # unlocks its three parts for mixing -- a player who owns two can wear one's
-    # top over the other's bottom. `kind: beyblade` tells the store to compose a
-    # preview from the parts rather than look for a single sprite file.
+    # top over the other's bottom. They are ordinary "spinner" items: a
+    # sprite path of "beyblade/NAME" is what marks one as layered, so every
+    # place that already handles a spinner handles these unchanged.
     {"id": "bey_silver_fang", "name": "Silver Fang", "category": "toys",
-     "sprite": "beyblade/silver_fang", "cost": 120, "kind": "beyblade"},
+     "sprite": "beyblade/silver_fang", "cost": 120, "kind": "spinner"},
     {"id": "bey_tidewing", "name": "Tidewing", "category": "toys",
-     "sprite": "beyblade/tidewing", "cost": 140, "kind": "beyblade"},
+     "sprite": "beyblade/tidewing", "cost": 140, "kind": "spinner"},
     {"id": "bey_ironclad", "name": "Ironclad", "category": "toys",
-     "sprite": "beyblade/ironclad", "cost": 150, "kind": "beyblade"},
+     "sprite": "beyblade/ironclad", "cost": 150, "kind": "spinner"},
     {"id": "bey_forgeheart", "name": "Forgeheart", "category": "toys",
-     "sprite": "beyblade/forgeheart", "cost": 160, "kind": "beyblade"},
+     "sprite": "beyblade/forgeheart", "cost": 160, "kind": "spinner"},
     {"id": "bey_verdanox", "name": "Verdanox", "category": "toys",
-     "sprite": "beyblade/verdanox", "cost": 170, "kind": "beyblade"},
+     "sprite": "beyblade/verdanox", "cost": 170, "kind": "spinner"},
     {"id": "bey_nightspur", "name": "Nightspur", "category": "toys",
-     "sprite": "beyblade/nightspur", "cost": 190, "kind": "beyblade"},
+     "sprite": "beyblade/nightspur", "cost": 190, "kind": "spinner"},
     {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
     # A GADGET: it doesn't get equipped, it gets CONFIGURED. Owning it unlocks
