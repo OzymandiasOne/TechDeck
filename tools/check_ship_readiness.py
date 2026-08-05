@@ -50,6 +50,15 @@ Checks (E = error, fails the build; W = warning):
       write and the decode-candidate-loop idiom that returns the raw codec
       name for later reuse as the write encoding (bit DXF Offset Tool +
       Customer DXF Quoting export, 2026-07-29).
+  E11 a plugin that opens a file/folder picker (sdk.request_directory /
+      request_file / pick_directory_gui / pick_file_gui / request_nest_targets)
+      must declare the "sentry_drone" settings field in plugin.json. The
+      Sentry Drone loadout menu (My Stuff -> SET UP) is discovered from these
+      manifests (sentry_mode.compatible_plugins) - there is no second list -
+      so a picker plugin without the field silently never appears there
+      (added 2026-08-05 when 922 LST Organizer gained a folder pick). Escape
+      hatch: a pick the drone must never touch passes style=""; a plugin
+      whose every picker call does so is exempt.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -122,6 +131,36 @@ def _iter_calls_skipping_main(tree: ast.AST):
         if isinstance(node, ast.Call):
             yield node
         stack.extend(ast.iter_child_nodes(node))
+
+
+# E11: the Sentry Drone loadout roster is discovered from plugin manifests
+# (sentry_mode.compatible_plugins) - a plugin gaining one of these picker
+# calls must also gain the "sentry_drone" settings field or the app silently
+# never shows up in the drone menu. style="" opts a single prompt out on
+# purpose (a pick the drone must never touch).
+PICKER_CALLS = {"request_directory", "request_file",
+                "pick_directory_gui", "pick_file_gui", "request_nest_targets"}
+
+
+def find_drone_picker_calls(tree: ast.AST) -> list[str]:
+    """Names of picker calls that would use the Sentry Drone - every
+    PICKER_CALLS call except those forcing the plain dialog with style=""."""
+    hits: list[str] = []
+    for node in _iter_calls_skipping_main(tree):
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            name = func.attr
+        elif isinstance(func, ast.Name):
+            name = func.id
+        else:
+            continue
+        if name not in PICKER_CALLS:
+            continue
+        style = next((kw.value for kw in node.keywords if kw.arg == "style"), None)
+        if isinstance(style, ast.Constant) and style.value == "":
+            continue  # deliberately drone-free prompt
+        hits.append(name)
+    return hits
 
 
 def find_bypassed_batch_prompts(tree: ast.AST) -> list[str]:
@@ -366,6 +405,7 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
         return
 
     imports_gui = False
+    picker_calls: list[str] = []
     for py_file in sorted(plugin_dir.rglob("*.py")):
         rel = py_file.relative_to(plugin_dir.parent)
 
@@ -385,6 +425,9 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 f"answer is reused by same-family plugins in a multi-run "
                 f"(use sdk.request_text if a non-shared prompt is intended)"
             )
+
+        # --- picker calls feed the Sentry Drone opt-in check (E11, below)
+        picker_calls += find_drone_picker_calls(tree)
 
         # --- BOM-writing "utf-8-sig" round-trip (E10)
         if "utf-8-sig" in src or "utf_8_sig" in src:
@@ -449,6 +492,23 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
             warnings.append(
                 f"{pid}: {rel} contains a hardcoded user path '{match}' - this "
                 f"will not exist on a colleague's machine; resolve via plugin_sdk"
+            )
+
+    # --- picker plugins must declare the Sentry Drone opt-in (E11)
+    if picker_calls and isinstance(manifest, dict):
+        fields = (manifest.get("settings") or {}).get("fields") or []
+        has_drone = any(isinstance(f, dict) and f.get("key") == "sentry_drone"
+                        for f in fields)
+        if not has_drone:
+            calls = ", ".join(sorted(set(picker_calls)))
+            errors.append(
+                f"{pid}: calls a file/folder picker ({calls}) but plugin.json "
+                f"has no 'sentry_drone' settings field - the Sentry Drone "
+                f"loadout menu is discovered from these manifests, so this app "
+                f"would silently never appear there. Paste the boilerplate "
+                f"field (reference copy in techdeck/core/sentry_mode.py; "
+                f"default MUST be false), or pass style=\"\" to a pick the "
+                f"drone must never touch"
             )
 
     # --- GUI thread rule (E3)
