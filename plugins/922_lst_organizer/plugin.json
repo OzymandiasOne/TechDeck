@@ -2,21 +2,22 @@
   "id": "922_lst_organizer",
   "name": "922 LST Organizer",
   "description": "Gathers a 922 batch's tube .lst files, files each into its source-material folder, and writes one color-coded PDF report reconciling the PO's tube count against what was pulled. Unresolvable files go to a Needs Review folder.",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
     "setup": [
-      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "Sync the '922 QTDR Production Packages' folder and know which 'Batch NNN' folder you're running.",
       "The batch needs its QF-QU-09 PO workbook in the Documentation folder, and the tube .lst files under the order folders' 7000 folders."
     ],
     "how_it_works": [
+      "Pick the batch's own 'Batch NNN' folder when the picker opens - no batch number typing.",
       "The app gathers the batch's tube .lst files and files each into a folder by source material.",
       "It reconciles the PO's tube count (total, oversized, target standard) against what was actually pulled, resolving odd filenames and order-folder fallbacks.",
       "A trailing revision letter counts as the same piece in either direction, so a PO line reading '-4' still matches a file named '-4A-STEP' (and vice versa) instead of being reported as missing."
     ],
     "output": [
-      "Tube .lst files sorted into per-material folders, a color-coded 'LST Report - Batch {n}.pdf' reconciliation, and a Needs Review folder for anything unresolved."
+      "Tube .lst files sorted into per-material folders, a color-coded 'LST Report - Batch {n}.pdf' reconciliation (missing tubes listed with their source material), and a Needs Review folder for anything unresolved."
     ]
   },
   "icon": "📋",
@@ -49,6 +50,15 @@
         "label": "Organize Files by Material",
         "description": "Automatically sort .lst files into material-specific folders",
         "default": true
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

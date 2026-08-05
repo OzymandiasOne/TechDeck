@@ -1,5 +1,5 @@
 """
-922 LST Organizer - v3.1.0
+922 LST Organizer - v3.2.0
 ==========================
 Gathers the tube-cutting `.lst` files for a 922 batch, files each one into its
 source-material folder, and writes ONE color-coded Excel report that reconciles
@@ -24,6 +24,13 @@ reported one physical tube twice - "needs review" AND "missing". The match now
 runs through `sdk.match_dypn_variant`, still single-candidate-only, with the
 order number breaking a tie when the PO has more than one open variant.
 
+v3.2.0 - batch input is now a FOLDER PICK (`sdk.request_directory` -> the
+'Batch NNN' folder, Sentry Drone capable), not a typed batch number; a cache
+hit from an earlier 922 plugin in a multi-run skips the pick, and a fresh pick
+seeds that same family cache (Hard Rule 10). The report's missing-tubes table
+shows each tube's SOURCE MATERIAL description instead of the where-to-look
+path hint (the material is what you take to the floor).
+
 Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
 the report so the target (standard tubes) reconciles cleanly.
 """
@@ -45,7 +52,7 @@ except ModuleNotFoundError:
 
 import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -222,6 +229,15 @@ def _order_num(name: str) -> str:
     return (name or "").split("-", 1)[0]
 
 
+def _material_label(serial: Optional[str], serial_desc: Dict[str, str]) -> str:
+    """'{description} ({serial})' when the SOURCE MATERIAL sheet knows the
+    serial, else the bare serial - what a missing tube reads as on the floor."""
+    if not serial:
+        return ""
+    desc = serial_desc.get(serial)
+    return f"{desc} ({serial})" if desc else serial
+
+
 def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
              batch_path: Path, log) -> Tuple[List[Pulled], Dict[str, Tuple], Dict[str, str]]:
     """Resolve every gathered file to a material. Returns (pulled, expected_tubes,
@@ -391,7 +407,7 @@ class _Pdf:
 
 def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
                   orders: List[str], pulled: List[Pulled], expected: Dict[str, Tuple],
-                  files_found: int) -> None:
+                  files_found: int, serial_desc: Dict[str, str]) -> None:
     std_total = sum(1 for v in expected.values() if v[2] == "standard")
     over_total = sum(1 for v in expected.values() if v[2] == "oversized")
     resolved = [p for p in pulled if p.resolved]
@@ -443,15 +459,15 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
         d.text("  -  ".join(flags) + ".", size=10, bold=True, color=_C_MISS_TX)
     d.gap(10)
 
-    # missing
+    # missing - the SOURCE MATERIAL description is what the floor pulls
+    # against, so it replaced the old where-to-look path hint (2026-08-05).
     if missing:
         d.text("MISSING STANDARD TUBES", size=11, bold=True, color=_C_MISS_TX)
-        d.row(["Order", "Part", "Serial", "Where to look"],
+        d.row(["Order", "Part", "Serial", "Source Material"],
               [90, 130, 70, 240], size=8.5, h=16, bold=True, fill=_C_BAND, tcolor=_C_WHITE)
         for dd, (order, serial, _c) in missing:
-            onum = _order_num(order)
-            hint = f"{onum}*/…/7000/{dd}*.lst" if onum else ""
-            d.row([onum, dd, serial, hint], [90, 130, 70, 240],
+            desc = (serial_desc.get(serial) or "") if serial else ""
+            d.row([_order_num(order), dd, serial, desc], [90, 130, 70, 240],
                   h=14, fill=_C_MISS_BG, tcolor=_C_MISS_TX)
         d.gap(10)
 
@@ -539,21 +555,48 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     dry_run = bool(settings.get("dry_run", False))
     do_organize = bool(settings.get("organize_by_material", True))
 
-    raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "403", "Batch 403", or "PO 403"):')
-    batch_no = sdk.parse_922_batch(raw or "")
-    if not batch_no:
-        raise ValueError(f"Unrecognised batch number input: {raw!r}")
-
+    # Batch input = pick the 'Batch NNN' folder itself. The SDK opens the
+    # Sentry Drone kill-cam picker when the drone is owned and armed for this
+    # app, otherwise a normal folder dialog. A cache hit from an earlier 922
+    # plugin in this multi-run skips the pick entirely; a fresh pick seeds
+    # that same family cache so later 922 stages never re-prompt (Hard Rule 10).
     root = sdk.resolve_922_root((settings.get("base_path") or "").strip())
-    if not root or not root.is_dir():
-        raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. Set Base Directory "
-            "in plugin settings.")
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if not batch_path:
-        raise RuntimeError(
-            f"Batch {batch_no} not found under {root} (also checked '1 - Completed').")
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("922", {}).get("batch_number")
+    if cached:
+        batch_no = sdk.parse_922_batch(str(cached)) or str(cached)
+        log(f"Batch {batch_no} (shared from an earlier plugin)")
+        if not root or not root.is_dir():
+            raise sdk.UserFacingError(
+                "Could not locate '922 QTDR Production Packages'.",
+                "Make sure OneDrive is synced, or set Base Directory in "
+                "Settings > Apps > 922 LST Organizer, then run again.")
+        batch_path = sdk.find_922_batch_path(root, batch_no)
+        if not batch_path:
+            raise sdk.UserFacingError(
+                f"Batch {batch_no} not found under {root} (also checked "
+                "'1 - Completed').",
+                "Double-check that batch folder exists there, then run again.")
+    else:
+        start_dir = str(root) if (root and root.is_dir()) else ""
+        raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
+        if cancel_event.is_set():
+            return
+        if not raw:
+            log("Folder selection cancelled - nothing was run.")
+            cancel_event.set()  # user cancel: not a ticket-earning run
+            return
+        batch_path = Path(raw)
+        batch_no = sdk.parse_922_batch(batch_path.name)
+        if not batch_path.is_dir() or not batch_no:
+            raise sdk.UserFacingError(
+                f"'{batch_path.name}' doesn't look like a 922 batch folder.",
+                "Run again and pick the batch's own folder (the one named "
+                "like 'Batch 483').")
+        # Seed the family batch cache immediately: the folder the user just
+        # picked IS this run's batch, so same-family plugins never re-prompt.
+        if shared_state is not None:
+            shared_state.setdefault("922", {})["batch_number"] = batch_no
     log(f"Batch {batch_no}: {batch_path}")
     if dry_run:
         log("DRY RUN - no files will be copied or moved.")
@@ -624,7 +667,8 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     report = lst_dir / f"LST Report - Batch {batch_no}.pdf"
     try:
         _write_report(report, batch_no, master_po,
-                      [d.name for d in order_dirs], pulled, expected, len(gathered))
+                      [d.name for d in order_dirs], pulled, expected, len(gathered),
+                      serial_desc)
         log(f"Report: {report}")
     except Exception as e:
         log(f"WARNING: could not write report: {e}")
@@ -660,7 +704,8 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         lines = []
         if missing:
             lines.append(f"{len(missing)} standard tube(s) missing:")
-            lines += [f"  - {d}" for d in sorted(missing)[:12]]
+            lines += [f"  - {d}  -  {_material_label(expected[d][1], serial_desc)}"
+                      for d in sorted(missing)[:12]]
             if len(missing) > 12:
                 lines.append(f"  ...and {len(missing) - 12} more")
         if review:
