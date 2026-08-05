@@ -38,7 +38,7 @@ DOCS = Path(__file__).resolve().parents[2] / "Other Documents"
 VC = DOCS / "TechDeck Version Controller.xlsx"
 PI = DOCS / "TECH_PROCESS_IMPROVEMENT.xlsm"
 TODAY = date.today().strftime("%b %d, %Y").replace(" 0", " ")
-CURRENT_VERSION = "0.8.6.11"
+CURRENT_VERSION = "0.8.6.12"
 
 
 # --------------------------------------------------------------------- helpers

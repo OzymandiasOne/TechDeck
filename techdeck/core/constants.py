@@ -5,7 +5,7 @@ Central location for app-wide constants and configuration values.
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.11"  # 911 Setup Teams cards (D911 MODELING) + difficulty label + action checklist; 922 cards post A-Z + stamp before repeater; 902 DXF Prep hidden-sheet fix + wider PN scheme; Customer DXF Analysis guideline offsets; Sentry Drone purchasable gadget; hang/crash capture; ghost tile selection fix
+APP_VERSION = "0.8.6.12"  # 922 Setup card-creation webhook fix (restored buckets key); FormingFinder plate-vs-rod on dual-material parts; LST organizers match revision letters both ways; Batch Repeater audits repeat shop prints
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

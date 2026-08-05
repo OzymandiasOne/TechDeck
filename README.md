@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.11 - 911 Teams Cards
+# TechDeck v0.8.6.12 - 922 Pipeline Fixes
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,42 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.12
+
+**922 Setup creates Teams cards again.** On v0.8.6.11 the card post was accepted but the
+flow behind it failed before creating anything, so a run could report DONE with no cards
+appearing on the D922 PIPELINE board. The posted payload had lost its bucket list in the
+v0.8.6.11 reordering change; it's restored, and the payload is now covered by tests so a
+required field can't silently disappear again. If your batch got no cards, just re-run
+the Generate Teams Cards stage - nothing was half-created, and existing cards are never
+duplicated.
+
+**FORMED tags land on the plate, not the rod.** Some parts carry a formed plate AND a rod
+under one part number, on two PO lines with different source materials. When the PO had
+no BEND note, FormingFinder recorded whichever line came first - often the rod - and
+Kitting then stamped FORMED on the rod's kit row while the actual plate went unmarked
+(Batch 485 had roughly thirty of these coin-flip parts). FormingFinder now reads the
+source-material descriptions and records the plate (THK) line; a BEND note still wins
+outright, and a part it can't disambiguate gets a warning naming it instead of a silent
+guess. For an affected batch, re-run FormingFinder and then Kitting to reprint correctly.
+
+**LST reports stop counting one tube twice.** A tube can be spelled `-4` on the PO and
+`-4A` on the shop file (or the reverse) - the same physical piece renamed between
+systems. The 922 LST Organizer treated those as two problems: a "missing" tube AND a
+"needs review" file. Both directions now match as one piece, the pairing is printed in
+the summary and marked on the report, and a genuinely different piece number still goes
+to Needs Review. The 911 LST Organizer gets the same matching for parts on the 1D
+diagram, logged and marked `OK as` on its report.
+
+**Batch Repeater checks repeat shop prints up front.** After pulling repeats it now
+verifies each repeat folder has its CAD-AND-SHOP-PRINTS folder and the tube cut files in
+the 7000 folders beneath it - looking only, nothing is moved. A repeat missing them used
+to surface weeks later as "missing tubes" on the end-of-batch LST report; now it's a
+warning at pull time, while the source batch is still easy to fix. Orders with no tube
+parts are noted as normal, never flagged.
 
 ---
 

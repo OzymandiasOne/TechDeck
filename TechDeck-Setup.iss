@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.11 - 911 Setup Teams cards (D911 MODELING) + difficulty label + action checklist; 922 cards post A-Z + stamp before repeater; 902 DXF Prep hidden-sheet fix + wider PN scheme; Customer DXF Analysis guideline offsets; Sentry Drone purchasable gadget; hang/crash capture; ghost tile selection fix
+; Version 0.8.6.12 - 922 Setup card-creation webhook fix (restored buckets key); FormingFinder plate-vs-rod on dual-material parts; LST organizers match revision letters both ways; Batch Repeater audits repeat shop prints
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.11"
+#define MyAppVersion "0.8.6.12"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

@@ -230,6 +230,21 @@ VERSION_ROWS = [
      "911 Setup, 922 Setup, 902 DXF Prep, Customer DXF Analysis, Desktop "
      "Widgets (new line), Widget Builder (new), Sheet Metal Calculators, "
      "interface text fitting, widget display and sizing fixes"),
+    ("Beta 0.8.6.12", "Aug 5, 2026", "Fix",
+     "Restored automated task-card creation for 922 batches: a regression in "
+     "the prior release meant the card post was accepted but no cards were "
+     "created on the board; the data contract is repaired and now covered by "
+     "automated tests so a required field cannot silently drop out again. "
+     "Formed-plate marking on kit paperwork now lands on the plate rather "
+     "than the rod for parts that carry both under one part number, "
+     "eliminating a class of mislabeled kit sheets. Material pull reports no "
+     "longer double-count a piece renamed between the purchase order and the "
+     "shop file - one physical part previously showed as both missing and "
+     "unresolved - cutting false missing-part alerts. Repeat-order pulls are "
+     "now verified for complete shop-print data at pull time, surfacing a "
+     "gap weeks earlier than the end-of-batch report that used to catch it.",
+     "922 Setup, 922 FormingFinder, 922 Kitting, 922 LST Organizer, 911 LST "
+     "Organizer, 922 Batch Repeater"),
 ]
 
 # ---- Wording fixes in EXISTING Version Controller prose --------------------
