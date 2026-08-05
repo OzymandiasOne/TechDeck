@@ -54,7 +54,7 @@ def test_finds_the_lsts_and_the_structure(tmp_path):
     scan = sdk.scan_shop_print_lsts(f)
 
     assert [p.name for p in scan.lsts] == ["R7211263-H10-3A-STEP.lst"]
-    assert scan.all_lsts == scan.lsts
+    assert not scan.from_nested
     assert scan.has_cad and len(scan.cad_dirs) == 1
     assert len(scan.seven_k) == 1
     assert scan.empty_7000 == []
@@ -117,22 +117,57 @@ def test_scanning_a_repeat_folder_directly_still_returns_its_files(tmp_path):
                "BK423594-R7653561-H6", ["R7653561-H6-4A"])
     scan = sdk.scan_shop_print_lsts(f)
 
-    assert len(scan.lsts) == 1
+    assert len(scan.lsts) == 1 and not scan.from_nested
 
 
-def test_a_non_repeat_path_wins_over_a_repeat_copy(tmp_path):
+def test_a_nested_repeat_copy_is_ignored_entirely_when_the_folder_has_its_own(tmp_path):
     # Batch 484's FK345540 really does carry its part twice, once under REPEAT\.
+    # The nested copy is the batch-before-last's: not pulled, and not counted -
+    # counting it would read as "1 .lst in 2 7000 folders", i.e. a phantom gap.
     f = _order(tmp_path, "FK345540-H5223262-H48", ["H5223262-H48-5"])
     old = f / "REPEAT" / "CAD-AND-SHOP-PRINTS" / "H5223262-H48-5" / "7000"
     old.mkdir(parents=True)
     (old / "stale.lst").write_text("lst", encoding="utf-8")
 
     scan = sdk.scan_shop_print_lsts(f)
-    # The PULL list drops the REPEAT copy...
     assert [p.name for p in scan.lsts] == ["H5223262-H48-5-STEP.lst"]
-    # ...but an AUDIT counting against seven_k must see both, or the folder
-    # reads as "1 .lst in 2 7000 folders" and looks like it's missing one.
-    assert len(scan.all_lsts) == 2 and len(scan.seven_k) == 2
+    assert len(scan.seven_k) == 1 and len(scan.cad_dirs) == 1
+    assert scan.empty_7000 == [] and not scan.from_nested
+
+
+def test_a_nested_repeat_copy_answers_when_the_folder_has_nothing(tmp_path):
+    # "Don't look in the nested REPEAT unless we're missing what we're checking
+    # for" - here the folder's own tree has no .lst at all, so the copy stands in
+    # (same fallback the pull has always used) and says so.
+    f = tmp_path / "FK345540-H5223262-H48"
+    old = f / "REPEAT" / "CAD-AND-SHOP-PRINTS" / "H5223262-H48-5" / "7000"
+    old.mkdir(parents=True)
+    (old / "H5223262-H48-5-STEP.lst").write_text("lst", encoding="utf-8")
+
+    scan = sdk.scan_shop_print_lsts(f)
+    assert len(scan.lsts) == 1 and len(scan.seven_k) == 1
+    assert scan.has_cad and scan.from_nested
+
+
+def test_a_stale_nested_cad_folder_with_no_lsts_is_not_credited(tmp_path):
+    # Nothing here can help this batch: no CAD folder of its own, and the
+    # nested copy has no .lst either. It must still read as having none.
+    f = tmp_path / "X6383061-H7918265-H18"
+    (f / "REPEAT" / "CAD-AND-SHOP-PRINTS" / "H7918265-H18-4A").mkdir(parents=True)
+
+    scan = sdk.scan_shop_print_lsts(f)
+    assert not scan.has_cad and scan.lsts == []
+
+
+def test_a_nested_repeats_empty_7000_is_never_reported_as_a_finding(tmp_path):
+    # The folder's own tree is complete; the stale nested copy has a hollow
+    # 7000 folder. That's the previous batch's problem, not this batch's.
+    f = _order(tmp_path, "FK345540-H5223262-H48", ["H5223262-H48-5"])
+    old = f / "REPEAT" / "CAD-AND-SHOP-PRINTS" / "H5223262-H48-9" / "7000"
+    old.mkdir(parents=True)
+    (old / "H5223262-H48-9-STEP.pdf").write_text("pdf", encoding="utf-8")
+
+    scan = sdk.scan_shop_print_lsts(f)
     assert scan.empty_7000 == []
 
 

@@ -142,6 +142,10 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
     reported as information. The two actionable findings are a repeat with no
     CAD-AND-SHOP-PRINTS folder at all, and a 7000 folder holding no .lst.
 
+    A repeat that carries its OWN nested `REPEAT\\` copy (the batch before
+    last) is not counted twice: the scan treats that copy as a fallback and
+    only reads it when the folder's own tree has nothing.
+
     Returns (folders checked, .lst files seen, [(folder name, problem), ...]).
     """
     problems: list = []
@@ -157,9 +161,7 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
         sdk.raise_if_cancelled(cancel_event)
         scan = sdk.scan_shop_print_lsts(folder, cancel_event)
         checked += 1
-        # all_lsts, not lsts: an audit counts what's THERE, including a nested
-        # REPEAT\ copy the pull list de-duplicates away.
-        total_lsts += len(scan.all_lsts)
+        total_lsts += len(scan.lsts)
         if not scan.has_cad:
             problems.append((folder.name, "no CAD-AND-SHOP-PRINTS folder"))
             log(f"  ! {folder.name}: no CAD-AND-SHOP-PRINTS folder")
@@ -173,11 +175,12 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
             problems.append((folder.name,
                              f"{len(scan.empty_7000)} 7000 folder(s) with no "
                              f".lst file ({where})"))
-            log(f"  ! {folder.name}: {len(scan.all_lsts)} .lst, but "
+            log(f"  ! {folder.name}: {len(scan.lsts)} .lst, but "
                 f"{len(scan.empty_7000)} empty 7000 folder(s) - {where}")
             continue
-        log(f"  ok {folder.name}: {len(scan.all_lsts)} .lst in "
-            f"{len(scan.seven_k)} 7000 folder(s)")
+        log(f"  ok {folder.name}: {len(scan.lsts)} .lst in "
+            f"{len(scan.seven_k)} 7000 folder(s)"
+            + ("  (from its own nested REPEAT copy)" if scan.from_nested else ""))
     return checked, total_lsts, problems
 
 

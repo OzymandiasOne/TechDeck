@@ -809,23 +809,23 @@ _CAD_PRINTS_RE = re.compile(r"^cad[-_ ]*and[-_ ]*shop[-_ ]*prints$", re.IGNORECA
 class ShopPrintScan(NamedTuple):
     """What one order folder's shop-print tree holds.
 
-    lsts        — the .lst files to PULL (non-repeat paths preferred, so a
-                  nested `REPEAT\\...` copy of a part is dropped when the
-                  folder's own copy is there)
-    all_lsts    — every .lst found, unfiltered. Use this to AUDIT (counting
-                  `lsts` against `seven_k` compares a filtered list to an
-                  unfiltered one and reads as a phantom gap: Batch 484's
-                  FK345540 has its part twice, once under `REPEAT\\`)
-    cad_dirs    — every CAD-AND-SHOP-PRINTS folder found (empty = nothing to pull)
+    Every field describes the SAME tree — either the folder's own, or (only
+    when its own yields no .lst at all) its nested `REPEAT\\` fallback. They
+    are consistent with each other by construction, so an audit can count
+    `lsts` against `seven_k` without inventing a phantom gap.
+
+    lsts        — the .lst files to pull
+    cad_dirs    — the CAD-AND-SHOP-PRINTS folder(s) (empty = nothing to pull)
     seven_k     — every 7000 folder under them
     empty_7000  — the 7000 folders that hold NO .lst (a tube part missing its
                   cut file — actionable, unlike having no 7000 folder at all)
+    from_nested — True when the answers came from a nested `REPEAT\\` copy
     """
     lsts: list
-    all_lsts: list
     cad_dirs: list
     seven_k: list
     empty_7000: list
+    from_nested: bool = False
 
     @property
     def has_cad(self) -> bool:
@@ -836,45 +836,56 @@ def scan_shop_print_lsts(order_dir, cancel_event=None) -> ShopPrintScan:
     """Walk ONE order folder's CAD-AND-SHOP-PRINTS tree for its tube `.lst`
     files, plus the structure around them (see ShopPrintScan).
 
-    `lsts` prefers non-repeat paths — a batch's own order folder wins over a
-    copy under `REPEAT BATCHES`. That test runs on the path RELATIVE to
-    `order_dir`, so pointing this AT a repeat folder (the Batch Repeater's
-    audit) still returns its files instead of discarding them all.
+    **A nested `REPEAT\\` subfolder is a FALLBACK, never an addition.** A
+    pulled repeat often carries its own prior repeat inside it; those files
+    are the batch-before-last's copy, so they are neither pulled nor counted
+    while the folder's own tree has anything — and the whole scan switches to
+    them only when it doesn't. Counting them alongside is what makes a folder
+    read as "1 .lst in 2 7000 folders" and look like it's missing one (real:
+    Batch 484's FK345540-H5223262-H48).
+
+    The nested test runs on the path RELATIVE to `order_dir`, so pointing this
+    AT a folder inside `REPEAT BATCHES` (the Batch Repeater's audit) scans it
+    normally instead of writing off every file as a repeat.
 
     Cancel is polled inside the walk (Hard Rule 11).
     """
     order_dir = Path(order_dir)
-    cad_dirs: list = []
-    seven_k: list = []
-    empty_7000: list = []
-    all_lsts: list = []
-    primary: list = []
-    secondary: list = []
+    own: dict = {"cad": [], "seven_k": [], "empty": [], "lsts": []}
+    nested: dict = {"cad": [], "seven_k": [], "empty": [], "lsts": []}
     for i, p in enumerate(order_dir.rglob("*")):
         if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
             break
         if not p.is_dir():
             continue
-        if _CAD_PRINTS_RE.match(p.name.strip()):
-            cad_dirs.append(p)
-            continue
-        if p.name.strip() != "7000":
+        is_cad = bool(_CAD_PRINTS_RE.match(p.name.strip()))
+        if not is_cad and p.name.strip() != "7000":
             continue
         try:
             rel = [s.lower() for s in p.relative_to(order_dir).parts]
         except ValueError:                      # pragma: no cover - defensive
             rel = [s.lower() for s in p.parts]
+        bucket = nested if any("repeat" in s for s in rel) else own
+        if is_cad:
+            bucket["cad"].append(p)
+            continue
         if not any(_CAD_PRINTS_RE.match(s) for s in rel):
             continue                            # a stray '7000' outside the tree
-        seven_k.append(p)
-        lsts = sorted(f for f in p.glob("*.lst") if f.is_file())
-        if not lsts:
-            empty_7000.append(p)
-            continue
-        all_lsts.extend(lsts)
-        (secondary if any("repeat" in s for s in rel) else primary).extend(lsts)
-    return ShopPrintScan(primary or secondary, all_lsts,
-                         cad_dirs, seven_k, empty_7000)
+        bucket["seven_k"].append(p)
+        found = sorted(f for f in p.glob("*.lst") if f.is_file())
+        if found:
+            bucket["lsts"].extend(found)
+        else:
+            bucket["empty"].append(p)
+    # One switch for the whole scan, so every field describes the same tree.
+    # `cad_dirs` follows it too: a nested CAD folder counts only when the
+    # nested copy is the one actually supplying the .lst files — otherwise a
+    # folder whose only prints are buried in a stale REPEAT\ still reads as
+    # having nothing to give this batch.
+    src, from_nested = (nested, True) if not own["lsts"] and nested["lsts"] \
+        else (own, False)
+    return ShopPrintScan(src["lsts"], src["cad"], src["seven_k"],
+                         src["empty"], from_nested)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
