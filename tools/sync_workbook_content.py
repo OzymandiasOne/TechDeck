@@ -201,12 +201,15 @@ ENGINEERING = [
 # the release turns that key into the version number. Applied BEFORE the upsert
 # so the row is updated in place rather than duplicated.
 VERSION_RENAMES = {
-    "In Development": "0.8.6.11",
+    "In Development": "Beta 0.8.6.11",
+    # Entries stay listed once applied - find_row returns None the second time,
+    # so the map is idempotent and doubles as a record of past re-keys.
+    "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("0.8.6.11", "Aug 2026", "Feature",
+    ("Beta 0.8.6.11", "Aug 5, 2026", "Feature",
      "Task-card creation for the 911 pipeline is now automated: setup reads the "
      "master schedule and raises one card per job awaiting modeling, carrying "
      "the job's difficulty rating and machine routing, which removes a manual "
