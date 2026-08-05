@@ -792,6 +792,89 @@ def visible_sheetnames(wb) -> list:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# DYPN part numbers (the shared join key between a PO row and a file on disk)
+#
+# A DYPN's last dashed segment is a piece number with an OPTIONAL trailing
+# revision letter: 'R6455461-H51-4' and 'R6455461-H51-4A' are the SAME piece.
+# EB renames it between the PO, the model and the SigmaNest export, so a batch's
+# PO can read '-4' while the shop file on disk reads '-4A-STEP' (or the exact
+# reverse). Joining on the exact string alone reports ONE physical piece TWICE —
+# the file looks foreign ("needs review") and the PO line looks un-pulled
+# ("missing") — which is what bit 922 LST Organizer on Batch 485.
+#
+# So: normalize both sides with normalize_dypn(), try the exact key first, and
+# fall back to match_dypn_variant() BEFORE declaring anything missing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Export tags that make a filename stem differ from its PO DYPN. Order matters
+# (tube tag, then STEP, then a duplicated suffix).
+_DYPN_TUBE_TAG_RE = re.compile(r"[-_]+P[-_]+Tube\d*$", re.IGNORECASE)  # SigmaNest per-tube export
+_DYPN_STEP_RE = re.compile(r"[-_]STEP$", re.IGNORECASE)
+_DYPN_DUP_SUFFIX_RE = re.compile(r"([-_])([A-Za-z0-9]+)[-_]\2$", re.IGNORECASE)  # -4A_4A -> -4A
+_DYPN_SEG_RE = re.compile(r"^(\d+)([A-Za-z]*)$")
+
+
+def normalize_dypn(value) -> str:
+    """A filename stem (or a raw PO DYPN) reduced to its canonical DYPN,
+    upper-cased: the export tags ('-P-Tube2', '-STEP') and a duplicated suffix
+    ('-4A_4A') are peeled off. 'R6455461-H51-4A-STEP' -> 'R6455461-H51-4A'."""
+    s = str(value or "")
+    s = _DYPN_TUBE_TAG_RE.sub("", s)
+    s = _DYPN_STEP_RE.sub("", s)
+    s = _DYPN_DUP_SUFFIX_RE.sub(r"\1\2", s)
+    return s.strip("-_ ").upper()
+
+
+def split_dypn(part) -> tuple:
+    """(head, piece number, revision letter) off a DYPN's last dashed segment:
+    'H5222069-H88-4A' -> ('H5222069-H88', '4', 'A'); '...-4' -> (..., '4', '').
+    A non-numeric last segment comes back whole as (head, segment, '')."""
+    p = str(part or "").strip().upper()
+    if "-" not in p:
+        return p, "", ""
+    head, seg = p.rsplit("-", 1)
+    m = _DYPN_SEG_RE.match(seg)
+    if not m:
+        return head, seg, ""
+    return head, m.group(1), m.group(2)
+
+
+def match_dypn_variant(part, candidates, prefer=None) -> Optional[str]:
+    """The one candidate that is `part` under a different trailing revision
+    letter ('...-4' vs '...-4A'), in either direction — or None.
+
+    Deliberately conservative, because a wrong hit files a part against the
+    wrong PO line: it answers only when the answer is unambiguous.
+      * a candidate whose letter matches exactly wins outright;
+      * otherwise `prefer` (a predicate, e.g. "same order number") narrows the
+        field, and is ignored when it would eliminate everything;
+      * more than one survivor -> None, so the caller flags it for a human.
+
+    Candidates are compared after normalize_dypn() but returned verbatim, so
+    the caller can use the result as a key back into its own mapping.
+    """
+    head, num, letter = split_dypn(normalize_dypn(part))
+    if not num.isdigit():
+        return None                      # no piece number -> nothing to vary
+    hits = []
+    for c in candidates:
+        c_head, c_num, c_letter = split_dypn(normalize_dypn(c))
+        if c_head == head and c_num == num:
+            hits.append((c, c_letter))
+    if not hits:
+        return None
+    exact = [c for c, c_letter in hits if c_letter == letter]
+    if len(exact) == 1:
+        return exact[0]
+    names = [c for c, _ in hits]
+    if len(names) > 1 and prefer is not None:
+        narrowed = [c for c in names if prefer(c)]
+        if narrowed:
+            names = narrowed
+    return names[0] if len(names) == 1 else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 922 tube materials + PO (QF-QU-09) reading
 #
 # Source-material serials classify a part's stock. STANDARD tubes are

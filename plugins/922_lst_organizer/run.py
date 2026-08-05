@@ -1,6 +1,6 @@
 """
-922 LST Organizer - v3.0.0 (rewrite 2026-07)
-============================================
+922 LST Organizer - v3.1.0
+==========================
 Gathers the tube-cutting `.lst` files for a 922 batch, files each one into its
 source-material folder, and writes ONE color-coded Excel report that reconciles
 the batch PO's tube count against what was actually pulled.
@@ -16,6 +16,13 @@ Why the rewrite (replaces the v15 lineage):
   to a `Needs Review` folder and listed on the report.
 - Output is now a single color-coded `.pdf` (reconciliation + attention + pull
   list), not the old `LST_Overview.txt` + `Tube_Parts_Batch.txt` + `.jsonl`.
+
+v3.1.0 - a trailing REVISION LETTER is the same piece in either direction. The
+PO can read `R6455461-H51-4` while the file on disk reads `R6455461-H51-4A-STEP`
+(Batch 485), or the reverse; v3.0 only forgave the second case, so the first
+reported one physical tube twice - "needs review" AND "missing". The match now
+runs through `sdk.match_dypn_variant`, still single-candidate-only, with the
+order number breaking a tie when the PO has more than one open variant.
 
 Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
 the report so the target (standard tubes) reconciles cleanly.
@@ -38,37 +45,15 @@ except ModuleNotFoundError:
 
 import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
-# Filename normalization: peel off the export tags that make a .lst stem differ
-# from its PO DYPN. Order matters (tube tag, then STEP, then a duplicated suffix).
-_P_TUBE_RE = re.compile(r"[-_]+P[-_]+Tube\d*$", re.IGNORECASE)   # SigmaNest per-tube export
-_STEP_RE = re.compile(r"[-_]STEP$", re.IGNORECASE)
-_DUP_SUFFIX_RE = re.compile(r"([-_])([A-Za-z0-9]+)[-_]\2$", re.IGNORECASE)  # -4A_4A -> -4A
-_SEG_RE = re.compile(r"^(\d+)([A-Za-z]*)$")
-
-
-def _normalize_part(stem: str) -> str:
-    """A .lst stem (or a raw PO DYPN) reduced to its canonical DYPN, upper-cased."""
-    s = str(stem)
-    s = _P_TUBE_RE.sub("", s)
-    s = _STEP_RE.sub("", s)
-    s = _DUP_SUFFIX_RE.sub(r"\1\2", s)
-    return s.strip("-_ ").upper()
-
-
-def _split_dypn(part: str) -> Tuple[str, str, str]:
-    """(ppn, number, letter) for the conservative suffix match, e.g.
-    'H5222069-H88-4A' -> ('H5222069-H88', '4', 'A'); '...-4' -> (..., '4', '')."""
-    if "-" not in part:
-        return part, "", ""
-    head, seg = part.rsplit("-", 1)
-    m = _SEG_RE.match(seg)
-    if not m:
-        return head, seg, ""
-    return head, m.group(1), m.group(2).upper()
+# Filename/DYPN normalization and the revision-letter variant match live in the
+# SDK (sdk.normalize_dypn / split_dypn / match_dypn_variant) so every plugin
+# that joins a part number to a file inherits the same rules.
+_normalize_part = sdk.normalize_dypn
+_split_dypn = sdk.split_dypn
 
 
 # ── LST discovery ───────────────────────────────────────────────────────────
@@ -307,30 +292,36 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
     missing = {d: v for d, v in expected.items()
                if v[2] == "standard" and d not in covered}
 
-    # Conservative suffix match: a still-unresolved file maps to a MISSING
-    # standard tube only when the PPN + number agree and either the file has no
-    # letter or the letters match, and exactly one such tube is missing.
+    # Conservative revision-letter match: a still-unresolved file maps to a
+    # MISSING standard tube when the PPN + piece number agree and the trailing
+    # letter is the only difference, IN EITHER DIRECTION (PO '-4' vs file '-4A'
+    # and the reverse - EB renames the piece between the PO and the SigmaNest
+    # export). Still single-candidate-only; the order number breaks a tie when
+    # the PO left more than one variant of that piece open.
     for pf in deferred:
-        ppn, num, letter = _split_dypn(pf.part)
-        cands = []
-        for d, (order, serial, _cls) in missing.items():
-            dppn, dnum, dletter = _split_dypn(d)
-            if dppn == ppn and dnum == num and (letter == "" or letter == dletter):
-                cands.append((d, order, serial))
-        if len(cands) == 1:
-            d, order, serial = cands[0]
+        onum = _order_num(pf.order)
+        d = sdk.match_dypn_variant(
+            pf.part, list(missing),
+            prefer=lambda cand: _order_num(missing[cand][0] or "") == onum)
+        if d:
+            order, serial, _cls = missing.pop(d)
             pf.part, pf.order = d, order or pf.order
             pf.serial, pf.desc = serial, serial_desc.get(serial)
             pf.tube, pf.how = sdk.tube_class(serial), "suffix"
             pf.reason = None
-            missing.pop(d, None)
         else:
-            same_ppn = [d for d in expected if _split_dypn(d)[0] == ppn]
-            if not same_ppn:
+            ppn, num, _letter = _split_dypn(pf.part)
+            variants = sorted(d for d in missing
+                              if _split_dypn(d)[:2] == (ppn, num))
+            same_ppn = sorted(d for d in expected if _split_dypn(d)[0] == ppn)
+            if len(variants) > 1:
+                pf.reason = ("ambiguous - could be any of "
+                             f"{', '.join(variants)}")
+            elif not same_ppn:
                 pf.reason = "part not found in this batch's PO (foreign / repeat?)"
             else:
-                pf.reason = ("no matching tube for this suffix (PO has "
-                             f"{', '.join(sorted(same_ppn))})")
+                pf.reason = ("no matching tube for this piece number (PO has "
+                             f"{', '.join(same_ppn)})")
         results.append(pf)   # keep review items in the result set
 
     return results, expected, serial_desc
@@ -385,7 +376,7 @@ class _Pdf:
     def gap(self, h):
         self.y += h
 
-    def text(self, s, size=9, bold=False, color=_C_INK, dx=0):
+    def text(self, s, size: float = 9, bold=False, color=_C_INK, dx=0):
         self._fits(size + 4)
         self.y += size
         self.p.insert_text((_M + dx, self.y), s, fontsize=size,
@@ -502,6 +493,9 @@ def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
 
     # pull list by material
     d.text("PULL LIST BY MATERIAL", size=11, bold=True, color=_C_BAND)
+    d.text("via:  exact = the PO DYPN matched the filename   |   order-po = matched via "
+           "the order folder's own workbook   |   suffix = same piece, different "
+           "revision letter", size=7.5, color=_C_GREY)
     groups: Dict[Tuple[str, str], List[Pulled]] = defaultdict(list)
     for p in resolved:
         groups[(p.desc or "(unknown)", p.serial or "")].append(p)
@@ -656,6 +650,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     missing = [d for d, v in expected.items()
                if v[2] == "standard" and d not in covered]
     extra = [p for p in resolved if p.tube and p.part not in expected]
+    by_letter = [p for p in resolved if p.how == "suffix"]
     log("=" * 60)
     log(f"922 LST Organizer - Batch {batch_no}")
     log(f"  Total tubes in PO:            {std_total + over_total}")
@@ -666,6 +661,13 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     log(f"  Missing standard tubes:       {len(missing)}")
     log(f"  Needs review:                 {len(review)}")
     log("=" * 60)
+    if by_letter:
+        # Surfaced, not silent: the PO and the file spell the same piece
+        # differently, so show the user exactly what was paired.
+        log(f"Matched by revision letter ({len(by_letter)}) - same piece, "
+            "PO and file spell the suffix differently:")
+        for p in by_letter:
+            log(f"  - PO {p.part}  <-  {p.src.name}")
 
     if missing or review or extra:
         lines = []

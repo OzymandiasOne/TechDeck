@@ -2,7 +2,7 @@
   "id": "911_lst_organizer",
   "name": "911 LST Organizer",
   "description": "Pulls the .lst files for the parts on a nest's 1D cutting diagram (cross-batch aware) into the nest's PRODUCTION PAPERWORK\\LST folder",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -12,7 +12,8 @@
     ],
     "how_it_works": [
       "Pick the nest's PRODUCTION PAPERWORK folder. The app reads the 1D diagram to see exactly which parts that nest cuts.",
-      "It finds each part's .lst file (foreign parts are traced back to their own nest by looking on disk, not the PDF header) and copies them in."
+      "It finds each part's .lst file (foreign parts are traced back to their own nest by looking on disk, not the PDF header) and copies them in.",
+      "A trailing revision letter counts as the same piece, so a part listed as '-3' still matches a file named '-3A' (and vice versa); those swaps are logged and marked on the report."
     ],
     "output": [
       "The parts' .lst files gathered into an LST folder under PRODUCTION PAPERWORK, plus a pull-list text file.",

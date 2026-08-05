@@ -1,5 +1,5 @@
 """
-911 LST Organizer Plugin - v2.0.0
+911 LST Organizer Plugin - v2.1.0
 Single-file TechDeck plugin.
 
 Pulls the .lst files for exactly the parts a nest's 1D cutting-pattern diagram
@@ -20,7 +20,11 @@ real 911 workflow 2026-07-07):
    but the folder tree is always readable.
 4. Each part's .lst is found under its nest folder (stem's first
    space/underscore token == part id; template/ARCHIVE paths excluded) and
-   copied flat into PRODUCTION PAPERWORK\\LST.
+   copied flat into PRODUCTION PAPERWORK\\LST. v2.1.0: if nothing matches the
+   part id exactly, an unambiguous TRAILING-REVISION-LETTER variant counts
+   ('H4143481-3' <-> 'H4143481-3A' - the same piece, spelled differently by the
+   1D diagram and the .lst export); the substitution is logged and marked
+   'OK as <part>' on the report rather than applied silently.
 5. Nests that exist nowhere on disk, and parts with no .lst, are reported in
    the console + report AND raised as a blocking popup (sdk.show_warning) so
    they can't scroll past unseen.
@@ -53,7 +57,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-VERSION = "2.0.2"
+VERSION = "2.1.0"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
 NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
@@ -220,13 +224,9 @@ def _is_excluded(path: Path, dest_dir: Path) -> bool:
     return False
 
 
-def _strip_step(part: str) -> str:
-    return part[:-5] if part.upper().endswith("-STEP") else part
-
-
 def index_nest_lsts(nest_folder: Path, dest_dir: Path, cancel_event
                     ) -> Dict[str, List[Path]]:
-    """{first stem token (upper) -> [.lst paths]} for a nest folder. One
+    """{normalized first stem token -> [.lst paths]} for a nest folder. One
     cancel-polled recursive walk per nest (Hard Rule 11)."""
     index: Dict[str, List[Path]] = defaultdict(list)
     for i, p in enumerate(nest_folder.rglob("*")):
@@ -238,7 +238,7 @@ def index_nest_lsts(nest_folder: Path, dest_dir: Path, cancel_event
             continue
         tokens = [t for t in re.split(r"[ _]+", p.stem.strip()) if t]
         if tokens:
-            index[_strip_step(tokens[0].upper())].append(p)
+            index[sdk.normalize_dypn(tokens[0])].append(p)
     return dict(index)
 
 # ── File operations ────────────────────────────────────────────────────────────
@@ -261,7 +261,7 @@ def _retry_fileop(fn, *args, **kwargs):
 def _write_report(txt_path: Path, info: dict, rows: list,
                   unresolved: Dict[str, List[str]], copied: int,
                   issues: List[str]) -> None:
-    """rows: (part, nest, batch, [copied names] or None)."""
+    """rows: (part, nest, batch, [copied names] or None, variant part or None)."""
     with open(txt_path, "w", encoding="utf-8", newline="") as f:
         f.write("# 911 LST pull report (generated)\n")
         f.write("# " + "=" * 76 + "\n")
@@ -281,8 +281,10 @@ def _write_report(txt_path: Path, info: dict, rows: list,
             f.write("# " + "=" * 76 + "\n")
 
         f.write("\npart\tnest\tbatch\tstatus\tfiles\n")
-        for part, nest, batch, files in rows:
-            status = "OK" if files else "MISSING"
+        for part, nest, batch, files, via in rows:
+            # 'OK as <part>' = the .lst spells the piece with a different
+            # trailing revision letter than the 1D diagram does.
+            status = ("OK" if not via else f"OK as {via}") if files else "MISSING"
             f.write(f"{part}\t{nest}\t{batch or ''}\t{status}"
                     f"\t{'; '.join(files or [])}\n")
         for nest in sorted(unresolved):
@@ -411,7 +413,19 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             for part in parts:
                 if cancel_event.is_set():
                     log("Cancelled."); return
-                hits = index.get(_strip_step(part.upper()), [])
+                hits = index.get(sdk.normalize_dypn(part), [])
+                via = None
+                if not hits:
+                    # A trailing revision letter is the same piece ('-3' vs
+                    # '-3A'): the 1D diagram and the .lst export don't always
+                    # agree on it, and calling a file that IS there "missing"
+                    # sends someone hunting for nothing. Conservative - only an
+                    # unambiguous single variant counts (sdk.match_dypn_variant).
+                    via = sdk.match_dypn_variant(part, index)
+                    if via:
+                        hits = index.get(via, [])
+                        log(f"    NOTE: no .lst named {part}; pulled {via} "
+                            "instead (same piece, different revision letter)")
                 copied_names: List[str] = []
                 for f in hits:
                     fname_lower = f.name.lower()
@@ -435,7 +449,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
                         issues.append(f"Failed to copy {f.name}: {e}")
                 if not hits:
                     log(f"    MISSING: no .lst for {part} under {src_nest}")
-                rows.append((part, src_nest, src_batch, copied_names or None))
+                rows.append((part, src_nest, src_batch, copied_names or None, via))
             progress_callback(15 + int(70 * ni / total_nests))
 
         if debug_fp:
@@ -460,9 +474,15 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     log("=" * 60)
     log(f"Parts on the 1D diagram: {len(pairs)}")
     log(f"LST files copied:        {copied_count}" + (" (dry run)" if dry_run else ""))
+    by_letter = [r for r in rows if r[3] and r[4]]
+    if by_letter:
+        log(f"\nMatched by revision letter ({len(by_letter)}) - same piece, the "
+            "diagram and the .lst spell the suffix differently:")
+        for part, _n, _b, _f, via in by_letter:
+            log(f"  - {part}  <-  {via}")
     if missing:
         log(f"\nWARNING: no .lst found for {len(missing)} part(s):")
-        for part, src_nest, src_batch, _ in missing[:8]:
+        for part, src_nest, src_batch, _f, _v in missing[:8]:
             log(f"  - {part} (nest {src_nest}, batch {src_batch})")
         if len(missing) > 8:
             log(f"  ... and {len(missing) - 8} more. See report.")

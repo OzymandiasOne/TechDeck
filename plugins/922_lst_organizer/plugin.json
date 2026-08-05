@@ -2,7 +2,7 @@
   "id": "922_lst_organizer",
   "name": "922 LST Organizer",
   "description": "Gathers a 922 batch's tube .lst files, files each into its source-material folder, and writes one color-coded PDF report reconciling the PO's tube count against what was pulled. Unresolvable files go to a Needs Review folder.",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -12,7 +12,8 @@
     ],
     "how_it_works": [
       "The app gathers the batch's tube .lst files and files each into a folder by source material.",
-      "It reconciles the PO's tube count (total, oversized, target standard) against what was actually pulled, resolving odd filenames and order-folder fallbacks."
+      "It reconciles the PO's tube count (total, oversized, target standard) against what was actually pulled, resolving odd filenames and order-folder fallbacks.",
+      "A trailing revision letter counts as the same piece in either direction, so a PO line reading '-4' still matches a file named '-4A-STEP' (and vice versa) instead of being reported as missing."
     ],
     "output": [
       "Tube .lst files sorted into per-material folders, a color-coded 'LST Report - Batch {n}.pdf' reconciliation, and a Needs Review folder for anything unresolved."
