@@ -90,9 +90,77 @@ def _find_organizer_workbook(doc_folder: Path, batch_no: str) -> Optional[Path]:
     return sorted(matches)[0] if matches else None
 
 
+# Source-material classification off the PO's SOURCE MATERIAL sheet
+# descriptions. Real Batch 485 text: plates read 'OSS 0.625 THK', rods read
+# 'OSS 0.625 OD ASTM A36'. \bOD\b (word-bounded) so 'ROD'/'BODY' can't misfire.
+_THK_RE = re.compile(r"\bTHK\b|\bPLATE\b", re.IGNORECASE)
+_OD_RE = re.compile(r"\bOD\b|\bROD\b", re.IGNORECASE)
+
+
+def _material_kind(desc: str) -> str:
+    """'plate' | 'rod' | 'unknown' from a source-material description.
+    Conflicting evidence (one 485 row says THK in Scribe and OD in Part
+    Description) is 'unknown' — never guess a formed plate onto a rod."""
+    plate, rod = bool(_THK_RE.search(desc)), bool(_OD_RE.search(desc))
+    if plate and not rod:
+        return "plate"
+    if rod and not plate:
+        return "rod"
+    return "unknown"
+
+
+def _load_material_descs(wb, log) -> dict[str, str]:
+    """{serial_casefold: 'scribe desc / part desc'} from the SOURCE MATERIAL
+    sheet. Empty (with a log line) when the sheet or headers are missing."""
+    smap = {s.strip().casefold(): s for s in wb.sheetnames}
+    name = smap.get('source material')
+    if not name:
+        log("PO workbook: no SOURCE MATERIAL sheet - source-material "
+            "descriptions unavailable for plate/rod disambiguation.")
+        return {}
+    ws = wb[name]
+    hdr, cols = None, {}
+    for r in range(1, min(ws.max_row, 10) + 1):
+        row_map = {}
+        for c in range(1, ws.max_column + 1):
+            v = ws.cell(row=r, column=c).value
+            if isinstance(v, str) and v.strip():
+                row_map[v.strip().upper()] = c
+        if 'SOURCE MATERIAL' in row_map:
+            hdr, cols = r, row_map
+            break
+    if hdr is None:
+        log("PO workbook: SOURCE MATERIAL sheet has no header row.")
+        return {}
+    ser_col = cols['SOURCE MATERIAL']
+    desc_cols = [cols[k] for k in ('SCRIBE DESCRIPTION', 'PART DESCRIPTION')
+                 if k in cols]
+    out: dict[str, str] = {}
+    for r in range(hdr + 1, ws.max_row + 1):
+        ser = ws.cell(row=r, column=ser_col).value
+        if ser in (None, ''):
+            continue
+        text = " / ".join(str(ws.cell(row=r, column=c).value).strip()
+                          for c in desc_cols
+                          if ws.cell(row=r, column=c).value not in (None, ''))
+        out.setdefault(str(ser).strip().casefold(), text)
+    return out
+
+
 def _load_po_lookup(po_path: Path, log) -> dict:
-    """Return {dypn_casefold: row metadata}. Bend rows preferred over non-bend
-    when the same DYPN appears on multiple rows."""
+    """Return {dypn_casefold: row metadata} for the Bent Plates rows.
+
+    A DYPN can appear on SEVERAL PO rows with DIFFERENT source materials — the
+    dual-material parts carry a formed PLATE and a ROD under one part number
+    (Batch 485: H7441366-H417-3 = 262028653-50 plate + -48 rod). Row choice,
+    in order:
+      1. a row whose NOTES say 'bend' (the PO told us outright);
+      2. the row whose source-material description reads as a PLATE (THK) and
+         not a ROD (OD) - a formed part IS a plate, so when the PO is silent
+         the material type decides. First-row-wins here is what put FORMED on
+         the rods of Kitting 485 pages 30/35 (2026-08-05);
+      3. anything not rod-like; else the first row, each with a warning.
+    """
     # Resilient load: on a fresh Files-On-Demand sync the PO workbook can be a
     # cloud-only placeholder — a plain load_workbook dies in zipfile with
     # OSError [Errno 22] even though the file exists (bit NRAPINI-LT, Batch 481).
@@ -133,46 +201,63 @@ def _load_po_lookup(po_path: Path, log) -> dict:
             return None
         return ws.cell(row=r, column=col).value
 
-    bend_keys: set[str] = set()
-    lookup: dict[str, dict] = {}
+    descs = _load_material_descs(wb, log)
 
-    # Pass 1: bend rows take priority
-    for r in range(header_row + 1, ws.max_row + 1):
-        dypn = cell_val(r, 'DYPN')
-        if not dypn:
-            continue
-        notes = cell_val(r, 'NOTES')
-        if not notes or 'bend' not in str(notes).lower():
-            continue
-        key = str(dypn).strip().casefold()
-        if key in lookup:
-            continue
-        lookup[key] = {
-            'ORDER': cell_val(r, 'ORDER'),
-            'PPN': cell_val(r, 'PPN'),
-            'DYPN': str(dypn).strip(),
-            'NOTES': notes,
-            'SOURCE MATERIAL': cell_val(r, 'SOURCE MATERIAL'),
-        }
-        bend_keys.add(key)
-
-    # Pass 2: fill in non-bend rows for DYPNs not already covered
+    # Collect EVERY row per DYPN - first-wins loses the plate/rod distinction.
+    rows_by_dypn: dict[str, list[dict]] = {}
     for r in range(header_row + 1, ws.max_row + 1):
         dypn = cell_val(r, 'DYPN')
         if not dypn:
             continue
         key = str(dypn).strip().casefold()
-        if key in lookup:
-            continue
-        lookup[key] = {
+        rows_by_dypn.setdefault(key, []).append({
             'ORDER': cell_val(r, 'ORDER'),
             'PPN': cell_val(r, 'PPN'),
             'DYPN': str(dypn).strip(),
             'NOTES': cell_val(r, 'NOTES'),
             'SOURCE MATERIAL': cell_val(r, 'SOURCE MATERIAL'),
-        }
-
+        })
     wb.close()
+
+    def _kind(row: dict) -> str:
+        sm = row.get('SOURCE MATERIAL')
+        if sm in (None, ''):
+            return "unknown"
+        return _material_kind(descs.get(str(sm).strip().casefold(), ""))
+
+    lookup: dict[str, dict] = {}
+    for key, rows in rows_by_dypn.items():
+        bend = [r for r in rows if r.get('NOTES')
+                and 'bend' in str(r['NOTES']).lower()]
+        if bend:
+            lookup[key] = bend[0]
+            continue
+        if len(rows) == 1:
+            lookup[key] = rows[0]
+            continue
+        # Silent PO, several materials: the formed part is the PLATE. The
+        # choice note is STASHED on the row, not logged here - the lookup
+        # covers every PO DYPN, but only the few actually discovered as formed
+        # matter, and the caller logs the note when it uses the row.
+        plates = [r for r in rows if _kind(r) == "plate"]
+        if len(plates) == 1:
+            chosen = plates[0]
+            others = ", ".join(str(r['SOURCE MATERIAL']) for r in rows
+                               if r is not chosen)
+            desc = descs.get(str(chosen['SOURCE MATERIAL']).strip().casefold(), '?')
+            chosen['_PICK_NOTE'] = (
+                f"{chosen['DYPN']}: {len(rows)} source materials on the PO; "
+                f"using plate {chosen['SOURCE MATERIAL']} ({desc}) over {others}")
+        else:
+            non_rod = [r for r in rows if _kind(r) != "rod"]
+            chosen = (plates or non_rod or rows)[0]
+            chosen['_PICK_WARN'] = (
+                f"WARNING: {chosen['DYPN']} has {len(rows)} source materials "
+                f"on the PO and none is unambiguously the plate - using "
+                f"{chosen['SOURCE MATERIAL']}; verify the FORMED tag on this "
+                f"part's kit page.")
+        lookup[key] = chosen
+
     return lookup
 
 
@@ -574,6 +659,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     rows_data: list[dict] = []
     for f in sorted_for_copy:
         meta = po_lookup.get(f['dypn'].casefold(), {})
+        # Surface the plate-vs-rod choice only for parts actually discovered
+        # as formed - it decides which kit row 922 Kitting stamps FORMED.
+        if meta.get('_PICK_NOTE'):
+            log(f"  {meta['_PICK_NOTE']}")
+        if meta.get('_PICK_WARN'):
+            log(f"  {meta['_PICK_WARN']}")
         rows_data.append({
             'ORDER': meta.get('ORDER'),
             'PPN': meta.get('PPN'),

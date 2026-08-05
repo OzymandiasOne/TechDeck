@@ -35,8 +35,14 @@ class _Run:
 
 
 class _Executor:
-    start_times = {"902_dxf_prep": time.time() - 600}
-    last_activity = {"902_dxf_prep": time.time() - 540}
+    # Timestamps are set per-instance (see test) — as class attributes they'd
+    # freeze at IMPORT time, and the seconds a loaded full-suite run spends
+    # between import and this test inflate the measured silence (bit 2026-08-05:
+    # 545.9 vs 540 ± 5 under -q while passing standalone).
+    def __init__(self):
+        now = time.time()
+        self.start_times = {"902_dxf_prep": now - 600}
+        self.last_activity = {"902_dxf_prep": now - 540}
 
     def get_active_plugins(self):
         return ["902_dxf_prep"]
@@ -60,7 +66,9 @@ class _Window:
 
 
 def test_snapshot_captures_the_stuck_plugin_and_prompt():
-    state = hang_watchdog._snapshot(_Window())
+    window = _Window()
+    window.home_page.plugin_executor = _Executor()   # fresh timestamps NOW
+    state = hang_watchdog._snapshot(window)
 
     assert state["kit"] == "Game"
     assert state["active_plugins"] == ["902_dxf_prep"]
