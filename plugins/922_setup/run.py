@@ -74,6 +74,15 @@ v2.3.3: Teams cards now read A-Z top-to-bottom in the bucket. Planner
 top-inserts each new task, so posting folders A-Z made the bucket read Z-A
 (user report); cards are now posted in reverse (_order_for_planner) so the
 alphabetically-first card lands on top.
+
+v2.4.1: restore the payload's `buckets` key. The v2.3.3 edit rewrote the
+payload dict inline to flip the post order and dropped `"buckets"` with it -
+flow #1's For_each_bucket does a foreach over that array, and a foreach over
+Null is a hard flow failure. TechDeck still logged DONE (HTTP 202 = accepted,
+not succeeded), so every 0.8.6.11 card run silently created nothing (bit
+Batch 488, 2026-08-05). The payload is now built by _build_payload - one
+place, contract-tested (tests/core/test_922_setup_cards.py) so a flow
+contract key can't silently vanish again.
 """
 from __future__ import annotations
 
@@ -89,7 +98,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -303,6 +312,33 @@ def _order_for_planner(cards: list[dict]) -> list[dict]:
     return list(reversed(cards))
 
 
+def _build_payload(template: dict, batch: str, cards: list[dict]
+                   ) -> tuple[dict, list[str]]:
+    """The flow #1 webhook payload — the REMOTE CONTRACT with the 'TechDeck 922
+    Setup - Create Production Cards' Power Automate flow.
+
+    Every key here is load-bearing on the flow side: `plan`, `batch`, `tasks`,
+    and `buckets` (the ordered left-to-right bucket set the flow find-or-creates
+    — its For_each_bucket loop does a foreach over `buckets`, and a foreach over
+    Null is a hard fail, not a skip). The v2.3.3 post-order edit rewrote this
+    dict inline and dropped `buckets` with it: every 0.8.6.11 run then died in
+    the flow at 858ms while TechDeck logged DONE (bit C.D., Batch 488,
+    2026-08-05). Built in one place and contract-tested so a key can't silently
+    vanish again. Returns (payload, buckets) — the buckets list is also logged.
+    """
+    buckets = [b.format(batch=batch) for b in template.get("buckets", [])] \
+        or [template.get("bucket_format", "BATCH {batch}").format(batch=batch)]
+    payload = {
+        "plan": template.get("plan", "D922 PIPELINE"),
+        "batch": batch,
+        "buckets": buckets,
+        # Posted in reverse so Planner (which top-inserts each new card) shows
+        # the bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
+        "tasks": _order_for_planner(cards),
+    }
+    return payload, buckets
+
+
 def _write_preview(payload: dict, log) -> None:
     """Save the built payload next to TechDeck's data for inspection."""
     sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
@@ -421,15 +457,7 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
                         "label in Teams AND card_template.json to cover it).")
 
     cards = _build_cards(template, batch, folders, folder_labels)
-    buckets = [b.format(batch=batch) for b in template.get("buckets", [])] \
-        or [template.get("bucket_format", "BATCH {batch}").format(batch=batch)]
-    payload = {
-        "plan": template.get("plan", "D922 PIPELINE"),
-        "batch": batch,
-        # Posted in reverse so Planner (which top-inserts each new card) shows the
-        # bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
-        "tasks": _order_for_planner(cards),
-    }
+    payload, buckets = _build_payload(template, batch, cards)
 
     log(f"\nBuckets (left to right): {', '.join(buckets)}")
     log(f"\nWill create {len(cards)} card(s) in plan '{payload['plan']}', "
