@@ -72,23 +72,10 @@ def _order_dirs(batch_path: Path, batch_no: str) -> List[Path]:
 
 def _find_lsts_for_order(order_dir: Path, cancel_event=None) -> List[Path]:
     """`.lst` files under any `CAD-AND-SHOP-PRINTS/*/7000/` subtree. Non-repeat
-    paths win; repeat paths are a fallback. Cancel is polled inside the walk
-    (Hard Rule 11) so a Cancel mid-scan actually stops."""
-    primary: List[Path] = []
-    secondary: List[Path] = []
-    for i, p in enumerate(order_dir.rglob("*")):
-        if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
-            break
-        if not (p.is_dir() and p.name.lower() == "7000"):
-            continue
-        segs = [s.lower() for s in p.parts]
-        if "cad-and-shop-prints" not in segs:
-            continue
-        lsts = [f for f in p.glob("*.lst") if f.is_file()]
-        if not lsts:
-            continue
-        (secondary if any("repeat" in s for s in segs) else primary).extend(lsts)
-    return primary or secondary
+    paths win; repeat paths are a fallback. The walk (and its Hard Rule 11
+    cancel polling) lives in `sdk.scan_shop_print_lsts`, shared with the 922
+    Batch Repeater's repeat audit."""
+    return sdk.scan_shop_print_lsts(order_dir, cancel_event).lsts
 
 
 # ── PO reading ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
   "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Labels each repeat's Teams card with the REPEAT label and moves it to the batch's MODEL CHECK bucket via a Power Automate webhook.",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -14,10 +14,12 @@
     "how_it_works": [
       "Enter the batch. The app finds which orders were made in a prior batch (repeats) and lets you pick which to pull.",
       "It copies each repeat's order folder into REPEAT BATCHES and distributes that repeat's CAD prints and binder into the matching current order folders.",
-      "It tags each repeat's Teams card REPEAT and moves it to MODEL CHECK, and folds the batch into the 922 Master Parts List."
+      "It tags each repeat's Teams card REPEAT and moves it to MODEL CHECK, and folds the batch into the 922 Master Parts List.",
+      "It then checks each repeat folder for its CAD-AND-SHOP-PRINTS folder and the .lst tube files in the 7000 folders beneath it - looking only, nothing is pulled - so a repeat whose source never had them is caught now instead of at the end of the batch."
     ],
     "output": [
-      "A REPEAT BATCHES folder with the pulled repeats, CAD and binders distributed to matching orders, updated Teams cards, and an updated 922 MPL."
+      "A REPEAT BATCHES folder with the pulled repeats, CAD and binders distributed to matching orders, updated Teams cards, and an updated 922 MPL.",
+      "A shop-print check per repeat folder, with a warning listing any repeat missing its CAD prints or its 7000 .lst files."
     ]
   },
   "icon": "🔄",

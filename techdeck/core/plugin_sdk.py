@@ -31,7 +31,7 @@ import shutil
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, NamedTuple, Optional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -789,6 +789,92 @@ def visible_sheetnames(wb) -> list:
     need this — sheet names are unique whether hidden or not.
     """
     return [n for n in wb.sheetnames if wb[n].sheet_state == "visible"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 922 shop-print trees (CAD-AND-SHOP-PRINTS / 7000)
+#
+# One 922 order folder's shop prints live at
+#   {order}\CAD-AND-SHOP-PRINTS\{DYPN}[\{assembly}\{DYPN}]\7000\*.lst
+# The depth VARIES (an assembly adds a level), and only TUBE parts get a `7000`
+# folder at all — so never assume a fixed depth, and never read "no 7000 folder"
+# as an error on its own. Shared by 922_lst_organizer (which pulls the files)
+# and 922_batch_repeater (which only audits a pulled repeat for them).
+# ─────────────────────────────────────────────────────────────────────────────
+
+CAD_PRINTS_DIR_NAME = "CAD-AND-SHOP-PRINTS"
+_CAD_PRINTS_RE = re.compile(r"^cad[-_ ]*and[-_ ]*shop[-_ ]*prints$", re.IGNORECASE)
+
+
+class ShopPrintScan(NamedTuple):
+    """What one order folder's shop-print tree holds.
+
+    lsts        — the .lst files to PULL (non-repeat paths preferred, so a
+                  nested `REPEAT\\...` copy of a part is dropped when the
+                  folder's own copy is there)
+    all_lsts    — every .lst found, unfiltered. Use this to AUDIT (counting
+                  `lsts` against `seven_k` compares a filtered list to an
+                  unfiltered one and reads as a phantom gap: Batch 484's
+                  FK345540 has its part twice, once under `REPEAT\\`)
+    cad_dirs    — every CAD-AND-SHOP-PRINTS folder found (empty = nothing to pull)
+    seven_k     — every 7000 folder under them
+    empty_7000  — the 7000 folders that hold NO .lst (a tube part missing its
+                  cut file — actionable, unlike having no 7000 folder at all)
+    """
+    lsts: list
+    all_lsts: list
+    cad_dirs: list
+    seven_k: list
+    empty_7000: list
+
+    @property
+    def has_cad(self) -> bool:
+        return bool(self.cad_dirs)
+
+
+def scan_shop_print_lsts(order_dir, cancel_event=None) -> ShopPrintScan:
+    """Walk ONE order folder's CAD-AND-SHOP-PRINTS tree for its tube `.lst`
+    files, plus the structure around them (see ShopPrintScan).
+
+    `lsts` prefers non-repeat paths — a batch's own order folder wins over a
+    copy under `REPEAT BATCHES`. That test runs on the path RELATIVE to
+    `order_dir`, so pointing this AT a repeat folder (the Batch Repeater's
+    audit) still returns its files instead of discarding them all.
+
+    Cancel is polled inside the walk (Hard Rule 11).
+    """
+    order_dir = Path(order_dir)
+    cad_dirs: list = []
+    seven_k: list = []
+    empty_7000: list = []
+    all_lsts: list = []
+    primary: list = []
+    secondary: list = []
+    for i, p in enumerate(order_dir.rglob("*")):
+        if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
+            break
+        if not p.is_dir():
+            continue
+        if _CAD_PRINTS_RE.match(p.name.strip()):
+            cad_dirs.append(p)
+            continue
+        if p.name.strip() != "7000":
+            continue
+        try:
+            rel = [s.lower() for s in p.relative_to(order_dir).parts]
+        except ValueError:                      # pragma: no cover - defensive
+            rel = [s.lower() for s in p.parts]
+        if not any(_CAD_PRINTS_RE.match(s) for s in rel):
+            continue                            # a stray '7000' outside the tree
+        seven_k.append(p)
+        lsts = sorted(f for f in p.glob("*.lst") if f.is_file())
+        if not lsts:
+            empty_7000.append(p)
+            continue
+        all_lsts.extend(lsts)
+        (secondary if any("repeat" in s for s in rel) else primary).extend(lsts)
+    return ShopPrintScan(primary or secondary, all_lsts,
+                         cad_dirs, seven_k, empty_7000)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

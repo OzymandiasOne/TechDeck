@@ -1,6 +1,18 @@
 """
-Batch Repeater Plugin for TechDeck v2.4.0
+Batch Repeater Plugin for TechDeck v2.5.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
+
+v2.5.0: after the copy, every folder in REPEAT BATCHES is AUDITED for the
+shop-print tube files - a 'CAD-AND-SHOP-PRINTS' folder, and `.lst` files in
+the `7000` folders beneath it - using the same scan the 922 LST Organizer
+pulls with (`sdk.scan_shop_print_lsts`). Nothing is pulled or organized here;
+this only LOOKS. The point is timing: a repeat's CAD folder is distributed
+into this batch's brand-new order folders, so if the SOURCE never had its
+.lst files the new folders start life without them and nobody finds out until
+the LST Organizer reports the tubes missing at the END of the batch. Only
+tube parts have a 7000 folder, so "no 7000 folder" is information, not a
+finding; a missing CAD folder and an empty 7000 folder are, and they end the
+run in a blocking sdk.show_warning.
 
 v2.4.0: the repeater now MAINTAINS the 922 MPL workbook instead of only
 reading it. Before the repeat search, in one open/save of 922 MPL.xlsx:
@@ -111,6 +123,62 @@ def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
                     return Path(root) / d
 
     return None
+
+
+def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
+                              ) -> Tuple[int, int, list]:
+    """Check every folder in REPEAT BATCHES for the shop-print tube files the
+    922 LST Organizer will later look for.
+
+    A repeat is pulled so its CAD data can be distributed into this batch's
+    brand-new order folders — so if the SOURCE folder never had its
+    `CAD-AND-SHOP-PRINTS\\...\\7000\\*.lst` files, the new order folder starts
+    life without them and nobody finds out until the LST Organizer reports the
+    tubes missing at the end of the batch. Same scan the organizer uses
+    (`sdk.scan_shop_print_lsts`) — this one only LOOKS; nothing is pulled or
+    organized here.
+
+    Only TUBE parts have a 7000 folder, so "no 7000 folder" is normal and is
+    reported as information. The two actionable findings are a repeat with no
+    CAD-AND-SHOP-PRINTS folder at all, and a 7000 folder holding no .lst.
+
+    Returns (folders checked, .lst files seen, [(folder name, problem), ...]).
+    """
+    problems: list = []
+    checked = total_lsts = 0
+    try:
+        folders = sorted((d for d in repeat_root.iterdir() if d.is_dir()),
+                         key=lambda d: d.name.lower())
+    except (FileNotFoundError, PermissionError) as e:
+        log(f"WARNING: could not read REPEAT BATCHES: {e}")
+        return 0, 0, problems
+
+    for folder in folders:
+        sdk.raise_if_cancelled(cancel_event)
+        scan = sdk.scan_shop_print_lsts(folder, cancel_event)
+        checked += 1
+        # all_lsts, not lsts: an audit counts what's THERE, including a nested
+        # REPEAT\ copy the pull list de-duplicates away.
+        total_lsts += len(scan.all_lsts)
+        if not scan.has_cad:
+            problems.append((folder.name, "no CAD-AND-SHOP-PRINTS folder"))
+            log(f"  ! {folder.name}: no CAD-AND-SHOP-PRINTS folder")
+            continue
+        if not scan.seven_k:
+            log(f"    {folder.name}: CAD prints present, no 7000 folder "
+                f"(no tube parts)")
+            continue
+        if scan.empty_7000:
+            where = ", ".join(p.parent.name for p in scan.empty_7000)
+            problems.append((folder.name,
+                             f"{len(scan.empty_7000)} 7000 folder(s) with no "
+                             f".lst file ({where})"))
+            log(f"  ! {folder.name}: {len(scan.all_lsts)} .lst, but "
+                f"{len(scan.empty_7000)} empty 7000 folder(s) - {where}")
+            continue
+        log(f"  ok {folder.name}: {len(scan.all_lsts)} .lst in "
+            f"{len(scan.seven_k)} 7000 folder(s)")
+    return checked, total_lsts, problems
 
 
 def _load_922_setup_template(log) -> dict:
@@ -427,7 +495,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_master_parts = (bool(settings.get('update_master_parts', True))
                        and bool(stage_options.get('master_parts', True)))
 
-    log("Starting 922 Batch Repeater v2.4.0...")
+    log("Starting 922 Batch Repeater v2.5.0...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -728,6 +796,21 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             log(f"ERROR: Failed to copy {order}: {e}")
             error_count += 1
     
+    progress_callback(88)
+
+    # === Audit the repeats' shop prints (look only - nothing is pulled) =====
+    # Everything sitting in REPEAT BATCHES, not just what this run copied: a
+    # repeat pulled last week is still feeding this batch. See
+    # _audit_repeat_shop_prints for why "no 7000 folder" isn't a finding.
+    lst_problems: list = []
+    if repeat_batch_folder.exists() and not cancel_event.is_set():
+        log("")
+        log("Checking repeat folders for CAD-AND-SHOP-PRINTS / 7000 .lst files...")
+        checked, total_lsts, lst_problems = _audit_repeat_shop_prints(
+            repeat_batch_folder, log, cancel_event)
+        log(f"Shop prints: {total_lsts} .lst file(s) across {checked} repeat "
+            f"folder(s); {len(lst_problems)} need attention.")
+
     progress_callback(90)
 
     # === Distribute CAD prints + binders into matching root order folders ===
@@ -869,12 +952,27 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     if not_found_count > 0:
         log(f"Not found: {not_found_count}")
-    
+
     if error_count > 0:
         log(f"Errors: {error_count}")
-    
+
+    if lst_problems:
+        log(f"Repeats missing shop-print .lst files: {len(lst_problems)}")
+
     log("=" * 50)
-    
+
+    # The .lst gap is what bites at the END of the batch (the LST Organizer
+    # reports the tubes missing), so raise it now rather than let it scroll by
+    # inside a 4-stage 922 Setup run.
+    if lst_problems:
+        sdk.show_warning(
+            params, "922 Batch Repeater - repeat shop prints",
+            "These repeat folders are missing the tube .lst files the 922 LST "
+            "Organizer will look for. Their CAD prints get distributed into "
+            "this batch's order folders as-is, so the tubes will read as "
+            "missing at the end of the batch unless the source is fixed:\n\n"
+            + "\n".join(f"  - {name}: {why}" for name, why in lst_problems))
+
     progress_callback(100)
     
     if error_count > 0 or not_found_count > 0:
