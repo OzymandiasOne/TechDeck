@@ -5,7 +5,7 @@ import pytest
 from techdeck.ui.widgets.console_cat import (
     FACE_ART, FACE_WIDTH, EYE_BOXES, PUPIL, MOUTH_FRAMES, MOUTH_TOP,
     GRIN_ROW, IRIS_COLS, IRIS_ROWS, PHOSPHOR, CHAR_TIER,
-    compile_frame, compose_face, face_html,
+    compose_face, face_html, summon_frame,
 )
 
 LEGAL_CHARS = set(" ·~ox=+%@")
@@ -112,34 +112,67 @@ def test_rest_is_reference_and_speech_grins():
     assert "|" in flat_open          # teeth only when it speaks
 
 
-def test_compile_ends_exactly_on_the_face():
-    final = compose_face()
-    assert compile_frame(final, 1.0, seed=3) == final
+def _present(frame):
+    return {(r, c) for r, row in enumerate(frame)
+            for c, (ch, _) in enumerate(row) if ch != " "}
 
 
-def test_compile_starts_blank():
+def _in_eye(r, c):
+    return any(er0 <= r <= er1 and ec0 <= c <= ec1
+               for er0, ec0, er1, ec1 in EYE_BOXES)
+
+
+def test_summon_ends_exactly_on_the_face():
     final = compose_face()
-    frame = compile_frame(final, 0.0, seed=3)
+    assert summon_frame(final, 1.0, seed=3) == final
+
+
+def test_summon_starts_dark():
+    final = compose_face()
+    frame = summon_frame(final, 0.0, seed=3)
     assert all(ch == " " for row in frame for ch, _ in row)
 
 
-def test_compile_is_deterministic_per_seed():
+def test_summon_is_deterministic_per_seed():
     final = compose_face()
-    assert compile_frame(final, 0.5, seed=3) == compile_frame(final, 0.5, seed=3)
-    assert compile_frame(final, 0.5, seed=3) != compile_frame(final, 0.5, seed=4)
+    assert summon_frame(final, 0.5, seed=3) == summon_frame(final, 0.5, seed=3)
+    assert summon_frame(final, 0.5, seed=3) != summon_frame(final, 0.5, seed=4)
 
 
-def test_compile_midway_is_noisy_but_converging():
+def test_summon_opens_with_closed_lids():
     final = compose_face()
-    mid = compile_frame(final, 0.5, seed=3)
-    assert mid != final
-    # Some cells already locked to their final glyph…
-    locked = sum(1 for r, row in enumerate(mid)
-                 for c, cell in enumerate(row)
-                 if cell == final[r][c] and cell[0] != " ")
-    # …and some still differ (noise or not yet rained in).
-    total = sum(1 for row in final for ch, _ in row if ch != " ")
-    assert 0 < locked < total
+    frame = summon_frame(final, 0.12, seed=3)
+    present = _present(frame)
+    assert present, "the lids should have faded in by 12%"
+    mid = (EYE_BOXES[0][0] + EYE_BOXES[0][2]) // 2
+    for r, c in present:
+        assert r == mid and _in_eye(r, c)
+        assert frame[r][c][0] == "—"
+
+
+def test_summon_eyes_open_before_the_lower_face():
+    final = compose_face()
+    frame = summon_frame(final, 0.30, seed=3)
+    present = _present(frame)
+    assert sum(1 for p in present if _in_eye(*p)) > 40  # eyes well open
+    assert all(_in_eye(*p) for p in present)            # nothing else yet
+
+
+def test_summon_seeds_are_three_points():
+    final = compose_face()
+    frame = summon_frame(final, 0.42, seed=3)
+    lower = [p for p in _present(frame) if not _in_eye(*p)]
+    assert len(lower) == 3  # nose tip + the two mouth corners
+    assert len({r for r, _ in lower}) <= 2
+
+
+def test_summon_presence_is_monotonic():
+    final = compose_face()
+    prev = set()
+    for p in (0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0):
+        now = _present(summon_frame(final, p, seed=3))
+        assert prev <= now, f"cells vanished between steps at {p}"
+        prev = now
 
 
 def test_face_html_emits_tier_colors_and_rows():

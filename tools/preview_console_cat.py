@@ -25,7 +25,7 @@ from PySide6.QtGui import (  # noqa: E402
 )
 
 from techdeck.ui.widgets.console_cat import (  # noqa: E402
-    FACE_ART as FACE_GRID, PHOSPHOR, compile_frame, compose_face,
+    FACE_ART as FACE_GRID, PHOSPHOR, compose_face, summon_frame,
 )
 
 BG = "#070B07"
@@ -41,8 +41,10 @@ VARIANTS = [
     ("speaking / open", dict(iris=(2, 1), mouth=2)),
 ]
 
-COMPILE_STAGES = [0.12, 0.30, 0.50, 0.70, 0.85, 1.0]
-COMPILE_SEED = 7
+# lids · eyes opening · open wide · seed points · early flower · mid flower
+# · late flower · brightening · done
+SUMMON_STAGES = [0.10, 0.22, 0.36, 0.42, 0.52, 0.65, 0.78, 0.90, 1.0]
+SUMMON_SEED = 7
 
 
 def render(panels, out_path: Path):
@@ -110,15 +112,15 @@ def main():
                     "compile stages) to PNGs.")
     parser.add_argument("--out", type=Path,
                         default=ROOT / "console_cat_preview.png")
-    parser.add_argument("--compile-out", type=Path,
-                        default=ROOT / "console_cat_compile.png")
+    parser.add_argument("--summon-out", type=Path,
+                        default=ROOT / "console_cat_summon.png")
     args = parser.parse_args()
     render([(label, compose_face(**kwargs)) for label, kwargs in VARIANTS],
            args.out)
     final = compose_face()
-    render([(f"compile {int(p * 100)}%",
-             compile_frame(final, p, seed=COMPILE_SEED))
-            for p in COMPILE_STAGES], args.compile_out)
+    render([(f"summon {int(p * 100)}%",
+             summon_frame(final, p, seed=SUMMON_SEED))
+            for p in SUMMON_STAGES], args.summon_out)
 
 
 if __name__ == "__main__":
