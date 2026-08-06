@@ -180,6 +180,57 @@ def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
     return out
 
 
+_RAIN_CHARS = "·~ox=+%@01"
+
+
+def _cell_hash(r: int, c: int, seed: int, salt: int = 0) -> int:
+    h = (r * 73856093) ^ (c * 19349663) ^ (seed * 83492791) ^ (salt * 2654435761)
+    h = (h ^ (h >> 13)) * 1274126177
+    return (h ^ (h >> 16)) & 0x7FFFFFFF
+
+
+def compile_frame(final_cells, progress: float, seed: int = 0):
+    """One frame of the summon compile: matrix rain condensing into the face.
+
+    Deterministic for a given seed. progress 0.0 → all blank (nothing has
+    rained in yet); 1.0 → exactly final_cells. In between, each cell rains
+    dim noise from the top down, then LOCKS to its final glyph — flashing
+    peak-bright for an instant before settling. Cells empty in the final
+    face flicker as noise early and burn out to black.
+    """
+    rows = len(final_cells)
+    tick = int(progress * 24)          # noise re-rolls as progress advances
+    out = []
+    for r, row in enumerate(final_cells):
+        out_row = []
+        for c, (ch, tier) in enumerate(row):
+            u = _cell_hash(r, c, seed) / 0x7FFFFFFF
+            appear = 0.05 + 0.30 * (r / max(1, rows - 1)) * (0.5 + 0.5 * u)
+            lock = 0.30 + 0.60 * (0.65 * u + 0.35 * (r / max(1, rows - 1)))
+            if progress >= 1.0:
+                out_row.append((ch, tier))
+            elif ch == " ":
+                # Never part of the face: noise that dies out early.
+                fade = appear + 0.45 * (lock - appear)
+                if appear <= progress < fade:
+                    n = _cell_hash(r, c, seed, tick)
+                    out_row.append((_RAIN_CHARS[n % len(_RAIN_CHARS)], "dim"))
+                else:
+                    out_row.append((" ", None))
+            elif progress < appear:
+                out_row.append((" ", None))
+            elif progress < lock:
+                n = _cell_hash(r, c, seed, tick)
+                noise_tier = "dim" if n & 1 else "mid"
+                out_row.append((_RAIN_CHARS[n % len(_RAIN_CHARS)], noise_tier))
+            elif progress < lock + 0.05:
+                out_row.append((ch, "peak"))   # the lock-in flash
+            else:
+                out_row.append((ch, tier))
+        out.append(out_row)
+    return out
+
+
 def face_html(cells, palette=None) -> str:
     """Render composed cells to HTML (consecutive same-tier runs merged into
     one span) for insertion into the console document. Rows joined with \\n —

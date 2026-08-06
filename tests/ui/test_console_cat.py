@@ -5,7 +5,7 @@ import pytest
 from techdeck.ui.widgets.console_cat import (
     FACE_ART, FACE_WIDTH, EYE_BOXES, PUPIL, MOUTH_FRAMES, MOUTH_TOP,
     GRIN_ROW, IRIS_COLS, IRIS_ROWS, PHOSPHOR, CHAR_TIER,
-    compose_face, face_html,
+    compile_frame, compose_face, face_html,
 )
 
 LEGAL_CHARS = set(" ·~ox=+%@")
@@ -110,6 +110,36 @@ def test_rest_is_reference_and_speech_grins():
     flat_open = "".join(ch for row in open_ for ch, _ in row)
     assert "|" not in flat_rest      # at rest the cat IS the reference
     assert "|" in flat_open          # teeth only when it speaks
+
+
+def test_compile_ends_exactly_on_the_face():
+    final = compose_face()
+    assert compile_frame(final, 1.0, seed=3) == final
+
+
+def test_compile_starts_blank():
+    final = compose_face()
+    frame = compile_frame(final, 0.0, seed=3)
+    assert all(ch == " " for row in frame for ch, _ in row)
+
+
+def test_compile_is_deterministic_per_seed():
+    final = compose_face()
+    assert compile_frame(final, 0.5, seed=3) == compile_frame(final, 0.5, seed=3)
+    assert compile_frame(final, 0.5, seed=3) != compile_frame(final, 0.5, seed=4)
+
+
+def test_compile_midway_is_noisy_but_converging():
+    final = compose_face()
+    mid = compile_frame(final, 0.5, seed=3)
+    assert mid != final
+    # Some cells already locked to their final glyph…
+    locked = sum(1 for r, row in enumerate(mid)
+                 for c, cell in enumerate(row)
+                 if cell == final[r][c] and cell[0] != " ")
+    # …and some still differ (noise or not yet rained in).
+    total = sum(1 for row in final for ch, _ in row if ch != " ")
+    assert 0 < locked < total
 
 
 def test_face_html_emits_tier_colors_and_rows():

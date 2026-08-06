@@ -25,7 +25,7 @@ from PySide6.QtGui import (  # noqa: E402
 )
 
 from techdeck.ui.widgets.console_cat import (  # noqa: E402
-    FACE_ART as FACE_GRID, PHOSPHOR, compose_face,
+    FACE_ART as FACE_GRID, PHOSPHOR, compile_frame, compose_face,
 )
 
 BG = "#070B07"
@@ -41,8 +41,12 @@ VARIANTS = [
     ("speaking / open", dict(iris=(2, 1), mouth=2)),
 ]
 
+COMPILE_STAGES = [0.12, 0.30, 0.50, 0.70, 0.85, 1.0]
+COMPILE_SEED = 7
 
-def render(out_path: Path):
+
+def render(panels, out_path: Path):
+    """panels: list of (label, composed cells) drawn in a 3-wide grid."""
     app = QGuiApplication.instance() or QGuiApplication([])  # noqa: F841
     # The offscreen platform on Windows has no system font lookup — load
     # Consolas straight from the Windows fonts folder or the glyphs render
@@ -66,7 +70,7 @@ def render(out_path: Path):
     panel_w = cols * cw + pad * 2
     panel_h = rows * chh + pad * 2 + label_h
     grid_cols = 3
-    grid_rows = (len(VARIANTS) + grid_cols - 1) // grid_cols
+    grid_rows = (len(panels) + grid_cols - 1) // grid_cols
 
     img = QImage(panel_w * grid_cols, panel_h * grid_rows,
                  QImage.Format.Format_RGB32)
@@ -74,13 +78,12 @@ def render(out_path: Path):
     p = QPainter(img)
     p.setFont(font)
 
-    for i, (label, kwargs) in enumerate(VARIANTS):
+    for i, (label, cells) in enumerate(panels):
         ox = (i % grid_cols) * panel_w + pad
         oy = (i // grid_cols) * panel_h + pad
         p.setPen(QColor(LABEL))
         p.drawText(ox, oy + fm.ascent(), label)
         oy += label_h
-        cells = compose_face(**kwargs)
         for r, row in enumerate(cells):
             for c, (ch, tier) in enumerate(row):
                 if tier is None:
@@ -103,11 +106,19 @@ def render(out_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Render the console cat face variants to a PNG.")
+        description="Render the console cat face variants (and the summon "
+                    "compile stages) to PNGs.")
     parser.add_argument("--out", type=Path,
                         default=ROOT / "console_cat_preview.png")
+    parser.add_argument("--compile-out", type=Path,
+                        default=ROOT / "console_cat_compile.png")
     args = parser.parse_args()
-    render(args.out)
+    render([(label, compose_face(**kwargs)) for label, kwargs in VARIANTS],
+           args.out)
+    final = compose_face()
+    render([(f"compile {int(p * 100)}%",
+             compile_frame(final, p, seed=COMPILE_SEED))
+            for p in COMPILE_STAGES], args.compile_out)
 
 
 if __name__ == "__main__":
