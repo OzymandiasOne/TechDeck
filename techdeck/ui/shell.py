@@ -761,7 +761,13 @@ class MainWindow(QMainWindow):
         return f"{m}m {s:02d}s"
 
     def _on_message_entered(self, message: str):
-        """Free-text (non-command) console input — point the user at /help."""
+        """Free-text (non-command) console input. If the cat is present, the
+        words are addressed to IT — it answers. Otherwise point at /help."""
+        cat = self.command_handler.active_cat()
+        if cat is not None:
+            from techdeck.ui.widgets.console_cat import respond_to
+            cat.speak(respond_to(message))
+            return
         self.console.append_system(
             "Commands start with a slash — type /help to see everything "
             "the console can do.")

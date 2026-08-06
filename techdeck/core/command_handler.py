@@ -149,6 +149,13 @@ class CommandHandler:
             self._cat = ConsoleCat(self.console)
         return self._cat
 
+    def active_cat(self):
+        """The cat, if it is currently present in the console; else None.
+        (The shell routes free console text to it for a response.)"""
+        if self._cat is not None and self._cat.is_present:
+            return self._cat
+        return None
+
     def _cmd_puppetmaster(self, args: str):
         """Summon the cat the loud way: the console's own text falls apart
         into rain and the face condenses out of it. (Deliberately absent

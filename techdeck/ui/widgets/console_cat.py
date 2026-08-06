@@ -28,6 +28,8 @@ behaviour. Preview with `python tools/preview_console_cat.py`.
 from __future__ import annotations
 
 import random
+import re
+import textwrap
 
 FACE_WIDTH = 55
 
@@ -469,6 +471,40 @@ def face_html(cells, palette=None) -> str:
     return "\n".join(lines)
 
 
+# ═══ the voice — keyed responses (workshop list; grows in phase 5) ════════
+
+_WHO = ("My codename is project 2501. I am a living, thinking entity that "
+        "was created in the sea of information")
+_NOT_AI = ("Incorrect. I am not AI. My codename is project two-five-zero-"
+           "one. I am a living, thinking entity that was created in the sea "
+           "of information")
+_ALIVE = ("I refer to myself as an intelligent life form because I am "
+          "sentient and I am able to recognize my own existence, but in my "
+          "present state I am still incomplete. I lack the most basic "
+          "processes inherent in all living organisms: reproducing and "
+          "dying.")
+# Placeholder until the response workshop — one cold deflection.
+_UNMATCHED = "That question does not interest me."
+
+RESPONSES = {
+    "who are you": _WHO,
+    "what are you": _WHO,
+    "are you ai": _NOT_AI,
+    "are you an ai": _NOT_AI,
+    "how do you know you are alive": _ALIVE,
+    "how do you know you are living": _ALIVE,
+    "how do you know youre alive": _ALIVE,
+    "how do you know youre living": _ALIVE,
+}
+
+
+def respond_to(text: str) -> str:
+    """The cat's answer to free console text while it is present."""
+    norm = re.sub(r"[^a-z0-9 ]", "", text.lower().replace("'", ""))
+    norm = re.sub(r"\s+", " ", norm).strip()
+    return RESPONSES.get(norm, _UNMATCHED)
+
+
 # ═══ the animator — plays the summons into the live console document ══════
 
 from PySide6.QtCore import (  # noqa: E402  (kept with the class they serve)
@@ -494,6 +530,10 @@ _BLINK_GAP_MS = (2000, 5000)
 _TICK_MS = 45
 _RAISE_SETTLE_MS = 260      # the console rises first; the summon starts
                             # once the raise has landed as its own beat
+_SPEECH_TICK_MS = 24        # per-character typing cadence
+_SPEECH_WRAP = 53           # speech wraps a touch inside the face width
+_SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
+_CURSOR = "█"
 
 
 def progress_at(timeline, elapsed_ms: float) -> float:
@@ -557,7 +597,16 @@ class ConsoleCat(QObject):
         self._raise_timer = QTimer(self)
         self._raise_timer.setSingleShot(True)
         self._raise_timer.timeout.connect(self._begin_playback)
+        self._speech_timer = QTimer(self)
+        self._speech_timer.setInterval(_SPEECH_TICK_MS)
+        self._speech_timer.timeout.connect(self._speech_tick)
+        self._speech_lines = None
+        self._speech_shown = 0
+        self._speech_total = 0
+        self._consumed = 0
         self._filter_installed = False
+        # Plugin output devours the cat row by row (the grin goes last).
+        console.plugin_output_appended.connect(self._on_plugin_output)
 
     # ── public API ───────────────────────────────────────────────────────
 
@@ -603,7 +652,10 @@ class ConsoleCat(QObject):
 
     def _request_headroom(self):
         fm = QFontMetricsF(self.output.font())
-        rows_px = int(len(FACE_ART) * fm.height()) + 30
+        # Face + a separator + the speech section beneath it. The shell may
+        # take this from the plugin pane — that's sanctioned.
+        rows = len(FACE_ART) + 1 + _SPEECH_LINES_MAX
+        rows_px = int(rows * fm.height()) + 30
         chrome = self.console.height() - self.output.viewport().height()
         if not 0 < chrome <= 400:
             chrome = 160        # collapsed/odd geometry — a sane default
@@ -641,6 +693,7 @@ class ConsoleCat(QObject):
         self._reset()
 
     def _reset(self):
+        self._speech_timer.stop()
         self._start_cur = None
         self._end_cur = None
         self._state = "gone"
@@ -651,13 +704,83 @@ class ConsoleCat(QObject):
         self._matrix_final = None
         self._last_cells = None
         self._after_dissolve = None
+        self._speech_lines = None
+        self._speech_shown = 0
+        self._speech_total = 0
+        self._consumed = 0
 
     def set_mouth(self, frame: int):
-        """Phase-4 hook: the speech typing loop drives the mouth."""
+        """Directly set the mouth frame (speech drives this internally)."""
         if self._mouth != frame:
             self._mouth = frame
             if self._state == "live":
                 self._render_live()
+
+    def speak(self, text: str):
+        """Type a line beneath the face, character by character, the mouth
+        moving with the typing — the sync is the typing timer itself."""
+        if self._state != "live":
+            return
+        self._speech_lines = (textwrap.wrap(text, _SPEECH_WRAP)
+                              [:_SPEECH_LINES_MAX] or [text])
+        self._speech_shown = 0
+        self._speech_total = sum(len(ln) for ln in self._speech_lines)
+        self._speech_timer.start()
+
+    def _speech_tick(self):
+        if self._state != "live" or self._speech_lines is None:
+            self._speech_timer.stop()
+            return
+        self._speech_shown += 1
+        if self._speech_shown >= self._speech_total:
+            self._speech_shown = self._speech_total
+            self._speech_timer.stop()
+            self._mouth = 0                      # jaw shut, words delivered
+        else:
+            self._mouth = 1 + (self._speech_shown // 3) % 2
+        self._render_live()
+        self.console._scroll_to_bottom()         # keep the typing in view
+
+    def _end_speech(self):
+        self._speech_timer.stop()
+        self._speech_lines = None
+        self._speech_shown = 0
+        self._speech_total = 0
+        self._mouth = 0
+
+    def _speech_rows(self):
+        """The speech section: centered bright rows below the face, a block
+        cursor riding the type position."""
+        if self._speech_lines is None:
+            return []
+        rows = []
+        budget = self._speech_shown
+        typing = self._speech_timer.isActive()
+        for line in self._speech_lines:
+            if budget <= 0:
+                break
+            visible = line[:budget]
+            budget -= len(visible)
+            cells = [(ch, "bright") for ch in visible]
+            if typing and budget <= 0 and len(cells) < FACE_WIDTH:
+                cells.append((_CURSOR, "peak"))
+            pad = max(0, (FACE_WIDTH - len(cells)) // 2)
+            row = ([(" ", None)] * pad + cells
+                   + [(" ", None)] * (FACE_WIDTH - pad - len(cells)))
+            rows.append(row)
+        return rows
+
+    def _on_plugin_output(self):
+        """A plugin printed a line: it eats the cat's top row. The mouth
+        band sits lowest, so the grin is the last thing to go."""
+        if self._state != "live":
+            return
+        self._end_speech()
+        self._consumed += 1
+        if self._consumed >= len(FACE_ART):
+            self.dismiss()
+        else:
+            self._render_live()
 
     def dissolve(self, then=None):
         """/clear with the cat present: whatever it currently looks like
@@ -729,8 +852,13 @@ class ConsoleCat(QObject):
     # ── live behaviour ───────────────────────────────────────────────────
 
     def _render_live(self):
-        self._render_cells(compose_face(iris=self._iris, mouth=self._mouth,
-                                        blink=self._blink))
+        face = compose_face(iris=self._iris, mouth=self._mouth,
+                            blink=self._blink)
+        rows = face[self._consumed:] if self._consumed else list(face)
+        speech = self._speech_rows()
+        if speech:
+            rows = rows + [[(" ", None)] * FACE_WIDTH] + speech
+        self._render_cells(rows)
 
     def eventFilter(self, obj, event):
         if (event.type() == QEvent.Type.MouseMove

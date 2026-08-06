@@ -63,6 +63,8 @@ class ConsoleWidget(QWidget, ThemeAware):
     # the shell raises the splitter, dashboard-style. The cat asks before
     # materializing so the face is never born clipped.
     raise_requested = Signal(int)
+    # A plugin printed a line — the cat (if present) loses a row to it.
+    plugin_output_appended = Signal()
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
@@ -877,6 +879,7 @@ class ConsoleWidget(QWidget, ThemeAware):
             f'{self._escape_html(text)}'
         )
         self._scroll_to_bottom()
+        self.plugin_output_appended.emit()
 
     @Slot(str)
     def append_game(self, text: str):

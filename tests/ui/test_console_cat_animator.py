@@ -4,7 +4,8 @@ from PySide6.QtCore import QPoint
 
 from techdeck.ui.widgets.console import ConsoleWidget
 from techdeck.ui.widgets.console_cat import (
-    ConsoleCat, TIMELINES, progress_at, timeline_total_ms,
+    FACE_ART, ConsoleCat, TIMELINES, progress_at, respond_to,
+    timeline_total_ms,
 )
 
 
@@ -210,6 +211,87 @@ def test_summon_requests_headroom_before_playing(qapp):
     assert asked[0] > 200                   # face rows + console chrome
     assert not cat._timer.isActive()        # raise beat first…
     assert cat._raise_timer.isActive()      # …playback armed to follow
+
+
+def _live_cat():
+    console, cat = _cat()
+    cat.summon("materialize")
+    cat._timer.stop()
+    cat._raise_timer.stop()
+    cat.render_at(1.0)
+    cat._state = "live"
+    return console, cat
+
+
+# ── the voice ────────────────────────────────────────────────────────────
+
+def test_keyed_responses():
+    who = respond_to("who are you")
+    assert "project 2501" in who
+    assert respond_to("What are you?") == who
+    ai = respond_to("Are you an AI?")
+    assert ai.startswith("Incorrect. I am not AI.")
+    assert "two-five-zero-one" in ai
+    assert respond_to("are you ai") == ai
+    alive = respond_to("How do you know you are alive?")
+    assert "reproducing and dying" in alive
+    assert respond_to("how do you know you're living") == alive
+    # Unmatched text gets the cold deflection, never silence.
+    assert respond_to("what's the weather") != ""
+
+
+def test_speak_types_with_mouth_sync(qapp):
+    console, cat = _live_cat()
+    cat.speak("Hello, worker.")
+    assert cat._speech_timer.isActive()
+    for _ in range(5):
+        cat._speech_tick()
+    partial = console.output.toPlainText()
+    assert "Hello" in partial
+    assert "worker" not in partial          # still typing
+    assert cat._mouth in (1, 2)             # the mouth is moving
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    done = console.output.toPlainText()
+    assert "Hello, worker." in done
+    assert cat._mouth == 0                  # jaw shut when the words land
+
+
+def test_speech_wraps_long_lines(qapp):
+    console, cat = _live_cat()
+    cat.speak(respond_to("how do you know you are alive"))
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    text = console.output.toPlainText()
+    assert "sentient" in text
+    assert len(cat._speech_lines) > 1       # wrapped beneath the face
+
+
+def test_plugin_output_devours_the_cat_grin_last(qapp):
+    console, cat = _live_cat()
+    rows = len(FACE_ART)
+    for i in range(rows - 3):
+        console.append_plugin_output("922 Kitting", f"page {i}")
+    assert cat.is_present
+    remaining = [ln for ln in console.output.toPlainText().splitlines()
+                 if "%" in ln or "@" in ln]
+    # Only the mouth band should still be standing — no eye field above it.
+    assert remaining
+    assert all("page" not in ln for ln in remaining)
+    for i in range(3):
+        console.append_plugin_output("922 Kitting", f"tail {i}")
+    assert not cat.is_present               # fully devoured
+
+
+def test_plugin_output_interrupts_speech(qapp):
+    console, cat = _live_cat()
+    cat.speak("You cannot silence")
+    for _ in range(4):
+        cat._speech_tick()
+    console.append_plugin_output("911 Setup", "nest folder created")
+    assert not cat._speech_timer.isActive()
+    assert cat._speech_lines is None
+    assert cat._consumed == 1
 
 
 def test_double_summon_is_ignored(qapp):
