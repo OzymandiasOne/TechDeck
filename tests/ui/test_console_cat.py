@@ -159,6 +159,17 @@ def test_summon_eyes_open_before_the_lower_face():
     assert all(_in_eye(*p) for p in present)            # nothing else yet
 
 
+def test_summon_stare_plays_on_fully_lit_eyes():
+    # By the stare beat the eyes must be COMPLETE — every eye cell at its
+    # final glyph and tier — so the lower face enters against a settled face.
+    final = compose_face()
+    frame = summon_frame(final, 0.40, seed=3)
+    for er0, ec0, er1, ec1 in EYE_BOXES:
+        for r in range(er0, er1 + 1):
+            for c in range(ec0, ec1 + 1):
+                assert frame[r][c] == final[r][c], (r, c)
+
+
 def test_summon_seeds_are_three_points():
     final = compose_face()
     frame = summon_frame(final, 0.48, seed=3)

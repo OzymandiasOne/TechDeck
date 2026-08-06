@@ -199,7 +199,9 @@ def _cell_hash(r: int, c: int, seed: int, salt: int = 0) -> int:
 _LID_IN = (0.03, 0.10)      # slits glow in, center-out
 _LID_RISE = 0.05            # the phosphor warm-up on each slit cell
 _EYES_OPEN = (0.24, 0.30)   # the snap — full open in a blink's time
-_SEEDS_AT = 0.46            # after a held stare
+_EYE_RISE = 0.03            # eyes hit FULL brightness fast (by ~0.36), so
+                            # the stare beat plays on a fully-lit face
+_SEEDS_AT = 0.46            # after the held stare
 _FLOWER = (0.50, 0.90)
 _RISE = 0.11            # per-tier-step delay after a cell materializes
 _TIER_RANK = {"dim": 0, "mid": 1, "bright": 2, "peak": 3}
@@ -313,9 +315,11 @@ def summon_frame(final_cells, progress: float, seed: int = 0):
                 continue
             # Late-materializing cells rise faster so everything reaches its
             # full tier just before progress hits 1.0 — no end-of-summon pop.
-            rise = min(_RISE, max(0.02, (0.99 - t_mat) / 3))
-            # Eyes materialize at mid so the snap reads crisp; the lower
-            # face starts dim and grows out of the dark.
+            # Eyes materialize at mid AND rise fast, so the snap reads crisp
+            # and the stare beat plays on a fully-lit face; the lower face
+            # starts dim and grows out of the dark.
+            rise = (_EYE_RISE if in_eye
+                    else min(_RISE, max(0.02, (0.99 - t_mat) / 3)))
             floor = 1 if in_eye else 0
             rank = min(_TIER_RANK[tier],
                        floor + int((progress - t_mat) / rise))
