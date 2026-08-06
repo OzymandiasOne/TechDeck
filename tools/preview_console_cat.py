@@ -25,12 +25,12 @@ from PySide6.QtGui import (  # noqa: E402
 )
 
 from techdeck.ui.widgets.console_cat import (  # noqa: E402
-    FACE_GRID, PHOSPHOR, compose_face,
+    FACE_ART as FACE_GRID, PHOSPHOR, compose_face,
 )
 
 BG = "#070B07"
 LABEL = "#2FA84F"
-HALO_TIERS = {"bright", "iris"}
+HALO_TIERS = {"bright", "peak"}
 
 VARIANTS = [
     ("center / closed", dict(iris=(2, 1), mouth=0)),
