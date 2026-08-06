@@ -27,6 +27,8 @@ behaviour. Preview with `python tools/preview_console_cat.py`.
 
 from __future__ import annotations
 
+import random
+
 FACE_WIDTH = 55
 
 # Rows 0-8: eyes. Rows 8-10: nose. Rows 11-13: the mouth band (whiskers at
@@ -454,3 +456,263 @@ def face_html(cells, palette=None) -> str:
             run_chars.append(ch)
         lines.append("".join(parts))
     return "\n".join(lines)
+
+
+# ═══ the animator — plays the summons into the live console document ══════
+
+from PySide6.QtCore import (  # noqa: E402  (kept with the class they serve)
+    QElapsedTimer, QEvent, QObject, QTimer,
+)
+from PySide6.QtGui import QCursor, QTextCursor  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+# Wall-clock pacing per summon: (progress_to, duration_ms) segments, piecewise
+# linear. This is where the holds get their real durations — the frame
+# generators only know progress.
+TIMELINES = {
+    "materialize": [(0.10, 500), (0.24, 600), (0.30, 250),
+                    (0.46, 1000), (1.0, 1800)],
+    "matrix": [(0.35, 1100), (1.0, 1900)],
+}
+
+_BLINK_MS = 150
+_BLINK_GAP_MS = (2000, 5000)
+_TICK_MS = 45
+
+
+def progress_at(timeline, elapsed_ms: float) -> float:
+    """Map elapsed wall-clock time onto animation progress (clamped 0..1)."""
+    p_from = 0.0
+    t = elapsed_ms
+    for p_to, dur in timeline:
+        if t <= dur:
+            return p_from + (p_to - p_from) * (t / dur)
+        t -= dur
+        p_from = p_to
+    return 1.0
+
+
+def timeline_total_ms(timeline) -> int:
+    return sum(dur for _, dur in timeline)
+
+
+class ConsoleCat(QObject):
+    """The Cheshire Cat, living INSIDE the console's QTextEdit document.
+
+    Owns a bookmarked range at the document's tail and rewrites it each
+    animation tick (QTextCursor replace — never append, so the document
+    doesn't grow). Two ways in:
+
+      summon("materialize")  — the startup-link entrance: the block is
+                               appended and the face grows out of darkness.
+      summon("matrix")       — /puppetmaster: the console's LAST lines are
+                               captured as the animation's source, removed,
+                               and decay into rain before the face condenses.
+
+    Once summoned it goes live: the gaze follows the mouse (app-level event
+    filter → the 5x3 iris grid), and it blinks every 2–5 s. dismiss() (or
+    /clear via stop()) removes it. set_mouth() re-renders with a speaking
+    frame — the hook phase 4's typing loop drives.
+    """
+
+    def __init__(self, console):
+        super().__init__(console)
+        self.console = console
+        self.output = console.output
+        self._state = "gone"        # gone | summoning | live
+        self._mode = None
+        self._seed = 0
+        self._source_cells = None
+        self._start_cur = None
+        self._end_cur = None
+        self._iris = (2, 1)
+        self._mouth = 0
+        self._blink = False
+        self._clock = QElapsedTimer()
+        self._timer = QTimer(self)
+        self._timer.setInterval(_TICK_MS)
+        self._timer.timeout.connect(self._tick)
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setSingleShot(True)
+        self._blink_timer.timeout.connect(self._blink_now)
+        self._filter_installed = False
+
+    # ── public API ───────────────────────────────────────────────────────
+
+    @property
+    def is_present(self) -> bool:
+        return self._state != "gone"
+
+    def summon(self, mode: str = "materialize"):
+        if self._state != "gone":
+            return
+        self._mode = mode
+        self._seed = random.randrange(1 << 30)
+        doc = self.output.document()
+        if mode == "matrix":
+            self._source_cells = text_to_cells(self._capture_tail_lines())
+        else:
+            self._source_cells = None
+        # Bookmark the block range: start holds its ground when we insert at
+        # it, end rides along to the end of each inserted frame.
+        work = QTextCursor(doc)
+        work.movePosition(QTextCursor.MoveOperation.End)
+        if not work.atBlockStart():
+            work.insertBlock()
+        pos = work.position()
+        self._start_cur = QTextCursor(doc)
+        self._start_cur.setPosition(pos)
+        self._start_cur.setKeepPositionOnInsert(True)
+        self._end_cur = QTextCursor(doc)
+        self._end_cur.setPosition(pos)
+        self._state = "summoning"
+        self._clock.start()
+        self.render_at(0.0)
+        self.console._scroll_to_bottom()
+        self._timer.start()
+
+    def dismiss(self):
+        """Remove the cat from the document and stop every timer."""
+        if self._state == "gone":
+            return
+        self._timer.stop()
+        self._blink_timer.stop()
+        self._remove_filter()
+        if self._start_cur is not None and self._end_cur is not None:
+            cur = QTextCursor(self.output.document())
+            cur.setPosition(self._start_cur.position())
+            cur.setPosition(self._end_cur.position(),
+                            QTextCursor.MoveMode.KeepAnchor)
+            cur.removeSelectedText()
+        self._start_cur = None
+        self._end_cur = None
+        self._state = "gone"
+        self._blink = False
+        self._mouth = 0
+
+    def stop(self):
+        """/clear teardown: the document is being wiped — just reset state."""
+        self._timer.stop()
+        self._blink_timer.stop()
+        self._remove_filter()
+        self._start_cur = None
+        self._end_cur = None
+        self._state = "gone"
+        self._blink = False
+        self._mouth = 0
+
+    def set_mouth(self, frame: int):
+        """Phase-4 hook: the speech typing loop drives the mouth."""
+        if self._mouth != frame:
+            self._mouth = frame
+            if self._state == "live":
+                self._render_live()
+
+    # ── summon playback ──────────────────────────────────────────────────
+
+    def _tick(self):
+        p = progress_at(TIMELINES[self._mode or "materialize"],
+                        self._clock.elapsed())
+        self.render_at(p)
+        if p >= 1.0:
+            self._timer.stop()
+            self._go_live()
+
+    def render_at(self, progress: float):
+        """Render one summon frame into the document (also the test seam)."""
+        final = compose_face(iris=self._iris, mouth=0, blink=False)
+        if self._mode == "matrix":
+            cells = matrix_summon_frame(self._source_cells, final,
+                                        progress, seed=self._seed)
+        else:
+            cells = summon_frame(final, progress, seed=self._seed)
+        self._render_cells(cells)
+
+    def _go_live(self):
+        self._state = "live"
+        self._install_filter()
+        self._schedule_blink()
+
+    # ── live behaviour ───────────────────────────────────────────────────
+
+    def _render_live(self):
+        self._render_cells(compose_face(iris=self._iris, mouth=self._mouth,
+                                        blink=self._blink))
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.Type.MouseMove
+                and self._state == "live"):
+            gaze = self._gaze_from_global(QCursor.pos())
+            if gaze != self._iris:
+                self._iris = gaze
+                self._render_live()
+        return False    # observe only — never consume
+
+    def _gaze_from_global(self, global_pos):
+        local = self.output.mapFromGlobal(global_pos)
+        w = max(1, self.output.width())
+        h = max(1, self.output.height())
+        ix = min(IRIS_COLS - 1, max(0, int(local.x() / w * IRIS_COLS)))
+        iy = min(IRIS_ROWS - 1, max(0, int(local.y() / h * IRIS_ROWS)))
+        return (ix, iy)
+
+    def _schedule_blink(self):
+        self._blink_timer.start(random.randint(*_BLINK_GAP_MS))
+
+    def _blink_now(self):
+        if self._state != "live":
+            return
+        self._blink = True
+        self._render_live()
+        QTimer.singleShot(_BLINK_MS, self._blink_done)
+
+    def _blink_done(self):
+        self._blink = False
+        if self._state == "live":
+            self._render_live()
+            self._schedule_blink()
+
+    # ── document plumbing ────────────────────────────────────────────────
+
+    def _capture_tail_lines(self):
+        """Read and REMOVE the document's last face-height lines — the
+        matrix summon's source: the console text the cat corrupts."""
+        doc = self.output.document()
+        rows = len(FACE_ART)
+        first = max(0, doc.blockCount() - rows)
+        lines = [doc.findBlockByNumber(i).text()
+                 for i in range(first, doc.blockCount())]
+        cur = QTextCursor(doc)
+        cur.setPosition(doc.findBlockByNumber(first).position())
+        cur.movePosition(QTextCursor.MoveOperation.End,
+                         QTextCursor.MoveMode.KeepAnchor)
+        cur.removeSelectedText()
+        return lines
+
+    def _render_cells(self, cells):
+        if self._start_cur is None or self._end_cur is None:
+            return
+        cur = QTextCursor(self.output.document())
+        cur.setPosition(self._start_cur.position())
+        cur.setPosition(self._end_cur.position(),
+                        QTextCursor.MoveMode.KeepAnchor)
+        body = (face_html(cells)
+                .replace(" ", "&nbsp;")     # Qt's HTML subset eats runs of
+                .replace("\n", "<br/>"))    # plain spaces — pin every cell
+        cur.insertHtml(
+            f'<span style="font-family: Consolas, \'Courier New\', '
+            f'monospace;">{body}</span>')
+
+    def _install_filter(self):
+        if not self._filter_installed:
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+                self._filter_installed = True
+
+    def _remove_filter(self):
+        if self._filter_installed:
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self)
+            self._filter_installed = False

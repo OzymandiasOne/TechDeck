@@ -68,6 +68,7 @@ class CommandHandler:
 
         self._rogue_player = None  # kept alive here to prevent GC
         self._spinner = None       # /fidget window; /clear closes it
+        self._cat = None           # the Cheshire Cat; lazy (see _console_cat)
         self._admin_mode = False   # /admin toggles; gates _ADMIN_COMMANDS
 
         # Command registry. Theme switching deliberately is NOT here —
@@ -91,6 +92,7 @@ class CommandHandler:
             '/jack': self._cmd_jack,
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
+            '/puppetmaster': self._cmd_puppetmaster,
             '/admin': self._cmd_admin,
             '/tickets': self._cmd_tickets,
             '/reset': self._cmd_reset,
@@ -134,8 +136,27 @@ class CommandHandler:
         segments = [s for s in rest.split("/") if s]
         if verb == "cmd" and segments:
             self.handle_command("/" + " ".join(segments))
+        elif verb == "cat" and segments == ["summon"]:
+            # The startup line's "redefine" — the materialization entrance.
+            self._console_cat().summon("materialize")
         else:
             self.console.append_error(f"Unroutable link: {url}")
+
+    def _console_cat(self):
+        """Lazy singleton — the cat only exists once someone lets it in."""
+        if self._cat is None:
+            from techdeck.ui.widgets.console_cat import ConsoleCat
+            self._cat = ConsoleCat(self.console)
+        return self._cat
+
+    def _cmd_puppetmaster(self, args: str):
+        """Summon the cat the loud way: the console's own text falls apart
+        into rain and the face condenses out of it. (Deliberately absent
+        from /help — those who know, know.)"""
+        cat = self._console_cat()
+        if cat.is_present:
+            return
+        cat.summon("matrix")
 
     # ------------------------------------------------------------------ #
     #  Core commands
@@ -653,6 +674,10 @@ class CommandHandler:
         self._stop_rave(announce=False)
         self._stop_moth()
         self._stop_spinner()
+        if self._cat is not None:
+            # The document is being wiped with the /clear — reset, don't
+            # try to excise a range from a vanishing document.
+            self._cat.stop()
 
     def _stop_spinner(self):
         """Close the /fidget spinner window if one is open (used by /clear)."""
