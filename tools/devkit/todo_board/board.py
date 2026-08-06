@@ -17,6 +17,7 @@ from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea,
     QPushButton, QToolButton, QMenu, QInputDialog, QMessageBox, QSizePolicy,
+    QCheckBox,
 )
 
 from techdeck.ui.theme_aware import ThemeAware
@@ -345,6 +346,16 @@ class TodoBoard(QWidget, ThemeAware):
         self._status = QLabel("", self)
         self._status_ok = True
         self._writeback_ok = True
+        self._triage_toggle = QCheckBox("Flow triage", self)
+        self._triage_toggle.setChecked(self.store.webhook_triage)
+        self._triage_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._triage_toggle.setToolTip(
+            "Send Status write-backs through the telemetry flow (server-side "
+            "workbook update — no local file write, no OneDrive conflicts).\n"
+            "Turn on only after the flow's triage branch is built "
+            "(docs/USAGE_TELEMETRY.md); without it, triage events append "
+            "junk feedback rows.")
+        self._triage_toggle.toggled.connect(self.store.set_webhook_triage)
         self._add_bucket_btn = QPushButton("+ Bucket", self)
         self._add_bucket_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._add_bucket_btn.clicked.connect(self._on_add_bucket)
@@ -386,12 +397,21 @@ class TodoBoard(QWidget, ThemeAware):
         # Complete / Won't Do, or archived) by moving those cards into Done /
         # Won't Do — cards the user has already parked terminally are left alone.
         moved = self.store.apply_external_status(load)
+        # Readback verification: a delivered-looking write-back whose row
+        # still reads "Needs Review" never landed (failed flow run behind the
+        # webhook's 202, or the workbook reverted under file mode) — re-queue
+        # and re-send it right away.
+        requeued = self.store.requeue_stale_writebacks(load)
+        if requeued:
+            wb_note = self._flush_writebacks() or wb_note
         if load.ok:
             parts = [f"{len(load.feedback)} open", f"{len(load.archive)} archived"]
             if added:
                 parts.append(f"+{added} new")
             if moved:
                 parts.append(f"{moved} auto-filed")
+            if requeued:
+                parts.append(f"{requeued} write-back(s) re-sent")
             if wb_note:
                 parts.append(wb_note)
             self._status.setText("  ·  ".join(parts))
@@ -412,6 +432,9 @@ class TodoBoard(QWidget, ThemeAware):
         if not res.ok:
             self._writeback_ok = False
             return f"⚠ {res.attempted} write-back(s) pending — {res.message}"
+        if res.via_webhook:
+            return (f"{res.written} status update(s) sent to flow"
+                    if res.written else "")
         bits = []
         if res.written:
             bits.append(f"{res.written} status(es) written")
@@ -426,7 +449,8 @@ class TodoBoard(QWidget, ThemeAware):
 
     def devkit_toolbar_actions(self):
         """Widgets the DevKit page hosts in its unified toolbar (right side)."""
-        return [self._status, self._add_bucket_btn, self._clear_btn, self._refresh_btn]
+        return [self._status, self._triage_toggle, self._add_bucket_btn,
+                self._clear_btn, self._refresh_btn]
 
     def _schedule_rebuild(self):
         """Rebuild on the next event-loop turn, coalescing multiple calls. Also
@@ -591,5 +615,9 @@ class TodoBoard(QWidget, ThemeAware):
         self._add_bucket_btn.setStyleSheet(btn_qss)
         self._clear_btn.setStyleSheet(btn_qss)
         self._refresh_btn.setStyleSheet(btn_qss)
+        self._triage_toggle.setStyleSheet(
+            f"QCheckBox {{ color: {self._pal.text_secondary}; "
+            f"font-size: 9pt; background: transparent; }}"
+            f"QCheckBox:hover {{ color: {self._pal.accent}; }}")
         # Re-render columns/cards in the new palette.
         self.rebuild_all()

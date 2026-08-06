@@ -402,3 +402,101 @@ def test_writeback_skips_manual_and_archive_cards(tmp_path):
     store.add_manual_card("done", "hand-written task")
     store.sync(_load(archive=[_entry(3, "922 Kitting", "archive")]))  # lands in done
     assert store.pending_writebacks() == []
+
+
+# ---- webhook triage mode ----------------------------------------------------
+
+def test_webhook_triage_default_off_and_persists(tmp_path):
+    store = BoardStore(path=tmp_path / "b.json")
+    assert store.webhook_triage is False               # off until the flow branch exists
+    store.set_webhook_triage(True)
+    assert BoardStore(path=tmp_path / "b.json").webhook_triage is True
+
+
+def test_webhook_triage_flush_sends_events_and_records(tmp_path, monkeypatch):
+    from techdeck.core import usage_tracker
+    from tools.devkit.todo_board.model import flush_writebacks
+    sent = []
+    monkeypatch.setattr(usage_tracker, "post_triage_events",
+                        lambda events: sent.append(events) or True)
+    store = BoardStore(path=tmp_path / "b.json")
+    store.set_webhook_triage(True)
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+
+    res = flush_writebacks(store)
+    assert res.ok and res.via_webhook and res.written == 1
+    ev = sent[0][0]
+    # row_key = "{timestamp} {user}" joined with | — the flow's Key column
+    # composes the same string from its Timestamp + User cells.
+    assert ev["row_key"] == "2026-07-21 09:00:00|tester"
+    assert ev["new_status"] == "Complete"
+    assert store.cards[key]["written_status"] == "Complete"
+    assert store.pending_writebacks() == []            # idempotent — no re-send
+
+    store.move_card(key, "todo", 0)                    # drag back out
+    res = flush_writebacks(store)
+    assert res.ok and res.written == 1
+    assert sent[1][0]["new_status"] == "Needs Review"
+    assert store.cards[key]["written_status"] == ""
+
+
+def test_webhook_triage_failure_stays_pending(tmp_path, monkeypatch):
+    from techdeck.core import usage_tracker
+    from tools.devkit.todo_board.model import flush_writebacks
+    monkeypatch.setattr(usage_tracker, "post_triage_events", lambda events: False)
+    store = BoardStore(path=tmp_path / "b.json")
+    store.set_webhook_triage(True)
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+    res = flush_writebacks(store)
+    assert not res.ok and res.written == 0
+    assert store.cards[key]["written_status"] == ""    # nothing recorded
+    assert store.pending_writebacks() == [(key, "Complete")]   # retried next flush
+
+
+def test_requeue_stale_writeback_when_row_still_needs_review(tmp_path):
+    """A 202'd triage event whose flow run failed (or a file-mode write the
+    workbook reverted) leaves the row at Needs Review — readback re-queues."""
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+    store.cards[key]["written_status"] = "Complete"    # delivery looked done
+    assert store.pending_writebacks() == []
+    requeued = store.requeue_stale_writebacks(
+        _load(feedback=[_same_key(key, "Needs Review")]))
+    assert requeued == 1
+    assert store.pending_writebacks() == [(key, "Complete")]
+
+
+def test_requeue_leaves_manual_edits_alone(tmp_path):
+    """Deferred (or any non-Needs-Review value) is a manual edit and wins —
+    only the exact 'Needs Review' re-queues."""
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+    store.cards[key]["written_status"] = "Complete"
+    assert store.requeue_stale_writebacks(
+        _load(feedback=[_same_key(key, "Deferred")])) == 0
+    assert store.requeue_stale_writebacks(
+        _load(feedback=[_same_key(key, "Complete")])) == 0
+    assert store.pending_writebacks() == []
+
+
+def test_external_status_skips_card_with_restore_in_flight(tmp_path):
+    """Webhook lag: a card dragged OUT of Done still has written_status set
+    until the restore lands; its row's stale 'Complete' must not yank the
+    card straight back into Done."""
+    store = BoardStore(path=tmp_path / "b.json")
+    store.sync(_load(feedback=[_entry(1, "911 Setup", "feedback")]))
+    key = store.bucket("todo")["cards"][0]
+    store.move_card(key, "done", 0)
+    store.cards[key]["written_status"] = "Complete"    # terminal write delivered
+    store.move_card(key, "todo", 0)                    # dragged back out; restore pending
+    moved = store.apply_external_status(_load(feedback=[_same_key(key, "Complete")]))
+    assert moved == 0
+    assert key in store.bucket("todo")["cards"]

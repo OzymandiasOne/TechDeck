@@ -14,17 +14,31 @@ Two jobs:
    organised. Each card snapshots its source fields at creation, so a card
    survives even if its telemetry row is later edited, archived, or deleted.
 
-3. Write STATUS back to the workbook (``flush_writebacks``): a card dropped in
-   Done / Won't Do sets its Feedback-sheet row's Status cell to Complete /
-   Won't Do; dragging it back out restores "Needs Review" — but only when the
-   cell still holds the value WE wrote (a manual edit in Excel always wins).
-   Only the Status cell of existing rows is ever touched — rows are never
-   added, moved, or deleted, so this cannot collide with the Power Automate
-   flow, which only APPENDS rows (docs/USAGE_TELEMETRY.md). Each card records
-   ``written_status`` (the value we last wrote) only after the file save
-   lands, making the flush idempotent and safe to retry — a locked workbook
-   (open in Excel) just leaves the write-back pending for the next drop or
-   Refresh.
+3. Write STATUS back (``flush_writebacks``): a card dropped in Done / Won't
+   Do sets its Feedback-sheet row's Status to Complete / Won't Do; dragging
+   it back out restores "Needs Review". Two modes:
+
+   * **Webhook triage** (``store.webhook_triage`` on + URL configured — the
+     preferred mode): POST a ``triage`` event per pending change to the
+     telemetry flow; the flow matches ``row_key`` (``"{timestamp} {user}"``
+     joined with ``|``) against the FeedbackTable's Key column and updates
+     the Status cell SERVER-SIDE. The local workbook is never written, so
+     the workbook has a single writer (the flow) and the OneDrive two-sided
+     conflict class (silent multi-day sync wedges, seen 7/31 and 8/6/2026)
+     is impossible by construction. The webhook 202s before the flow runs,
+     so delivery is verified by READBACK: ``requeue_stale_writebacks`` re-
+     queues any card whose row still reads "Needs Review" on a later
+     refresh (idempotent re-send until the sheet agrees).
+   * **Legacy local-file write** (flag off / no URL, e.g. offline dev):
+     edits only the Status cell of existing rows — never row adds/moves/
+     deletes — atomically via temp + os.replace. A drag-out restores
+     "Needs Review" only when the cell still holds the value WE wrote (a
+     manual edit in Excel always wins). A locked workbook just leaves the
+     write-back pending for the next drop or Refresh.
+
+   Both modes record ``written_status`` (the value last delivered) only
+   after the write lands (file save / 2xx), keeping the flush idempotent
+   and safe to retry.
 
 Column lookups go by header NAME, never a fixed index (Hard Rule 1).
 """
@@ -231,11 +245,12 @@ def load_feedback() -> FeedbackLoad:
 class WritebackResult:
     """Outcome of one flush attempt, for the board's status line."""
     attempted: int = 0    # pending items going in
-    written: int = 0      # Status cells actually changed in the file
+    written: int = 0      # Status changes delivered (file cells / flow events)
     adopted: int = 0      # already-correct cells / manual edits left alone
     missing: int = 0      # rows no longer on the Feedback sheet (archived?)
     ok: bool = True       # False = nothing persisted; retry later
     message: str = ""
+    via_webhook: bool = False   # True = sent as triage events, not file writes
 
 
 def _locate_header(ws) -> tuple[Optional[int], dict[str, int]]:
@@ -252,7 +267,86 @@ def _locate_header(ws) -> tuple[Optional[int], dict[str, int]]:
     return None, {}
 
 
+def _triage_webhook_available() -> bool:
+    try:
+        from techdeck.core.constants import TELEMETRY_WEBHOOK_URL
+        return bool(TELEMETRY_WEBHOOK_URL)
+    except Exception:
+        return False
+
+
 def flush_writebacks(store: "BoardStore") -> WritebackResult:
+    """Deliver pending Status changes. Never raises.
+
+    Dispatch: webhook triage when enabled + configured (the flow updates the
+    cloud workbook server-side — single-writer, no local file write),
+    otherwise the legacy local-file cell write. See the module docstring for
+    the two modes' contracts.
+    """
+    if store.webhook_triage and _triage_webhook_available():
+        return _flush_writebacks_webhook(store)
+    return _flush_writebacks_file(store)
+
+
+def _flush_writebacks_webhook(store: "BoardStore") -> WritebackResult:
+    """POST pending Status changes as ``triage`` events to the telemetry
+    flow. ``written_status`` is recorded on 2xx; actual landing is verified
+    by readback on a later refresh (``requeue_stale_writebacks``), because
+    the Teams-webhook trigger 202s before the flow run executes."""
+    pending = store.pending_writebacks()
+    res = WritebackResult(attempted=len(pending), via_webhook=True)
+    if not pending:
+        return res
+    events: list[dict] = []
+    landed: dict[str, str] = {}
+    for key, desired in pending:
+        card = store.cards.get(key)
+        if card is None:
+            continue
+        ts = (card.get("date") or "").replace("T", " ")
+        user = card.get("user") or ""
+        events.append({
+            "timestamp": ts,
+            "user": user,
+            "machine": os.environ.get("COMPUTERNAME") or "unknown",
+            "techdeck_version": _app_version(),
+            "row_key": f"{ts}|{user}",
+            "new_status": desired,
+        })
+        landed[key] = "" if desired == STATUS_NEEDS_REVIEW else desired
+    try:
+        from techdeck.core import usage_tracker
+        ok = usage_tracker.post_triage_events(events)
+    except Exception as exc:
+        logger.warning("Dev Board triage webhook failed: %s", exc)
+        res.ok = False
+        res.message = str(exc)
+        return res
+    if not ok:
+        res.ok = False
+        res.message = "triage webhook returned an error status"
+        return res
+    res.written = len(events)
+    changed = False
+    for key, new_written in landed.items():
+        card = store.cards.get(key)
+        if card is not None and (card.get("written_status") or "") != new_written:
+            card["written_status"] = new_written
+            changed = True
+    if changed:
+        store.save()
+    return res
+
+
+def _app_version() -> str:
+    try:
+        from techdeck.core.constants import APP_VERSION
+        return APP_VERSION
+    except Exception:
+        return ""
+
+
+def _flush_writebacks_file(store: "BoardStore") -> WritebackResult:
     """Write pending Status changes into the Feedback sheet. Never raises.
 
     Atomic + idempotent: the edited workbook is saved to a temp file and
@@ -396,6 +490,7 @@ class BoardStore:
         # and hidden). Remembered so the archived telemetry rows behind them
         # don't just re-sync back in; a row that later reopens resurrects.
         self.cleared: set[str] = set()
+        self.settings: dict = {}        # board prefs (e.g. webhook_triage)
         self._load()
 
     # ---- persistence -----------------------------------------------------
@@ -407,9 +502,11 @@ class BoardStore:
                 self.buckets = data.get("buckets") or []
                 self.cards = data.get("cards") or {}
                 self.cleared = set(data.get("cleared") or [])
+                self.settings = data.get("settings") or {}
             except Exception as exc:
                 logger.warning("Dev Board: state unreadable (%s); starting fresh", exc)
                 self.buckets, self.cards, self.cleared = [], {}, set()
+                self.settings = {}
         if not self.buckets:
             self.buckets = [dict(b, cards=[]) for b in DEFAULT_BUCKETS]
         for b in self.buckets:
@@ -418,10 +515,26 @@ class BoardStore:
 
     def save(self):
         payload = {"version": STATE_VERSION, "buckets": self.buckets,
-                   "cards": self.cards, "cleared": sorted(self.cleared)}
+                   "cards": self.cards, "cleared": sorted(self.cleared),
+                   "settings": self.settings}
         tmp = self.path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
+
+    # ---- settings --------------------------------------------------------
+
+    @property
+    def webhook_triage(self) -> bool:
+        """True = deliver Status write-backs as triage events through the
+        telemetry flow (requires the flow's triage branch — see
+        docs/USAGE_TELEMETRY.md). Default OFF: with the flag on but the flow
+        branch missing, triage events would fall into the flow's feedback
+        branch and append blank-suggestion junk rows."""
+        return bool(self.settings.get("webhook_triage"))
+
+    def set_webhook_triage(self, on: bool):
+        self.settings["webhook_triage"] = bool(on)
+        self.save()
 
     def _reconcile(self):
         """Repair drift: drop bucket refs to unknown cards, and file any card
@@ -551,6 +664,12 @@ class BoardStore:
                 continue
             if cur["id"] in (DONE_BUCKET_ID, WONT_DO_BUCKET_ID):
                 continue   # respect the terminal bucket the user chose
+            if card.get("written_status"):
+                # A "Needs Review" restore is still in flight for this card
+                # (dragged out of a terminal bucket; webhook/sheet lag hasn't
+                # caught up). The row's terminal status is OUR stale value —
+                # honoring it would yank the card straight back.
+                continue
             dst = self.bucket(target)
             if dst is None:
                 continue
@@ -563,6 +682,36 @@ class BoardStore:
         return moved
 
     # ---- write-back ------------------------------------------------------
+
+    def requeue_stale_writebacks(self, load: "FeedbackLoad") -> int:
+        """Readback verification: re-queue terminal write-backs that never
+        landed. A card whose ``written_status`` says we delivered Complete /
+        Won't Do, but whose Feedback row still reads "Needs Review", had its
+        delivery lost — a failed flow run behind the webhook's 202, or (file
+        mode) the workbook reverted under us (OneDrive conflict resolution).
+        Clearing ``written_status`` puts it back in ``pending_writebacks``;
+        the re-send is idempotent so convergence is safe to retry.
+
+        Deliberately narrow: only an exact "Needs Review" re-queues. Any
+        other value (Deferred, free text) is a manual edit and wins — to
+        reopen a Done-carded row by hand, drag the card out of Done instead
+        of editing the cell. Returns how many were re-queued.
+        """
+        if not load.ok:
+            return 0
+        status_by_key = {e.key: (e.orig_status or "").strip()
+                         for e in load.feedback}
+        requeued = 0
+        for key, card in self.cards.items():
+            written = card.get("written_status") or ""
+            if written not in (STATUS_COMPLETE, STATUS_WONT_DO):
+                continue
+            if status_by_key.get(key) == STATUS_NEEDS_REVIEW:
+                card["written_status"] = ""
+                requeued += 1
+        if requeued:
+            self.save()
+        return requeued
 
     def pending_writebacks(self) -> list[tuple[str, str]]:
         """Cards whose Feedback-sheet Status should change, as

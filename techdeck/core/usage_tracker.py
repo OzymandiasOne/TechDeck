@@ -239,6 +239,18 @@ def send_feedback_event(suggestion: str, which_feature: str) -> None:
         raise RuntimeError("the feedback service returned an error status")
 
 
+def post_triage_events(events: List[dict]) -> bool:
+    """POST DevKit Dev Board triage decisions (Status updates for existing
+    Feedback rows) through the same flow — the flow's triage branch matches
+    each event's ``row_key`` against the FeedbackTable's Key column and sets
+    the Status cell server-side, so the maintainer's machine never writes the
+    workbook locally (docs/USAGE_TELEMETRY.md). Maintainer machine only.
+    Returns True on 2xx; network failures raise for the caller to surface."""
+    if not TELEMETRY_WEBHOOK_URL:
+        return False
+    return _post_events("triage", events)
+
+
 def telemetry_status() -> dict:
     """Snapshot for the debug report — never raises."""
     out = {
