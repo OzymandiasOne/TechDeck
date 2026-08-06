@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer, QEvent, QUrl
 from PySide6.QtGui import QTextCursor, QFont, QDesktopServices
+import re
 import threading
 
 from techdeck.ui.widgets.dashboard import DashboardView
@@ -54,6 +55,10 @@ class ConsoleWidget(QWidget, ThemeAware):
     before_input_request = Signal()  # Emitted just before showing a plugin input prompt
     dashboard_shown = Signal()  # Emitted when a dashboard is rendered (shell auto-expands)
     cleared = Signal()  # Emitted after the console is cleared (button or /clear)
+    # A techdeck:// anchor in the output was clicked (see append_markup).
+    # External anchors (file:///, https://) never come through here — they
+    # open with the OS as before.
+    internal_link_clicked = Signal(str)
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
@@ -940,8 +945,42 @@ class ConsoleWidget(QWidget, ThemeAware):
         )
         self._scroll_to_bottom()
 
+    _LINK_MARKUP = re.compile(r"\[\[([^|\]]+)\|([^\]]+)\]\]")
+
+    def markup_to_html(self, text: str, body_color: str = None) -> str:
+        """Convert a line with [[label|url]] spans into escaped HTML where each
+        span is an anchor styled like the rest of the line (body-colored,
+        underlined — the append_link convention). Everything outside the
+        spans is HTML-escaped verbatim."""
+        if body_color is None:
+            from techdeck.ui.theme_manager import get_theme_manager
+            body_color = get_theme_manager().get_current_palette().text
+        parts = []
+        pos = 0
+        for m in self._LINK_MARKUP.finditer(text):
+            parts.append(self._escape_html(text[pos:m.start()]))
+            label, url = m.group(1), m.group(2)
+            parts.append(
+                f'<a href="{url}" style="color: {body_color}; '
+                f'text-decoration: underline;">{self._escape_html(label)}</a>')
+            pos = m.end()
+        parts.append(self._escape_html(text[pos:]))
+        return "".join(parts)
+
+    def append_markup(self, text: str, color: str = None):
+        """Append a line whose [[label|url]] spans render as clickable
+        anchors — the inline counterpart of append_link (which links a whole
+        line). techdeck:// urls dispatch inside the app; file/https urls open
+        with the OS. `color` tints the whole line (default: theme text)."""
+        from techdeck.ui.theme_manager import get_theme_manager
+        body_color = color or get_theme_manager().get_current_palette().text
+        html = self.markup_to_html(text, body_color)
+        self.output.append(
+            f'<span style="color: {body_color};">{html}</span>')
+        self._scroll_to_bottom()
+
     def eventFilter(self, obj, event):
-        """Hover/click handling for append_link anchors in the output view."""
+        """Hover/click handling for anchors in the output view."""
         if obj is self.output.viewport():
             et = event.type()
             if et == QEvent.Type.MouseMove:
@@ -953,9 +992,18 @@ class ConsoleWidget(QWidget, ThemeAware):
                     and event.button() == Qt.MouseButton.LeftButton):
                 anchor = self.output.anchorAt(event.position().toPoint())
                 if anchor:
-                    QDesktopServices.openUrl(QUrl(anchor))
+                    self._activate_anchor(anchor)
                     return True
         return super().eventFilter(obj, event)
+
+    def _activate_anchor(self, anchor: str):
+        """Open a clicked output anchor: techdeck:// targets stay inside the
+        app (routed via internal_link_clicked → CommandHandler.
+        handle_internal_link); anything else goes to the OS as before."""
+        if anchor.startswith("techdeck://"):
+            self.internal_link_clicked.emit(anchor)
+        else:
+            QDesktopServices.openUrl(QUrl(anchor))
 
     def show_spinner(self, html: str):
         """Show the spinner label with the given HTML content."""

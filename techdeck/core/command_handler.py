@@ -117,6 +117,26 @@ class CommandHandler:
             self.console.append_error(f"Unknown command: {cmd}")
             self.console.append_system("Type /help for available commands.")
 
+    def handle_internal_link(self, url: str) -> None:
+        """Dispatch a clicked techdeck:// console anchor (see the console's
+        append_markup). Path form: techdeck://<verb>/<segment>/<segment>...
+
+        Verbs:
+          cmd — run a console command as if typed: techdeck://cmd/dash,
+                techdeck://cmd/moredetails/all (segments join with spaces).
+
+        Anchors are only ever authored by our own code, so an unknown verb is
+        a dev mistake — surfaced as a console error rather than swallowed."""
+        if not url.startswith("techdeck://"):
+            return
+        path = url[len("techdeck://"):].strip("/")
+        verb, _, rest = path.partition("/")
+        segments = [s for s in rest.split("/") if s]
+        if verb == "cmd" and segments:
+            self.handle_command("/" + " ".join(segments))
+        else:
+            self.console.append_error(f"Unroutable link: {url}")
+
     # ------------------------------------------------------------------ #
     #  Core commands
     # ------------------------------------------------------------------ #

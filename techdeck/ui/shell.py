@@ -287,6 +287,8 @@ class MainWindow(QMainWindow):
         # Setup command handler (pass self so commands can reach the window + app)
         self.command_handler = CommandHandler(self.settings, self.console, main_window=self)
         self.console.command_entered.connect(self.command_handler.handle_command)
+        self.console.internal_link_clicked.connect(
+            self.command_handler.handle_internal_link)
         self.console.cleared.connect(self.command_handler.stop_session_effects)
         self.console.message_entered.connect(self._on_message_entered)
         self.console.input_provided.connect(self._on_console_input_provided)
