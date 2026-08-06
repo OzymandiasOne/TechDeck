@@ -215,7 +215,12 @@ class CommandHandler:
                 self.console.show_read_more_hint()
 
     def _cmd_clear(self, args: str):
-        self.console.clear()
+        if self._cat is not None and self._cat.is_present:
+            # The cat goes the way it came: decays into rain and dies to
+            # darkness, THEN the console clears.
+            self._cat.dissolve(then=self.console.clear)
+        else:
+            self.console.clear()
 
     def _cmd_version(self, args: str):
         self.console.append_system(f"TechDeck v{APP_VERSION}")

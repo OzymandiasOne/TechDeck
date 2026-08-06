@@ -139,6 +139,68 @@ def test_timer_path_reaches_live(qapp, monkeypatch):
     assert not cat._filter_installed
 
 
+# QTextDocument.toPlainText() normalizes the &nbsp; padding back to plain
+# spaces — assertions read the document, so they check spaces.
+
+def test_face_renders_centered(qapp):
+    console, cat = _cat()
+    cat._viewport_cols = lambda: 91     # a realistic console width in cells
+    cat.summon("materialize")
+    cat._timer.stop()
+    cat.render_at(1.0)
+    face_lines = [ln for ln in console.output.toPlainText().splitlines()
+                  if "@" in ln]
+    assert face_lines
+    assert all(ln.startswith(" " * 15) for ln in face_lines)
+
+
+def test_matrix_progress_zero_keeps_text_at_left_edge(qapp):
+    # Seamlessness: at the moment /puppetmaster fires, the captured console
+    # text must not shift — the source is captured at full console width.
+    console, cat = _cat()
+    cat._viewport_cols = lambda: 91
+    console.append_system("marker line for the seam")
+    cat.summon("matrix")
+    cat._timer.stop()
+    cat.render_at(0.0)
+    line = next(ln for ln in console.output.toPlainText().splitlines()
+                if "marker" in ln)
+    assert not line.startswith(" ")
+    # …while the face it condenses into is centered.
+    cat.render_at(1.0)
+    face_lines = [ln for ln in console.output.toPlainText().splitlines()
+                  if "@" in ln]
+    assert all(ln.startswith(" " * 15) for ln in face_lines)
+
+
+def test_dissolve_decays_then_runs_callback(qapp, monkeypatch):
+    import techdeck.ui.widgets.console_cat as cc
+    monkeypatch.setitem(cc.TIMELINES, "dissolve", [(0.5, 80), (1.0, 40)])
+    console, cat = _cat()
+    console.append_system("survivor")
+    cat.summon("materialize")
+    cat._timer.stop()
+    cat.render_at(1.0)
+    cat._state = "live"
+    done = []
+    cat.dissolve(then=lambda: done.append(True))
+    assert cat._state == "dissolving"
+    from PySide6.QtCore import QDeadlineTimer, QEventLoop
+    deadline = QDeadlineTimer(2000)
+    while cat.is_present and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+    assert done == [True]
+    assert not cat.is_present
+    assert "@" not in console.output.toPlainText()
+
+
+def test_dissolve_when_gone_runs_callback_immediately(qapp):
+    console, cat = _cat()
+    done = []
+    cat.dissolve(then=lambda: done.append(True))
+    assert done == [True]
+
+
 def test_double_summon_is_ignored(qapp):
     console, cat = _cat()
     cat.summon("materialize")

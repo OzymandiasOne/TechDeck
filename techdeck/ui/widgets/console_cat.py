@@ -373,6 +373,17 @@ def text_to_cells(lines, rows: int | None = None, width: int | None = None):
     return out
 
 
+def pad_cells(cells, total_cols: int):
+    """Center a grid in a wider one by padding both sides with darkness."""
+    width = len(cells[0])
+    if total_cols <= width:
+        return [list(row) for row in cells]
+    left = (total_cols - width) // 2
+    pad_l = [(" ", None)] * left
+    pad_r = [(" ", None)] * (total_cols - width - left)
+    return [pad_l + list(row) + pad_r for row in cells]
+
+
 def matrix_summon_frame(source_cells, final_cells, progress: float,
                         seed: int = 0):
     """One frame of the /puppetmaster summon (see choreography above).
@@ -463,7 +474,7 @@ def face_html(cells, palette=None) -> str:
 from PySide6.QtCore import (  # noqa: E402  (kept with the class they serve)
     QElapsedTimer, QEvent, QObject, QTimer,
 )
-from PySide6.QtGui import QCursor, QTextCursor  # noqa: E402
+from PySide6.QtGui import QCursor, QFontMetricsF, QTextCursor  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 # Wall-clock pacing per summon: (progress_to, duration_ms) segments, piecewise
@@ -473,6 +484,9 @@ TIMELINES = {
     "materialize": [(0.10, 500), (0.24, 600), (0.30, 250),
                     (0.46, 1000), (1.0, 1800)],
     "matrix": [(0.35, 1100), (1.0, 1900)],
+    # /clear: the face decays to rain and dies — nothing condenses after,
+    # so visually it's over by ~0.5; the short tail segment closes it out.
+    "dissolve": [(0.5, 1100), (1.0, 120)],
 }
 
 _BLINK_MS = 150
@@ -519,10 +533,13 @@ class ConsoleCat(QObject):
         super().__init__(console)
         self.console = console
         self.output = console.output
-        self._state = "gone"        # gone | summoning | live
+        self._state = "gone"        # gone | summoning | live | dissolving
         self._mode = None
         self._seed = 0
         self._source_cells = None
+        self._matrix_final = None   # face pre-padded to the capture width
+        self._last_cells = None     # most recent rendered frame
+        self._after_dissolve = None
         self._start_cur = None
         self._end_cur = None
         self._iris = (2, 1)
@@ -550,9 +567,15 @@ class ConsoleCat(QObject):
         self._seed = random.randrange(1 << 30)
         doc = self.output.document()
         if mode == "matrix":
-            self._source_cells = text_to_cells(self._capture_tail_lines())
+            # Capture at the console's full character width so progress 0 is
+            # the untouched text, with the face condensing dead-center.
+            cols = self._viewport_cols()
+            self._source_cells = text_to_cells(self._capture_tail_lines(),
+                                               width=cols)
+            self._matrix_final = pad_cells(compose_face(), cols)
         else:
             self._source_cells = None
+            self._matrix_final = None
         # Bookmark the block range: start holds its ground when we insert at
         # it, end rides along to the end of each inserted frame.
         work = QTextCursor(doc)
@@ -584,22 +607,26 @@ class ConsoleCat(QObject):
             cur.setPosition(self._end_cur.position(),
                             QTextCursor.MoveMode.KeepAnchor)
             cur.removeSelectedText()
-        self._start_cur = None
-        self._end_cur = None
-        self._state = "gone"
-        self._blink = False
-        self._mouth = 0
+        self._reset()
 
     def stop(self):
         """/clear teardown: the document is being wiped — just reset state."""
         self._timer.stop()
         self._blink_timer.stop()
         self._remove_filter()
+        self._reset()
+
+    def _reset(self):
         self._start_cur = None
         self._end_cur = None
         self._state = "gone"
+        self._mode = None
         self._blink = False
         self._mouth = 0
+        self._source_cells = None
+        self._matrix_final = None
+        self._last_cells = None
+        self._after_dissolve = None
 
     def set_mouth(self, frame: int):
         """Phase-4 hook: the speech typing loop drives the mouth."""
@@ -607,6 +634,35 @@ class ConsoleCat(QObject):
             self._mouth = frame
             if self._state == "live":
                 self._render_live()
+
+    def dissolve(self, then=None):
+        """/clear with the cat present: whatever it currently looks like
+        decays into rain and dies to darkness, THEN `then` runs (the actual
+        clear). Works mid-summon too — it decays from the current frame."""
+        if self._state == "gone":
+            if then is not None:
+                then()
+            return
+        if self._state == "dissolving":
+            return
+        self._timer.stop()
+        self._blink_timer.stop()
+        self._remove_filter()
+        self._mode = "dissolve"
+        self._source_cells = (self._last_cells
+                              or pad_cells(compose_face(),
+                                           self._viewport_cols()))
+        self._after_dissolve = then
+        self._state = "dissolving"
+        self._clock.start()
+        self._timer.start()
+
+    def _finish_dissolve(self):
+        callback = self._after_dissolve
+        self._after_dissolve = None
+        self.dismiss()          # state is "dissolving", so this runs fully
+        if callback is not None:
+            callback()
 
     # ── summon playback ──────────────────────────────────────────────────
 
@@ -616,15 +672,27 @@ class ConsoleCat(QObject):
         self.render_at(p)
         if p >= 1.0:
             self._timer.stop()
-            self._go_live()
+            if self._mode == "dissolve":
+                self._finish_dissolve()
+            else:
+                self._go_live()
 
     def render_at(self, progress: float):
-        """Render one summon frame into the document (also the test seam)."""
-        final = compose_face(iris=self._iris, mouth=0, blink=False)
+        """Render one animation frame into the document (also the test seam)."""
         if self._mode == "matrix":
-            cells = matrix_summon_frame(self._source_cells, final,
+            assert self._source_cells is not None
+            assert self._matrix_final is not None
+            cells = matrix_summon_frame(self._source_cells,
+                                        self._matrix_final,
+                                        progress, seed=self._seed)
+        elif self._mode == "dissolve":
+            assert self._source_cells is not None
+            blank = [[(" ", None)] * len(self._source_cells[0])
+                     for _ in self._source_cells]
+            cells = matrix_summon_frame(self._source_cells, blank,
                                         progress, seed=self._seed)
         else:
+            final = compose_face(iris=self._iris, mouth=0, blink=False)
             cells = summon_frame(final, progress, seed=self._seed)
         self._render_cells(cells)
 
@@ -689,9 +757,21 @@ class ConsoleCat(QObject):
         cur.removeSelectedText()
         return lines
 
+    def _viewport_cols(self) -> int:
+        """The console's visible width in character cells (never narrower
+        than the face)."""
+        fm = QFontMetricsF(self.output.font())
+        advance = max(1.0, fm.horizontalAdvance("M"))
+        return max(FACE_WIDTH,
+                   int(self.output.viewport().width() / advance) - 1)
+
     def _render_cells(self, cells):
         if self._start_cur is None or self._end_cur is None:
             return
+        # Center in the console: pad to the live viewport width (no-op for
+        # grids already captured at full width — pad_cells never shrinks).
+        cells = pad_cells(cells, self._viewport_cols())
+        self._last_cells = cells
         cur = QTextCursor(self.output.document())
         cur.setPosition(self._start_cur.position())
         cur.setPosition(self._end_cur.position(),
