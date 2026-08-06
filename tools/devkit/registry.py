@@ -51,6 +51,11 @@ def _build_pixel_lint() -> QWidget:
     return PixelLintPanel()
 
 
+def _build_frame_extractor() -> QWidget:
+    from tools.devkit.frame_extractor import FrameExtractorPanel
+    return FrameExtractorPanel()
+
+
 DEV_TOOLS = [
     ToolSpec("todo_board", "Dev Board", _build_todo_board),
     ToolSpec("pixel_studio", "Pixel Studio", _build_pixel_studio),
@@ -58,4 +63,5 @@ DEV_TOOLS = [
     ToolSpec("automated_tests", "Automated Tests", _build_test_runner),
     ToolSpec("ship_readiness", "Ship Readiness", _build_ship_readiness),
     ToolSpec("pixel_lint", "Pixel Style Lint", _build_pixel_lint),
+    ToolSpec("frame_extractor", "Frame Extractor", _build_frame_extractor),
 ]
