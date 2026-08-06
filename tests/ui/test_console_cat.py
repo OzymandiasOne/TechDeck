@@ -135,8 +135,9 @@ def test_summon_starts_dark():
 
 def test_summon_is_deterministic_per_seed():
     final = compose_face()
-    assert summon_frame(final, 0.5, seed=3) == summon_frame(final, 0.5, seed=3)
-    assert summon_frame(final, 0.5, seed=3) != summon_frame(final, 0.5, seed=4)
+    assert summon_frame(final, 0.7, seed=3) == summon_frame(final, 0.7, seed=3)
+    # Mid-flower, the materialization order's jitter differs by seed.
+    assert summon_frame(final, 0.7, seed=3) != summon_frame(final, 0.7, seed=4)
 
 
 def test_summon_opens_with_closed_lids():
@@ -152,7 +153,7 @@ def test_summon_opens_with_closed_lids():
 
 def test_summon_eyes_open_before_the_lower_face():
     final = compose_face()
-    frame = summon_frame(final, 0.30, seed=3)
+    frame = summon_frame(final, 0.36, seed=3)  # mid-stare, post-snap
     present = _present(frame)
     assert sum(1 for p in present if _in_eye(*p)) > 40  # eyes well open
     assert all(_in_eye(*p) for p in present)            # nothing else yet
@@ -160,19 +161,35 @@ def test_summon_eyes_open_before_the_lower_face():
 
 def test_summon_seeds_are_three_points():
     final = compose_face()
-    frame = summon_frame(final, 0.42, seed=3)
+    frame = summon_frame(final, 0.48, seed=3)
     lower = [p for p in _present(frame) if not _in_eye(*p)]
     assert len(lower) == 3  # nose tip + the two mouth corners
     assert len({r for r, _ in lower}) <= 2
 
 
-def test_summon_presence_is_monotonic():
+def test_summon_presence_is_monotonic_after_the_snap():
+    # The one sanctioned disappearance is the lid splitting open (its cells
+    # over the pupil hole return to darkness) — from the snap onward the
+    # face only ever gains ground on the dark.
     final = compose_face()
     prev = set()
-    for p in (0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0):
+    for p in (0.3, 0.4, 0.55, 0.7, 0.85, 1.0):
         now = _present(summon_frame(final, p, seed=3))
         assert prev <= now, f"cells vanished between steps at {p}"
         prev = now
+
+
+def test_summon_slits_are_straight_lines():
+    # During the hold, each eye's slit is one unbroken run of lid chars —
+    # it spans the pupil hole rather than breaking around it.
+    final = compose_face()
+    frame = summon_frame(final, 0.15, seed=3)
+    mid = (EYE_BOXES[0][0] + EYE_BOXES[0][2]) // 2
+    for er0, ec0, er1, ec1 in EYE_BOXES:
+        cols = [c for c in range(ec0, ec1 + 1) if frame[mid][c][0] != " "]
+        assert cols, "slit missing"
+        assert cols == list(range(min(cols), max(cols) + 1)), "slit is broken"
+        assert all(frame[mid][c][0] == "—" for c in cols)
 
 
 def test_face_html_emits_tier_colors_and_rows():

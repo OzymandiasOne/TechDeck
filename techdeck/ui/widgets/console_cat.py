@@ -187,17 +187,20 @@ def _cell_hash(r: int, c: int, seed: int, salt: int = 0) -> int:
 
 
 # ── the summon: the face comes FORWARD out of the dark ────────────────────
-# Choreography (progress 0..1): two closed-eye lid lines fade in from the
-# darkness, center-out → the lids OPEN wide, rows peeling away from the
-# center line (the pupil already on you) → three seed points appear: the
-# nose tip and the two mouth corners → the features FLOWER outward from
-# their seeds in unison. Materialized cells rise dim → mid → full tier as
-# progress advances, so the whole face brightens toward the viewer.
+# Choreography (progress 0..1): two straight slit lines GLOW IN from the
+# darkness (phosphor warming up — the closed eyes), hold a beat → the eyes
+# SNAP open like a cat's, the pupil already on you → they hold, staring →
+# the nose tip and mouth corners seed, and the lower face GRADUALLY flowers
+# outward from them. Materialized cells rise toward full tier as progress
+# advances, so the whole face brightens toward the viewer; open-eye cells
+# come in at mid brightness so the snap reads crisp, while the slits and the
+# lower face warm up out of the dark.
 
-_LID_IN = (0.02, 0.14)
-_EYES_OPEN = (0.16, 0.34)
-_SEEDS_AT = 0.40
-_FLOWER = (0.46, 0.88)
+_LID_IN = (0.03, 0.10)      # slits glow in, center-out
+_LID_RISE = 0.05            # the phosphor warm-up on each slit cell
+_EYES_OPEN = (0.24, 0.30)   # the snap — full open in a blink's time
+_SEEDS_AT = 0.46            # after a held stare
+_FLOWER = (0.50, 0.90)
 _RISE = 0.11            # per-tier-step delay after a cell materializes
 _TIER_RANK = {"dim": 0, "mid": 1, "bright": 2, "peak": 3}
 _TIER_BY_RANK = ("dim", "mid", "bright", "peak")
@@ -252,7 +255,7 @@ def _summon_schedule(final_cells, seed: int):
                 span = _EYES_OPEN[1] - _EYES_OPEN[0]
                 frac = abs(r - _EYE_MID) / max(1, EYE_BOXES[0][2] - _EYE_MID)
                 schedule[p] = (_EYES_OPEN[0] + span * frac
-                               + 0.03 * (u - 0.5))
+                               + 0.01 * (u - 0.5))
         else:
             seeds = [nose_seed] if kind == "nose" else mouth_seeds
             if p in ((nose_seed,) if kind == "nose" else mouth_seeds):
@@ -262,6 +265,19 @@ def _summon_schedule(final_cells, seed: int):
                 frac = flower_t(p, seeds) / (nose_max if kind == "nose"
                                              else mouth_max)
                 schedule[p] = _FLOWER[0] + span * frac + 0.02 * (u - 0.5)
+
+    # The slits must be STRAIGHT lines: schedule the mid-row cells the final
+    # face leaves blank (the pupil hole) too — they render as lid until the
+    # eyes snap open, then the lid splits and they return to darkness.
+    for er0, ec0, er1, ec1 in EYE_BOXES:
+        center_c = (ec0 + ec1) / 2
+        for c in range(ec0, ec1 + 1):
+            p = (_EYE_MID, c)
+            if p not in schedule and FACE_ART[_EYE_MID][c] != " ":
+                u = _cell_hash(_EYE_MID, c, seed) / 0x7FFFFFFF
+                frac = abs(c - center_c) / max(1.0, (ec1 - ec0) / 2)
+                schedule[p] = (_LID_IN[0] + (_LID_IN[1] - _LID_IN[0])
+                               * (0.75 * frac + 0.25 * u))
     return schedule
 
 
@@ -281,18 +297,28 @@ def summon_frame(final_cells, progress: float, seed: int = 0):
         out_row = []
         for c, (ch, tier) in enumerate(row):
             t_mat = schedule.get((r, c))
+            in_eye = _feature_of(r, c) == "eye"
+            if (lids_only and r == _EYE_MID and in_eye
+                    and t_mat is not None):
+                # The closed slits — unbroken lines (they span the pupil
+                # hole) glowing in dim → mid as the phosphor warms up.
+                if progress < t_mat:
+                    out_row.append((" ", None))
+                else:
+                    rank = min(1, int((progress - t_mat) / _LID_RISE))
+                    out_row.append((_BLINK_CHAR, _TIER_BY_RANK[rank]))
+                continue
             if ch == " " or t_mat is None or progress < t_mat:
                 out_row.append((" ", None))
                 continue
             # Late-materializing cells rise faster so everything reaches its
             # full tier just before progress hits 1.0 — no end-of-summon pop.
             rise = min(_RISE, max(0.02, (0.99 - t_mat) / 3))
-            if lids_only and r == _EYE_MID and _feature_of(r, c) == "eye":
-                # The closed lids, before the eyes open.
-                rank = min(1, int((progress - t_mat) / rise))
-                out_row.append((_BLINK_CHAR, _TIER_BY_RANK[rank]))
-                continue
-            rank = min(_TIER_RANK[tier], int((progress - t_mat) / rise))
+            # Eyes materialize at mid so the snap reads crisp; the lower
+            # face starts dim and grows out of the dark.
+            floor = 1 if in_eye else 0
+            rank = min(_TIER_RANK[tier],
+                       floor + int((progress - t_mat) / rise))
             out_row.append((ch, _TIER_BY_RANK[rank]))
         out.append(out_row)
     return out
