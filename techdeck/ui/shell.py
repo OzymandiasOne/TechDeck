@@ -294,6 +294,7 @@ class MainWindow(QMainWindow):
         self.console.input_provided.connect(self._on_console_input_provided)
         self.console.before_input_request.connect(self._flush_plugin_logs)
         self.console.dashboard_shown.connect(self._on_dashboard_shown)
+        self.console.raise_requested.connect(self._on_console_raise_requested)
         self.console.dashboard.set_idle_provider(self._idle_dashboard_data)
 
         # Create Run Selected button and add to console header
@@ -957,6 +958,19 @@ class MainWindow(QMainWindow):
             total = sum(sizes)
             desired = min(max(sizes[1], 460), max(total - 200, 200))
             self.home_splitter.setSizes([max(total - desired, 200), desired])
+
+    def _on_console_raise_requested(self, desired: int):
+        """An in-console effect (the cat) needs vertical room: expand the
+        console pane to at least `desired` px, dashboard-style."""
+        if not self.console.isVisible():
+            self._expand_console()
+        sizes = self.home_splitter.sizes()
+        if len(sizes) >= 2:
+            total = sum(sizes)
+            want = min(max(sizes[1], desired),
+                       max(total - HOME_APPS_MIN_HEIGHT, 200))
+            self.home_splitter.setSizes(
+                [max(total - want, HOME_APPS_MIN_HEIGHT), want])
 
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""

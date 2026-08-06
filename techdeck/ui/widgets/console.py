@@ -59,6 +59,10 @@ class ConsoleWidget(QWidget, ThemeAware):
     # External anchors (file:///, https://) never come through here — they
     # open with the OS as before.
     internal_link_clicked = Signal(str)
+    # An in-console effect needs vertical room (px of console-pane height):
+    # the shell raises the splitter, dashboard-style. The cat asks before
+    # materializing so the face is never born clipped.
+    raise_requested = Signal(int)
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800

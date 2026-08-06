@@ -201,6 +201,17 @@ def test_dissolve_when_gone_runs_callback_immediately(qapp):
     assert done == [True]
 
 
+def test_summon_requests_headroom_before_playing(qapp):
+    console, cat = _cat()
+    asked = []
+    console.raise_requested.connect(asked.append)
+    cat.summon("materialize")
+    assert len(asked) == 1
+    assert asked[0] > 200                   # face rows + console chrome
+    assert not cat._timer.isActive()        # raise beat first…
+    assert cat._raise_timer.isActive()      # …playback armed to follow
+
+
 def test_double_summon_is_ignored(qapp):
     console, cat = _cat()
     cat.summon("materialize")

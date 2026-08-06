@@ -492,6 +492,8 @@ TIMELINES = {
 _BLINK_MS = 150
 _BLINK_GAP_MS = (2000, 5000)
 _TICK_MS = 45
+_RAISE_SETTLE_MS = 260      # the console rises first; the summon starts
+                            # once the raise has landed as its own beat
 
 
 def progress_at(timeline, elapsed_ms: float) -> float:
@@ -552,6 +554,9 @@ class ConsoleCat(QObject):
         self._blink_timer = QTimer(self)
         self._blink_timer.setSingleShot(True)
         self._blink_timer.timeout.connect(self._blink_now)
+        self._raise_timer = QTimer(self)
+        self._raise_timer.setSingleShot(True)
+        self._raise_timer.timeout.connect(self._begin_playback)
         self._filter_installed = False
 
     # ── public API ───────────────────────────────────────────────────────
@@ -589,8 +594,25 @@ class ConsoleCat(QObject):
         self._end_cur = QTextCursor(doc)
         self._end_cur.setPosition(pos)
         self._state = "summoning"
-        self._clock.start()
+        # Ask the shell for headroom FIRST — the console rises, then the
+        # summon plays into a pane that already fits the face.
+        self._request_headroom()
         self.render_at(0.0)
+        self.console._scroll_to_bottom()
+        self._raise_timer.start(_RAISE_SETTLE_MS)
+
+    def _request_headroom(self):
+        fm = QFontMetricsF(self.output.font())
+        rows_px = int(len(FACE_ART) * fm.height()) + 30
+        chrome = self.console.height() - self.output.viewport().height()
+        if not 0 < chrome <= 400:
+            chrome = 160        # collapsed/odd geometry — a sane default
+        self.console.raise_requested.emit(rows_px + chrome)
+
+    def _begin_playback(self):
+        if self._state != "summoning":      # cleared during the raise beat
+            return
+        self._clock.start()
         self.console._scroll_to_bottom()
         self._timer.start()
 
@@ -600,6 +622,7 @@ class ConsoleCat(QObject):
             return
         self._timer.stop()
         self._blink_timer.stop()
+        self._raise_timer.stop()
         self._remove_filter()
         if self._start_cur is not None and self._end_cur is not None:
             cur = QTextCursor(self.output.document())
@@ -613,6 +636,7 @@ class ConsoleCat(QObject):
         """/clear teardown: the document is being wiped — just reset state."""
         self._timer.stop()
         self._blink_timer.stop()
+        self._raise_timer.stop()
         self._remove_filter()
         self._reset()
 
@@ -647,6 +671,7 @@ class ConsoleCat(QObject):
             return
         self._timer.stop()
         self._blink_timer.stop()
+        self._raise_timer.stop()
         self._remove_filter()
         self._mode = "dissolve"
         self._source_cells = (self._last_cells
