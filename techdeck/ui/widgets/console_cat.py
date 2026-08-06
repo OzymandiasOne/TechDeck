@@ -1,54 +1,74 @@
 """The Cheshire Cat — character-grid face art + compositor for the console.
 
 The cat is rendered as colored monospace text INSIDE the console's QTextEdit
-(never a widget overlay), in the phosphor-terminal style of the reference set:
-character density carries brightness. This module owns the ART and the pure
-COMPOSITOR; the animator that writes frames into the console document lives
-with the console wiring (phase 3).
+(never a widget overlay). The eyes, nose, and blink are TRANSCRIBED from the
+reference ASCII cat (reference/cheshire_cat_1088p_frames — the moshi cat),
+glyph for glyph; the striped Cheshire grin is ours (the reference cat has no
+mouth to speak of, and the grin is the point of this character).
 
-Editing the art (house style — hand-editable grids like the moth's
-MOTH_FRAMES and the fidget's SPINNER_ART):
+Editing the art (house style — hand-editable grids like MOTH_FRAMES):
 
-FACE_GRID legend (every row exactly the same length):
-  .  empty
-  1  dim glow        (sparse halo char)
-  2  mid glow
-  3  bright glow
-  L  left eye socket  (textured field computed at render time; iris stamps here)
-  R  right eye socket
-  M  mouth region     (rows replaced by the active MOUTH_FRAMES frame)
+  EYE_LEFT / EYE_RIGHT   18x8 glyph grids, '.' = empty. Drawn WITHOUT a
+                         pupil — the pupil is stamped at compose time.
+  PUPIL                  the 5x3-position gaze stamp: a DIM squiggle patch —
+                         a hole in the glow, exactly as in the reference
+                         (never a bright cluster).
+  NOSE                   the small squiggle cluster between the eyes.
+  MOUTH_FRAMES           closed / half / open grin, tier-coded 1/2/3 plus
+                         '|' tooth separators. The resting frame already
+                         wears the full striped grin.
 
-MOUTH_FRAMES: three frames (closed / half / open), each exactly the size of
-the M region. Same 1/2/3 tiers, plus '|' — a tooth separator, drawn verbatim
-at bright tier (the striped Cheshire grin).
+Brightness comes from a per-character tier map (CHAR_TIER): '·' halo dots are
+dim, 'ox=+0' structure chars are mid, '%' field is bright. Blink is DERIVED,
+not drawn: every eye glyph collapses to a lid line '—' of the same span, the
+pupil squiggle staying faintly visible — the reference's exact behaviour.
 
-The socket texture, rim detection, and iris clipping are computed at render
-time from the shapes (precedent: the fidget auto-traces its outline). Preview
-any change with `python tools/preview_console_cat.py`.
+Preview any change with `python tools/preview_console_cat.py`.
 """
 
 from __future__ import annotations
 
-FACE_GRID = [
-    "......1............................1......",
-    ".....131..........................131.....",
-    "....13331........................13331....",
-    "...133333331..................133333331...",
-    "......LLLLLLLLL............RRRRRRRRR......",
-    ".....LLLLLLLLLLL..........RRRRRRRRRRR.....",
-    "....LLLLLLLLLLLLL........RRRRRRRRRRRRR....",
-    "....LLLLLLLLLLLLL........RRRRRRRRRRRRR....",
-    ".....LLLLLLLLLLL..........RRRRRRRRRRR.....",
-    "......LLLLLLLLL............RRRRRRRRR......",
-    "...................1221...................",
-    "........MMMMMMMMMMMMMMMMMMMMMMMMMM........",
-    "........MMMMMMMMMMMMMMMMMMMMMMMMMM........",
-    "........MMMMMMMMMMMMMMMMMMMMMMMMMM........",
+# ── components (transcribed) ──────────────────────────────────────────────
+
+EYE_LEFT = [
+    ".....··oo··.......",
+    "...·ox=%%%%%%xx·..",
+    "..·o=%%%%%%%%==%x·",
+    "..=%%%%%%%%%+%%=x·",
+    ".·o%%%%%%%%%%o%%o·",
+    "..x%%%%%%%%%%o%=·.",
+    "..·ox=%%%%+%%oo·..",
+    "....·oooo··.......",
+]
+
+EYE_RIGHT = [
+    "......·o··........",
+    "...·ox=%%%%%%xx·..",
+    "..·=%%%%%%%%=+%%x·",
+    "..=%%%%%%%%+%%%%x·",
+    ".x%%%%%%%%%%o%=·..",
+    ".o%%%%%%%=%%+=·...",
+    "..xx=%%%%o%%o·....",
+    ".....·oooo···.....",
+]
+
+# The gaze stamp — dim squiggles, mid-tier blend chars at the edges. Stamped
+# only over field cells so it never escapes the eye.
+PUPIL = [
+    "+~~~=",
+    "~~~~o",
+    "+~~oo",
+]
+
+NOSE = [
+    "~~~~",
+    "=%%%%x",
+    "=%%~",
 ]
 
 # closed / half / open — cycled while the cat speaks. The RESTING frame
-# already wears the full striped grin (the signature — the cat grins at
-# rest); speaking widens and brightens it rather than revealing it.
+# already wears the full striped grin (the signature); speaking widens and
+# brightens it rather than revealing it.
 MOUTH_FRAMES = [
     [
         "33" + "." * 22 + "33",
@@ -67,16 +87,48 @@ MOUTH_FRAMES = [
     ],
 ]
 
-# The grin alone — what remains mid-dissolve (phase 4) and the last thing
-# plugin output erases.
-GRIN_ROW = 12   # FACE_GRID row where the grin's tooth band sits
+# ── assembly ──────────────────────────────────────────────────────────────
 
-# 5 x 3 iris positions (ix 0..4 left→right, iy 0..2 up→down), matching the
-# reference recipe's pre-generated frame grid. (2, 1) is dead center.
+FACE_WIDTH = 45
+EYE_TOP = 0
+EYE_LEFT_COL = 2
+EYE_RIGHT_COL = 25
+
+_EYE_W = len(EYE_LEFT[0])
+_EYE_H = len(EYE_LEFT)
+
+
+def _assemble_face():
+    """Build the full glyph grid from the components. Mouth rows are region
+    markers ('M') resolved against MOUTH_FRAMES at compose time."""
+    rows = []
+    for r in range(_EYE_H):
+        row = ["."] * FACE_WIDTH
+        for c, ch in enumerate(EYE_LEFT[r]):
+            row[EYE_LEFT_COL + c] = ch
+        for c, ch in enumerate(EYE_RIGHT[r]):
+            row[EYE_RIGHT_COL + c] = ch
+        rows.append("".join(row))
+    for nose_row in NOSE:
+        start = (FACE_WIDTH - len(nose_row)) // 2
+        rows.append("." * start + nose_row
+                    + "." * (FACE_WIDTH - start - len(nose_row)))
+    m_w = len(MOUTH_FRAMES[0][0])
+    m_start = (FACE_WIDTH - m_w) // 2
+    for _ in MOUTH_FRAMES[0]:
+        rows.append("." * m_start + "M" * m_w
+                    + "." * (FACE_WIDTH - m_start - m_w))
+    return rows
+
+
+FACE_GRID = _assemble_face()
+
+# The grin's tooth band — what the dissolve erases last.
+GRIN_ROW = _EYE_H + len(NOSE) + 1
+
+# 5 x 3 gaze positions (ix 0..4 left→right, iy 0..2 up→down); (2, 1) centers.
 IRIS_COLS = 5
 IRIS_ROWS = 3
-IRIS_W = 4
-IRIS_H = 2
 
 # Phosphor tier palette — classic green CRT. Theme hook comes later; keep
 # every color here so a swap is one dict.
@@ -84,53 +136,42 @@ PHOSPHOR = {
     "dim": "#1E5A2A",
     "mid": "#2FA84F",
     "bright": "#5CE87A",
-    "iris": "#B6FFC6",
 }
 
-# Deterministic per-cell character choice (stable across frames — the face
-# must not shimmer while idle). Indexed by (x * 7 + y * 13) % len.
-_TIER_CHARS = {
-    "1": ("·",),                    # ·
-    "2": ("=", "%", "=", "~"),
-    "3": ("%", "@", "%", "%"),
+# Field cells the pupil may stamp over / the blink collapses to lid lines.
+_FIELD_CHARS = set("%=x+o0")
+CHAR_TIER = {
+    "·": "dim", "~": "dim",
+    "o": "mid", "x": "mid", "=": "mid", "+": "mid", "0": "mid", "—": "mid",
+    "%": "bright", "|": "bright", "@": "bright",
 }
-_SOCKET_INTERIOR = ("%", "=", "%", "~", "=", "%")
-_SOCKET_RIM = ("·", "·", "·", "o")
-_BLINK_CHAR = "—"                   # — (lid line)
-_IRIS_CHAR = "@"
+# Nose squiggles read clearly in the reference — mid, not pupil-dim.
+_NOSE_TIER = {"~": "mid"}
 
+_TIER_CHARS = {"1": ("·",), "2": ("=", "%", "=", "~"), "3": ("%", "@", "%", "%")}
 _TIER_OF = {"1": "dim", "2": "mid", "3": "bright"}
+_BLINK_CHAR = "—"
 
-
-def _grid_dims():
-    return len(FACE_GRID), len(FACE_GRID[0])
-
-
-def _socket_cells(marker: str):
-    """All (row, col) of one eye socket, plus its bounding box."""
-    cells = set()
-    for r, row in enumerate(FACE_GRID):
-        for c, ch in enumerate(row):
-            if ch == marker:
-                cells.add((r, c))
-    rows = [r for r, _ in cells]
-    cols = [c for _, c in cells]
-    bbox = (min(rows), min(cols), max(rows), max(cols))
-    return cells, bbox
-
-
-def _iris_origin(bbox, ix: int, iy: int):
-    """Top-left cell of the iris stamp for grid position (ix, iy)."""
-    r0, c0, r1, c1 = bbox
-    span_w = (c1 - c0 + 1) - IRIS_W
-    span_h = (r1 - r0 + 1) - IRIS_H
-    col = c0 + round(span_w * ix / (IRIS_COLS - 1))
-    row = r0 + round(span_h * iy / (IRIS_ROWS - 1))
-    return row, col
+# Pupil travel: interior of each eye (inset from the rim) minus stamp size.
+_PUPIL_H = len(PUPIL)
+_PUPIL_W = len(PUPIL[0])
+_PUPIL_ROW_MIN = 1
+_PUPIL_ROW_MAX = _EYE_H - 2 - _PUPIL_H   # bottom rim row excluded
+_PUPIL_COL_MIN = 3
+_PUPIL_COL_MAX = _EYE_W - 3 - _PUPIL_W
 
 
 def _pick(seq, r: int, c: int) -> str:
     return seq[(c * 7 + r * 13) % len(seq)]
+
+
+def _pupil_origin(ix: int, iy: int):
+    """Stamp origin (within one eye's local grid) for gaze (ix, iy)."""
+    row = _PUPIL_ROW_MIN + round(
+        (_PUPIL_ROW_MAX - _PUPIL_ROW_MIN) * iy / (IRIS_ROWS - 1))
+    col = _PUPIL_COL_MIN + round(
+        (_PUPIL_COL_MAX - _PUPIL_COL_MIN) * ix / (IRIS_COLS - 1))
+    return row, col
 
 
 def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
@@ -141,34 +182,14 @@ def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
 
     iris:  (ix, iy) in the 5x3 gaze grid; both eyes move together.
     mouth: index into MOUTH_FRAMES.
-    blink: closed lids — irises hidden, sockets collapse to lid lines.
+    blink: eyes collapse to lid lines of the same span, the pupil squiggle
+           staying faintly visible (the reference's blink).
     """
     ix, iy = iris
     if not (0 <= ix < IRIS_COLS and 0 <= iy < IRIS_ROWS):
         raise ValueError(f"iris out of range: {iris!r}")
     frame = MOUTH_FRAMES[mouth]
-
-    left_cells, left_bbox = _socket_cells("L")
-    right_cells, right_bbox = _socket_cells("R")
-    sockets = left_cells | right_cells
-    iris_cells = set()
-    if not blink:
-        for cells, bbox in ((left_cells, left_bbox), (right_cells, right_bbox)):
-            r0, c0 = _iris_origin(bbox, ix, iy)
-            for dr in range(IRIS_H):
-                for dc in range(IRIS_W):
-                    if (r0 + dr, c0 + dc) in cells:   # clip to the shape
-                        iris_cells.add((r0 + dr, c0 + dc))
-
-    # Lid line rows: the middle of each socket's bbox when blinking.
-    lid_rows = set()
-    if blink:
-        for r0, _, r1, _ in (left_bbox, right_bbox):
-            mid = (r0 + r1) // 2
-            lid_rows.update((mid, mid + 1))
-
-    mouth_rows = [r for r, row in enumerate(FACE_GRID) if "M" in row]
-    mouth_start_col = FACE_GRID[mouth_rows[0]].index("M")
+    p_row, p_col = _pupil_origin(ix, iy)
 
     out = []
     for r, row in enumerate(FACE_GRID):
@@ -176,27 +197,10 @@ def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
         for c, ch in enumerate(row):
             if ch == ".":
                 out_row.append((" ", None))
-            elif ch in _TIER_OF:
-                out_row.append((_pick(_TIER_CHARS[ch], r, c), _TIER_OF[ch]))
-            elif ch in ("L", "R"):
-                if blink:
-                    if r in lid_rows:
-                        out_row.append((_BLINK_CHAR, "mid"))
-                    else:
-                        out_row.append((" ", None))
-                elif (r, c) in iris_cells:
-                    out_row.append((_IRIS_CHAR, "iris"))
-                else:
-                    # Rim cells (any 4-neighbour outside the socket) render
-                    # sparse; the interior renders as the dense field.
-                    neighbours = ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1))
-                    rim = any(n not in sockets for n in neighbours)
-                    seq = _SOCKET_RIM if rim else _SOCKET_INTERIOR
-                    tier = "dim" if rim else "mid"
-                    out_row.append((_pick(seq, r, c), tier))
-            elif ch == "M":
-                m_row = frame[r - mouth_rows[0]]
-                m_ch = m_row[c - mouth_start_col]
+                continue
+            if ch == "M":
+                m_start = row.index("M")
+                m_ch = frame[r - GRIN_ROW + 1][c - m_start]
                 if m_ch == ".":
                     out_row.append((" ", None))
                 elif m_ch == "|":
@@ -204,8 +208,30 @@ def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
                 else:
                     out_row.append((_pick(_TIER_CHARS[m_ch], r, c),
                                     _TIER_OF[m_ch]))
-            else:
-                raise ValueError(f"unknown grid char {ch!r} at {(r, c)}")
+                continue
+            # Eye cells: pupil stamp, then blink collapse, then the glyph.
+            in_eye = r < _EYE_H
+            if in_eye:
+                local_col = None
+                if EYE_LEFT_COL <= c < EYE_LEFT_COL + _EYE_W:
+                    local_col = c - EYE_LEFT_COL
+                elif EYE_RIGHT_COL <= c < EYE_RIGHT_COL + _EYE_W:
+                    local_col = c - EYE_RIGHT_COL
+                if (local_col is not None
+                        and p_row <= r - EYE_TOP < p_row + _PUPIL_H
+                        and p_col <= local_col < p_col + _PUPIL_W
+                        and ch in _FIELD_CHARS):
+                    p_ch = PUPIL[r - EYE_TOP - p_row][local_col - p_col]
+                    out_row.append((p_ch, CHAR_TIER[p_ch]))
+                    continue
+                if blink:
+                    out_row.append((_BLINK_CHAR, "mid"))
+                    continue
+                out_row.append((ch, CHAR_TIER[ch]))
+                continue
+            # Nose rows.
+            tier = _NOSE_TIER.get(ch, CHAR_TIER[ch])
+            out_row.append((ch, tier))
         out.append(out_row)
     return out
 
