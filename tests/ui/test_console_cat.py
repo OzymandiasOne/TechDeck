@@ -5,7 +5,8 @@ import pytest
 from techdeck.ui.widgets.console_cat import (
     FACE_ART, FACE_WIDTH, EYE_BOXES, PUPIL, MOUTH_FRAMES, MOUTH_TOP,
     GRIN_ROW, IRIS_COLS, IRIS_ROWS, PHOSPHOR, CHAR_TIER,
-    compose_face, face_html, summon_frame,
+    compose_face, face_html, matrix_summon_frame, summon_frame,
+    text_to_cells,
 )
 
 LEGAL_CHARS = set(" ·~ox=+%@")
@@ -215,6 +216,56 @@ def test_summon_slits_are_straight_lines():
         assert cols, "slit missing"
         assert cols == list(range(min(cols), max(cols) + 1)), "slit is broken"
         assert all(frame[mid][c][0] == "—" for c in cols)
+
+
+SAMPLE_LINES = [
+    "[922 Kitting]: Batch 481 kit pages merged",
+    "System: Run complete - 3 plugins, 0 errors",
+    "You: /puppetmaster",
+]
+
+
+def test_text_to_cells_pads_and_clips():
+    cells = text_to_cells(["abc", "x" * 100])
+    assert len(cells) == len(FACE_ART)
+    assert all(len(row) == FACE_WIDTH for row in cells)
+    assert cells[-1][0][0] == "x"     # long line clipped to width, kept last
+    assert cells[-2][2][0] == "c"     # short line above it
+    assert cells[0] == [(" ", None)] * FACE_WIDTH   # padded with darkness
+
+
+def test_matrix_summon_starts_on_the_source_text():
+    # Seamless by construction: at progress 0 the frame IS the console text.
+    final = compose_face()
+    src = text_to_cells(SAMPLE_LINES)
+    assert matrix_summon_frame(src, final, 0.0, seed=3) == src
+
+
+def test_matrix_summon_ends_on_the_face():
+    final = compose_face()
+    src = text_to_cells(SAMPLE_LINES)
+    assert matrix_summon_frame(src, final, 1.0, seed=3) == final
+
+
+def test_matrix_summon_is_deterministic_per_seed():
+    final = compose_face()
+    src = text_to_cells(SAMPLE_LINES)
+    a = matrix_summon_frame(src, final, 0.5, seed=3)
+    assert a == matrix_summon_frame(src, final, 0.5, seed=3)
+    assert a != matrix_summon_frame(src, final, 0.5, seed=4)
+
+
+def test_matrix_summon_decays_the_text_into_rain():
+    final = compose_face()
+    src = text_to_cells(SAMPLE_LINES)
+    frame = matrix_summon_frame(src, final, 0.25, seed=3)
+    assert frame != src and frame != final
+    # Mid-decay, some cells hold rain: chars matching neither the source
+    # nor the finished face at that position.
+    rain = sum(1 for r, row in enumerate(frame)
+               for c, (ch, _) in enumerate(row)
+               if ch != " " and ch != src[r][c][0] and ch != final[r][c][0])
+    assert rain > 10
 
 
 def test_face_html_emits_tier_colors_and_rows():

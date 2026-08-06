@@ -338,6 +338,98 @@ def summon_frame(final_cells, progress: float, seed: int = 0):
     return out
 
 
+# ── the /puppetmaster summon: the console falls apart into rain ──────────
+# The second, louder way in. Where the startup-link materialization grows
+# out of empty darkness, /puppetmaster corrupts what is ALREADY THERE: the
+# console's existing text decays character-by-character into matrix rain,
+# the rain streams downward and thins, and the face condenses out of it.
+# Seamless by construction — at progress 0 the frame IS the source text.
+
+_RAIN_CHARS = "·~ox=+%@01"
+_DECAY = (0.04, 0.30)       # source chars corrupt into rain
+_FALL_START = 0.12          # rain begins streaming downward
+_DIE = (0.22, 0.46)         # rain thins back to darkness
+_CONDENSE_APPEAR = 0.18     # face-cell noise starts claiming its spot
+_LOCK = (0.38, 0.90)        # face cells lock to their final glyph
+_FLASH = 0.05               # peak-bright instant on lock
+
+
+def text_to_cells(lines, rows: int | None = None, width: int | None = None):
+    """Console text → a source grid for matrix_summon_frame. The LAST
+    `rows` lines are kept (the face block replaces the console's tail),
+    clipped/padded to `width`; text renders mid-tier."""
+    rows = rows or len(FACE_ART)
+    width = width or FACE_WIDTH
+    lines = [str(ln) for ln in lines][-rows:]
+    while len(lines) < rows:
+        lines.insert(0, "")
+    out = []
+    for line in lines:
+        line = line[:width].ljust(width)
+        out.append([(ch, "mid") if ch != " " else (" ", None)
+                    for ch in line])
+    return out
+
+
+def matrix_summon_frame(source_cells, final_cells, progress: float,
+                        seed: int = 0):
+    """One frame of the /puppetmaster summon (see choreography above).
+
+    Deterministic for a given seed. progress 0.0 → exactly source_cells
+    (the console text, undisturbed); 1.0 → exactly final_cells. Between,
+    the text corrupts to rain, falls, dies out, and the face condenses.
+    """
+    if progress >= 1.0:
+        return [list(row) for row in final_cells]
+    rows = len(final_cells)
+    width = len(final_cells[0])
+    tick = int(progress * 24)
+    out = []
+    for r in range(rows):
+        out_row = []
+        for c in range(width):
+            ch_f, tier_f = final_cells[r][c]
+            u = _cell_hash(r, c, seed) / 0x7FFFFFFF
+            appear = (_CONDENSE_APPEAR
+                      + 0.22 * (r / max(1, rows - 1)) * (0.5 + 0.5 * u))
+            lock = (_LOCK[0] + (_LOCK[1] - _LOCK[0])
+                    * (0.65 * u + 0.35 * (r / max(1, rows - 1))))
+            if ch_f != " " and progress >= lock:
+                if progress < lock + _FLASH:
+                    out_row.append((ch_f, "peak"))
+                else:
+                    out_row.append((ch_f, tier_f))
+                continue
+            if ch_f != " " and progress >= appear:
+                n = _cell_hash(r, c, seed, tick)
+                out_row.append((_RAIN_CHARS[n % len(_RAIN_CHARS)],
+                                "dim" if n & 1 else "mid"))
+                continue
+            # Otherwise: whatever source text is falling through this cell.
+            speed = 0.6 + 0.9 * (_cell_hash(0, c, seed, 1) / 0x7FFFFFFF)
+            offset = int(max(0.0, progress - _FALL_START)
+                         * rows * 1.8 * speed)
+            src_r = r - offset
+            if 0 <= src_r < len(source_cells):
+                s_ch, s_tier = source_cells[src_r][c]
+                if s_ch != " ":
+                    su = _cell_hash(src_r, c, seed, 2) / 0x7FFFFFFF
+                    corrupt = _DECAY[0] + (_DECAY[1] - _DECAY[0]) * su
+                    die = _DIE[0] + (_DIE[1] - _DIE[0]) * su
+                    if progress < corrupt:
+                        out_row.append((s_ch, s_tier))
+                    elif progress < die:
+                        n = _cell_hash(src_r, c, seed, 3 + tick)
+                        out_row.append((_RAIN_CHARS[n % len(_RAIN_CHARS)],
+                                        "dim" if n % 3 else "mid"))
+                    else:
+                        out_row.append((" ", None))
+                    continue
+            out_row.append((" ", None))
+        out.append(out_row)
+    return out
+
+
 def face_html(cells, palette=None) -> str:
     """Render composed cells to HTML (consecutive same-tier runs merged into
     one span) for insertion into the console document. Rows joined with \\n —
