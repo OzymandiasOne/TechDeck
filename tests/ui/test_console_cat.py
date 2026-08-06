@@ -170,12 +170,26 @@ def test_summon_stare_plays_on_fully_lit_eyes():
                 assert frame[r][c] == final[r][c], (r, c)
 
 
-def test_summon_seeds_are_three_points():
-    final = compose_face()
-    frame = summon_frame(final, 0.48, seed=3)
+def _lower_by_region(frame):
+    from techdeck.ui.widgets.console_cat import MOUTH_TOP
     lower = [p for p in _present(frame) if not _in_eye(*p)]
-    assert len(lower) == 3  # nose tip + the two mouth corners
-    assert len({r for r, _ in lower}) <= 2
+    nose = [p for p in lower if p[0] < MOUTH_TOP]
+    mouth = [p for p in lower if p[0] >= MOUTH_TOP]
+    return nose, mouth
+
+
+def test_summon_nose_breaches_first():
+    final = compose_face()
+    # The nose tip is the lone lower-face point right after the stare…
+    nose, mouth = _lower_by_region(summon_frame(final, 0.46, seed=3))
+    assert len(nose) == 1
+    assert mouth == []
+    # …and is well into its bloom before the mouth corners even seed.
+    nose, mouth = _lower_by_region(summon_frame(final, 0.53, seed=3))
+    assert len(nose) > 3
+    assert mouth == []
+    nose, mouth = _lower_by_region(summon_frame(final, 0.56, seed=3))
+    assert len(mouth) == 2  # the two corner seeds arrive while the nose finishes
 
 
 def test_summon_presence_is_monotonic_after_the_snap():

@@ -201,8 +201,13 @@ _LID_RISE = 0.05            # the phosphor warm-up on each slit cell
 _EYES_OPEN = (0.24, 0.30)   # the snap — full open in a blink's time
 _EYE_RISE = 0.03            # eyes hit FULL brightness fast (by ~0.36), so
                             # the stare beat plays on a fully-lit face
-_SEEDS_AT = 0.46            # after the held stare
-_FLOWER = (0.50, 0.90)
+# The lower face breaches nose-first — the topography of a face coming
+# forward through a surface: the nose tip is the nearest point, so it seeds
+# and blooms ahead; the mouth corners follow while the nose is finishing.
+_NOSE_SEED_AT = 0.44        # after the held stare
+_NOSE_FLOWER = (0.47, 0.62)
+_MOUTH_SEED_AT = 0.54
+_MOUTH_FLOWER = (0.58, 0.90)
 _RISE = 0.11            # per-tier-step delay after a cell materializes
 _TIER_RANK = {"dim": 0, "mid": 1, "bright": 2, "peak": 3}
 _TIER_BY_RANK = ("dim", "mid", "bright", "peak")
@@ -258,15 +263,20 @@ def _summon_schedule(final_cells, seed: int):
                 frac = abs(r - _EYE_MID) / max(1, EYE_BOXES[0][2] - _EYE_MID)
                 schedule[p] = (_EYES_OPEN[0] + span * frac
                                + 0.01 * (u - 0.5))
-        else:
-            seeds = [nose_seed] if kind == "nose" else mouth_seeds
-            if p in ((nose_seed,) if kind == "nose" else mouth_seeds):
-                schedule[p] = _SEEDS_AT
+        elif kind == "nose":
+            if p == nose_seed:
+                schedule[p] = _NOSE_SEED_AT
             else:
-                span = _FLOWER[1] - _FLOWER[0]
-                frac = flower_t(p, seeds) / (nose_max if kind == "nose"
-                                             else mouth_max)
-                schedule[p] = _FLOWER[0] + span * frac + 0.02 * (u - 0.5)
+                span = _NOSE_FLOWER[1] - _NOSE_FLOWER[0]
+                frac = flower_t(p, [nose_seed]) / nose_max
+                schedule[p] = _NOSE_FLOWER[0] + span * frac + 0.02 * (u - 0.5)
+        else:
+            if p in mouth_seeds:
+                schedule[p] = _MOUTH_SEED_AT
+            else:
+                span = _MOUTH_FLOWER[1] - _MOUTH_FLOWER[0]
+                frac = flower_t(p, mouth_seeds) / mouth_max
+                schedule[p] = _MOUTH_FLOWER[0] + span * frac + 0.02 * (u - 0.5)
 
     # The slits must be STRAIGHT lines: schedule the mid-row cells the final
     # face leaves blank (the pupil hole) too — they render as lid until the
