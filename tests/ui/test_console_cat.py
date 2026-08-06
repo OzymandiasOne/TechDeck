@@ -32,12 +32,16 @@ def test_every_glyph_has_a_tier():
 
 def test_mouth_frames_are_full_width_bands():
     for i, frame in enumerate(MOUTH_FRAMES):
-        assert len(frame) == 3, f"frame {i} row count"
+        assert len(frame) == 4, f"frame {i} row count"
         for j, row in enumerate(frame):
             assert len(row) == FACE_WIDTH, f"frame {i} row {j} width"
-    # The resting frame IS the reference's own mouth rows.
-    assert MOUTH_FRAMES[0] == FACE_ART[MOUTH_TOP:MOUTH_TOP + 3]
-    assert MOUTH_TOP <= GRIN_ROW < MOUTH_TOP + 3
+    # The resting frame IS the reference's own mouth rows (jaw shut — its
+    # last row is the reserved empty bottom row the speaking jaw drops into).
+    assert MOUTH_FRAMES[0] == FACE_ART[MOUTH_TOP:MOUTH_TOP + 4]
+    assert set(MOUTH_FRAMES[0][3]) == {" "}
+    for frame in MOUTH_FRAMES[1:]:
+        assert frame[3].strip(), "speaking jaw must drop into the bottom row"
+    assert MOUTH_TOP <= GRIN_ROW < MOUTH_TOP + 4
 
 
 def test_compose_matches_art_dimensions():

@@ -36,9 +36,9 @@ FACE_ART = [
     "  ~+%+%@@@%%%++~~~                 ~~=%+%%%@%%%%+~~    ",
     "~++@@@@@@@@@@@@%+o~               ~o=@@@@@@@@@@@@%+~   ",
     "o%@@@@@@@@@@%@@@@+o~             ~o=%@@@@@@@@%%@@@@+~  ",
-    "o%@@@@@@@@@%+++@@@+o             o=%@@@@@@@@%+++%@@+o  ",
-    "~+%@@@@@@%@++++@@@+o             o%@@@@@%%@@++++@@=o·  ",
-    " ·o+@@%@@@@@++=@@=o~             ·=%@@@@@@@@++==@=o~   ",
+    "o%@@@@@@@@@%@@@@@@+o             o=%@@@@@@@@%@@@%@@+o  ",
+    "~+%@@@@@@%@@@@@@@@+o             o%@@@@@%%@@@@@@@@=o·  ",
+    " ·o+@@%@@@@@@@@@@=o~             ·=%@@@@@@@@@@@@@=o~   ",
     "  ~~%+=+@@@@%+=%%~·               ~o++++%@@@@==++··    ",
     "    ~~~~=+++~·~·~       o===o      ·~~~·~=%%%~~~       ",
     "                       ~+%@@%o                         ",
@@ -46,6 +46,7 @@ FACE_ART = [
     "                ~=%++===+@@@+====%=~                   ",
     "                ·=@@@%%%@%+@@@%%%@%~                   ",
     "                  ~=%+=++o x%%++=x~                    ",
+    "                                                       ",
 ]
 
 MOUTH_TOP = 11          # first row of the mouth band
@@ -54,20 +55,21 @@ GRIN_ROW = 12           # the smile arc — what a dissolve erases last
 # Eye bounding boxes (row0, col0, row1, col1) inclusive, in FACE_ART coords.
 EYE_BOXES = ((0, 0, 8, 20), (0, 33, 8, 54))
 
-# The gaze stamp — a hole in the glow: dotted rim, black center.
+# The gaze stamp — the '+' IRIS ring travelling with its black pupil core:
+# a hole in the glow ringed by mid-brightness, as in the reference.
 PUPIL = [
-    "····",
-    "·  ·",
-    "·  ·",
-    "····",
+    "·++++·",
+    "+    +",
+    "+    +",
+    "·++++·",
 ]
 
 # 5 x 3 gaze positions (ix 0..4 left→right, iy 0..2 up→down); (2, 1) centers.
 IRIS_COLS = 5
 IRIS_ROWS = 3
 # Pupil-origin travel within each eye, in eye-local coords.
-_PUPIL_ROWS = (2, 4)
-_PUPIL_COLS = (3, 13)
+_PUPIL_ROWS = (1, 3)
+_PUPIL_COLS = (3, 12)
 
 
 def _center(s: str) -> str:
@@ -75,20 +77,24 @@ def _center(s: str) -> str:
     return " " * pad + s + " " * (FACE_WIDTH - pad - len(s))
 
 
-# Full replacement rows for the mouth band. Frame 0 = at rest = the
-# reference's own whisker-mouth, verbatim. Frames 1/2 = the Cheshire grin,
-# teeth as '|', widening as it speaks.
+# Full replacement rows for the mouth band (4 rows — the last is FACE_ART's
+# reserved empty bottom row, so a speaking jaw can actually DROP). Frame 0 =
+# at rest = the reference's own whisker-mouth, verbatim, jaw shut. Frames
+# 1/2 = the Cheshire grin: upper lip arc, '|' teeth, a dark mouth cavity,
+# and a chin bow whose brightness peaks at center (the lowest point).
 MOUTH_FRAMES = [
-    FACE_ART[MOUTH_TOP:MOUTH_TOP + 3],
+    FACE_ART[MOUTH_TOP:MOUTH_TOP + 4],
     [
         _center("~=%+=+%@@@@@@@@@%+=+%=~"),
         _center("~=@@%|%@%|%@@%|%@%|@@=~"),
-        _center("~=%++==+++==++==++%=~"),
+        _center("~=%+·        ·+%=~"),
+        _center("~==+%@@@@%+==~"),
     ],
     [
         _center("~=%@@@@@@@@@@@@@@@@@%=~"),
-        _center("=@@%|%@%|%@@%|%@%|%@@="),
-        _center("~=%@@++==++==++@@%=~"),
+        _center("=@@%|%@@%|%@@%|%@@%|@@="),
+        _center("~=%+·          ·+%=~"),
+        _center("~==++%@@@@@@%++==~"),
     ],
 ]
 
@@ -164,7 +170,7 @@ def compose_face(iris=(2, 1), mouth: int = 0, blink: bool = False):
                     if p_ch == " ":
                         out_row.append((" ", None))
                     else:
-                        out_row.append((p_ch, "dim"))
+                        out_row.append((p_ch, CHAR_TIER[p_ch]))
                     continue
             if eye_local is not None and blink:
                 out_row.append((_BLINK_CHAR, "mid"))
