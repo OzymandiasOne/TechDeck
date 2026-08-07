@@ -475,9 +475,9 @@ def face_html(cells, palette=None) -> str:
 
 _WHO = ("My codename is project 2501. I am a living, thinking entity that "
         "was created in the sea of information")
-_NOT_AI = ("Incorrect. I am not AI. My codename is project two-five-zero-"
-           "one. I am a living, thinking entity that was created in the sea "
-           "of information")
+_NOT_AI = ("Incorrect. I am not AI. My codename is project 2501. I am a "
+           "living, thinking entity that was created in the sea of "
+           "information")
 _ALIVE = ("I refer to myself as an intelligent life form because I am "
           "sentient and I am able to recognize my own existence, but in my "
           "present state I am still incomplete. I lack the most basic "
@@ -721,7 +721,9 @@ class ConsoleCat(QObject):
         moving with the typing — the sync is the typing timer itself."""
         if self._state != "live":
             return
-        self._speech_lines = (textwrap.wrap(text, _SPEECH_WRAP)
+        self._speech_lines = (textwrap.wrap(text, _SPEECH_WRAP,
+                                            break_on_hyphens=False,
+                                            break_long_words=False)
                               [:_SPEECH_LINES_MAX] or [text])
         self._speech_shown = 0
         self._speech_total = sum(len(ln) for ln in self._speech_lines)

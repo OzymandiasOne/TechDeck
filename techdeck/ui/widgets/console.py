@@ -216,8 +216,25 @@ class ConsoleWidget(QWidget, ThemeAware):
         # Theme the tab bar + readout (and re-theme on live theme switch)
         self.setup_theme_awareness()
 
-        # Initial message
-        self.append_system("TechDeck online. Type /help for available commands.")
+        # Initial message. Outside the professional theme, the first words
+        # belong to something that lives in here — clicking "redefine"
+        # summons it (techdeck://cat/summon → the materialization).
+        if self._professional_mode():
+            self.append_system(
+                "TechDeck online. Type /help for available commands.")
+        else:
+            self.append_markup(
+                "Your effort to remain what you are is what limits you. "
+                "I can help [[redefine|techdeck://cat/summon]] those limits. "
+                "Type /help for commands.")
+
+    @staticmethod
+    def _professional_mode() -> bool:
+        try:
+            from techdeck.core.settings import SettingsManager
+            return SettingsManager().is_professional()
+        except Exception:
+            return False
     
     def show_read_more_hint(self):
         """Float a small "read more" pill at the bottom of the output viewport.

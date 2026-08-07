@@ -53,6 +53,23 @@ def test_append_markup_renders_into_document(qapp):
     assert "redefine" in c.output.toPlainText()
 
 
+def test_startup_line_carries_the_summon_link(qapp, monkeypatch):
+    monkeypatch.setattr(ConsoleWidget, "_professional_mode",
+                        staticmethod(lambda: False))
+    c = ConsoleWidget()
+    assert "techdeck://cat/summon" in c.output.toHtml()
+    assert "redefine" in c.output.toPlainText()
+    assert "limits" in c.output.toPlainText()
+
+
+def test_startup_line_professional_theme_stays_plain(qapp, monkeypatch):
+    monkeypatch.setattr(ConsoleWidget, "_professional_mode",
+                        staticmethod(lambda: True))
+    c = ConsoleWidget()
+    assert "redefine" not in c.output.toPlainText()
+    assert "TechDeck online" in c.output.toPlainText()
+
+
 # ── anchor activation ─────────────────────────────────────────────────────
 
 def test_internal_anchor_emits_signal_not_os(qapp, monkeypatch):

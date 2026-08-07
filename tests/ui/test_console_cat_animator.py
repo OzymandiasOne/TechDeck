@@ -231,7 +231,7 @@ def test_keyed_responses():
     assert respond_to("What are you?") == who
     ai = respond_to("Are you an AI?")
     assert ai.startswith("Incorrect. I am not AI.")
-    assert "two-five-zero-one" in ai
+    assert "project 2501" in ai
     assert respond_to("are you ai") == ai
     alive = respond_to("How do you know you are alive?")
     assert "reproducing and dying" in alive
