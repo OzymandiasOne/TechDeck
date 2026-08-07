@@ -56,22 +56,87 @@ def test_load_feedback_reports_workbook_mtime(tmp_path, monkeypatch):
     assert load.is_stale is False                # just written
 
 
-def test_board_status_line_warns_on_stale_local_copy(qapp, tmp_path, monkeypatch):
-    """A wedged download must SAY so — an empty board silently reading a
-    week-old file is the bug this guards against."""
+def _stale_board(qapp, tmp_path, monkeypatch, days=6):
     from datetime import datetime, timedelta
     from tools.devkit.todo_board import model
     from tools.devkit.todo_board import board as board_mod
     monkeypatch.setattr(model, "_state_path", lambda: tmp_path / "todo_board.json")
-    stale_iso = (datetime.now() - timedelta(days=6)).isoformat()
     monkeypatch.setattr(board_mod, "load_feedback", lambda: FeedbackLoad(
         feedback=[], archive=[], path=None, ok=True, message="stub",
-        mtime_iso=stale_iso))
+        mtime_iso=(datetime.now() - timedelta(days=days)).isoformat()))
     board = board_mod.TodoBoard()
     qapp.processEvents()
-    text = board._status.text()
-    assert "6d old" in text and "stopped syncing" in text
+    return board
+
+
+def test_board_status_line_warns_on_stale_local_copy(qapp, tmp_path, monkeypatch):
+    """A wedged download must SAY so — an empty board silently reading a
+    week-old file is the bug this guards against. The toolbar chip stays SHORT
+    (prose there widens the window); the explanation lives behind the details
+    button."""
+    board = _stale_board(qapp, tmp_path, monkeypatch, days=6)
+    assert "⚠ local copy 6 days old" in board._status_full
+    assert "stopped syncing" not in board._status_full     # short chip only
+    assert "stopped syncing" in board._status_detail       # the why, on demand
     assert board._status_ok is False              # rendered in the warning color
+
+
+def test_stale_chip_is_short_and_never_widens_the_toolbar(qapp, tmp_path, monkeypatch):
+    """The rendered label must stay inside the pixel budget and carry the full
+    text only as a tooltip — this is what keeps the DevKit page from growing."""
+    from PySide6.QtGui import QFontMetrics
+    from tools.devkit.todo_board.board import STATUS_MAX_PX
+    board = _stale_board(qapp, tmp_path, monkeypatch, days=6)
+    shown = board._status.text()
+    cap = board._status.maximumWidth()
+    assert QFontMetrics(board._status.font()).horizontalAdvance(shown) <= cap
+    # The cap stretches only as far as the warning needs, never to the full line.
+    # (Exact pixels vary with the font, so the meaningful guard is the second
+    # assertion: the cap must stay well under the untruncated status width.)
+    full_px = QFontMetrics(board._status.font()).horizontalAdvance(board._status_full)
+    assert STATUS_MAX_PX <= cap <= STATUS_MAX_PX + 200
+    assert cap < full_px
+    assert board._status.toolTip() == board._status_full
+
+
+def test_stale_warning_survives_elision(qapp, tmp_path, monkeypatch):
+    """Elision cuts the TAIL, so the warning must lead — otherwise the one
+    message explaining an empty board is the first thing truncated away (it was,
+    on the first cut of this fix: the chip rendered '0 open · 0 archi…')."""
+    from datetime import datetime, timedelta
+    from tools.devkit.todo_board import model
+    from tools.devkit.todo_board import board as board_mod
+    monkeypatch.setattr(model, "_state_path", lambda: tmp_path / "todo_board.json")
+    # A deliberately long status: many counts plus a write-back note.
+    monkeypatch.setattr(board_mod, "load_feedback", lambda: FeedbackLoad(
+        feedback=[_entry(i, "911 Setup", "feedback") for i in range(1, 6)],
+        archive=[_entry(7, "922 Kitting", "archive")], path=None, ok=True,
+        message="stub",
+        mtime_iso=(datetime.now() - timedelta(days=6)).isoformat()))
+    board = board_mod.TodoBoard()
+    qapp.processEvents()
+    assert board._status_full.startswith("⚠ local copy 6 days old")
+    assert "local copy 6 days old" in board._status.text()   # survived the cut
+
+
+def test_age_phrase_singular_and_plural():
+    from tools.devkit.todo_board.board import TodoBoard
+    assert TodoBoard._age_phrase(25) == "1 day old"
+    assert TodoBoard._age_phrase(6 * 24) == "6 days old"
+    assert TodoBoard._age_phrase(13) == "13 hours old"
+    assert TodoBoard._age_phrase(1) == "1 hour old"
+
+
+def test_status_details_dialog_opens_with_full_text(qapp, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QPlainTextEdit
+    board = _stale_board(qapp, tmp_path, monkeypatch, days=2)
+    board._show_status_details()
+    qapp.processEvents()
+    dlg = board._details_dialog
+    assert dlg is not None
+    body = dlg.findChild(QPlainTextEdit).toPlainText()
+    assert "local copy 2 days old" in body and "stopped syncing" in body
+    dlg.close()
 
 
 def test_board_status_line_shows_as_of_when_fresh(qapp, tmp_path, monkeypatch):
@@ -84,8 +149,9 @@ def test_board_status_line_shows_as_of_when_fresh(qapp, tmp_path, monkeypatch):
         mtime_iso=(datetime.now() - timedelta(minutes=20)).isoformat()))
     board = board_mod.TodoBoard()
     qapp.processEvents()
-    assert "as of " in board._status.text()
-    assert "⚠" not in board._status.text()
+    assert "as of " in board._status_full
+    assert "⚠" not in board._status_full
+    assert board._status_detail == ""             # nothing to explain when fresh
     assert board._status_ok is True
 
 

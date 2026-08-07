@@ -15,11 +15,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QFontMetrics
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QScrollArea,
     QPushButton, QToolButton, QMenu, QInputDialog, QMessageBox, QSizePolicy,
-    QCheckBox,
+    QCheckBox, QDialog, QPlainTextEdit,
 )
 
 from techdeck.ui.theme_aware import ThemeAware
@@ -30,6 +30,13 @@ from tools.devkit.todo_board.model import (
 from tools.devkit.todo_board.widgets import TaskCard, CARD_MIME, menu_stylesheet
 
 COLUMN_WIDTH = 290
+# Hard pixel budget for the toolbar status label. The status text is
+# open-ended (counts + write-back notes + a staleness warning), and a QLabel
+# reports its full text width as its minimum — so without a cap it drags the
+# whole DevKit page, and therefore the window, wider. Anything past the budget
+# is elided; the full text and the long-form explanation live in the details
+# popup instead (Ⓘ button), which never affects layout.
+STATUS_MAX_PX = 230
 # Terminal buckets accumulate forever, so cap how many cards render and offer a
 # one-click clear. Older completed cards live on in the telemetry Archive.
 TERMINAL_BUCKETS = (DONE_BUCKET_ID, WONT_DO_BUCKET_ID)
@@ -348,6 +355,22 @@ class TodoBoard(QWidget, ThemeAware):
         self._status = QLabel("", self)
         self._status_ok = True
         self._writeback_ok = True
+        # Elided display + the untruncated text/explanation behind the Ⓘ button.
+        self._status_full = ""      # complete one-line status
+        self._status_detail = ""    # long-form explanation ("" = nothing extra)
+        f = self._status.font()
+        f.setPointSize(9)
+        self._status.setFont(f)     # set on the widget, not via QSS, so
+        self._status.setMaximumWidth(STATUS_MAX_PX)   # QFontMetrics is accurate
+        self._status.setMinimumWidth(0)
+        self._status.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                   QSizePolicy.Policy.Preferred)
+        self._details_btn = QToolButton(self)
+        self._details_btn.setText("ⓘ")
+        self._details_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._details_btn.setToolTip("Show the full status and what it means")
+        self._details_btn.clicked.connect(self._show_status_details)
+        self._details_dialog = None
         self._triage_toggle = QCheckBox("Flow triage", self)
         self._triage_toggle.setChecked(self.store.webhook_triage)
         self._triage_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -421,14 +444,66 @@ class TodoBoard(QWidget, ThemeAware):
             # hasn't changed in half a day means OneDrive stopped syncing it
             # DOWN — the failure that silently starved this board for six
             # days, indistinguishable from "no new feedback" until now.
-            parts.append(self._freshness_note(load))
-            self._status.setText("  ·  ".join(p for p in parts if p))
+            line = "  ·  ".join(p for p in parts if p)
+            fresh = self._freshness_note(load)
+            if fresh:
+                # A staleness WARNING goes first: the label is elided to a pixel
+                # budget, so anything trailing can be cut — and the one thing
+                # that must never be cut is the reason the board looks empty.
+                # The neutral "as of <when>" is fine to lose, so it trails.
+                line = (f"{fresh}  ·  {line}" if load.is_stale and line
+                        else f"{line}  ·  {fresh}" if line else fresh)
+            self._set_status(line, self._freshness_detail(load),
+                             keep=fresh if load.is_stale else "")
             self._status_ok = self._writeback_ok and not load.is_stale
         else:
-            self._status.setText("⚠ " + load.message)
+            self._set_status("⚠ " + load.message, self._freshness_detail(load))
             self._status_ok = False
         self._style_status()
         self.rebuild_all()
+
+    def _set_status(self, text: str, detail: str = "", keep: str = ""):
+        """Show `text` in the toolbar, elided to STATUS_MAX_PX so a long status
+        can never widen the page. The full text goes to the tooltip, and
+        `detail` (plus the full text) to the Ⓘ details popup.
+
+        `keep` is a leading fragment that must render in FULL — the budget
+        stretches to fit it if needed. Without this the staleness warning got
+        clipped mid-word ('⚠ local copy 6 day…'), which is worse than useless.
+        Everything after `keep` is still elided, so the growth is bounded by the
+        warning's own length rather than by the whole status line.
+        """
+        self._status_full = text
+        self._status_detail = detail
+        fm = QFontMetrics(self._status.font())
+        budget = STATUS_MAX_PX
+        if keep:
+            # Room for the kept text PLUS the separator and ellipsis Qt appends,
+            # or elidedText eats the tail of `keep` itself to make space.
+            budget = max(budget, fm.horizontalAdvance(f"{keep}  ·  …") + 4)
+        self._status.setMaximumWidth(budget)
+        self._status.setText(fm.elidedText(text, Qt.TextElideMode.ElideRight, budget))
+        self._status.setToolTip(text)
+        self._details_btn.setVisible(bool(text or detail))
+
+    def _show_status_details(self):
+        """Open the full status + explanation in its own small window. Kept out
+        of the toolbar deliberately: the board must not grow to fit prose."""
+        body = self._status_full
+        if self._status_detail:
+            body = f"{body}\n\n{self._status_detail}" if body else self._status_detail
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Dev Board — status details")
+        dlg.setMinimumSize(520, 240)
+        lay = QVBoxLayout(dlg)
+        view = QPlainTextEdit(body, dlg)
+        view.setReadOnly(True)
+        lay.addWidget(view)
+        close = QPushButton("Close", dlg)
+        close.clicked.connect(dlg.close)
+        lay.addWidget(close, 0, Qt.AlignmentFlag.AlignRight)
+        self._details_dialog = dlg      # keep a ref so Qt doesn't GC it
+        dlg.show()
 
     def _flush_writebacks(self) -> str:
         """Run a write-back flush if anything is pending; returns a short note
@@ -451,9 +526,19 @@ class TodoBoard(QWidget, ThemeAware):
         return ", ".join(bits)
 
     @staticmethod
-    def _freshness_note(load) -> str:
-        """'as of <when>' for the local copy, escalated to a warning once it's
-        stale enough that the download side must be broken."""
+    def _age_phrase(age_hours: float) -> str:
+        """'1 day old' / '3 days old' / '14 hours old'."""
+        if age_hours >= 24:
+            days = round(age_hours / 24)
+            return f"{days} day old" if days == 1 else f"{days} days old"
+        hours = max(1, round(age_hours))
+        return f"{hours} hour old" if hours == 1 else f"{hours} hours old"
+
+    @classmethod
+    def _freshness_note(cls, load) -> str:
+        """SHORT freshness chip for the toolbar — 'as of <when>' normally, or
+        '⚠ local copy 1 day old' when stale. The why lives in the details
+        popup; prose here would widen the page (see STATUS_MAX_PX)."""
         age = load.age_hours
         if age is None:
             return ""
@@ -463,20 +548,46 @@ class TodoBoard(QWidget, ThemeAware):
             return ""
         if not load.is_stale:
             return f"as of {stamp}"
-        days = age / 24.0
-        span = f"{days:.0f}d" if days >= 1 else f"{age:.0f}h"
-        return (f"⚠ local copy {span} old (as of {stamp}) — OneDrive may have "
-                f"stopped syncing it down; new feedback won't appear")
+        return f"⚠ local copy {cls._age_phrase(age)}"
+
+    @classmethod
+    def _freshness_detail(cls, load) -> str:
+        """Long-form explanation for the details popup — only when stale."""
+        age = load.age_hours
+        if age is None or not load.is_stale:
+            return ""
+        try:
+            stamp = datetime.fromisoformat(load.mtime_iso).strftime("%b %d %Y, %H:%M")
+        except ValueError:
+            stamp = "unknown"
+        where = str(load.path) if load.path else "(workbook not located)"
+        return (
+            f"The local copy of the telemetry workbook is "
+            f"{cls._age_phrase(age)} (last changed {stamp}).\n\n"
+            f"The Power Automate flow appends a row to the CLOUD copy on every "
+            f"plugin run by every user, so this file should change many times a "
+            f"day. That it hasn't means OneDrive has most likely stopped syncing "
+            f"it DOWN to this machine — so new feedback will not appear on the "
+            f"board, and an empty board looks exactly like 'no new feedback'.\n\n"
+            f"To fix: check the OneDrive tray icon for this file, or rename it "
+            f"so OneDrive re-downloads a fresh copy under the original name "
+            f"(that has broken the deadlock before).\n\n"
+            f"File: {where}")
 
     def _style_status(self):
         # Neutral, legible text — the accent read as an error in warm themes.
+        # Font size is set on the widget (not here) so elision measures right.
         color = self._pal.text if self._status_ok else self._pal.warning
-        self._status.setStyleSheet(f"color: {color}; font-size: 9pt;")
+        self._status.setStyleSheet(f"color: {color}; background: transparent;")
+        self._details_btn.setStyleSheet(
+            f"QToolButton {{ color: {color}; background: transparent; "
+            f"border: none; padding: 0 2px; font-size: 11pt; }}"
+            f"QToolButton:hover {{ color: {self._pal.accent}; }}")
 
     def devkit_toolbar_actions(self):
         """Widgets the DevKit page hosts in its unified toolbar (right side)."""
-        return [self._status, self._triage_toggle, self._add_bucket_btn,
-                self._clear_btn, self._refresh_btn]
+        return [self._status, self._details_btn, self._triage_toggle,
+                self._add_bucket_btn, self._clear_btn, self._refresh_btn]
 
     def _schedule_rebuild(self):
         """Rebuild on the next event-loop turn, coalescing multiple calls. Also
@@ -553,7 +664,7 @@ class TodoBoard(QWidget, ThemeAware):
         # touches the workbook only when a status actually changes).
         note = self._flush_writebacks()
         if note:
-            self._status.setText(note)
+            self._set_status(note)
             self._status_ok = self._writeback_ok
             self._style_status()
         self._schedule_rebuild()
