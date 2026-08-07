@@ -1083,17 +1083,24 @@ class ConsoleWidget(QWidget, ThemeAware):
             QDesktopServices.openUrl(QUrl(anchor))
 
     # ===== Pinned current-output area =====
-    def present_current(self, html: str):
+    def present_current(self, html: str, full: bool = False):
         """Show a command readout in the pinned current-output area — the
         Claude-Code-style zone at the bottom of the console page, above the
         input row. The history above keeps auto-scrolling for plugins (and
         holds the Puppet Master's face); this area holds whatever is CURRENT,
         so a readout like /help can never collide with either. Replaces the
         previous content. It scrolls on its own when the readout overflows
-        (a "read more" pill points that out); /clear empties it."""
+        (a "read more" pill points that out); /clear empties it.
+
+        Sized to content. The cap is HALF the page by default — that keeps
+        the history, and the face living in it, on screen. ``full=True``
+        lets it grow to nearly the whole page, leaving a few history lines
+        peeking above so the `You:` echo reads like part of one terminal —
+        for when the face is absent and nothing above needs the room."""
         self.pinned.setHtml(html)
         doc_h = self.pinned.document().size().height()
-        cap = max(120, self._console_page.height() // 2)
+        page_h = self._console_page.height()
+        cap = max(120, page_h - 90 if full else page_h // 2)
         self.pinned.setFixedHeight(int(min(doc_h + 4, cap)))
         self.pinned.verticalScrollBar().setValue(0)
         self.pinned.show()

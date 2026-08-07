@@ -322,6 +322,20 @@ def test_pinned_area_shows_and_clears(qapp, tmp_path):
     assert console.pinned.toPlainText() == ""
 
 
+def test_pinned_cap_is_generous_without_the_face(qapp):
+    # full=True (no face to keep visible) may take nearly the whole page;
+    # the default cap is half, so the face living in the history stays on
+    # screen while he delivers /help.
+    console = ConsoleWidget()
+    console._console_page.resize(400, 600)
+    long_readout = "line<br>" * 200          # far taller than any cap
+    console.present_current(long_readout, full=True)
+    tall = console.pinned.height()
+    console.present_current(long_readout)
+    assert tall > console.pinned.height()    # half-page cap when protecting
+    assert tall <= 600 - 90 + 4              # …but never the whole page
+
+
 def test_appends_land_above_the_face_and_survive_redraws(qapp):
     # While the cat holds the document tail, appended history lines insert
     # ABOVE the face (ConsoleWidget._append_line → cat._insert_above) — they

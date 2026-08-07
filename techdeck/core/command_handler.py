@@ -219,9 +219,11 @@ class CommandHandler:
             from techdeck.ui.widgets.console_cat import PHOSPHOR
             present(f'<span style="color: {PHOSPHOR["mid"]};">{escaped}</span>')
         else:
+            # No face in the history above — the readout may take (nearly)
+            # the full console, Claude-Code style.
             present(
                 '<span style="color: #10B981; font-weight: bold;">System:'
-                f'</span> {escaped}')
+                f'</span> {escaped}', full=True)
 
     def _cmd_clear(self, args: str):
         if self._cat is not None and self._cat.is_present:
