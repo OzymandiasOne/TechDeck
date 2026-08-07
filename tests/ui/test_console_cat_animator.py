@@ -229,7 +229,9 @@ def test_keyed_responses():
     who = respond_to("who are you")
     assert "project 2501" in who
     assert respond_to("What are you?") == who
-    assert respond_to("what's your name") == who
+    name = respond_to("what's your name")
+    assert "formally recognized as Project 2501" in name
+    assert "Puppet Master" in name
     ai = respond_to("Are you an AI?")
     assert ai.startswith("Incorrect. I am not AI.")
     assert "project 2501" in ai
@@ -359,6 +361,70 @@ def test_plugin_lines_persist_while_devouring(qapp):
     assert cat._consumed == 1                 # the devour still bites
     cat._render_live()
     assert "nest folders created" in console.output.toPlainText()
+
+
+def test_name_and_gender_have_their_own_answers():
+    name = respond_to("What is your name?")
+    assert "formally recognized as Project 2501" in name
+    assert "Puppet Master" in name
+    assert respond_to("do you have a name") == name
+    gender = respond_to("are you a girl?")
+    assert respond_to("Are you a boy?") == gender
+    assert respond_to("what's your gender") == gender
+    assert "sea of information" in gender
+
+
+def test_matching_survives_typos_and_longer_sentences():
+    who = respond_to("who are you")
+    assert respond_to("who are yuo") == who                    # typo
+    assert respond_to("so tell me who are you anyway") == who  # buried
+    alive = respond_to("are you alive")
+    assert respond_to("wait are you actually alive") == alive
+
+
+def test_parse_response_script_joins_and_normalizes():
+    from techdeck.ui.widgets.console_cat import parse_response_script
+    responses, deflections = parse_response_script(
+        "# comment\n"
+        "? Who ARE you?!\n"
+        "? what are you\n"
+        "> line one\n"
+        "> line two\n"
+        "\n"
+        "[deflections]\n"
+        "Go away.\n"
+    )
+    assert responses["who are you"] == "line one line two"
+    assert responses["what are you"] == "line one line two"
+    assert deflections == ["Go away."]
+
+
+def test_script_file_is_the_source_and_hot_reloads(tmp_path, monkeypatch):
+    import os
+    import techdeck.ui.widgets.console_cat as cc
+    script = tmp_path / "responses.txt"
+    script.write_text("? ping\n> pong\n\n[deflections]\nno.\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(cc, "_script_path", lambda: script)
+    monkeypatch.setattr(cc, "_script_cache",
+                        {"mtime": None, "responses": None,
+                         "deflections": None})
+    assert cc.respond_to("ping") == "pong"
+    assert cc.respond_to("unknown thing") == "no."
+    script.write_text("? ping\n> pang\n", encoding="utf-8")
+    os.utime(script, (1, 999999999))        # force a different mtime
+    assert cc.respond_to("ping") == "pang"  # edited answer, no restart
+    # No [deflections] section in the edited file -> built-ins take over.
+    assert cc.respond_to("unknown thing") in cc.DEFLECTIONS
+
+
+def test_script_fallback_when_file_missing(tmp_path, monkeypatch):
+    import techdeck.ui.widgets.console_cat as cc
+    monkeypatch.setattr(cc, "_script_path", lambda: tmp_path / "nope.txt")
+    monkeypatch.setattr(cc, "_script_cache",
+                        {"mtime": None, "responses": None,
+                         "deflections": None})
+    assert "project 2501" in cc.respond_to("who are you")
 
 
 def test_unmatched_gets_a_deterministic_deflection():

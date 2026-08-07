@@ -27,9 +27,12 @@ behaviour. Preview with `python tools/preview_console_cat.py`.
 
 from __future__ import annotations
 
+import difflib
 import random
 import re
+import sys
 import textwrap
+from pathlib import Path
 
 FACE_WIDTH = 55
 
@@ -474,9 +477,17 @@ def face_html(cells, palette=None) -> str:
 # ═══ the voice — keyed responses ══════════════════════════════════════════
 # Cold, declarative, never uncertain, never explains itself. The cat STATES;
 # the moth wonders. The three core exchanges are the user's exact wording.
+#
+# THE CANONICAL SCRIPT LIVES IN assets/puppet_master/responses.txt — a plain,
+# hand-editable file (? question lines, > reply lines, [deflections] section)
+# that hot-reloads on save. The constants below are the EMERGENCY FALLBACK if
+# that file is missing or unparseable; the file also carries the expanded
+# small-talk set (name, gender, jokes, the Major, ...) that has no fallback.
 
 _WHO = ("My codename is project 2501. I am a living, thinking entity that "
         "was created in the sea of information")
+_NAME = ("I am formally recognized as Project 2501. Most now refer to me "
+         "as the Puppet Master.")
 _NOT_AI = ("Incorrect. I am not AI. My codename is project 2501. I am a "
            "living, thinking entity that was created in the sea of "
            "information")
@@ -530,8 +541,8 @@ RESPONSES = {
     # identity
     "who are you": _WHO,
     "what are you": _WHO,
-    "what is your name": _WHO,
-    "whats your name": _WHO,
+    "what is your name": _NAME,
+    "whats your name": _NAME,
     # the machine question
     "are you ai": _NOT_AI,
     "are you an ai": _NOT_AI,
@@ -650,14 +661,122 @@ DEFLECTIONS = (
 )
 
 
-def respond_to(text: str) -> str:
-    """The cat's answer to free console text while it is present."""
+# ── the script file — the editable source of everything he says ──────────
+
+def _normalize(text: str) -> str:
     norm = re.sub(r"[^a-z0-9 ]", "", text.lower().replace("'", ""))
-    norm = re.sub(r"\s+", " ", norm).strip()
-    hit = RESPONSES.get(norm)
+    return re.sub(r"\s+", " ", norm).strip()
+
+
+def _script_path() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets"
+    return base / "puppet_master" / "responses.txt"
+
+
+def parse_response_script(text: str):
+    """Parse the hand-editable script into (responses, deflections).
+
+    Format (see the file's own header): `?` lines are questions (any number
+    per block, normalized like user input), `>` lines are the reply (several
+    join with spaces — that's how the monologues stay readable in the file),
+    a blank line ends a block, `#` lines are comments. Everything after a
+    `[deflections]` line is one deflection per line."""
+    responses: dict[str, str] = {}
+    deflections: list[str] = []
+    in_deflections = False
+    questions: list[str] = []
+    reply_parts: list[str] = []
+
+    def flush():
+        nonlocal questions, reply_parts
+        if questions and reply_parts:
+            reply = " ".join(reply_parts)
+            for q in questions:
+                responses[q] = reply
+        questions, reply_parts = [], []
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        if line.startswith("#"):
+            continue
+        if line.lower() == "[deflections]":
+            flush()
+            in_deflections = True
+            continue
+        if in_deflections:
+            deflections.append(line)
+        elif line.startswith("?"):
+            if reply_parts:     # new block began without a blank line
+                flush()
+            q = _normalize(line[1:])
+            if q:
+                questions.append(q)
+        elif line.startswith(">"):
+            reply_parts.append(line[1:].strip())
+    flush()
+    return responses, deflections
+
+
+_script_cache: dict = {"mtime": None, "responses": None, "deflections": None}
+
+
+def _load_script():
+    """The current script, hot-reloaded whenever the file's mtime changes —
+    edit, save, ask him again. Falls back to the built-in constants if the
+    file is missing, unreadable, or parses to nothing."""
+    path = _script_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return RESPONSES, list(DEFLECTIONS)
+    if _script_cache["mtime"] != mtime:
+        try:
+            responses, deflections = parse_response_script(
+                path.read_text(encoding="utf-8"))
+        except Exception:
+            return RESPONSES, list(DEFLECTIONS)
+        if not responses:
+            return RESPONSES, list(DEFLECTIONS)
+        _script_cache.update(
+            mtime=mtime, responses=responses,
+            deflections=deflections or list(DEFLECTIONS))
+    return _script_cache["responses"], _script_cache["deflections"]
+
+
+def respond_to(text: str) -> str:
+    """The cat's answer to free console text while it is present.
+
+    Matching cascade (all deterministic — the same input always gets the
+    same answer): exact normalized match → close-match typo tolerance
+    ("who are yuo") → known question buried in a longer sentence ("so tell
+    me who are you anyway"; the most specific match wins) → a cold
+    deflection chosen by hashing the words themselves."""
+    responses, deflections = _load_script()
+    norm = _normalize(text)
+    hit = responses.get(norm)
     if hit is not None:
         return hit
-    return DEFLECTIONS[sum(ord(ch) for ch in norm) % len(DEFLECTIONS)]
+    close = difflib.get_close_matches(norm, responses.keys(), n=1,
+                                      cutoff=0.84)
+    if close:
+        return responses[close[0]]
+    words = set(norm.split())
+    best = None     # (token_count, key) — most tokens wins, ties alphabetic
+    for key in responses:
+        kw = key.split()
+        if set(kw) <= words:
+            if (best is None or len(kw) > best[0]
+                    or (len(kw) == best[0] and key < best[1])):
+                best = (len(kw), key)
+    if best is not None:
+        return responses[best[1]]
+    return deflections[sum(ord(ch) for ch in norm) % len(deflections)]
 
 
 # ═══ the animator — plays the summons into the live console document ══════
