@@ -821,6 +821,11 @@ class ConsoleCat(QObject):
         self._end_cur = QTextCursor(doc)
         self._end_cur.setPosition(pos)
         self._state = "summoning"
+        # While the face holds the document tail, history appends must land
+        # ABOVE it — an append at the end falls inside this bookmarked range
+        # and the next redraw wipes it (the /help-under-the-face bug). The
+        # console routes every append_* line through this hook.
+        self.console.tail_insert = self._insert_above
         # Ask the shell for headroom FIRST — the console rises, then the
         # summon plays into a pane that already fits the face.
         self._request_headroom()
@@ -870,7 +875,30 @@ class ConsoleCat(QObject):
         self._remove_filter()
         self._reset()
 
+    def _insert_above(self, html: str) -> bool:
+        """Insert one appended history line ABOVE the face block, keeping
+        the face glued to the document tail (ConsoleWidget._append_line
+        calls this while the cat is present). Returns False when there is
+        no live range — the console then appends normally."""
+        if self._state == "gone" or self._start_cur is None:
+            return False
+        cur = QTextCursor(self.output.document())
+        cur.setPosition(self._start_cur.position())
+        cur.beginEditBlock()
+        cur.insertHtml(html)
+        cur.insertBlock()
+        cur.endEditBlock()
+        # _start_cur keeps its position on inserts AT it (so face redraws
+        # hold their ground) — repair it to the face's new start by hand.
+        # _end_cur sits after the insertion point, so it shifted on its own.
+        self._start_cur.setPosition(cur.position())
+        return True
+
     def _reset(self):
+        # `==`, not `is`: each attribute access builds a fresh bound-method
+        # object, so identity always fails; equality matches func+instance.
+        if getattr(self.console, "tail_insert", None) == self._insert_above:
+            self.console.tail_insert = None
         self._speech_timer.stop()
         self._page_timer.stop()
         self._speech_pages = []

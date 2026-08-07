@@ -133,10 +133,37 @@ class ConsoleWidget(QWidget, ThemeAware):
         self.output.viewport().installEventFilter(self)
         self.output.viewport().setMouseTracking(True)
 
+        # ===== The pinned current-output area (Claude-Code-style) =====
+        # A second, seamless text area at the bottom of the console page,
+        # right above the input row: same background, no border, zero
+        # spacing, so the two read as ONE black screen. The history above
+        # auto-scrolls as plugins print (and is where the Puppet Master's
+        # face lives, at the document tail); this pinned area holds whatever
+        # is CURRENT — command readouts like /help — so a readout can never
+        # collide with the face, and the user can scroll it independently
+        # of the history's auto-scroll. Hidden (0 px) until present_current
+        # fills it; /clear empties it.
+        self.pinned = QTextEdit()
+        self.pinned.setReadOnly(True)
+        self.pinned.setFont(_font)
+        self.pinned.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.pinned.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self.pinned.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.pinned.setFixedHeight(0)
+        self.pinned.hide()
+
+        # While something owns the history's tail (the Puppet Master's face),
+        # it registers an inserter here; append lines then land ABOVE the
+        # owned range instead of inside it (see _append_line).
+        self.tail_insert = None
+
         self._console_page = QWidget()
         _cp = QVBoxLayout(self._console_page)
         _cp.setContentsMargins(0, 0, 0, 0)
-        _cp.addWidget(self.output)
+        _cp.setSpacing(0)   # no seam — history + pinned read as one screen
+        _cp.addWidget(self.output, 1)
+        _cp.addWidget(self.pinned)
 
         self.dashboard = DashboardView()
         self._dash_page = QWidget()
@@ -236,39 +263,53 @@ class ConsoleWidget(QWidget, ThemeAware):
         except Exception:
             return False
     
-    def show_read_more_hint(self):
-        """Float a small "read more" pill at the bottom of the output viewport.
+    def show_read_more_hint(self, target=None):
+        """Float a small "read more" pill at the bottom of an output area's
+        viewport (default: the history output).
 
-        Used by /help, which anchors the scroll at the START of its block —
-        the pill makes it obvious there is more content below the fold. It
-        hides as soon as the user scrolls (any further append auto-scrolls,
-        which also hides it) or after a few seconds.
+        Used by present_current when a readout overflows the pinned area
+        (``target=self.pinned``) — the pill makes it obvious there is more
+        content below the fold. It hides as soon as the user scrolls that
+        area (any further append auto-scrolls, which also hides it) or after
+        a few seconds.
         """
+        target = target or self.output
         from techdeck.ui.theme_manager import get_theme_manager
         theme = get_theme_manager().get_current_palette()
-        if getattr(self, "_read_more_pill", None) is None:
-            self._read_more_pill = QLabel(self.output)
-            self._read_more_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._read_more_pill.hide()
+        pill = getattr(self, "_read_more_pill", None)
+        if pill is not None and pill.parent() is not target:
+            pill.hide()
+            pill.deleteLater()
+            pill = None
+        if pill is None:
+            pill = self._read_more_pill = QLabel(target)
+            pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            pill.hide()
+        if getattr(self, "_read_more_timer", None) is None:
             self._read_more_timer = QTimer(self)
             self._read_more_timer.setSingleShot(True)
-            self._read_more_timer.timeout.connect(self._read_more_pill.hide)
-            self.output.verticalScrollBar().valueChanged.connect(
+            self._read_more_timer.timeout.connect(self._hide_read_more_hint)
+        hooked = getattr(self, "_read_more_hooked", None)
+        if hooked is None:
+            hooked = self._read_more_hooked = set()
+        if target not in hooked:
+            target.verticalScrollBar().valueChanged.connect(
                 self._hide_read_more_hint)
-        self._read_more_pill.setText("▼  read more  ▼")
-        self._read_more_pill.setStyleSheet(
+            hooked.add(target)
+        pill.setText("▼  read more  ▼")
+        pill.setStyleSheet(
             f"background-color: {theme.surface}; color: {theme.text}; "
             f"border: 1px solid {theme.border_strong}; border-radius: 10px; "
             f"padding: 3px 12px; font-size: 11px;"
         )
-        self._read_more_pill.adjustSize()
-        vp = self.output.viewport()
-        self._read_more_pill.move(
-            (vp.width() - self._read_more_pill.width()) // 2,
-            vp.height() - self._read_more_pill.height() - 8,
+        pill.adjustSize()
+        vp = target.viewport()
+        pill.move(
+            (vp.width() - pill.width()) // 2,
+            vp.height() - pill.height() - 8,
         )
-        self._read_more_pill.show()
-        self._read_more_pill.raise_()
+        pill.show()
+        pill.raise_()
         self._read_more_timer.start(8000)
 
     def _hide_read_more_hint(self, _value=None):
@@ -852,60 +893,74 @@ class ConsoleWidget(QWidget, ThemeAware):
         title, text = self._warn_args
         QMessageBox.warning(self.window(), title, text)
 
+    def _append_line(self, html: str):
+        """Append one line to the history output.
+
+        While the Puppet Master holds the document tail, the line is
+        inserted ABOVE his face instead of appended at the end — an append
+        at the end lands INSIDE his bookmarked range and gets wiped by his
+        next redraw (the bug that made /help vanish under the face). The
+        cat registers `tail_insert` while present; anything appended then
+        flows in above the face, which stays glued to the bottom."""
+        inserter = self.tail_insert
+        if inserter is not None:
+            try:
+                if inserter(html):
+                    self._scroll_to_bottom()
+                    return
+            except Exception:
+                pass    # a stale/broken inserter must never lose the line
+        self.output.append(html)
+        self._scroll_to_bottom()
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
             f'{self._escape_html(text)}'
         )
-        self._scroll_to_bottom()
 
     @Slot(str)
     def append_system(self, text: str):
         """Append system message to output."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #10B981; font-weight: bold;">System:</span> '
             f'{self._escape_html(text)}'
         )
-        self._scroll_to_bottom()
 
     @Slot(str)
     def append_assistant(self, text: str):
         """Append assistant message to output."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #A78BFA; font-weight: bold;">Assistant:</span> '
             f'{self._escape_html(text)}'
         )
-        self._scroll_to_bottom()
 
     @Slot(str)
     def append_error(self, text: str):
         """Append error message to output."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #EF4444; font-weight: bold;">Error:</span> '
             f'{self._escape_html(text)}'
         )
-        self._scroll_to_bottom()
 
     @Slot(str, str)
     def append_plugin_output(self, plugin_name: str, text: str):
         """Append plugin output message."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #F59E0B; font-weight: bold;">[{plugin_name}]:</span> '
             f'{self._escape_html(text)}'
         )
-        self._scroll_to_bottom()
         self.plugin_output_appended.emit()
 
     @Slot(str)
     def append_game(self, text: str):
         """Append game/easter-egg output — thread-safe via @Slot."""
-        self.output.append(
+        self._append_line(
             f'<span style="color: #C084FC; font-family: Consolas, monospace;">'
             f'{self._escape_html(text)}</span>'
         )
-        self._scroll_to_bottom()
 
     def safe_game_log(self, text: str):
         """Call append_game from any thread safely."""
@@ -963,11 +1018,10 @@ class ConsoleWidget(QWidget, ThemeAware):
         if prefix:
             lead = (f'<span style="color: #C084FC; font-weight: bold;">'
                     f'{self._escape_html(prefix)}</span> ')
-        self.output.append(
+        self._append_line(
             lead + f'<a href="{url}" style="color: {body_color}; '
             f'text-decoration: underline;">{self._escape_html(text)}</a>'
         )
-        self._scroll_to_bottom()
 
     _LINK_MARKUP = re.compile(r"\[\[([^|\]]+)\|([^\]]+)\]\]")
 
@@ -999,9 +1053,8 @@ class ConsoleWidget(QWidget, ThemeAware):
         from techdeck.ui.theme_manager import get_theme_manager
         body_color = color or get_theme_manager().get_current_palette().text
         html = self.markup_to_html(text, body_color)
-        self.output.append(
+        self._append_line(
             f'<span style="color: {body_color};">{html}</span>')
-        self._scroll_to_bottom()
 
     def eventFilter(self, obj, event):
         """Hover/click handling for anchors in the output view."""
@@ -1028,6 +1081,34 @@ class ConsoleWidget(QWidget, ThemeAware):
             self.internal_link_clicked.emit(anchor)
         else:
             QDesktopServices.openUrl(QUrl(anchor))
+
+    # ===== Pinned current-output area =====
+    def present_current(self, html: str):
+        """Show a command readout in the pinned current-output area — the
+        Claude-Code-style zone at the bottom of the console page, above the
+        input row. The history above keeps auto-scrolling for plugins (and
+        holds the Puppet Master's face); this area holds whatever is CURRENT,
+        so a readout like /help can never collide with either. Replaces the
+        previous content. It scrolls on its own when the readout overflows
+        (a "read more" pill points that out); /clear empties it."""
+        self.pinned.setHtml(html)
+        doc_h = self.pinned.document().size().height()
+        cap = max(120, self._console_page.height() // 2)
+        self.pinned.setFixedHeight(int(min(doc_h + 4, cap)))
+        self.pinned.verticalScrollBar().setValue(0)
+        self.pinned.show()
+
+        def _hint():
+            if (self.pinned.isVisible()
+                    and self.pinned.verticalScrollBar().maximum() > 0):
+                self.show_read_more_hint(target=self.pinned)
+        QTimer.singleShot(0, _hint)
+
+    def clear_current(self):
+        """Empty and collapse the pinned current-output area."""
+        self.pinned.clear()
+        self.pinned.setFixedHeight(0)
+        self.pinned.hide()
 
     def show_spinner(self, html: str):
         """Show the spinner label with the given HTML content."""
@@ -1157,11 +1238,14 @@ class ConsoleWidget(QWidget, ThemeAware):
             " border-top-left-radius: 0; border-top-right-radius: 6px;"
             " border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }"
         )
-        # Inner text area: borderless, square on all four corners, same body color.
-        self.output.setStyleSheet(
-            f"QTextEdit {{ border: none; border-radius: 0; background: {body_bg};"
-            f" color: {p.console_text}; }}"
-        )
+        # Inner text areas: borderless, square on all four corners, same body
+        # color — the pinned area must be indistinguishable from the history
+        # so the two read as one black screen.
+        for area in (self.output, self.pinned):
+            area.setStyleSheet(
+                f"QTextEdit {{ border: none; border-radius: 0; background: {body_bg};"
+                f" color: {p.console_text}; }}"
+            )
         # Tabs: no outlines either. The selected tab fills with body_bg so it is
         # the same color as the console; inactive tabs use the lighter surface
         # fill so they still read as separate tabs.
@@ -1184,6 +1268,8 @@ class ConsoleWidget(QWidget, ThemeAware):
         """Clear console output (Clear button or /clear). Emits `cleared` so the
         command handler can tear down in-console sessions (blackjack, rave, moth)."""
         from techdeck.core.audio_manager import get_audio_manager, SOUND_CLEAR
+        self.tail_insert = None   # the tail owner's range dies with the doc
+        self.clear_current()
         self.output.clear()
         self.append_system("Console cleared.")
         get_audio_manager().play(SOUND_CLEAR)

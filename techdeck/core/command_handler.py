@@ -201,33 +201,27 @@ class CommandHandler:
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
         )
-        # Record where the appended block will start so we can scroll the
-        # viewport there after appending. The console auto-scrolls to bottom
-        # on every append, which lands the user at the END of the help text —
-        # disorienting because they want to read from "Available commands:"
-        # downward.
-        output = getattr(self.console, "output", None)
-        pre_pos = output.document().characterCount() - 1 if output is not None else None
-        cat = self.active_cat()
-        if cat is not None:
+        # The readout renders in the pinned current-output area at the bottom
+        # of the console (present_current) — never appended to the history
+        # document, where it used to land inside the Puppet Master's
+        # bookmarked tail range and get wiped by his next redraw. It reads
+        # top-down from "Available commands:", scrolls on its own when it
+        # overflows (with the "read more" pill), and /clear empties it.
+        present = getattr(self.console, "present_current", None)
+        if present is None:                   # headless/mock console
+            self.console.append_system(help_text)
+            return
+        escaped = self.console._escape_html(help_text)
+        if self.active_cat() is not None:
             # The Puppet Master delivers the readout himself: his phosphor
             # color, no "System:" tag — while he is in the console, /help is
             # him speaking.
             from techdeck.ui.widgets.console_cat import PHOSPHOR
-            self.console.append_markup(help_text, color=PHOSPHOR["mid"])
+            present(f'<span style="color: {PHOSPHOR["mid"]};">{escaped}</span>')
         else:
-            self.console.append_system(help_text)
-        if output is not None and pre_pos is not None:
-            from PySide6.QtGui import QTextCursor
-            anchor = QTextCursor(output.document())
-            anchor.setPosition(pre_pos)
-            rect = output.cursorRect(anchor)
-            sb = output.verticalScrollBar()
-            sb.setValue(sb.value() + rect.top())
-            # Anchoring at the top hides the rest of the list below the fold —
-            # show a floating "read more" pill so that's discoverable.
-            if sb.value() < sb.maximum():
-                self.console.show_read_more_hint()
+            present(
+                '<span style="color: #10B981; font-weight: bold;">System:'
+                f'</span> {escaped}')
 
     def _cmd_clear(self, args: str):
         if self._cat is not None and self._cat.is_present:

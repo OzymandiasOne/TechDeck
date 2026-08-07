@@ -291,13 +291,60 @@ def test_help_is_delivered_by_the_cat_when_present(qapp, tmp_path):
     handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
     handler._cat = cat
     handler.handle_command("/help")
-    text = console.output.toPlainText()
-    assert "Available commands:" in text
+    # The readout renders in the pinned current-output area, NOT the
+    # history document — so it can never land inside the face's range.
+    pinned = console.pinned.toPlainText()
+    assert "Available commands:" in pinned
     # His readout, not the machine's — no System: tag on the help block.
-    assert "System: Available commands:" not in text
+    assert "System:" not in pinned
+    assert "Available commands:" not in console.output.toPlainText()
+    # …and his own redraws (blink/gaze/speech) can never wipe it. This is
+    # the regression that motivated the pinned area: the face used to
+    # overtake /help on its next redraw.
+    cat._render_live()
+    assert "Available commands:" in console.pinned.toPlainText()
     cat.dismiss()
     handler.handle_command("/help")
-    assert "System: Available commands:" in console.output.toPlainText()
+    assert "System: Available commands:" in console.pinned.toPlainText()
+
+
+def test_pinned_area_shows_and_clears(qapp, tmp_path):
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    console = ConsoleWidget()
+    handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+    assert console.pinned.isHidden()          # empty until a readout claims it
+    handler.handle_command("/help")
+    assert not console.pinned.isHidden()
+    assert console.pinned.height() > 0
+    console.clear_current()
+    assert console.pinned.isHidden()
+    assert console.pinned.toPlainText() == ""
+
+
+def test_appends_land_above_the_face_and_survive_redraws(qapp):
+    # While the cat holds the document tail, appended history lines insert
+    # ABOVE the face (ConsoleWidget._append_line → cat._insert_above) — they
+    # used to land inside his bookmarked range and be wiped on his next
+    # redraw.
+    console, cat = _live_cat()
+    console.append_system("run summary line")
+    console.append_user("who are you")
+    cat._render_live()                        # a blink-style redraw
+    text = console.output.toPlainText()
+    assert "run summary line" in text
+    assert "who are you" in text
+    assert text.index("run summary line") < text.index("@")   # above the face
+    cat.dismiss()
+    assert console.tail_insert is None        # hook unregistered with him
+
+
+def test_plugin_lines_persist_while_devouring(qapp):
+    console, cat = _live_cat()
+    console.append_plugin_output("911 Setup", "nest folders created")
+    assert cat._consumed == 1                 # the devour still bites
+    cat._render_live()
+    assert "nest folders created" in console.output.toPlainText()
 
 
 def test_unmatched_gets_a_deterministic_deflection():
