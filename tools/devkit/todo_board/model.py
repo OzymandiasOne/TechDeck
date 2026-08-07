@@ -97,6 +97,11 @@ _WORKBOOK_NAME = "TechDeck Telemetry.xlsx"
 _FEEDBACK_SHEET = "Feedback"
 _ARCHIVE_SHEET = "Archive"
 
+# How old the local workbook copy may get before the board calls it stale.
+# Sized against the flow's write cadence (a usage row per run, every user), so
+# well under a working day of legitimate silence.
+STALE_AFTER_HOURS = 12
+
 
 # ---------------------------------------------------------------------------
 # Feedback source (read-only)
@@ -210,6 +215,32 @@ class FeedbackLoad:
     path: Optional[Path] = None
     ok: bool = False
     message: str = ""
+    mtime_iso: str = ""      # local copy's last-modified time ("" if unknown)
+
+    @property
+    def age_hours(self) -> Optional[float]:
+        """Hours since the local copy last changed, or None if unknown."""
+        if not self.mtime_iso:
+            return None
+        try:
+            delta = datetime.now() - datetime.fromisoformat(self.mtime_iso)
+        except ValueError:
+            return None
+        return delta.total_seconds() / 3600.0
+
+    @property
+    def is_stale(self) -> bool:
+        """True when the local copy looks like it stopped syncing DOWN.
+
+        The flow appends a usage row on every plugin run by every user — dozens
+        a day — so the cloud copy changes constantly, and a local copy untouched
+        for STALE_AFTER_HOURS means the DOWNLOAD side is wedged rather than that
+        nothing happened. This is the signal that was missing when a silent
+        OneDrive deadlock starved the board for six days: an empty board looked
+        identical to "no new feedback" (docs/USAGE_TELEMETRY.md troubleshooting).
+        """
+        age = self.age_hours
+        return age is not None and age >= STALE_AFTER_HOURS
 
 
 def load_feedback() -> FeedbackLoad:
@@ -222,11 +253,15 @@ def load_feedback() -> FeedbackLoad:
                     "(looked for TechDeck/TechDeck Telemetry.xlsx). Set "
                     "TECHDECK_TELEMETRY_XLSX to point at it.")
     try:
+        mtime_iso = datetime.fromtimestamp(path.stat().st_mtime).isoformat()
+    except OSError:
+        mtime_iso = ""
+    try:
         from techdeck.core import plugin_sdk as sdk
         wb = sdk.load_workbook_resilient(path, read_only=True, data_only=True)
     except Exception as exc:  # locked / placeholder / corrupt — report, don't crash
         logger.warning("Dev Board: could not read %s: %s", path, exc)
-        return FeedbackLoad(path=path, message=str(exc))
+        return FeedbackLoad(path=path, message=str(exc), mtime_iso=mtime_iso)
     try:
         feedback = _read_sheet(wb, _FEEDBACK_SHEET, "feedback")
         archive = _read_sheet(wb, _ARCHIVE_SHEET, "archive")
@@ -234,6 +269,7 @@ def load_feedback() -> FeedbackLoad:
         wb.close()
     return FeedbackLoad(
         feedback=feedback, archive=archive, path=path, ok=True,
+        mtime_iso=mtime_iso,
         message=f"{len(feedback)} open + {len(archive)} archived from {path.name}")
 
 

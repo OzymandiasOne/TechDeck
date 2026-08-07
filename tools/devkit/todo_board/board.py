@@ -12,6 +12,8 @@ theme change (ThemeAware). Source-only — never in the frozen build.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from PySide6.QtCore import Qt, Signal, QTimer, QSize
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
@@ -414,8 +416,14 @@ class TodoBoard(QWidget, ThemeAware):
                 parts.append(f"{requeued} write-back(s) re-sent")
             if wb_note:
                 parts.append(wb_note)
-            self._status.setText("  ·  ".join(parts))
-            self._status_ok = self._writeback_ok
+            # Freshness of the LOCAL copy we just read. The flow writes the
+            # cloud copy on every run by every user, so a local file that
+            # hasn't changed in half a day means OneDrive stopped syncing it
+            # DOWN — the failure that silently starved this board for six
+            # days, indistinguishable from "no new feedback" until now.
+            parts.append(self._freshness_note(load))
+            self._status.setText("  ·  ".join(p for p in parts if p))
+            self._status_ok = self._writeback_ok and not load.is_stale
         else:
             self._status.setText("⚠ " + load.message)
             self._status_ok = False
@@ -441,6 +449,24 @@ class TodoBoard(QWidget, ThemeAware):
         if res.missing:
             bits.append(f"{res.missing} row(s) not on Feedback sheet (archived?)")
         return ", ".join(bits)
+
+    @staticmethod
+    def _freshness_note(load) -> str:
+        """'as of <when>' for the local copy, escalated to a warning once it's
+        stale enough that the download side must be broken."""
+        age = load.age_hours
+        if age is None:
+            return ""
+        try:
+            stamp = datetime.fromisoformat(load.mtime_iso).strftime("%b %d %H:%M")
+        except ValueError:
+            return ""
+        if not load.is_stale:
+            return f"as of {stamp}"
+        days = age / 24.0
+        span = f"{days:.0f}d" if days >= 1 else f"{age:.0f}h"
+        return (f"⚠ local copy {span} old (as of {stamp}) — OneDrive may have "
+                f"stopped syncing it down; new feedback won't appear")
 
     def _style_status(self):
         # Neutral, legible text — the accent read as an error in warm themes.

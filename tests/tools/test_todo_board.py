@@ -22,6 +22,73 @@ def _load(feedback=(), archive=()) -> FeedbackLoad:
                         path=None, ok=True, message="stub")
 
 
+# ---- local-copy freshness (wedged-download detector) -----------------------
+
+def test_load_is_stale_only_past_threshold():
+    from datetime import datetime, timedelta
+    from tools.devkit.todo_board.model import STALE_AFTER_HOURS
+    fresh = FeedbackLoad(ok=True, mtime_iso=(
+        datetime.now() - timedelta(hours=1)).isoformat())
+    assert fresh.is_stale is False
+    assert 0.5 < fresh.age_hours < 1.5
+
+    wedged = FeedbackLoad(ok=True, mtime_iso=(
+        datetime.now() - timedelta(hours=STALE_AFTER_HOURS + 1)).isoformat())
+    assert wedged.is_stale is True
+
+
+def test_load_without_mtime_is_never_stale():
+    """Stubbed/unknown mtime must not raise a false alarm."""
+    assert FeedbackLoad(ok=True).age_hours is None
+    assert FeedbackLoad(ok=True).is_stale is False
+    assert FeedbackLoad(ok=True, mtime_iso="not-a-date").is_stale is False
+
+
+def test_load_feedback_reports_workbook_mtime(tmp_path, monkeypatch):
+    from tools.devkit.todo_board.model import load_feedback
+    xlsx = tmp_path / "TechDeck Telemetry.xlsx"
+    _make_telemetry_workbook(xlsx, [
+        ["2026-07-01 10:00:00", "amy", "M1", "add dark mode",
+         "Shell", "0.8.6", "Needs Review"]])
+    monkeypatch.setenv("TECHDECK_TELEMETRY_XLSX", str(xlsx))
+    load = load_feedback()
+    assert load.ok and load.mtime_iso            # captured from the file
+    assert load.is_stale is False                # just written
+
+
+def test_board_status_line_warns_on_stale_local_copy(qapp, tmp_path, monkeypatch):
+    """A wedged download must SAY so — an empty board silently reading a
+    week-old file is the bug this guards against."""
+    from datetime import datetime, timedelta
+    from tools.devkit.todo_board import model
+    from tools.devkit.todo_board import board as board_mod
+    monkeypatch.setattr(model, "_state_path", lambda: tmp_path / "todo_board.json")
+    stale_iso = (datetime.now() - timedelta(days=6)).isoformat()
+    monkeypatch.setattr(board_mod, "load_feedback", lambda: FeedbackLoad(
+        feedback=[], archive=[], path=None, ok=True, message="stub",
+        mtime_iso=stale_iso))
+    board = board_mod.TodoBoard()
+    qapp.processEvents()
+    text = board._status.text()
+    assert "6d old" in text and "stopped syncing" in text
+    assert board._status_ok is False              # rendered in the warning color
+
+
+def test_board_status_line_shows_as_of_when_fresh(qapp, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    from tools.devkit.todo_board import model
+    from tools.devkit.todo_board import board as board_mod
+    monkeypatch.setattr(model, "_state_path", lambda: tmp_path / "todo_board.json")
+    monkeypatch.setattr(board_mod, "load_feedback", lambda: FeedbackLoad(
+        feedback=[], archive=[], path=None, ok=True, message="stub",
+        mtime_iso=(datetime.now() - timedelta(minutes=20)).isoformat()))
+    board = board_mod.TodoBoard()
+    qapp.processEvents()
+    assert "as of " in board._status.text()
+    assert "⚠" not in board._status.text()
+    assert board._status_ok is True
+
+
 # ---- registry --------------------------------------------------------------
 
 def test_todo_board_is_default_devkit_page():
