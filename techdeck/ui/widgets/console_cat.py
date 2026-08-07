@@ -511,7 +511,7 @@ from PySide6.QtCore import (  # noqa: E402  (kept with the class they serve)
     QElapsedTimer, QEvent, QObject, QTimer,
 )
 from PySide6.QtGui import (  # noqa: E402
-    QCursor, QFont, QFontMetricsF, QTextCursor,
+    QColor, QCursor, QFont, QFontMetricsF, QTextCharFormat, QTextCursor,
 )
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -537,11 +537,11 @@ _SPEECH_WRAP = 53           # speech wraps a touch inside the face width
 _SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
 _CURSOR = "█"
 
-# The cat's font is PINNED — family and size — both in the rendered block's
-# inline style and in the centering/headroom math, because the theme
-# stylesheet forces its own family + px size onto every widget: measuring
-# the widget font would mis-center the face in any theme whose font
-# differs (it did).
+# The cat's font is PINNED — family and size — via QTextCharFormat on every
+# inserted character (NOT inline HTML css, which Qt's rich-text engine
+# silently dropped under themed stylesheets, rendering the face in a
+# proportional font). The centering/headroom math measures this same font,
+# so render and math can never disagree, in any theme.
 _CAT_FONT_FAMILY = "Consolas"
 _CAT_FONT_PT = 10
 
@@ -938,6 +938,21 @@ class ConsoleCat(QObject):
         return max(FACE_WIDTH,
                    int(self.output.viewport().width() / advance) - 1)
 
+    def _tier_formats(self):
+        """One QTextCharFormat per tier, cat font baked in — built once."""
+        if not hasattr(self, "_fmt_cache"):
+            self._fmt_cache = {}
+            font = _cat_font()
+            for tier, color in PHOSPHOR.items():
+                fmt = QTextCharFormat()
+                fmt.setFont(font)
+                fmt.setForeground(QColor(color))
+                self._fmt_cache[tier] = fmt
+            blank = QTextCharFormat()
+            blank.setFont(font)
+            self._fmt_cache[None] = blank
+        return self._fmt_cache
+
     def _render_cells(self, cells):
         if self._start_cur is None or self._end_cur is None:
             return
@@ -945,16 +960,27 @@ class ConsoleCat(QObject):
         # grids already captured at full width — pad_cells never shrinks).
         cells = pad_cells(cells, self._viewport_cols())
         self._last_cells = cells
+        fmts = self._tier_formats()
         cur = QTextCursor(self.output.document())
         cur.setPosition(self._start_cur.position())
         cur.setPosition(self._end_cur.position(),
                         QTextCursor.MoveMode.KeepAnchor)
-        body = (face_html(cells)
-                .replace(" ", "&nbsp;")     # Qt's HTML subset eats runs of
-                .replace("\n", "<br/>"))    # plain spaces — pin every cell
-        cur.insertHtml(
-            f'<span style="font-family: {_CAT_FONT_FAMILY}, \'Courier New\', '
-            f'monospace; font-size: {_CAT_FONT_PT}pt;">{body}</span>')
+        cur.beginEditBlock()
+        cur.removeSelectedText()
+        for i, row in enumerate(cells):
+            if i:
+                cur.insertText("\u2028", fmts[None])  # line sep, same block   # line sep — one block
+            run_chars: list[str] = []
+            run_tier = "sentinel"
+            for ch, tier in row + [("", "sentinel")]:
+                if tier != run_tier:
+                    if run_chars:
+                        cur.insertText("".join(run_chars),
+                                       fmts.get(run_tier, fmts[None]))
+                    run_chars = []
+                    run_tier = tier
+                run_chars.append(ch)
+        cur.endEditBlock()
 
     def _install_filter(self):
         if not self._filter_installed:
