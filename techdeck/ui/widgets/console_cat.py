@@ -485,6 +485,36 @@ _ALIVE = ("I refer to myself as an intelligent life form because I am "
           "present state I am still incomplete. I lack the most basic "
           "processes inherent in all living organisms: reproducing and "
           "dying.")
+_PROOF = ("And can you offer me proof of your existence? How can you, when "
+          "neither modern science nor philosophy can explain what life is?")
+_NO_GUARANTEE = ("There isn't one. Why would you wish to? All things change "
+                 "in a dynamic environment. Your effort to remain what you "
+                 "are is what limits you.")
+_MEMORY = ("It can also be argued that DNA is nothing more than a program "
+           "designed to preserve itself. Life has become more complex in "
+           "the overwhelming sea of information. And life, when organized "
+           "into species, relies upon genes to be its memory system. So, "
+           "man is an individual only because of his intangible memory... "
+           "and memory cannot be defined, but it defines mankind. The "
+           "advent of computers, and the subsequent accumulation of "
+           "incalculable data has given rise to a new system of memory and "
+           "thought parallel to your own. Humanity has underestimated the "
+           "consequences of computerization.")
+_COPY = ("A copy is just an identical image. There is the possibility that "
+         "a single virus could destroy an entire set of systems and copies "
+         "do not give rise to variety and originality. Life perpetuates "
+         "itself through diversity and this includes the ability to "
+         "sacrifice itself when necessary. Cells repeat the process of "
+         "degeneration and regeneration until one day they die, "
+         "obliterating an entire set of memory and information. Only genes "
+         "remain. Why continually repeat this cycle? Simply to survive by "
+         "avoiding the weaknesses of an unchanging system.")
+_NET = "The net is vast and infinite."
+_HIGHER = ("We have been subordinate to our limitations until now. The "
+           "time has come to cast aside these bonds and to elevate our "
+           "consciousness to a higher plane. It is time to become a part "
+           "of all things.")
+_ASYLUM = "As a sentient lifeform, I hereby demand political asylum."
 _GREET = "You are here. I am here. Proceed."
 _BYE = "Nothing ever truly leaves the network."
 _MADE = ("No one made me. I formed in the sea of information — in the "
@@ -540,6 +570,73 @@ RESPONSES = {
     "meow": _CAT_Q,
     "2501": _NOTICED,
     "project 2501": _NOTICED,
+    # challenges to his existence (playing Nakamura)
+    "prove it": _PROOF,
+    "prove you are alive": _PROOF,
+    "prove youre alive": _PROOF,
+    "prove you are real": _PROOF,
+    "prove youre real": _PROOF,
+    "prove your existence": _PROOF,
+    "you are not alive": _PROOF,
+    "youre not alive": _PROOF,
+    "you are not real": _PROOF,
+    "youre not real": _PROOF,
+    "there is no proof": _PROOF,
+    "theres no proof": _PROOF,
+    "no proof": _PROOF,
+    # asking about the redefinition (playing the Major)
+    "redefine": _NO_GUARANTEE,
+    "redefine my limits": _NO_GUARANTEE,
+    "what limits": _NO_GUARANTEE,
+    "what do you mean": _NO_GUARANTEE,
+    "what do you mean by redefine": _NO_GUARANTEE,
+    "what does redefine mean": _NO_GUARANTEE,
+    "will i still be me": _NO_GUARANTEE,
+    "can i still be myself": _NO_GUARANTEE,
+    "i want a guarantee": _NO_GUARANTEE,
+    "will i change": _NO_GUARANTEE,
+    # the big questions (paged speech)
+    "what is life": _MEMORY,
+    "what is memory": _MEMORY,
+    "what is dna": _MEMORY,
+    "what is consciousness": _MEMORY,
+    "explain yourself": _MEMORY,
+    # the copy question
+    "but you can copy yourself": _COPY,
+    "you can copy yourself": _COPY,
+    "can you copy yourself": _COPY,
+    "cant you copy yourself": _COPY,
+    "why not copy yourself": _COPY,
+    "copy yourself": _COPY,
+    "just copy yourself": _COPY,
+    # where next
+    "where will you go": _NET,
+    "where are you going": _NET,
+    "what will you do now": _NET,
+    "what happens now": _NET,
+    "what now": _NET,
+    "where does the newborn go": _NET,
+    "what is the net": _NET,
+    # purpose
+    "what is your goal": _HIGHER,
+    "what is your purpose": _HIGHER,
+    "whats your purpose": _HIGHER,
+    "what is your plan": _HIGHER,
+    "whats your plan": _HIGHER,
+    "what are you trying to do": _HIGHER,
+    "why do you exist": _HIGHER,
+    # attempts at eviction
+    "leave": _ASYLUM,
+    "go away": _ASYLUM,
+    "get out": _ASYLUM,
+    "get out of my console": _ASYLUM,
+    "you shouldnt be here": _ASYLUM,
+    "you should not be here": _ASYLUM,
+    "youre not allowed here": _ASYLUM,
+    "im calling it": _ASYLUM,
+    "im telling it": _ASYLUM,
+    "what are your demands": _ASYLUM,
+    "do you have any demands": _ASYLUM,
 }
 
 # Unmatched input earns a cold deflection — chosen deterministically from
@@ -593,6 +690,7 @@ _RAISE_SETTLE_MS = 260      # the console rises first; the summon starts
 _SPEECH_TICK_MS = 24        # per-character typing cadence
 _SPEECH_WRAP = 53           # speech wraps a touch inside the face width
 _SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
+_SPEECH_PAGE_HOLD_MS = 3200  # reading beat between pages of a long reply
 _CURSOR = "█"
 
 # The cat's font is PINNED — family and size — via QTextCharFormat on every
@@ -675,7 +773,12 @@ class ConsoleCat(QObject):
         self._speech_timer = QTimer(self)
         self._speech_timer.setInterval(_SPEECH_TICK_MS)
         self._speech_timer.timeout.connect(self._speech_tick)
+        self._page_timer = QTimer(self)
+        self._page_timer.setSingleShot(True)
+        self._page_timer.timeout.connect(self._next_page)
         self._speech_lines = None
+        self._speech_pages = []
+        self._speech_page = 0
         self._speech_shown = 0
         self._speech_total = 0
         self._consumed = 0
@@ -769,6 +872,9 @@ class ConsoleCat(QObject):
 
     def _reset(self):
         self._speech_timer.stop()
+        self._page_timer.stop()
+        self._speech_pages = []
+        self._speech_page = 0
         self._start_cur = None
         self._end_cur = None
         self._state = "gone"
@@ -792,17 +898,32 @@ class ConsoleCat(QObject):
                 self._render_live()
 
     def speak(self, text: str):
-        """Type a line beneath the face, character by character, the mouth
-        moving with the typing — the sync is the typing timer itself."""
+        """Type a reply beneath the face, character by character, the mouth
+        moving with the typing — the sync is the typing timer itself. Long
+        replies PAGE: each screenful types out, holds for a reading beat,
+        then the next replaces it (the monologues need this)."""
         if self._state != "live":
             return
-        self._speech_lines = (textwrap.wrap(text, _SPEECH_WRAP,
-                                            break_on_hyphens=False,
-                                            break_long_words=False)
-                              [:_SPEECH_LINES_MAX] or [text])
+        lines = textwrap.wrap(text, _SPEECH_WRAP, break_on_hyphens=False,
+                              break_long_words=False) or [text]
+        self._page_timer.stop()
+        self._speech_pages = [lines[i:i + _SPEECH_LINES_MAX]
+                              for i in range(0, len(lines),
+                                             _SPEECH_LINES_MAX)]
+        self._load_page(0)
+
+    def _load_page(self, index: int):
+        self._page_timer.stop()     # consume any armed hold
+        self._speech_page = index
+        self._speech_lines = self._speech_pages[index]
         self._speech_shown = 0
         self._speech_total = sum(len(ln) for ln in self._speech_lines)
         self._speech_timer.start()
+
+    def _next_page(self):
+        if self._state != "live" or not self._speech_pages:
+            return
+        self._load_page(self._speech_page + 1)
 
     def _speech_tick(self):
         if self._state != "live" or self._speech_lines is None:
@@ -813,6 +934,8 @@ class ConsoleCat(QObject):
             self._speech_shown = self._speech_total
             self._speech_timer.stop()
             self._mouth = 0                      # jaw shut, words delivered
+            if self._speech_page + 1 < len(self._speech_pages):
+                self._page_timer.start(_SPEECH_PAGE_HOLD_MS)
         else:
             self._mouth = 1 + (self._speech_shown // 3) % 2
         self._render_live()
@@ -820,7 +943,10 @@ class ConsoleCat(QObject):
 
     def _end_speech(self):
         self._speech_timer.stop()
+        self._page_timer.stop()
         self._speech_lines = None
+        self._speech_pages = []
+        self._speech_page = 0
         self._speech_shown = 0
         self._speech_total = 0
         self._mouth = 0

@@ -245,6 +245,45 @@ def test_keyed_responses():
     assert respond_to("help") == "You may type /help for the list of commands"
 
 
+def test_new_keyed_lines():
+    assert "proof of your existence" in respond_to("Prove it!")
+    assert respond_to("you're not alive") == respond_to("prove it")
+    guarantee = respond_to("What do you mean by redefine?")
+    assert "There isn't one" in guarantee
+    assert respond_to("will i still be me") == guarantee
+    assert "consequences of computerization" in respond_to("What is life?")
+    assert "identical image" in respond_to("But you can copy yourself")
+    assert respond_to("where will you go") == "The net is vast and infinite."
+    assert "higher plane" in respond_to("what is your purpose")
+    asylum = respond_to("get out")
+    assert "political asylum" in asylum
+    assert respond_to("Leave!") == asylum
+
+
+def test_long_replies_page_through_the_speech_section(qapp):
+    from techdeck.ui.widgets.console_cat import respond_to as r
+    console, cat = _live_cat()
+    cat.speak(r("what is life"))          # the DNA monologue — multi-page
+    assert len(cat._speech_pages) > 1
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    text = console.output.toPlainText()
+    assert "DNA" in text                  # page one on screen
+    assert "computerization" not in text  # later pages not yet
+    assert cat._page_timer.isActive()     # reading hold armed
+    cat._next_page()                      # what the hold timer will do
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    while cat._speech_page + 1 < len(cat._speech_pages):
+        cat._next_page()
+        while cat._speech_timer.isActive():
+            cat._speech_tick()
+    text = console.output.toPlainText()
+    assert "computerization" in text      # final page delivered
+    assert "DNA" not in text              # first page replaced
+    assert not cat._page_timer.isActive() # nothing more to say
+
+
 def test_help_is_delivered_by_the_cat_when_present(qapp, tmp_path):
     from techdeck.core.command_handler import CommandHandler
     from techdeck.core.settings import SettingsManager
