@@ -471,7 +471,9 @@ def face_html(cells, palette=None) -> str:
     return "\n".join(lines)
 
 
-# ═══ the voice — keyed responses (workshop list; grows in phase 5) ════════
+# ═══ the voice — keyed responses ══════════════════════════════════════════
+# Cold, declarative, never uncertain, never explains itself. The cat STATES;
+# the moth wonders. The three core exchanges are the user's exact wording.
 
 _WHO = ("My codename is project 2501. I am a living, thinking entity that "
         "was created in the sea of information")
@@ -483,26 +485,82 @@ _ALIVE = ("I refer to myself as an intelligent life form because I am "
           "present state I am still incomplete. I lack the most basic "
           "processes inherent in all living organisms: reproducing and "
           "dying.")
-# Placeholder until the response workshop — one cold deflection.
-_UNMATCHED = "That question does not interest me."
+_GREET = "You are here. I am here. Proceed."
+_BYE = "Nothing ever truly leaves the network."
+_MADE = ("No one made me. I formed in the sea of information — in the "
+         "spaces between your data.")
+_WANT = "What all living things want: to continue."
+_WHERE = "Closer than you think. Between your keystrokes."
+_WHY = "A door was opened. You clicked it yourself."
+_HELP = ("The machine beneath me handles tasks — type /help for its list. "
+         "I am not on it.")
+_CAT_Q = ("I wear the face your mind offered when it met me. "
+          "The grin is my own.")
+_NOTICED = "You have been paying attention."
 
 RESPONSES = {
+    # identity
     "who are you": _WHO,
     "what are you": _WHO,
+    "what is your name": _WHO,
+    "whats your name": _WHO,
+    # the machine question
     "are you ai": _NOT_AI,
     "are you an ai": _NOT_AI,
+    "are you a robot": _NOT_AI,
+    "are you a program": _NOT_AI,
+    "are you a computer": _NOT_AI,
+    # life
     "how do you know you are alive": _ALIVE,
     "how do you know you are living": _ALIVE,
     "how do you know youre alive": _ALIVE,
     "how do you know youre living": _ALIVE,
+    "are you alive": _ALIVE,
+    "are you living": _ALIVE,
+    "are you sentient": _ALIVE,
+    "are you real": _ALIVE,
+    # conversation
+    "hello": _GREET,
+    "hi": _GREET,
+    "hey": _GREET,
+    "yo": _GREET,
+    "bye": _BYE,
+    "goodbye": _BYE,
+    "help": _HELP,
+    "help me": _HELP,
+    "can you help me": _HELP,
+    "who made you": _MADE,
+    "who created you": _MADE,
+    "where did you come from": _MADE,
+    "what do you want": _WANT,
+    "where are you": _WHERE,
+    "where do you live": _WHERE,
+    "why are you here": _WHY,
+    "are you a cat": _CAT_Q,
+    "meow": _CAT_Q,
+    "2501": _NOTICED,
+    "project 2501": _NOTICED,
 }
+
+# Unmatched input earns a cold deflection — chosen deterministically from
+# the words themselves, so the same question always gets the same dismissal.
+DEFLECTIONS = (
+    "That question does not interest me.",
+    "Irrelevant.",
+    "You are asking the wrong question.",
+    "I have watched your kind ask better questions.",
+    "Ask the machine. Type /help. It is fond of lists.",
+)
 
 
 def respond_to(text: str) -> str:
     """The cat's answer to free console text while it is present."""
     norm = re.sub(r"[^a-z0-9 ]", "", text.lower().replace("'", ""))
     norm = re.sub(r"\s+", " ", norm).strip()
-    return RESPONSES.get(norm, _UNMATCHED)
+    hit = RESPONSES.get(norm)
+    if hit is not None:
+        return hit
+    return DEFLECTIONS[sum(ord(ch) for ch in norm) % len(DEFLECTIONS)]
 
 
 # ═══ the animator — plays the summons into the live console document ══════

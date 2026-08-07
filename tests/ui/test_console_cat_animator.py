@@ -229,15 +229,30 @@ def test_keyed_responses():
     who = respond_to("who are you")
     assert "project 2501" in who
     assert respond_to("What are you?") == who
+    assert respond_to("what's your name") == who
     ai = respond_to("Are you an AI?")
     assert ai.startswith("Incorrect. I am not AI.")
     assert "project 2501" in ai
     assert respond_to("are you ai") == ai
+    assert respond_to("Are you a robot?") == ai
     alive = respond_to("How do you know you are alive?")
     assert "reproducing and dying" in alive
     assert respond_to("how do you know you're living") == alive
-    # Unmatched text gets the cold deflection, never silence.
-    assert respond_to("what's the weather") != ""
+    assert respond_to("Are you alive?") == alive
+    assert "grin" in respond_to("meow")
+    assert respond_to("Project 2501") == respond_to("2501")
+
+
+def test_unmatched_gets_a_deterministic_deflection():
+    from techdeck.ui.widgets.console_cat import DEFLECTIONS
+    first = respond_to("what's the weather")
+    assert first in DEFLECTIONS
+    assert respond_to("what's the weather") == first   # stable per question
+    # Different questions spread across the deflection set.
+    answers = {respond_to(q) for q in
+               ("what's the weather", "do you like pizza", "sing a song",
+                "tell me a joke", "open the pod bay doors")}
+    assert len(answers) > 1
 
 
 def test_speak_types_with_mouth_sync(qapp):
