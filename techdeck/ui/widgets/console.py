@@ -1114,9 +1114,9 @@ class ConsoleWidget(QWidget, ThemeAware):
             # beneath the face so it stays whole above the readout.
             chrome = self.height() - self._console_page.height()
             self.raise_requested.emit(int(
-                chrome + self.pinned_reserve + min(doc_h + 4, 300)))
-        cap = self._pinned_cap(full)
-        self.pinned.setFixedHeight(int(min(doc_h + 4, cap)))
+                chrome + self.pinned_reserve + min(doc_h + 16, 300)))
+        self.pinned.setFixedHeight(
+            self._pinned_fit_height(self._pinned_cap(full)))
         self.pinned.verticalScrollBar().setValue(0)
         self.pinned.show()
         self._scroll_to_bottom()    # keep the face tight against the seam
@@ -1134,6 +1134,15 @@ class ConsoleWidget(QWidget, ThemeAware):
             return max(120, page_h - self.pinned_reserve)
         return max(120, page_h - 90 if full else page_h // 2)
 
+    def _pinned_fit_height(self, cap: int) -> int:
+        """Height that shows the pinned document WITHOUT clipping its last
+        line (up to cap). document().size() alone under-measures once the
+        app stylesheet restyles the font, which visibly cut off text — pad
+        for the frame plus breathing room."""
+        doc_h = self.pinned.document().size().height()
+        pad = 2 * self.pinned.frameWidth() + 12
+        return int(min(doc_h + pad, cap))
+
     def append_current(self, html: str):
         """APPEND one line to the pinned current-output area (present_current
         replaces; this grows). The running "current" feed: while the Puppet
@@ -1142,9 +1151,8 @@ class ConsoleWidget(QWidget, ThemeAware):
         if self.pinned.isHidden():
             self.pinned.clear()
         self.pinned.append(html)
-        doc_h = self.pinned.document().size().height()
         self.pinned.setFixedHeight(
-            int(min(doc_h + 4, self._pinned_cap(False))))
+            self._pinned_fit_height(self._pinned_cap(False)))
         self.pinned.show()
         sb = self.pinned.verticalScrollBar()
         sb.setValue(sb.maximum())
