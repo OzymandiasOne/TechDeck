@@ -427,6 +427,25 @@ def test_script_fallback_when_file_missing(tmp_path, monkeypatch):
     assert "project 2501" in cc.respond_to("who are you")
 
 
+def test_unmatched_questions_are_logged_for_harvest(monkeypatch):
+    import techdeck.ui.widgets.console_cat as cc
+
+    calls = []
+
+    class _Stub:
+        def info(self, msg, *args):
+            calls.append(msg % args if args else msg)
+
+    monkeypatch.setattr(cc, "_unmatched_logger", _Stub())
+    cc.respond_to("what's the weather")
+    assert calls and "what's the weather" in calls[0]
+    assert "UNMATCHED" in calls[0]
+    calls.clear()
+    cc.respond_to("who are you")            # matched — nothing logged
+    cc.respond_to("who are yuo")            # fuzzy-matched — nothing logged
+    assert calls == []
+
+
 def test_unmatched_gets_a_deterministic_deflection():
     from techdeck.ui.widgets.console_cat import DEFLECTIONS
     first = respond_to("what's the weather")

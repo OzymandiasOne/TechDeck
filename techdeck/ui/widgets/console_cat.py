@@ -28,6 +28,9 @@ behaviour. Preview with `python tools/preview_console_cat.py`.
 from __future__ import annotations
 
 import difflib
+import logging
+import logging.handlers
+import os
 import random
 import re
 import sys
@@ -749,6 +752,40 @@ def _load_script():
     return _script_cache["responses"], _script_cache["deflections"]
 
 
+_unmatched_logger: logging.Logger | None = None
+
+
+def _get_unmatched_logger() -> logging.Logger:
+    """Rotating file logger for questions he had to deflect —
+    %LOCALAPPDATA%/TechDeck/logs/puppet_master_unmatched.log. The debug
+    report tails it, so colleague machines hand their misses back to the
+    maintainer for harvesting into responses.txt. Never raises (NullHandler
+    fallback, same contract as get_run_logger)."""
+    global _unmatched_logger
+    if _unmatched_logger is not None:
+        return _unmatched_logger
+    logger = logging.getLogger("techdeck.puppet_master_unmatched")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if not logger.handlers:
+        try:
+            if os.name == "nt":
+                base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+            else:
+                base = Path.home() / ".local" / "share"
+            log_dir = base / "TechDeck" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                log_dir / "puppet_master_unmatched.log",
+                maxBytes=500_000, backupCount=2, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(handler)
+        except Exception:
+            logger.addHandler(logging.NullHandler())
+    _unmatched_logger = logger
+    return logger
+
+
 def respond_to(text: str) -> str:
     """The cat's answer to free console text while it is present.
 
@@ -756,7 +793,9 @@ def respond_to(text: str) -> str:
     same answer): exact normalized match → close-match typo tolerance
     ("who are yuo") → known question buried in a longer sentence ("so tell
     me who are you anyway"; the most specific match wins) → a cold
-    deflection chosen by hashing the words themselves."""
+    deflection chosen by hashing the words themselves. Deflected questions
+    are logged (see _get_unmatched_logger) so real misses can be harvested
+    into the script file instead of guessed at."""
     responses, deflections = _load_script()
     norm = _normalize(text)
     hit = responses.get(norm)
@@ -776,7 +815,12 @@ def respond_to(text: str) -> str:
                 best = (len(kw), key)
     if best is not None:
         return responses[best[1]]
-    return deflections[sum(ord(ch) for ch in norm) % len(deflections)]
+    reply = deflections[sum(ord(ch) for ch in norm) % len(deflections)]
+    try:
+        _get_unmatched_logger().info("UNMATCHED %r -> %r", text.strip(), reply)
+    except Exception:
+        pass    # harvesting must never break the conversation
+    return reply
 
 
 # ═══ the animator — plays the summons into the live console document ══════
