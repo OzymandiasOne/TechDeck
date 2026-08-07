@@ -443,6 +443,13 @@ class MainWindow(QMainWindow):
         from __main__.py while the splash subprocess is still covering the
         window — Qt does the work behind the splash and the user never
         sees the cycling."""
+        # A page with a large real minimum (the DevKit toolbar wants ~1450px)
+        # legitimately GROWS the window while it is current during the cycle,
+        # and windows never shrink back when the minimum relaxes — so the app
+        # opened at whatever width the widest page demanded. Restore the
+        # pre-warmup size afterwards; the splash still covers the window, so
+        # neither the growth nor the snap-back is ever visible.
+        size_before = self.size()
         # Cycle through every stacked page so each one fires its first-show
         # / first-paint pipeline (style polish, layout, paint).
         for i in range(1, self.page_stack.count()):
@@ -479,6 +486,27 @@ class MainWindow(QMainWindow):
         # Back to home.
         self.page_stack.setCurrentIndex(0)
         QApplication.processEvents()
+
+        # Undo any growth the cycle forced (see note above). The grown
+        # minimum was pushed to the NATIVE window while the wide page was
+        # current and Qt does not re-sync it downward when the page's size
+        # policy relaxes — the platform clamp silently refuses the shrink.
+        # Reset the native minimum first; Qt re-imposes the true (small)
+        # minimum on the next layout pass.
+        if self.size() != size_before:
+            handle = self.windowHandle()
+            if handle is not None:
+                from PySide6.QtCore import QSize
+                handle.setMinimumSize(QSize(0, 0))
+            # The relaxed minimum is still a pending LayoutRequest here and
+            # resize() clamps against the stale cached value — recompute the
+            # layout minimums NOW so the shrink isn't silently refused.
+            for layout in (self.centralWidget().layout(), self.layout()):
+                if layout is not None:
+                    layout.invalidate()
+                    layout.activate()
+            self.resize(size_before)
+            QApplication.processEvents()
 
     def _on_dev_mode_toggled(self, active: bool):
         """When dev mode is switched off while the DevKit page is showing, fall
