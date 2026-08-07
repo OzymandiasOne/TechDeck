@@ -510,7 +510,9 @@ def respond_to(text: str) -> str:
 from PySide6.QtCore import (  # noqa: E402  (kept with the class they serve)
     QElapsedTimer, QEvent, QObject, QTimer,
 )
-from PySide6.QtGui import QCursor, QFontMetricsF, QTextCursor  # noqa: E402
+from PySide6.QtGui import (  # noqa: E402
+    QCursor, QFont, QFontMetricsF, QTextCursor,
+)
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 # Wall-clock pacing per summon: (progress_to, duration_ms) segments, piecewise
@@ -534,6 +536,21 @@ _SPEECH_TICK_MS = 24        # per-character typing cadence
 _SPEECH_WRAP = 53           # speech wraps a touch inside the face width
 _SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
 _CURSOR = "█"
+
+# The cat's font is PINNED — family and size — both in the rendered block's
+# inline style and in the centering/headroom math, because the theme
+# stylesheet forces its own family + px size onto every widget: measuring
+# the widget font would mis-center the face in any theme whose font
+# differs (it did).
+_CAT_FONT_FAMILY = "Consolas"
+_CAT_FONT_PT = 10
+
+
+def _cat_font() -> QFont:
+    font = QFont(_CAT_FONT_FAMILY)
+    font.setPointSize(_CAT_FONT_PT)
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    return font
 
 
 def progress_at(timeline, elapsed_ms: float) -> float:
@@ -651,7 +668,7 @@ class ConsoleCat(QObject):
         self._raise_timer.start(_RAISE_SETTLE_MS)
 
     def _request_headroom(self):
-        fm = QFontMetricsF(self.output.font())
+        fm = QFontMetricsF(_cat_font())
         # Face + a separator + the speech section beneath it. The shell may
         # take this from the plugin pane — that's sanctioned.
         rows = len(FACE_ART) + 1 + _SPEECH_LINES_MAX
@@ -913,9 +930,10 @@ class ConsoleCat(QObject):
         return lines
 
     def _viewport_cols(self) -> int:
-        """The console's visible width in character cells (never narrower
-        than the face)."""
-        fm = QFontMetricsF(self.output.font())
+        """The console's visible width in the CAT's character cells (never
+        narrower than the face). Measured with the pinned cat font — the
+        widget font lies whenever a theme stylesheet restyles the console."""
+        fm = QFontMetricsF(_cat_font())
         advance = max(1.0, fm.horizontalAdvance("M"))
         return max(FACE_WIDTH,
                    int(self.output.viewport().width() / advance) - 1)
@@ -935,8 +953,8 @@ class ConsoleCat(QObject):
                 .replace(" ", "&nbsp;")     # Qt's HTML subset eats runs of
                 .replace("\n", "<br/>"))    # plain spaces — pin every cell
         cur.insertHtml(
-            f'<span style="font-family: Consolas, \'Courier New\', '
-            f'monospace;">{body}</span>')
+            f'<span style="font-family: {_CAT_FONT_FAMILY}, \'Courier New\', '
+            f'monospace; font-size: {_CAT_FONT_PT}pt;">{body}</span>')
 
     def _install_filter(self):
         if not self._filter_installed:
