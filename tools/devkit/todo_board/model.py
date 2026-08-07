@@ -216,31 +216,79 @@ class FeedbackLoad:
     ok: bool = False
     message: str = ""
     mtime_iso: str = ""      # local copy's last-modified time ("" if unknown)
+    data_iso: str = ""       # newest Timestamp inside the workbook ("" if none)
+
+    @property
+    def freshness_iso(self) -> str:
+        """The timestamp staleness is judged against.
+
+        Prefers the newest row IN the data over the file's mtime, because mtime
+        lies on a synced file: OneDrive stamped a freshly downloaded copy
+        2026-08-06 15:55 while the rows inside ran through 2026-08-07 10:14.
+        Judging by mtime called that workbook a day stale seconds after it
+        arrived — and a warning that cries wolf is a warning people learn to
+        ignore, which would defeat the whole point of having it.
+        """
+        return self.data_iso or self.mtime_iso
 
     @property
     def age_hours(self) -> Optional[float]:
-        """Hours since the local copy last changed, or None if unknown."""
-        if not self.mtime_iso:
+        """Hours since the workbook's newest row (see freshness_iso)."""
+        stamp = self.freshness_iso
+        if not stamp:
             return None
         try:
-            delta = datetime.now() - datetime.fromisoformat(self.mtime_iso)
+            delta = datetime.now() - datetime.fromisoformat(stamp)
         except ValueError:
             return None
         return delta.total_seconds() / 3600.0
 
     @property
     def is_stale(self) -> bool:
-        """True when the local copy looks like it stopped syncing DOWN.
+        """True when the board is reading data that stopped arriving.
 
         The flow appends a usage row on every plugin run by every user — dozens
-        a day — so the cloud copy changes constantly, and a local copy untouched
-        for STALE_AFTER_HOURS means the DOWNLOAD side is wedged rather than that
-        nothing happened. This is the signal that was missing when a silent
+        a day — so the newest row should never be more than a few hours old.
+        Past STALE_AFTER_HOURS the DOWNLOAD side is wedged rather than nothing
+        having happened. This is the signal that was missing when a silent
         OneDrive deadlock starved the board for six days: an empty board looked
         identical to "no new feedback" (docs/USAGE_TELEMETRY.md troubleshooting).
         """
         age = self.age_hours
         return age is not None and age >= STALE_AFTER_HOURS
+
+
+def _newest_timestamp(ws) -> str:
+    """Newest value in this sheet's Timestamp column, normalised to a sortable
+    ``YYYY-MM-DD HH:MM:SS`` string ("" if there is no such column). Column found
+    by header NAME (Hard Rule 1)."""
+    rows = ws.iter_rows(values_only=True)
+    col = None
+    for row in rows:
+        cells = {str(c).strip().lower(): i for i, c in enumerate(row) if c is not None}
+        if "timestamp" in cells:
+            col = cells["timestamp"]
+            break
+    if col is None:
+        return ""
+    best = ""
+    for row in rows:            # continues after the header row
+        if col < len(row) and row[col] is not None:
+            # Normalise the ISO 'T' so datetime and string cells sort together.
+            stamp = _iso(row[col]).replace("T", " ")
+            if stamp > best:
+                best = stamp
+    return best
+
+
+def _newest_data_timestamp(wb) -> str:
+    """Newest Timestamp anywhere in the workbook — Usage leads because it gains
+    a row on every plugin run by every user, so it tracks how current the data
+    really is regardless of what the filesystem says about the file."""
+    stamps = [_newest_timestamp(wb[name])
+              for name in ("Usage", _FEEDBACK_SHEET, _ARCHIVE_SHEET)
+              if name in wb.sheetnames]
+    return max((s for s in stamps if s), default="")
 
 
 def load_feedback() -> FeedbackLoad:
@@ -265,11 +313,16 @@ def load_feedback() -> FeedbackLoad:
     try:
         feedback = _read_sheet(wb, _FEEDBACK_SHEET, "feedback")
         archive = _read_sheet(wb, _ARCHIVE_SHEET, "archive")
+        try:
+            data_iso = _newest_data_timestamp(wb)
+        except Exception as exc:      # freshness is a nicety, never fatal
+            logger.warning("Dev Board: could not read data timestamps: %s", exc)
+            data_iso = ""
     finally:
         wb.close()
     return FeedbackLoad(
         feedback=feedback, archive=archive, path=path, ok=True,
-        mtime_iso=mtime_iso,
+        mtime_iso=mtime_iso, data_iso=data_iso,
         message=f"{len(feedback)} open + {len(archive)} archived from {path.name}")
 
 

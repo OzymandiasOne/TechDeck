@@ -44,7 +44,55 @@ def test_load_without_mtime_is_never_stale():
     assert FeedbackLoad(ok=True, mtime_iso="not-a-date").is_stale is False
 
 
-def test_load_feedback_reports_workbook_mtime(tmp_path, monkeypatch):
+def test_freshness_prefers_data_over_file_mtime():
+    """mtime lies on a synced file: OneDrive stamped a freshly downloaded copy
+    2026-08-06 15:55 while its rows ran through 2026-08-07 10:14. Judging by
+    mtime called it a day stale seconds after it arrived."""
+    from datetime import datetime, timedelta
+    now = datetime.now()
+    load = FeedbackLoad(
+        ok=True,
+        mtime_iso=(now - timedelta(hours=20)).isoformat(),      # misleading
+        data_iso=(now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"))
+    assert load.freshness_iso == load.data_iso
+    assert 1.5 < load.age_hours < 2.5
+    assert load.is_stale is False            # the data is 2h old, not 20h
+
+    # With no data timestamps at all, mtime is still the fallback.
+    only_mtime = FeedbackLoad(ok=True, mtime_iso=(now - timedelta(hours=20)).isoformat())
+    assert only_mtime.freshness_iso == only_mtime.mtime_iso
+    assert only_mtime.is_stale is True
+
+
+def test_newest_data_timestamp_scans_usage_first(tmp_path):
+    """The Usage sheet gains a row on every run by every user, so it is the
+    truest freshness signal — and it must be found by header name."""
+    import openpyxl
+    from tools.devkit.todo_board.model import _newest_data_timestamp
+    xlsx = tmp_path / "wb.xlsx"
+    wb = openpyxl.Workbook()
+    us = wb.active
+    us.title = "Usage"
+    us.append(["Timestamp", "User", "Machine"])
+    us.append(["2026-08-07 10:14:33", "amy", "M1"])
+    us.append(["2026-08-05 08:00:00", "bob", "M2"])
+    fb = wb.create_sheet("Feedback")
+    fb.append(["Timestamp", "User", "Machine", "Suggestion"])
+    fb.append(["2026-08-06 09:15:40", "cd", "M3", "idea"])
+    wb.save(xlsx)
+    wb.close()
+    wb = openpyxl.load_workbook(xlsx, read_only=True, data_only=True)
+    try:
+        assert _newest_data_timestamp(wb) == "2026-08-07 10:14:33"
+    finally:
+        wb.close()
+
+
+def test_load_feedback_reports_both_timestamps(tmp_path, monkeypatch):
+    """Freshness follows the DATA, not the file. This workbook is written right
+    now but holds only a July row, so it is correctly reported stale — the
+    inverse of the bug this replaced, where a file downloaded seconds ago was
+    called stale because OneDrive backdated its mtime."""
     from tools.devkit.todo_board.model import load_feedback
     xlsx = tmp_path / "TechDeck Telemetry.xlsx"
     _make_telemetry_workbook(xlsx, [
@@ -52,8 +100,10 @@ def test_load_feedback_reports_workbook_mtime(tmp_path, monkeypatch):
          "Shell", "0.8.6", "Needs Review"]])
     monkeypatch.setenv("TECHDECK_TELEMETRY_XLSX", str(xlsx))
     load = load_feedback()
-    assert load.ok and load.mtime_iso            # captured from the file
-    assert load.is_stale is False                # just written
+    assert load.ok and load.mtime_iso                    # file mtime captured
+    assert load.data_iso.startswith("2026-07-01")        # newest row in the data
+    assert load.freshness_iso == load.data_iso           # data wins
+    assert load.is_stale is True                         # July data is stale
 
 
 def _stale_board(qapp, tmp_path, monkeypatch, days=6):
@@ -75,7 +125,7 @@ def test_board_status_line_warns_on_stale_local_copy(qapp, tmp_path, monkeypatch
     (prose there widens the window); the explanation lives behind the details
     button."""
     board = _stale_board(qapp, tmp_path, monkeypatch, days=6)
-    assert "⚠ local copy 6 days old" in board._status_full
+    assert "⚠ data 6 days old" in board._status_full
     assert "stopped syncing" not in board._status_full     # short chip only
     assert "stopped syncing" in board._status_detail       # the why, on demand
     assert board._status_ok is False              # rendered in the warning color
@@ -115,8 +165,8 @@ def test_stale_warning_survives_elision(qapp, tmp_path, monkeypatch):
         mtime_iso=(datetime.now() - timedelta(days=6)).isoformat()))
     board = board_mod.TodoBoard()
     qapp.processEvents()
-    assert board._status_full.startswith("⚠ local copy 6 days old")
-    assert "local copy 6 days old" in board._status.text()   # survived the cut
+    assert board._status_full.startswith("⚠ data 6 days old")
+    assert "data 6 days old" in board._status.text()   # survived the cut
 
 
 def test_age_phrase_singular_and_plural():
@@ -135,7 +185,7 @@ def test_status_details_dialog_opens_with_full_text(qapp, tmp_path, monkeypatch)
     dlg = board._details_dialog
     assert dlg is not None
     body = dlg.findChild(QPlainTextEdit).toPlainText()
-    assert "local copy 2 days old" in body and "stopped syncing" in body
+    assert "data 2 days old" in body and "stopped syncing" in body
     dlg.close()
 
 
@@ -633,3 +683,4 @@ def test_external_status_skips_card_with_restore_in_flight(tmp_path):
     moved = store.apply_external_status(_load(feedback=[_same_key(key, "Complete")]))
     assert moved == 0
     assert key in store.bucket("todo")["cards"]
+

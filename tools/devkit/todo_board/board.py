@@ -543,12 +543,13 @@ class TodoBoard(QWidget, ThemeAware):
         if age is None:
             return ""
         try:
-            stamp = datetime.fromisoformat(load.mtime_iso).strftime("%b %d %H:%M")
+            stamp = datetime.fromisoformat(
+                load.freshness_iso.replace(" ", "T")).strftime("%b %d %H:%M")
         except ValueError:
             return ""
         if not load.is_stale:
             return f"as of {stamp}"
-        return f"⚠ local copy {cls._age_phrase(age)}"
+        return f"⚠ data {cls._age_phrase(age)}"
 
     @classmethod
     def _freshness_detail(cls, load) -> str:
@@ -557,18 +558,23 @@ class TodoBoard(QWidget, ThemeAware):
         if age is None or not load.is_stale:
             return ""
         try:
-            stamp = datetime.fromisoformat(load.mtime_iso).strftime("%b %d %Y, %H:%M")
+            stamp = datetime.fromisoformat(
+                load.freshness_iso.replace(" ", "T")).strftime("%b %d %Y, %H:%M")
         except ValueError:
             stamp = "unknown"
         where = str(load.path) if load.path else "(workbook not located)"
         return (
-            f"The local copy of the telemetry workbook is "
-            f"{cls._age_phrase(age)} (last changed {stamp}).\n\n"
+            f"The newest row in the local telemetry workbook is "
+            f"{cls._age_phrase(age)} ({stamp}).\n\n"
             f"The Power Automate flow appends a row to the CLOUD copy on every "
-            f"plugin run by every user, so this file should change many times a "
-            f"day. That it hasn't means OneDrive has most likely stopped syncing "
-            f"it DOWN to this machine — so new feedback will not appear on the "
-            f"board, and an empty board looks exactly like 'no new feedback'.\n\n"
+            f"plugin run by every user, so the newest row should never be more "
+            f"than a few hours old. That it is means OneDrive has most likely "
+            f"stopped syncing this file DOWN to this machine — so new feedback "
+            f"will not appear on the board, and an empty board looks exactly "
+            f"like 'no new feedback'.\n\n"
+            f"(Freshness is measured from the newest row in the data, not the "
+            f"file's timestamp — OneDrive stamps a downloaded copy with a time "
+            f"that can predate the cloud's last write.)\n\n"
             f"To fix: check the OneDrive tray icon for this file, or rename it "
             f"so OneDrive re-downloads a fresh copy under the original name "
             f"(that has broken the deadlock before).\n\n"
