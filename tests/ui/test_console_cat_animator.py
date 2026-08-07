@@ -345,14 +345,40 @@ def test_appends_land_above_the_face_and_survive_redraws(qapp):
     # redraw.
     console, cat = _live_cat()
     console.append_system("run summary line")
-    console.append_user("who are you")
+    console.append_error("something failed")
     cat._render_live()                        # a blink-style redraw
     text = console.output.toPlainText()
     assert "run summary line" in text
-    assert "who are you" in text
+    assert "something failed" in text
     assert text.index("run summary line") < text.index("@")   # above the face
     cat.dismiss()
     assert console.tail_insert is None        # hook unregistered with him
+    assert console.pinned_reserve == 0        # face reserve released
+
+
+def test_conversation_echo_goes_to_the_pinned_box_when_cat_present(qapp):
+    # Your typed lines must never pile up above the face — while he is
+    # present they land in the pinned current area beneath him.
+    console, cat = _live_cat()
+    console.append_user("hello")
+    console.append_user("who are you")
+    pinned = console.pinned.toPlainText()
+    assert "You: hello" in pinned
+    assert "You: who are you" in pinned
+    assert "hello" not in console.output.toPlainText()
+    cat.dismiss()
+    console.append_user("back to normal")     # no cat → history as usual
+    assert "back to normal" in console.output.toPlainText()
+
+
+def test_readout_caps_beneath_the_face_when_cat_present(qapp):
+    # With the face reserved, a big readout may take the page MINUS his
+    # rows — it can never clip him (the bug the screenshot showed).
+    console, cat = _live_cat()
+    console._console_page.resize(400, 700)
+    assert console.pinned_reserve > 0
+    console.present_current("line<br>" * 200)
+    assert console.pinned.height() <= 700 - console.pinned_reserve + 4
 
 
 def test_plugin_lines_persist_while_devouring(qapp):

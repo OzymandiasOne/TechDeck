@@ -989,6 +989,12 @@ class ConsoleCat(QObject):
         # and the next redraw wipes it (the /help-under-the-face bug). The
         # console routes every append_* line through this hook.
         self.console.tail_insert = self._insert_above
+        # Reserve the face's px: the pinned current area caps beneath it
+        # (a readout can never clip the face) and user echoes route into
+        # that area instead of piling up above the face.
+        fm = QFontMetricsF(_cat_font())
+        rows = len(FACE_ART) + 1 + _SPEECH_LINES_MAX
+        self.console.pinned_reserve = int(rows * fm.height()) + 16
         # Ask the shell for headroom FIRST — the console rises, then the
         # summon plays into a pane that already fits the face.
         self._request_headroom()
@@ -1062,6 +1068,7 @@ class ConsoleCat(QObject):
         # object, so identity always fails; equality matches func+instance.
         if getattr(self.console, "tail_insert", None) == self._insert_above:
             self.console.tail_insert = None
+        self.console.pinned_reserve = 0
         self._speech_timer.stop()
         self._page_timer.stop()
         self._speech_pages = []

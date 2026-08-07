@@ -157,6 +157,11 @@ class ConsoleWidget(QWidget, ThemeAware):
         # it registers an inserter here; append lines then land ABOVE the
         # owned range instead of inside it (see _append_line).
         self.tail_insert = None
+        # …and it reserves the px its face needs (pinned_reserve > 0 while
+        # the cat is present): the pinned area then caps at page-minus-face
+        # so a readout can never clip him, and user echoes route into the
+        # pinned area (append_current) instead of piling up above the face.
+        self.pinned_reserve = 0
 
         self._console_page = QWidget()
         _cp = QVBoxLayout(self._console_page)
@@ -915,11 +920,15 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     @Slot(str)
     def append_user(self, text: str):
-        """Append user message to output."""
-        self._append_line(
-            f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
-            f'{self._escape_html(text)}'
-        )
+        """Append user message. While the Puppet Master is present
+        (pinned_reserve > 0) the echo goes to the pinned current area under
+        his face — never stacked above it; otherwise into the history."""
+        html = (f'<span style="color: #60A5FA; font-weight: bold;">You:</span> '
+                f'{self._escape_html(text)}')
+        if self.pinned_reserve:
+            self.append_current(html)
+        else:
+            self._append_line(html)
 
     @Slot(str)
     def append_system(self, text: str):
@@ -1092,24 +1101,54 @@ class ConsoleWidget(QWidget, ThemeAware):
         previous content. It scrolls on its own when the readout overflows
         (a "read more" pill points that out); /clear empties it.
 
-        Sized to content. The cap is HALF the page by default — that keeps
-        the history, and the face living in it, on screen. ``full=True``
-        lets it grow to nearly the whole page, leaving a few history lines
-        peeking above so the `You:` echo reads like part of one terminal —
-        for when the face is absent and nothing above needs the room."""
+        Sized to content. While the Puppet Master is present
+        (pinned_reserve > 0) the cap is the page MINUS his reserved face
+        px — the readout can never clip him — and the pane is raised to
+        make room for both. Otherwise the cap is half the page, or nearly
+        the whole page with ``full=True`` (a few history lines stay peeking
+        above so the `You:` echo reads like part of one terminal)."""
         self.pinned.setHtml(html)
         doc_h = self.pinned.document().size().height()
-        page_h = self._console_page.height()
-        cap = max(120, page_h - 90 if full else page_h // 2)
+        if self.pinned_reserve:
+            # Grow the pane first (synchronous splitter resize), THEN cap
+            # beneath the face so it stays whole above the readout.
+            chrome = self.height() - self._console_page.height()
+            self.raise_requested.emit(int(
+                chrome + self.pinned_reserve + min(doc_h + 4, 300)))
+        cap = self._pinned_cap(full)
         self.pinned.setFixedHeight(int(min(doc_h + 4, cap)))
         self.pinned.verticalScrollBar().setValue(0)
         self.pinned.show()
+        self._scroll_to_bottom()    # keep the face tight against the seam
 
         def _hint():
             if (self.pinned.isVisible()
                     and self.pinned.verticalScrollBar().maximum() > 0):
                 self.show_read_more_hint(target=self.pinned)
         QTimer.singleShot(0, _hint)
+
+    def _pinned_cap(self, full: bool) -> int:
+        """Tallest the pinned area may grow right now, in px."""
+        page_h = self._console_page.height()
+        if self.pinned_reserve:         # the face above must stay whole
+            return max(120, page_h - self.pinned_reserve)
+        return max(120, page_h - 90 if full else page_h // 2)
+
+    def append_current(self, html: str):
+        """APPEND one line to the pinned current-output area (present_current
+        replaces; this grows). The running "current" feed: while the Puppet
+        Master is present your typed lines land here — his reply plays on
+        the face above — so nothing piles up on top of the face."""
+        if self.pinned.isHidden():
+            self.pinned.clear()
+        self.pinned.append(html)
+        doc_h = self.pinned.document().size().height()
+        self.pinned.setFixedHeight(
+            int(min(doc_h + 4, self._pinned_cap(False))))
+        self.pinned.show()
+        sb = self.pinned.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        self._scroll_to_bottom()    # keep the face tight against the seam
 
     def clear_current(self):
         """Empty and collapse the pinned current-output area."""
