@@ -538,6 +538,33 @@ def test_plugin_output_interrupts_speech(qapp):
     assert cat._consumed == 1
 
 
+def test_remove_history_line(qapp):
+    console = ConsoleWidget()
+    console.append_system("keep me")
+    console.append_markup("unique needle line [[x|techdeck://cmd/dash]]")
+    assert console.remove_history_line("unique needle")
+    text = console.output.toPlainText()
+    assert "unique needle" not in text
+    assert "keep me" in text
+    assert not console.remove_history_line("unique needle")   # already gone
+
+
+def test_summon_link_retires_the_invitation(qapp, tmp_path):
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    console = ConsoleWidget()
+    needle = "I can help redefine those limits"
+    if needle not in console.output.toPlainText():   # professional startup
+        console.append_markup(
+            "Your effort to remain what you are is what limits you. "
+            "I can help [[redefine|techdeck://cat/summon]] those limits. "
+            "Type /help for commands.")
+    handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+    handler.handle_internal_link("techdeck://cat/summon")
+    assert needle not in console.output.toPlainText()
+    assert handler.active_cat() is not None
+
+
 def test_double_summon_is_ignored(qapp):
     console, cat = _cat()
     cat.summon("materialize")

@@ -1082,6 +1082,25 @@ class ConsoleWidget(QWidget, ThemeAware):
                     return True
         return super().eventFilter(obj, event)
 
+    def remove_history_line(self, needle: str) -> bool:
+        """Remove the first history block whose text contains ``needle``.
+        Used to retire the startup invitation line once its "redefine" link
+        has been clicked — the materialization makes it redundant. Returns
+        False if no block matched."""
+        doc = self.output.document()
+        block = doc.firstBlock()
+        while block.isValid():
+            if needle in block.text():
+                cur = QTextCursor(doc)
+                cur.setPosition(block.position())
+                end = min(block.position() + block.length(),
+                          doc.characterCount() - 1)
+                cur.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+                cur.removeSelectedText()
+                return True
+            block = block.next()
+        return False
+
     def _activate_anchor(self, anchor: str):
         """Open a clicked output anchor: techdeck:// targets stay inside the
         app (routed via internal_link_clicked → CommandHandler.

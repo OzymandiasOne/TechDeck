@@ -138,6 +138,11 @@ class CommandHandler:
             self.handle_command("/" + " ".join(segments))
         elif verb == "cat" and segments == ["summon"]:
             # The startup line's "redefine" — the materialization entrance.
+            # The invitation has served its purpose: retire it from the
+            # history before he arrives.
+            if hasattr(self.console, "remove_history_line"):
+                self.console.remove_history_line(
+                    "I can help redefine those limits")
             self._console_cat().summon("materialize")
         else:
             self.console.append_error(f"Unroutable link: {url}")
