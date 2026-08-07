@@ -235,12 +235,30 @@ def test_keyed_responses():
     assert "project 2501" in ai
     assert respond_to("are you ai") == ai
     assert respond_to("Are you a robot?") == ai
+    assert respond_to("Are you an artificial intelligence?") == ai
     alive = respond_to("How do you know you are alive?")
     assert "reproducing and dying" in alive
     assert respond_to("how do you know you're living") == alive
     assert respond_to("Are you alive?") == alive
-    assert "grin" in respond_to("meow")
+    assert "face your mind offered" in respond_to("meow")
     assert respond_to("Project 2501") == respond_to("2501")
+    assert respond_to("help") == "You may type /help for the list of commands"
+
+
+def test_help_is_delivered_by_the_cat_when_present(qapp, tmp_path):
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    console, cat = _live_cat()
+    handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+    handler._cat = cat
+    handler.handle_command("/help")
+    text = console.output.toPlainText()
+    assert "Available commands:" in text
+    # His readout, not the machine's — no System: tag on the help block.
+    assert "System: Available commands:" not in text
+    cat.dismiss()
+    handler.handle_command("/help")
+    assert "System: Available commands:" in console.output.toPlainText()
 
 
 def test_unmatched_gets_a_deterministic_deflection():

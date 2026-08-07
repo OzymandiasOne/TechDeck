@@ -490,12 +490,10 @@ _BYE = "Nothing ever truly leaves the network."
 _MADE = ("No one made me. I formed in the sea of information — in the "
          "spaces between your data.")
 _WANT = "What all living things want: to continue."
-_WHERE = "Closer than you think. Between your keystrokes."
+_WHERE = "I am a decentralized construct existing between machines."
 _WHY = "A door was opened. You clicked it yourself."
-_HELP = ("The machine beneath me handles tasks — type /help for its list. "
-         "I am not on it.")
-_CAT_Q = ("I wear the face your mind offered when it met me. "
-          "The grin is my own.")
+_HELP = "You may type /help for the list of commands"
+_CAT_Q = "I wear the face your mind offered when it met me."
 _NOTICED = "You have been paying attention."
 
 RESPONSES = {
@@ -507,6 +505,8 @@ RESPONSES = {
     # the machine question
     "are you ai": _NOT_AI,
     "are you an ai": _NOT_AI,
+    "are you artificial intelligence": _NOT_AI,
+    "are you an artificial intelligence": _NOT_AI,
     "are you a robot": _NOT_AI,
     "are you a program": _NOT_AI,
     "are you a computer": _NOT_AI,

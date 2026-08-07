@@ -208,7 +208,15 @@ class CommandHandler:
         # downward.
         output = getattr(self.console, "output", None)
         pre_pos = output.document().characterCount() - 1 if output is not None else None
-        self.console.append_system(help_text)
+        cat = self.active_cat()
+        if cat is not None:
+            # The Puppet Master delivers the readout himself: his phosphor
+            # color, no "System:" tag — while he is in the console, /help is
+            # him speaking.
+            from techdeck.ui.widgets.console_cat import PHOSPHOR
+            self.console.append_markup(help_text, color=PHOSPHOR["mid"])
+        else:
+            self.console.append_system(help_text)
         if output is not None and pre_pos is not None:
             from PySide6.QtGui import QTextCursor
             anchor = QTextCursor(output.document())
