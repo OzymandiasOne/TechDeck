@@ -16,6 +16,15 @@ feature is simply described by what it DOES:
 
 # ---- Version Controller :: SYSTEM FEATURES  (name, what, value, status) -----
 SYSTEM_FEATURES = [
+    ("Scheduling Board Status Automation",
+     "The shared planning schedule's status column is advanced by the platform "
+     "as each job progresses -- off the card queue once its Teams card is "
+     "posted, off the setup queue once its batch is set up -- instead of being "
+     "retyped by hand.",
+     "Removes a manual bookkeeping step that planning previously repeated for "
+     "every job, and keeps the board an accurate picture of what is actually "
+     "waiting rather than what someone last remembered to update.",
+     "Active"),
     ("Recognition & Rewards Economy",
      "Activity credits accrue as operators run automation tools and submit "
      "feedback, and are redeemed in an in-app rewards catalog.",
@@ -406,4 +415,10 @@ PI_NEW = [
      "ATTACHED, AND THE IN-APP UPDATER READS A SEPARATE PUBLISHED MANIFEST; "
      "UPDATING THE MANIFEST IS THE DELIBERATE GO-LIVE STEP, SO A BUILD CAN BE "
      "PUBLISHED AND VERIFIED BEFORE ANY OPERATOR IS OFFERED IT"),
+    ("SCHEDULING BOARD - AUTOMATIC STATUS ADVANCE", "COMPLETE",
+     "THE PLANNING SCHEDULE'S STATUS COLUMN NOW ADVANCES ITSELF AS WORK "
+     "COMPLETES - A JOB MOVES OFF THE CARD QUEUE WHEN ITS TEAMS CARD IS "
+     "POSTED AND OFF THE SETUP QUEUE WHEN ITS BATCH IS SET UP; ONLY JOBS THAT "
+     "GENUINELY REACHED THE NEXT STAGE MOVE, AND A SCHEDULE OPEN ON ANOTHER "
+     "MACHINE LISTS THE ROWS TO CHANGE BY HAND RATHER THAN BLOCKING THE RUN"),
 ]
