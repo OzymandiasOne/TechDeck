@@ -216,10 +216,13 @@ class ConsoleWidget(QWidget, ThemeAware):
         # Theme the tab bar + readout (and re-theme on live theme switch)
         self.setup_theme_awareness()
 
-        # Initial message. Outside the professional theme, the first words
-        # belong to something that lives in here — clicking "redefine"
-        # summons it (techdeck://cat/summon → the materialization).
-        if self._professional_mode():
+        # Initial message. Outside the professional theme — and once the
+        # Puppet Master is live (held for Halloween 2026; see
+        # constants.puppet_master_enabled) — the first words belong to
+        # something that lives in here, and clicking "redefine" summons it
+        # (techdeck://cat/summon → the materialization). Until then everyone
+        # gets the plain greeting, which is also the professional-theme line.
+        if self._professional_mode() or not self._puppet_master_live():
             self.append_system(
                 "TechDeck online. Type /help for available commands.")
         else:
@@ -235,6 +238,15 @@ class ConsoleWidget(QWidget, ThemeAware):
             return SettingsManager().is_professional()
         except Exception:
             return False
+
+    @staticmethod
+    def _puppet_master_live() -> bool:
+        """False while the Puppet Master is held for the Halloween release."""
+        try:
+            from techdeck.core.constants import puppet_master_enabled
+            return puppet_master_enabled()
+        except Exception:
+            return False    # never risk leaking him on an import error
     
     def show_read_more_hint(self):
         """Float a small "read more" pill at the bottom of the output viewport.

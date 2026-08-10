@@ -54,12 +54,31 @@ def test_append_markup_renders_into_document(qapp):
 
 
 def test_startup_line_carries_the_summon_link(qapp, monkeypatch):
+    """Once the Puppet Master is live (Halloween 2026), the non-professional
+    greeting is his invitation."""
     monkeypatch.setattr(ConsoleWidget, "_professional_mode",
                         staticmethod(lambda: False))
+    monkeypatch.setattr(ConsoleWidget, "_puppet_master_live",
+                        staticmethod(lambda: True))
     c = ConsoleWidget()
     assert "techdeck://cat/summon" in c.output.toHtml()
     assert "redefine" in c.output.toPlainText()
     assert "limits" in c.output.toPlainText()
+
+
+def test_startup_line_stays_plain_while_the_puppet_master_is_held(
+        qapp, monkeypatch):
+    """The shipping state until the Halloween release: he is finished and
+    merged, but every colleague gets the ordinary greeting and no summon
+    anchor — not even an inert one, which would still give him away."""
+    monkeypatch.setattr(ConsoleWidget, "_professional_mode",
+                        staticmethod(lambda: False))
+    monkeypatch.setattr(ConsoleWidget, "_puppet_master_live",
+                        staticmethod(lambda: False))
+    c = ConsoleWidget()
+    assert "techdeck://cat/summon" not in c.output.toHtml()
+    assert "redefine" not in c.output.toPlainText()
+    assert "TechDeck online" in c.output.toPlainText()
 
 
 def test_startup_line_professional_theme_stays_plain(qapp, monkeypatch):

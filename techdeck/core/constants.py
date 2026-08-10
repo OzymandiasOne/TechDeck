@@ -3,6 +3,48 @@ TechDeck Constants
 Central location for app-wide constants and configuration values.
 """
 
+import os as _os
+
+
+# ---------------------------------------------------------------------------
+# Puppet Master release gate (2026-08-10)
+# ---------------------------------------------------------------------------
+# The Cheshire-cat console entity is FINISHED and merged on main — the face,
+# the summon animations, the 2501 voice, /help delivery. It is being held for a
+# Halloween 2026 themed release, so it must not reach colleagues before then.
+#
+# Reverting it was never an option: it is spread across ~20 commits that other
+# console work sits on top of. So it ships DORMANT instead, gated at its three
+# (and only three) entry points:
+#
+#   1. the console's startup greeting + its "redefine" summon link
+#   2. the /puppetmaster command
+#   3. the techdeck://cat/summon link route
+#
+# Nothing else can reach it: ConsoleCat is a lazy singleton created only by
+# those paths, and active_cat() returns None until one of them runs — so the
+# free-text routing and the /help takeover stay dormain automatically.
+#
+# GOING LIVE AT HALLOWEEN IS THIS ONE FLAG plus merging `halloween-update`
+# (which holds the later refinements: hot-reloading script, slang matching,
+# the pinned output area, the harvest log).
+#
+# Set TECHDECK_PUPPET_MASTER=1 in the environment to wake him locally without
+# editing code — that is how to demo or test him before the flag flips.
+PUPPET_MASTER_ENABLED = False
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def puppet_master_enabled() -> bool:
+    """True when the Puppet Master may appear. Env override wins so the
+    feature can be exercised on a dev machine while shipping off."""
+    override = _os.environ.get("TECHDECK_PUPPET_MASTER", "").strip().lower()
+    if override:
+        return override in _TRUTHY
+    return PUPPET_MASTER_ENABLED
+
+
 # Application metadata
 APP_NAME = "TechDeck"
 APP_VERSION = "0.8.6.12"  # 922 Setup card-creation webhook fix (restored buckets key); FormingFinder plate-vs-rod on dual-material parts; LST organizers match revision letters both ways; Batch Repeater audits repeat shop prints

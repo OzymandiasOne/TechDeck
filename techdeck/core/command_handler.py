@@ -10,7 +10,7 @@ import threading
 from typing import Callable
 from pathlib import Path
 from techdeck.core.settings import SettingsManager
-from techdeck.core.constants import APP_VERSION
+from techdeck.core.constants import APP_VERSION, puppet_master_enabled
 from techdeck.core.flavor import generate_haiku, generate_musing
 from techdeck.core.audio_manager import (
     get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
@@ -102,6 +102,13 @@ class CommandHandler:
     # admin mode is entered via /admin. Register future admin commands in the
     # dict above, add them here, and list them in _ADMIN_HELP.
     _ADMIN_COMMANDS = {'/tickets', '/reset'}
+
+    # Commands held back for an unreleased themed update: refused as "Unknown
+    # command", exactly like a typo, so nothing hints they exist. /puppetmaster
+    # was already absent from /help ("those who know, know") — this makes the
+    # command itself dormant too, until constants.PUPPET_MASTER_ENABLED flips
+    # for Halloween 2026.
+    _HELD_COMMANDS = {'/puppetmaster'}
     _ADMIN_HELP = (
         "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
         "  /reset store     - Clear all Emporium purchases"
@@ -113,7 +120,8 @@ class CommandHandler:
         args = parts[1] if len(parts) > 1 else ""
 
         if cmd in self.commands and not (
-                cmd in self._ADMIN_COMMANDS and not self._admin_mode):
+                cmd in self._ADMIN_COMMANDS and not self._admin_mode) and not (
+                cmd in self._HELD_COMMANDS and not puppet_master_enabled()):
             self.commands[cmd](args)
         else:
             self.console.append_error(f"Unknown command: {cmd}")
@@ -138,6 +146,11 @@ class CommandHandler:
             self.handle_command("/" + " ".join(segments))
         elif verb == "cat" and segments == ["summon"]:
             # The startup line's "redefine" — the materialization entrance.
+            # Gated with everything else while he is held for Halloween: the
+            # link is not authored at all in that state, so reaching here means
+            # a stale console document (a session open across a flag flip).
+            if not puppet_master_enabled():
+                return
             self._console_cat().summon("materialize")
         else:
             self.console.append_error(f"Unroutable link: {url}")
