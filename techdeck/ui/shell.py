@@ -107,7 +107,7 @@ class MainWindow(QMainWindow):
         "Herded all the data in",
         "Convinced the files in",
         "Rustled that paperwork in",
-        "PDF bothered and quit their jobs in"
+        "PDF bothered and quit their jobs in",
         "Hullaballooed for",
         "Did the thing in",
         "Knocked that out in",
