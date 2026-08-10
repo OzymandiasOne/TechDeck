@@ -15,9 +15,18 @@ to patch one of those would quietly rewrite a real ledger or real settings
 instead. Individual tests had been patching `_ledger_path` one at a time;
 that is a convention, and conventions get forgotten.
 
-All three resolve their base from `os.environ["LOCALAPPDATA"]`, so redirecting
-that one variable for the whole session closes the class rather than the
-instance.
+A second instance of the same class, found the same day from a colleague's
+debug report: `tests/ui/test_run_controller.py` drives the ghost-tile drop
+path with a fixture tile literally named `ghost`, and `get_run_logger()`
+resolves the SAME way — so every `pytest` run appended
+"Dropped 1 selected tile(s) not in the current kit: ghost" to the real
+`logs/plugin_runs.log`. 194 lines, 20% of the log, in a file whose entire
+purpose is diagnosing colleague-reported failures after the fact.
+
+All four consumers — the preview file, the posted-card ledger, the settings
+document and the run/detail logs — resolve their base from
+`os.environ["LOCALAPPDATA"]`, so redirecting that one variable for the whole
+session closes the class rather than the instances.
 """
 
 
