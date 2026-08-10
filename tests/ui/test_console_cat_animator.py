@@ -408,6 +408,41 @@ def test_matching_survives_typos_and_longer_sentences():
     assert respond_to("wait are you actually alive") == alive
 
 
+def test_shorthand_and_contractions_reach_the_same_answers():
+    how = respond_to("how are you")
+    assert respond_to("What's up?") == how
+    assert respond_to("sup") == how
+    assert respond_to("wassup") == how
+    assert respond_to("how r u") == how
+    assert respond_to("how's it going") == how
+    assert respond_to("you good?") == how
+    who = respond_to("who are you")
+    assert respond_to("who r u") == who
+    assert respond_to("y r u here") == respond_to("why are you here")
+    assert respond_to("thx") == respond_to("thanks")
+    assert respond_to("I'm calling it") == respond_to("im calling it")
+    assert respond_to("don't you copy yourself") == \
+        respond_to("cant you copy yourself")
+
+
+def test_smalltalk_reactions():
+    assert respond_to("ok") == "Proceed."
+    assert respond_to("k") == "Proceed."
+    assert respond_to("yeah") == respond_to("yes")
+    assert respond_to("nope") == respond_to("no")
+    assert respond_to("lmao") == respond_to("lol")
+    assert respond_to("hahaha") == respond_to("lol")
+    assert respond_to("hmm") == respond_to("hm")
+    assert respond_to("wyd") == respond_to("what are you up to")
+
+
+def test_short_keys_do_not_hijack_long_sentences():
+    from techdeck.ui.widgets.console_cat import DEFLECTIONS
+    assert respond_to("ok") == "Proceed."
+    long_input = "is it ok if i run the kitting app now or not"
+    assert respond_to(long_input) in DEFLECTIONS
+
+
 def test_parse_response_script_joins_and_normalizes():
     from techdeck.ui.widgets.console_cat import parse_response_script
     responses, deflections = parse_response_script(

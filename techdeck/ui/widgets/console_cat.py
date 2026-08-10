@@ -671,6 +671,50 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", norm).strip()
 
 
+# Token canonicalization — applied to BOTH the script's questions (at parse
+# time) and the user's input (at ask time), so slang, contractions, and
+# texting shorthand all meet in one canonical space: "who r u", "how's it
+# going", "wassup" match keys written in plain English. Because both sides
+# get the same treatment, script authors never need to think about it.
+# Patterns run on _normalize output (lowercase, apostrophes stripped).
+_CANON_REWRITES = [(re.compile(rf"\b{pat}\b"), rep) for pat, rep in (
+    # contractions (apostrophes are already stripped: "what's" → "whats")
+    ("whats", "what is"), ("whatre", "what are"), ("whos", "who is"),
+    ("hows", "how is"), ("wheres", "where is"), ("whens", "when is"),
+    ("whys", "why is"), ("youre", "you are"), ("theyre", "they are"),
+    ("im", "i am"), ("ive", "i have"), ("dont", "do not"),
+    ("cant", "can not"), ("cannot", "can not"), ("wont", "will not"),
+    ("isnt", "is not"), ("arent", "are not"), ("aint", "are not"),
+    ("doesnt", "does not"), ("didnt", "did not"), ("wasnt", "was not"),
+    ("werent", "were not"), ("shouldnt", "should not"),
+    ("couldnt", "could not"), ("wouldnt", "would not"),
+    # texting shorthand
+    ("u", "you"), ("r", "are"), ("ur", "your"), ("y", "why"),
+    ("wat", "what"), ("wut", "what"), ("wats", "what is"),
+    ("wuts", "what is"), ("plz", "please"), ("pls", "please"),
+    ("thx", "thanks"), ("thanx", "thanks"), ("ty", "thanks"),
+    ("tysm", "thanks"), ("idk", "i do not know"),
+    ("gonna", "going to"), ("wanna", "want to"), ("gotta", "got to"),
+    ("lemme", "let me"), ("gimme", "give me"), ("dunno", "do not know"),
+    # greetings & reactions collapse to one representative each
+    ("sup", "what is up"), ("wassup", "what is up"),
+    ("whassup", "what is up"), ("wazzup", "what is up"),
+    ("whatsup", "what is up"), ("watsup", "what is up"),
+    ("hiya", "hi"), ("heya", "hi"), ("yoo", "yo"), ("yooo", "yo"),
+    ("yea", "yes"), ("yeah", "yes"), ("yep", "yes"), ("yup", "yes"),
+    ("ya", "yes"), ("nah", "no"), ("nope", "no"),
+    ("haha", "lol"), ("hahaha", "lol"), ("hehe", "lol"),
+    ("lmao", "lol"), ("lmfao", "lol"), ("rofl", "lol"),
+    ("wtf", "what the"), ("omg", "oh my god"),
+)]
+
+
+def _canonicalize(norm: str) -> str:
+    for rx, rep in _CANON_REWRITES:
+        norm = rx.sub(rep, norm)
+    return re.sub(r"\s+", " ", norm).strip()
+
+
 def _script_path() -> Path:
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         base = Path(sys._MEIPASS) / "assets"
@@ -717,7 +761,7 @@ def parse_response_script(text: str):
         elif line.startswith("?"):
             if reply_parts:     # new block began without a blank line
                 flush()
-            q = _normalize(line[1:])
+            q = _canonicalize(_normalize(line[1:]))
             if q:
                 questions.append(q)
         elif line.startswith(">"):
@@ -727,6 +771,16 @@ def parse_response_script(text: str):
 
 
 _script_cache: dict = {"mtime": None, "responses": None, "deflections": None}
+_fallback_responses: dict | None = None
+
+
+def _fallback():
+    """The built-in constants, keys canonicalized to match the input space."""
+    global _fallback_responses
+    if _fallback_responses is None:
+        _fallback_responses = {_canonicalize(k): v
+                               for k, v in RESPONSES.items()}
+    return _fallback_responses, list(DEFLECTIONS)
 
 
 def _load_script():
@@ -737,15 +791,15 @@ def _load_script():
     try:
         mtime = path.stat().st_mtime
     except OSError:
-        return RESPONSES, list(DEFLECTIONS)
+        return _fallback()
     if _script_cache["mtime"] != mtime:
         try:
             responses, deflections = parse_response_script(
                 path.read_text(encoding="utf-8"))
         except Exception:
-            return RESPONSES, list(DEFLECTIONS)
+            return _fallback()
         if not responses:
-            return RESPONSES, list(DEFLECTIONS)
+            return _fallback()
         _script_cache.update(
             mtime=mtime, responses=responses,
             deflections=deflections or list(DEFLECTIONS))
@@ -790,32 +844,36 @@ def respond_to(text: str) -> str:
     """The cat's answer to free console text while it is present.
 
     Matching cascade (all deterministic — the same input always gets the
-    same answer): exact normalized match → close-match typo tolerance
+    same answer): canonicalize slang/contractions (both sides live in the
+    same canonical space) → exact match → close-match typo tolerance
     ("who are yuo") → known question buried in a longer sentence ("so tell
-    me who are you anyway"; the most specific match wins) → a cold
-    deflection chosen by hashing the words themselves. Deflected questions
-    are logged (see _get_unmatched_logger) so real misses can be harvested
-    into the script file instead of guessed at."""
+    me who are you anyway"; the most specific match wins, and one-word keys
+    only count when the input itself is short, so "ok" can't hijack a long
+    sentence) → a cold deflection chosen by hashing the words themselves.
+    Deflected questions are logged (see _get_unmatched_logger) so real
+    misses can be harvested into the script file instead of guessed at."""
     responses, deflections = _load_script()
-    norm = _normalize(text)
-    hit = responses.get(norm)
+    canon = _canonicalize(_normalize(text))
+    hit = responses.get(canon)
     if hit is not None:
         return hit
-    close = difflib.get_close_matches(norm, responses.keys(), n=1,
+    close = difflib.get_close_matches(canon, responses.keys(), n=1,
                                       cutoff=0.84)
     if close:
         return responses[close[0]]
-    words = set(norm.split())
+    words = set(canon.split())
     best = None     # (token_count, key) — most tokens wins, ties alphabetic
     for key in responses:
         kw = key.split()
+        if len(kw) < 2 and len(words) > 2:
+            continue    # short keys never hijack long sentences
         if set(kw) <= words:
             if (best is None or len(kw) > best[0]
                     or (len(kw) == best[0] and key < best[1])):
                 best = (len(kw), key)
     if best is not None:
         return responses[best[1]]
-    reply = deflections[sum(ord(ch) for ch in norm) % len(deflections)]
+    reply = deflections[sum(ord(ch) for ch in canon) % len(deflections)]
     try:
         _get_unmatched_logger().info("UNMATCHED %r -> %r", text.strip(), reply)
     except Exception:

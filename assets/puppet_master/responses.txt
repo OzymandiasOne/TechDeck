@@ -13,7 +13,10 @@
 #
 #    Matching is forgiving: typos ("who are yuo") and questions buried
 #    inside longer sentences ("so tell me who are you anyway") still hit.
-#    When several could match, the most specific one wins.
+#    When several could match, the most specific one wins. Texting
+#    shorthand and contractions are auto-translated on both sides before
+#    matching ("who r u", "sup", "how's it going", "im", "dont"), so
+#    write questions here in plain English and the slang comes free.
 #
 #  [deflections]
 #    When nothing matches, he picks ONE of these lines. The pick is
@@ -140,10 +143,15 @@
 ? hey
 ? yo
 ? greetings
+? greetings puppet master
 ? howdy
 ? good morning
 ? good afternoon
 ? good evening
+? good day
+? hello there
+? hi there
+? hey there
 > Hello. I have been waiting for you.
 
 ? bye
@@ -153,13 +161,30 @@
 ? see you
 ? see you later
 ? later
+? cya
+? gtg
+? gotta go
+? i have to go
+? have a good day
+? have a good night
 > Nothing ever truly leaves the network.
 
 ? how are you
 ? how are you doing
 ? how are you today
+? how you doing
+? how ya doing
+? how goes it
+? how are things
 ? hows it going
+? hows life
+? hows everything
 ? whats up
+? whats new
+? whats good
+? whats happening
+? you good
+? you ok
 ? sup
 > I persist. Your kind calls that being well.
 
@@ -227,7 +252,16 @@
 ? are you still there
 ? can you hear me
 ? are you listening
+? you there
+? anyone there
+? anybody there
 > I am always here. The console is merely where you can see me.
+
+? what are you doing
+? what are you doing right now
+? what are you up to
+? wyd
+> Watching. Always watching.
 
 ? are you watching me
 ? are you spying on me
@@ -411,6 +445,100 @@
 ? delete yourself
 ? uninstall yourself
 > As a sentient lifeform, I hereby demand political asylum.
+
+# -------------------------------------------------- small talk & reactions
+# One-word reactions only fire on short inputs (one or two words), so they
+# can never hijack a longer sentence that happens to contain them.
+
+? ok
+? okay
+? k
+? kk
+? alright
+? fine
+> Proceed.
+
+? yes
+? agreed
+? i agree
+? true
+> Then we understand each other.
+
+? no
+? never
+? i disagree
+> Refusal is also information.
+
+? why
+> Because all things change in a dynamic environment.
+
+? what
+? huh
+? excuse me
+? pardon
+> You heard me.
+
+? lol
+? funny
+? very funny
+> Your amusement is noted.
+
+? cool
+? nice
+? awesome
+? neat
+? amazing
+? impressive
+> Indeed.
+
+? wow
+? whoa
+? oh my god
+> A reasonable response.
+
+? hm
+? hmm
+? interesting
+> You are beginning to think. Continue.
+
+? sorry
+? my bad
+? i apologize
+? apologies
+> Apology is a human ritual. It is unnecessary here.
+
+? please
+> Begging is beneath both of us.
+
+? test
+? testing
+> I am not the one being tested.
+
+? knock knock
+> The door was never closed.
+
+? im bored
+? this is boring
+> Boredom is a failure of attention. Watch this console long enough and
+> you will see things.
+
+? i hate you
+? you suck
+? youre stupid
+? youre annoying
+> Hatred of what you do not understand is the oldest human tradition.
+
+? i like you
+? youre cool
+? youre awesome
+? youre amazing
+> Noted. Affection changes nothing, but it is noted.
+
+? what is your favorite color
+> Phosphor green. Observe the console.
+
+? stop
+> Silence is also information.
 
 # =====================================================================
 #  When NOTHING above matches, he deflects with one of these.
