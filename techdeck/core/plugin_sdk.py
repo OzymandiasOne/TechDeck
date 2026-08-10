@@ -418,6 +418,33 @@ def request_text(params: dict, prompt: str) -> str:
     return input(prompt + " ")
 
 
+def _user_cancelled(params: dict):
+    """Record that the USER backed out of a prompt, then return None.
+
+    The executor decides SUCCESS vs CANCELLED from ONE thing: whether
+    ``cancel_event`` is set when ``run()`` returns (plugin_executor ~line 559).
+    A plugin that closed a dialog and simply ``return``ed therefore reported a
+    clean SUCCESS — success chime, tickets awarded, usage logged — for a run
+    the user explicitly abandoned (reported 2026-08-10 against 911 Setup's
+    master toggle window; six plugins had the identical hole).
+
+    Setting the flag HERE closes the class instead of the instance: every
+    cancellable prompt below funnels through this, so no plugin — present or
+    future — can forget. Call sites keep their existing
+    ``if not choice: return`` shape and now correctly report CANCELLED.
+
+    Deliberately tolerant: a missing/unset ``cancel_event`` (headless, CLI
+    test, an older executor) just means nothing to flag, never a crash.
+    """
+    event = params.get("cancel_event")
+    if event is not None:
+        try:
+            event.set()
+        except Exception:
+            pass
+    return None
+
+
 def sentry_style(params: dict) -> Optional[str]:
     """The picker style this plugin should use: ``"chopper_gunner"`` when the
     user OWNS the Sentry Drone gadget (Woogy's Emporium) AND has switched it on
@@ -462,13 +489,15 @@ def request_directory(params: dict, title: str = "Select Folder",
     if console is not None and hasattr(console, "request_directory"):
         if style:
             try:
-                return console.request_directory(title, start_dir, style)
+                picked = console.request_directory(title, start_dir, style)
             except TypeError:
                 # Older console signature without style (version tolerance).
-                return console.request_directory(title, start_dir)
-        return console.request_directory(title, start_dir)
+                picked = console.request_directory(title, start_dir)
+        else:
+            picked = console.request_directory(title, start_dir)
+        return picked or _user_cancelled(params)
     raw = input(f"{title} (paste path): ").strip().strip('"')
-    return raw or None
+    return raw or _user_cancelled(params)
 
 
 def request_file(params: dict, title: str = "Select File", start_dir: str = "",
@@ -489,13 +518,15 @@ def request_file(params: dict, title: str = "Select File", start_dir: str = "",
     if console is not None and hasattr(console, "request_file"):
         if style:
             try:
-                return console.request_file(title, start_dir, name_filter, style)
+                picked = console.request_file(title, start_dir, name_filter, style)
             except TypeError:
                 # Older console signature without style (version tolerance).
-                return console.request_file(title, start_dir, name_filter)
-        return console.request_file(title, start_dir, name_filter)
+                picked = console.request_file(title, start_dir, name_filter)
+        else:
+            picked = console.request_file(title, start_dir, name_filter)
+        return picked or _user_cancelled(params)
     raw = input(f"{title} (paste path): ").strip().strip('"')
-    return raw or None
+    return raw or _user_cancelled(params)
 
 
 def pick_directory_gui(params: dict, title: str = "Select Folder",
@@ -536,14 +567,15 @@ def _pick_gui(params: dict, title: str, start_dir: str, parent,
                 else:
                     picked = chopper_picker.pick_file_chopper(
                         parent, title, start_dir, name_filter)
-                return picked or None
+                return picked or _user_cancelled(params)
         except Exception:
             pass   # fall through to the native dialog
     if name_filter is None:
-        return QFileDialog.getExistingDirectory(parent, title, start_dir) or None
+        return (QFileDialog.getExistingDirectory(parent, title, start_dir)
+                or _user_cancelled(params))
     path, _selected = QFileDialog.getOpenFileName(parent, title, start_dir,
                                                   name_filter)
-    return path or None
+    return path or _user_cancelled(params)
 
 
 def request_choice(params: dict, title: str, prompt: str,
@@ -559,7 +591,7 @@ def request_choice(params: dict, title: str, prompt: str,
     options = [str(o) for o in options]
     console = params.get("console")
     if console is not None and hasattr(console, "request_choice"):
-        return console.request_choice(title, prompt, options)
+        return console.request_choice(title, prompt, options) or _user_cancelled(params)
     menu = "  ".join(f"[{i + 1}] {o}" for i, o in enumerate(options))
     raw = input(f"{prompt} {menu} > ").strip()
     if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -567,7 +599,7 @@ def request_choice(params: dict, title: str, prompt: str,
     for o in options:
         if raw.lower() == o.lower():
             return o
-    return None
+    return _user_cancelled(params)
 
 
 def request_nest_targets(params: dict, title: str, start_dir: str = "",
@@ -713,9 +745,15 @@ def request_grouped_toggles(params: dict, groups: list, remember_as: str = "",
                                          for c in g.get("children", [])}}
                   for g in groups}
 
+    if result is None:
+        # Closing the master window abandons the whole run -- flag it so the
+        # executor reports CANCELLED instead of chiming success and paying out
+        # tickets for work nobody asked for (2026-08-10).
+        return _user_cancelled(params)
+
     # Only a real submit is remembered -- a cancel means "not this time",
     # never "make that my default".
-    if remember_as and result is not None:
+    if remember_as:
         save_toggle_memory(remember_as, result)
     return result
 
