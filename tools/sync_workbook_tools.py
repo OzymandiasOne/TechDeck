@@ -18,12 +18,22 @@ TOOL_SECTIONS = [
  ("911 QTDR PRODUCTION PACKAGE WORKFLOW", [
   ("911 Setup",
    "Performs the full 911 QTDR batch setup: nest folders, templates, forecast "
-   "data and production PDFs, plus the batch's coordination cards.",
+   "data and production PDFs.",
    "Reads nest numbers from the batch list, builds each nest folder from the "
-   "template set, files the production PDFs, populates forecast data, and "
-   "generates one coordination card per scheduled order with its difficulty "
-   "and machine routing already set.",
+   "template set, files the production PDFs, and populates forecast data. "
+   "Which steps run is chosen from a checklist that remembers each operator's "
+   "selection between sessions, so a site that skips a step configures it "
+   "once rather than every run.",
    "Active", "0.8.0"),
+  ("911 Teams Cards",
+   "Creates the coordination cards for every 911 order waiting to be modelled, "
+   "and keeps the planning board's status column current.",
+   "Reads the shared planning schedule for orders awaiting setup and posts one "
+   "coordination card each, with difficulty and machine routing already set "
+   "and the scheduled due date attached, then advances each order's status on "
+   "the schedule as its card goes out. Needs no batch number and skips orders "
+   "already carded, so it can be run at any time.",
+   "Active", "0.8.7"),
   ("911 Batch Repeater",
    "Finds every repeat part in a 911 batch and copies its existing CAD work "
    "forward instead of remodelling it.",

@@ -1,4 +1,4 @@
-"""Tests for 911 Setup's Generate Teams Cards stage (v1.8.0).
+"""Tests for the 911 Teams Cards plugin (split out of 911 Setup 2026-08-10).
 
 Every fixture string below is a REAL value copied off the live EB 922 Schedule
 (CURRENT PIPELINE) or a 911 BATCH LIST on 2026-08-03 -- the point of these
@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugins" / "911_setup"
+PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugins" / "911_teams_cards"
 
 
 @pytest.fixture(scope="module")
 def st():
     spec = importlib.util.spec_from_file_location(
-        "st_911_setup", PLUGIN_DIR / "run.py")
+        "st_911_teams_cards", PLUGIN_DIR / "run.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

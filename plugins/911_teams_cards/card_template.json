@@ -1,0 +1,48 @@
+{
+  "_comment": "Template for the Teams cards created by 911 Setup's 'Generate Teams Cards' stage. Cards are driven by the EB 922 Schedule's CURRENT PIPELINE sheet: every row whose DEPT. is '911' AND whose STATUS is 'NEED TEAMS/SETUP' becomes one card in the MODELING bucket of the SOPO D911 PIPELINE plan. Edit this file to change the cards - no flow change is needed unless the payload SHAPE changes. 'label_map' mirrors the plan's label slots top-to-bottom (category1 = top of the label list); if a label is renamed or reordered IN TEAMS, update it here too.",
+  "plan": "EB SOPO D911",
+  "bucket": "MODELING",
+  "title_format": "BATCH: {batch} - NEST: {nest} ({material})",
+  "title_format_no_material": "BATCH: {batch} - NEST: {nest}",
+  "priority": "Medium",
+  "status": "Not started",
+  "checklist": [
+    "Shop Prints",
+    "Inspection Sheet",
+    "Production Packets",
+    "Program",
+    "Cover Sheet",
+    "Scribe Sheet",
+    "Production"
+  ],
+
+  "_comment_tube_only": "Checklist items dropped when the source material is not a tube (a tube-laser program is meaningless on saw stock). 'tube_keywords' is also the FIRST machine test - see machine rules below.",
+  "tube_only_checklist": ["Program"],
+  "tube_keywords": ["TUBE"],
+
+  "_comment_schedule": "Which CURRENT PIPELINE rows become cards. Matched case-insensitively on the stripped cell value.",
+  "schedule_dept": "911",
+  "schedule_status": "NEED TEAMS/SETUP",
+
+  "_comment_status_flow": "TechDeck ADVANCES the schedule's STATUS column as work completes (C.D. 2026-08-10) - the belt is 'schedule_status' -> 'status_after_cards' (this nest's Teams card posted) -> 'status_after_setup' (this nest's batch setup ran). Only rows that genuinely reached the next stage move: a nest whose card was skipped or whose post failed keeps 'schedule_status' and is re-offered next run, and a stamping-only re-run never advances anything. Written through Excel COM (never openpyxl - the RATING column's difficulty is a CELL FILL COLOUR and the sheet's conditional formatting would not survive an openpyxl save). Set 'write_schedule_status' false to go back to read-only.",
+  "write_schedule_status": true,
+  "status_after_cards": "NEED SETUP",
+  "status_after_setup": "NEED MODEL",
+
+  "_comment_skips": "Two reasons a queued nest gets NO card - both are reported at the end of the run, and both re-offer the nest on a later run once the missing piece appears. 'require_material_notes': the schedule's NOTES cell (column D) is blank, so the material has not been specified yet and the card could carry neither a machine label nor a Program decision (C.D. 2026-08-03). 'require_material_code': the nest's BATCH LIST 'Material' code could not be read, so the title would come out as 'BATCH: x - NEST: y' with no '(code)' - which does NOT match the real title later, defeating the flow's exact-title duplicate check and leaving you with two cards for one nest.",
+  "require_material_notes": true,
+  "require_material_code": true,
+
+  "_comment_machine": "SAW CUT vs TUBE LASER, read off the schedule's NOTES text (column D; falls back to the BATCH LIST 'Description' when NOTES is blank). Rule, in order (C.D. 2026-08-03): (1) the material says TUBE -> it IS a tube -> TUBE LASER; (2) otherwise a '(TL)' note means it is going on the tube laser anyway -> TUBE LASER; (3) everything else -> SAW CUT. Shape does NOT imply the tube laser - an angle is an angle. Only a material text that is entirely EMPTY gets no label at all, and that is reported at the end of the run.",
+  "machine_tube_markers": ["TL", "TUBE LASER"],
+  "machine_default": "SAW CUT",
+
+  "_comment_labels": "Slot keys, not names - the flow stays dumb and only sees categoryN. Order here mirrors the plan's label list top-to-bottom: slot 1 is the UNNAMED Pink default, then 2 DIFFICULT, 3 MEDIUM, 4 SIMPLE, 5 SAW CUT, 6 TUBE LASER. The first live post (2026-08-04) shipped with this map starting at category1 and every card's labels came out shifted one slot (SAW CUT lit up SIMPLE, so cards showed two difficulties) - verify against Teams' label list, which shows UNNAMED slots by their colour name.",
+  "label_map": {
+    "DIFFICULT": "category2",
+    "MEDIUM": "category3",
+    "SIMPLE": "category4",
+    "SAW CUT": "category5",
+    "TUBE LASER": "category6"
+  }
+}

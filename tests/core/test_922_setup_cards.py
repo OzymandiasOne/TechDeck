@@ -144,8 +144,9 @@ def test_repeat_tagger_payload_contract_keys_exist_in_source():
         assert key in window, f"flow #2 payload lost its {key} key"
 
 
-def test_911_setup_payload_contract_keys_exist_in_source():
-    # Flow #3 reads plan / bucket / tasks.
-    window = _payload_window("911_setup")
+def test_911_teams_cards_payload_contract_keys_exist_in_source():
+    # Flow #3 reads plan / bucket / tasks. The payload moved out of 911_setup
+    # into its own plugin on 2026-08-10 -- 911 Setup now imports it.
+    window = _payload_window("911_teams_cards")
     for key in ('"plan"', '"bucket"', '"tasks"'):
         assert key in window, f"flow #3 payload lost its {key} key"

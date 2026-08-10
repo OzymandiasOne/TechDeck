@@ -666,6 +666,32 @@ class SettingsManager:
         self.data["feedback_features"] = dict(state)
         self.save()
 
+    # ---- Remembered master-toggle selections --------------------------------
+    # What each plugin's GroupedToggleDialog was last submitted with, keyed by
+    # a caller-chosen memory key (normally the plugin id). Lives at the top
+    # level of settings.json rather than under plugin_settings, so it can never
+    # collide with a plugin's own Settings > Apps fields.
+    #
+    # Kept here (not in the plugin folder) so it survives an app update: the
+    # installer replaces plugins/, but %LOCALAPPDATA%\TechDeck\settings.json is
+    # user data and is left alone. Asked for by A.T. 2026-08-07 -- Saco was
+    # re-unticking the same two toggles on every single 911 Setup run.
+
+    def get_toggle_memory(self, memory_key: str) -> Dict[str, Any]:
+        store = self.data.get("toggle_memory")
+        if not isinstance(store, dict):
+            return {}
+        remembered = store.get(memory_key)
+        return remembered if isinstance(remembered, dict) else {}
+
+    def set_toggle_memory(self, memory_key: str, state: Dict[str, Any]) -> None:
+        store = self.data.get("toggle_memory")
+        if not isinstance(store, dict):
+            store = {}
+        store[memory_key] = dict(state)
+        self.data["toggle_memory"] = store
+        self.save()
+
     # ========== Plugin Settings ==========
     
     def get_plugin_settings(self, plugin_id: str) -> Dict[str, Any]:

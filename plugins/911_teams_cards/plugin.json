@@ -1,0 +1,65 @@
+{
+  "id": "911_teams_cards",
+  "name": "911 Teams Cards",
+  "description": "Posts one Teams modeling card per 911 nest waiting to be set up, read straight off the EB 922 Schedule - with the job's difficulty, its saw-cut or tube-laser machine, and its scheduled due date - then moves each nest's status along the schedule as its card goes out. No batch number needed.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "details": {
+    "setup": [
+      "Keep the EB 922 Schedule synced, and mark each nest that needs a card 'NEED TEAMS/SETUP' in the STATUS column.",
+      "Give each of those rows a rating colour in the RATING column and its source material in the NOTES column - a nest with no material listed is passed over until you fill it in.",
+      "Make sure each referenced batch's folder is synced, so its BATCH LIST can be read for the stock code that goes in the card title."
+    ],
+    "how_it_works": [
+      "Run it - there is nothing to enter. The work list is every EB 922 Schedule row marked DEPT. 911 and NEED TEAMS/SETUP, whichever batch each nest belongs to.",
+      "One card per nest goes into the MODELING bucket of the SOPO D911 PIPELINE plan, labelled with its difficulty and its machine, due on the schedule's date.",
+      "Each nest whose card is posted moves to NEED SETUP on the schedule, so the board shows what is still waiting for a card and what is waiting for setup.",
+      "Re-running is safe: cards already posted are skipped rather than duplicated, and anything passed over is offered again once the gap is filled."
+    ],
+    "output": [
+      "One Teams card per waiting nest, in the MODELING bucket of the SOPO D911 PIPELINE plan.",
+      "The EB 922 Schedule's STATUS column advanced to NEED SETUP for every nest that got a card.",
+      "An end-of-run report of every nest passed over and why."
+    ]
+  },
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "qtdr_base_path",
+        "type": "directory",
+        "label": "911 QTDR Base Directory",
+        "description": "Path to the '911 QTDR' folder, used to read each batch's BATCH LIST for the stock code in the card title. Leave blank to use the default OneDrive path under your home directory.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\911 QTDR",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "schedule_path",
+        "type": "file",
+        "label": "EB 922 Schedule",
+        "description": "Path to 'EB 922 Schedule.xlsx'. Leave blank to discover it under whichever Pilot Program folder this machine has.",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "card_webhook_url",
+        "type": "text",
+        "label": "Teams Webhook URL",
+        "description": "Override for the Power Automate flow that creates the cards. Leave blank to use the flow this app ships with.",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "card_dry_run",
+        "type": "boolean",
+        "label": "Dry run (preview only, post nothing)",
+        "description": "Build the payload and write it to a preview file without posting. Nothing is created in Teams and the schedule is left untouched.",
+        "required": false,
+        "default": false
+      }
+    ]
+  }
+}

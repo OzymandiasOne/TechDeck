@@ -616,7 +616,62 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
-def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[dict]:
+def load_toggle_memory(memory_key: str) -> dict:
+    """The selections last submitted under ``memory_key`` ({} if none/unreadable)."""
+    try:
+        from techdeck.core.settings import SettingsManager
+        return dict(SettingsManager().get_toggle_memory(memory_key) or {})
+    except Exception:
+        return {}
+
+
+def save_toggle_memory(memory_key: str, result: dict) -> None:
+    """Remember a GroupedToggleDialog result. Never raises — failing to
+    remember a preference must not sink the run that just succeeded."""
+    try:
+        from techdeck.core.settings import SettingsManager
+        SettingsManager().set_toggle_memory(memory_key, result)
+    except Exception:
+        pass
+
+
+def apply_toggle_memory(groups: list, remembered: dict) -> list:
+    """``groups`` with each toggle's ``checked`` replaced by what the user last
+    submitted. Pure — returns a new list, mutating nothing.
+
+    The merge is by KEY, in one direction only, and that is what makes the
+    memory survive an app update:
+
+      * key in groups AND remembered -> the remembered state wins
+      * key in groups, NOT remembered -> its DECLARED default. A toggle added
+        by an update ships at whatever default it declares; it never inherits
+        a state the user was never shown.
+      * key remembered, NOT in groups -> dropped. Removing or renaming a
+        toggle retires its memory instead of resurrecting a dead key.
+
+    A child marked ``disabled`` stays unchecked no matter what is remembered —
+    disabled means unavailable, not merely off.
+    """
+    out = []
+    for g in groups:
+        saved = remembered.get(g.get("key")) or {}
+        merged = dict(g)
+        if "enabled" in saved:
+            merged["checked"] = bool(saved["enabled"])
+        saved_opts = saved.get("options") or {}
+        children = []
+        for c in g.get("children") or []:
+            child = dict(c)
+            if not child.get("disabled") and child.get("key") in saved_opts:
+                child["checked"] = bool(saved_opts[child["key"]])
+            children.append(child)
+        merged["children"] = children
+        out.append(merged)
+    return out
+
+
+def request_grouped_toggles(params: dict, groups: list, remember_as: str = "",
+                            **kwargs) -> Optional[dict]:
     """Show the two-level master toggle dialog (stages as checkable parents,
     per-stage option toggles as children — GroupedToggleDialog) and block
     until submit. ``groups`` spec and the returned
@@ -625,22 +680,44 @@ def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[di
     pass through (window_title, header, subtext, run_button_text). Returns
     None if the user cancelled.
 
+    ``remember_as`` (normally the plugin id) makes the dialog STICKY: it opens
+    with whatever was last submitted under that key and saves the new answer on
+    submit, so a user who always runs the same subset sets it up once. Stored
+    in settings.json, which an app update leaves alone — see
+    SettingsManager.get_toggle_memory and apply_toggle_memory for the merge
+    rules that keep it sane across added/removed toggles. A cancel saves
+    nothing. Omit it and the dialog is stateless, exactly as before.
+
     Headless — or on an older TechDeck whose console lacks the method — it
     returns every group/child at its declared default (an all-defaults
-    submit), so scripted runs never hang on a dialog.
+    submit), so scripted runs never hang on a dialog. Remembered state is
+    applied there too, so a scripted run matches what the GUI would have
+    offered.
     """
+    if remember_as:
+        remembered = load_toggle_memory(remember_as)
+        if remembered:
+            groups = apply_toggle_memory(groups, remembered)
+
     console = params.get("console")
     if console is not None and hasattr(console, "request_grouped_toggles"):
         try:
-            return console.request_grouped_toggles(groups, **kwargs)
+            result = console.request_grouped_toggles(groups, **kwargs)
         except TypeError:
             # Older console signature without these kwargs (version tolerance).
-            return console.request_grouped_toggles(groups)
-    return {g["key"]: {"enabled": bool(g.get("checked", True)),
-                       "options": {c["key"]: (not c.get("disabled")
-                                              and bool(c.get("checked", True)))
-                                   for c in g.get("children", [])}}
-            for g in groups}
+            result = console.request_grouped_toggles(groups)
+    else:
+        result = {g["key"]: {"enabled": bool(g.get("checked", True)),
+                             "options": {c["key"]: (not c.get("disabled")
+                                                    and bool(c.get("checked", True)))
+                                         for c in g.get("children", [])}}
+                  for g in groups}
+
+    # Only a real submit is remembered -- a cancel means "not this time",
+    # never "make that my default".
+    if remember_as and result is not None:
+        save_toggle_memory(remember_as, result)
+    return result
 
 
 def plugin_settings(plugin_id: str) -> dict:

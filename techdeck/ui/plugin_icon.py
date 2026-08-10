@@ -35,6 +35,7 @@ from PySide6.QtGui import (
 PLUGIN_ICON_KEYS = {
     "922_setup":            "icons8-toolbox",
     "911_setup":            "microsoft_excel_2019",
+    "911_teams_cards":      "sym_speech_bubble",
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
     "911_po_pdf_extractor": "claw",
