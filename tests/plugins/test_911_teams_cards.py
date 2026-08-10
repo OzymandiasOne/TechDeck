@@ -263,7 +263,31 @@ MATERIALS = {
 }
 
 
-def _stage(st, tmp_path, monkeypatch, settings=None):
+def _stub_schedule_io(st, monkeypatch, writes, statuses=None, fail=""):
+    """Stand in for the two functions that touch the real EB 922 Schedule.
+
+    The row LOOKUP and the COM WRITE are stubbed; everything between them
+    (which rows qualify, what they move to, the hand-fix report) is the real
+    _advance_schedule_status. ``statuses`` overrides each row's current
+    STATUS by excel_row; ``fail`` makes the write fail like a locked file.
+    """
+    statuses = statuses or {}
+    rows = [{"excel_row": r["excel_row"], "batch": r["batch"],
+             "nest": r["nest"],
+             "status": statuses.get(r["excel_row"], "NEED TEAMS/SETUP")}
+            for r in SCHEDULE]
+    monkeypatch.setattr(st, "_schedule_status_rows",
+                        lambda *a, **k: (Path("EB 922 Schedule.xlsx"), 6,
+                                         rows, ""))
+    monkeypatch.setattr(
+        st, "_write_schedule_statuses",
+        lambda path, col, updates: (0, fail) if fail
+        else (writes.extend(updates) or (len(updates), "")))
+    return rows
+
+
+def _stage(st, tmp_path, monkeypatch, settings=None, writes=None,
+           statuses=None, fail=""):
     """Run the stage with the schedule + BATCH LISTs stubbed out, capturing
     the payload that would be POSTed. Returns (posted_payloads, log_lines)."""
     posted, lines = [], []
@@ -275,6 +299,8 @@ def _stage(st, tmp_path, monkeypatch, settings=None):
                         lambda: tmp_path / "911_setup_posted_cards.json")
     monkeypatch.setattr(st.sdk, "post_webhook",
                         lambda url, payload, log: posted.append(payload) or True)
+    _stub_schedule_io(st, monkeypatch, writes if writes is not None else [],
+                      statuses, fail)
     params = {"log": lines.append, "console": None,
               "settings": settings if settings is not None else {}}
     st._run_teams_cards(params, lambda v: None, threading.Event(), "")
@@ -338,3 +364,117 @@ def test_dry_run_never_writes_the_ledger(st, tmp_path, monkeypatch):
     # ...so the real run still offers the card
     posted2, _ = _stage(st, tmp_path, monkeypatch)
     assert len(posted2[0]["tasks"]) == 1
+
+
+# ── schedule STATUS write-back (v1.9.0, C.D. 2026-08-10) ────────────────────
+# The belt: NEED TEAMS/SETUP -> (card posted) NEED SETUP -> (setup ran) NEED
+# MODEL. Only rows that genuinely reached the next stage move.
+
+def test_template_declares_the_whole_status_belt(template):
+    assert template["schedule_status"] == "NEED TEAMS/SETUP"
+    assert template["status_after_cards"] == "NEED SETUP"
+    assert template["status_after_setup"] == "NEED MODEL"
+    assert template["write_schedule_status"] is True
+
+
+def test_a_posted_card_advances_only_its_own_row(st, tmp_path, monkeypatch):
+    """Two of the three queued nests are skipped (blank NOTES / no stock
+    code). They must keep NEED TEAMS/SETUP so they are re-offered."""
+    writes = []
+    posted, lines = _stage(st, tmp_path, monkeypatch, writes=writes)
+    assert len(posted[0]["tasks"]) == 1
+    assert writes == [(138, "NEED SETUP", "V092 503836")]
+    assert "advanced to 'NEED SETUP'" in "\n".join(lines)
+
+
+def test_a_failed_post_never_advances_the_status(st, tmp_path, monkeypatch):
+    writes = []
+    monkeypatch.setattr(st, "_read_schedule_rows",
+                        lambda *a, **k: ([dict(r) for r in SCHEDULE], ""))
+    monkeypatch.setattr(st, "_read_batch_list_materials",
+                        lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
+    monkeypatch.setattr(st, "_ledger_path",
+                        lambda: tmp_path / "911_setup_posted_cards.json")
+    monkeypatch.setattr(st.sdk, "post_webhook", lambda url, payload, log: False)
+    _stub_schedule_io(st, monkeypatch, writes)
+    st._run_teams_cards({"log": lambda m: None, "console": None, "settings": {}},
+                        lambda v: None, threading.Event(), "")
+    assert writes == []
+
+
+def test_dry_run_never_advances_the_status(st, tmp_path, monkeypatch):
+    writes = []
+    _stage(st, tmp_path, monkeypatch, settings={"card_dry_run": True},
+           writes=writes)
+    assert writes == []
+
+
+def test_a_row_already_past_the_card_stop_is_left_alone(st, tmp_path, monkeypatch):
+    """Re-carding is already blocked by the ledger, but if a row somehow comes
+    back round it must not be dragged BACKWARDS from NEED SETUP."""
+    writes = []
+    _stage(st, tmp_path, monkeypatch, writes=writes,
+           statuses={138: "NEED SETUP"})
+    assert writes == []
+
+
+def test_a_locked_schedule_still_posts_and_names_the_rows_to_fix(
+        st, tmp_path, monkeypatch):
+    """The whole point of the shared-file design (C.D. 2026-08-10): a
+    spreadsheet someone else has open costs typing, never a card."""
+    writes = []
+    posted, lines = _stage(st, tmp_path, monkeypatch, writes=writes,
+                           fail="EB 922 Schedule.xlsx opened read-only")
+    assert len(posted[0]["tasks"]) == 1          # card went out anyway
+    blob = "\n".join(lines)
+    assert "Could not update the EB 922 Schedule" in blob
+    assert "opened read-only" in blob
+    assert "row 138" in blob and "V092 503836" in blob
+    assert "NEED SETUP" in blob
+
+
+def test_write_back_can_be_turned_off_in_the_template(st, tmp_path, monkeypatch):
+    writes = []
+    real = st._load_card_template()
+    monkeypatch.setattr(st, "_load_card_template",
+                        lambda: {**real, "write_schedule_status": False})
+    posted, _ = _stage(st, tmp_path, monkeypatch, writes=writes)
+    assert len(posted[0]["tasks"]) == 1
+    assert writes == []
+
+
+def test_setup_stop_moves_need_setup_to_need_model(st, monkeypatch):
+    """The second half of the belt, exercised through _advance_schedule_status
+    the way run() calls it at the end of a batch."""
+    writes, lines = [], []
+    _stub_schedule_io(st, monkeypatch, writes, statuses={138: "NEED SETUP"})
+    left = st._advance_schedule_status(
+        {}, st._load_card_template(), lines.append,
+        [("V092", "503836")], ["NEED SETUP"], "NEED MODEL")
+    assert left == []
+    assert writes == [(138, "NEED MODEL", "V092 503836")]
+
+
+def test_setup_never_skips_a_nest_past_its_card_stop(st, monkeypatch):
+    """A nest still at NEED TEAMS/SETUP has never been carded. Setting it up
+    must not jump it to NEED MODEL -- that would erase the fact that it still
+    needs a card."""
+    writes, lines = [], []
+    _stub_schedule_io(st, monkeypatch, writes)   # all rows NEED TEAMS/SETUP
+    left = st._advance_schedule_status(
+        {}, st._load_card_template(), lines.append,
+        [("V092", "503836")], ["NEED SETUP"], "NEED MODEL")
+    assert left == []
+    assert writes == []
+
+
+def test_an_unreadable_schedule_reports_the_rows_rather_than_raising(
+        st, monkeypatch):
+    lines = []
+    monkeypatch.setattr(st, "_schedule_status_rows",
+                        lambda *a, **k: (None, None, [], "the workbook is gone"))
+    left = st._advance_schedule_status(
+        {}, st._load_card_template(), lines.append,
+        [("V092", "503836")], ["NEED SETUP"], "NEED MODEL")
+    assert left == ["V092 503836"]
+    assert "the workbook is gone" in "\n".join(lines)

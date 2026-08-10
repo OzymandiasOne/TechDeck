@@ -1401,6 +1401,11 @@ _SCHED_NOTES = "NOTES"
 _SCHED_RATING = "RATING"
 _SCHED_STATUS = "STATUS"
 
+# The two stops after 'NEED TEAMS/SETUP' on the status belt (card_template.json
+# overrides both). Fallbacks only -- see the write-back section below.
+_STATUS_AFTER_CARDS_DEFAULT = "NEED SETUP"
+_STATUS_AFTER_SETUP_DEFAULT = "NEED MODEL"
+
 
 def _load_card_template() -> dict:
     """Load card_template.json sitting next to this file."""
@@ -1732,6 +1737,213 @@ def _record_posted_titles(titles, log) -> None:
         log(f"  (Could not update the posted-card ledger: {exc})")
 
 
+# ===========================================================================
+# Schedule status write-back (v1.9.0)
+# ===========================================================================
+# The EB 922 Schedule's STATUS column is a conveyor belt, and as of
+# 2026-08-10 TechDeck is what advances it (C.D.; until now the schedule was
+# read-only and every status was moved by hand):
+#
+#   NEED TEAMS/SETUP --(card posted)--> NEED SETUP --(setup ran)--> NEED MODEL
+#
+# Only rows that genuinely reached the next stage move. A nest whose card was
+# SKIPPED (blank NOTES, no stock code) or whose post failed keeps
+# NEED TEAMS/SETUP so it is re-offered next run -- the same rule the
+# posted-card ledger already follows -- and a nest still sitting at
+# NEED TEAMS/SETUP is never jumped straight to NEED MODEL by a setup-only
+# run, because that would erase the fact that it still needs a card.
+#
+# Written through Excel COM, never openpyxl: the RATING column carries each
+# nest's difficulty as a CELL FILL COLOUR, and the sheet has conditional
+# formatting openpyxl already warns about on load and would drop on save.
+# COM touches only the cells we name.
+#
+# Unlike _build_inspection_sheets_via_excel this opens the real file IN PLACE
+# and calls Save(). That builder's temp-copy + os.replace dance exists because
+# Excel SaveAs fails onto a OneDrive path; a plain in-place Save is what Excel
+# does for a human all day. Replacing this file wholesale would also clobber
+# whatever planning edited while we were running.
+#
+# The schedule is shared, so it is often open on someone else's machine. That
+# must NEVER cost a card: the cards post first, and any row we could not write
+# is listed for the user to change by hand (C.D. 2026-08-10).
+# ---------------------------------------------------------------------------
+
+def _schedule_status_rows(params, template, log, cancel_event=None):
+    """(path, status_col, rows, problem) for every DEPT. 911 pipeline row.
+
+    ``rows`` are {"excel_row", "batch", "nest", "status"} with ``status``
+    already through _norm_status. Read-only -- _write_schedule_statuses is
+    the only thing that changes a cell. ``problem`` is non-empty when the
+    lookup could not happen at all.
+    """
+    stamps = _load_omit_stamp_helpers(log)
+    if stamps is None:
+        return None, None, [], ("the 911 Remove Ticket helpers could not be "
+                                "loaded, so the schedule could not be read")
+    path = stamps._schedule_path(params)
+    if path is None:
+        return None, None, [], "the EB 922 Schedule workbook could not be found"
+    try:
+        wb = sdk.load_workbook_resilient(path, log=log, data_only=True)
+    except Exception as exc:
+        return path, None, [], f"{path.name} could not be read: {exc}"
+    try:
+        if _SCHED_SHEET not in wb.sheetnames:
+            return path, None, [], f"{path.name} has no '{_SCHED_SHEET}' sheet"
+        ws = wb[_SCHED_SHEET]
+        # Header row scanned, never assumed (Hard Rule 2); columns by NAME
+        # (Hard Rule 1) -- the live sheet ships them with trailing spaces.
+        hdr_row, hdr = sdk.find_header_row(ws, [_SCHED_KEY, _SCHED_STATUS])
+        if not hdr_row:
+            return path, None, [], (f"{path.name} has no row containing both "
+                                    f"'{_SCHED_KEY}' and '{_SCHED_STATUS}'")
+        c_key = hdr.get(_SCHED_KEY)
+        c_status = hdr.get(_SCHED_STATUS)
+        c_dept = hdr.get(_SCHED_DEPT)
+        want_dept = _norm_text(template.get("schedule_dept", "911"))
+        rows = []
+        for r in range(hdr_row + 1, ws.max_row + 1):
+            if cancel_event is not None and r % 64 == 0:
+                sdk.raise_if_cancelled(cancel_event)
+            if c_dept and _norm_text(ws.cell(r, c_dept).value) != want_dept:
+                continue
+            batch, nest = _split_batch_nest(ws.cell(r, c_key).value)
+            rows.append({"excel_row": r, "batch": batch, "nest": nest,
+                         "status": _norm_status(ws.cell(r, c_status).value)})
+        return path, c_status, rows, ""
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+
+
+def _write_schedule_statuses(path: Path, status_col: int, updates: list):
+    """Stamp STATUS on the named schedule rows via Excel COM, in place.
+
+    ``updates`` is [(excel_row, new_status, label)] -- ``label`` is only for
+    the caller's hand-fix list. Returns (written, failure_text); a non-empty
+    ``failure_text`` means NOTHING was written.
+    """
+    if not updates:
+        return 0, ""
+    try:
+        import win32com.client
+        import pythoncom
+    except ImportError:
+        return 0, ("the Excel COM bindings (pywin32) are not available on "
+                   "this machine")
+
+    xlCalculationManual = -4135
+    pythoncom.CoInitialize()
+    excel = None
+    wb = None
+    try:
+        excel = win32com.client.DispatchEx("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.ScreenUpdating = False
+        excel.EnableEvents = False
+        excel.AskToUpdateLinks = False
+        try:
+            excel.Calculation = xlCalculationManual
+        except Exception:
+            pass
+
+        wb = excel.Workbooks.Open(
+            Filename=str(path),
+            UpdateLinks=0,
+            ReadOnly=False,
+            IgnoreReadOnlyRecommended=True,
+            Notify=False,
+            AddToMru=False,
+        )
+        # A workbook already open elsewhere opens READ-ONLY instead of
+        # raising (the "file in use" prompt is suppressed by DisplayAlerts),
+        # and Save() on it silently does nothing. Check before writing --
+        # this is the shared-file case the whole hand-fix path exists for.
+        if wb.ReadOnly:
+            return 0, (f"{path.name} opened read-only, which means it is "
+                       f"open on another machine")
+
+        ws = wb.Sheets(_SCHED_SHEET)
+        for excel_row, new_status, _label in updates:
+            ws.Cells(excel_row, status_col).Value = new_status
+        wb.Save()
+        return len(updates), ""
+    except Exception as exc:
+        return 0, f"Excel refused the write ({exc})"
+    finally:
+        try:
+            if wb is not None:
+                # Already saved above; never let Close re-prompt or re-write.
+                wb.Close(SaveChanges=False)
+        except Exception:
+            pass
+        try:
+            if excel is not None:
+                excel.Quit()
+        except Exception:
+            pass
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+
+
+def _advance_schedule_status(params, template, log, pairs, from_statuses,
+                             new_status, cancel_event=None) -> list:
+    """Move every DEPT. 911 row for ``pairs`` off ``from_statuses`` onto
+    ``new_status``. ``pairs`` is an iterable of (batch, nest).
+
+    Returns the labels of rows that still need changing BY HAND (empty on a
+    clean write). Never raises and never blocks its caller: a locked schedule
+    costs the user some typing, never a card (C.D. 2026-08-10).
+    """
+    if not bool(template.get("write_schedule_status", True)):
+        return []
+    wanted = {(_norm_text(b), _norm_text(n)) for b, n in pairs if b and n}
+    if not wanted:
+        return []
+
+    try:
+        path, status_col, rows, problem = _schedule_status_rows(
+            params, template, log, cancel_event)
+    except sdk.PluginCancelled:
+        raise
+    except Exception as exc:  # a status write must never sink the run
+        problem, path, status_col, rows = str(exc), None, None, []
+
+    if problem or not status_col:
+        log(f"\n  ! EB 922 Schedule STATUS not updated - "
+            f"{problem or 'no STATUS column found'}.")
+        log(f"    Please set these to '{new_status}' by hand: "
+            + ", ".join(sorted(f"{b} {n}" for b, n in wanted)))
+        return sorted(f"{b} {n}" for b, n in wanted)
+
+    from_set = {_norm_status(s) for s in from_statuses}
+    updates = [(r["excel_row"], new_status, f"{r['batch']} {r['nest']}")
+               for r in rows
+               if (r["batch"], r["nest"]) in wanted and r["status"] in from_set]
+    if not updates:
+        return []
+
+    written, failure = _write_schedule_statuses(path, status_col, updates)
+    if failure:
+        log(f"\n  {'!' * 46}")
+        log(f"  ! Could not update the EB 922 Schedule - {failure}.")
+        log(f"    Everything else finished normally. Please set these rows'")
+        log(f"    STATUS to '{new_status}' by hand:")
+        for excel_row, _st, label in updates:
+            log(f"      row {excel_row}   {label}")
+        log(f"  {'!' * 46}")
+        return [label for _r, _s, label in updates]
+
+    log(f"  EB 922 Schedule: {written} row(s) advanced to '{new_status}'.")
+    return []
+
+
 def _run_teams_cards(params: dict, progress_callback, cancel_event,
                      qtdr_override: str, lo: int = 0, hi: int = 100) -> bool:
     """The Generate Teams Cards stage. Returns True when the payload posted
@@ -1839,7 +2051,10 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
             skip = {(r["batch"], r["nest"]) for r in no_code}
             rows = [r for r in rows if (r["batch"], r["nest"]) not in skip]
 
-    cards, card_labels = [], []
+    # card_rows tracks each card's ORIGINATING schedule row, so the status
+    # write-back below advances exactly the rows that got a card -- not the
+    # whole work list, which still holds everything skipped along the way.
+    cards, card_labels, card_rows = [], [], []
     for r in rows:
         sdk.raise_if_cancelled(cancel_event)
         material = (materials.get(r["batch"]) or {}).get(r["nest"])
@@ -1847,19 +2062,21 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
                                   warnings, unlabelled)
         cards.append(card)
         card_labels.append(names)
+        card_rows.append(r)
 
     # --- Drop what this machine has already posted -------------------------
     already = _load_posted_titles(log)
     if already:
-        keep = [(c, n) for c, n in zip(cards, card_labels)
+        keep = [(c, n, r) for c, n, r in zip(cards, card_labels, card_rows)
                 if c["title"] not in already]
         suppressed = len(cards) - len(keep)
         if suppressed:
             log(f"Already carded: {suppressed} nest(s) were posted from this "
                 f"machine before and are not being re-sent.")
             log(f"  (Ledger: {_ledger_path()} - delete it to re-offer them.)")
-        cards = [c for c, _ in keep]
-        card_labels = [n for _, n in keep]
+        cards = [c for c, _, _ in keep]
+        card_labels = [n for _, n, _ in keep]
+        card_rows = [r for _, _, r in keep]
 
     if not cards:
         log("\nNothing new to card - every queued nest either has no source "
@@ -1945,6 +2162,15 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         log(f"\nTeams cards: DONE. Requested {len(cards)} card(s) in "
             f"'{payload['bucket']}'.")
         log(f"Check the {payload['plan']} tab in the D922 channel to confirm.")
+        # These nests are now carded, so they leave the card queue and join
+        # the setup queue. Gated on the confirmed 2xx for the same reason the
+        # ledger is: a failed post must leave the row exactly as it was.
+        _advance_schedule_status(
+            params, template, log,
+            [(r["batch"], r["nest"]) for r in card_rows],
+            [template.get("schedule_status", "NEED TEAMS/SETUP")],
+            template.get("status_after_cards", _STATUS_AFTER_CARDS_DEFAULT),
+            cancel_event)
         return True
     log("\nTeams cards: FAILED - see the errors above. No cards were created.")
     return False
@@ -2528,6 +2754,39 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"{'!'*50}")
     elif packet_qtys:
         log("\nAll part quantities verified against the nest packet PDFs.")
+
+    # ------------------------------------------------------------------ #
+    # Schedule status -- these nests are now SET UP (v1.9.0, C.D. 2026-08-10)
+    #
+    # Gated on folder setup AND nest workbook data, because those two are what
+    # "this nest has been set up" actually means. A re-run with only PDF
+    # Stamping (or only Inspection Sheets) ticked re-does one artefact and
+    # must not advance anything.
+    #
+    # Only rows sitting at 'NEED SETUP' move -- which is exactly where the
+    # cards stage leaves a nest it carded, including earlier in THIS run. A
+    # nest still at 'NEED TEAMS/SETUP' has never been carded, so it stays put
+    # rather than skipping the card stop entirely.
+    # ------------------------------------------------------------------ #
+    if do_folders and do_nest_data:
+        try:
+            _sched_template = _load_card_template()
+        except (OSError, json.JSONDecodeError) as exc:
+            _sched_template = None
+            log(f"\n  ! EB 922 Schedule STATUS not updated - card_template.json "
+                f"could not be read ({exc}).")
+        if _sched_template is not None:
+            _advance_schedule_status(
+                params, _sched_template, log,
+                [(batch_number, n) for n in nest_numbers],
+                [_sched_template.get("status_after_cards",
+                                     _STATUS_AFTER_CARDS_DEFAULT)],
+                _sched_template.get("status_after_setup",
+                                    _STATUS_AFTER_SETUP_DEFAULT),
+                cancel_event)
+    elif do_folders or do_nest_data or do_inspection or do_stamping:
+        log("\n  (EB 922 Schedule STATUS left alone - a partial re-run does "
+            "not mark a nest set up.)")
 
     progress_callback(100)
     log(f"\n{'='*50}")

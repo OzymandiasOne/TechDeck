@@ -24,6 +24,11 @@
   "schedule_dept": "911",
   "schedule_status": "NEED TEAMS/SETUP",
 
+  "_comment_status_flow": "TechDeck ADVANCES the schedule's STATUS column as work completes (C.D. 2026-08-10) - the belt is 'schedule_status' -> 'status_after_cards' (this nest's Teams card posted) -> 'status_after_setup' (this nest's batch setup ran). Only rows that genuinely reached the next stage move: a nest whose card was skipped or whose post failed keeps 'schedule_status' and is re-offered next run, and a stamping-only re-run never advances anything. Written through Excel COM (never openpyxl - the RATING column's difficulty is a CELL FILL COLOUR and the sheet's conditional formatting would not survive an openpyxl save). Set 'write_schedule_status' false to go back to read-only.",
+  "write_schedule_status": true,
+  "status_after_cards": "NEED SETUP",
+  "status_after_setup": "NEED MODEL",
+
   "_comment_skips": "Two reasons a queued nest gets NO card - both are reported at the end of the run, and both re-offer the nest on a later run once the missing piece appears. 'require_material_notes': the schedule's NOTES cell (column D) is blank, so the material has not been specified yet and the card could carry neither a machine label nor a Program decision (C.D. 2026-08-03). 'require_material_code': the nest's BATCH LIST 'Material' code could not be read, so the title would come out as 'BATCH: x - NEST: y' with no '(code)' - which does NOT match the real title later, defeating the flow's exact-title duplicate check and leaving you with two cards for one nest.",
   "require_material_notes": true,
   "require_material_code": true,
