@@ -1248,21 +1248,66 @@ def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
         out.close()
 
 
-def save_pdf_atomic(doc, dest_path: Path) -> None:
+def save_pdf_atomic(doc, dest_path: Path, close: bool = True) -> None:
     """Save an open fitz document and atomically replace dest_path.
 
-    fitz cannot save in place (especially after redactions), so write to a
-    temp file on the same volume and os.replace it over the target. The caller
-    still owns `doc` and should close it afterwards.
+    fitz cannot save in place (especially after redactions), so write to a temp
+    file beside the target and os.replace it over the destination.
+
+    ORDER MATTERS ON WINDOWS. An open fitz document keeps a handle on the file
+    it was opened from, so replacing that same path while the doc is still open
+    fails with ``PermissionError [WinError 5] Access is denied`` — the classic
+    in-place-edit case (open a PDF, stamp it, save it back) this helper exists
+    to serve. The document is therefore CLOSED before the replace, and `close`
+    defaults to True: on return, `doc` is closed and must not be used or closed
+    again (fitz raises ``ValueError: document closed`` on a second close).
+
+    Pass ``close=False`` only when `doc` was built from scratch or opened from a
+    DIFFERENT file than `dest_path` and you still need it afterwards — if the
+    doc's own source path IS `dest_path`, it is closed anyway, because leaving
+    it open cannot work.
+
+    A failed save or replace never leaves a stray ``tmp*.pdf`` behind: partial
+    temp files are cleaned up on the way out. (They are genuinely dangerous
+    here — a leftover temp PDF in a 922 order folder gets picked up as that
+    order's work packet by anything that takes "the first PDF in the folder".)
     """
     import fitz
     dest_path = Path(dest_path)
+
     with tempfile.NamedTemporaryFile(
         suffix=".pdf", delete=False, dir=str(dest_path.parent)
     ) as tmp:
         tmp_path = Path(tmp.name)
-    doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
-    os.replace(str(tmp_path), str(dest_path))
+
+    try:
+        doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
+
+        # Release the source handle before swapping the file underneath it.
+        if close or _doc_source_is(doc, dest_path):
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+        os.replace(str(tmp_path), str(dest_path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _doc_source_is(doc, dest_path: Path) -> bool:
+    """True when `doc` was opened from `dest_path` (so it holds that handle)."""
+    try:
+        src = getattr(doc, "name", None)
+        if not src:
+            return False
+        return Path(src).resolve() == Path(dest_path).resolve()
+    except Exception:
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
