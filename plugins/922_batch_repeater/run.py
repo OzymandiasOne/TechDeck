@@ -713,7 +713,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     console = params.get("console")
     if console is not None and hasattr(console, "request_selection"):
         ordered_orders = sorted(orders_to_copy.keys(), key=str.lower)
-        selection = console.request_selection(
+        selection = sdk.request_selection(
+            params,
             ordered_orders,
             done_orders,
             window_title=f"922 Batch Repeater - {actual_batch_name}",
@@ -726,8 +727,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         )
         if selection is None:
             log("Repeat selection cancelled -- nothing was pulled.")
-            cancel_event.set()  # user cancel: don't count as a successful (ticket-earning) run
-            return
+            return   # sdk.request_selection already flagged the cancel
         chosen = set(selection)
         orders_to_copy = {o: s for o, s in orders_to_copy.items() if o in chosen}
         if not orders_to_copy:

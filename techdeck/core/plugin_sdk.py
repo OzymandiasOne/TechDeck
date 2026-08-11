@@ -602,6 +602,36 @@ def request_choice(params: dict, title: str, prompt: str,
     return _user_cancelled(params)
 
 
+def request_selection(params: dict, items, done_items=None,
+                      **kwargs) -> Optional[list]:
+    """Ask the user to tick which of ``items`` to run (SelectionDialog), and
+    block until submit. Returns the chosen items, or None if they cancelled.
+
+    ``items`` are display strings; ``done_items`` are flagged "already done".
+    ``kwargs`` pass through to the dialog (window_title, header, root_label,
+    noun, done_label, prompt_note, subhead_prefix, run_button_text,
+    disabled_items, disabled_label, ...).
+
+    Headless — or on an older TechDeck whose console lacks the method — every
+    item is returned, so a scripted run selects everything instead of hanging.
+    Note the difference from a CANCEL: no dialog means "run it all", an empty
+    submit means "run nothing", and only a cancel flags the run.
+
+    Prefer this over calling ``console.request_selection`` directly: three
+    plugins did, each re-implementing the hasattr fallback, and each having to
+    remember to set ``cancel_event`` by hand — one of them (Baked Beans)
+    didn't, so cancelling its process picker scored a ticket-earning success.
+    This routes through :func:`_user_cancelled` like every other prompt.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_selection"):
+        picked = console.request_selection(list(items), done_items, **kwargs)
+        if picked is None:
+            return _user_cancelled(params)
+        return list(picked)
+    return list(items)
+
+
 def request_nest_targets(params: dict, title: str, start_dir: str = "",
                          target_pattern: Optional[str] = None):
     """Two-phase Sentry-Drone folder pick (911 Batch Repeater): the user

@@ -696,6 +696,70 @@ def _advance_schedule_status(params, template, log, pairs, from_statuses,
     return []
 
 
+def _card_pick_label(card: dict, names: list, row: dict) -> str:
+    """One row of the nest picker: what you need to decide yes/no.
+
+    Batch + nest first (that is how the schedule reads and how people talk
+    about a nest), then the labels the card will carry and its due date. The
+    stock code stays out — it is in the card TITLE but it is not a thing
+    anyone chooses by.
+    """
+    bits = [f"{row['batch']} {row['nest']}"]
+    if names:
+        bits.append(" / ".join(names))
+    due = (card.get("dueDate") or "")[:10]
+    bits.append(f"due {due}" if due else "no due date")
+    return "  -  ".join(bits)
+
+
+def _choose_cards(params, cards, card_labels, card_rows, log):
+    """Let the user tick which queued nests to card.
+
+    Returns the filtered ``(cards, card_labels, card_rows)``, or None if the
+    user cancelled (the SDK has already flagged the run cancelled).
+
+    Labels are made unique before display: SelectionDialog returns the chosen
+    STRINGS, so two identical rows would be indistinguishable coming back. A
+    duplicate can only happen if the schedule lists the same batch+nest twice,
+    which is a data error rather than something to crash on -- so they are
+    numbered instead, and both survive the round trip.
+    """
+    labels, seen = [], {}
+    for card, names, row in zip(cards, card_labels, card_rows):
+        label = _card_pick_label(card, names, row)
+        if label in seen:
+            seen[label] += 1
+            label = f"{label}  (#{seen[label]})"
+        else:
+            seen[label] = 1
+        labels.append(label)
+
+    picked = sdk.request_selection(
+        params, labels, None,
+        window_title="911 Teams Cards",
+        header="Select Nests to Card",
+        root_label="All queued nests",
+        noun="nest",
+        prompt_note=("Every nest waiting on the EB 922 Schedule is ticked. "
+                     "Untick any you do not want a card for yet - they stay "
+                     "queued and are offered again next run."),
+        run_button_text="Create Cards",
+    )
+    if picked is None:
+        return None
+
+    keep = set(picked)
+    trio = [(c, n, r) for c, n, r, label in
+            zip(cards, card_labels, card_rows, labels) if label in keep]
+    dropped = len(cards) - len(trio)
+    if dropped:
+        log(f"Skipping {dropped} nest(s) you unticked - they stay queued on "
+            f"the schedule and are offered again next run.")
+    return ([c for c, _, _ in trio],
+            [n for _, n, _ in trio],
+            [r for _, _, r in trio])
+
+
 def _run_teams_cards(params: dict, progress_callback, cancel_event,
                      qtdr_override: str, lo: int = 0, hi: int = 100) -> bool:
     """The Generate Teams Cards stage. Returns True when the payload posted
@@ -829,6 +893,27 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         cards = [c for c, _, _ in keep]
         card_labels = [n for _, n, _ in keep]
         card_rows = [r for _, _, r in keep]
+
+    # --- Pick which of the queued nests to card (C.D. 2026-08-06) ----------
+    # "Sometimes I want to make only a couple Teams cards. Ideally I'd be able
+    # to select which of the orders in the schedule I want and only make
+    # those." Everything is ticked by default, so the common case is still one
+    # click, and the list is exactly what would be POSTED -- it runs after the
+    # skips and the already-carded ledger, so nothing on screen is a nest that
+    # was never going to be carded anyway.
+    #
+    # Lives here, in the shared engine, so BOTH entry points get it: this app
+    # and 911 Setup's optional Teams Cards stage.
+    if len(cards) > 0:
+        chosen = _choose_cards(params, cards, card_labels, card_rows, log)
+        if chosen is None:
+            log("\nNest selection cancelled - no cards were created.")
+            return False
+        cards, card_labels, card_rows = chosen
+        if not cards:
+            log("\nNo nests selected - nothing to card.")
+            _pct(1.0)
+            return True
 
     if not cards:
         log("\nNothing new to card - every queued nest either has no source "

@@ -2,7 +2,7 @@
   "id": "911_teams_cards",
   "name": "911 Teams Cards",
   "description": "Posts one Teams modeling card per 911 nest waiting to be set up, read straight off the EB 922 Schedule - with the job's difficulty, its saw-cut or tube-laser machine, and its scheduled due date - then moves each nest's status along the schedule as its card goes out. No batch number needed.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -13,7 +13,7 @@
     ],
     "how_it_works": [
       "Run it - there is nothing to enter. The work list is every EB 922 Schedule row marked DEPT. 911 and NEED TEAMS/SETUP, whichever batch each nest belongs to.",
-      "One card per nest goes into the MODELING bucket of the SOPO D911 PIPELINE plan, labelled with its difficulty and its machine, due on the schedule's date.",
+      "Tick which of the queued nests you want cards for - all are ticked by default. Anything you untick stays queued and is offered again next run.",
       "Each nest whose card is posted moves to NEED SETUP on the schedule, so the board shows what is still waiting for a card and what is waiting for setup.",
       "Re-running is safe: cards already posted are skipped rather than duplicated, and anything passed over is offered again once the gap is filled."
     ],
