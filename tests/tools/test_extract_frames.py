@@ -1,12 +1,27 @@
-"""Tests for tools/extract_frames.py — the video-to-stills exporter."""
+"""Tests for tools/extract_frames.py — the video-to-stills exporter.
+
+SKIPPED where OpenCV is absent. `extract_frames` is a DevKit-only utility (it
+turns a screen recording into stills for review) and nothing in the shipped app
+imports it, so `opencv-python` is deliberately NOT in requirements-dev.txt — a
+~40MB dependency for a tool no user ever runs.
+
+That has to be a SKIP rather than a bare import, though: an unconditional
+`import cv2` at module scope fails at COLLECTION, and a collection error aborts
+the whole pytest run ("Interrupted: 1 error during collection"). It doesn't
+cost you one test, it costs you all of them. Caught on the public repo's CI
+during the v0.8.6.13 release push — the runner has no OpenCV, so zero tests ran
+while the local suite was fully green.
+"""
 
 import argparse
 
-import cv2
 import numpy as np
 import pytest
 
-from tools.extract_frames import extract_frames, parse_timestamp
+cv2 = pytest.importorskip(
+    "cv2", reason="opencv-python is a DevKit-only dependency, not installed in CI")
+
+from tools.extract_frames import extract_frames, parse_timestamp  # noqa: E402
 
 
 @pytest.fixture(scope="module")
