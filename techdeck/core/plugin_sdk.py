@@ -905,9 +905,39 @@ def header_map(ws, header_row: int) -> dict[str, int]:
     return out
 
 
-def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
+def header_col(hdr: dict, name: str) -> Optional[int]:
+    """Column for `name` in a header_map, tolerating a header that has GROWN.
+
+    Exact match first, then the leftmost header that STARTS WITH `name`. Use
+    this instead of `hdr.get("NAME")` for any header a person maintains and
+    might append to.
+
+    Why it exists: the EB 922 Schedule's rating column was renamed `RATING` →
+    `RATING/PC COUNT`, and both difficulty readers looked it up exactly. They
+    silently found nothing — every Teams card posted with no difficulty label
+    and every packet stamped none, for weeks, behind a dismissable warning
+    (2026-08-11). Header names are lookup KEYS but they are also human text,
+    and humans add words to them.
+    """
+    target = name.strip().upper()
+    if target in hdr:
+        return hdr[target]
+    matches = [col for key, col in hdr.items() if key.startswith(target)]
+    return min(matches) if matches else None
+
+
+def find_header_row(ws, required: Iterable[str], max_scan: int = 30,
+                    prefix_ok: bool = False):
     """Scan the first `max_scan` rows for the row containing all `required`
-    header names. Returns (row_index, header_map) or (None, {})."""
+    header names. Returns (row_index, header_map) or (None, {}).
+
+    Matching is EXACT by default. Pass ``prefix_ok=True`` when a required
+    header is one a person maintains and may have appended to — then `RATING`
+    also satisfies `RATING/PC COUNT`. It stays opt-in because loosening it
+    everywhere would let a required `QTY` latch onto `QTY SHIPPED` on some
+    other sheet and silently read the wrong column. Pair it with
+    :func:`header_col` to pull those columns back out.
+    """
     required_upper = [r.strip().upper() for r in required]
     limit = min(ws.max_row, max_scan)
     for r in range(1, limit + 1):
@@ -916,7 +946,12 @@ def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
             v = ws.cell(row=r, column=c).value
             if isinstance(v, str) and v.strip():
                 row_map[v.strip().upper()] = c
-        if all(name in row_map for name in required_upper):
+        if prefix_ok:
+            ok = all(header_col(row_map, name) is not None
+                     for name in required_upper)
+        else:
+            ok = all(name in row_map for name in required_upper)
+        if ok:
             return r, row_map
     return None, {}
 

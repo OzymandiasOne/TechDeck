@@ -264,18 +264,21 @@ def _read_schedule_rows(params, template, log, cancel_event):
             return [], (f"{path.name} has no '{_SCHED_SHEET}' sheet, so no "
                         f"Teams cards were created.")
         ws = wb[_SCHED_SHEET]
-        hdr_row, hdr = sdk.find_header_row(ws, [_SCHED_KEY, _SCHED_STATUS])
+        # prefix_ok + header_col: these headers are hand-maintained and
+        # have drifted before ('RATING' -> 'RATING/PC COUNT').
+        hdr_row, hdr = sdk.find_header_row(
+            ws, [_SCHED_KEY, _SCHED_STATUS], prefix_ok=True)
         if not hdr_row:
             return [], (f"{path.name} has no row containing both "
                         f"'{_SCHED_KEY}' and '{_SCHED_STATUS}' on the "
                         f"'{_SCHED_SHEET}' sheet, so no Teams cards were "
                         f"created.")
-        c_key = hdr.get(_SCHED_KEY)
-        c_status = hdr.get(_SCHED_STATUS)
-        c_dept = hdr.get(_SCHED_DEPT)
-        c_date = hdr.get(_SCHED_DATE)
-        c_notes = hdr.get(_SCHED_NOTES)
-        c_rating = hdr.get(_SCHED_RATING)
+        c_key = sdk.header_col(hdr, _SCHED_KEY)
+        c_status = sdk.header_col(hdr, _SCHED_STATUS)
+        c_dept = sdk.header_col(hdr, _SCHED_DEPT)
+        c_date = sdk.header_col(hdr, _SCHED_DATE)
+        c_notes = sdk.header_col(hdr, _SCHED_NOTES)
+        c_rating = sdk.header_col(hdr, _SCHED_RATING)
         theme_rgbs = stamps._theme_rgbs(wb)
 
         want_dept = _norm_text(template.get("schedule_dept", "911"))
@@ -550,9 +553,9 @@ def _schedule_status_rows(params, template, log, cancel_event=None):
         if not hdr_row:
             return path, None, [], (f"{path.name} has no row containing both "
                                     f"'{_SCHED_KEY}' and '{_SCHED_STATUS}'")
-        c_key = hdr.get(_SCHED_KEY)
-        c_status = hdr.get(_SCHED_STATUS)
-        c_dept = hdr.get(_SCHED_DEPT)
+        c_key = sdk.header_col(hdr, _SCHED_KEY)
+        c_status = sdk.header_col(hdr, _SCHED_STATUS)
+        c_dept = sdk.header_col(hdr, _SCHED_DEPT)
         want_dept = _norm_text(template.get("schedule_dept", "911"))
         rows = []
         for r in range(hdr_row + 1, ws.max_row + 1):

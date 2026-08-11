@@ -257,16 +257,19 @@ def _load_difficulty_map(params, log):
         ws = wb[DIFFICULTY_SHEET]
         # Scan for the header row, never assume row 1 (Hard Rule 2); the SDK
         # returns (row_index, {UPPERCASE HEADER: col}).
-        hdr_row, hdr = sdk.find_header_row(ws, [_COL_BATCH_NEST, _COL_RATING])
+        # prefix_ok: the rating header grew to 'RATING/PC COUNT' and an
+        # exact match silently found nothing (2026-08-11).
+        hdr_row, hdr = sdk.find_header_row(
+            ws, [_COL_BATCH_NEST, _COL_RATING], prefix_ok=True)
         if not hdr_row:
             return {}, (f"{path.name} has no row containing both "
                         f"'{_COL_BATCH_NEST}' and '{_COL_RATING}' on the "
                         f"'{DIFFICULTY_SHEET}' sheet, so no difficulty labels "
                         f"were stamped.")
-        c_dept = hdr.get(_COL_DEPT)
-        c_key = hdr.get(_COL_BATCH_NEST)
-        c_rate = hdr.get(_COL_RATING)
-        c_stat = hdr.get(_COL_STATUS)
+        c_dept = sdk.header_col(hdr, _COL_DEPT)
+        c_key = sdk.header_col(hdr, _COL_BATCH_NEST)
+        c_rate = sdk.header_col(hdr, _COL_RATING)
+        c_stat = sdk.header_col(hdr, _COL_STATUS)
         theme_rgbs = _theme_rgbs(wb)
 
         out = {}

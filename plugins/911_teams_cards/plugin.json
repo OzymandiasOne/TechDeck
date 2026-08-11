@@ -2,7 +2,7 @@
   "id": "911_teams_cards",
   "name": "911 Teams Cards",
   "description": "Posts one Teams modeling card per 911 nest waiting to be set up, read straight off the EB 922 Schedule - with the job's difficulty, its saw-cut or tube-laser machine, and its scheduled due date - then moves each nest's status along the schedule as its card goes out. No batch number needed.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
