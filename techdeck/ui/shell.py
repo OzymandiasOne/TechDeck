@@ -410,6 +410,15 @@ class MainWindow(QMainWindow):
         self._step("account page built")
         QApplication.processEvents()
 
+        # Assistant page — the personal organizer (terminal + schedule + notes
+        # + tasks). Self-contained: it owns its own store under
+        # %LOCALAPPDATA%\TechDeck\assistant and shares nothing with the plugin
+        # console beyond the theme.
+        from techdeck.ui.pages.assistant_page import AssistantPage
+        self.assistant_page = AssistantPage(self.settings)
+        self._step("assistant page built")
+        QApplication.processEvents()
+
         # DevKit page — developer tools, source builds only. Only constructed
         # when running from source, so the source-only tools/devkit package is
         # never imported in a frozen exe.
@@ -427,6 +436,7 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.library_page)  # 1: Library
         self.page_stack.addWidget(self.settings_page) # 2: Settings
         self.page_stack.addWidget(self.account_page)  # 3: Account
+        self.page_stack.addWidget(self.assistant_page)  # 4: Assistant
         if self.devkit_page is not None:
             self._devkit_page_index = self.page_stack.addWidget(self.devkit_page)
 
@@ -522,13 +532,20 @@ class MainWindow(QMainWindow):
             "home": 0,
             "library": 1,
             "settings": 2,
-            "account": 3
+            "account": 3,
+            "assistant": 4,
         }
         if self._devkit_page_index is not None:
             page_map["devkit"] = self._devkit_page_index
 
         index = page_map.get(page_id, 0)
         self.page_stack.setCurrentIndex(index)
+
+        # The Assistant's panels are edited from several places (terminal,
+        # wizard, tabs) — re-sync them on arrival so nothing is stale, and put
+        # the caret in the command line so it's typeable straight away.
+        if page_id == "assistant":
+            self.assistant_page.refresh()
 
         # NOTE: we used to call library_page.refresh() here on every Library
         # click, which rebuilt all 10 plugin cards from scratch and caused a

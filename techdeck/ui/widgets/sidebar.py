@@ -255,6 +255,7 @@ class Sidebar(QWidget, ThemeAware):
         pages = [
             ("home.svg", "Home", "home"),
             ("library.svg", "Library", "library"),
+            ("assistant.svg", "Assistant", "assistant"),
             ("settings.svg", "Settings", "settings"),
         ]
         for icon_name, text, page_id in pages:
