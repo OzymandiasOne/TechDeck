@@ -949,6 +949,7 @@ class SettingsManager:
         s["unlocked_items"] = []
         s["equipped_spinner"] = None
         s["equipped_background"] = None
+        s["beyblade_build"] = None      # parts are re-locked; the build with them
         self.save()
 
     def get_equipped_spinner(self) -> Optional[str]:
@@ -957,6 +958,21 @@ class SettingsManager:
 
     def set_equipped_spinner(self, item_id: Optional[str]) -> None:
         self.data.setdefault("settings", {})["equipped_spinner"] = item_id
+        self.save()
+
+    def get_beyblade_build(self) -> Optional[str]:
+        """The last combination the player assembled in the beyblade builder.
+
+        Kept SEPARATE from `equipped_spinner` on purpose: the equipped slot is
+        whatever they are spinning right now, and equipping a plain spinner
+        would otherwise erase the fact that they ever built anything. This is
+        what the "Build Your Own" tile shows, so their build stays on the tile
+        regardless of what is currently equipped.
+        """
+        return self.data.get("settings", {}).get("beyblade_build")
+
+    def set_beyblade_build(self, variant: Optional[str]) -> None:
+        self.data.setdefault("settings", {})["beyblade_build"] = variant
         self.save()
 
     # The My House / Garden background wallpaper. Stored as the sprite FILENAME

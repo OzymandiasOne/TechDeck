@@ -144,7 +144,12 @@ class BeybladeBuilder(QDialog):
         self.update()
 
     def _equip(self):
-        self.settings.set_equipped_spinner(beyblade.variant_id(self.choice))
+        variant = beyblade.variant_id(self.choice)
+        self.settings.set_equipped_spinner(variant)
+        # Remembered separately from the equipped slot so the My Stuff "Build
+        # Your Own" tile keeps showing what they built even after they equip
+        # some other spinner.
+        self.settings.set_beyblade_build(variant)
         self.accept()
 
     def paintEvent(self, _e):

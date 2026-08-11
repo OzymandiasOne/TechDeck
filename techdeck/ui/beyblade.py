@@ -123,6 +123,62 @@ def compose(choice: dict | None = None) -> dict | None:
             "symmetry": 2}
 
 
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return 0.0
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def silhouette(color: str, choice: dict | None = None,
+               levels: int = 4) -> dict | None:
+    """A composed beyblade rendered as a monochrome cut-out.
+
+    The "Build Your Own" placeholder, shown until the player has built
+    something. Derived from `compose()` rather than drawn as its own sprite, so
+    it is always the real shape of the real parts and cannot drift when the art
+    changes.
+
+    It is NOT flattened to a single colour, even though that is what
+    "silhouette" implies. A beyblade is drawn from directly above, so its
+    outline is a disc — flatten it and you get an anonymous grey blob. Every
+    feature that says "beyblade" (the blades, the rings, the chip) is INTERNAL,
+    so the structure has to survive. Each source colour is therefore mapped onto
+    a ramp of one hue by luminance: unmistakably a beyblade, unmistakably not a
+    finished one.
+    """
+    data = compose(choice)
+    if data is None:
+        return None
+    pal = data["palette"]
+    if not pal:
+        return None
+
+    lums = sorted({_luminance(v) for v in pal.values()})
+    lo, hi = lums[0], lums[-1]
+    span = (hi - lo) or 1.0
+    base = _luminance(color)
+    # Ramp around the given tone: dark enough to read as a shadow, light enough
+    # that the internal detail is still legible against the tile.
+    dark, light = base * 0.45, min(255.0, base * 1.55)
+
+    def tone(hex_color: str) -> str:
+        step = round((_luminance(hex_color) - lo) / span * (levels - 1))
+        v = dark + (light - dark) * (step / max(levels - 1, 1))
+        r = int(round(v * 0.82))
+        g = int(round(v * 0.80))
+        b = int(round(min(255.0, v * 1.05)))
+        return f"#{max(0,min(255,r)):02X}{max(0,min(255,g)):02X}{max(0,min(255,b)):02X}"
+
+    return {"palette": {ch: tone(v) for ch, v in pal.items()},
+            "rows": list(data["rows"]),
+            "symmetry": data.get("symmetry", 2)}
+
+
 _POOL = ("abdefhijlmnopqstuvzABCDEFGHIJKMNOPQSTUVWXYZ0139"
          "!#$%&*+=?@~")
 
