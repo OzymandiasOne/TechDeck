@@ -47,7 +47,7 @@ def puppet_master_enabled() -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.6.12"  # 922 Setup card-creation webhook fix (restored buckets key); FormingFinder plate-vs-rod on dual-material parts; LST organizers match revision letters both ways; Batch Repeater audits repeat shop prints
+APP_VERSION = "0.8.6.13"  # 911 Teams Cards becomes its own app with a nest picker; the EB 922 Schedule status advances itself; 911 Setup remembers your action checklist; cancelled runs no longer count as successes; difficulty labels restored after a schedule header rename
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

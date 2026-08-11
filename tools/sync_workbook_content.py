@@ -218,6 +218,23 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.6.13", "Aug 11, 2026", "Feature",
+     "Coordination-card creation for the 911 pipeline is now a standalone tool, "
+     "so cards can be raised without running a batch setup and a setup can be "
+     "re-run without re-raising cards - a change requested directly by the "
+     "planning group. Operators can now select which of the waiting jobs to "
+     "raise cards for rather than the whole queue. The shared planning "
+     "schedule's status column is maintained by the platform as work "
+     "progresses, removing a manual bookkeeping step and keeping the board an "
+     "accurate picture of what is actually waiting. Setup tools remember each "
+     "operator's chosen steps between sessions, so a site that skips a step "
+     "configures it once instead of every run. Two reliability defects fixed: "
+     "abandoning a tool at its first prompt was being recorded as a completed "
+     "run, and a renamed column heading on the planning schedule had silently "
+     "stopped difficulty ratings from reaching either the printed packets or "
+     "the coordination cards - column lookups now tolerate headings that gain "
+     "extra wording.",
+     "Released"),
     ("Beta 0.8.6.11", "Aug 5, 2026", "Feature",
      "Task-card creation for the 911 pipeline is now automated: setup reads the "
      "master schedule and raises one card per job awaiting modeling, carrying "

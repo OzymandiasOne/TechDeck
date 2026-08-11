@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.12 - 922 Pipeline Fixes
+# TechDeck v0.8.6.13 - 911 Teams Cards
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,63 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.6.13
+
+**911 Teams Cards is now its own app.** Card generation has moved out of 911 Setup into a
+separate tool, so you can post cards without running a setup and run a setup without
+posting cards. It needs no batch number - the EB 922 Schedule's queue is the work list -
+and it reads whichever batches happen to be waiting. 911 Setup still offers the stage as
+an optional first step if you want both in one pass, but it now starts switched off.
+
+**Pick exactly which nests get a card.** The new app opens a tick-list of every nest
+waiting on the schedule, showing each one's difficulty, its saw-cut or tube-laser routing,
+and its due date. Everything is ticked to begin with, so carding the whole queue is still
+one click. Anything you untick stays queued and is offered again next time.
+
+**The schedule keeps itself up to date.** As work completes, TechDeck now advances the
+STATUS column for you instead of leaving it to be retyped: a nest moves off the card queue
+once its card is posted, and off the setup queue once its batch is set up. Only nests that
+genuinely reached the next stage move, and if someone else has the schedule open the cards
+still go out - the console just lists the rows to change by hand.
+
+**911 Setup remembers your action checklist.** The window that asks which steps to run now
+reopens with whatever you picked last time, saved between sessions and across updates. A
+site that always skips a step sets it up once instead of unticking it on every run.
+
+**Cancelling a run now reports as cancelled.** Closing an app's first window used to play
+the success sound and award tickets for work that never happened. Backing out of any
+folder picker, file picker, or checklist window is now recorded as a cancelled run.
+
+**Difficulty labels are working again.** The rating column on the EB 922 Schedule was
+renamed, and TechDeck was still looking for the old name - so it quietly stopped finding
+any ratings at all. Packets stamped no difficulty label and Teams cards carried none.
+Column lookups now tolerate a heading that has had words added to it.
+
+**Smaller fixes.** A run-completion message could come out with two lines run together.
+
+### Feedback Fixes
+
+*"Could the Teams card generation be separate from 911 Setup? I don't want to make Teams
+cards every time I run the setup - sometimes I re-run the setup because something changed
+and I just want an updated version."*
+911 Teams Cards is now a standalone app, and the stage inside 911 Setup defaults to off.
+
+*"Sometimes I only want to make a couple of Teams cards. Ideally I'd be able to select
+which of the orders in the schedule I want, and only make those."*
+The new app opens a tick-list of the waiting nests; untick any you don't want yet.
+
+*"Could the schedule's status column be updated automatically as cards are made?"*
+It is - nests move to NEED SETUP when their card posts, and to NEED MODEL once their batch
+is set up.
+
+*"911 Setup feels less streamlined now - we have to keep toggling off the Teams card
+generation and the difficulty label before we can enter our batch number. Could there be
+default toggle sets?"*
+The checklist window now remembers your selection between sessions, so those toggles stay
+where you leave them.
 
 ---
 
