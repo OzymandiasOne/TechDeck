@@ -29,10 +29,38 @@ def _text(reply) -> str:
     return "\n".join(line for _role, line in reply.lines)
 
 
-# ── capture ──────────────────────────────────────────────────────────────────
+# ── talking (the default) ────────────────────────────────────────────────────
 
-def test_free_text_becomes_a_task(brain):
-    reply = brain.handle("fix the PO sheet 45m urgent due today", NOW)
+@pytest.mark.parametrize("said", [
+    "this PO sheet is a nightmare",
+    "onedrive ate the file AGAIN",
+    "order the 4130 tube",
+    "i need to get out of here",
+    "just thinking out loud",
+])
+def test_free_text_files_absolutely_nothing(brain, said):
+    """The contract. Someone venting at 6:40am must not end the morning with a
+    to-do list made of their own complaints."""
+    reply = brain.handle(said, NOW)
+    assert brain.store.tasks == []
+    assert brain.store.notes == []
+    assert reply.dirty is False
+    assert reply.lines                      # but it DOES answer
+
+
+def test_the_first_reply_says_out_loud_that_nothing_is_being_saved(brain):
+    assert "nothing you say here gets saved" in _text(
+        brain.handle("what a morning", NOW))
+
+
+def test_the_reminder_is_not_repeated_under_every_line(brain):
+    brain.handle("what a morning", NOW)
+    second = _text(brain.handle("genuinely unbelievable", NOW))
+    assert "nothing you say here gets saved" not in second
+
+
+def test_an_explicit_ask_still_captures(brain):
+    reply = brain.handle("/task fix the PO sheet 45m urgent due today", NOW)
     assert reply.dirty
     task = brain.store.tasks[0]
     assert task.title == "fix the PO sheet"
@@ -41,11 +69,58 @@ def test_free_text_becomes_a_task(brain):
     assert task.deadline == "2026-08-11"
 
 
-def test_the_note_syntax_nudge_appears_once_not_on_every_line(brain):
-    first = _text(brain.handle("order the tube", NOW))
-    second = _text(brain.handle("order the plate", NOW))
-    assert "note:" in first
-    assert "note:" not in second
+def test_remind_me_to_is_an_explicit_ask(brain):
+    brain.handle("remind me to call Dan at 9am", NOW)
+    assert brain.store.tasks[0].title == "call Dan"
+
+
+def test_a_bare_task_command_promotes_the_last_thing_said(brain):
+    brain.handle("order the 4130 tube", NOW)
+    assert brain.store.tasks == []
+    brain.handle("/task", NOW)
+    assert brain.store.tasks[0].title == "order the 4130 tube"
+
+
+def test_promoting_twice_does_not_file_it_twice(brain):
+    brain.handle("order the 4130 tube", NOW)
+    brain.handle("/task", NOW)
+    brain.handle("/task", NOW)
+    assert len(brain.store.tasks) == 1
+
+
+def test_a_bare_task_command_with_nothing_said_asks_for_input(brain):
+    assert "Give me something to do" in _text(brain.handle("/task", NOW))
+
+
+def test_an_actionable_line_is_OFFERED_not_filed(brain):
+    reply = brain.handle("call Dan about the rev C", NOW)
+    assert reply.offer_task is True
+    assert brain.store.tasks == []
+
+
+@pytest.mark.parametrize("vent", [
+    "this printer is garbage",
+    "i hate this spreadsheet",
+    "WHY WON'T IT SYNC",
+    "so tired today",
+])
+def test_venting_is_never_offered_as_a_task(brain, vent):
+    """A complaint is full of verbs. Offering to add "this printer is garbage"
+    to someone's to-do list is the exact joke the goblin exists to prevent."""
+    assert brain.handle(vent, NOW).offer_task is False
+
+
+def test_the_goblin_takes_the_users_side_never_the_other_way(brain):
+    """Cheap but load-bearing: the goblin absorbs abuse, it never returns it."""
+    reply = _text(brain.handle("this is completely broken and I hate it", NOW)).lower()
+    for insult in ("you're", "your fault", "you are", "user error", "skill issue"):
+        assert insult not in reply
+
+
+def test_goblin_command_explains_what_is_and_is_not_stored(brain):
+    said = _text(brain.handle("/goblin", NOW)).lower()
+    assert "task" in said
+    assert "note" in said
 
 
 def test_note_prefix_files_a_note(brain):

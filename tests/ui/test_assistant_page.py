@@ -355,12 +355,34 @@ def page(qapp, tmp_path, monkeypatch):
     return AssistantPage(SettingsManager())
 
 
-def test_typing_a_task_reaches_the_store_and_the_transcript(page):
-    page.submit("fix the PO sheet 45m urgent")
-    assert page.store.tasks[0].title == "fix the PO sheet"
-    assert "fix the PO sheet" in page.terminal.toPlainText()
+def test_typing_is_answered_and_kept_but_never_filed(page):
+    page.submit("this rev C is a nightmare")
+    assert page.store.tasks == []
+    assert page.store.notes == []
+    assert "this rev C is a nightmare" in page.terminal.toPlainText()
     # And it survives the session: the transcript is on disk, not just on screen.
     assert any(m.role == "user" for m in page.store.load_chat())
+
+
+def test_an_explicit_task_command_does_file(page):
+    page.submit("/task fix the PO sheet 45m urgent")
+    assert page.store.tasks[0].title == "fix the PO sheet"
+
+
+def test_the_make_that_a_task_chip_appears_only_for_actionable_lines(page):
+    page.submit("call Dan about the rev C")
+    assert "↑ Make that a task" in [b.text() for b in page.chips._buttons]
+
+    page.submit("this printer is garbage")
+    assert "↑ Make that a task" not in [b.text() for b in page.chips._buttons]
+
+
+def test_pressing_the_chip_is_what_actually_files_it(page):
+    page.submit("call Dan about the rev C")
+    assert page.store.tasks == []
+    chip = next(b for b in page.chips._buttons if b.text() == "↑ Make that a task")
+    chip.click()
+    assert page.store.tasks[0].title == "call Dan about the rev C"
 
 
 def test_a_command_that_asks_for_a_tab_switch_gets_one(page):

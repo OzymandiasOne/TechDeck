@@ -533,7 +533,8 @@ class Intent:
 
 
 INTENTS = (
-    "task",         # capture a task
+    "chat",         # the default — the user is TALKING, not filing anything
+    "task",         # capture a task (only ever from an explicit ask)
     "note",         # capture a note
     "schedule",     # open the schedule builder
     "agenda",       # what's on today / this week
@@ -546,9 +547,14 @@ INTENTS = (
 )
 
 _RE_NOTE = re.compile(r"^\s*(?:note|jot|remember)\s*[:\-]?\s+", re.I)
+# Deliberately short. Every phrase here is an unambiguous REQUEST to file
+# something. "i need to…", "don't forget…" and "gotta…" used to be in this list
+# and were pulled: they are things people say mid-vent ("I need to get out of
+# here"), and answering a complaint with a new to-do item is exactly the
+# behaviour this page was rewritten to stop doing.
 _RE_TASK = re.compile(
-    r"^\s*(?:add|new|todo|task|capture|remind me to|remind me|i need to|"
-    r"need to|don'?t forget to|dont forget to)\s*[:\-]?\s+", re.I)
+    r"^\s*(?:add|new task|todo|task|capture|remind me to|remind me)\s*[:\-]?\s+",
+    re.I)
 _RE_SCHEDULE = re.compile(
     r"^\s*(?:build|make|plan|create|generate)?\s*(?:me\s+)?(?:a\s+|my\s+)?"
     r"schedule\b|^\s*plan (?:my|the) (?:day|week|morning|afternoon)\b", re.I)
@@ -568,10 +574,14 @@ _RE_HELP = re.compile(r"^\s*(?:help|what can you do|commands?)\s*\??\s*$", re.I)
 def parse_intent(text: str) -> Intent:
     """Classify one free-text terminal line.
 
-    Order matters: the more specific a phrase is, the earlier it is tested. A
-    line that matches nothing becomes a **task capture** — that is the single
-    most common reason someone types into an assistant, and the response says
-    so, with the one-word prefix that would have made it a note instead.
+    Order matters: the more specific a phrase is, the earlier it is tested.
+
+    **A line that matches nothing is `chat` — the user is talking.** Nothing is
+    filed on a guess. Capture requires an explicit ask (`/task`, "add …",
+    "remind me to …"), the Add a task button, or the Tasks tab. The first
+    build defaulted to capturing everything, which turned "this PO sheet is a
+    nightmare" into a chore of that name; a tool that answers a complaint with
+    a to-do item is a tool people stop talking to.
     """
     raw = (text or "").strip()
     if not raw:
@@ -605,7 +615,7 @@ def parse_intent(text: str) -> Intent:
     if match:
         return Intent("task", raw[match.end():], {"explicit": True})
 
-    return Intent("task", raw, {"explicit": False})
+    return Intent("chat", raw)
 
 
 def parse_bullet_block(text: str, now: Optional[datetime] = None) -> List[Dict[str, Any]]:

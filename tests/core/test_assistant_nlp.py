@@ -206,17 +206,32 @@ def test_bullet_block():
     ("find rev c", "search"),
     ("help", "help"),
     ("remind me to call Dan", "task"),
-    ("pick up parts 30m", "task"),
+    ("add order the 4130 tube", "task"),
+    ("/task is a command, not free text", "chat"),
 ])
 def test_intents(text, kind):
     assert nlp.parse_intent(text).kind == kind
 
 
-def test_unmatched_text_becomes_a_task_capture():
-    intent = nlp.parse_intent("order the 4130 tube")
-    assert intent.kind == "task"
-    assert intent.data["explicit"] is False
+@pytest.mark.parametrize("text", [
+    "order the 4130 tube",
+    "this PO sheet is a nightmare",
+    "onedrive ate the file AGAIN",
+    "i need to get out of here",
+    "gotta remember the gate code",
+    "don't forget the rev C",
+    "pick up parts 30m",
+])
+def test_unmatched_text_is_conversation_never_a_capture(text):
+    """The contract of the page: typing at it does not file anything. Only an
+    unmistakable request does, and the phrases below are ones people say
+    mid-vent — "i need to get out of here" is not a to-do item."""
+    assert nlp.parse_intent(text).kind == "chat"
 
 
-def test_explicit_task_verb_is_marked():
-    assert nlp.parse_intent("add order the tube").data["explicit"] is True
+def test_explicit_task_verbs_still_capture():
+    for text in ("add order the tube", "remind me to call Dan",
+                 "todo order the tube", "capture order the tube"):
+        intent = nlp.parse_intent(text)
+        assert intent.kind == "task", text
+        assert intent.data["explicit"] is True

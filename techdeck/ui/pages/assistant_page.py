@@ -51,9 +51,13 @@ _TAB_KEYS = {"terminal": TAB_TERMINAL, "schedule": TAB_SCHEDULE,
 HISTORY_LINES = 300
 
 GREETING = (
-    "Type what you need and I'll file it. “fix the PO sheet 45m urgent due "
-    "friday” becomes a task; “note: gate code is 4417” becomes a note; "
-    "“build me a schedule” opens the planner. /help lists everything."
+    "Talk to me. Complain, think out loud, whatever — none of it gets filed "
+    "unless you ask. Press “Add a task” or type /task when you actually want "
+    "something on a list. /help has the rest."
+)
+GREETING_PROFESSIONAL = (
+    "Assistant ready. Free text is not stored as a task — use “Add a task”, "
+    "/task, or the Tasks tab. /help lists every command."
 )
 
 
@@ -64,7 +68,13 @@ class AssistantPage(QWidget, ThemeAware):
         super().__init__(parent)
         self.settings = settings
         self.store = AssistantStore()
-        self.brain = AssistantBrain(self.store)
+        # Professional theme mutes the goblin — a client demo gets plain
+        # acknowledgements, not a feral terminal creature.
+        self.brain = AssistantBrain(
+            self.store, professional=settings.is_professional())
+        # Set when the last thing said could plausibly be a task, so the chip
+        # row can offer to file it. Nothing is ever filed off this alone.
+        self._can_promote = False
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 16)
@@ -152,6 +162,10 @@ class AssistantPage(QWidget, ThemeAware):
 
     # ── history ──────────────────────────────────────────────────────────────
 
+    def _greeting(self) -> str:
+        return (GREETING_PROFESSIONAL if self.settings.is_professional()
+                else GREETING)
+
     def _load_history(self):
         messages = self.store.load_chat(HISTORY_LINES)
         if messages:
@@ -164,8 +178,9 @@ class AssistantPage(QWidget, ThemeAware):
             self.command_line.seed_history(
                 [m.text for m in messages if m.role == "user"])
         else:
-            self.terminal.append_line("deck", GREETING)
-            self._record("deck", GREETING)
+            greeting = self._greeting()
+            self.terminal.append_line("deck", greeting)
+            self._record("deck", greeting)
 
     def _record(self, role: str, text: str):
         self.store.append_chat(ChatMessage(role=role, text=text))
@@ -193,6 +208,7 @@ class AssistantPage(QWidget, ThemeAware):
             self.terminal.append_line(role, line)
             self._record(role, line)
 
+        self._can_promote = reply.offer_task
         if reply.dirty:
             self._on_data_changed()
 
@@ -207,8 +223,9 @@ class AssistantPage(QWidget, ThemeAware):
         elif action == ACT_CLEAR:
             self.terminal.clear()
             self.store.clear_chat()
-            self.terminal.append_line("deck", GREETING)
-            self._record("deck", GREETING)
+            greeting = self._greeting()
+            self.terminal.append_line("deck", greeting)
+            self._record("deck", greeting)
         elif action == ACT_EDIT_NOTE:
             note_id = reply.payload.get("note_id")
             self.notes_panel.refresh()
@@ -227,8 +244,15 @@ class AssistantPage(QWidget, ThemeAware):
         has_plan = self.store.latest_schedule() is not None
         open_count = len(self.store.open_tasks())
 
-        chips = [("schedule", "Build a schedule",
-                  "Walk through building a time-blocked plan")]
+        chips = []
+        # Offered only when the last thing said could plausibly be a job, and
+        # only ever as an offer — this is the one route from talking to filing,
+        # and the user has to take it deliberately.
+        if self._can_promote:
+            chips.append(("promote", "↑ Make that a task",
+                          "File the last thing you said as a task"))
+        chips.append(("schedule", "Build a schedule",
+                      "Walk through building a time-blocked plan"))
         if has_plan:
             chips.append(("today", "What's on today?",
                           "Show today's blocks from the saved plan"))
@@ -243,7 +267,10 @@ class AssistantPage(QWidget, ThemeAware):
         self.chips.set_chips(chips)
 
     def _on_chip(self, key: str):
-        if key == "schedule":
+        if key == "promote":
+            # `/task` with no argument files the last thing said.
+            self.submit("/task")
+        elif key == "schedule":
             self.open_wizard()
         elif key == "today":
             self.submit("/today")

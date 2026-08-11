@@ -14,6 +14,8 @@ from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from techdeck.core.assistant import nlp
+from techdeck.core.assistant.goblin import NUDGE as GOBLIN_NUDGE
+from techdeck.core.assistant.goblin import Goblin, looks_actionable
 from techdeck.core.assistant.models import (
     BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
     ChatMessage, Note, PRIORITIES, Schedule, TaskItem,
@@ -48,6 +50,9 @@ class Reply:
     # Set when the reply changed stored data, so the page knows to re-render
     # its panels without every handler having to say so.
     dirty: bool = False
+    # The user said something that COULD be a task. The page offers a one-click
+    # "make that a task" chip — it never files anything on this alone.
+    offer_task: bool = False
 
     def say(self, text: str, role: str = ROLE_DECK) -> "Reply":
         self.lines.append((role, text))
@@ -64,11 +69,17 @@ class Reply:
 
 
 HELP_TEXT = """\
-Type plainly, or use a command. Both work.
+Talk to me. Nothing you say gets filed unless you ask for it.
 
-  Just type it              →  captured as a task
-    fix the PO sheet 45m urgent due friday
-    call Dan tomorrow at 9am
+  Just type                 →  we're just talking. Vent away.
+    this PO sheet is a nightmare
+    onedrive ate the file AGAIN
+
+  To actually file something:
+    press “Add a task”, or
+    /task fix the PO sheet 45m urgent due friday
+    /task                             ← files the last thing you said
+    remind me to call Dan at 9am
     note: gate code is 4417
     - a line starting with a dash becomes a note
 
@@ -84,7 +95,8 @@ Type plainly, or use a command. Both work.
   /export md|ics|txt                save the plan (ics imports into Outlook)
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
-  /clear                            wipe the terminal (history is kept on disk)
+  /goblin                           who's in here, and what it does with what you say
+  /clear                            wipe the terminal (this one really does delete it)
 
 Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1–p4.
 When: today · tomorrow · friday · 8/14 · in 2 days · at 2pm · due eod.
@@ -94,12 +106,13 @@ When: today · tomorrow · friday · 8/14 · in 2 days · at 2pm · due eod.
 class AssistantBrain:
     """Interprets terminal input against an :class:`AssistantStore`."""
 
-    def __init__(self, store: AssistantStore):
+    def __init__(self, store: AssistantStore, professional: bool = False):
         self.store = store
-        # The "this became a task, here's how to make it a note" nudge is
-        # useful exactly once. Repeating it under every captured line turns
-        # the transcript into noise.
-        self._explained_note_syntax = False
+        # The thing that answers when the user just wants to talk.
+        self.goblin = Goblin(professional=professional)
+        # The last free-text line, so a bare `/task` (or the page's "make that
+        # a task" chip) can promote something already said without retyping it.
+        self._last_said = ""
 
     # ── entry point ──────────────────────────────────────────────────────────
 
@@ -135,6 +148,7 @@ class AssistantBrain:
             "set": self._cmd_set,
             "purge": self._cmd_purge,
             "clear": self._cmd_clear,
+            "goblin": self._cmd_goblin, "vent": self._cmd_goblin,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -149,6 +163,23 @@ class AssistantBrain:
 
     def _cmd_help(self, args: str, now: datetime) -> Reply:
         return Reply().say(HELP_TEXT, ROLE_SYSTEM)
+
+    def _cmd_goblin(self, args: str, now: datetime) -> Reply:
+        """Who's in here, and — the part that actually matters — what it does
+        and doesn't do with what you say."""
+        if self.goblin.professional:
+            return Reply().system(
+                "This terminal is a scratch space. Free text is never stored "
+                "as a task; use “Add a task”, /task, or the Tasks tab.")
+        reply = Reply()
+        reply.say("I live in here. I eat complaints.")
+        reply.system(
+            "   Say whatever you want — none of it becomes a task, a note, or "
+            "a calendar block.\n"
+            "   Nothing leaves this machine either.\n"
+            "   When you DO want something filed: “Add a task”, /task, or "
+            "/task on its own to grab the last thing you said.")
+        return reply
 
     def _cmd_clear(self, args: str, now: datetime) -> Reply:
         return Reply(action=ACT_CLEAR).system(
@@ -264,11 +295,21 @@ class AssistantBrain:
     # -- tasks ---------------------------------------------------------------
 
     def _cmd_task(self, args: str, now: datetime) -> Reply:
+        """`/task <line>` files it. A bare `/task` promotes the last thing you
+        said — which is the point of not auto-filing: you can talk freely, and
+        if it turns out one of those lines was actually a job, it's one word
+        away instead of a retype."""
         if not args:
-            return Reply().error("Give me something to do: /task fix the PO sheet 45m")
-        return self._capture_task(args, now, explicit=True)
+            if not self._last_said:
+                return Reply().error(
+                    "Give me something to do: /task fix the PO sheet 45m")
+            said, self._last_said = self._last_said, ""
+            # Cleared so a second press can't file the same line twice.
+            return self._capture_task(said, now, promoted=True)
+        return self._capture_task(args, now)
 
-    def _capture_task(self, text: str, now: datetime, explicit: bool) -> Reply:
+    def _capture_task(self, text: str, now: datetime,
+                      promoted: bool = False) -> Reply:
         parsed = nlp.parse_task_line(text, now)
         title = parsed.get("title", "").strip()
         if not title:
@@ -286,12 +327,8 @@ class AssistantBrain:
         self.store.add_task(task)
 
         reply = Reply(dirty=True)
-        reply.say(f"Added: {task.label()}")
+        reply.say(("Fine. Filed: " if promoted else "Added: ") + task.label())
         reply.system("   " + self._describe(task))
-        if not explicit and not self._explained_note_syntax:
-            self._explained_note_syntax = True
-            reply.system("   (that's a task — start a line with “note:” or “-” "
-                         "to file it as a note instead)")
         return reply
 
     @staticmethod
@@ -560,8 +597,24 @@ class AssistantBrain:
             return self._cmd_remove(intent.text, now)
         if intent.kind == "search":
             return self._cmd_find(intent.text, now)
-        return self._capture_task(intent.text or raw, now,
-                                  explicit=bool(intent.data.get("explicit")))
+        if intent.kind == "task":
+            return self._capture_task(intent.text or raw, now)
+        return self._chat(raw)
+
+    def _chat(self, raw: str) -> Reply:
+        """The default. The user is talking — so listen, answer, and file
+        NOTHING. This is the whole contract of the page: the terminal is a
+        place you can complain at 6:40am without it turning your complaint
+        into a chore."""
+        self._last_said = raw
+        reply = Reply()
+        reply.say(self.goblin.respond(raw))
+        if self.goblin.wants_nudge():
+            reply.system(f"   {GOBLIN_NUDGE}")
+        # Offer, never act: the page shows a one-click chip and the user
+        # decides. Venting is explicitly excluded from "looks actionable".
+        reply.offer_task = looks_actionable(raw)
+        return reply
 
     def _agenda_intent(self, raw: str, now: datetime) -> Reply:
         when = nlp.parse_when(raw, now)

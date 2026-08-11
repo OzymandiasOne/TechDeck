@@ -191,9 +191,10 @@ class CommandLine(QWidget, ThemeAware):
 
         self.field = QLineEdit()
         self.field.setMinimumHeight(38)
+        # The placeholder is a promise. It used to advertise task shorthand,
+        # which implied that typing files things — the opposite of the rule.
         self.field.setPlaceholderText(
-            "Type what you need — “fix the PO sheet 45m urgent due friday” — "
-            "or /help")
+            "Say anything — nothing gets filed unless you ask.  /help")
         self.field.returnPressed.connect(self._submit)
         self.field.installEventFilter(self)
 
