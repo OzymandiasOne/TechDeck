@@ -119,6 +119,13 @@ ENGINEERING = [
      "unregistered modules or malformed configuration.",
      "A tool that would fail on an operator machine cannot be released.",
      "Enforced on every build; covers every deployed tool."),
+    ("Aug 2026", "Shared PDF Write Reliability", "Quality",
+     "Corrected a fault in the shared routine tools use to rewrite a PDF in "
+     "place: the file was being swapped while still held open, which failed on "
+     "Windows and could leave a partial temporary file next to the original.",
+     "Prevents a class of failure where a document is left unwritten and a "
+     "stray temporary file could be mistaken for the real paperwork.",
+     "Shared component; available to every tool that writes a PDF."),
     ("Jul 2026", "Continuous Integration", "Testing",
      "The full test suite now runs automatically on every code change, not "
      "only ahead of a release.",
@@ -438,4 +445,12 @@ PI_NEW = [
      "POSTED AND OFF THE SETUP QUEUE WHEN ITS BATCH IS SET UP; ONLY JOBS THAT "
      "GENUINELY REACHED THE NEXT STAGE MOVE, AND A SCHEDULE OPEN ON ANOTHER "
      "MACHINE LISTS THE ROWS TO CHANGE BY HAND RATHER THAN BLOCKING THE RUN"),
+    ("PART DIFFICULTY CARRIED ONTO THE WORK PACKET", "COMPLETE",
+     "PARTS REQUIRING A COMPOUND CUT ARE MARKED DIFFICULT ON THEIR ENGINEERING "
+     "DRAWING BY THE DESIGN AUTOMATION SYSTEM; A NEW TOOL READS EVERY PART "
+     "DRAWING IN A BATCH AND STAMPS THAT MARKING ONTO THE FRONT PAGE OF THE "
+     "WORK PACKET THE SHOP FLOOR ACTUALLY WORKS FROM, SO DIFFICULTY IS VISIBLE "
+     "AT THE START OF THE JOB INSTEAD OF BURIED IN THE PART PRINTS; RE-RUNNING "
+     "AFTER A PART CHANGES UPDATES THE PACKET BOTH WAYS, ADDING THE MARKING OR "
+     "REMOVING IT"),
 ]

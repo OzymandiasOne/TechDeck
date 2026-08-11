@@ -109,6 +109,18 @@ TOOL_SECTIONS = [
    "Iterates the work-order PDFs and overlays the PO and pallet detail so the "
    "floor paperwork is labelled without manual editing.",
    "Active", "0.7.4"),
+  ("922 Difficulty Stamper",
+   "Marks the work packets of orders containing a part that is difficult to "
+   "produce.",
+   "Reads every part drawing in a batch, identifies the parts the design "
+   "automation system marked as requiring a compound cut, and stamps that "
+   "marking onto the front page of the corresponding work packet so the "
+   "difficulty is visible on the paperwork the floor works from rather than "
+   "only on the individual part prints. Re-running after a part is revised "
+   "corrects the packet in either direction, and the run reports which parts "
+   "made each order difficult, which orders are not yet modelled, and any "
+   "drawing it could not read.",
+   "Active", "0.8.6.13"),
   ("922 FormingFinder",
    "Discovers and merges the formed-plate PDFs for a 922 batch.",
    "Identifies formed plates three ways -- filename, PO notes, and spatial "
