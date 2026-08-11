@@ -85,6 +85,17 @@ ICON_SUBSTITUTIONS = {
     ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#FF77A8"},
     ("matrix", "sym_opened_folder_911"):         {"#9BFFB0": "#00E436"},
+    # caution (922 Difficulty Stamper): the luminance-rank recolor sends the
+    # triangle to each theme's LIGHTEST colour, which is what a hazard sign must
+    # not be -- a near-white triangle reads as a generic glyph, and the whole
+    # point of the icon is "caution". Pull the body back onto the warmest colour
+    # each palette actually has. matrix has no warm colour at all (it is greens
+    # and greys by definition), so it keeps its theme green.
+    ("dark", "caution"):                         {"#FFF1E8": "#FFA300"},
+    ("light", "caution"):                        {"#C2C3C7": "#FFA300"},
+    ("cherry_blossom", "caution"):               {"#FFF1E8": "#FFCCAA"},
+    ("blue", "caution"):                         {"#FFF1E8": "#FFA300"},
+    ("cyberpunk", "caution"):                    {"#FFF1E8": "#FFEC27"},
 }
 
 
@@ -2047,6 +2058,51 @@ _SYM_WRENCH_TONES = {"a": "#706D67", "b": "#B6B5B5"}
 def sym_wrench(d):          # symbol: wrench
     _draw_grid(d, _SYM_WRENCH_GRID, _SYM_WRENCH_TONES)
 
+_CAUTION_GRID = [
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "..............yyyy..............",
+    "..............yyyy..............",
+    "..............yyyy..............",
+    "..............yyyy..............",
+    "............yyyyyyyy............",
+    "............yyyyyyyy............",
+    "............yyyyyyyy............",
+    "............yyyyyyyy............",
+    "..........yyyykkkkyyyy..........",
+    "..........yyyykkkkyyyy..........",
+    "..........yyyykkkkyyyy..........",
+    "..........yyyykkkkyyyy..........",
+    "........yyyyyykkkkyyyyyy........",
+    "........yyyyyykkkkyyyyyy........",
+    "........yyyyyykkkkyyyyyy........",
+    "........yyyyyykkkkyyyyyy........",
+    "......yyyyyyyyyyyyyyyyyyyy......",
+    "......yyyyyyyyyyyyyyyyyyyy......",
+    "......yyyyyyyykkkkyyyyyyyy......",
+    "......yyyyyyyykkkkyyyyyyyy......",
+    "....yyyyyyyyyykkkkyyyyyyyyyy....",
+    "....yyyyyyyyyykkkkyyyyyyyyyy....",
+    "....yyyyyyyyyyyyyyyyyyyyyyyy....",
+    "....yyyyyyyyyyyyyyyyyyyyyyyy....",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+]
+_CAUTION_TONES = {"k": "#16161C", "y": "#FCC201"}
+
+def caution(d):             # 922 difficulty stamper
+    # Apex-up warning triangle with an exclamation. Deliberately NOT the ISO
+    # outlined sign: house style separates shapes by flat colour, not a traced
+    # outline. The apex stays POINTED on purpose -- flattening it makes the
+    # triangle+bar read as a capital "A" (three tournament variants died on
+    # this, and it is invisible in the grid; only the render shows it).
+    _draw_grid(d, _CAUTION_GRID, _CAUTION_TONES)
+
+
 ICONS = {
     "clipboard": clipboard,
     "repeat": repeat,
@@ -2064,6 +2120,7 @@ ICONS = {
     "copy": copy,
     "badge": badge,
     "qr": qr,
+    "caution": caution,
 }
 # Icons8 symbols (themed like the plugin tiles; sym_-prefixed keys).
 ICONS.update({

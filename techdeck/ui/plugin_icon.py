@@ -42,6 +42,7 @@ PLUGIN_ICON_KEYS = {
     "911_sketch_extractor": "sym_picture",
     "911_sspo_award_review": "stopwatch",
     "922_pallet_stamper":   "stamp",
+    "922_difficulty_stamper": "caution",
     "922_formingfinder":    "futurama_bender",
     "922_kitting":          "toolbox",
     "922_lst_organizer":    "sym_opened_folder",
