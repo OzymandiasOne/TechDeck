@@ -1,0 +1,76 @@
+{
+  "id": "922_difficulty_stamper",
+  "name": "922 Difficulty Stamper",
+  "description": "Scans a 922 batch's part drawings for the DriveWorks DIFFICULT label and stamps DIFFICULT on that order's work packet. Re-running keeps packets honest: an order that is no longer difficult has its stamp removed.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "922",
+  "details": {
+    "setup": [
+      "Sync the '922 QTDR Production Packages' folder.",
+      "The parts must already be modeled - the app reads the part drawings under each order's CAD-AND-SHOP-PRINTS folder. Orders that aren't modeled yet are reported and skipped.",
+      "Close the work-packet PDFs if they're open in a viewer, so they can be re-saved with the stamp."
+    ],
+    "how_it_works": [
+      "Enter the batch number.",
+      "For each order it reads every part drawing under CAD-AND-SHOP-PRINTS and looks for the DIFFICULT label DriveWorks prints on parts with a compound cut.",
+      "If any part in the order is difficult, it stamps DIFFICULT in red on the first page of that order's work packet.",
+      "If an order was stamped before but none of its parts are difficult any more, the old stamp is removed."
+    ],
+    "output": [
+      "Work packets stamped DIFFICULT, plus a summary listing which orders are difficult and which parts made them difficult."
+    ]
+  },
+  "icon": "\u26a0\ufe0f",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Base Directory",
+        "description": "Path to '922 QTDR Production Packages' folder. Leave blank to auto-discover from OneDrive.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\...",
+        "required": false,
+        "default": "",
+        "validation": {
+          "pattern": ".*",
+          "message": "Please select a valid directory path"
+        }
+      },
+      {
+        "key": "font_size",
+        "type": "number",
+        "label": "Font Size (pt)",
+        "description": "Size of the DIFFICULT stamp in points",
+        "default": 18,
+        "min": 10,
+        "max": 30,
+        "step": 1,
+        "suffix": " pt"
+      },
+      {
+        "key": "h_offset_inches",
+        "type": "number",
+        "label": "Horizontal Offset (inches)",
+        "description": "Distance left from right edge",
+        "default": 4.0,
+        "min": 0.5,
+        "max": 10.0,
+        "step": 0.5,
+        "suffix": " in"
+      },
+      {
+        "key": "v_offset_inches",
+        "type": "number",
+        "label": "Vertical Offset (inches)",
+        "description": "Distance up from bottom edge. The default sits half an inch below the Pallet Stamper's stamp so the two don't overlap.",
+        "default": 6.5,
+        "min": 0.5,
+        "max": 10.0,
+        "step": 0.5,
+        "suffix": " in"
+      }
+    ]
+  }
+}
