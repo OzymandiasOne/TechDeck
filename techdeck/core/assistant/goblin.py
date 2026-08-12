@@ -295,7 +295,8 @@ _NEUTRAL = [
     "Mm-hm.",
     "Okay.",
     "Woogy hears you.",
-    "Go on.",
+    "Woogy is listening. A bead of cold sweat rolls down his forehead. "
+    "At any moment, he might have a panic attack.",
     "Yeah?",
     "Woogy is still here.",
     "Right, right.",

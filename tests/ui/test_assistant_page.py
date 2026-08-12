@@ -835,3 +835,18 @@ def test_the_camera_only_shows_on_hover(qapp):
     # ...while the disc itself got darker.
     assert (hovered.pixelColor(36, 10).lightness()
             < resting.pixelColor(36, 10).lightness())
+
+
+def test_the_input_hint_is_italic_only_while_it_is_empty(qapp):
+    """Styling the field italic outright would italicise what the user TYPES
+    as well, which reads as a rendering fault rather than a hint."""
+    from techdeck.ui.widgets.assistant_terminal import CommandLine
+    line = CommandLine()
+    assert "/help" in line.field.placeholderText()
+    assert line.field.font().italic()
+
+    line.field.setText("fix the PO sheet")
+    assert not line.field.font().italic()
+
+    line.field.clear()
+    assert line.field.font().italic()

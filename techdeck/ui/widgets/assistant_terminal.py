@@ -380,7 +380,11 @@ class CommandLine(QWidget, ThemeAware):
 
         self.field = QLineEdit()
         self.field.setMinimumHeight(38)
-        self.field.setPlaceholderText("/help")
+        self.field.setPlaceholderText("type /help for commands")
+        # Italic only while the placeholder is showing. Styling the widget
+        # italic outright would italicise what the user TYPES as well, which
+        # reads as a rendering fault rather than a hint.
+        self.field.textChanged.connect(self._sync_placeholder_style)
         self.field.returnPressed.connect(self._submit)
         self.field.installEventFilter(self)
 
@@ -393,6 +397,18 @@ class CommandLine(QWidget, ThemeAware):
         row.addWidget(self.field, 1)
         row.addWidget(self.send_btn, 0)
         self.setup_theme_awareness()
+        self._sync_placeholder_style()
+
+    def _sync_placeholder_style(self, _text: str = ""):
+        """Italicise the field only while it is empty, so the hint reads as a
+        hint and typed text reads as text. Guarded on the state actually
+        flipping: setFont triggers a relayout, and this runs on every keystroke."""
+        wanted = not self.field.text()
+        font = self.field.font()
+        if font.italic() == wanted:
+            return
+        font.setItalic(wanted)
+        self.field.setFont(font)
 
     def apply_theme(self):
         palette = self.get_current_palette()
