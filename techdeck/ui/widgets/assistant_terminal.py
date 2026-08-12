@@ -184,6 +184,11 @@ class TerminalView(QTextEdit, ThemeAware):
     def clear(self):
         super().clear()
         self._last_speaker = ""
+        # QTextEdit.clear() empties the document's RESOURCE cache along with
+        # its text, so every avatar registered by _register_avatars is gone and
+        # the next message renders a broken-image icon where the face should
+        # be. Put them back. (Same reason apply_theme re-registers.)
+        self._register_avatars()
 
     def append_line(self, role: str, text: str):
         palette = self.get_current_palette()

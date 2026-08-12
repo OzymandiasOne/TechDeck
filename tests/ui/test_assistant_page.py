@@ -591,3 +591,35 @@ def test_a_broken_reminder_check_never_takes_the_page_down(page, monkeypatch):
     monkeypatch.setattr(module, "due_notifications",
                         lambda **_kw: (_ for _ in ()).throw(RuntimeError("nope")))
     page._check_reminders()          # must not raise
+
+
+def test_avatars_survive_a_clear(qapp):
+    """QTextEdit.clear() empties the document's RESOURCE cache along with its
+    text. Without re-registering, every message after /clear rendered a
+    broken-image icon where the face should be."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+
+    view = TerminalView()
+    view.append_line("deck", "before")
+    view.clear()
+    view.append_line("deck", "after")
+
+    for name in ("woogy", "user"):
+        resource = view.document().resource(
+            QTextDocument.ResourceType.ImageResource,
+            QUrl(f"techdeck://avatar/{name}"))
+        assert resource is not None and not resource.isNull(), name
+
+
+def test_the_clear_command_leaves_working_avatars(page):
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+
+    page.submit("/clear")
+    page.submit("morning")
+    resource = page.terminal.document().resource(
+        QTextDocument.ResourceType.ImageResource,
+        QUrl("techdeck://avatar/woogy"))
+    assert resource is not None and not resource.isNull()
