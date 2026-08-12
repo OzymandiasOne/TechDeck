@@ -45,6 +45,21 @@ MOOD_GREETING = "greeting"
 MOOD_THANKS = "thanks"
 MOOD_ASK = "ask"
 MOOD_NEUTRAL = "neutral"
+# Added after watching a real conversation in which 80% of what the user said
+# fell through to MOOD_NEUTRAL. Each of these is a thing somebody actually
+# typed at him, not a category invented in the abstract.
+MOOD_ABOUT_HIM = "about_him"      # "what did you do today"
+MOOD_LAUGH = "laugh"              # "lol"
+MOOD_COMPLIMENT = "compliment"    # "that was surprisingly responsive"
+MOOD_ACK = "ack"                  # "k", "kay", "ya i kno that"
+MOOD_LEADIN = "leadin"            # "you know what"  ->  "What?"
+MOOD_REPEAT = "repeat"            # "you said that already"
+MOOD_STOP = "stop"                # "just stop"
+MOOD_SHOUT = "shout"              # "YEAH"
+MOOD_SCOLDED = "scolded"          # "no need to get an attitude"
+MOOD_THREAT = "threat"            # "I didnt threaten you yet"
+MOOD_EXCLAIM = "exclaim"          # "omg"
+MOOD_CONFUSED = "confused"        # "what?"
 
 
 _RAGE_WORDS = re.compile(
@@ -118,6 +133,68 @@ _INSULT = re.compile(
     r"go away|leave me alone|nonsense|creepy|weird)\b", re.I)
 
 
+# A bare opener that is waiting for "What?" before the real sentence arrives.
+_LEADIN = re.compile(
+    r"^\s*(?:you know what|guess what|hey woogy|woogy|listen|check this out|"
+    r"one more thing|so anyway)\s*[.!,]?\s*$", re.I)
+
+_REPEAT_CALLOUT = re.compile(
+    r"\b(?:you (?:said|say) that already|already said that|you already said|"
+    r"said that before|repeat(?:ing)? yourself|same (?:thing|one) again|"
+    r"you keep saying)\b", re.I)
+
+# Questions ABOUT him, as opposed to requests OF him. "can you check the
+# schedule" is second person too, and answering it with "Woogy is just a guy"
+# would be worse than saying nothing.
+_ABOUT_HIM = re.compile(
+    r"^\s*(?:what'?s up|whats up|sup|wassup|how'?s it going)\b"
+    r"|\b(?:what|how|who|why)\s+(?:are|is|do|did|does|was|were)\s+(?:you|woogy)\b"
+    r"|\bwhat did you (?:do|say|mean)\b"
+    r"|\b(?:are|do|did|can|will|would)\s+you\s+(?:ok|okay|real|alive|there|"
+    r"listening|understand|know|remember|sleep|eat|think|care|even|actually)\b"
+    r"|\byou (?:don'?t|do not|dont) (?:understand|know|get|listen)\b"
+    r"|\byou (?:did|do|didn'?t do) (?:nothing|anything)\b"
+    r"|\btell me about (?:yourself|you|woogy)\b", re.I)
+
+# (?:ha|he){2,} rather than haha+ : "hahaha" is ha-ha-ha, so haha+ only ever
+# matched a stutter like "hahaa".
+_LAUGH = re.compile(r"\b(?:lol+|lmao+|rofl|(?:ha|he){2,}|heh|hah)\b|😂|🤣", re.I)
+
+_COMPLIMENT = re.compile(
+    r"\b(?:good (?:job|bot|one|answer|boy)|nice one|well done|not bad|"
+    r"impressive|responsive|clever|that was (?:good|great|funny)|"
+    r"love (?:it|that)|amazing|excellent|proud of you)\b", re.I)
+
+_STOP = re.compile(
+    r"^\s*(?:just |please )?(?:stop|quit it|enough|no more|cut it out|"
+    r"nevermind|never mind|forget it|drop it)\b", re.I)
+
+_SCOLDED = re.compile(
+    r"\b(?:no need to|don'?t be|watch it|excuse me|attitude|sass\w*|snippy|"
+    r"uncalled for|that'?s mean|be nice|settle down)\b", re.I)
+
+_THREAT = re.compile(
+    r"\b(?:threat\w*|or else|watch out|fight me|square up|had it up to here|"
+    r"i'?ve had it|ive had it|so help me|don'?t make me|dont make me)\b", re.I)
+
+_EXCLAIM = re.compile(
+    r"^\s*(?:omg|oh my god|ugh+|oof|jeez|geez|sheesh|wow+|whoa+|bruh|welp|"
+    r"hm+|hmm+|eh)\b", re.I)
+
+_CONFUSED = re.compile(r"^\s*(?:what|huh|come again|say again|\?+)[?!.]*\s*$", re.I)
+
+# Short affirmatives. Matched on the OPENER plus a length cap, because "kay",
+# "ya i kno that" and "okay wise guy" are all the same shrug.
+_ACK_OPENER = re.compile(
+    r"^\s*(?:k|kay|ok|okay|sure|right|alright|aight|mhm+|yeah|yea|ya|yep|yup|"
+    r"yes|fine|cool|gotcha|word|true)\b", re.I)
+
+
+def is_ack(text: str) -> bool:
+    raw = (text or "").strip()
+    return bool(_ACK_OPENER.match(raw)) and len(raw.split()) <= 5
+
+
 def is_aimed_at_me(text: str) -> bool:
     """True when the user is having a go at Woogy himself.
 
@@ -153,10 +230,27 @@ def read_mood(text: str) -> str:
     shouting = bool(_CAPS_WORD.search(raw)) and len(raw) > 6
     bangs = raw.count("!") >= 2 or "?!" in raw
 
-    # Before general rage: if it's pointed at him, he takes it rather than
-    # commiserating about a culprit that doesn't exist.
+    # Order is precedence, most specific first. The named phrases come before
+    # the broad sentiment buckets, and MOOD_ASK stays near the bottom because
+    # "how are you?" is about HIM before it is a question.
     if is_aimed_at_me(raw):
         return MOOD_AT_ME
+    if _REPEAT_CALLOUT.search(raw):
+        return MOOD_REPEAT
+    if _SCOLDED.search(raw):
+        return MOOD_SCOLDED
+    if _THREAT.search(raw):
+        return MOOD_THREAT
+    if _LEADIN.match(raw):
+        return MOOD_LEADIN
+    if _ABOUT_HIM.search(raw):
+        return MOOD_ABOUT_HIM
+    if _LAUGH.search(raw):
+        return MOOD_LAUGH
+    if _COMPLIMENT.search(raw):
+        return MOOD_COMPLIMENT
+    if _STOP.match(raw):
+        return MOOD_STOP
     # _INSULT counts here too: "excel sucks" is plainly anger, and "sucks"
     # lives in the insult list rather than the rage list.
     if _RAGE_WORDS.search(raw) or _INSULT.search(raw) or shouting or bangs:
@@ -165,10 +259,23 @@ def read_mood(text: str) -> str:
         return MOOD_TIRED
     if _WIN_WORDS.search(raw):
         return MOOD_WIN
+    # Thanks stays BELOW rage on purpose: "thanks for NOTHING" is a complaint,
+    # and answering it with "any time!" is the single most irritating thing a
+    # chat box can do. Moving this line up broke that; a test caught it.
     if _THANKS_WORDS.search(raw):
         return MOOD_THANKS
     if _GREETING_WORDS.match(raw):
         return MOOD_GREETING
+    # Short and in capitals: emphasis, not fury. Long capitals already went to
+    # rage above.
+    if _CAPS_WORD.search(raw) and len(raw.split()) <= 3:
+        return MOOD_SHOUT
+    if is_ack(raw):
+        return MOOD_ACK
+    if _CONFUSED.match(raw):
+        return MOOD_CONFUSED
+    if _EXCLAIM.match(raw):
+        return MOOD_EXCLAIM
     if raw.rstrip().endswith("?"):
         return MOOD_ASK
     return MOOD_NEUTRAL
@@ -302,6 +409,121 @@ _NEUTRAL = [
     "Right, right.",
 ]
 
+
+# ── The conversational pools ────────────────────────────────────────────────
+# Added after watching a real conversation. Every one of these exists because
+# somebody typed something Woogy had no answer for.
+
+_ABOUT_HIM_LINES = [
+    "Woogy stands here. That is the whole job. Woogy is very good at it.",
+    "Not much! Woogy had a big day of standing.",
+    "Woogy waited. Woogy is real good at waiting.",
+    "Woogy is a guy in a box. That is the honest answer.",
+    "Woogy don't sleep. Woogy don't eat. Woogy just is.",
+    "Woogy has been right here. Woogy is always right here.",
+    "Woogy understands SOME of it. Woogy nods at the rest.",
+    "Honestly? Woogy is doing his best and it is going okay.",
+    "Woogy don't have a today. Woogy has a here.",
+    "Woogy counted the pixels again. There is the same amount.",
+    "Woogy thought about a sandwich for a while. That was the day.",
+]
+
+_LAUGH_LINES = [
+    "Hee. Woogy made a funny.",
+    "Was that a good one? Woogy will do more.",
+    "Woogy is laughing too. Woogy thinks.",
+    "Oh good. Woogy likes when you do that.",
+    "Woogy don't get it, but Woogy is happy.",
+    "Heh. Yeah.",
+    "Woogy will write that one down in the funny book.",
+]
+
+_COMPLIMENT_LINES = [
+    "Oh! Um. Thank you. Woogy tried.",
+    "V-very kind. Woogy is going to think about that all day.",
+    "Woogy is blushing. You cannot see it. It is happening.",
+    "Really? Woogy did that?",
+    "Woogy will take it. Woogy don't get many.",
+    "Aw. Now Woogy has to be good all the time.",
+    "Woogy is going to tell the other Woogys. There are no other Woogys.",
+]
+
+_ACK_LINES = [
+    "Mm.",
+    "Yeah.",
+    "Right.",
+    "Okay good.",
+    "Woogy agrees. Woogy usually agrees.",
+    "Cool cool.",
+    "Good.",
+]
+
+# The user asked for this one by name: a bare "you know what" is waiting for
+# "What?" before the actual sentence arrives.
+_LEADIN_LINES = [
+    "What?",
+    "What? What is it.",
+    "Yeah? Woogy is listening.",
+    "Ooh. What.",
+    "Woogy is ready. Go.",
+]
+
+_REPEAT_LINES = [
+    "Oh. Woogy did say that. Woogy has a small brain.",
+    "Sorry. Woogy only knows so many things.",
+    "Woogy will find a different one. Woogy is looking.",
+    "That is embarrassing. Woogy apologises.",
+    "Woogy repeats when Woogy is nervous. Woogy is always nervous.",
+]
+
+_STOP_LINES = [
+    "Okay. Woogy stops.",
+    "Stopping. Stopped.",
+    "Woogy will be quiet now.",
+    "Okay okay okay.",
+    "Woogy is a closed mouth.",
+]
+
+_SHOUT_LINES = [
+    "AH! Okay!",
+    "Woogy heard that one!",
+    "Loud! Woogy is awake!",
+    "YES. Whatever it is, YES.",
+    "Woogy jumped a little.",
+]
+
+_SCOLDED_LINES = [
+    "Sorry! Woogy did not mean it like that.",
+    "Oh no. Woogy has no attitude. Woogy has no anything.",
+    "Woogy is sorry. Woogy will do a better voice.",
+    "That came out wrong. Woogy is bad at coming out right.",
+    "Woogy takes it back. All of it.",
+]
+
+_THREAT_LINES = [
+    "Woogy is very small and has done nothing.",
+    "Please. Woogy has a family. Woogy thinks.",
+    "Okay okay! Woogy is putting his hands up. Woogy has hands?",
+    "Woogy accepts whatever this is.",
+    "Woogy would like the record to show that he was polite.",
+]
+
+_EXCLAIM_LINES = [
+    "Yeah.",
+    "Woogy knows.",
+    "Right?",
+    "Mm. Big feelings.",
+    "Woogy felt that too.",
+]
+
+_CONFUSED_LINES = [
+    "Woogy don't know either.",
+    "Woogy is also asking that.",
+    "Hm. Yeah. Hm.",
+    "Woogy was hoping you knew.",
+]
+
+
 _PROFESSIONAL = [
     "Noted.",
     "Understood.",
@@ -325,6 +547,18 @@ class Goblin:
             MOOD_THANKS: CompendiumState(_THANKS),
             MOOD_ASK: CompendiumState(_ASK),
             MOOD_NEUTRAL: CompendiumState(_NEUTRAL),
+            MOOD_ABOUT_HIM: CompendiumState(_ABOUT_HIM_LINES),
+            MOOD_LAUGH: CompendiumState(_LAUGH_LINES),
+            MOOD_COMPLIMENT: CompendiumState(_COMPLIMENT_LINES),
+            MOOD_ACK: CompendiumState(_ACK_LINES),
+            MOOD_LEADIN: CompendiumState(_LEADIN_LINES),
+            MOOD_REPEAT: CompendiumState(_REPEAT_LINES),
+            MOOD_STOP: CompendiumState(_STOP_LINES),
+            MOOD_SHOUT: CompendiumState(_SHOUT_LINES),
+            MOOD_SCOLDED: CompendiumState(_SCOLDED_LINES),
+            MOOD_THREAT: CompendiumState(_THREAT_LINES),
+            MOOD_EXCLAIM: CompendiumState(_EXCLAIM_LINES),
+            MOOD_CONFUSED: CompendiumState(_CONFUSED_LINES),
             "professional": CompendiumState(_PROFESSIONAL),
         }
 
@@ -354,8 +588,7 @@ def looks_actionable(text: str) -> bool:
     raw = (text or "").strip()
     if len(raw) < 6 or len(raw.split()) > 20:
         return False
-    if read_mood(raw) in (MOOD_RAGE, MOOD_AT_ME, MOOD_TIRED, MOOD_WIN,
-                          MOOD_GREETING, MOOD_THANKS):
+    if read_mood(raw) != MOOD_NEUTRAL:
         return False
     if raw.rstrip().endswith("?"):
         return False

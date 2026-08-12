@@ -222,3 +222,77 @@ def test_woogy_talks_like_woogy():
              + goblin._ASK + goblin._NEUTRAL)
     named = [line for line in pools if "Woogy" in line]
     assert len(named) > len(pools) * 0.6
+
+
+# ── conversational range ─────────────────────────────────────────────────────
+# Every case below is a line somebody actually typed at him in a real session
+# where 80% of the conversation fell through to the generic pool.
+
+@pytest.mark.parametrize("text,mood", [
+    # questions about him, not requests of him
+    ("whats up", goblin.MOOD_ABOUT_HIM),
+    ("what did you do today", goblin.MOOD_ABOUT_HIM),
+    ("so basically you did nothing", goblin.MOOD_ABOUT_HIM),
+    ("you dont understand anything that I'm saying, do you?", goblin.MOOD_ABOUT_HIM),
+    ("are you real", goblin.MOOD_ABOUT_HIM),
+    ("lol okay woogy", goblin.MOOD_LAUGH),
+    ("lol", goblin.MOOD_LAUGH),
+    ("hahaha", goblin.MOOD_LAUGH),
+    ("Wow that was surpisingly responsive", goblin.MOOD_COMPLIMENT),
+    ("good bot", goblin.MOOD_COMPLIMENT),
+    ("no need to get an attitude", goblin.MOOD_SCOLDED),
+    ("ya i kno that", goblin.MOOD_ACK),
+    ("kay", goblin.MOOD_ACK),
+    ("k", goblin.MOOD_ACK),
+    ("okay wise guy", goblin.MOOD_ACK),
+    ("YEAH", goblin.MOOD_SHOUT),
+    ("you said that already", goblin.MOOD_REPEAT),
+    ("omg", goblin.MOOD_EXCLAIM),
+    ("just stop", goblin.MOOD_STOP),
+    ("you know what", goblin.MOOD_LEADIN),
+    ("I didnt threaten you yet", goblin.MOOD_THREAT),
+    ("IVE HAD IT UP TO HERE WITH YOU", goblin.MOOD_THREAT),
+    ("huh?", goblin.MOOD_CONFUSED),
+])
+def test_he_has_an_answer_for_the_things_people_actually_type(text, mood):
+    assert goblin.read_mood(text) == mood
+
+
+def test_a_lead_in_gets_what():
+    """Asked for by name: a bare "you know what" is waiting for "What?" before
+    the real sentence arrives."""
+    g = Goblin()
+    replies = {g.respond("you know what") for _ in range(30)}
+    assert any(r.lower().startswith("what") for r in replies)
+
+
+def test_a_request_of_him_is_not_a_question_about_him():
+    """"can you check the schedule" is second person too. Answering it with
+    "Woogy is just a guy" would be worse than saying nothing."""
+    assert goblin.read_mood("can you check the schedule") != goblin.MOOD_ABOUT_HIM
+    assert goblin.read_mood("would you look at the PO") != goblin.MOOD_ABOUT_HIM
+
+
+def test_every_mood_has_a_pool_behind_it():
+    """A mood with no pool raises a KeyError the moment somebody types the
+    phrase that triggers it, which is the worst place to find out."""
+    g = Goblin()
+    for name in dir(goblin):
+        if not name.startswith("MOOD_"):
+            continue
+        assert getattr(goblin, name) in g._pools, name
+
+
+def test_the_real_conversation_no_longer_falls_through(qapp=None):
+    """The session this whole batch came from: 17 of 21 lines hit the generic
+    pool. None should now."""
+    said = [
+        "hello", "whats up", "what did you do today", "so basically you did nothing",
+        "lol okay woogy", "you dont understand anything that I'm saying, do you?",
+        "Wow that was surpisingly responsive", "no need to get an attitude",
+        "ya i kno that", "YEAH", "okay wise guy", "you said that already",
+        "omg", "just stop", "lol", "you know what", "I didnt threaten you yet",
+        "kay", "k", "lame",
+    ]
+    generic = [t for t in said if goblin.read_mood(t) == goblin.MOOD_NEUTRAL]
+    assert generic == []
