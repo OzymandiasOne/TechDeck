@@ -388,7 +388,35 @@ def test_pressing_the_chip_is_what_actually_files_it(page):
 def test_a_command_that_asks_for_a_tab_switch_gets_one(page):
     page.submit("/notes")
     from techdeck.ui.pages.assistant_page import TAB_NOTES
-    assert page.tab_bar.currentIndex() == TAB_NOTES
+    assert page.tabs.current() == TAB_NOTES
+    assert page.stack.currentWidget() is page.notes_panel
+
+
+def test_personal_notes_sits_apart_on_the_right(page):
+    """Terminal / Schedule / Tasks are the working loop; Personal Notes is a
+    different activity and is deliberately separated from them."""
+    from techdeck.ui.pages.assistant_page import (
+        TAB_NOTES, TAB_SCHEDULE, TAB_TASKS, TAB_TERMINAL)
+    strip = page.tabs
+    left = [strip._left.itemAt(i).widget().text()
+            for i in range(strip._left.count())]
+    right = [strip._right.itemAt(i).widget().text()
+             for i in range(strip._right.count())]
+    assert left == ["Terminal", "Schedule", "Tasks"]
+    assert right == ["Personal Notes"]
+
+
+def test_only_one_tab_is_ever_selected_across_both_groups(page):
+    """The reason this is buttons and not two QTabBars: a QTabBar always keeps
+    one of its own tabs selected, so a split row would show two."""
+    from techdeck.ui.pages.assistant_page import TAB_NOTES, TAB_TASKS
+    page._show_tab(TAB_NOTES)
+    checked = [b for b in page.tabs._buttons.values() if b.isChecked()]
+    assert len(checked) == 1 and checked[0].text() == "Personal Notes"
+
+    page._show_tab(TAB_TASKS)
+    checked = [b for b in page.tabs._buttons.values() if b.isChecked()]
+    assert len(checked) == 1 and checked[0].text() == "Tasks"
 
 
 def test_chips_adapt_to_whether_there_is_a_plan(page):
@@ -434,3 +462,132 @@ def test_history_comes_back_with_no_session_divider(page, tmp_path):
     text = reopened.terminal.toPlainText()
     assert "order the 4130 tube" in text
     assert "session" not in text.lower()
+
+
+# ── chat layout: avatars and names ───────────────────────────────────────────
+
+def test_woogy_gets_a_round_avatar_from_his_own_sprite(qapp):
+    from techdeck.ui.widgets.assistant_terminal import AVATAR_PX, woogy_avatar
+    pixmap = woogy_avatar()
+    assert not pixmap.isNull()
+    assert pixmap.size().width() == AVATAR_PX
+    image = pixmap.toImage()
+    # Round, so the corners must be transparent and the middle must not be.
+    assert image.pixelColor(0, 0).alpha() == 0
+    assert image.pixelColor(AVATAR_PX // 2, AVATAR_PX // 2).alpha() > 0
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("Anthony Siebenmorgen", "AS"),
+    ("ASiebenmorgen", "AS"),
+    ("fern.tucker", "FT"),
+    ("woogy", "WO"),
+    ("", "?"),
+])
+def test_initials(name, expected):
+    from techdeck.ui.widgets.assistant_terminal import _initials
+    assert _initials(name) == expected
+
+
+def test_the_speaker_is_named_woogy_not_a_symbol(qapp):
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    view = TerminalView()
+    view.append_line("deck", "Heard.")
+    text = view.toPlainText()
+    assert "Woogy" in text
+    assert "\u25c6" not in text            # the old diamond prefix
+
+
+def test_the_user_line_is_named_after_the_user(qapp):
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    view = TerminalView()
+    view.set_identity("Anthony Siebenmorgen")
+    view.append_line("user", "morning")
+    assert "Anthony Siebenmorgen" in view.toPlainText()
+
+
+def test_consecutive_lines_from_one_speaker_share_a_head(qapp):
+    """Teams groups a run of messages under one avatar. A reply plus its
+    footnote should be one block, not two heads."""
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    view = TerminalView()
+    view.append_line("deck", "Heard.")
+    view.append_line("deck", "Still here.")
+    assert view.toPlainText().count("Woogy") == 1
+
+
+def test_a_system_note_attaches_to_the_message_above_it(qapp):
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    view = TerminalView()
+    view.append_line("deck", "Heard.")
+    view.append_line("system", "(nothing here gets saved)")
+    text = view.toPlainText()
+    assert text.count("Woogy") == 1
+    assert "nothing here gets saved" in text
+
+
+def test_clearing_resets_the_grouping(qapp):
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    view = TerminalView()
+    view.append_line("deck", "one")
+    view.clear()
+    view.append_line("deck", "two")
+    assert "Woogy" in view.toPlainText()
+
+
+# ── reminders ────────────────────────────────────────────────────────────────
+
+def test_the_reminder_button_reports_the_current_state(page):
+    from techdeck.ui.notifier import DesktopNotifier
+    label = page.reminders_btn.text()
+    if DesktopNotifier.available():
+        assert label == "Reminders on"
+        page.submit("/remind off")
+        assert page.reminders_btn.text() == "Reminders off"
+    else:
+        assert label == "Reminders unavailable"
+
+
+def test_remind_command_persists(page):
+    page.submit("/remind 25")
+    assert page.store.notify.lead_minutes == 25
+    assert page.store.notify.enabled is True
+    page.submit("/remind off")
+    assert page.store.notify.enabled is False
+
+
+def test_a_reminder_is_only_ever_sent_once(page, monkeypatch):
+    """The page must record what it sent, or every 30-second tick re-fires the
+    same popup."""
+    from datetime import datetime, timedelta
+    from techdeck.core.assistant.models import TaskItem
+    from techdeck.core.assistant.scheduler import ScheduleRequest, build_schedule
+
+    sent = []
+    monkeypatch.setattr(page.notifier, "notify",
+                        lambda title, body, seconds=12: sent.append(title) or True)
+
+    soon = datetime.now() + timedelta(minutes=2)
+    task = TaskItem(title="Fix the PO sheet", estimate_min=30,
+                    fixed_start=soon.replace(second=0, microsecond=0).isoformat())
+    page.store.add_task(task)
+    plan = build_schedule(ScheduleRequest(
+        tasks=[task], start_day=soon.date(), end_day=soon.date(),
+        prefs=page.store.prefs))
+    page.store.add_schedule(plan)
+    page.store.notify.enabled = True
+    page.store.notify.lead_minutes = 30
+    page.store.notify.quiet_outside_hours = False
+    page.store.notify.daily_digest = False      # keep the test to one signal
+    page.store.notify.overdue = False
+
+    page._check_reminders()
+    page._check_reminders()
+    assert sent == ["Fix the PO sheet"]
+
+
+def test_a_broken_reminder_check_never_takes_the_page_down(page, monkeypatch):
+    import techdeck.ui.pages.assistant_page as module
+    monkeypatch.setattr(module, "due_notifications",
+                        lambda **_kw: (_ for _ in ()).throw(RuntimeError("nope")))
+    page._check_reminders()          # must not raise

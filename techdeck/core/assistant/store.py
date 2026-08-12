@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from techdeck.core.assistant.models import (
     ChatMessage, Note, TaskItem, Schedule, SchedulePrefs, now_iso,
 )
+from techdeck.core.assistant.notifier import NotifyPrefs, prune_sent
 
 # Keep the transcript bounded. Old lines are dropped from the FRONT on rotate,
 # so history reads oldest→newest and the file can't grow without limit.
@@ -59,6 +60,7 @@ class AssistantStore:
         self.tasks: List[TaskItem] = []
         self.schedules: List[Schedule] = []
         self.prefs = SchedulePrefs()
+        self.notify = NotifyPrefs()
         self.meta: Dict[str, Any] = {}
 
         self.load()
@@ -81,6 +83,7 @@ class AssistantStore:
         self.tasks = [TaskItem.from_dict(d) for d in data.get("tasks", []) or []]
         self.schedules = [Schedule.from_dict(d) for d in data.get("schedules", []) or []]
         self.prefs = SchedulePrefs.from_dict(data.get("prefs", {}) or {})
+        self.notify = NotifyPrefs.from_dict(data.get("notify", {}) or {})
         self.meta = dict(data.get("meta", {}) or {})
         self._migrate()
 
@@ -111,6 +114,7 @@ class AssistantStore:
             "version": 1,
             "saved_at": now_iso(),
             "prefs": self.prefs.to_dict(),
+            "notify": self.notify.to_dict(),
             "notes": [n.to_dict() for n in self.notes],
             "tasks": [t.to_dict() for t in self.tasks],
             "schedules": [s.to_dict() for s in self.schedules[:MAX_SCHEDULES]],
@@ -273,6 +277,23 @@ class AssistantStore:
 
     def save_prefs(self, prefs: SchedulePrefs) -> None:
         self.prefs = prefs
+        self.save()
+
+    def save_notify_prefs(self, notify: NotifyPrefs) -> None:
+        self.notify = notify
+        self.save()
+
+    # ── sent reminders ───────────────────────────────────────────────────────
+
+    def sent_reminders(self) -> List[str]:
+        """Keys of reminders already shown. Persisted so restarting TechDeck
+        does not replay the morning."""
+        return list(self.meta.get("sent_reminders", []) or [])
+
+    def mark_reminders_sent(self, keys: List[str]) -> None:
+        if not keys:
+            return
+        self.meta["sent_reminders"] = prune_sent(self.sent_reminders() + keys)
         self.save()
 
     # ── chat transcript ──────────────────────────────────────────────────────

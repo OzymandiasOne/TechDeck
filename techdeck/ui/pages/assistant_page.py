@@ -23,8 +23,8 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTabBar, QStackedWidget,
-    QFrame, QFileDialog, QMessageBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
+    QFrame, QFileDialog, QMessageBox, QPushButton,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -33,11 +33,13 @@ from techdeck.core.assistant.commands import (
     AssistantBrain, Reply,
 )
 from techdeck.core.assistant.models import ChatMessage
+from techdeck.core.assistant.notifier import due_notifications
 from techdeck.core.assistant.store import AssistantStore
+from techdeck.ui.notifier import DesktopNotifier
 from techdeck.core.settings import SettingsManager
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.widgets.assistant_terminal import (
-    ChipBar, CommandLine, TerminalView,
+    ChipBar, CommandLine, TabStrip, TerminalView,
 )
 from techdeck.ui.widgets.assistant_notes import NotesPanel
 from techdeck.ui.widgets.assistant_schedule import SchedulePanel, TasksPanel
@@ -49,6 +51,12 @@ _TAB_KEYS = {"terminal": TAB_TERMINAL, "schedule": TAB_SCHEDULE,
 # How much transcript to show on open. The file keeps far more; this is just
 # what's worth scrolling through.
 HISTORY_LINES = 300
+
+# How often to look for a reminder that has come due. Thirty seconds is fine
+# grained enough that a "10 minutes before" reminder is never more than half a
+# minute late, and cheap enough to ignore: the check is a list comprehension
+# over one saved plan.
+REMINDER_TICK_MS = 30_000
 
 # No greeting, and no session divider. The terminal opens on whatever you last
 # said and nothing else. An explainer at the top of a chat box is read once,
@@ -87,26 +95,29 @@ class AssistantPage(QWidget, ThemeAware):
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
         header.addLayout(titles, 1)
+
+        self.reminders_btn = QPushButton()
+        self.reminders_btn.setMinimumHeight(30)
+        self.reminders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reminders_btn.clicked.connect(self._open_reminder_settings)
+        header.addWidget(self.reminders_btn, 0, Qt.AlignmentFlag.AlignTop)
         outer.addLayout(header)
 
         # ── tabs ─────────────────────────────────────────────────────────────
-        self.tab_bar = QTabBar()
-        self.tab_bar.setObjectName("assistantTabBar")
-        self.tab_bar.setExpanding(False)
-        self.tab_bar.setDrawBase(False)
-        self.tab_bar.setUsesScrollButtons(False)
-        for label in ("Terminal", "Schedule", "Personal Notes", "Tasks"):
-            self.tab_bar.addTab(label)
-        self.tab_bar.currentChanged.connect(self._on_tab_changed)
-
-        tab_row = QHBoxLayout()
-        tab_row.setContentsMargins(0, 0, 0, 0)
-        tab_row.addWidget(self.tab_bar, 0, Qt.AlignmentFlag.AlignBottom)
-        tab_row.addStretch()
-        outer.addLayout(tab_row)
+        # Terminal / Schedule / Tasks are the working loop and sit together on
+        # the left. Personal Notes is a different activity, so it sits apart on
+        # the right rather than being a fourth thing to scan past.
+        self.tabs = TabStrip()
+        self.tabs.add_tab(TAB_TERMINAL, "Terminal")
+        self.tabs.add_tab(TAB_SCHEDULE, "Schedule")
+        self.tabs.add_tab(TAB_TASKS, "Tasks")
+        self.tabs.add_tab(TAB_NOTES, "Personal Notes", right=True)
+        self.tabs.tab_selected.connect(self._on_tab_changed)
+        outer.addWidget(self.tabs)
 
         # ── panels ───────────────────────────────────────────────────────────
         self.terminal = TerminalView()
+        self.terminal.set_identity(self._display_name())
 
         terminal_page = QWidget()
         terminal_box = QVBoxLayout(terminal_page)
@@ -151,9 +162,26 @@ class AssistantPage(QWidget, ThemeAware):
         self.command_line.submitted.connect(self.submit)
         outer.addWidget(self.command_line)
 
+        # ── reminders ────────────────────────────────────────────────────────
+        self.notifier = DesktopNotifier(self)
+        self.notifier.activated.connect(self._on_notification_clicked)
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(REMINDER_TICK_MS)
+        self._reminder_timer.timeout.connect(self._check_reminders)
+
         self.setup_theme_awareness()
         self._load_history()
         self._refresh_chips()
+        self._apply_reminder_prefs()
+
+    def _display_name(self) -> str:
+        """Whose initials go on the avatar: the name from My Account if it's
+        been filled in, otherwise the Windows login."""
+        import os
+        data = self.settings.get_user_data() or {}
+        return (str(data.get("name") or "").strip()
+                or str(data.get("username") or "").strip()
+                or os.environ.get("USERNAME", "You"))
 
     # ── history ──────────────────────────────────────────────────────────────
 
@@ -357,15 +385,93 @@ class AssistantPage(QWidget, ThemeAware):
             QTimer.singleShot(0, self.command_line.focus)
 
     def _show_tab(self, index: int):
-        if self.tab_bar.currentIndex() != index:
-            self.tab_bar.setCurrentIndex(index)
+        self.tabs.set_current(index)
+
+    # ── reminders ────────────────────────────────────────────────────────────
+
+    def _apply_reminder_prefs(self):
+        """Switch the tray icon and the polling timer to match the saved
+        preference, and re-label the header button."""
+        notify = self.store.notify
+        supported = DesktopNotifier.available()
+        on = bool(notify.enabled and supported)
+
+        self.notifier.set_enabled(on)
+        if on and not self._reminder_timer.isActive():
+            self._reminder_timer.start()
+            # Check immediately as well: opening TechDeck at 7:58 should not
+            # wait half a minute to mention the 8:00 block.
+            QTimer.singleShot(0, self._check_reminders)
+        elif not on and self._reminder_timer.isActive():
+            self._reminder_timer.stop()
+
+        if not supported:
+            self.reminders_btn.setText("Reminders unavailable")
+            self.reminders_btn.setToolTip(DesktopNotifier.unavailable_reason())
+        elif on:
+            self.reminders_btn.setText("Reminders on")
+            self.reminders_btn.setToolTip(
+                f"{notify.lead_minutes} min warning before each block. "
+                f"Click to change.")
         else:
-            self.stack.setCurrentIndex(index)
+            self.reminders_btn.setText("Reminders off")
+            self.reminders_btn.setToolTip("Click to turn them on")
+
+    def _open_reminder_settings(self):
+        from techdeck.ui.dialogs.reminder_dialog import ReminderDialog
+        dialog = ReminderDialog(self.store.notify, parent=self.window())
+        if not dialog.exec():
+            return
+        self.store.save_notify_prefs(dialog.result_prefs())
+        self._apply_reminder_prefs()
+
+    def _check_reminders(self):
+        """One tick: find what's due, show it, remember that we did.
+
+        Wrapped whole: a reminder is the least important thing on this page and
+        must never be the reason it falls over.
+        """
+        try:
+            pending = due_notifications(
+                schedule=self.store.latest_schedule(),
+                tasks=self.store.tasks,
+                prefs=self.store.prefs,
+                notify=self.store.notify,
+                now=datetime.now(),
+                already_sent=self.store.sent_reminders(),
+            )
+        except Exception as exc:
+            print(f"[assistant] reminder check failed: {exc}")
+            return
+
+        shown = []
+        for note in pending:
+            if self.notifier.notify(note.title, note.body):
+                shown.append(note.key)
+        if shown:
+            self.store.mark_reminders_sent(shown)
+
+    def _on_notification_clicked(self):
+        """Clicking a toast (or the tray icon) brings TechDeck forward on the
+        Assistant's Schedule tab, which is what the reminder was about."""
+        window = self.window()
+        try:
+            if window is not None:
+                window.showNormal()
+                window.raise_()
+                window.activateWindow()
+                sidebar = getattr(window, "sidebar", None)
+                if sidebar is not None:
+                    sidebar.set_current_page("assistant")
+                    window._on_page_changed("assistant")
+        except Exception as exc:
+            print(f"[assistant] could not surface the window: {exc}")
+        self._show_tab(TAB_SCHEDULE)
 
     def _on_data_changed(self):
         """Anything that mutates the store lands here, so the panels the user
         isn't looking at are never stale when they switch to them."""
-        current = self.tab_bar.currentIndex()
+        current = self.tabs.current()
         if current == TAB_SCHEDULE:
             self.schedule_panel.refresh()
         elif current == TAB_TASKS:
@@ -388,20 +494,23 @@ class AssistantPage(QWidget, ThemeAware):
         palette = self.get_current_palette()
         self.subtitle.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 12px;")
+        self.reminders_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {palette.text_secondary};
+                border: 1px solid {palette.border};
+                border-radius: 15px;
+                padding: 4px 14px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                border-color: {palette.accent};
+                color: {palette.accent};
+            }}
+        """)
         body = palette.console_bg
         self.panel.setStyleSheet(
             f"QFrame#assistantPanel {{ background: {body}; border: none;"
-            " border-top-left-radius: 0; border-top-right-radius: 8px;"
+            " border-top-left-radius: 0; border-top-right-radius: 0;"
             " border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }")
-        # Chrome-style tabs: the selected tab fills with the panel colour so it
-        # flows into the content, exactly like the plugin console's tab bar.
-        self.tab_bar.setStyleSheet(
-            "QTabBar#assistantTabBar { background: transparent; }"
-            f"QTabBar#assistantTabBar::tab {{ background: {palette.surface};"
-            f" color: {palette.text_secondary}; font-weight: bold;"
-            " padding: 7px 16px; margin-right: 3px; border: none;"
-            " border-top-left-radius: 8px; border-top-right-radius: 8px; }"
-            f"QTabBar#assistantTabBar::tab:selected {{ background: {body};"
-            f" color: {palette.text}; }}"
-            f"QTabBar#assistantTabBar::tab:hover:!selected {{"
-            f" background: {palette.surface_hover}; }}")
+

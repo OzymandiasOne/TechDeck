@@ -40,6 +40,7 @@ ACT_CLEAR = "clear"
 ACT_REFRESH = "refresh"
 ACT_EDIT_NOTE = "edit_note"  # payload: {"note_id": ...}
 ACT_PREFS = "prefs"
+ACT_REMINDERS = "reminders"   # payload: {"open": bool} to open the settings
 
 
 @dataclass
@@ -95,6 +96,7 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /export md|ics|txt                save the plan (ics imports into Outlook)
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
+  /remind [on|off|<minutes>]        desktop reminders before each block
   /clear                            wipe the terminal (this one really does delete it)
 
 Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1-p4.
@@ -147,6 +149,8 @@ class AssistantBrain:
             "set": self._cmd_set,
             "purge": self._cmd_purge,
             "clear": self._cmd_clear,
+            "remind": self._cmd_remind, "reminders": self._cmd_remind,
+            "notify": self._cmd_remind,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -161,6 +165,44 @@ class AssistantBrain:
 
     def _cmd_help(self, args: str, now: datetime) -> Reply:
         return Reply().say(HELP_TEXT, ROLE_SYSTEM)
+
+    def _cmd_remind(self, args: str, now: datetime) -> Reply:
+        """`/remind` reports, `/remind on|off` toggles, `/remind 15` sets the
+        warning time. Bare `/remind` also opens the settings window, since that
+        is where the rest of the knobs live."""
+        notify = self.store.notify
+        token = args.strip().lower()
+
+        if token in ("on", "off"):
+            notify.enabled = token == "on"
+            self.store.save_notify_prefs(notify)
+            return Reply(dirty=True, action=ACT_REMINDERS).say(
+                f"Reminders {token}.")
+
+        digits = "".join(c for c in token if c.isdigit())
+        if digits:
+            notify.lead_minutes = int(digits)
+            notify.enabled = True
+            self.store.save_notify_prefs(
+                type(notify).from_dict(notify.to_dict()))
+            return Reply(dirty=True, action=ACT_REMINDERS).say(
+                f"I'll warn you {self.store.notify.lead_minutes} minutes "
+                f"before each block.")
+
+        state = "on" if notify.enabled else "off"
+        lines = [
+            f"Reminders are {state}.",
+            f"  warning        {notify.lead_minutes} min before a block",
+            f"  morning plan   {'yes at ' + notify.digest_at if notify.daily_digest else 'no'}",
+            f"  overdue        {'yes' if notify.overdue else 'no'}",
+            f"  quiet hours    {'outside your working day' if notify.quiet_outside_hours else 'never quiet'}",
+            "",
+            "These only arrive while TechDeck is open. For reminders that",
+            "reach you with it closed, export the plan as a calendar file",
+            "and open it in Outlook.",
+        ]
+        return Reply(action=ACT_REMINDERS, payload={"open": True}).result(
+            "\n".join(lines))
 
     def _cmd_clear(self, args: str, now: datetime) -> Reply:
         return Reply(action=ACT_CLEAR).system(
