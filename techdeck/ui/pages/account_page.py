@@ -13,9 +13,10 @@ import os
 from pathlib import Path
 
 from techdeck.ui.avatars import normalise_for_storage, user_avatar
+from techdeck.ui.widgets.avatar_button import AvatarButton
 
-# Big enough to actually see the picture you just chose.
-AVATAR_PREVIEW_PX = 84
+# Big enough to read a face and to hold the hover camera comfortably.
+AVATAR_PREVIEW_PX = 72
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import APP_VERSION
@@ -59,47 +60,43 @@ class AccountPage(QWidget, ThemeAware):
         # ===== User Info Section =====
         user_section = self._create_section("User Information")
 
-        # --- Profile picture -------------------------------------------------
-        # Sits at the top of the section because it is the thing people come
-        # here to change after seeing their initials in the Assistant.
-        picture_row = QHBoxLayout()
-        picture_row.setSpacing(14)
+        # --- Identity card ---------------------------------------------------
+        # The Office 365 shape: picture, name, email. The picture IS the
+        # button, dimming under a camera on hover, so there is no "Choose
+        # image…" button and no paragraph explaining what a profile picture is.
+        identity_row = QHBoxLayout()
+        identity_row.setSpacing(14)
 
-        self.avatar_preview = QLabel()
-        self.avatar_preview.setFixedSize(AVATAR_PREVIEW_PX, AVATAR_PREVIEW_PX)
-        self.avatar_preview.setStyleSheet("background: transparent;")
-        picture_row.addWidget(self.avatar_preview, 0, Qt.AlignmentFlag.AlignTop)
+        self.avatar_button = AvatarButton(AVATAR_PREVIEW_PX)
+        self.avatar_button.clicked.connect(self._choose_avatar)
+        identity_row.addWidget(self.avatar_button, 0,
+                               Qt.AlignmentFlag.AlignVCenter)
 
-        picture_buttons = QVBoxLayout()
-        picture_buttons.setSpacing(6)
-        picture_label = QLabel("Profile picture:")
-        picture_label.setStyleSheet("font-weight: 600;")
-        picture_buttons.addWidget(picture_label)
+        identity_text = QVBoxLayout()
+        identity_text.setSpacing(2)
+        identity_text.addStretch()
+        self.identity_name = QLabel()
+        self.identity_name.setStyleSheet("font-size: 15px; font-weight: 600;")
+        identity_text.addWidget(self.identity_name)
 
-        button_row = QHBoxLayout()
-        button_row.setSpacing(8)
-        self.choose_avatar_btn = QPushButton("Choose image…")
-        self.choose_avatar_btn.setMinimumHeight(32)
-        self.choose_avatar_btn.clicked.connect(self._choose_avatar)
-        button_row.addWidget(self.choose_avatar_btn)
+        self.identity_email = QLabel()
+        self._style_secondary(self.identity_email, "font-size: 12px;")
+        identity_text.addWidget(self.identity_email)
 
-        self.clear_avatar_btn = QPushButton("Remove")
-        self.clear_avatar_btn.setMinimumHeight(32)
+        # Only appears once there is a picture to remove, so the card stays
+        # two lines until it has a reason to be three.
+        self.clear_avatar_btn = QPushButton("Remove picture")
+        self.clear_avatar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_avatar_btn.setFlat(True)
         self.clear_avatar_btn.clicked.connect(self._clear_avatar)
-        button_row.addWidget(self.clear_avatar_btn)
-        button_row.addStretch()
-        picture_buttons.addLayout(button_row)
+        identity_text.addWidget(self.clear_avatar_btn,
+                                0, Qt.AlignmentFlag.AlignLeft)
+        identity_text.addStretch()
 
-        self.avatar_hint = QLabel(
-            "Shown next to your messages in the Assistant. "
-            "Square images look best; anything else is centre-cropped.")
-        self.avatar_hint.setWordWrap(True)
-        self._style_secondary(self.avatar_hint, "font-size: 11px;")
-        picture_buttons.addWidget(self.avatar_hint)
-        picture_buttons.addStretch()
-
-        picture_row.addLayout(picture_buttons, 1)
-        user_section.addLayout(picture_row)
+        identity_row.addLayout(identity_text, 1)
+        identity_row.addStretch()
+        user_section.addLayout(identity_row)
+        user_section.addSpacing(8)
 
         # Username (read-only, from Windows)
         username_label = QLabel("Username (Windows Login):")
@@ -380,14 +377,33 @@ class AccountPage(QWidget, ThemeAware):
                 or os.environ.get("USERNAME", "You"))
 
     def _refresh_avatar(self):
-        """Redraw the preview and enable/disable Remove."""
-        if not hasattr(self, "avatar_preview"):
+        """Redraw the identity card: picture, name, email, and whether there is
+        a picture to remove."""
+        if not hasattr(self, "avatar_button"):
             return
-        accent = self.get_current_palette().accent
-        self.avatar_preview.setPixmap(
-            user_avatar(self.settings, self._display_name(), accent,
+        palette = self.get_current_palette()
+        self.avatar_button.set_pixmap(
+            user_avatar(self.settings, self._display_name(), palette.accent,
                         AVATAR_PREVIEW_PX))
-        self.clear_avatar_btn.setEnabled(self.settings.has_avatar())
+
+        data = self.settings.get_user_data() or {}
+        self.identity_name.setText(self._display_name())
+        self.identity_email.setText(
+            str(data.get("email") or "").strip()
+            or os.environ.get("USERNAME", ""))
+
+        self.clear_avatar_btn.setVisible(self.settings.has_avatar())
+        self.clear_avatar_btn.setStyleSheet(f"""
+            QPushButton {{
+                border: none;
+                background: transparent;
+                color: {palette.accent};
+                font-size: 12px;
+                padding: 0px;
+                text-align: left;
+            }}
+            QPushButton:hover {{ text-decoration: underline; }}
+        """)
 
     def _choose_avatar(self):
         path, _chosen = QFileDialog.getOpenFileName(

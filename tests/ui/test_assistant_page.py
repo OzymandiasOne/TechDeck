@@ -762,3 +762,76 @@ def test_the_page_navigates_on_an_account_link(page, monkeypatch):
     monkeypatch.setattr(page, "_go_to_page", went.append)
     page._on_internal_link(ACCOUNT_URL)
     assert went == ["account"]
+
+
+# ── the My Account identity card ─────────────────────────────────────────────
+
+@pytest.fixture
+def account(qapp, tmp_path):
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui.pages.account_page import AccountPage
+    settings = SettingsManager(tmp_path / "cfg")
+    settings.update_user_data(name="Anthony Siebenmorgen",
+                             email="ada.sparks@example.com")
+    return AccountPage(settings)
+
+
+def test_the_card_shows_the_name_and_email(account):
+    assert account.identity_name.text() == "Anthony Siebenmorgen"
+    assert account.identity_email.text() == "ada.sparks@example.com"
+
+
+def test_remove_only_appears_once_there_is_a_picture(account, tmp_path):
+    """The card stays two lines until it has a reason to be three."""
+    from techdeck.ui import avatars
+    # isHidden(), not isVisible(): the page itself is never shown in a test,
+    # so isVisible() is False regardless of what we asked for.
+    assert account.clear_avatar_btn.isHidden()
+
+    avatars.normalise_for_storage(
+        _square_png(tmp_path / "me.png")
+    ).save(str(account.settings.avatar_path()), "PNG")
+    account._refresh_avatar()
+    assert not account.clear_avatar_btn.isHidden()
+
+    account._clear_avatar()
+    assert account.clear_avatar_btn.isHidden()
+
+
+def test_renaming_yourself_updates_the_card(account):
+    account.name_input.setText("Woogy Woogerson")
+    account.settings.update_user_data(name="Woogy Woogerson")
+    account._refresh_avatar()
+    assert account.identity_name.text() == "Woogy Woogerson"
+
+
+def test_the_avatar_is_the_button(qapp):
+    """No "Choose image…" button any more: the picture is the affordance."""
+    from techdeck.ui.widgets.avatar_button import AvatarButton
+    button = AvatarButton(72)
+    fired = []
+    button.clicked.connect(lambda: fired.append(True))
+    button.clicked.emit()
+    assert fired == [True]
+    assert button.toolTip() == "Change or add profile picture"
+
+
+def test_the_camera_only_shows_on_hover(qapp):
+    from techdeck.ui.widgets.avatar_button import AvatarButton
+    from techdeck.ui import avatars
+
+    button = AvatarButton(72)
+    button.set_pixmap(avatars.initials_avatar("A B", "#2878A8", 72))
+
+    resting = button.grab().toImage()
+    button._hover = True
+    hovered = button.grab().toImage()
+    assert resting != hovered
+
+    # The scrim is a CIRCLE: the avatar leaves its corners empty and the hover
+    # state must not paint over them. (A widget grab is opaque, so compare the
+    # corner across the two states rather than looking for transparency.)
+    assert hovered.pixelColor(1, 1) == resting.pixelColor(1, 1)
+    # ...while the disc itself got darker.
+    assert (hovered.pixelColor(36, 10).lightness()
+            < resting.pixelColor(36, 10).lightness())
