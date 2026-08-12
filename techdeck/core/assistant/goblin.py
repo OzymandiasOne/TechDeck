@@ -486,7 +486,7 @@ _STOP_LINES = [
 
 _SHOUT_LINES = [
     "AH! Okay!",
-    "Woogy heard that one!",
+    "Woogy cowers behind the counter. Only the top of his head is visible.",
     "Loud! Woogy is awake!",
     "YES. Whatever it is, YES.",
     "Woogy jumped a little.",
