@@ -352,7 +352,12 @@ def page(qapp, tmp_path, monkeypatch):
         lambda self, base_dir=None: original(self, tmp_path / "assistant"))
     from techdeck.core.settings import SettingsManager
     from techdeck.ui.pages.assistant_page import AssistantPage
-    return AssistantPage(SettingsManager())
+    built = AssistantPage(SettingsManager())
+    # Answer synchronously here. The real page waits a beat before Woogy
+    # speaks; a test asserting straight after submit() would otherwise be
+    # racing a QTimer.
+    built.REPLY_DELAY_MS = 0
+    return built
 
 
 def test_typing_is_answered_and_kept_but_never_filed(page):
@@ -850,3 +855,33 @@ def test_the_input_hint_is_italic_only_while_it_is_empty(qapp):
 
     line.field.clear()
     assert line.field.font().italic()
+
+
+def test_woogy_waits_a_beat_before_answering(qapp, page):
+    """Your line lands at once; his comes after a pause. An instant reply
+    reads as a lookup table rather than somebody on the other end."""
+    from techdeck.ui.pages.assistant_page import _DEFAULT_REPLY_DELAY_MS
+    assert _DEFAULT_REPLY_DELAY_MS > 0
+
+    page.REPLY_DELAY_MS = _DEFAULT_REPLY_DELAY_MS
+    page.submit("morning")
+
+    text = page.terminal.toPlainText()
+    assert "morning" in text          # yours is there immediately
+    assert "Woogy" not in text        # his is not
+
+    # ...and arrives once the timer fires.
+    from PySide6.QtCore import QEventLoop, QTimer
+    loop = QEventLoop()
+    QTimer.singleShot(_DEFAULT_REPLY_DELAY_MS + 250, loop.quit)
+    loop.exec()
+    assert "Woogy" in page.terminal.toPlainText()
+
+
+def test_the_work_happens_immediately_even_though_the_reply_waits(qapp, page):
+    """Only the RENDERING waits. Doing the work late would let a fast typist
+    reorder their own conversation."""
+    from techdeck.ui.pages.assistant_page import _DEFAULT_REPLY_DELAY_MS
+    page.REPLY_DELAY_MS = _DEFAULT_REPLY_DELAY_MS
+    page.submit("/task fix the PO sheet 45m")
+    assert [t.title for t in page.store.tasks] == ["fix the PO sheet"]

@@ -309,14 +309,6 @@ _PROFESSIONAL = [
     "Got it.",
 ]
 
-# Dropped in every so often, never twice close together, the whole point of
-# the rewrite is that people can trust this box not to file things behind
-# their back, and trust needs saying out loud once in a while.
-NUDGE = ("(Woogy don't write any of this down. Press “Add a task” or type "
-         "/task if you want it kept)")
-NUDGE_EVERY = 7
-
-
 class Goblin:
     """One goblin per Assistant page. Holds only the shuffled pools and a
     counter, so it can be constructed anywhere and thrown away."""
@@ -335,11 +327,9 @@ class Goblin:
             MOOD_NEUTRAL: CompendiumState(_NEUTRAL),
             "professional": CompendiumState(_PROFESSIONAL),
         }
-        self._spoken = 0
 
     def respond(self, text: str) -> str:
         """One reply to one line of free text."""
-        self._spoken += 1
         if self.professional:
             return self._pools["professional"].get_line()
 
@@ -351,11 +341,6 @@ class Goblin:
             if target and random.random() < 0.65:
                 return self._pools["rage_targeted"].get_line().format(target=target)
         return self._pools[mood].get_line()
-
-    def wants_nudge(self) -> bool:
-        """True on the first reply and every Nth after it, the reminder that
-        nothing here is being filed."""
-        return self._spoken == 1 or (self._spoken % NUDGE_EVERY == 0)
 
 
 def looks_actionable(text: str) -> bool:

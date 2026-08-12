@@ -48,15 +48,11 @@ def test_free_text_files_absolutely_nothing(brain, said):
     assert reply.lines                      # but it DOES answer
 
 
-def test_the_first_reply_says_out_loud_that_nothing_is_being_saved(brain):
-    assert "don't write any of this down" in _text(
-        brain.handle("what a morning", NOW))
-
-
-def test_the_reminder_is_not_repeated_under_every_line(brain):
-    brain.handle("what a morning", NOW)
-    second = _text(brain.handle("genuinely unbelievable", NOW))
-    assert "don't write any of this down" not in second
+def test_talking_gets_a_reply_and_nothing_else(brain):
+    """One line in, one line out. No disclaimer riding along underneath."""
+    reply = brain.handle("what a morning", NOW)
+    assert len(reply.lines) == 1
+    assert reply.lines[0][0] == "deck"
 
 
 def test_an_explicit_ask_still_captures(brain):

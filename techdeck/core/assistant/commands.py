@@ -14,7 +14,6 @@ from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from techdeck.core.assistant import nlp
-from techdeck.core.assistant.goblin import NUDGE as GOBLIN_NUDGE
 from techdeck.core.assistant.goblin import Goblin, looks_actionable
 from techdeck.core.assistant.models import (
     BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
@@ -631,8 +630,6 @@ class AssistantBrain:
         self._last_said = raw
         reply = Reply()
         reply.say(self.goblin.respond(raw))
-        if self.goblin.wants_nudge():
-            reply.system(f"   {GOBLIN_NUDGE}")
         # Offer, never act: the page shows a one-click chip and the user
         # decides. Venting is explicitly excluded from "looks actionable".
         reply.offer_task = looks_actionable(raw)

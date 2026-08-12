@@ -117,17 +117,6 @@ def test_professional_mode_gets_a_plain_acknowledgement():
         assert g.respond("this is a nightmare AGAIN") in goblin._PROFESSIONAL
 
 
-def test_the_nudge_fires_first_then_rarely():
-    g = Goblin()
-    fired = []
-    for _ in range(goblin.NUDGE_EVERY * 3):
-        g.respond("hm")
-        fired.append(g.wants_nudge())
-    assert fired[0] is True
-    assert fired[1] is False
-    assert sum(fired) <= 4          # occasional reassurance, not nagging
-
-
 # ── looks_actionable ─────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("text", [
