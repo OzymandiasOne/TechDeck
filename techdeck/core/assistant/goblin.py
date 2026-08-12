@@ -36,6 +36,7 @@ from techdeck.core.flavor import CompendiumState
 # ── Moods ────────────────────────────────────────────────────────────────────
 
 MOOD_RAGE = "rage"
+MOOD_AT_ME = "at_me"
 MOOD_TIRED = "tired"
 MOOD_WIN = "win"
 MOOD_GREETING = "greeting"
@@ -98,6 +99,42 @@ _TARGETS: Dict[str, str] = {
 _CAPS_WORD = re.compile(r"\b[A-Z]{3,}\b")
 _WORD = re.compile(r"\b[A-Za-z]{3,}\b")
 
+# Is the complaint pointed at WOOGY, rather than at Excel or the printer?
+# Second person, his name, or the app itself. Answering "i hate you" with a
+# line about some imaginary third party is the one thing an abuse goblin
+# really cannot get wrong.
+_AT_ME = re.compile(
+    r"\b(?:you|you'?re|youre|your|yours|yourself|u|ur|woogy|techdeck)\b"
+    r"|\bthis (?:app|thing|program|terminal|assistant|bot|goblin)\b", re.I)
+
+# Aimed language only counts as abuse when it is actually unkind. "can you
+# check the schedule" is second person too.
+_INSULT = re.compile(
+    r"\b(hate|suck|sucks|sucked|stupid|dumb|idiot|moron|useless|worthless|"
+    r"pointless|annoying|irritating|garbage|trash|rubbish|terrible|awful|"
+    r"lame|cringe|unfunny|not funny|worst|shut up|shutup|shut it|be quiet|"
+    r"go away|leave me alone|nonsense|creepy|weird)\b", re.I)
+
+
+def is_aimed_at_me(text: str) -> bool:
+    """True when the user is having a go at Woogy himself.
+
+    Two ways in. The obvious one is second person ("i hate you", "shut up
+    woogy"). The other is a **bare verdict**: "not funny", "lame", "boring".
+    Those name no subject at all, and in a two-party chat the only thing they
+    can be about is the last thing said, which was his. The guard is that
+    there must be no recognised external culprit in the line, so "excel sucks"
+    still gets the Excel treatment.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    if not _INSULT.search(raw):
+        return False
+    if _AT_ME.search(raw):
+        return True
+    return len(raw.split()) <= 4 and read_target(raw) is None
+
 
 def read_mood(text: str) -> str:
     """Classify one line of free text.
@@ -114,7 +151,13 @@ def read_mood(text: str) -> str:
     shouting = bool(_CAPS_WORD.search(raw)) and len(raw) > 6
     bangs = raw.count("!") >= 2 or "?!" in raw
 
-    if _RAGE_WORDS.search(raw) or shouting or bangs:
+    # Before general rage: if it's pointed at him, he takes it rather than
+    # commiserating about a culprit that doesn't exist.
+    if is_aimed_at_me(raw):
+        return MOOD_AT_ME
+    # _INSULT counts here too: "excel sucks" is plainly anger, and "sucks"
+    # lives in the insult list rather than the rage list.
+    if _RAGE_WORDS.search(raw) or _INSULT.search(raw) or shouting or bangs:
         return MOOD_RAGE
     if _TIRED_WORDS.search(raw):
         return MOOD_TIRED
@@ -145,7 +188,6 @@ _RAGE = [
     "Yeah. That one's a crime.",
     "Noted, catalogued, and held against it forever.",
     "It shouldn't be like this. You're not wrong.",
-    "I'm writing down a name. Not yours. Its.",
     "Absolutely feral about this on your behalf.",
     "Keep going, I've got room.",
     "That's not a you problem. That's a *that* problem.",
@@ -159,6 +201,25 @@ _RAGE = [
     "Filed under: things that should not have happened.",
     "Cool. Cool cool cool. That's fine. That's totally fine.",
     "This is the fourth time this week and I *am* counting.",
+]
+
+# Aimed at him. He takes it. No sulking, no arguing back, no wounded bit,
+# all three would make the user manage HIS feelings, which is backwards.
+_AT_ME_LINES = [
+    "Yeah. Fair.",
+    "Go on then. I can take it.",
+    "That's what I'm here for. Genuinely.",
+    "Noted. Still not leaving.",
+    "Deserved, probably.",
+    "Better me than the printer.",
+    "Swing away. I contain no self-esteem.",
+    "I've been called worse by better software.",
+    "Get it out. I'm built for exactly this.",
+    "Okay. Anyway.",
+    "Understandable. Carry on.",
+    "Fine by me. I have enormous patience and no feelings.",
+    "That one landed. I'm fine.",
+    "Cool. I'll be here regardless.",
 ]
 
 _RAGE_TARGETED = [
@@ -257,6 +318,7 @@ class Goblin:
         self.professional = professional
         self._pools = {
             MOOD_RAGE: CompendiumState(_RAGE),
+            MOOD_AT_ME: CompendiumState(_AT_ME_LINES),
             "rage_targeted": CompendiumState(_RAGE_TARGETED),
             MOOD_TIRED: CompendiumState(_TIRED),
             MOOD_WIN: CompendiumState(_WIN),
@@ -300,8 +362,8 @@ def looks_actionable(text: str) -> bool:
     raw = (text or "").strip()
     if len(raw) < 6 or len(raw.split()) > 20:
         return False
-    if read_mood(raw) in (MOOD_RAGE, MOOD_TIRED, MOOD_WIN, MOOD_GREETING,
-                          MOOD_THANKS):
+    if read_mood(raw) in (MOOD_RAGE, MOOD_AT_ME, MOOD_TIRED, MOOD_WIN,
+                          MOOD_GREETING, MOOD_THANKS):
         return False
     if raw.rstrip().endswith("?"):
         return False

@@ -155,3 +155,62 @@ def test_a_plain_job_can_be_offered(text):
 ])
 def test_venting_rambling_and_questions_are_never_offered(text):
     assert goblin.looks_actionable(text) is False
+
+
+# ── aimed at him, versus aimed at the world ──────────────────────────────────
+
+@pytest.mark.parametrize("text", [
+    "i hate you",
+    "you suck",
+    "shut up woogy",
+    "youre useless",
+    "you are so annoying",
+    "this app is garbage",
+    "this thing is pointless",
+    "not funny",
+    "lame",
+])
+def test_abuse_pointed_at_woogy_is_recognised(text):
+    """Answering "i hate you" with a line about some imaginary third party is
+    the one thing an abuse goblin really cannot get wrong."""
+    assert goblin.read_mood(text) == goblin.MOOD_AT_ME
+
+
+@pytest.mark.parametrize("text", [
+    "excel sucks",
+    "onedrive is garbage",
+    "this printer is useless",
+    "the schedule is garbage",
+    "this rev c is stupid",
+])
+def test_abuse_pointed_at_the_world_still_gets_the_world_treatment(text):
+    """A bare verdict only reads as aimed at him when nothing else in the line
+    could be the subject."""
+    assert goblin.read_mood(text) == goblin.MOOD_RAGE
+
+
+@pytest.mark.parametrize("text", [
+    "can you check the schedule",
+    "what do you think",
+    "how are you",
+    "your plan looks right",
+])
+def test_second_person_alone_is_not_an_insult(text):
+    assert goblin.read_mood(text) != goblin.MOOD_AT_ME
+
+
+def test_he_takes_it_rather_than_arguing_back():
+    """No sulking, no arguing, no wounded bit. All three would make the user
+    manage HIS feelings, which is backwards."""
+    g = Goblin()
+    banned = ("rude", "that's not nice", "sorry you feel", "i tried",
+              "how dare", "wow.", "no need for that")
+    for _ in range(200):
+        said = g.respond("i hate you").lower()
+        for phrase in banned:
+            assert phrase not in said, said
+
+
+def test_venting_at_him_is_never_offered_as_a_task():
+    assert goblin.looks_actionable("i hate you") is False
+    assert goblin.looks_actionable("shut up woogy") is False
