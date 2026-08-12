@@ -1,13 +1,13 @@
 """Rule-based parsing for the Assistant terminal.
 
-**There is no language model behind this** — TechDeck ships offline into a
+**There is no language model behind this**, TechDeck ships offline into a
 locked-down environment, so "type what you mean" is implemented as a
 deterministic grammar of durations, dates, priorities and verbs. That is a
 feature, not a compromise: the same input always produces the same result, and
 the terminal always echoes what it understood so a wrong guess is visible and
 correctable on the spot.
 
-Everything here is pure functions over strings — no Qt, no I/O.
+Everything here is pure functions over strings, no Qt, no I/O.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _DUR_QUARTER = re.compile(r"\b(?:quarter\s+(?:of\s+)?(?:an\s+)?hour)\b", re.I)
 def parse_duration(text: str) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
     """Find a duration anywhere in ``text``.
 
-    Returns ``(minutes, (start, end))`` — the span lets the caller strip the
+    Returns ``(minutes, (start, end))``, the span lets the caller strip the
     duration out of a task title. Longest/most-specific pattern wins so
     "1h30" doesn't get read as "1 hour" with a stray 30.
     """
@@ -66,11 +66,11 @@ _PRIORITY_WORDS = {
 _PRIORITY_ANYWHERE = {"critical", "urgent", "asap", "emergency",
                       "p1", "p2", "p3", "p4"}
 _PRIORITY_RE = re.compile(
-    r"(?:^|(?<=[\s,;|(\[]))"
+    r"(?:^|(?<=[\s;|(\[]))"
     r"(?P<word>critical|urgent|asap|emergency|important|whenever|someday|"
     r"backburner|p[1-4]|high|medium|normal|med|low)"
     r"(?:\s+(?P<qual>priority|pri))?"
-    r"(?P<trail>[,;|)\]]|\s|$)", re.I)
+    r"(?P<trail>[;|)\]]|\s|$)", re.I)
 
 
 def parse_priority(text: str) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
@@ -79,7 +79,7 @@ def parse_priority(text: str) -> Tuple[Optional[str], Optional[Tuple[int, int]]]
     A word only counts when it can't be part of the task's own name:
     ``urgent``/``asap``/``p2`` are never anything else, but a bare ``high`` has
     to be qualified ("high priority"), punctuation-delimited, or sitting at the
-    end of the line — otherwise "high bay rack inspection" would silently lose
+    end of the line, otherwise "high bay rack inspection" would silently lose
     its first word.
     """
     for match in _PRIORITY_RE.finditer(text):
@@ -245,7 +245,7 @@ def parse_when(text: str, now: Optional[datetime] = None) -> WhenMatch:
                     result.spans.append(match.span())
                     break
 
-    # "eod" is a time, not a day — it means "before the day is out".
+    # "eod" is a time, not a day, it means "before the day is out".
     if result.at is None:
         eod = _RE_EOD.search(text)
         if eod:
@@ -254,7 +254,7 @@ def parse_when(text: str, now: Optional[datetime] = None) -> WhenMatch:
             if result.day is None:
                 result.day = today
 
-    # A bare time already past today rolls to tomorrow — "at 7" typed at 3pm
+    # A bare time already past today rolls to tomorrow, "at 7" typed at 3pm
     # means tomorrow morning, not eight hours ago.
     if result.day is None and result.at is not None:
         result.day = today if result.at > now.time() else today + timedelta(days=1)
@@ -333,7 +333,7 @@ def _time_12h(match: "re.Match[str]") -> Optional[time]:
 
 
 def _time_bare(match: "re.Match[str]") -> Optional[time]:
-    """'at 2' — assume the working-day reading: 1–6 means the afternoon,
+    """'at 2', assume the working-day reading: 1–6 means the afternoon,
     7–12 the morning. Wrong occasionally, and always echoed back so it can be
     corrected in one edit."""
     hour = int(match.group(1))
@@ -358,9 +358,9 @@ def parse_task_line(line: str, now: Optional[datetime] = None) -> Dict[str, Any]
 
     Two accepted shapes, both optional in every part:
 
-    * **Pipe form** — ``Fix the PO sheet | high | 45m | due friday``
+    * **Pipe form**, ``Fix the PO sheet | high | 45m | due friday``
       Fields after the title are sniffed, so their order doesn't matter.
-    * **Inline form** — ``Fix the PO sheet 45m urgent due friday at 9am``
+    * **Inline form**, ``Fix the PO sheet 45m urgent due friday at 9am``
 
     Returns a dict of ``{title, priority, estimate_min, deadline, fixed_start,
     links, splittable, notes}`` with only the keys it actually found (plus a
@@ -373,7 +373,7 @@ def parse_task_line(line: str, now: Optional[datetime] = None) -> Dict[str, Any]
     if not raw:
         return {"title": "", "parsed": []}
 
-    # Links come out first — a URL contains ':' and '/' that every other
+    # Links come out first, a URL contains ':' and '/' that every other
     # pattern below would happily mis-read as a time or a date.
     links: List[str] = []
 
@@ -472,7 +472,7 @@ def _absorb_inline(title: str, out: Dict[str, Any], now: datetime) -> str:
     # Priority is read LAST, against the fully-masked line. A bare "high" only
     # counts when nothing but the task name is left around it, so
     # "call Dan 1h30 high due tomorrow" has to lose its estimate and its due
-    # date first — otherwise "high" sits mid-sentence, fails the delimiter
+    # date first, otherwise "high" sits mid-sentence, fails the delimiter
     # test, and ends up stranded in the title.
     priority, pspan = parse_priority(_mask(title, cuts))
     if priority and pspan:
@@ -517,8 +517,8 @@ def _tidy(text: str) -> str:
     """Collapse the whitespace and dangling punctuation left behind by cutting
     tokens out of the middle of a sentence."""
     text = re.sub(r"\s+", " ", text or "").strip()
-    text = re.sub(r"^[\s,;:|\-–—]+", "", text)
-    text = re.sub(r"[\s,;:|\-–—]+$", "", text)
+    text = re.sub(r"^[\s,;:|\-–]+", "", text)
+    text = re.sub(r"[\s,;:|\-–]+$", "", text)
     return text.strip()
 
 
@@ -533,7 +533,7 @@ class Intent:
 
 
 INTENTS = (
-    "chat",         # the default — the user is TALKING, not filing anything
+    "chat",         # the default, the user is TALKING, not filing anything
     "task",         # capture a task (only ever from an explicit ask)
     "note",         # capture a note
     "schedule",     # open the schedule builder
@@ -576,7 +576,7 @@ def parse_intent(text: str) -> Intent:
 
     Order matters: the more specific a phrase is, the earlier it is tested.
 
-    **A line that matches nothing is `chat` — the user is talking.** Nothing is
+    **A line that matches nothing is `chat`, the user is talking.** Nothing is
     filed on a guess. Capture requires an explicit ask (`/task`, "add …",
     "remind me to …"), the Add a task button, or the Tasks tab. The first
     build defaulted to capturing everything, which turned "this PO sheet is a

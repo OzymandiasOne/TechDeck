@@ -2,8 +2,7 @@
 chips, and the command line.
 
 The transcript reuses the console's visual language (monospace, role-coloured
-prefixes, dark panel) so it reads as the same kind of place as Home's console —
-but it is a **separate** widget with its own history file, because this one has
+prefixes, dark panel) so it reads as the same kind of place as Home's console, but it is a **separate** widget with its own history file, because this one has
 to survive across sessions and the plugin console deliberately does not.
 """
 
@@ -40,7 +39,7 @@ class TerminalView(QTextEdit, ThemeAware):
         font.setStyleHint(QFont.StyleHint.Monospace)
         self.setFont(font)
         self.setFrameShape(QFrame.Shape.NoFrame)
-        # A read-only QTextEdit renders anchors but never acts on them — same
+        # A read-only QTextEdit renders anchors but never acts on them, same
         # filter trick the plugin console uses.
         self.viewport().installEventFilter(self)
         self.viewport().setMouseTracking(True)
@@ -70,20 +69,11 @@ class TerminalView(QTextEdit, ThemeAware):
             # Blocks of structured output (agendas, lists) get the plain body
             # colour and lean on their own indentation for structure.
             html = f'<span style="color: {palette.text};">{body}</span>'
-        else:  # 'deck' — the assistant speaking
+        else:  # 'deck', the assistant speaking
             html = (f'<span style="color: {palette.accent}; font-weight: bold;">'
                     f'&#9670;</span> <span style="color: {palette.text};">'
                     f'{body}</span>')
         self.append(html)
-        self._scroll_to_bottom()
-
-    def append_separator(self, label: str):
-        """A dim, centred divider — used to mark where a previous session's
-        history ends and this one begins."""
-        palette = self.get_current_palette()
-        self.append(
-            f'<div style="color: {palette.text_secondary};">'
-            f'──────── {_escape(label)} ────────</div>')
         self._scroll_to_bottom()
 
     def _scroll_to_bottom(self):
@@ -191,10 +181,7 @@ class CommandLine(QWidget, ThemeAware):
 
         self.field = QLineEdit()
         self.field.setMinimumHeight(38)
-        # The placeholder is a promise. It used to advertise task shorthand,
-        # which implied that typing files things — the opposite of the rule.
-        self.field.setPlaceholderText(
-            "Say anything — nothing gets filed unless you ask.  /help")
+        self.field.setPlaceholderText("/help")
         self.field.returnPressed.connect(self._submit)
         self.field.installEventFilter(self)
 

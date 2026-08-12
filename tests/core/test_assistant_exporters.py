@@ -1,6 +1,6 @@
 """Schedule exports.
 
-The .ics is the one with a hard contract — it has to survive Outlook's
+The .ics is the one with a hard contract, it has to survive Outlook's
 importer, which means CRLF line endings, escaped text, and folded long lines.
 The markdown/text exports just have to be complete.
 """

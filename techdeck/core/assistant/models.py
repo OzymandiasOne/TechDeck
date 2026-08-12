@@ -1,4 +1,4 @@
-"""Assistant data model — plain dataclasses, JSON round-trippable.
+"""Assistant data model, plain dataclasses, JSON round-trippable.
 
 Every model carries ``to_dict`` / ``from_dict`` so the store can persist them
 without a serializer library, and so an older settings file that predates a
@@ -38,7 +38,7 @@ def now_iso() -> str:
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     """Tolerant ISO parse. Accepts a bare date ('2026-08-12' → midnight) and
-    returns None for anything unparseable rather than raising — a hand-edited
+    returns None for anything unparseable rather than raising, a hand-edited
     JSON file must never take the page down."""
     if not value:
         return None
@@ -77,7 +77,7 @@ class ChatMessage:
 @dataclass
 class Note:
     """A free-form note. ``body`` is plain text with leading-space indentation
-    for nested bullets — deliberately NOT rich text, so a note stays greppable,
+    for nested bullets, deliberately NOT rich text, so a note stays greppable,
     diff-able, and exportable as-is."""
     id: str = field(default_factory=lambda: new_id("n_"))
     title: str = "Untitled note"
@@ -127,8 +127,8 @@ class TaskItem:
     links: List[str] = field(default_factory=list)
     priority: str = "medium"
     estimate_min: int = 30
-    deadline: Optional[str] = None       # ISO date or datetime — "due by"
-    fixed_start: Optional[str] = None    # ISO datetime — an immovable appointment
+    deadline: Optional[str] = None       # ISO date or datetime, "due by"
+    fixed_start: Optional[str] = None    # ISO datetime, an immovable appointment
     splittable: bool = True              # may be sliced across several blocks
     done: bool = False
     done_at: Optional[str] = None
@@ -196,7 +196,7 @@ class TaskItem:
         return 1.0
 
     def score(self, today: date) -> float:
-        """WSJF — cost of delay per minute of work. Ranks a 15-minute high
+        """WSJF, cost of delay per minute of work. Ranks a 15-minute high
         against a 3-hour critical honestly instead of always running the
         loudest task first."""
         return (self.weight * self.urgency_multiplier(today)) / max(5, self.estimate_min)
@@ -331,7 +331,7 @@ class SchedulePrefs:
     # focus_block_min to 0 to switch breathers off entirely.
     focus_block_min: int = 90
     breather_min: int = 10
-    # Smallest slice a splittable task may be cut into — below this, context
+    # Smallest slice a splittable task may be cut into, below this, context
     # switching costs more than the slot is worth.
     min_chunk_min: int = 25
     # Every estimate is padded by this much. People under-estimate; a plan
@@ -386,12 +386,12 @@ def parse_hhmm(value: str, default: time) -> time:
 
 
 def fmt_time(dt: datetime) -> str:
-    """12-hour clock without the leading zero — '7:00 AM', '1:45 PM'."""
+    """12-hour clock without the leading zero, '7:00 AM', '1:45 PM'."""
     return dt.strftime("%I:%M %p").lstrip("0")
 
 
 def fmt_day(d: date) -> str:
-    """'Tue, Aug 12' — with 'Today'/'Tomorrow' when that's what it is."""
+    """'Tue, Aug 12', with 'Today'/'Tomorrow' when that's what it is."""
     today = date.today()
     if d == today:
         return f"Today · {d.strftime('%a, %b')} {d.day}"

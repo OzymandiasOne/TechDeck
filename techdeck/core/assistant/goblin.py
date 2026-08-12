@@ -1,4 +1,4 @@
-"""The abuse goblin — the thing that lives in the Assistant's terminal.
+"""The abuse goblin, the thing that lives in the Assistant's terminal.
 
 **Why this exists.** The first build treated every unmatched line as a task to
 capture. That is wrong, and it is wrong in an annoying way: someone who types
@@ -14,12 +14,12 @@ happens on the Add a task button, the Tasks tab, `/task`, or an explicit
 **The rules the goblin obeys.**
 
 1. It never insults the user. Ever. The abuse flows *in*, and whatever comes
-   back out is aimed at the situation — Excel, OneDrive, the printer, the
-   schedule — never at the person typing.
+   back out is aimed at the situation (Excel, OneDrive, the printer, the
+   schedule) and never at the person typing.
 2. It doesn't fix, advise, or reframe unless asked. "That sounds hard, have you
    tried…" is exactly the wrong answer to a vent.
 3. It swears in goblin. Somebody's colleague can walk past this screen.
-4. It shuts up in the professional theme — client demos get a plain,
+4. It shuts up in the professional theme. Client demos get a plain,
    neutral acknowledgement and nothing else.
 
 No Qt, no I/O, no state on disk. Pure text in, text out.
@@ -45,8 +45,8 @@ MOOD_NEUTRAL = "neutral"
 
 
 _RAGE_WORDS = re.compile(
-    # "tired OF something" is a complaint about that thing, not exhaustion —
-    # it belongs here, and rage is tested first so it wins.
+    # "tired OF something" is a complaint about that thing, not exhaustion.
+    # It belongs here, and rage is tested first so it wins.
     r"\b(hate|hates|hating|sick of|tired of|fed up|furious|livid|raging|screaming|"
     r"stupid|idiotic|moronic|garbage|trash|useless|worthless|broken|busted|"
     r"nightmare|disaster|ridiculous|absurd|insane|unbelievable|infuriating|"
@@ -209,7 +209,7 @@ _THANKS = [
     "Don't. I did nothing. Mostly.",
     "I exist to absorb. It's fine.",
     "Sure. Any time.",
-    "That's what I'm for. Well — that and lurking.",
+    "That's what I'm for. Well, that and lurking.",
     "Noted. Do not make it weird.",
 ]
 
@@ -241,11 +241,11 @@ _PROFESSIONAL = [
     "Got it.",
 ]
 
-# Dropped in every so often, never twice close together — the whole point of
+# Dropped in every so often, never twice close together, the whole point of
 # the rewrite is that people can trust this box not to file things behind
 # their back, and trust needs saying out loud once in a while.
-NUDGE = ("(nothing you say here gets saved — press “Add a task” or type "
-         "/task to file something)")
+NUDGE = ("(nothing here gets saved. Press “Add a task” or type /task "
+         "to file something)")
 NUDGE_EVERY = 7
 
 
@@ -277,14 +277,14 @@ class Goblin:
         mood = read_mood(text)
         if mood == MOOD_RAGE:
             target = read_target(text)
-            # Namedrop when we know the culprit, but not every single time —
-            # a goblin that always says the magic word stops being funny.
+            # Namedrop when we know the culprit, but not every single time.
+            # A goblin that always says the magic word stops being funny.
             if target and random.random() < 0.65:
                 return self._pools["rage_targeted"].get_line().format(target=target)
         return self._pools[mood].get_line()
 
     def wants_nudge(self) -> bool:
-        """True on the first reply and every Nth after it — the reminder that
+        """True on the first reply and every Nth after it, the reminder that
         nothing here is being filed."""
         return self._spoken == 1 or (self._spoken % NUDGE_EVERY == 0)
 
@@ -292,7 +292,7 @@ class Goblin:
 def looks_actionable(text: str) -> bool:
     """Could this line plausibly be a task, if the user decided it was?
 
-    Used only to decide whether to OFFER a one-click "make that a task" — never
+    Used only to decide whether to OFFER a one-click "make that a task", never
     to file anything. It deliberately says no to venting: a complaint contains
     plenty of verbs, and offering to add "this printer is garbage" to someone's
     to-do list is the joke the goblin exists to prevent.

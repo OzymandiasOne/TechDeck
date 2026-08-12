@@ -1,6 +1,6 @@
 """The terminal's brain: one typed line in, a reply plus an optional UI action out.
 
-Deliberately Qt-free. ``AssistantBrain.handle`` returns a :class:`Reply` — the
+Deliberately Qt-free. ``AssistantBrain.handle`` returns a :class:`Reply`, the
 lines to print and, when the request needs the interface to do something
 (open the schedule builder, jump to a tab, put up a save dialog), a named
 ``action`` for the page to carry out. That split is what makes the whole
@@ -51,7 +51,7 @@ class Reply:
     # its panels without every handler having to say so.
     dirty: bool = False
     # The user said something that COULD be a task. The page offers a one-click
-    # "make that a task" chip — it never files anything on this alone.
+    # "make that a task" chip, it never files anything on this alone.
     offer_task: bool = False
 
     def say(self, text: str, role: str = ROLE_DECK) -> "Reply":
@@ -97,7 +97,7 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /purge                            clear out finished tasks
   /clear                            wipe the terminal (this one really does delete it)
 
-Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1–p4.
+Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1-p4.
 When: today · tomorrow · friday · 8/14 · in 2 days · at 2pm · due eod.
 """
 
@@ -164,8 +164,7 @@ class AssistantBrain:
 
     def _cmd_clear(self, args: str, now: datetime) -> Reply:
         return Reply(action=ACT_CLEAR).system(
-            "Terminal cleared. Your history is still on disk — "
-            "reopen the page to see it again.")
+            "Terminal cleared. That wipes the saved history too.")
 
     # -- scheduling ----------------------------------------------------------
 
@@ -188,7 +187,7 @@ class AssistantBrain:
                       f"{open_count} open task{'s' if open_count != 1 else ''} "
                       f"loaded in.")
         else:
-            reply.say("Opening the schedule builder — add your tasks in step 2.")
+            reply.say("Opening the schedule builder. Add your tasks in step 2.")
         return reply
 
     def _cmd_replan(self, args: str, now: datetime) -> Reply:
@@ -236,7 +235,7 @@ class AssistantBrain:
 
     def _agenda_for(self, start: date, end: date, now: datetime,
                     label: str) -> Reply:
-        """Read the saved plan for a date range — this reports what was PLANNED,
+        """Read the saved plan for a date range, this reports what was PLANNED,
         it doesn't invent a new plan. /replan is the one that re-solves."""
         schedule = self.store.latest_schedule()
         reply = Reply()
@@ -277,7 +276,7 @@ class AssistantBrain:
 
     def _cmd_task(self, args: str, now: datetime) -> Reply:
         """`/task <line>` files it. A bare `/task` promotes the last thing you
-        said — which is the point of not auto-filing: you can talk freely, and
+        said, which is the point of not auto-filing: you can talk freely, and
         if it turns out one of those lines was actually a job, it's one word
         away instead of a retype."""
         if not args:
@@ -345,7 +344,7 @@ class AssistantBrain:
             lines.append(f"  ☐ {task.label()}"
                          f"   [{task.priority}, {fmt_duration(task.estimate_min)}]{flag}")
         total = sum(t.estimate_min for t in tasks)
-        lines.append(f"  — {fmt_duration(total)} of work on the books.")
+        lines.append(f"  {fmt_duration(total)} of work on the books.")
         return Reply().result("\n".join(lines))
 
     def _cmd_done(self, args: str, now: datetime) -> Reply:
@@ -361,7 +360,7 @@ class AssistantBrain:
         if not matches:
             return Reply().error(f"No open task matching “{needle.strip()}”.")
         if len(matches) > 1:
-            reply = Reply().say(f"That matches {len(matches)} tasks — "
+            reply = Reply().say(f"That matches {len(matches)} tasks, "
                                 f"be a bit more specific:")
             for task in matches[:8]:
                 reply.system(f"   • {task.label()}")
@@ -378,7 +377,7 @@ class AssistantBrain:
         if not matches:
             return Reply().error(f"No task matching “{args.strip()}”.")
         if len(matches) > 1:
-            reply = Reply().say(f"That matches {len(matches)} tasks — "
+            reply = Reply().say(f"That matches {len(matches)} tasks, "
                                 f"be a bit more specific:")
             for task in matches[:8]:
                 reply.system(f"   • {task.label()}")
@@ -397,7 +396,7 @@ class AssistantBrain:
     # -- notes ---------------------------------------------------------------
 
     def _cmd_note(self, args: str, now: datetime) -> Reply:
-        title = args.strip() or f"Note — {now.strftime('%b %d, %I:%M %p').replace(' 0', ' ')}"
+        title = args.strip() or f"Note {now.strftime('%b %d, %I:%M %p').replace(' 0', ' ')}"
         note = Note(title=title[:80], body="")
         self.store.add_note(note)
         return Reply(action=ACT_EDIT_NOTE, payload={"note_id": note.id},
@@ -406,7 +405,7 @@ class AssistantBrain:
     def _capture_note(self, text: str, now: datetime) -> Reply:
         """Free-text note capture. The first line becomes the title when it
         reads like one; otherwise the note is stamped with the time and the
-        whole thing is the body — nothing typed is ever thrown away."""
+        whole thing is the body, nothing typed is ever thrown away."""
         body = text.rstrip()
         lines = body.splitlines()
         first = lines[0].strip() if lines else ""
@@ -417,8 +416,8 @@ class AssistantBrain:
             body = "\n".join(lines[1:]).strip("\n")
         else:
             title = (first[:60] if first else
-                     f"Note — {now.strftime('%b %d')}")
-            title = title.lstrip("-*• ").strip() or f"Note — {now.strftime('%b %d')}"
+                     f"Note {now.strftime('%b %d')}")
+            title = title.lstrip("-*• ").strip() or f"Note {now.strftime('%b %d')}"
 
         note = Note(title=title, body=body)
         self.store.add_note(note)
@@ -583,7 +582,7 @@ class AssistantBrain:
         return self._chat(raw)
 
     def _chat(self, raw: str) -> Reply:
-        """The default. The user is talking — so listen, answer, and file
+        """The default. The user is talking, so listen, answer, and file
         NOTHING. This is the whole contract of the page: the terminal is a
         place you can complain at 6:40am without it turning your complaint
         into a chore."""

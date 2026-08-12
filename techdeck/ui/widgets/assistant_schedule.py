@@ -1,7 +1,7 @@
 """The Schedule and Tasks tabs.
 
 ``SchedulePanel`` renders a generated plan as a day-by-day agenda you can tick
-off as you go — ticking a block completes the underlying task everywhere, which
+off as you go, ticking a block completes the underlying task everywhere, which
 is the whole reason the plan references task ids instead of copying titles.
 
 ``TasksPanel`` is the backlog: everything captured but not yet done, ordered by
@@ -173,9 +173,9 @@ class SchedulePanel(QWidget, ThemeAware):
 
     def _show_export_menu(self):
         menu = QMenu(self)
-        menu.addAction("Calendar file (.ics) — imports into Outlook",
+        menu.addAction("Calendar file (.ics) for Outlook",
                        lambda: self.export_requested.emit("ics"))
-        menu.addAction("Markdown (.md) — paste into Teams",
+        menu.addAction("Markdown (.md) for Teams",
                        lambda: self.export_requested.emit("md"))
         menu.addAction("Plain text (.txt)",
                        lambda: self.export_requested.emit("txt"))
@@ -196,7 +196,7 @@ class SchedulePanel(QWidget, ThemeAware):
             self.export_btn.setEnabled(False)
             empty = QLabel(
                 "Nothing planned yet.\n\n"
-                "Tell me what's on your plate and I'll lay the day out — "
+                "Tell me what's on your plate and I'll lay the day out: "
                 "what to do, when, and what won't fit.")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setWordWrap(True)
@@ -319,7 +319,7 @@ class SchedulePanel(QWidget, ThemeAware):
                             f"background: transparent; {extra}")
         layout.addWidget(label, 1)
 
-        # "You are here" — the single most useful thing an agenda can tell you
+        # "You are here", the single most useful thing an agenda can tell you
         # when you glance at it mid-morning.
         start, end = block.start_dt(), block.end_dt()
         if start and end and start <= now < end:
@@ -365,7 +365,7 @@ class SchedulePanel(QWidget, ThemeAware):
         box.addWidget(note)
 
         for item in schedule.unscheduled:
-            row = QLabel(f"• {item.get('title', '')}  —  {item.get('reason', '')}")
+            row = QLabel(f"• {item.get('title', '')}: {item.get('reason', '')}")
             row.setWordWrap(True)
             row.setStyleSheet(f"color: {palette.text}; background: transparent;")
             box.addWidget(row)
@@ -411,7 +411,7 @@ class TasksPanel(QWidget, ThemeAware):
         self.quick_add = QLineEdit()
         self.quick_add.setMinimumHeight(34)
         self.quick_add.setPlaceholderText(
-            "Add a task — “order the 4130 tube 20m high due friday”")
+            "Add a task: “order the 4130 tube 20m high due friday”")
         self.quick_add.returnPressed.connect(self._quick_add)
         add_row.addWidget(self.quick_add, 1)
 

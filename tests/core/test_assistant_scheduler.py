@@ -89,7 +89,7 @@ def test_a_deadline_today_beats_a_better_score():
 
 
 def test_within_a_bucket_cost_of_delay_per_minute_wins():
-    """A 15-minute high beats a 3-hour critical — five quick wins shouldn't
+    """A 15-minute high beats a 3-hour critical, five quick wins shouldn't
     rot behind one big job."""
     schedule = _build([
         TaskItem(title="slow-critical", priority="critical", estimate_min=180),

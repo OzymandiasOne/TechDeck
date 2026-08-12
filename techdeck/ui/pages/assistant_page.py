@@ -1,4 +1,4 @@
-"""The Assistant page — TechDeck's personal organizer.
+"""The Assistant page, TechDeck's personal organizer.
 
 A terminal with tabs above it and a command line below. The terminal is where
 you talk to it; the other tabs are where the results live:
@@ -9,7 +9,7 @@ you talk to it; the other tabs are where the results live:
     Tasks           the backlog everything else is built from
 
 The command line and the word-bubble chips sit **below the tab stack**, so they
-stay reachable no matter which tab is showing — you're never more than one line
+stay reachable no matter which tab is showing, you're never more than one line
 of typing away from capturing something.
 
 All the thinking happens in ``techdeck.core.assistant``; this module is wiring
@@ -50,15 +50,10 @@ _TAB_KEYS = {"terminal": TAB_TERMINAL, "schedule": TAB_SCHEDULE,
 # what's worth scrolling through.
 HISTORY_LINES = 300
 
-GREETING = (
-    "Talk to me. Complain, think out loud, whatever — none of it gets filed "
-    "unless you ask. Press “Add a task” or type /task when you actually want "
-    "something on a list. /help has the rest."
-)
-GREETING_PROFESSIONAL = (
-    "Assistant ready. Free text is not stored as a task — use “Add a task”, "
-    "/task, or the Tasks tab. /help lists every command."
-)
+# No greeting, and no session divider. The terminal opens on whatever you last
+# said and nothing else. An explainer at the top of a chat box is read once,
+# ignored forever, and then sits there being wrong the moment the behaviour
+# changes; the chips and /help carry the same information on demand.
 
 
 class AssistantPage(QWidget, ThemeAware):
@@ -68,7 +63,7 @@ class AssistantPage(QWidget, ThemeAware):
         super().__init__(parent)
         self.settings = settings
         self.store = AssistantStore()
-        # Professional theme mutes the goblin — a client demo gets plain
+        # Professional theme mutes the goblin, a client demo gets plain
         # acknowledgements, not a feral terminal creature.
         self.brain = AssistantBrain(
             self.store, professional=settings.is_professional())
@@ -88,7 +83,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.title = QLabel("Assistant")
         self.title.setStyleSheet("font-size: 22px; font-weight: bold;")
         self.subtitle = QLabel(
-            "Your desk — notes, tasks, and a schedule that actually fits the day.")
+            "Notes, tasks, and a schedule that actually fits the day.")
         titles.addWidget(self.title)
         titles.addWidget(self.subtitle)
         header.addLayout(titles, 1)
@@ -141,7 +136,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.stack.addWidget(self.notes_panel)
         self.stack.addWidget(self.tasks_panel)
         # A hidden panel (the wide schedule table) must not floor the window's
-        # minimum width — same rule every stacked host in TechDeck follows.
+        # minimum width, same rule every stacked host in TechDeck follows.
         from techdeck.ui.utils import limit_min_size_to_current_page
         limit_min_size_to_current_page(self.stack)
         panel_box.addWidget(self.stack)
@@ -162,25 +157,12 @@ class AssistantPage(QWidget, ThemeAware):
 
     # ── history ──────────────────────────────────────────────────────────────
 
-    def _greeting(self) -> str:
-        return (GREETING_PROFESSIONAL if self.settings.is_professional()
-                else GREETING)
-
     def _load_history(self):
         messages = self.store.load_chat(HISTORY_LINES)
-        if messages:
-            for message in messages:
-                self.terminal.append_line(message.role, message.text)
-            last = messages[-1].ts[:10]
-            today = datetime.now().date().isoformat()
-            self.terminal.append_separator(
-                "today" if last == today else f"new session · {today}")
-            self.command_line.seed_history(
-                [m.text for m in messages if m.role == "user"])
-        else:
-            greeting = self._greeting()
-            self.terminal.append_line("deck", greeting)
-            self._record("deck", greeting)
+        for message in messages:
+            self.terminal.append_line(message.role, message.text)
+        self.command_line.seed_history(
+            [m.text for m in messages if m.role == "user"])
 
     def _record(self, role: str, text: str):
         self.store.append_chat(ChatMessage(role=role, text=text))
@@ -223,9 +205,6 @@ class AssistantPage(QWidget, ThemeAware):
         elif action == ACT_CLEAR:
             self.terminal.clear()
             self.store.clear_chat()
-            greeting = self._greeting()
-            self.terminal.append_line("deck", greeting)
-            self._record("deck", greeting)
         elif action == ACT_EDIT_NOTE:
             note_id = reply.payload.get("note_id")
             self.notes_panel.refresh()
@@ -246,7 +225,7 @@ class AssistantPage(QWidget, ThemeAware):
 
         chips = []
         # Offered only when the last thing said could plausibly be a job, and
-        # only ever as an offer — this is the one route from talking to filing,
+        # only ever as an offer, this is the one route from talking to filing,
         # and the user has to take it deliberately.
         if self._can_promote:
             chips.append(("promote", "↑ Make that a task",
@@ -345,7 +324,7 @@ class AssistantPage(QWidget, ThemeAware):
             content = exporters.to_markdown(schedule)
 
         try:
-            # newline="" keeps the .ics CRLF line endings exactly as built —
+            # newline="" keeps the .ics CRLF line endings exactly as built.
             # Python would otherwise translate them to CRCRLF on Windows.
             with open(path, "w", encoding="utf-8", newline="") as handle:
                 handle.write(content)

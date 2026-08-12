@@ -3,7 +3,7 @@
 Two things are being protected here and only one of them is the jokes:
 
 1. **Nothing gets filed on a guess.** `looks_actionable` decides whether to
-   *offer* a one-click capture, and it must say no to venting — a complaint is
+   *offer* a one-click capture, and it must say no to venting, a complaint is
    full of verbs, and "this printer is garbage" is not a to-do item.
 2. **The abuse only ever flows one way.** The goblin absorbs it and aims
    whatever comes back at the situation, never at the person typing.
@@ -96,7 +96,7 @@ def test_a_targeted_rage_line_never_leaves_its_placeholder_showing():
 
 def test_it_never_turns_on_the_user():
     """The one rule that isn't negotiable: abuse goes IN, and what comes back
-    is aimed at the situation. ("you're allowed to be tired" is fine — this is
+    is aimed at the situation. ("you're allowed to be tired" is fine, this is
     about blame and dismissal, not the word "you".)"""
     banned = ("your fault", "that's on you", "user error", "skill issue",
               "stupid of you", "you should have", "you should've",

@@ -2,13 +2,13 @@
 
 Three steps, in the order a person actually thinks about their day:
 
-1. **What are we covering?** — the window, plus the shape of your working day
+1. **What are we covering?**, the window, plus the shape of your working day
    tucked behind Advanced so nobody has to look at it twice.
-2. **What's on your plate?** — one row per task. The Task cell takes shorthand
+2. **What's on your plate?**, one row per task. The Task cell takes shorthand
    (``fix the PO sheet 45m urgent due friday``) and fills the other cells in,
    and a whole list can be pasted in at once. Everything typed here becomes a
    real task, so nothing is retyped next time.
-3. **Here's the plan** — the generated agenda, what didn't fit, and why.
+3. **Here's the plan**, the generated agenda, what didn't fit, and why.
 
 The dialog owns no scheduling logic; it collects a
 :class:`~techdeck.core.assistant.scheduler.ScheduleRequest` and hands it over.
@@ -45,7 +45,7 @@ COL_TASK, COL_PRIORITY, COL_ESTIMATE, COL_DUE, COL_MORE = range(5)
 
 
 class PasteTasksDialog(QDialog):
-    """Bulk entry — paste the list you already wrote somewhere else."""
+    """Bulk entry, paste the list you already wrote somewhere else."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,7 +56,7 @@ class PasteTasksDialog(QDialog):
         box.setSpacing(10)
 
         blurb = QLabel(
-            "One task per line. Dashes and numbering are fine — and any "
+            "One task per line. Dashes and numbering are fine, and any "
             "estimate, priority or due date on the line gets picked up:\n\n"
             "    - fix the PO sheet 45m urgent due friday\n"
             "    2. call Dan about rev C | high | 1h30\n"
@@ -327,7 +327,7 @@ class ScheduleWizard(QDialog, ThemeAware):
         box.setSpacing(10)
 
         blurb = QLabel(
-            "Tick what to include. Type a task however you'd say it — "
+            "Tick what to include. Type a task however you'd say it: "
             "“fix the PO sheet 45m urgent due friday” fills in the rest of "
             "the row for you.")
         blurb.setWordWrap(True)
@@ -421,7 +421,7 @@ class ScheduleWizard(QDialog, ThemeAware):
 
         due = QLineEdit(task.deadline or "")
         due.setPlaceholderText("friday")
-        due.setToolTip("Type a day — friday, tomorrow, 8/14 — or leave it blank")
+        due.setToolTip("Type a day: friday, tomorrow, 8/14. Or leave it blank")
         due.editingFinished.connect(lambda r=row: self._normalize_due(r))
         self.table.setCellWidget(row, COL_DUE, due)
 
@@ -499,7 +499,7 @@ class ScheduleWizard(QDialog, ThemeAware):
 
     def _normalize_due(self, row: int):
         """Rewrite whatever was typed in the Due cell as the date it resolved
-        to — instant, unambiguous feedback instead of a silent guess."""
+        to, instant, unambiguous feedback instead of a silent guess."""
         widget = self.table.cellWidget(row, COL_DUE)
         if widget is None:
             return
@@ -570,7 +570,7 @@ class ScheduleWizard(QDialog, ThemeAware):
 
     def _rebind_row_callbacks(self):
         """Row indices shift when a row is removed, and the lambdas captured the
-        OLD index — re-point every one of them at its current row."""
+        OLD index, re-point every one of them at its current row."""
         for row in range(self.table.rowCount()):
             priority = self.table.cellWidget(row, COL_PRIORITY)
             if priority is not None:

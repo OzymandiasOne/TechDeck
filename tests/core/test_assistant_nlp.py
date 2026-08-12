@@ -1,7 +1,7 @@
 """The Assistant's rule-based parser.
 
 These tests are the contract for "type what you mean". There is no model behind
-it, so every behaviour here is a rule someone can read — and the failure mode
+it, so every behaviour here is a rule someone can read, and the failure mode
 that matters most is a FALSE positive: silently eating a word out of a task's
 name is worse than not recognising a shorthand at all. Several tests below
 exist only to pin that down.
@@ -225,7 +225,7 @@ def test_intents(text, kind):
 def test_unmatched_text_is_conversation_never_a_capture(text):
     """The contract of the page: typing at it does not file anything. Only an
     unmistakable request does, and the phrases below are ones people say
-    mid-vent — "i need to get out of here" is not a to-do item."""
+    mid-vent, "i need to get out of here" is not a to-do item."""
     assert nlp.parse_intent(text).kind == "chat"
 
 

@@ -1,4 +1,4 @@
-"""The terminal's brain — one typed line in, a reply plus an action out.
+"""The terminal's brain, one typed line in, a reply plus an action out.
 
 The brain is Qt-free on purpose, so the entire command surface is testable
 without a window. Anything the page does on the brain's behalf shows up here as
@@ -49,14 +49,13 @@ def test_free_text_files_absolutely_nothing(brain, said):
 
 
 def test_the_first_reply_says_out_loud_that_nothing_is_being_saved(brain):
-    assert "nothing you say here gets saved" in _text(
-        brain.handle("what a morning", NOW))
+    assert "nothing here gets saved" in _text(brain.handle("what a morning", NOW))
 
 
 def test_the_reminder_is_not_repeated_under_every_line(brain):
     brain.handle("what a morning", NOW)
     second = _text(brain.handle("genuinely unbelievable", NOW))
-    assert "nothing you say here gets saved" not in second
+    assert "nothing here gets saved" not in second
 
 
 def test_an_explicit_ask_still_captures(brain):

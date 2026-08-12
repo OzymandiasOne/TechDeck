@@ -2,10 +2,10 @@
 
 Three targets, each earning its place:
 
-* **Markdown** — pasteable into Teams or a shared doc, still readable raw.
-* **Plain text** — the terminal digest (``scheduler.summarize``), re-exported
+* **Markdown**, pasteable into Teams or a shared doc, still readable raw.
+* **Plain text**, the terminal digest (``scheduler.summarize``), re-exported
   here so callers have one import for "give me the file contents".
-* **iCalendar** — the one that actually matters day to day: Outlook imports a
+* **iCalendar**, the one that actually matters day to day: Outlook imports a
   ``.ics``, so a plan built here lands on the real calendar in two clicks
   instead of being retyped.
 """
@@ -31,7 +31,7 @@ def to_text(schedule: Schedule) -> str:
 
 def to_markdown(schedule: Schedule) -> str:
     stats = schedule.stats or {}
-    lines: List[str] = [f"# Schedule — {schedule.range_label}", ""]
+    lines: List[str] = [f"# Schedule: {schedule.range_label}", ""]
     created = schedule.created_at.replace("T", " ")
     lines.append(f"*Built {created} · {stats.get('tasks_placed', 0)} tasks · "
                  f"{fmt_duration(stats.get('work_minutes', 0))} of work · "
@@ -61,7 +61,7 @@ def to_markdown(schedule: Schedule) -> str:
         lines.append("## Didn't fit")
         lines.append("")
         for item in schedule.unscheduled:
-            lines.append(f"- **{item.get('title', '')}** — {item.get('reason', '')}")
+            lines.append(f"- **{item.get('title', '')}**: {item.get('reason', '')}")
         lines.append("")
 
     if schedule.warnings:

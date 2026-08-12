@@ -7,7 +7,7 @@ agenda: what to do, when, and what didn't fit.
 person whose day it is:
 
 1. *Deadline buckets.* Walking day by day, anything already due that day (or
-   overdue) is placed first — no clever score is allowed to push a
+   overdue) is placed first, no clever score is allowed to push a
    due-today task past its deadline.
 2. *WSJF within a bucket.* Whatever's left competes on cost-of-delay per
    minute (``TaskItem.score``), so a 15-minute high-priority job outranks a
@@ -18,7 +18,7 @@ On top of that: every estimate is padded (people under-estimate), long stretches
 get a breather, splittable work is sliced but never into useless slivers, and
 "one sitting" tasks demand a contiguous block or don't get scheduled at all.
 
-Pure functions over the models — no Qt, no I/O, fully unit-testable.
+Pure functions over the models, no Qt, no I/O, fully unit-testable.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class _Pending:
 @dataclass
 class ScheduleRequest:
     """Everything the engine needs. Built by the wizard, the terminal, or a
-    test — all three go through this one door."""
+    test, all three go through this one door."""
     tasks: Sequence[TaskItem]
     start_day: date
     end_day: date
@@ -86,7 +86,7 @@ class ScheduleRequest:
 
 
 def padded_minutes(task: TaskItem, prefs: SchedulePrefs) -> int:
-    """The estimate the engine actually plans against — the user's number plus
+    """The estimate the engine actually plans against, the user's number plus
     the optimism buffer, snapped to the grid."""
     raw = max(GRID, int(task.estimate_min or 0))
     return max(GRID, _snap_up(raw * (1.0 + prefs.buffer_pct / 100.0)))
@@ -112,7 +112,7 @@ def _free_intervals(day: date, prefs: SchedulePrefs, req: ScheduleRequest,
     """Open stretches on ``day``, as (start_min, end_min) pairs.
 
     Starts from the working day, cuts out lunch and every already-committed
-    block, and — on the current day — refuses to schedule into the past.
+    block, and, on the current day, refuses to schedule into the past.
     """
     start = _mins(prefs.start_time())
     end = _mins(prefs.end_time())
@@ -148,7 +148,7 @@ def _free_intervals(day: date, prefs: SchedulePrefs, req: ScheduleRequest,
 # ── The engine ───────────────────────────────────────────────────────────────
 
 def build_schedule(req: ScheduleRequest) -> Schedule:
-    """Produce a Schedule for the request. Never raises on bad input — an
+    """Produce a Schedule for the request. Never raises on bad input, an
     impossible window yields an empty plan with a warning explaining why."""
     prefs = req.prefs
     now = req.now or datetime.now()
@@ -176,13 +176,13 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
         if start_dt is None:
             continue
         day = start_dt.date()
-        # An appointment is a commitment someone else made with you — plan the
+        # An appointment is a commitment someone else made with you, plan the
         # raw duration, not the padded one; the buffer is for your own guesses.
         length = max(GRID, _snap_up(task.estimate_min))
         if day not in fixed_by_day:
             schedule.warnings.append(
                 f"“{task.label()}” is set for {day.isoformat()}, which is "
-                f"outside this schedule — left where it is.")
+                f"outside this schedule. Left where it is.")
             continue
         begin = _mins(start_dt.time())
         fixed_by_day[day].append((begin, begin + length, task))
@@ -193,7 +193,7 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
             if items[i][0] < items[i - 1][1]:
                 schedule.warnings.append(
                     f"{fmt_day(day)}: “{items[i][2].label()}” overlaps "
-                    f"“{items[i - 1][2].label()}”. Both are shown — you'll have "
+                    f"“{items[i - 1][2].label()}”. Both are shown. You'll have "
                     f"to move one.")
 
     # --- 2. the flexible pool ------------------------------------------------
@@ -230,7 +230,7 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
         blocks.sort(key=lambda b: b.start)
         blocks = _merge_adjacent(blocks)
         # A lunch or appointment on a day where nothing else got planned is
-        # still worth showing — it's why the day looks empty.
+        # still worth showing, it's why the day looks empty.
         schedule.days.append(DaySchedule(day=day.isoformat(), blocks=blocks))
 
     _stamp_parts(schedule)
@@ -242,7 +242,7 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
         task = entry.task
         if entry.remaining == entry.total:
             reason = ("needs one unbroken block of "
-                      f"{fmt_duration(entry.total)} — no gap that long"
+                      f"{fmt_duration(entry.total)} and no gap is that long"
                       ) if not entry.splittable else "ran out of room in this range"
         else:
             reason = (f"{fmt_duration(entry.remaining)} of "
@@ -273,7 +273,7 @@ def _pack_interval(interval: Tuple[int, int], day: date, pending: List[_Pending]
         if prefs.focus_block_min > 0 and prefs.breather_min > 0:
             room = prefs.focus_block_min - continuous
             if room < prefs.min_chunk_min:
-                # Time for a breather — but only if there is enough left after
+                # Time for a breather, but only if there is enough left after
                 # it to be worth sitting back down for.
                 if window >= prefs.breather_min + prefs.min_chunk_min and \
                         any(p.remaining > 0 for p in pending):
@@ -292,7 +292,7 @@ def _pack_interval(interval: Tuple[int, int], day: date, pending: List[_Pending]
             need = entry.remaining
             if entry.splittable:
                 chunk = _snap_down(min(need, cap))
-                # Never leave a sliver too small to be useful — unless the
+                # Never leave a sliver too small to be useful, unless the
                 # sliver IS the whole remainder of the task.
                 if chunk < need and chunk < prefs.min_chunk_min:
                     continue
@@ -326,8 +326,7 @@ def _merge_adjacent(blocks: List[ScheduleBlock]) -> List[ScheduleBlock]:
 
     The packer works one open stretch at a time and caps chunks at the focus
     block, so a task can end up as "part 1 of 2" immediately followed by "part 2
-    of 2" with nothing between them. On paper that's two rows for one sitting —
-    merge them so a split only ever appears where there's a real interruption.
+    of 2" with nothing between them. On paper that's two rows for one sitting, merge them so a split only ever appears where there's a real interruption.
     """
     merged: List[ScheduleBlock] = []
     for block in blocks:
@@ -343,7 +342,7 @@ def _merge_adjacent(blocks: List[ScheduleBlock]) -> List[ScheduleBlock]:
 
 
 def _stamp_parts(schedule: Schedule) -> None:
-    """Number a task's slices across the WHOLE plan, not per day — a task split
+    """Number a task's slices across the WHOLE plan, not per day, a task split
     over two afternoons is "part 1 of 2" and "part 2 of 2", not two part-1s."""
     counts: Dict[str, int] = {}
     for block in schedule.all_blocks():
@@ -380,7 +379,7 @@ def _ordered(pending: List[_Pending], day: date, today: date) -> List[_Pending]:
 
 def _add_deadline_warnings(schedule: Schedule, tasks: Sequence[TaskItem],
                            pending: List[_Pending], days: List[date]) -> None:
-    """Flag every deadline the plan does not actually hit — the single most
+    """Flag every deadline the plan does not actually hit, the single most
     useful thing a schedule can tell you, and the easiest to miss by eye."""
     last_end: Dict[str, date] = {}
     for day_plan in schedule.days:
@@ -491,7 +490,7 @@ def resolve_range(key: str, now: Optional[datetime] = None,
 def summarize(schedule: Schedule) -> str:
     """A compact plain-text digest of a plan."""
     stats = schedule.stats or {}
-    lines = [f"{schedule.range_label} — {stats.get('tasks_placed', 0)} task(s), "
+    lines = [f"{schedule.range_label}: {stats.get('tasks_placed', 0)} task(s), "
              f"{fmt_duration(stats.get('work_minutes', 0))} of planned work"]
     if stats.get("buffer_pct"):
         lines[0] += f" (estimates padded {stats['buffer_pct']}%)"
@@ -513,7 +512,7 @@ def summarize(schedule: Schedule) -> str:
         lines.append("")
         lines.append("Didn't fit:")
         for item in schedule.unscheduled:
-            lines.append(f"  – {item['title']} — {item['reason']}")
+            lines.append(f"  {item['title']}: {item['reason']}")
     if schedule.warnings:
         lines.append("")
         for warning in schedule.warnings:

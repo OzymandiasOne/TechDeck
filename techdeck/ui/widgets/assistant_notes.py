@@ -1,9 +1,9 @@
-"""Personal Notes tab — a note list beside a bullet-aware plain-text editor.
+"""Personal Notes tab, a note list beside a bullet-aware plain-text editor.
 
 Notes are **plain text**, not rich text, and that is a deliberate choice: a
 plain note stays greppable by ``/find``, exports to markdown unchanged, and
 survives any future change to how it's displayed. Nesting is expressed the way
-everyone already types it — two spaces per level with a ``-`` marker — and the
+everyone already types it, two spaces per level with a ``-`` marker, and the
 editor just makes that ergonomic (Enter continues the bullet, Tab nests it).
 """
 
@@ -30,7 +30,7 @@ class BulletEditor(QTextEdit, ThemeAware):
     """Plain-text editor that knows about nested bullets.
 
     * **Enter** continues the current bullet at the same indent. On an *empty*
-      bullet it outdents instead, then clears — so you walk back out of a list
+      bullet it outdents instead, then clears, so you walk back out of a list
       by pressing Enter, exactly like every other outliner.
     * **Tab / Shift+Tab** nest and un-nest the current line, or every line in
       the selection.
@@ -133,7 +133,7 @@ class BulletEditor(QTextEdit, ThemeAware):
                 new_text = text[len(INDENT):] if text.startswith(INDENT) \
                     else text.lstrip(" ")
             # BlockUnderCursor selects the leading newline too on every block
-            # after the first — replace only the text and keep the break.
+            # after the first, replace only the text and keep the break.
             edit.setPosition(block.position())
             edit.setPosition(block.position() + len(text),
                              QTextCursor.MoveMode.KeepAnchor)
@@ -320,7 +320,7 @@ class NotesPanel(QWidget, ThemeAware):
             self._show_note(None)
 
     def select_note(self, note_id: str):
-        """Jump to a note by id — used when something ELSE opened it (the
+        """Jump to a note by id, used when something ELSE opened it (the
         terminal's /note, a link). Unlike the refresh path this one does clear
         an active filter, because the user's intent is to see that note."""
         if self._select_row(note_id):
@@ -371,7 +371,7 @@ class NotesPanel(QWidget, ThemeAware):
         if note is None:
             self.title_field.setText("")
             self.editor.setPlainText("")
-            self.status.setText("No note selected — press New to start one.")
+            self.status.setText("No note selected. Press New to start one.")
         else:
             self.title_field.setText(note.title)
             self.editor.setPlainText(note.body)

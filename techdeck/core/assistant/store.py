@@ -11,7 +11,7 @@ document is small and fully rewritten on every edit, while the transcript grows
 by one line per message and is only ever appended to or tailed. Writing the
 whole transcript back on every keystroke would be the slowest thing on the page.
 
-Writes are atomic (temp file + ``os.replace``), matching SettingsManager — a
+Writes are atomic (temp file + ``os.replace``), matching SettingsManager, a
 crash mid-write must never cost the user their notes.
 """
 
@@ -37,8 +37,7 @@ MAX_SCHEDULES = 40
 
 
 class AssistantStore:
-    """Load/save the Assistant's data. Single-threaded (GUI thread) by design —
-    every caller is a Qt slot."""
+    """Load/save the Assistant's data. Single-threaded (GUI thread) by design, every caller is a Qt slot."""
 
     def __init__(self, base_dir: Optional[Path] = None):
         if base_dir is None:
@@ -69,7 +68,7 @@ class AssistantStore:
                 with open(self.doc_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (json.JSONDecodeError, IOError, OSError) as exc:
-                # Never let a bad file take the page down — quarantine it so the
+                # Never let a bad file take the page down, quarantine it so the
                 # user can recover by hand, and carry on with an empty desk.
                 print(f"[assistant] could not read {self.doc_path}: {exc}")
                 self._quarantine(self.doc_path)
@@ -142,7 +141,7 @@ class AssistantStore:
 
     def sorted_notes(self) -> List[Note]:
         """Pinned first, then most recently touched. Two passes rather than one
-        clever key — ISO timestamps sort lexically, so a plain reverse sort on
+        clever key, ISO timestamps sort lexically, so a plain reverse sort on
         updated_at is exact, and the stable sort then floats the pins."""
         by_recency = sorted(self.notes, key=lambda n: n.updated_at, reverse=True)
         return sorted(by_recency, key=lambda n: 0 if n.pinned else 1)

@@ -1,7 +1,7 @@
 """Assistant page widgets.
 
 The engine is covered in tests/core; these tests cover the wiring that only
-exists on the Qt side — the bullet editor's key handling, the chips reacting to
+exists on the Qt side, the bullet editor's key handling, the chips reacting to
 state, the terminal's HTML escaping, and the fact that typing a line actually
 reaches the store and the transcript.
 """
@@ -342,7 +342,7 @@ def page(qapp, tmp_path, monkeypatch):
     """A real AssistantPage pointed at a throwaway store.
 
     (The session conftest already redirects %LOCALAPPDATA%, so this is belt and
-    braces — but a test that writes into another test's store is a flake
+    braces, but a test that writes into another test's store is a flake
     waiting to happen.)
     """
     import techdeck.core.assistant.store as store_module
@@ -413,8 +413,24 @@ def test_a_parser_crash_is_reported_not_fatal(page, monkeypatch):
 
 
 def test_clear_wipes_the_view_and_the_stored_history(page):
-    # Not "fix the PO sheet" — the greeting uses that as its example.
     page.submit("order the 4130 tube 20m")
     page.submit("/clear")
     assert "4130 tube" not in page.terminal.toPlainText()
-    assert [m.role for m in page.store.load_chat()] == ["deck"]   # the greeting
+    assert page.store.load_chat() == []
+
+
+def test_a_fresh_page_opens_empty_with_no_greeting(page):
+    """No explainer at the top of the box. It gets read once, ignored forever,
+    and then sits there being wrong the moment the behaviour changes."""
+    assert page.terminal.toPlainText().strip() == ""
+    assert page.store.load_chat() == []
+
+
+def test_history_comes_back_with_no_session_divider(page, tmp_path):
+    page.submit("order the 4130 tube 20m")
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui.pages.assistant_page import AssistantPage
+    reopened = AssistantPage(SettingsManager())
+    text = reopened.terminal.toPlainText()
+    assert "order the 4130 tube" in text
+    assert "session" not in text.lower()

@@ -1,4 +1,4 @@
-"""Edit one task in full — the long form behind the terminal's one-liner.
+"""Edit one task in full, the long form behind the terminal's one-liner.
 
 Typing ``fix the PO sheet 45m urgent due friday`` covers the common case; this
 dialog covers everything else (notes, links, an exact start time, "must be one
@@ -144,7 +144,7 @@ class TaskEditDialog(QDialog, ThemeAware):
         self.links = QTextEdit()
         self.links.setAcceptRichText(False)
         self.links.setPlaceholderText(
-            r"One per line — https://… or C:\path\to\file.xlsx")
+            r"One per line, https://… or C:\path\to\file.xlsx")
         self.links.setPlainText("\n".join(self._task.links))
         self.links.setMaximumHeight(70)
         outer.addWidget(QLabel("Links / files"))
