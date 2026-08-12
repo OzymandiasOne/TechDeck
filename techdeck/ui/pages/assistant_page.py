@@ -58,10 +58,10 @@ HISTORY_LINES = 300
 # over one saved plan.
 REMINDER_TICK_MS = 30_000
 
-# A beat between your line landing and Woogy answering. An instant reply reads
-# as a lookup table; a short pause reads as somebody on the other end. Short
-# enough that a slash command still feels responsive.
-_DEFAULT_REPLY_DELAY_MS = 450
+# A full second between your line landing and Woogy answering. An instant reply
+# reads as a lookup table; a pause reads as somebody on the other end who had
+# to read it first.
+_DEFAULT_REPLY_DELAY_MS = 1000
 
 # No greeting, and no session divider. The terminal opens on whatever you last
 # said and nothing else. An explainer at the top of a chat box is read once,
