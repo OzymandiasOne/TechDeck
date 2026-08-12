@@ -95,7 +95,6 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /export md|ics|txt                save the plan (ics imports into Outlook)
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
-  /goblin                           who's in here, and what it does with what you say
   /clear                            wipe the terminal (this one really does delete it)
 
 Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1–p4.
@@ -148,7 +147,6 @@ class AssistantBrain:
             "set": self._cmd_set,
             "purge": self._cmd_purge,
             "clear": self._cmd_clear,
-            "goblin": self._cmd_goblin, "vent": self._cmd_goblin,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -163,23 +161,6 @@ class AssistantBrain:
 
     def _cmd_help(self, args: str, now: datetime) -> Reply:
         return Reply().say(HELP_TEXT, ROLE_SYSTEM)
-
-    def _cmd_goblin(self, args: str, now: datetime) -> Reply:
-        """Who's in here, and — the part that actually matters — what it does
-        and doesn't do with what you say."""
-        if self.goblin.professional:
-            return Reply().system(
-                "This terminal is a scratch space. Free text is never stored "
-                "as a task; use “Add a task”, /task, or the Tasks tab.")
-        reply = Reply()
-        reply.say("I live in here. I eat complaints.")
-        reply.system(
-            "   Say whatever you want — none of it becomes a task, a note, or "
-            "a calendar block.\n"
-            "   Nothing leaves this machine either.\n"
-            "   When you DO want something filed: “Add a task”, /task, or "
-            "/task on its own to grab the last thing you said.")
-        return reply
 
     def _cmd_clear(self, args: str, now: datetime) -> Reply:
         return Reply(action=ACT_CLEAR).system(

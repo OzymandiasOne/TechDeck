@@ -117,11 +117,6 @@ def test_the_goblin_takes_the_users_side_never_the_other_way(brain):
         assert insult not in reply
 
 
-def test_goblin_command_explains_what_is_and_is_not_stored(brain):
-    said = _text(brain.handle("/goblin", NOW)).lower()
-    assert "task" in said
-    assert "note" in said
-
 
 def test_note_prefix_files_a_note(brain):
     reply = brain.handle("note: gate code is 4417", NOW)
