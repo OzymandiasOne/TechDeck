@@ -8,9 +8,6 @@ to survive across sessions and the plugin console deliberately does not.
 
 from __future__ import annotations
 
-import re
-import sys
-from pathlib import Path
 from typing import Iterable, List
 
 from PySide6.QtWidgets import (
@@ -19,8 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QUrl, QEvent
 from PySide6.QtGui import (
-    QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPixmap,
-    QTextCursor, QTextDocument,
+    QDesktopServices, QFont, QTextCursor, QTextDocument,
 )
 
 from techdeck.ui.theme_aware import ThemeAware
@@ -33,95 +29,19 @@ _USER_COLOR = "#60A5FA"
 _ERROR_COLOR = "#EF4444"
 
 
-AVATAR_PX = 36
+# Avatar rendering is shared with My Account, so it lives in ui/avatars.
+# Re-exported here because this module is where the terminal's callers expect
+# to find it.
+from techdeck.ui.avatars import (          # noqa: E402
+    AVATAR_PX, initials_avatar, user_avatar, woogy_avatar,
+)
+from techdeck.ui.avatars import initials as _initials   # noqa: E402
+
 _WOOGY_NAME = "Woogy"
-_WOOGY_DISC = "#4C3B6E"        # the Emporium's purple, so he sits on his own shelf
 
-# Woogy's sprite is a full figure: three eyestalks and a mouth on top, and a
-# striped bucket at his feet. A profile picture wants the face, so the bucket
-# is cropped away before the circle is applied. Measured off the art,
-# not guessed, and it is a FRACTION so re-drawing him at another size still
-# lands on the face.
-_WOOGY_FACE_FRACTION = 0.90
-
-
-def woogy_avatar(size: int = AVATAR_PX) -> QPixmap:
-    """Woogy's Emporium sprite as a round profile picture.
-
-    The same ``.tdart`` asset the Emporium and the game use, so he is
-    recognisably the same character everywhere. He is drawn on a solid disc:
-    the sprite has a transparent background, and a floating head with nothing
-    behind it reads as a rendering glitch rather than an avatar.
-    """
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-
-    face = None
-    try:
-        from techdeck.ui import pixel_art
-        if getattr(sys, "frozen", False):
-            base = Path(sys._MEIPASS) / "assets" / "sprites"
-        else:
-            base = Path(__file__).resolve().parents[3] / "assets" / "sprites"
-        sprite = pixel_art.render(pixel_art.load(base / "woogy.tdart"), scale=1)
-        crop = sprite.copy(0, 0, sprite.width(),
-                           max(1, int(sprite.height() * _WOOGY_FACE_FRACTION)))
-        # Smooth, not nearest: this is a ~36px downscale of a 71px sprite, and
-        # a non-integer nearest-neighbour shrink drops whole rows of his eyes.
-        face = crop.scaled(size, size,
-                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                           Qt.TransformationMode.SmoothTransformation)
-    except Exception:
-        face = None
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    path = QPainterPath()
-    path.addEllipse(0, 0, size, size)
-    painter.setClipPath(path)
-    painter.fillPath(path, QColor(_WOOGY_DISC))
-    if face is not None and not face.isNull():
-        painter.drawPixmap((size - face.width()) // 2,
-                           (size - face.height()) // 2, face)
-    else:
-        painter.setPen(QColor("#FFFFFF"))
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "W")
-    painter.end()
-    return pixmap
-
-
-def initials_avatar(name: str, color: str, size: int = AVATAR_PX) -> QPixmap:
-    """A coloured disc with someone's initials, the Teams convention."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    path = QPainterPath()
-    path.addEllipse(0, 0, size, size)
-    painter.fillPath(path, QColor(color))
-    painter.setPen(QColor("#FFFFFF"))
-    font = QFont()
-    font.setPointSizeF(max(7.0, size * 0.38))
-    font.setBold(True)
-    painter.setFont(font)
-    painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter,
-                     _initials(name))
-    painter.end()
-    return pixmap
-
-
-def _initials(name: str) -> str:
-    """'Anthony Siebenmorgen' -> 'AS'. 'ASiebenmorgen' -> 'AS'."""
-    words = [w for w in re.split(r"[\s._-]+", (name or "").strip()) if w]
-    if len(words) >= 2:
-        return (words[0][0] + words[1][0]).upper()
-    if words:
-        single = words[0]
-        caps = re.findall(r"[A-Z]", single)
-        if len(caps) >= 2:
-            return (caps[0] + caps[1]).upper()
-        return single[:2].upper()
-    return "?"
+# Clicking your own face opens My Account, where you set it. Woogy's is inert,
+# he does not have an account.
+ACCOUNT_URL = "techdeck://account"
 
 
 class TerminalView(QTextEdit, ThemeAware):
@@ -136,10 +56,15 @@ class TerminalView(QTextEdit, ThemeAware):
     so a reply plus its footnote is one block instead of two heads.
     """
 
+    # A techdeck:// anchor was clicked (the user's own avatar). External urls
+    # still open with the OS, same split the plugin console uses.
+    internal_link_clicked = Signal(str)
+
     MAX_BLOCKS = 4000
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings=None):
         super().__init__(parent)
+        self._settings = settings
         self.setReadOnly(True)
         self.document().setMaximumBlockCount(self.MAX_BLOCKS)
         font = QFont("Consolas", 10)
@@ -174,10 +99,13 @@ class TerminalView(QTextEdit, ThemeAware):
         document.addResource(
             QTextDocument.ResourceType.ImageResource,
             QUrl("techdeck://avatar/woogy"), woogy_avatar().toImage())
+        if self._settings is not None:
+            mine = user_avatar(self._settings, self._identity, palette.accent)
+        else:
+            mine = initials_avatar(self._identity, palette.accent)
         document.addResource(
             QTextDocument.ResourceType.ImageResource,
-            QUrl("techdeck://avatar/user"),
-            initials_avatar(self._identity, palette.accent).toImage())
+            QUrl("techdeck://avatar/user"), mine.toImage())
 
     # -- appending -----------------------------------------------------------
 
@@ -222,11 +150,19 @@ class TerminalView(QTextEdit, ThemeAware):
         else:
             cell = (f'<img src="techdeck://avatar/{avatar}" '
                     f'width="{AVATAR_PX}" height="{AVATAR_PX}">')
+            # Your own face is a door to My Account, which is where you change
+            # it. Woogy's is inert; he does not have an account.
+            if avatar == "user":
+                cell = f'<a href="{ACCOUNT_URL}">{cell}</a>'
 
         header = ""
         if speaker and not continued:
-            header = (f'<span style="color: {name_colour}; font-weight: bold;">'
-                      f'{_escape(speaker)}</span><br>')
+            name = (f'<span style="color: {name_colour}; font-weight: bold;">'
+                    f'{_escape(speaker)}</span>')
+            if avatar == "user":
+                name = (f'<a href="{ACCOUNT_URL}" style="color: {name_colour};'
+                        f' text-decoration: none;">{name}</a>')
+            header = name + "<br>"
 
         # A two-column table gives a real hanging indent, so a wrapped line
         # stays in the message column instead of running under the avatar.
@@ -258,9 +194,17 @@ class TerminalView(QTextEdit, ThemeAware):
                   and event.button() == Qt.MouseButton.LeftButton):
                 anchor = self.anchorAt(event.position().toPoint())
                 if anchor:
-                    QDesktopServices.openUrl(QUrl(anchor))
+                    self._activate_anchor(anchor)
                     return True
         return super().eventFilter(obj, event)
+
+    def _activate_anchor(self, anchor: str):
+        """techdeck:// targets stay inside the app; anything else goes to the
+        OS. Same split the plugin console uses."""
+        if anchor.startswith("techdeck://"):
+            self.internal_link_clicked.emit(anchor)
+        else:
+            QDesktopServices.openUrl(QUrl(anchor))
 
 
 class TabStrip(QWidget, ThemeAware):

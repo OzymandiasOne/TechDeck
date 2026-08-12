@@ -39,7 +39,7 @@ from techdeck.ui.notifier import DesktopNotifier
 from techdeck.core.settings import SettingsManager
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.widgets.assistant_terminal import (
-    ChipBar, CommandLine, TabStrip, TerminalView,
+    ACCOUNT_URL, ChipBar, CommandLine, TabStrip, TerminalView,
 )
 from techdeck.ui.widgets.assistant_notes import NotesPanel
 from techdeck.ui.widgets.assistant_schedule import SchedulePanel, TasksPanel
@@ -116,8 +116,9 @@ class AssistantPage(QWidget, ThemeAware):
         outer.addWidget(self.tabs)
 
         # ── panels ───────────────────────────────────────────────────────────
-        self.terminal = TerminalView()
+        self.terminal = TerminalView(settings=settings)
         self.terminal.set_identity(self._display_name())
+        self.terminal.internal_link_clicked.connect(self._on_internal_link)
 
         terminal_page = QWidget()
         terminal_box = QVBoxLayout(terminal_page)
@@ -451,6 +452,26 @@ class AssistantPage(QWidget, ThemeAware):
         if shown:
             self.store.mark_reminders_sent(shown)
 
+    def _on_internal_link(self, url: str):
+        """A techdeck:// anchor in the transcript. Only one so far: your own
+        avatar, which opens My Account because that is where you change it."""
+        if url == ACCOUNT_URL:
+            self._go_to_page("account")
+
+    def _go_to_page(self, page_id: str):
+        """Bring the window forward on another sidebar page."""
+        window = self.window()
+        try:
+            window.showNormal()
+            window.raise_()
+            window.activateWindow()
+            sidebar = getattr(window, "sidebar", None)
+            if sidebar is not None:
+                sidebar.set_current_page(page_id)
+                window._on_page_changed(page_id)
+        except Exception as exc:
+            print(f"[assistant] could not open {page_id}: {exc}")
+
     def _on_notification_clicked(self):
         """Clicking a toast (or the tray icon) brings TechDeck forward on the
         Assistant's Schedule tab, which is what the reminder was about."""
@@ -482,6 +503,9 @@ class AssistantPage(QWidget, ThemeAware):
 
     def refresh(self):
         """Called by the shell when the page becomes visible."""
+        # The picture and the name can both have been changed on My Account
+        # since we were last shown.
+        self.terminal.set_identity(self._display_name())
         self.schedule_panel.refresh()
         self.tasks_panel.refresh()
         self.notes_panel.refresh(keep_selection=True)

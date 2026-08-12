@@ -605,7 +605,37 @@ class SettingsManager:
         
         self.data["user"].update(kwargs)
         self.save()
-    
+
+    # ========== Profile picture ==========
+    # The image itself is a FILE beside settings.json, not base64 inside it:
+    # settings.json is rewritten in full on every change (tickets, tiles, a
+    # plugin setting), and carrying a quarter-megabyte of photo through every
+    # one of those writes is a cost paid forever for a picture that changes
+    # once. The UI owns the encoding; this only owns the location.
+
+    AVATAR_FILE_NAME = "avatar.png"
+
+    def avatar_path(self) -> Path:
+        """Where the user's profile picture lives, set or not."""
+        return self.settings_dir / self.AVATAR_FILE_NAME
+
+    def has_avatar(self) -> bool:
+        try:
+            return self.avatar_path().is_file()
+        except OSError:
+            return False
+
+    def clear_avatar(self) -> bool:
+        """Delete the picture, falling back to initials. True if one went."""
+        path = self.avatar_path()
+        try:
+            if path.is_file():
+                path.unlink()
+                return True
+        except OSError as exc:
+            print(f"Could not remove profile picture: {exc}")
+        return False
+
     # ========== App Settings ==========
     
     def get_theme(self) -> str:

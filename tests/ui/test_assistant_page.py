@@ -623,3 +623,142 @@ def test_the_clear_command_leaves_working_avatars(page):
         QTextDocument.ResourceType.ImageResource,
         QUrl("techdeck://avatar/woogy"))
     assert resource is not None and not resource.isNull()
+
+
+# ── profile picture ──────────────────────────────────────────────────────────
+
+def _square_png(path, colour="#FF00AA", size=400):
+    from PySide6.QtGui import QPixmap, QColor
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(colour))
+    pixmap.save(str(path), "PNG")
+    return path
+
+
+def test_a_chosen_picture_replaces_the_initials(qapp, tmp_path):
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui import avatars
+
+    settings = SettingsManager(tmp_path / "cfg")
+    before = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+
+    picture = avatars.normalise_for_storage(_square_png(tmp_path / "me.png"))
+    picture.save(str(settings.avatar_path()), "PNG")
+    after = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+
+    assert settings.has_avatar()
+    assert before.toImage() != after.toImage()
+    # Centre pixel is the picture's colour, not the accent disc.
+    assert after.toImage().pixelColor(24, 24).name().lower() == "#ff00aa"
+
+
+def test_the_picture_is_still_a_circle(qapp, tmp_path):
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui import avatars
+
+    settings = SettingsManager(tmp_path / "cfg")
+    avatars.normalise_for_storage(
+        _square_png(tmp_path / "me.png")).save(str(settings.avatar_path()), "PNG")
+    image = avatars.user_avatar(settings, "A B", "#2878A8", 48).toImage()
+    assert image.pixelColor(0, 0).alpha() == 0        # corner cut away
+    assert image.pixelColor(24, 24).alpha() > 0
+
+
+def test_a_big_photo_is_shrunk_before_it_is_stored(qapp, tmp_path):
+    """A 12 MP phone photo has no business living in the settings folder."""
+    from techdeck.ui import avatars
+    big = avatars.normalise_for_storage(
+        _square_png(tmp_path / "huge.png", size=4000))
+    assert max(big.width(), big.height()) == avatars.STORED_AVATAR_PX
+
+
+def test_a_file_that_is_not_an_image_is_refused(qapp, tmp_path):
+    from techdeck.ui import avatars
+    dud = tmp_path / "notes.txt"
+    dud.write_text("this is not a picture", encoding="utf-8")
+    assert avatars.normalise_for_storage(dud) is None
+
+
+def test_removing_the_picture_falls_back_to_initials(qapp, tmp_path):
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui import avatars
+
+    settings = SettingsManager(tmp_path / "cfg")
+    avatars.normalise_for_storage(
+        _square_png(tmp_path / "me.png")).save(str(settings.avatar_path()), "PNG")
+    assert settings.has_avatar()
+
+    assert settings.clear_avatar() is True
+    assert not settings.has_avatar()
+    assert settings.clear_avatar() is False          # already gone, no error
+
+    fallback = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+    assert fallback.toImage() == avatars.initials_avatar(
+        "Anthony Siebenmorgen", "#2878A8", 48).toImage()
+
+
+def test_a_picture_deleted_behind_our_back_falls_back_quietly(qapp, tmp_path):
+    from techdeck.core.settings import SettingsManager
+    from techdeck.ui import avatars
+
+    settings = SettingsManager(tmp_path / "cfg")
+    avatars.normalise_for_storage(
+        _square_png(tmp_path / "me.png")).save(str(settings.avatar_path()), "PNG")
+    settings.avatar_path().unlink()
+    assert not avatars.user_avatar(settings, "A B", "#2878A8", 48).isNull()
+
+
+def test_the_picture_lives_beside_settings_not_inside_it(tmp_path):
+    """settings.json is rewritten in full on every ticket and tile change;
+    carrying a photo through all of those is a cost paid forever."""
+    import json
+    from techdeck.core.settings import SettingsManager
+    settings = SettingsManager(tmp_path / "cfg")
+    settings.update_user_data(name="Anthony")
+    document = json.loads(settings.settings_file.read_text(encoding="utf-8"))
+    assert "avatar.png" == settings.avatar_path().name
+    assert "png" not in json.dumps(document).lower()
+
+
+# ── clicking your face ───────────────────────────────────────────────────────
+
+def test_your_avatar_links_to_my_account_and_woogys_does_not(qapp):
+    from techdeck.ui.widgets.assistant_terminal import ACCOUNT_URL, TerminalView
+    view = TerminalView()
+    view.append_line("user", "morning")
+    view.append_line("deck", "Woogy is listening.")
+    html = view.toHtml()
+    assert ACCOUNT_URL in html
+    # One link per user message, not one per avatar in the document.
+    assert html.count(ACCOUNT_URL) == 2          # the picture and the name
+
+
+def test_clicking_your_avatar_asks_the_page_to_open_my_account(qapp):
+    from techdeck.ui.widgets.assistant_terminal import ACCOUNT_URL, TerminalView
+    view = TerminalView()
+    fired = []
+    view.internal_link_clicked.connect(fired.append)
+    view._activate_anchor(ACCOUNT_URL)
+    assert fired == [ACCOUNT_URL]
+
+
+def test_an_external_link_still_goes_to_the_os(qapp, monkeypatch):
+    from techdeck.ui.widgets.assistant_terminal import TerminalView
+    opened = []
+    monkeypatch.setattr(
+        "techdeck.ui.widgets.assistant_terminal.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()))
+    view = TerminalView()
+    fired = []
+    view.internal_link_clicked.connect(fired.append)
+    view._activate_anchor("https://example.com")
+    assert opened == ["https://example.com"]
+    assert fired == []
+
+
+def test_the_page_navigates_on_an_account_link(page, monkeypatch):
+    from techdeck.ui.widgets.assistant_terminal import ACCOUNT_URL
+    went = []
+    monkeypatch.setattr(page, "_go_to_page", went.append)
+    page._on_internal_link(ACCOUNT_URL)
+    assert went == ["account"]

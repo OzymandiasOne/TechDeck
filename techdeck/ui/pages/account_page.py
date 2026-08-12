@@ -5,10 +5,17 @@ User profile information and access status.
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox, QTabWidget
+    QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox, QTabWidget,
+    QFileDialog
 )
 from PySide6.QtCore import Qt
 import os
+from pathlib import Path
+
+from techdeck.ui.avatars import normalise_for_storage, user_avatar
+
+# Big enough to actually see the picture you just chose.
+AVATAR_PREVIEW_PX = 84
 
 from techdeck.core.settings import SettingsManager
 from techdeck.core.constants import APP_VERSION
@@ -51,7 +58,49 @@ class AccountPage(QWidget, ThemeAware):
         
         # ===== User Info Section =====
         user_section = self._create_section("User Information")
-        
+
+        # --- Profile picture -------------------------------------------------
+        # Sits at the top of the section because it is the thing people come
+        # here to change after seeing their initials in the Assistant.
+        picture_row = QHBoxLayout()
+        picture_row.setSpacing(14)
+
+        self.avatar_preview = QLabel()
+        self.avatar_preview.setFixedSize(AVATAR_PREVIEW_PX, AVATAR_PREVIEW_PX)
+        self.avatar_preview.setStyleSheet("background: transparent;")
+        picture_row.addWidget(self.avatar_preview, 0, Qt.AlignmentFlag.AlignTop)
+
+        picture_buttons = QVBoxLayout()
+        picture_buttons.setSpacing(6)
+        picture_label = QLabel("Profile picture:")
+        picture_label.setStyleSheet("font-weight: 600;")
+        picture_buttons.addWidget(picture_label)
+
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+        self.choose_avatar_btn = QPushButton("Choose image…")
+        self.choose_avatar_btn.setMinimumHeight(32)
+        self.choose_avatar_btn.clicked.connect(self._choose_avatar)
+        button_row.addWidget(self.choose_avatar_btn)
+
+        self.clear_avatar_btn = QPushButton("Remove")
+        self.clear_avatar_btn.setMinimumHeight(32)
+        self.clear_avatar_btn.clicked.connect(self._clear_avatar)
+        button_row.addWidget(self.clear_avatar_btn)
+        button_row.addStretch()
+        picture_buttons.addLayout(button_row)
+
+        self.avatar_hint = QLabel(
+            "Shown next to your messages in the Assistant. "
+            "Square images look best; anything else is centre-cropped.")
+        self.avatar_hint.setWordWrap(True)
+        self._style_secondary(self.avatar_hint, "font-size: 11px;")
+        picture_buttons.addWidget(self.avatar_hint)
+        picture_buttons.addStretch()
+
+        picture_row.addLayout(picture_buttons, 1)
+        user_section.addLayout(picture_row)
+
         # Username (read-only, from Windows)
         username_label = QLabel("Username (Windows Login):")
         username_label.setStyleSheet("font-weight: 600; margin-top: 8px;")
@@ -182,12 +231,14 @@ class AccountPage(QWidget, ThemeAware):
 
         # Load initial data
         self._load_user_data()
+        self._refresh_avatar()
 
         # Re-stamp the Status label whenever the theme switches so the green
         # tracks the active palette and dodges the light/salmon shimmer.
         self.setup_theme_awareness()
 
     def apply_theme(self):
+        self._refresh_avatar()
         self._apply_status_style()
         self._style_tabs()
         self._apply_professional()
@@ -311,12 +362,65 @@ class AccountPage(QWidget, ThemeAware):
             title=title
         )
         
+        # A renamed user means new initials, if they have no picture set.
+        self._refresh_avatar()
+
         QMessageBox.information(
             self,
             "Saved",
             "Your profile information has been saved."
         )
     
+    # ========== Profile picture ==========
+
+    def _display_name(self) -> str:
+        data = self.settings.get_user_data() or {}
+        return (str(data.get("name") or "").strip()
+                or str(data.get("username") or "").strip()
+                or os.environ.get("USERNAME", "You"))
+
+    def _refresh_avatar(self):
+        """Redraw the preview and enable/disable Remove."""
+        if not hasattr(self, "avatar_preview"):
+            return
+        accent = self.get_current_palette().accent
+        self.avatar_preview.setPixmap(
+            user_avatar(self.settings, self._display_name(), accent,
+                        AVATAR_PREVIEW_PX))
+        self.clear_avatar_btn.setEnabled(self.settings.has_avatar())
+
+    def _choose_avatar(self):
+        path, _chosen = QFileDialog.getOpenFileName(
+            self.window(), "Choose a profile picture", str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp);;All files (*.*)")
+        if not path:
+            return
+
+        # Shrink before storing. A 12 MP phone photo has no business living in
+        # the settings folder for the next three years.
+        picture = normalise_for_storage(path)
+        if picture is None:
+            QMessageBox.warning(
+                self, "Not an image",
+                "That file couldn't be read as an image. Try a PNG or a JPG.")
+            return
+
+        target = self.settings.avatar_path()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not picture.save(str(target), "PNG"):
+                raise OSError("the image could not be written")
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Couldn't save that",
+                f"Your picture couldn't be saved:\n\n{exc}")
+            return
+        self._refresh_avatar()
+
+    def _clear_avatar(self):
+        self.settings.clear_avatar()
+        self._refresh_avatar()
+
     def _on_tab_changed(self, _i):
         """Keep the playful tabs in sync as ownership/balance/progress change,
         and click the UFO50 tab-select sound."""
