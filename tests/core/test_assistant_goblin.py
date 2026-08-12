@@ -214,3 +214,22 @@ def test_he_takes_it_rather_than_arguing_back():
 def test_venting_at_him_is_never_offered_as_a_task():
     assert goblin.looks_actionable("i hate you") is False
     assert goblin.looks_actionable("shut up woogy") is False
+
+
+def test_no_answer_to_a_question_reads_as_a_verdict_on_the_user():
+    """ASK catches any question, including "am i crazy?". A line that opens
+    with a bare affirmative agrees with it."""
+    for line in goblin._ASK:
+        opener = line.split()[0].strip(".,!").lower()
+        assert opener not in ("yes", "probably", "maybe", "definitely",
+                              "certainly", "sure", "yep", "yeah"), line
+
+
+def test_woogy_talks_like_woogy():
+    """Third person, his own name, the Emporium voice. If most of the pool
+    stops sounding like him the character has drifted."""
+    pools = (goblin._RAGE + goblin._AT_ME_LINES + goblin._TIRED
+             + goblin._WIN + goblin._GREETING + goblin._THANKS
+             + goblin._ASK + goblin._NEUTRAL)
+    named = [line for line in pools if "Woogy" in line]
+    assert len(named) > len(pools) * 0.6

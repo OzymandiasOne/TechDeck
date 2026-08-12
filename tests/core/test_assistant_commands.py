@@ -49,13 +49,14 @@ def test_free_text_files_absolutely_nothing(brain, said):
 
 
 def test_the_first_reply_says_out_loud_that_nothing_is_being_saved(brain):
-    assert "nothing here gets saved" in _text(brain.handle("what a morning", NOW))
+    assert "don't write any of this down" in _text(
+        brain.handle("what a morning", NOW))
 
 
 def test_the_reminder_is_not_repeated_under_every_line(brain):
     brain.handle("what a morning", NOW)
     second = _text(brain.handle("genuinely unbelievable", NOW))
-    assert "nothing here gets saved" not in second
+    assert "don't write any of this down" not in second
 
 
 def test_an_explicit_ask_still_captures(brain):

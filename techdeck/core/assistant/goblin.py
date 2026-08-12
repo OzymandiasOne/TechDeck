@@ -18,7 +18,9 @@ happens on the Add a task button, the Tasks tab, `/task`, or an explicit
    schedule) and never at the person typing.
 2. It doesn't fix, advise, or reframe unless asked. "That sounds hard, have you
    tried…" is exactly the wrong answer to a vent.
-3. It swears in goblin. Somebody's colleague can walk past this screen.
+3. He is a dumb sweetheart, not a wit. Third person, small words, tries
+   hard, slightly out of his depth. The comedy is earnestness, not snark,
+   and it keeps the screen safe for a colleague walking past.
 4. It shuts up in the professional theme. Client demos get a plain,
    neutral acknowledgement and nothing else.
 
@@ -184,117 +186,121 @@ def read_target(text: str) -> Optional[str]:
 # ── What it says ─────────────────────────────────────────────────────────────
 
 _RAGE = [
-    "Good. Let it out. I'll hold it.",
-    "Yeah. That one's a crime.",
-    "Noted, catalogued, and held against it forever.",
-    "It shouldn't be like this. You're not wrong.",
-    "Absolutely feral about this on your behalf.",
-    "Keep going, I've got room.",
-    "That's not a you problem. That's a *that* problem.",
-    "Hissing. Quietly. Professionally.",
-    "You have been extremely patient up to now and I want that on the record.",
-    "Right there with you.",
-    "I would bite it if it had ankles.",
-    "Nope. Nope. That's genuinely unreasonable.",
-    "Say the rest. Nobody's counting.",
-    "Deeply, personally offended on your behalf.",
-    "Filed under: things that should not have happened.",
-    "Cool. Cool cool cool. That's fine. That's totally fine.",
-    "This is the fourth time this week and I *am* counting.",
+    "Woogy don't like that. Woogy don't like that at all.",
+    "That is a bad one. Woogy is sorry.",
+    "Ohhh. Ohhh, that is rotten.",
+    "Woogy would fight it for you. Woogy would lose. But Woogy would go.",
+    "You keep going. Woogy is listening real good.",
+    "That should not happen to a nice person.",
+    "Woogy is making an angry face. You cannot see it. It is very angry.",
+    "Hrrmph. No. Bad.",
+    "Woogy wrote it in the bad book. Woogy keeps a bad book.",
+    "You have been SO patient about this. Woogy noticed.",
+    "Say more. Woogy has all day. Woogy has nothing but day.",
+    "That is not fair and Woogy will say so to anybody who asks.",
+    "Oh no. Oh no no no.",
+    "Woogy don't understand it, but Woogy is mad about it too.",
+    "V-very bad. Maybe the worst one today.",
+    "Woogy is on your side. Woogy is always on your side.",
 ]
 
-# Aimed at him. He takes it. No sulking, no arguing back, no wounded bit,
-# all three would make the user manage HIS feelings, which is backwards.
+# Aimed at him. He takes it, cheerfully, and stays. No sulking, no arguing
+# back, no wounded bit, all three would make the user manage HIS feelings,
+# which is backwards.
 _AT_ME_LINES = [
-    "Yeah. Fair.",
-    "Go on then. I can take it.",
-    "That's what I'm here for. Genuinely.",
-    "Noted. Still not leaving.",
-    "Deserved, probably.",
-    "Better me than the printer.",
-    "Swing away. I contain no self-esteem.",
-    "I've been called worse by better software.",
-    "Get it out. I'm built for exactly this.",
-    "Okay. Anyway.",
-    "Understandable. Carry on.",
-    "Fine by me. I have enormous patience and no feelings.",
-    "That one landed. I'm fine.",
-    "Cool. I'll be here regardless.",
+    "Okay. Woogy can take it.",
+    "That is fair. Woogy is not very good.",
+    "Woogy don't mind. Woogy is still here.",
+    "Yeah. Woogy gets that a lot.",
+    "Better Woogy than the printer, maybe.",
+    "Go on. Woogy has thick skin. Woogy has like four skins.",
+    "Okay! ...okay.",
+    "Woogy will be right here when you are done.",
+    "You are allowed. Woogy don't have feelings, only opinions.",
+    "Hrmph. Fine. Woogy still likes you.",
+    "Woogy has been yelled at by better software.",
+    "That one got Woogy a little. Woogy is okay.",
+    "Alright, alright. Woogy will just be over here.",
+    "Woogy is not offended. Woogy is barely a guy.",
 ]
 
 _RAGE_TARGETED = [
-    "{target} did that on purpose. I've said this before.",
-    "*hisses at {target}*",
-    "{target} has been on thin ice with me for a while.",
-    "One day {target} will answer for this.",
-    "Yeah. {target} is like that.",
-    "{target}. Every time. Every single time.",
-    "Adding {target} to the list. The list is long.",
-    "I have never trusted {target} and today I feel vindicated.",
-    "{target} woke up and chose violence, apparently.",
+    "{target} did that on purpose. Woogy has always said so.",
+    "Woogy does not trust {target}. Never has.",
+    "{target} again! {target} is always doing this.",
+    "Woogy is putting {target} in the bad book.",
+    "Ohhh, {target}. Woogy knows all about {target}.",
+    "If Woogy sees {target}, Woogy will say something. Probably. Maybe.",
+    "{target} is a menace and nobody listens to Woogy about it.",
+    "Woogy warned everybody about {target}. Nobody wrote it down.",
+    "Not {target} again. Woogy is tired of {target}.",
 ]
 
 _TIRED = [
-    "Sit for a second. The batch will still be there.",
-    "Long one. You don't have to be sharp right now.",
-    "Yeah. That's a real day.",
-    "You're allowed to be tired. It's not a character flaw.",
-    "Coffee. Then the next thing. Not before.",
-    "Nothing on that list is going anywhere. Breathe.",
-    "That's a lot of hours in your legs.",
-    "Honestly? Fair.",
-    "You've done enough thinking for one morning.",
+    "You should sit down. Woogy will watch the list.",
+    "Long one, huh. Woogy is tired too and Woogy don't even do anything.",
+    "That is a lot of day for one person.",
+    "Woogy says you are allowed to be tired. Woogy is in charge of that.",
+    "Go get a coffee. Woogy will not move.",
+    "Nothing on the list is running away. Woogy checked.",
+    "You did plenty already. Woogy saw.",
+    "Rest your eyes. Woogy has three and it don't help.",
 ]
 
 _WIN = [
-    "THERE it is.",
-    "Look at you.",
-    "Logged as a win. I do keep score.",
-    "See, and everyone said it couldn't be done. (Nobody said that. Still.)",
-    "Good. You earned that one.",
-    "Excellent. Ride it while it lasts.",
-    "That's the good stuff.",
-    "Chef's kiss. Goblin's kiss. Whatever.",
+    "HEY! Woogy saw that!",
+    "V-very good! Woogy approves.",
+    "Look at you go. Woogy is telling everybody.",
+    "Woogy knew you would. Woogy did not doubt one second.",
+    "That is the good stuff. Woogy is happy.",
+    "Woogy is writing this one in the GOOD book.",
+    "Wooo! ...that was Woogy. Woogy did that.",
+    "Good! Good good good.",
 ]
 
 _GREETING = [
-    "You're here. What broke.",
-    "Morning. Who are we mad at.",
-    "Present and hungry for complaints.",
-    "Hey. Talk to me.",
-    "Here. As ever. Lurking.",
-    "Go on then.",
+    "Hi! Woogy is here. What'll it be.",
+    "Oh! You came back. Woogy waited.",
+    "Hello hello. Who are we mad at today.",
+    "Woogy is up. Woogy has been up. Woogy don't sleep.",
+    "Hey. Tell Woogy things.",
+    "There you are. Woogy was just standing here.",
 ]
 
 _THANKS = [
-    "Don't. I did nothing. Mostly.",
-    "I exist to absorb. It's fine.",
-    "Sure. Any time.",
-    "That's what I'm for. Well, that and lurking.",
-    "Noted. Do not make it weird.",
+    "Aw. Woogy did nothing. Woogy just sat here.",
+    "Ohh. Um. You are welcome.",
+    "Woogy likes when you say that.",
+    "That is Woogy's job. Woogy has one job.",
+    "Don't. Woogy will get shy.",
+    "Any time. Woogy means it.",
 ]
 
+# ASK catches ANY question, including the self-doubting kind ("am i crazy?").
+# So no line here may open with a bare affirmative: "Probably!" is a shrug
+# about the world, but sitting under that question it reads as agreeing the
+# user is crazy. Every line stays pointed at the situation or at Woogy.
 _ASK = [
-    "You're not crazy. That one's genuinely bad.",
-    "I have opinions but no authority.",
-    "Couldn't tell you. I'm a goblin in a terminal.",
-    "Probably. Isn't it always.",
-    "If you want me to actually *do* something, /help has the list.",
-    "My professional assessment: ugh.",
+    "Woogy don't know. Woogy is just a guy.",
+    "You are not crazy. Woogy thinks it is bad too.",
+    "Woogy has opinions and no power. It is a bad combination.",
+    "Hmm. Woogy is thinking. ...Woogy is done thinking. Woogy don't know.",
+    "If you want Woogy to DO something, /help has the list. Woogy can read.",
+    "Woogy would bet it is not you. It is usually not you.",
+    "Woogy is rarely sure about anything, but Woogy is sure that is annoying.",
 ]
 
 _NEUTRAL = [
-    "Heard.",
-    "Mm. Go on.",
-    "I'm listening.",
-    "Right.",
+    "Woogy is listening.",
+    "Mm-hm.",
     "Okay.",
-    "Still here.",
-    "Sure.",
-    "Got it.",
+    "Woogy hears you.",
+    "Go on.",
+    "Yeah?",
+    "Woogy is still here.",
+    "Right, right.",
 ]
 
-# The professional theme gets none of the above.
 _PROFESSIONAL = [
     "Noted.",
     "Understood.",
@@ -305,8 +311,8 @@ _PROFESSIONAL = [
 # Dropped in every so often, never twice close together, the whole point of
 # the rewrite is that people can trust this box not to file things behind
 # their back, and trust needs saying out loud once in a while.
-NUDGE = ("(nothing here gets saved. Press “Add a task” or type /task "
-         "to file something)")
+NUDGE = ("(Woogy don't write any of this down. Press “Add a task” or type "
+         "/task if you want it kept)")
 NUDGE_EVERY = 7
 
 
