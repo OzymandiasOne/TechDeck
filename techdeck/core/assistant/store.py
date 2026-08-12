@@ -35,6 +35,10 @@ CHAT_ROTATE_TO = 3000
 # Generated schedules kept per user. Older ones fall off the end.
 MAX_SCHEDULES = 40
 
+# Transcript generation. Bumping this discards the existing chat.jsonl ONCE on
+# the next launch. See _migrate for when that is and isn't justified.
+CHAT_SCHEMA = 1
+
 
 class AssistantStore:
     """Load/save the Assistant's data. Single-threaded (GUI thread) by design, every caller is a Qt slot."""
@@ -78,6 +82,29 @@ class AssistantStore:
         self.schedules = [Schedule.from_dict(d) for d in data.get("schedules", []) or []]
         self.prefs = SchedulePrefs.from_dict(data.get("prefs", {}) or {})
         self.meta = dict(data.get("meta", {}) or {})
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """One-shot cleanups, keyed off a stamp in ``meta`` so each runs once.
+
+        **Generation 1 discards the whole transcript.** The pre-release build
+        opened with a greeting explaining that anything you typed became a
+        task, and then auto-captured every line to prove it. Both behaviours
+        were removed, but a transcript is a LOG: those lines stayed pinned at
+        the top of the terminal, describing something the page no longer does,
+        on every machine that had ever run the old build. Telling each person
+        to type /clear is not a fix.
+
+        Wiping a transcript is only defensible because of what it is: a scratch
+        conversation, explicitly advertised as not stored work. Notes, tasks,
+        schedules and preferences are never touched by a migration.
+        """
+        if int(self.meta.get("chat_schema", 0) or 0) >= CHAT_SCHEMA:
+            return
+        if self.chat_path.exists():
+            self.clear_chat()
+        self.meta["chat_schema"] = CHAT_SCHEMA
+        self.save()
 
     def save(self) -> None:
         payload = {

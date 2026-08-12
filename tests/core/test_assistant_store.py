@@ -130,3 +130,49 @@ def test_no_temp_files_are_left_behind(store):
     store.add_note(Note(title="a"))
     store.add_note(Note(title="b"))
     assert not list(store.dir.glob("*.tmp"))
+
+
+# ── migrations ───────────────────────────────────────────────────────────────
+
+def test_a_pre_release_transcript_is_discarded_once(tmp_path):
+    """The old build's greeting and auto-captured lines sat pinned at the top
+    of the terminal describing behaviour the page no longer has. A log of a
+    removed feature is not worth keeping, and asking every user to type /clear
+    is not a fix."""
+    directory = tmp_path / "assistant"
+    directory.mkdir(parents=True)
+    (directory / "chat.jsonl").write_text(
+        json.dumps({"role": "deck", "text": "Type what you need and I'll file it."})
+        + "\n", encoding="utf-8")
+
+    store = AssistantStore(directory)
+    assert store.load_chat() == []
+    assert store.meta["chat_schema"] == 1
+
+
+def test_the_migration_runs_only_once(tmp_path):
+    directory = tmp_path / "assistant"
+    store = AssistantStore(directory)
+    store.append_chat(ChatMessage(role="user", text="said after the migration"))
+
+    reopened = AssistantStore(directory)
+    assert [m.text for m in reopened.load_chat()] == ["said after the migration"]
+
+
+def test_a_migration_never_touches_real_work(tmp_path):
+    """Wiping a scratch transcript is defensible. Wiping notes or tasks is not,
+    and no migration may ever start."""
+    directory = tmp_path / "assistant"
+    directory.mkdir(parents=True)
+    (directory / "chat.jsonl").write_text("{}\n", encoding="utf-8")
+    (directory / "assistant.json").write_text(json.dumps({
+        "notes": [{"id": "n1", "title": "Gate code", "body": "- 4417"}],
+        "tasks": [{"id": "t1", "title": "Fix the PO sheet"}],
+        "prefs": {"day_start": "06:30"},
+    }), encoding="utf-8")
+
+    store = AssistantStore(directory)
+    assert [n.title for n in store.notes] == ["Gate code"]
+    assert [t.title for t in store.tasks] == ["Fix the PO sheet"]
+    assert store.prefs.day_start == "06:30"
+    assert store.load_chat() == []
