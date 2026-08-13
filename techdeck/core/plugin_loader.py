@@ -94,22 +94,51 @@ class PluginLoader:
     def __init__(self, plugins_dir: Optional[Path] = None):
         """
         Initialize plugin loader.
-        
+
         Args:
-            plugins_dir: Custom plugins directory. 
-                        Defaults to %LOCALAPPDATA%/TechDeck/plugins
+            plugins_dir: Custom plugins directory. When omitted, resolution
+                order is:
+
+                1. TECHDECK_PLUGINS_DIR environment variable (explicit override)
+                2. Frozen build: %LOCALAPPDATA%/TechDeck/plugins — the copies
+                   the installer laid down
+                3. Dev run from a repo checkout: the repo's plugins/ tree, so
+                   the code you just edited IS the code that runs (this
+                   retired the old copy-to-both-locations Hard Rule 12)
+                4. %LOCALAPPDATA%/TechDeck/plugins as the final fallback
         """
         if plugins_dir is None:
-            if os.name == 'nt':
-                base = Path(os.environ.get('LOCALAPPDATA', Path.home()))
-            else:
-                base = Path.home() / '.local' / 'share'
-            plugins_dir = base / 'TechDeck' / 'plugins'
-        
+            plugins_dir = self._default_plugins_dir()
+
         self.plugins_dir = Path(plugins_dir)
         self.plugins_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.plugins: Dict[str, Plugin] = {}
+
+    @staticmethod
+    def _default_plugins_dir() -> Path:
+        """Resolve the default plugin directory (see __init__ docstring)."""
+        env_override = os.environ.get("TECHDECK_PLUGINS_DIR", "").strip()
+        if env_override:
+            return Path(env_override)
+
+        if os.name == 'nt':
+            base = Path(os.environ.get('LOCALAPPDATA', Path.home()))
+        else:
+            base = Path.home() / '.local' / 'share'
+        installed = base / 'TechDeck' / 'plugins'
+
+        # Frozen exe: always the installed copies. (The check must come before
+        # the repo-tree probe — a frozen build ships plugins/ inside _internal
+        # two levels above this file, which would otherwise match.)
+        if getattr(sys, "frozen", False):
+            return installed
+
+        # Dev checkout: prefer the repo tree so edits run without a copy step.
+        repo_tree = Path(__file__).resolve().parents[2] / "plugins"
+        if repo_tree.is_dir():
+            return repo_tree
+        return installed
     
     def _validate_plugin_path(self, plugin_path: Path) -> bool:
         """
@@ -144,7 +173,11 @@ class PluginLoader:
             List of discovered Plugin objects
         """
         self.plugins.clear()
-        
+
+        # One line of provenance in app.log: dev runs load the repo tree,
+        # frozen runs load %LOCALAPPDATA% — this is how you tell which.
+        logger.info("Discovering plugins in %s", self.plugins_dir)
+
         if not self.plugins_dir.exists():
             logger.warning(f"Plugins directory does not exist: {self.plugins_dir}")
             return []

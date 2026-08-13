@@ -533,9 +533,10 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 if repo_b != inst_b:
                     warnings.append(
                         f"{pid}: installed copy of {fname} in LOCALAPPDATA differs "
-                        f"from the repo - the repo version is what ships. If you "
-                        f"tested a fix in the installed copy, port it back "
-                        f"(Hard Rule 12 in reverse)"
+                        f"from the repo - the repo version is what ships AND what "
+                        f"dev runs load (dev reads the repo tree directly since "
+                        f"the Hard Rule 12 retirement). If you hand-edited the "
+                        f"installed copy, port the change back to the repo"
                     )
                     break
 
