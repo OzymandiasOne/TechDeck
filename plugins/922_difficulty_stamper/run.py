@@ -9,6 +9,13 @@ This app closes that gap: it reads every part drawing under an order's
 CAD-AND-SHOP-PRINTS folder, and if any of them carry the label it stamps
 DIFFICULT on the first page of that order's work packet, the same way the
 Pallet Stamper stamps the batch and pallet.
+
+Once the packet is stamped, the (blue) label has done its job on the drawing,
+so it is redacted OFF the part drawing. A metadata marker is left behind in
+the drawing so a re-run still knows the order is difficult - without it, the
+stripped drawing would read as clean and the packet stamp would be wrongly
+removed. DriveWorks regenerating the drawing writes a fresh file (no marker),
+so a re-modeled part always speaks for itself.
 """
 
 import re
@@ -38,6 +45,12 @@ DIFFICULT_LABEL = "DIFFICULT"
 # Colour is what separates our stamp from a black DIFFICULT that would appear if
 # a drawing page were ever bound into the packet - only ours is ever redacted.
 _RED_COLOR_INT = 0xFF0000
+
+# After the packet is stamped, the label is stripped off the part drawing and
+# this marker is written into the drawing's PDF metadata Keywords. It is the
+# ONLY record that the drawing was difficult, so a re-run keeps the packet
+# stamped instead of reading the stripped drawing as clean.
+_STRIP_MARKER = "TechDeck-DIFFICULT-stripped"
 
 # Where the modeled parts live inside an order folder.
 _CAD_FOLDER = "CAD-AND-SHOP-PRINTS"
@@ -71,12 +84,37 @@ def _is_label_span(text: str) -> bool:
     return (text or "").strip().upper() == DIFFICULT_LABEL
 
 
-def drawing_has_label(pdf_path: Path, log) -> Optional[bool]:
-    """Does this part drawing carry the DIFFICULT label?
+def _label_rects(page, color: Optional[int] = None) -> List[fitz.Rect]:
+    """Rects of whole-span DIFFICULT labels on a page (padded 2pt for a clean
+    redaction). Pass a colour int to match only that colour's spans."""
+    rects = []
+    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
+    for block in blocks:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                if color is not None and span.get("color", 0) != color:
+                    continue
+                if _is_label_span(span.get("text", "")):
+                    b = span["bbox"]
+                    rects.append(fitz.Rect(b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2))
+    return rects
 
-    Returns True/False, or None if the PDF could not be read (the caller
-    reports unreadable drawings rather than silently treating them as clean -
-    a drawing we couldn't open might well be a difficult one).
+
+def _has_strip_marker(doc) -> bool:
+    return _STRIP_MARKER in ((doc.metadata or {}).get("keywords") or "")
+
+
+def inspect_drawing(pdf_path: Path, log) -> Optional[Tuple[bool, bool]]:
+    """(has_visible_label, was_stripped_before) for a part drawing.
+
+    has_visible_label: the drawing still carries DriveWorks' DIFFICULT label.
+    was_stripped_before: this app already moved the label to the packet and
+    redacted it off (metadata marker). Returns None if the PDF could not be
+    read - the caller reports unreadable drawings rather than silently
+    treating them as clean; a drawing we couldn't open might well be a
+    difficult one.
     """
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
@@ -86,21 +124,61 @@ def drawing_has_label(pdf_path: Path, log) -> Optional[bool]:
         return None
 
     try:
-        for page in doc:
-            blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
-            for block in blocks:
-                if block.get("type") != 0:
-                    continue
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        if _is_label_span(span.get("text", "")):
-                            return True
-        return False
+        marker = _has_strip_marker(doc)
+        visible = any(_label_rects(page) for page in doc)
+        return visible, marker
     except Exception as e:
         log(f"WARNING: Could not read {pdf_path.name}: {e}")
         return None
     finally:
         doc.close()
+
+
+def strip_label(pdf_path: Path, log) -> Optional[int]:
+    """Redact every DIFFICULT label off a part drawing, once the packet holds
+    the stamp, and leave the strip marker in the PDF metadata.
+
+    Returns the number of labels removed (0 = nothing visible, file left
+    untouched), or None if the PDF errored - the caller reports those; the
+    drawing keeps its label and the next run simply tries again.
+    """
+    try:
+        sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
+        doc = fitz.open(str(pdf_path))
+        saved = False
+        try:
+            count = 0
+            for page in doc:
+                rects = _label_rects(page)
+                if not rects:
+                    continue
+                for r in rects:
+                    page.add_redact_annot(r, fill=(1, 1, 1))
+                page.apply_redactions()
+                count += len(rects)
+
+            if not count:
+                return 0  # already stripped - never rewrite the file
+
+            md = doc.metadata or {}
+            keywords = (md.get("keywords") or "").strip()
+            if _STRIP_MARKER not in keywords:
+                md["keywords"] = f"{keywords} {_STRIP_MARKER}".strip()
+                doc.set_metadata(md)
+
+            sdk.save_pdf_atomic(doc, pdf_path)  # closes doc - don't close again
+            saved = True
+            return count
+        finally:
+            if not saved:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+
+    except Exception as e:
+        log(f"WARNING: could not remove the label from {pdf_path.name}: {e}")
+        return None
 
 
 def find_part_drawings(order_dir: Path) -> List[Path]:
@@ -158,20 +236,9 @@ def anchor_xy(page, h_offset_in: float, v_offset_in: float) -> Tuple[float, floa
 
 
 def _find_stamp_rects(page) -> List[fitz.Rect]:
-    """Rects of any DIFFICULT stamp this app previously put on the page."""
-    rects = []
-    blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)["blocks"]
-    for block in blocks:
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                if span.get("color", 0) != _RED_COLOR_INT:
-                    continue
-                if _is_label_span(span.get("text", "")):
-                    b = span["bbox"]
-                    rects.append(fitz.Rect(b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2))
-    return rects
+    """Rects of any DIFFICULT stamp this app previously put on the page.
+    Red-only: a packet stamp is always ours; a drawing's label never is."""
+    return _label_rects(page, color=_RED_COLOR_INT)
 
 
 def apply_stamp(pdf_path: Path, want_stamp: bool, font_size: int,
@@ -224,6 +291,22 @@ def apply_stamp(pdf_path: Path, want_stamp: bool, font_size: int,
     except Exception as e:
         log(f"ERROR: PDF error for {pdf_path.name}: {e}")
         return None
+
+
+def _strip_order_drawings(order_no: str, labeled: List[Path],
+                          strip_failed: List[str], log) -> int:
+    """Strip the label off an order's drawings AFTER its packet is stamped.
+    Returns how many labels came off; failures are collected for the report
+    (the drawing keeps its label, so the next run just tries again)."""
+    count = 0
+    for pdf in labeled:
+        result = strip_label(pdf, log)
+        if result is None:
+            strip_failed.append(f"{order_no}: {pdf.name}")
+        elif result:
+            count += result
+            log(f"  Removed the label from {pdf.name}")
+    return count
 
 
 def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
@@ -281,6 +364,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     no_packet: List[str] = []
     unreadable: List[str] = []
     failures: List[Tuple[str, Path]] = []         # (order, work packet)
+    to_strip: Dict[str, List[Path]] = {}          # stamp failed; strip after retry
+    strip_failed: List[str] = []
+    labels_stripped = 0
 
     for idx, order_dir in enumerate(order_dirs):
         sdk.raise_if_cancelled(cancel_event)
@@ -293,15 +379,23 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             not_modeled.append(order_dir.name)
             continue
 
-        hits: List[str] = []
+        labeled: List[Path] = []          # still carrying the blue label
+        stripped_before: List[str] = []   # label already moved to the packet
         for i, pdf in enumerate(drawings):
             if i % 16 == 0:
                 sdk.raise_if_cancelled(cancel_event)
-            found = drawing_has_label(pdf, log)
-            if found is None:
+            res = inspect_drawing(pdf, log)
+            if res is None:
                 unreadable.append(f"{order_no}: {pdf.name}")
-            elif found:
-                hits.append(pdf.name)
+                continue
+            visible, was_stripped = res
+            if visible:
+                labeled.append(pdf)
+            elif was_stripped:
+                stripped_before.append(pdf.name)
+
+        hits = ([p.name for p in labeled] +
+                [f"{n} (label already on the packet)" for n in stripped_before])
 
         packet = find_work_packet(order_dir)
         if packet is None:
@@ -317,9 +411,15 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         result = apply_stamp(packet, bool(hits), font_size, h_offset, v_offset, log)
         if result is None:
             failures.append((order_no, packet))
+            if labeled:
+                # Packet first, drawings second: the label stays on the
+                # drawing until the packet actually carries the stamp.
+                to_strip[order_no] = labeled
         elif result == "stamped":
             stamped.append(order_no)
             log(f"Stamped {order_no} - {len(hits)} difficult part(s)")
+            labels_stripped += _strip_order_drawings(
+                order_no, labeled, strip_failed, log)
         elif result == "removed":
             removed.append(order_no)
             log(f"Removed old stamp from {order_no} (no difficult parts any more)")
@@ -340,6 +440,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             else:
                 log(f"Stamped on retry: {order_no}")
                 stamped.append(order_no)
+                if want and order_no in to_strip:
+                    labels_stripped += _strip_order_drawings(
+                        order_no, to_strip.pop(order_no), strip_failed, log)
         failures = still_failed
 
     progress_callback(95)
@@ -351,6 +454,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     log(f"Orders scanned:        {total}")
     log(f"Difficult orders:      {len(difficult)}")
     log(f"Packets stamped:       {len(stamped)}")
+    if labels_stripped:
+        log(f"Drawing labels removed:{labels_stripped:>4}")
+    if strip_failed:
+        log(f"Labels NOT removed:    {len(strip_failed)}")
     if removed:
         log(f"Stamps removed:        {len(removed)}")
     if not_modeled:
@@ -398,6 +505,12 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             "These work packets could not be stamped (even after a retry). "
             "Stamp them by hand:\n" +
             "\n".join(f"  {o}\n      {p}" for o, p in failures))
+    if strip_failed:
+        problems.append(
+            "The DIFFICULT label could not be removed from these drawings "
+            "(their packet IS stamped; the drawing just still shows the "
+            "label - the next run will try again):\n" +
+            "\n".join(f"  {n}" for n in strip_failed))
     if unreadable:
         problems.append(
             "These part drawings could not be read, so they were not checked "
@@ -414,7 +527,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         if hasattr(sdk, "set_run_outcome"):
             sdk.set_run_outcome(
                 params, sdk.RUN_OUTCOME_WARNING,
-                f"{len(failures)} unstamped, {len(unreadable)} unreadable drawing(s), "
+                f"{len(failures)} unstamped, {len(strip_failed)} label(s) not "
+                f"removed, {len(unreadable)} unreadable drawing(s), "
                 f"{len(no_packet)} order(s) with no packet")
         log("WARNING: Completed, but some items need a look")
     else:

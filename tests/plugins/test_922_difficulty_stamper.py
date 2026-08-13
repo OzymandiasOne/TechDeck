@@ -122,6 +122,47 @@ def test_stamp_is_applied_then_idempotent_then_removed(ds, tmp_path):
     assert packet.stat().st_mtime_ns == before
 
 
+# --- stripping the label off the drawing -------------------------------------
+
+def _make_drawing(path: Path, with_label: bool = True) -> None:
+    """A part drawing; the DriveWorks label is blue, unlike our red stamp."""
+    doc = fitz.open()
+    page = doc.new_page(width=792, height=612)
+    if with_label:
+        page.insert_text(fitz.Point(400, 300), "DIFFICULT",
+                         fontsize=18, fontname="helv", fill=(0, 0, 1))
+    doc.save(str(path))
+    doc.close()
+
+
+def test_strip_label_round_trip(ds, tmp_path):
+    drawing = tmp_path / "262028652-175 BAR F.pdf"
+    _make_drawing(drawing)
+    log = lambda *_: None
+
+    assert ds.inspect_drawing(drawing, log) == (True, False)
+    assert ds.strip_label(drawing, log) == 1
+
+    # The label is gone from the page...
+    assert _stamp_count(drawing) == 0
+    # ...but the drawing still reads as difficult, via the metadata marker -
+    # without it a re-run would see a clean drawing and un-stamp the packet.
+    assert ds.inspect_drawing(drawing, log) == (False, True)
+
+    # Stripping an already-stripped drawing never rewrites the file.
+    before = drawing.stat().st_mtime_ns
+    assert ds.strip_label(drawing, log) == 0
+    assert drawing.stat().st_mtime_ns == before
+
+
+def test_fresh_clean_drawing_reads_clean(ds, tmp_path):
+    # A regenerated drawing is a brand-new file: no label, no marker - so a
+    # part revised to be non-difficult really does read as clean.
+    drawing = tmp_path / "262028652-175 BAR.pdf"
+    _make_drawing(drawing, with_label=False)
+    assert ds.inspect_drawing(drawing, lambda *_: None) == (False, False)
+
+
 def test_failed_write_leaves_no_stray_temp_pdf(ds, tmp_path, monkeypatch):
     """A stray tmp*.pdf in an order folder would be read as the work packet."""
     packet = tmp_path / "BK573366.pdf"
