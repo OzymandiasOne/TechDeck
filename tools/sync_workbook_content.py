@@ -225,6 +225,20 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "", "Feature",
+     "Flat bar forming moves in-house: the design automation system now marks "
+     "a formed flat bar's files the same way it marks formed plates, the "
+     "forming search gathers formed flat bars alongside formed plates by all "
+     "three of its methods, and kit paperwork tags those parts automatically - "
+     "no separate list-keeping for the new forming work. Kit paperwork "
+     "generation also gains an input check: any kit line whose part has no "
+     "source material recorded is flagged before anything prints, with the "
+     "choice to stop and fix the purchase-order data or knowingly proceed. "
+     "And the packet difficulty marking now finishes the job: once a work "
+     "packet carries the mark, the original marking is removed from the part "
+     "drawings it came from, so the flag lives on the paperwork the floor "
+     "works from - re-running still keeps packets honest in both directions.",
+     "922 FormingFinder, 922 Kitting, 922 Difficulty Stamper"),
     ("Beta 0.8.7", "Aug 13, 2026", "Feature",
      "Adds a personal planning workspace to the platform. Staff can capture "
      "what is on their plate in plain language and have the day laid out as a "
@@ -467,6 +481,21 @@ PI_NEW = [
      "POSTED AND OFF THE SETUP QUEUE WHEN ITS BATCH IS SET UP; ONLY JOBS THAT "
      "GENUINELY REACHED THE NEXT STAGE MOVE, AND A SCHEDULE OPEN ON ANOTHER "
      "MACHINE LISTS THE ROWS TO CHANGE BY HAND RATHER THAN BLOCKING THE RUN"),
+    ("IN-HOUSE FLAT BAR FORMING SUPPORT", "COMPLETE",
+     "FORMED FLAT BARS NOW FLOW THROUGH THE SAME AUTOMATED PIPELINE AS FORMED "
+     "PLATES: THE DESIGN AUTOMATION SYSTEM APPENDS THE FORMED FILENAME SUFFIX "
+     "TO A FLAT BAR WHEN ITS MATERIAL STATE IS SWITCHED TO FORMED, THE "
+     "FORMING SEARCH GATHERS THEM BY ALL THREE OF ITS METHODS, AND KIT "
+     "PAPERWORK TAGS THEM FORMED AUTOMATICALLY"),
+    ("KITTING SOURCE MATERIAL PRE-CHECK", "COMPLETE",
+     "EVERY KIT PAGE IS CHECKED BEFORE ANYTHING PRINTS; A LINE WITH A PART "
+     "BUT NO SOURCE MATERIAL HALTS THE RUN WITH THE LIST OF OFFENDERS AND "
+     "THE CHOICE TO FIX THE PURCHASE ORDER FIRST OR PROCEED ANYWAY"),
+    ("DIFFICULTY LABEL MOVES TO THE PACKET", "COMPLETE",
+     "ONCE A WORK PACKET IS STAMPED DIFFICULT, THE BLUE LABEL IS REMOVED "
+     "FROM THE PART DRAWINGS IT CAME FROM; A METADATA MARKER KEEPS RE-RUNS "
+     "HONEST, SO A STRIPPED DRAWING STILL READS AS DIFFICULT UNTIL THE PART "
+     "IS REGENERATED"),
     ("PART DIFFICULTY CARRIED ONTO THE WORK PACKET", "COMPLETE",
      "PARTS REQUIRING A COMPOUND CUT ARE MARKED DIFFICULT ON THEIR ENGINEERING "
      "DRAWING BY THE DESIGN AUTOMATION SYSTEM; A NEW TOOL READS EVERY PART "
