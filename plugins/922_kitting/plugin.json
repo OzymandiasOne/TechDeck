@@ -1,18 +1,19 @@
 {
   "id": "922_kitting",
   "name": "922 Kitting",
-  "description": "Formats and prints kitting paperwork for an entire 922 batch. Applies batch color formatting, detects formed plates from the Bent Plates sheet, and merges all kit pages into a single PDF.",
-  "version": "1.0.0",
+  "description": "Formats and prints kitting paperwork for an entire 922 batch. Applies batch color formatting, flags kit lines missing their source material before printing, detects formed parts (plates and flat bars) from the Bent Plates sheet, and merges all kit pages into a single PDF.",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
     "setup": [
       "Sync the '922 QTDR Production Packages' folder and know the batch number.",
-      "Run FormingFinder first so the Bent Plates sheet is filled - Kitting reads it to detect formed plates."
+      "Run FormingFinder first so the Bent Plates sheet is filled - Kitting reads it to detect formed parts (plates and flat bars)."
     ],
     "how_it_works": [
       "The app formats the kitting paperwork for the whole batch and applies the batch color formatting.",
-      "It detects formed plates from the Bent Plates sheet and merges all the kit pages into one PDF."
+      "Before anything prints, it checks every kit page for parts with no source material. If it finds any, it lists them and stops so you can fix the PO - or you can choose to proceed anyway.",
+      "It detects formed parts (plates and flat bars) from the Bent Plates sheet and merges all the kit pages into one PDF."
     ],
     "output": [
       "A single merged, color-formatted kitting PDF for the batch, ready to print."

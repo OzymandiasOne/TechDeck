@@ -7,11 +7,15 @@ Phase 1: applies the batch color (read from legend AD3..AD12) to the Bin Label
 & Checklist sheet header/footer cells, with luminance-based text color and a
 lightened secondary shade.
 
-Phase 2: loops the driver cell D21 over 1, 3, ..., 35 (18 iterations / 36
+Phase 2: first a PRE-CHECK pass over every kit page - a line with a part but
+no source material would print a blank bin label, so all such lines are
+flagged up front and the run halts (with the option to proceed anyway).
+Then loops the driver cell D21 over 1, 3, ..., 35 (18 iterations / 36
 orders), detects FORMED parts against the Bent Plates sheet by appending
-&" FORMED" to the Material Desc formula, exports each iteration as a 2-page
-PDF, reverts the FORMED edits, then merges all per-iteration PDFs into
-Kitting {batch}.pdf.
+&" FORMED" to the Material Desc formula (the sheet's DYPNs cover formed
+plates AND formed flat bars - whatever FormingFinder recorded), exports each
+iteration as a 2-page PDF, reverts the FORMED edits, then merges all
+per-iteration PDFs into Kitting {batch}.pdf.
 
 Requires Excel COM (pywin32). The workbook is staged locally before any COM
 work - OneDrive can interfere with Excel COM saves.
@@ -68,6 +72,10 @@ LIGHTEN_FACTOR = 0.40
 # Labels-only export: top portion of the sheet (no material list)
 LABELS_END_ROW = 17
 LABELS_FALLBACK_PRINT_AREA = "$A$1:$AC$17"
+
+# Missing-source-material gate
+_CHOICE_STOP = "Stop - fix the PO first"
+_CHOICE_PROCEED = "Proceed anyway"
 
 # Matches a single cell range like $A$1:$Q$35 (with or without sheet prefix outside)
 _RANGE_RE = re.compile(r"(\$?[A-Z]+)\$?(\d+):(\$?[A-Z]+)\$?(\d+)")
@@ -277,6 +285,102 @@ def _revert_edits(ws, edits: list[tuple[str, str]], log) -> None:
             log(f"    WARNING: could not revert {addr}: {exc}")
 
 
+# Missing source-material pre-check -------------------------------------------
+
+def _cell_text(ws, addr: str) -> str:
+    """A cell's DISPLAYED text. .Text (not .Value) so a lookup error shows as
+    its '#N/A'-style string instead of a COM error integer."""
+    try:
+        txt = ws.Range(addr).Text
+    except Exception:
+        return ""
+    return str(txt or "").strip()
+
+
+def _is_blank_value(txt: str) -> bool:
+    """'' is blank; '0' is what a lookup of an empty source cell renders
+    (real material codes are never a bare 0); '#...' is a broken lookup."""
+    return txt == "" or txt == "0" or txt.startswith("#")
+
+
+def _scan_missing_source_material(
+    excel, ws, cancel_event, progress_callback, p_start: int, p_end: int,
+) -> list[tuple[int, int, str]]:
+    """One pass over every kit page BEFORE anything prints: a line with a
+    part (DYPN) but no Raw Material means the PO has no source material for
+    it, and that field would go out blank. Returns [(order_no, row, dypn)].
+    Leaves D21 back at 1."""
+    d21 = ws.Range("D21")
+    iterations = list(range(1, 36, 2))
+    missing: list[tuple[int, int, str]] = []
+    for idx, n in enumerate(iterations):
+        sdk.raise_if_cancelled(cancel_event)
+        d21.Value = n
+        excel.CalculateFull()
+        for r in PART_ROWS:
+            for order_no, dypn_col, rawmat_col in (
+                (n, LEFT_DYPN_COL, LEFT_RAWMAT_COL),
+                (n + 1, RIGHT_DYPN_COL, RIGHT_RAWMAT_COL),
+            ):
+                dypn_txt = _cell_text(ws, f"{dypn_col}{r}")
+                if _is_blank_value(dypn_txt):
+                    continue
+                if _is_blank_value(_cell_text(ws, f"{rawmat_col}{r}")):
+                    missing.append((order_no, r, dypn_txt))
+        progress_callback(
+            p_start + int((idx + 1) / len(iterations) * (p_end - p_start)))
+    d21.Value = 1
+    excel.CalculateFull()
+    return missing
+
+
+def _resolve_missing_source_material(
+    params: dict, console, missing: list[tuple[int, int, str]], log,
+) -> None:
+    """Halt on missing source material unless the user chooses to proceed.
+    Raises UserFacingError to stop; returns normally to proceed anyway."""
+    log(f"WARNING: {len(missing)} kit line(s) have a part but NO source material:")
+    for o, r, d in missing:
+        log(f"  Order {o}, row {r}: {d}")
+
+    lines = "\n".join(f"  Order {o}, row {r}: {d}" for o, r, d in missing)
+    choice = None
+    if hasattr(sdk, "request_choice"):
+        choice = sdk.request_choice(
+            params, "922 Kitting - missing source material",
+            "These kit lines have a part but no source material, so the "
+            f"field would print blank:\n\n{lines}\n\n"
+            "Stop and fix the PO / organizer first, or generate the kitting "
+            "paperwork anyway?",
+            [_CHOICE_STOP, _CHOICE_PROCEED])
+    elif console is not None and hasattr(console, "request_input"):
+        ans = console.request_input(
+            f"{len(missing)} kit line(s) are missing their source material "
+            "(listed above). Proceed anyway? Y/N")
+        if (ans or "").strip().lower() in {"y", "yes"}:
+            choice = _CHOICE_PROCEED
+    else:
+        ans = input(f"{len(missing)} kit line(s) missing source material. "
+                    "Proceed anyway? Y/N: ")
+        if (ans or "").strip().lower() in {"y", "yes"}:
+            choice = _CHOICE_PROCEED
+
+    if choice != _CHOICE_PROCEED:
+        raise sdk.UserFacingError(
+            f"{len(missing)} kit line(s) have a part with no source material "
+            "(listed in the console).",
+            "Fill in the SOURCE MATERIAL for those parts on the PO / Pallet & "
+            "Rod Organizer, then run 922 Kitting again - or choose 'Proceed "
+            "anyway' when it asks.")
+
+    log("Proceeding anyway - those fields will print blank.")
+    if hasattr(sdk, "set_run_outcome"):
+        sdk.set_run_outcome(
+            params, sdk.RUN_OUTCOME_WARNING,
+            f"{len(missing)} kit line(s) missing source material - "
+            "proceeded anyway")
+
+
 # Main entry ------------------------------------------------------------------
 
 def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
@@ -376,6 +480,18 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         log(f"Bent Plates DYPNs indexed: {len(bent_plates)}")
         progress_callback(15)
 
+        # Pre-check: find every kit line missing its source material BEFORE
+        # any paperwork is generated, and halt unless the user says otherwise.
+        # Nothing is saved yet, so a halt here leaves the workbook untouched.
+        log("Pre-check: scanning all kit pages for missing source material...")
+        missing = _scan_missing_source_material(
+            excel, ws_kit, cancel_event, progress_callback, 15, 25)
+        if missing:
+            _resolve_missing_source_material(params, console, missing, log)
+        else:
+            log("  All kit lines have a source material.")
+        progress_callback(25)
+
         # Phase 2: print loop
         d21 = ws_kit.Range("D21")
         try:
@@ -436,7 +552,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 in_progress_edits = []
 
             excel.CalculateFull()
-            progress_callback(15 + int((idx + 1) / total_iters * 70))
+            progress_callback(25 + int((idx + 1) / total_iters * 60))
 
         # Reset driver
         d21.Value = 1
