@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.6.13 - 911 Teams Cards becomes its own app with a nest picker; the EB 922 Schedule status advances itself; 911 Setup remembers your action checklist; cancelled runs no longer count as successes; difficulty labels restored after a schedule header rename
+; Version 0.8.7 - New Assistant page: talk to Woogy, plan a time-blocked day, keep notes and tasks, get Windows reminders; new 922 Difficulty Stamper carries the DIFFICULT label onto work packets; set your own profile picture
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.6.13"
+#define MyAppVersion "0.8.7"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

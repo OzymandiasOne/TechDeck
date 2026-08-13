@@ -225,6 +225,28 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7", "Aug 13, 2026", "Feature",
+     "Adds a personal planning workspace to the platform. Staff can capture "
+     "what is on their plate in plain language and have the day laid out as a "
+     "worked schedule: commitments with a date are placed first, the remainder "
+     "ordered by value returned against time spent, every estimate padded "
+     "against optimism, and meetings and breaks worked around. Anything that "
+     "will not fit in the available hours is reported with the reason rather "
+     "than silently dropped, which turns an over-committed day into a "
+     "conversation before it becomes a missed deadline. The finished plan "
+     "exports to Outlook, so reminders reach staff on any device, and the "
+     "platform also prompts locally before each block begins. A running notes "
+     "and task list sits alongside it. "
+     "A new packet-marking tool carries the engineering difficulty flag from "
+     "the CAD models through to the printed work packet, so a compound-cut "
+     "part is visible to the floor at the point of work instead of only in the "
+     "model. Re-running is safe in both directions: it will not mark a packet "
+     "twice, and a job whose parts are no longer flagged has its previous mark "
+     "removed. Parts whose drawings cannot be read are reported rather than "
+     "assumed clear. "
+     "Also: staff can set a profile picture, and a reliability defect that "
+     "could fail a document save when the file was still held open is fixed.",
+     "Released"),
     ("Beta 0.8.6.13", "Aug 11, 2026", "Feature",
      "Coordination-card creation for the 911 pipeline is now a standalone tool, "
      "so cards can be raised without running a batch setup and a setup can be "

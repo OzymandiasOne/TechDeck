@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.13 - 911 Teams Cards
+# TechDeck v0.8.7 - The Assistant
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -8,6 +8,53 @@ to colleagues who can't run Python directly. No installs, no PATH changes - just
 the `.exe`.
 
 ---
+
+## What's New in v0.8.7
+
+**A new Assistant page.** There's a new tab in the sidebar: your own desk inside TechDeck.
+It's a terminal you can talk to, with a Schedule, a Tasks list and Personal Notes beside
+it, and a command line along the bottom that works from any of them.
+
+**Talk to it, and nothing gets filed behind your back.** Type whatever you want at the
+terminal - think out loud, complain about OneDrive at 6:40 in the morning - and Woogy
+answers. Nothing you say becomes a task, a note or a calendar entry unless you actually
+ask for it: press "Add a task", type `/task`, or say "remind me to call Dan at 9am". Your
+conversation is kept between sessions, and it never leaves your machine.
+
+**Build a schedule that fits the day.** Tell it what's on your plate - one line per job,
+however you'd say it out loud ("fix the PO sheet 45m urgent due friday") - and it lays out
+a real timetable. Anything due today goes first, then whatever gives you the most back for
+the time it costs, so five quick wins don't sit behind one big job all morning. It pads
+every estimate (everyone under-estimates), works around your meetings and your lunch,
+splits long jobs across gaps but never into useless five-minute slivers, and leaves a
+breather after a long stretch. Anything that won't fit is listed with the reason instead of
+quietly disappearing.
+
+**Send the plan to Outlook.** Export it as a calendar file and open it - the whole day
+lands on your real calendar, so the reminders reach you on your phone and in meetings.
+Markdown and plain text exports are there too for pasting into Teams.
+
+**Reminders while you work.** Windows notifications before each block starts, a summary of
+the day each morning, and a once-a-day nudge about anything past its date. It never fires
+late, never fires twice, and stays quiet outside your working hours. These come from
+TechDeck itself, so they only arrive while it's open - that's what the calendar export is
+for.
+
+**Notes to yourself.** Nested bullets, Tab to indent, saves as you type.
+
+**922 Difficulty Stamper.** A new app that carries the DriveWorks DIFFICULT label forward
+onto the paperwork the floor actually sees. It reads every part drawing under an order's
+CAD-AND-SHOP-PRINTS folder, and if any part carries the label it stamps DIFFICULT in red on
+page one of that order's work packet, sitting just below the pallet stamp. Re-running never
+double-stamps, and an order whose parts are no longer difficult has its old stamp removed.
+Drawings it can't read are reported rather than treated as clean.
+
+**Set your own profile picture.** My Account has a proper identity card now: your picture,
+your name, your email. Hover the circle to change it. Your picture shows next to your
+messages in the Assistant, and clicking it there brings you back to My Account.
+
+**Smaller fixes.** Saving a PDF could fail on files the app still had open. The "Build Your
+Own" tile in My Stuff shows the beyblade you actually built rather than a placeholder.
 
 ## What's New in v0.8.6.13
 
