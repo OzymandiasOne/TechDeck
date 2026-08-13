@@ -484,12 +484,17 @@ _STOP_LINES = [
     "Woogy is a closed mouth.",
 ]
 
+# Being shouted at does not make him acknowledge you, it makes him hide or
+# over-agree. The two kept lines set that register; anything added here should
+# be frightened or pathetically eager, never a simple "heard you".
 _SHOUT_LINES = [
-    "AH! Okay!",
     "Woogy cowers behind the counter. Only the top of his head is visible.",
-    "Loud! Woogy is awake!",
     "YES. Whatever it is, YES.",
-    "Woogy jumped a little.",
+    "Woogy agrees. Woogy agrees so much. Please stop shouting.",
+    "Every eye Woogy has is pointed at you. All three of them.",
+    "Woogy did it. Whatever it was, Woogy did it, and Woogy is sorry.",
+    "Woogy is nodding. Woogy has not stopped nodding.",
+    "Woogy is standing very still. Things cannot see you if you stand very still.",
 ]
 
 _SCOLDED_LINES = [
