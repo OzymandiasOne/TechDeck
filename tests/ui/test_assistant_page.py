@@ -483,8 +483,8 @@ def test_woogy_gets_a_round_avatar_from_his_own_sprite(qapp):
 
 
 @pytest.mark.parametrize("name,expected", [
-    ("Anthony Siebenmorgen", "AS"),
-    ("ASiebenmorgen", "AS"),
+    ("Ada Sparks", "AS"),
+    ("ASparks", "AS"),
     ("fern.tucker", "FT"),
     ("woogy", "WO"),
     ("", "?"),
@@ -506,9 +506,9 @@ def test_the_speaker_is_named_woogy_not_a_symbol(qapp):
 def test_the_user_line_is_named_after_the_user(qapp):
     from techdeck.ui.widgets.assistant_terminal import TerminalView
     view = TerminalView()
-    view.set_identity("Anthony Siebenmorgen")
+    view.set_identity("Ada Sparks")
     view.append_line("user", "morning")
-    assert "Anthony Siebenmorgen" in view.toPlainText()
+    assert "Ada Sparks" in view.toPlainText()
 
 
 def test_consecutive_lines_from_one_speaker_share_a_head(qapp):
@@ -645,11 +645,11 @@ def test_a_chosen_picture_replaces_the_initials(qapp, tmp_path):
     from techdeck.ui import avatars
 
     settings = SettingsManager(tmp_path / "cfg")
-    before = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+    before = avatars.user_avatar(settings, "Ada Sparks", "#2878A8", 48)
 
     picture = avatars.normalise_for_storage(_square_png(tmp_path / "me.png"))
     picture.save(str(settings.avatar_path()), "PNG")
-    after = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+    after = avatars.user_avatar(settings, "Ada Sparks", "#2878A8", 48)
 
     assert settings.has_avatar()
     assert before.toImage() != after.toImage()
@@ -697,9 +697,9 @@ def test_removing_the_picture_falls_back_to_initials(qapp, tmp_path):
     assert not settings.has_avatar()
     assert settings.clear_avatar() is False          # already gone, no error
 
-    fallback = avatars.user_avatar(settings, "Anthony Siebenmorgen", "#2878A8", 48)
+    fallback = avatars.user_avatar(settings, "Ada Sparks", "#2878A8", 48)
     assert fallback.toImage() == avatars.initials_avatar(
-        "Anthony Siebenmorgen", "#2878A8", 48).toImage()
+        "Ada Sparks", "#2878A8", 48).toImage()
 
 
 def test_a_picture_deleted_behind_our_back_falls_back_quietly(qapp, tmp_path):
@@ -776,13 +776,13 @@ def account(qapp, tmp_path):
     from techdeck.core.settings import SettingsManager
     from techdeck.ui.pages.account_page import AccountPage
     settings = SettingsManager(tmp_path / "cfg")
-    settings.update_user_data(name="Anthony Siebenmorgen",
+    settings.update_user_data(name="Ada Sparks",
                              email="ada.sparks@example.com")
     return AccountPage(settings)
 
 
 def test_the_card_shows_the_name_and_email(account):
-    assert account.identity_name.text() == "Anthony Siebenmorgen"
+    assert account.identity_name.text() == "Ada Sparks"
     assert account.identity_email.text() == "ada.sparks@example.com"
 
 
