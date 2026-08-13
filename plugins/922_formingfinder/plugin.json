@@ -1,8 +1,8 @@
 {
   "id": "922_formingfinder",
   "name": "922 FormingFinder",
-  "description": "Discovers formed plate PDFs in a 922 batch via filename, PO NOTES, and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet in the Pallet & Rod Organizer.",
-  "version": "1.1.0",
+  "description": "Discovers formed plate and formed flat bar PDFs in a 922 batch via filename, PO NOTES, and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet in the Pallet & Rod Organizer.",
+  "version": "1.2.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -11,11 +11,11 @@
       "The batch's order folders and the Pallet & Rod Organizer need to be in place (run 922 Setup first)."
     ],
     "how_it_works": [
-      "The app discovers formed-plate PDFs three ways: by filename, by the PO NOTES, and by analyzing the PDF layout.",
-      "It copies and merges the formed-plate PDFs and fills in the Bent Plates sheet of the Pallet & Rod Organizer."
+      "The app discovers formed parts - formed plates AND formed flat bars - three ways: by filename (the ' F' suffix), by the PO NOTES, and by analyzing the PDF layout.",
+      "It copies and merges the formed-part PDFs and fills in the Bent Plates sheet of the Pallet & Rod Organizer."
     ],
     "output": [
-      "Merged formed-plate PDFs and a populated Bent Plates sheet in the Pallet & Rod Organizer (which Kitting then reads)."
+      "Merged formed-part PDFs and a populated Bent Plates sheet in the Pallet & Rod Organizer (which Kitting then reads)."
     ]
   },
   "requires_admin": false,

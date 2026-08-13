@@ -149,3 +149,48 @@ def test_missing_source_material_sheet_degrades_to_first_row(ff, tmp_path):
 ])
 def test_material_kind(ff, desc, kind):
     assert ff._material_kind(desc) == kind
+
+
+# --- flat bars are formable too (formed in-house since 2026-08) ---------------
+
+@pytest.mark.parametrize("desc,kind", [
+    ("OSS 0.375 X 2.00 FLAT BAR ASTM A36", "bar"),
+    ("0.375 X 2.00 FLATBAR", "bar"),
+    ("OSS 0.375 OD FLAT BAR", "unknown"),   # bar + rod evidence = conflict
+])
+def test_material_kind_flat_bar(ff, desc, kind):
+    assert ff._material_kind(desc) == kind
+
+
+def test_silent_po_picks_the_flat_bar_over_the_rod(ff, tmp_path):
+    materials = _MATERIALS + [
+        ("262028652-77", "OSS 0.375 X 2.00 FLAT BAR",
+         "0.375 X 2.00 FLAT BAR X 24.00 Length"),
+    ]
+    po = _po_workbook(tmp_path, [
+        ["X1", "P-2", "P-2-3", "262028653-48", ""],   # rod
+        ["X1", "P-2", "P-2-3", "262028652-77", ""],   # flat bar
+    ], materials)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    row = lookup["p-2-3"]
+    assert row["SOURCE MATERIAL"] == "262028652-77"
+    assert "using flat bar 262028652-77" in row["_PICK_NOTE"]
+
+
+@pytest.mark.parametrize("name,dypn", [
+    ("E6492162-H22-3 PLT F.pdf", "E6492162-H22-3"),
+    ("E6492162-H22-3 BAR F.pdf", "E6492162-H22-3"),
+    ("E6492162-H22-3 BAR.pdf", "E6492162-H22-3"),
+])
+def test_dypn_from_filename(ff, name, dypn):
+    assert ff._dypn_from_filename(name) == dypn
+
+
+@pytest.mark.parametrize("name,formed", [
+    ("E6492162-H22-3 PLT F.pdf", True),
+    ("E6492162-H22-3 BAR F.pdf", True),
+    ("E6492162-H22-3 PLT.pdf", False),
+    ("E6492162-H22-3 BAR.pdf", False),
+])
+def test_formed_suffix(ff, name, formed):
+    assert ff._has_formed_suffix(name) is formed

@@ -1,10 +1,13 @@
 """
 922 FormingFinder
 =================
-Discovers formed plate PDFs in a 922 QTDR batch using three methods:
-  1. Filename scan for "PLT F"
+Discovers formed plate AND formed flat bar PDFs in a 922 QTDR batch using
+three methods:
+  1. Filename scan for "PLT F" / "BAR F" (DriveWorks appends " F" to a formed
+     plate's filename, and - since flat bars are formed in-house - to a flat
+     bar's when its Material State is "Formed")
   2. PO workbook NOTES column containing "bend"
-  3. PDF content / spatial analysis for unlabeled formed plates
+  3. PDF content / spatial analysis for unlabeled formed parts
 
 Copies all discovered PDFs into Batch {n} - Documentation/Forming {n}/, merges
 them into Forming {n}.pdf, and writes one row per part to the Bent Plates
@@ -43,11 +46,27 @@ PURPLE_HEX = "FF7030A0"
 # DYPN helpers -----------------------------------------------------------------
 
 def _dypn_from_filename(filename: str) -> str:
-    """Extract DYPN from filename: the portion before ' PLT'."""
-    idx = filename.find(" PLT")
-    if idx == -1:
-        return Path(filename).stem
-    return filename[:idx].strip()
+    """Extract DYPN from filename: the portion before ' PLT' or ' BAR'."""
+    for token in (" PLT", " BAR"):
+        idx = filename.find(token)
+        if idx != -1:
+            return filename[:idx].strip()
+    return Path(filename).stem
+
+
+def _has_formed_suffix(name: str) -> bool:
+    """DriveWorks marks a formed part's filename with ' F' after the type
+    token: '{DYPN} PLT F' (formed mounting plate project) and '{DYPN} BAR F'
+    (FLAT BAR project with Material State = Formed). Case-sensitive on
+    purpose, same as the original PLT-only scan."""
+    return "PLT F" in name or "BAR F" in name
+
+
+def _is_part_pdf(name: str) -> bool:
+    """A plate or flat-bar part PDF. ' BAR' keeps its leading space so a DYPN
+    that merely contains the letters can't misfire ('PLT' predates this and
+    stays as-is for back-compat)."""
+    return "PLT" in name or " BAR" in name
 
 
 def _bent_suffix(dypn: str) -> str:
@@ -93,18 +112,28 @@ def _find_organizer_workbook(doc_folder: Path, batch_no: str) -> Optional[Path]:
 # Source-material classification off the PO's SOURCE MATERIAL sheet
 # descriptions. Real Batch 485 text: plates read 'OSS 0.625 THK', rods read
 # 'OSS 0.625 OD ASTM A36'. \bOD\b (word-bounded) so 'ROD'/'BODY' can't misfire.
+# Flat bars (formable in-house since 2026-08) are matched on 'FLAT BAR' only -
+# a bare \bBAR\b would also hit 'BAR STOCK'-style rod text.
 _THK_RE = re.compile(r"\bTHK\b|\bPLATE\b", re.IGNORECASE)
 _OD_RE = re.compile(r"\bOD\b|\bROD\b", re.IGNORECASE)
+_BAR_RE = re.compile(r"\bFLAT\s*BAR\b", re.IGNORECASE)
+
+# The kinds that can be a FORMED part (a rod never is).
+_FORMABLE_KINDS = ("plate", "bar")
 
 
 def _material_kind(desc: str) -> str:
-    """'plate' | 'rod' | 'unknown' from a source-material description.
-    Conflicting evidence (one 485 row says THK in Scribe and OD in Part
-    Description) is 'unknown' — never guess a formed plate onto a rod."""
-    plate, rod = bool(_THK_RE.search(desc)), bool(_OD_RE.search(desc))
-    if plate and not rod:
-        return "plate"
-    if rod and not plate:
+    """'plate' | 'bar' | 'rod' | 'unknown' from a source-material description.
+    Conflicting formable-vs-rod evidence (one 485 row says THK in Scribe and
+    OD in Part Description) is 'unknown' — never guess a formed part onto a
+    rod. THK + FLAT BAR together is fine (both say formable) and reads as
+    'plate'."""
+    plate = bool(_THK_RE.search(desc))
+    bar = bool(_BAR_RE.search(desc))
+    rod = bool(_OD_RE.search(desc))
+    if (plate or bar) and not rod:
+        return "plate" if plate else "bar"
+    if rod and not (plate or bar):
         return "rod"
     return "unknown"
 
@@ -155,10 +184,11 @@ def _load_po_lookup(po_path: Path, log) -> dict:
     (Batch 485: H7441366-H417-3 = 262028653-50 plate + -48 rod). Row choice,
     in order:
       1. a row whose NOTES say 'bend' (the PO told us outright);
-      2. the row whose source-material description reads as a PLATE (THK) and
-         not a ROD (OD) - a formed part IS a plate, so when the PO is silent
-         the material type decides. First-row-wins here is what put FORMED on
-         the rods of Kitting 485 pages 30/35 (2026-08-05);
+      2. the row whose source-material description reads as FORMABLE (a plate
+         via THK, or a flat bar via FLAT BAR) and not a ROD (OD) - a formed
+         part is never a rod, so when the PO is silent the material type
+         decides. First-row-wins here is what put FORMED on the rods of
+         Kitting 485 pages 30/35 (2026-08-05);
       3. anything not rod-like; else the first row, each with a warning.
     """
     # Resilient load: on a fresh Files-On-Demand sync the PO workbook can be a
@@ -235,27 +265,29 @@ def _load_po_lookup(po_path: Path, log) -> dict:
         if len(rows) == 1:
             lookup[key] = rows[0]
             continue
-        # Silent PO, several materials: the formed part is the PLATE. The
-        # choice note is STASHED on the row, not logged here - the lookup
-        # covers every PO DYPN, but only the few actually discovered as formed
-        # matter, and the caller logs the note when it uses the row.
-        plates = [r for r in rows if _kind(r) == "plate"]
-        if len(plates) == 1:
-            chosen = plates[0]
+        # Silent PO, several materials: the formed part is the formable one
+        # (plate or flat bar), never the rod. The choice note is STASHED on
+        # the row, not logged here - the lookup covers every PO DYPN, but only
+        # the few actually discovered as formed matter, and the caller logs
+        # the note when it uses the row.
+        formable = [r for r in rows if _kind(r) in _FORMABLE_KINDS]
+        if len(formable) == 1:
+            chosen = formable[0]
+            word = "plate" if _kind(chosen) == "plate" else "flat bar"
             others = ", ".join(str(r['SOURCE MATERIAL']) for r in rows
                                if r is not chosen)
             desc = descs.get(str(chosen['SOURCE MATERIAL']).strip().casefold(), '?')
             chosen['_PICK_NOTE'] = (
                 f"{chosen['DYPN']}: {len(rows)} source materials on the PO; "
-                f"using plate {chosen['SOURCE MATERIAL']} ({desc}) over {others}")
+                f"using {word} {chosen['SOURCE MATERIAL']} ({desc}) over {others}")
         else:
             non_rod = [r for r in rows if _kind(r) != "rod"]
-            chosen = (plates or non_rod or rows)[0]
+            chosen = (formable or non_rod or rows)[0]
             chosen['_PICK_WARN'] = (
                 f"WARNING: {chosen['DYPN']} has {len(rows)} source materials "
-                f"on the PO and none is unambiguously the plate - using "
-                f"{chosen['SOURCE MATERIAL']}; verify the FORMED tag on this "
-                f"part's kit page.")
+                f"on the PO and none is unambiguously the plate or flat bar - "
+                f"using {chosen['SOURCE MATERIAL']}; verify the FORMED tag on "
+                f"this part's kit page.")
         lookup[key] = chosen
 
     return lookup
@@ -264,7 +296,8 @@ def _load_po_lookup(po_path: Path, log) -> dict:
 # Method 1 ---------------------------------------------------------------------
 
 def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=None) -> dict[str, dict]:
-    """Recursively scan for PDFs with 'PLT F' in the filename (case-sensitive)."""
+    """Recursively scan for PDFs with 'PLT F' or 'BAR F' in the filename
+    (case-sensitive)."""
     found: dict[str, dict] = {}
     # Poll cancel_event during the rglob walk — over a OneDrive batch tree this
     # single call can run for a long time, and without the check a Cancel click
@@ -276,7 +309,7 @@ def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=
             break
         if i and i % 500 == 0:
             log(f"  Method 1: scanned {i} PDFs so far...")
-        if "PLT F" not in pdf.name:
+        if not _has_formed_suffix(pdf.name):
             continue
         if _is_skipped(pdf, batch_path, batch_no):
             continue
@@ -293,7 +326,8 @@ def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=
 
 def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=None) -> Optional[Path]:
     """Find a PDF for DYPN under {batch_root}/{order folder}/CAD-AND-SHOP-PRINTS/.
-    Prefer 'PLT F' over 'PLT' if both exist."""
+    Plates and flat bars both qualify; prefer the ' F'-suffixed (formed) file
+    over the flat one if both exist."""
     order_folder = None
     for child in batch_path.iterdir():
         if not child.is_dir():
@@ -313,22 +347,22 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=N
     if not cad_root:
         return None
 
-    plt_f_match: Optional[Path] = None
-    plt_match: Optional[Path] = None
+    formed_match: Optional[Path] = None
+    flat_match: Optional[Path] = None
     needle = f"{dypn} "
     for i, pdf in enumerate(cad_root.rglob("*.pdf")):
         if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
             break
         name = pdf.name
-        if needle not in name or "PLT" not in name:
+        if needle not in name or not _is_part_pdf(name):
             continue
-        if "PLT F" in name:
-            if plt_f_match is None:
-                plt_f_match = pdf
+        if _has_formed_suffix(name):
+            if formed_match is None:
+                formed_match = pdf
         else:
-            if plt_match is None:
-                plt_match = pdf
-    return plt_f_match or plt_match
+            if flat_match is None:
+                flat_match = pdf
+    return formed_match or flat_match
 
 
 def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[str, dict]:
@@ -434,9 +468,9 @@ def _method3(
     for i, pdf in enumerate(batch_path.rglob("*.pdf")):
         if i % 64 == 0 and cancel_event.is_set():
             return found
-        if "PLT" not in pdf.name:
+        if not _is_part_pdf(pdf.name):
             continue
-        if "PLT F" in pdf.name:
+        if _has_formed_suffix(pdf.name):
             continue
         if _is_skipped(pdf, batch_path, batch_no):
             continue
@@ -456,7 +490,7 @@ def _method3(
             continue
         if _is_formed_pdf(pdf):
             found[key] = {'dypn': dypn, 'pdf_path': pdf, 'methods': {3}}
-            log(f"  Method 3: formed plate detected -- {dypn}")
+            log(f"  Method 3: formed part detected -- {dypn}")
     return found
 
 
@@ -508,7 +542,7 @@ def _update_bent_plates(
         notes_cell.font = purple_font
 
     # Row 1 title (merged cell; write to top-left)
-    ws.cell(row=1, column=1, value=f"BATCH {batch_no}: FORMED PLATES")
+    ws.cell(row=1, column=1, value=f"BATCH {batch_no}: FORMED PARTS")
 
     wb.save(organizer_path)
     wb.close()
@@ -576,7 +610,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         return
 
     # Method 1
-    log("Method 1: scanning filenames for 'PLT F'...")
+    log("Method 1: scanning filenames for 'PLT F' / 'BAR F'...")
     m1 = _method1(batch_path, batch_no, log, cancel_event)
     log(f"  Method 1 found: {len(m1)} DYPN(s)")
     progress_callback(25)
@@ -610,7 +644,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 }
 
     # Method 3
-    log("Method 3: scanning PDFs for formed-plate visual signature...")
+    log("Method 3: scanning PDFs for formed-part visual signature...")
     m3 = _method3(
         batch_path, batch_no, set(combined.keys()),
         log, progress_callback, cancel_event,
@@ -625,11 +659,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         return
 
     if not combined:
-        log("No formed plates discovered by any method. Nothing to write.")
+        log("No formed parts discovered by any method. Nothing to write.")
         progress_callback(100)
         return
 
-    log(f"Total unique formed plates: {len(combined)}")
+    log(f"Total unique formed parts: {len(combined)}")
 
     # Phase 2: copy PDFs into Forming subfolder
     forming_dir.mkdir(parents=True, exist_ok=True)
@@ -692,7 +726,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     log("=" * 50)
     log(f"922 FormingFinder -- Batch {batch_no}")
-    log(f"  Total formed plates : {len(rows_data)}")
+    log(f"  Total formed parts  : {len(rows_data)}")
     log("=" * 50)
 
 
