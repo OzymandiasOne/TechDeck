@@ -170,6 +170,26 @@ class PluginResult:
     outcome_message: str = ""
 
 
+@dataclass
+class RunningPlugin:
+    """Bookkeeping for one live run — replaces the five parallel dicts that
+    were each keyed by plugin_id (running_threads / cancel_events /
+    start_times / last_activity / _input_wait_started) and could drift out
+    of step. `thread` is None for main-thread (GUI) runs, which ARE
+    registered here: before this, a requires_main_thread plugin was invisible
+    to is_plugin_running / get_active_plugins, so the close-without-warning
+    guard and the hang watchdog's snapshot missed exactly the plugin class
+    most likely to freeze the UI, and a double-click could start it twice."""
+    plugin_id: str
+    cancel_event: threading.Event
+    started_at: float
+    last_activity: float
+    thread: Optional[threading.Thread] = None
+    # When the current console input prompt started (None = not prompting).
+    # Drives the auto-pause on long input idle (Phase C).
+    input_wait_started: Optional[float] = None
+
+
 class PluginExecutor:
     """
     Manages plugin execution with progress tracking and cancellation support.
@@ -193,16 +213,9 @@ class PluginExecutor:
             default_timeout: Default timeout in seconds for plugin execution (0 = no timeout)
         """
         self.plugin_loader = plugin_loader
-        self.running_threads: Dict[str, threading.Thread] = {}
-        self.cancel_events: Dict[str, threading.Event] = {}
+        # One record per live run (incl. main-thread runs) — see RunningPlugin.
+        self._running: Dict[str, RunningPlugin] = {}
         self.results: Dict[str, PluginResult] = {}
-        self.start_times: Dict[str, float] = {}  # PHASE 2: Track start times
-        # Last log/progress activity per plugin — drives the inactivity watchdog
-        self.last_activity: Dict[str, float] = {}
-        # When the current console input prompt started (per plugin). Set when
-        # waiting_for_input flips True, cleared when it flips False. Drives the
-        # auto-pause on long input idle (Phase C).
-        self._input_wait_started: Dict[str, float] = {}
         # PHASE 1 FIX: Thread safety - RLock allows same thread to acquire multiple times
         self._lock = threading.RLock()
         # PHASE 2: Default timeout
@@ -285,15 +298,26 @@ class PluginExecutor:
         
         # PHASE 1 FIX: Thread-safe check if already running
         with self._lock:
-            if plugin_id in self.running_threads and self.running_threads[plugin_id].is_alive():
+            existing = self._running.get(plugin_id)
+            if existing is not None and (existing.thread is None
+                                         or existing.thread.is_alive()):
                 if log_callback:
                     log_callback(f"Plugin {plugin_id} is already running")
                 return False
-            
-            # Create cancel event
+
+            # Create cancel event + registry record. Main-thread (GUI) runs
+            # register too (thread=None) so is_plugin_running, the close
+            # warning, and the hang watchdog's snapshot all see them.
             cancel_event = threading.Event()
-            self.cancel_events[plugin_id] = cancel_event
-            
+            now = time.time()
+            record = RunningPlugin(
+                plugin_id=plugin_id,
+                cancel_event=cancel_event,
+                started_at=now,
+                last_activity=now,
+            )
+            self._running[plugin_id] = record
+
             # Initialize result
             self.results[plugin_id] = PluginResult(
                 plugin_id=plugin_id,
@@ -301,11 +325,6 @@ class PluginExecutor:
                 message="Starting...",
                 progress=0
             )
-            
-            # PHASE 2: Record start time
-            self.start_times[plugin_id] = time.time()
-            # Seed activity timestamp for the inactivity watchdog
-            self.last_activity[plugin_id] = time.time()
 
             # Console reference (if any) lets the watchdog tell "blocked waiting
             # for user input" apart from "genuinely hung".
@@ -317,7 +336,9 @@ class PluginExecutor:
 
             # Check if plugin requires main thread
             if plugin.requires_main_thread:
-                # Execute in main thread using QTimer
+                # Execute in main thread using QTimer. No inactivity monitor:
+                # its cancel flag couldn't preempt a busy main thread anyway —
+                # main-thread hangs are the hang watchdog's job.
                 def execute_in_main_thread():
                     self._execute_plugin_directly(
                         plugin, params or {}, log_callback, progress_callback,
@@ -335,7 +356,7 @@ class PluginExecutor:
                     daemon=True
                 )
 
-                self.running_threads[plugin_id] = thread
+                record.thread = thread
                 thread.start()
 
                 # Start inactivity watchdog if an idle limit is set
@@ -348,15 +369,16 @@ class PluginExecutor:
                         daemon=True
                     )
                     monitor_thread.start()
-            
+
         return True
     
     def _touch_activity(self, plugin_id: str) -> None:
         """Mark the plugin as active right now, resetting the inactivity
         watchdog. Called on every log line and progress update."""
         with self._lock:
-            if plugin_id in self.last_activity:
-                self.last_activity[plugin_id] = time.time()
+            record = self._running.get(plugin_id)
+            if record is not None:
+                record.last_activity = time.time()
 
     def _timeout_monitor(
         self,
@@ -397,22 +419,21 @@ class PluginExecutor:
 
             # Check if plugin is still running
             with self._lock:
-                if plugin_id not in self.running_threads:
+                record = self._running.get(plugin_id)
+                if record is None:
                     return  # Plugin completed normally
-
-                thread = self.running_threads.get(plugin_id)
-                if thread is None or not thread.is_alive():
+                if record.thread is not None and not record.thread.is_alive():
                     return  # Plugin finished
 
             is_waiting = console is not None and getattr(console, 'waiting_for_input', False)
             if is_waiting:
                 # Track when this prompt started so we know when to auto-pause.
                 with self._lock:
-                    if plugin_id not in self._input_wait_started:
-                        self._input_wait_started[plugin_id] = time.time()
-                    wait_start = self._input_wait_started[plugin_id]
+                    if record.input_wait_started is None:
+                        record.input_wait_started = time.time()
+                    wait_start = record.input_wait_started
                     # Keep the inactivity timer fresh — user think-time isn't "hung".
-                    self.last_activity[plugin_id] = time.time()
+                    record.last_activity = time.time()
 
                 # Auto-pause once if we cross the threshold and a callback exists.
                 if (on_input_idle is not None
@@ -430,12 +451,12 @@ class PluginExecutor:
                 # Prompt was answered (or never started); reset for the NEXT prompt
                 # this plugin might raise.
                 with self._lock:
-                    self._input_wait_started.pop(plugin_id, None)
+                    record.input_wait_started = None
                 pause_signalled = False
 
             # Cancel only after `timeout` seconds with no activity
             with self._lock:
-                last = self.last_activity.get(plugin_id, time.time())
+                last = record.last_activity
             idle = time.time() - last
             if idle >= timeout:
                 if log_callback:
@@ -444,8 +465,7 @@ class PluginExecutor:
                         f"hung, cancelling..."
                     )
                 with self._lock:
-                    if plugin_id in self.cancel_events:
-                        self.cancel_events[plugin_id].set()
+                    record.cancel_event.set()
                     if plugin_id in self.results:
                         result = self.results[plugin_id]
                         result.status = PluginStatus.TIMEOUT
@@ -461,11 +481,46 @@ class PluginExecutor:
         progress_callback: Optional[Callable[[int], None]],
         completion_callback: Optional[Callable[[PluginResult], None]],
         cancel_event: threading.Event,
-        timeout: int  # PHASE 2: Timeout parameter
+        timeout: int
     ) -> None:
-        """
-        Internal method that runs in the plugin thread.
-        
+        """Worker-thread entry — thin wrapper over the shared run body."""
+        self._run_plugin_body(plugin, params, log_callback, progress_callback,
+                              completion_callback, cancel_event, timeout,
+                              threaded=True)
+
+    def _execute_plugin_directly(
+        self,
+        plugin: Plugin,
+        params: Dict[str, Any],
+        log_callback: Optional[Callable[[str], None]],
+        progress_callback: Optional[Callable[[int], None]],
+        completion_callback: Optional[Callable[[PluginResult], None]],
+        cancel_event: threading.Event,
+        timeout: int
+    ) -> None:
+        """Main-thread (GUI plugin) entry — same body, run synchronously on
+        the GUI thread via QTimer.singleShot(0, ...) from execute_plugin."""
+        self._run_plugin_body(plugin, params, log_callback, progress_callback,
+                              completion_callback, cancel_event, timeout,
+                              threaded=False)
+
+    def _run_plugin_body(
+        self,
+        plugin: Plugin,
+        params: Dict[str, Any],
+        log_callback: Optional[Callable[[str], None]],
+        progress_callback: Optional[Callable[[int], None]],
+        completion_callback: Optional[Callable[[PluginResult], None]],
+        cancel_event: threading.Event,
+        timeout: int,
+        *,
+        threaded: bool,
+    ) -> None:
+        """The one shared execution body. Was two near-verbatim ~200-line
+        copies (thread vs main-thread) that drifted: every fix had to land
+        twice, and the main-thread copy skipped the post-run cancel check so
+        a cancelled GUI run could still report SUCCESS.
+
         Args:
             plugin: Plugin object to execute
             params: Parameters to pass to plugin
@@ -473,7 +528,9 @@ class PluginExecutor:
             progress_callback: Progress callback
             completion_callback: Completion callback
             cancel_event: Event to check for cancellation
-            timeout: Execution timeout in seconds
+            timeout: Idle-timeout in seconds (0 = disabled; logged only —
+                the monitor thread enforces it, and only for threaded runs)
+            threaded: False for main-thread (GUI plugin) runs
         """
         plugin_id = plugin.id
         start_time = time.time()  # PHASE 2: Track execution time
@@ -488,8 +545,11 @@ class PluginExecutor:
             self._touch_activity(plugin_id)
             try:
                 get_detail_logger().info("%s | %s", plugin_id, message)
-            except Exception:
-                pass  # detail logging must never break a run
+            except Exception as e:
+                # Detail logging must never break a run. debug level: this
+                # fires per log line, so a broken handler must not flood
+                # app.log in turn.
+                logger.debug("Detail log write failed: %s", e)
             if log_callback:
                 try:
                     log_callback(message)
@@ -515,10 +575,16 @@ class PluginExecutor:
             start_msg = get_start_message(plugin.name)
             safe_log(start_msg)
             safe_progress(0)
-            get_run_logger().info(
-                "RUN START %s (v%s) idle_limit=%ss",
-                plugin_id, plugin.version, timeout,
-            )
+            if threaded:
+                get_run_logger().info(
+                    "RUN START %s (v%s) idle_limit=%ss",
+                    plugin_id, plugin.version, timeout,
+                )
+            else:
+                get_run_logger().info(
+                    "RUN START %s (v%s) [main thread]",
+                    plugin_id, plugin.version,
+                )
 
             # Load plugin module
             try:
@@ -551,8 +617,10 @@ class PluginExecutor:
             plugin_settings = settings_manager.get_plugin_settings(plugin_id)
             plugin_params['settings'] = plugin_settings
 
-            # Execute plugin
-            plugin_result = run_func(plugin_params, safe_progress, cancel_event)
+            # Execute plugin. The return value is ignored by design — status
+            # is reported through mutations of plugin_params (set_run_outcome,
+            # set_ticket_units) and the exceptions above.
+            run_func(plugin_params, safe_progress, cancel_event)
 
             # PHASE 2: Calculate execution time
             execution_time = time.time() - start_time
@@ -596,8 +664,10 @@ class PluginExecutor:
                     from techdeck.core.usage_tracker import record_run
                     record_run(plugin_id, plugin.name,
                                getattr(plugin, 'family', 'General'), execution_time)
-                except Exception:
-                    pass  # telemetry must never affect a run
+                except Exception as telemetry_exc:
+                    # Telemetry must never affect a run — but leave a trace.
+                    logger.warning("Usage telemetry record failed: %s",
+                                   telemetry_exc)
 
         except PluginCancelled:
             # Cooperative cancel: a plugin called sdk.raise_if_cancelled() after
@@ -642,8 +712,9 @@ class PluginExecutor:
             try:
                 from techdeck.core.settings import SettingsManager
                 SettingsManager().record_plugin_error(plugin_id)
-            except Exception:
-                pass
+            except Exception as stats_exc:
+                logger.warning("Could not record error stat for %s: %s",
+                               plugin_id, stats_exc)
 
             # Handle errors — a KNOWN user-caused failure (file open in Excel,
             # cloud file won't download) gets a clean plain-English message; the
@@ -677,197 +748,9 @@ class PluginExecutor:
                 except Exception as e:
                     logger.warning("Error in completion callback: %s", e)
 
-            # PHASE 1 FIX: Thread-safe cleanup
-            # PHASE 2: Also clean up start_times
+            # Thread-safe cleanup: one registry record to drop.
             with self._lock:
-                if plugin_id in self.running_threads:
-                    del self.running_threads[plugin_id]
-                if plugin_id in self.cancel_events:
-                    del self.cancel_events[plugin_id]
-                if plugin_id in self.start_times:
-                    del self.start_times[plugin_id]
-                if plugin_id in self.last_activity:
-                    del self.last_activity[plugin_id]
-                if plugin_id in self._input_wait_started:
-                    del self._input_wait_started[plugin_id]
-    
-    def _execute_plugin_directly(
-        self,
-        plugin: Plugin,
-        params: Dict[str, Any],
-        log_callback: Optional[Callable[[str], None]],
-        progress_callback: Optional[Callable[[int], None]],
-        completion_callback: Optional[Callable[[PluginResult], None]],
-        cancel_event: threading.Event,
-        timeout: int
-    ) -> None:
-        """Execute plugin directly in main thread (for GUI plugins)."""
-        plugin_id = plugin.id
-        start_time = time.time()
-        
-        with self._lock:
-            result = self.results[plugin_id]
-            result.status = PluginStatus.RUNNING
-        
-        def safe_log(message: str):
-            self._touch_activity(plugin_id)
-            try:
-                get_detail_logger().info("%s | %s", plugin_id, message)
-            except Exception:
-                pass  # detail logging must never break a run
-            if log_callback:
-                try:
-                    log_callback(message)
-                except Exception as e:
-                    logger.warning("Error in log callback: %s", e)
-
-        def safe_progress(value: int):
-            self._touch_activity(plugin_id)
-            if progress_callback:
-                try:
-                    clamped = max(0, min(100, value))
-                    with self._lock:
-                        result.progress = clamped
-                    progress_callback(clamped)
-                except Exception as e:
-                    logger.warning("Error in progress callback: %s", e)
-        
-        try:
-            from techdeck.core.settings import SettingsManager
-            from techdeck.core.flavor import get_start_message
-            settings_manager = SettingsManager()
-            safe_log(get_start_message(plugin.name))
-            safe_progress(0)
-            get_run_logger().info("RUN START %s (v%s) [main thread]", plugin_id, plugin.version)
-
-            module = self.plugin_loader.load_plugin_module(plugin_id)
-
-            if not hasattr(module, 'run'):
-                raise RuntimeError("Plugin missing 'run' function")
-
-            run_func = module.run
-            if not callable(run_func):
-                raise RuntimeError("Plugin 'run' is not callable")
-
-            plugin_params = params.copy()
-            plugin_params['log'] = safe_log
-            plugin_params['plugin_id'] = plugin_id
-            plugin_params['plugin_family'] = getattr(plugin, 'family', 'General')
-            # Stash the cancel flag so deeply-nested helper code can poll it via
-            # sdk.raise_if_cancelled(params.get('cancel_event')) without threading
-            # the event through every call.
-            plugin_params['cancel_event'] = cancel_event
-
-            plugin_settings = settings_manager.get_plugin_settings(plugin_id)
-            plugin_params['settings'] = plugin_settings
-
-            plugin_result = run_func(plugin_params, safe_progress, cancel_event)
-
-            execution_time = time.time() - start_time
-
-            outcome_status, outcome_msg = self._run_outcome_from(plugin_params)
-            with self._lock:
-                if outcome_status is not None:
-                    result.status = PluginStatus.WARNING
-                    result.message = outcome_msg or "Completed with warnings"
-                    result.outcome_message = outcome_msg
-                else:
-                    result.status = PluginStatus.SUCCESS
-                    result.message = "Completed successfully"
-                result.progress = 100
-                result.execution_time = execution_time
-                result.ticket_units = self._ticket_units_from(plugin_params)
-            settings_manager.increment_plugin_runs(plugin_id)
-            safe_progress(100)
-            get_run_logger().info(
-                "RUN %s %s in %.1fs",
-                "WARNING" if outcome_status is not None else "OK",
-                plugin_id, execution_time,
-            )
-            try:
-                from techdeck.core.usage_tracker import record_run
-                record_run(plugin_id, plugin.name,
-                           getattr(plugin, 'family', 'General'), execution_time)
-            except Exception:
-                pass  # telemetry must never affect a run
-
-        except PluginCancelled:
-            # Cooperative cancel: a plugin called sdk.raise_if_cancelled() after
-            # the user hit Cancel. A clean stop, not an error.
-            execution_time = time.time() - start_time
-            with self._lock:
-                result.status = PluginStatus.CANCELLED
-                result.message = "Cancelled by user"
-                result.execution_time = execution_time
-            safe_log("Plugin execution cancelled")
-            get_run_logger().info(
-                "RUN CANCELLED %s after %.1fs (cooperative)",
-                plugin_id, execution_time,
-            )
-
-        except InputAborted as exc:
-            execution_time = time.time() - start_time
-            with self._lock:
-                if exc.reason == "paused":
-                    result.status = PluginStatus.PAUSED
-                    result.message = "Paused"
-                    safe_log("Plugin paused waiting for input.")
-                else:
-                    result.status = PluginStatus.CANCELLED
-                    result.message = f"Cancelled ({exc.reason})"
-                    safe_log(f"Plugin input cancelled: {exc.reason}")
-                result.execution_time = execution_time
-            get_run_logger().info(
-                "RUN %s %s after %.1fs (input aborted: %s)",
-                "PAUSED" if exc.reason == "paused" else "CANCELLED",
-                plugin_id, execution_time, exc.reason,
-            )
-
-        except Exception as e:
-            execution_time = time.time() - start_time
-
-            try:
-                from techdeck.core.settings import SettingsManager
-                SettingsManager().record_plugin_error(plugin_id)
-            except Exception:
-                pass
-
-            user_err = _as_user_facing(e)
-            with self._lock:
-                result.status = PluginStatus.ERROR
-                if user_err is not None:
-                    result.is_user_error = True
-                    result.message = user_err.problem
-                    result.user_fix = user_err.fix
-                    result.error = str(user_err)
-                else:
-                    result.message = f"Error: {str(e)}"
-                    result.error = str(e)
-                result.execution_time = execution_time
-            if user_err is None:
-                safe_log(f"Plugin error: {str(e)}")
-            safe_progress(0)
-            get_run_logger().error(
-                "RUN ERROR %s after %.1fs\n%s",
-                plugin_id, execution_time, traceback.format_exc(),
-            )
-
-        finally:
-            if completion_callback:
-                try:
-                    completion_callback(result)
-                except Exception as e:
-                    logger.warning("Error in completion callback: %s", e)
-
-            with self._lock:
-                if plugin_id in self.cancel_events:
-                    del self.cancel_events[plugin_id]
-                if plugin_id in self.start_times:
-                    del self.start_times[plugin_id]
-                if plugin_id in self.last_activity:
-                    del self.last_activity[plugin_id]
-                if plugin_id in self._input_wait_started:
-                    del self._input_wait_started[plugin_id]
+                self._running.pop(plugin_id, None)
     
     def cancel_plugin(self, plugin_id: str) -> bool:
         """
@@ -879,10 +762,10 @@ class PluginExecutor:
         Returns:
             True if cancellation requested, False if plugin not running
         """
-        # PHASE 1 FIX: Thread-safe access to cancel_events
         with self._lock:
-            if plugin_id in self.cancel_events:
-                self.cancel_events[plugin_id].set()
+            record = self._running.get(plugin_id)
+            if record is not None:
+                record.cancel_event.set()
                 return True
         return False
     
@@ -896,10 +779,12 @@ class PluginExecutor:
         Returns:
             True if plugin is running
         """
-        # PHASE 1 FIX: Thread-safe check
+        # Main-thread (GUI) runs have no thread object; while their registry
+        # record exists, they are running.
         with self._lock:
-            return (plugin_id in self.running_threads and 
-                    self.running_threads[plugin_id].is_alive())
+            record = self._running.get(plugin_id)
+            return (record is not None
+                    and (record.thread is None or record.thread.is_alive()))
     
     def get_result(self, plugin_id: str) -> Optional[PluginResult]:
         """
@@ -926,20 +811,29 @@ class PluginExecutor:
             Execution time in seconds, or None if not running
         """
         with self._lock:
-            if plugin_id in self.start_times:
-                return time.time() - self.start_times[plugin_id]
+            record = self._running.get(plugin_id)
+            if record is not None:
+                return time.time() - record.started_at
             # If not currently running, check if we have a result with execution_time
             result = self.results.get(plugin_id)
             if result and result.execution_time > 0:
                 return result.execution_time
         return None
+
+    def get_last_activity(self, plugin_id: str) -> Optional[float]:
+        """Timestamp of the running plugin's last log/progress activity, or
+        None if it isn't running. The hang watchdog uses this for its
+        'silent for N seconds' snapshot line."""
+        with self._lock:
+            record = self._running.get(plugin_id)
+            return record.last_activity if record is not None else None
     
     def cancel_all(self) -> None:
         """Cancel all running plugins."""
-        # PHASE 1 FIX: Thread-safe iteration over copy of keys
+        # Thread-safe iteration over a copy of the keys
         with self._lock:
-            plugin_ids = list(self.cancel_events.keys())
-        
+            plugin_ids = list(self._running.keys())
+
         for plugin_id in plugin_ids:
             self.cancel_plugin(plugin_id)
     
@@ -954,10 +848,16 @@ class PluginExecutor:
         Returns:
             True if plugin completed, False if timeout
         """
-        # PHASE 1 FIX: Thread-safe access to get thread
         with self._lock:
-            thread = self.running_threads.get(plugin_id)
-        
+            record = self._running.get(plugin_id)
+            thread = record.thread if record is not None else None
+
+        if record is not None and thread is None:
+            # A main-thread (GUI) run occupies the GUI thread itself — there
+            # is nothing to join and blocking here could deadlock. Report
+            # "not completed"; in practice this cannot be reached from the
+            # GUI thread while such a run is executing.
+            return False
         if thread:
             thread.join(timeout)
             return not thread.is_alive()
@@ -970,7 +870,7 @@ class PluginExecutor:
         Returns:
             List of plugin IDs that are running
         """
-        # PHASE 1 FIX: Thread-safe iteration
+        # Includes main-thread (GUI) runs (record.thread is None).
         with self._lock:
-            return [pid for pid, thread in self.running_threads.items() 
-                    if thread.is_alive()]
+            return [pid for pid, record in self._running.items()
+                    if record.thread is None or record.thread.is_alive()]
