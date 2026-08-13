@@ -491,10 +491,12 @@ _SHOUT_LINES = [
     "Woogy cowers behind the counter. Only the top of his head is visible.",
     "YES. Whatever it is, YES.",
     "Woogy agrees. Woogy agrees so much. Please stop shouting.",
-    "Every eye Woogy has is pointed at you. All three of them.",
+    "Every eye Woogy has is pointed at you.",
     "Woogy did it. Whatever it was, Woogy did it, and Woogy is sorry.",
-    "Woogy is nodding. Woogy has not stopped nodding.",
-    "Woogy is standing very still. Things cannot see you if you stand very still.",
+    # Angle brackets mark an inner thought, which is also the one place the
+    # third-person tic drops. The terminal escapes them, so they render as
+    # written rather than being eaten as markup.
+    "Woogy is standing very still. <User can't see me if I stand very still>",
 ]
 
 _SCOLDED_LINES = [
