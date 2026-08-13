@@ -22,6 +22,8 @@ from techdeck.core.plugin_loader import PluginLoader, Plugin
 from techdeck.ui.widgets.console import InputAborted
 from techdeck.core.plugin_sdk import PluginCancelled  # cooperative-cancel signal (stdlib-only SDK top)
 
+logger = logging.getLogger(__name__)
+
 
 # Default plugin IDLE timeout. The watchdog is inactivity-based: a plugin is
 # only cancelled after this many seconds with NO log/progress activity (and
@@ -492,7 +494,7 @@ class PluginExecutor:
                 try:
                     log_callback(message)
                 except Exception as e:
-                    print(f"Error in log callback: {e}")
+                    logger.warning("Error in log callback: %s", e)
 
         def safe_progress(value: int):
             self._touch_activity(plugin_id)
@@ -504,7 +506,7 @@ class PluginExecutor:
                         result.progress = clamped
                     progress_callback(clamped)
                 except Exception as e:
-                    print(f"Error in progress callback: {e}")
+                    logger.warning("Error in progress callback: %s", e)
         
         try:
             from techdeck.core.settings import SettingsManager
@@ -673,7 +675,7 @@ class PluginExecutor:
                 try:
                     completion_callback(result)
                 except Exception as e:
-                    print(f"Error in completion callback: {e}")
+                    logger.warning("Error in completion callback: %s", e)
 
             # PHASE 1 FIX: Thread-safe cleanup
             # PHASE 2: Also clean up start_times
@@ -717,7 +719,7 @@ class PluginExecutor:
                 try:
                     log_callback(message)
                 except Exception as e:
-                    print(f"Error in log callback: {e}")
+                    logger.warning("Error in log callback: %s", e)
 
         def safe_progress(value: int):
             self._touch_activity(plugin_id)
@@ -728,7 +730,7 @@ class PluginExecutor:
                         result.progress = clamped
                     progress_callback(clamped)
                 except Exception as e:
-                    print(f"Error in progress callback: {e}")
+                    logger.warning("Error in progress callback: %s", e)
         
         try:
             from techdeck.core.settings import SettingsManager
@@ -855,7 +857,7 @@ class PluginExecutor:
                 try:
                     completion_callback(result)
                 except Exception as e:
-                    print(f"Error in completion callback: {e}")
+                    logger.warning("Error in completion callback: %s", e)
 
             with self._lock:
                 if plugin_id in self.cancel_events:

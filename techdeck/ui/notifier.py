@@ -19,12 +19,15 @@ settings dialog says so rather than pretending it worked.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import QSystemTrayIcon
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QIcon
+
+logger = logging.getLogger(__name__)
 
 
 def _app_icon() -> QIcon:
@@ -91,7 +94,7 @@ class DesktopNotifier(QObject):
             tray.activated.connect(lambda _reason: self.activated.emit())
             tray.show()
         except Exception as exc:
-            print(f"[notifier] could not create the tray icon: {exc}")
+            logger.warning("Could not create the tray icon: %s", exc)
             return None
         self._tray = tray
         return tray
@@ -111,5 +114,5 @@ class DesktopNotifier(QObject):
                              max(1, int(seconds)) * 1000)
             return True
         except Exception as exc:
-            print(f"[notifier] showMessage failed: {exc}")
+            logger.warning("Tray showMessage failed: %s", exc)
             return False

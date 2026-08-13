@@ -18,11 +18,14 @@ crash mid-write must never cost the user their notes.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from techdeck.core.assistant.models import (
     ChatMessage, Note, TaskItem, Schedule, SchedulePrefs, now_iso,
@@ -76,7 +79,8 @@ class AssistantStore:
             except (json.JSONDecodeError, IOError, OSError) as exc:
                 # Never let a bad file take the page down, quarantine it so the
                 # user can recover by hand, and carry on with an empty desk.
-                print(f"[assistant] could not read {self.doc_path}: {exc}")
+                logger.error("Could not read %s: %s - quarantining",
+                             self.doc_path, exc)
                 self._quarantine(self.doc_path)
                 data = {}
         self.notes = [Note.from_dict(d) for d in data.get("notes", []) or []]
@@ -305,7 +309,7 @@ class AssistantStore:
             with open(self.chat_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(message.to_dict(), ensure_ascii=False) + "\n")
         except OSError as exc:
-            print(f"[assistant] chat append failed: {exc}")
+            logger.warning("Chat append failed: %s", exc)
             return
         self._maybe_rotate_chat()
 
@@ -349,4 +353,4 @@ class AssistantStore:
                 f.writelines(keep)
             os.replace(tmp, self.chat_path)
         except OSError as exc:
-            print(f"[assistant] chat rotate failed: {exc}")
+            logger.warning("Chat rotate failed: %s", exc)

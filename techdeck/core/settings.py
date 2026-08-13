@@ -5,6 +5,7 @@ Manages profiles, user data, app configuration, and plugin settings.
 """
 
 import json
+import logging
 import os
 import sys
 import threading
@@ -14,6 +15,8 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import tempfile
 import shutil
+
+logger = logging.getLogger(__name__)
 
 from techdeck.core.constants import (
     DEFAULT_PROFILE_NAME,
@@ -140,12 +143,12 @@ class SettingsManager:
                 self._validate_and_migrate()
                 return
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Could not load settings: {e}")
+                logger.warning("Could not load settings: %s", e)
                 # Corrupt live file — try the last-known-good backup before
                 # discarding the user's profile/tickets/unlocks.
                 if self._load_from_backup():
                     return
-                print("Creating new settings file.")
+                logger.warning("Creating new settings file.")
                 self._create_default_settings()
         else:
             # Live file absent. On an older build a crash between unlink and
@@ -166,9 +169,9 @@ class SettingsManager:
             with open(backup_path, 'r', encoding='utf-8') as f:
                 self.data = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Settings backup also unreadable: {e}")
+            logger.error("Settings backup also unreadable: %s", e)
             return False
-        print(f"Recovered settings from backup: {backup_path}")
+        logger.warning("Recovered settings from backup: %s", backup_path)
         self._validate_and_migrate()
         return True
     
@@ -197,8 +200,8 @@ class SettingsManager:
                 except RuntimeError:
                     continue
             if payload is None:
-                print("Warning: settings save skipped (document busy); "
-                      "will persist on the next write")
+                logger.warning("Settings save skipped (document busy); "
+                               "will persist on the next write")
                 return
 
             try:
@@ -250,8 +253,8 @@ class SettingsManager:
                 # Defer rather than raise: a raise here propagates into the
                 # plugin executor and flips a SUCCESSFUL run to ERROR. The
                 # in-memory document is intact and the next write retries.
-                print(f"Warning: settings save deferred ({e}); "
-                      "will retry on the next write")
+                logger.warning("Settings save deferred (%s); "
+                               "will retry on the next write", e)
     
     def _create_default_settings(self) -> None:
         """Create default settings structure."""
@@ -633,7 +636,7 @@ class SettingsManager:
                 path.unlink()
                 return True
         except OSError as exc:
-            print(f"Could not remove profile picture: {exc}")
+            logger.warning("Could not remove profile picture: %s", exc)
         return False
 
     # ========== App Settings ==========

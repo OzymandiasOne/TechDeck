@@ -6,12 +6,14 @@ Checks for updates from GitHub Pages manifest, supports mandatory updates,
 and provides version comparison.
 """
 
+import logging
 import requests
 import threading
-from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime, timedelta
 from packaging import version
+
+logger = logging.getLogger(__name__)
 
 
 class UpdateInfo:
@@ -152,17 +154,13 @@ class UpdateChecker:
         Returns:
             UpdateInfo if update available, None otherwise
         """
-        print("=" * 60)
-        print("UPDATE CHECK STARTED")
-        print(f"Current version: {self.current_version}")
-        print(f"Manifest URL: {self.update_url}")
-        print("-" * 60)
-        
+        logger.info("Update check started (current=%s, url=%s)",
+                    self.current_version, self.update_url)
+
         try:
             import time as _time
             bust = int(_time.time())
             url = f"{self.update_url}?_={bust}"
-            print(f"Fetching manifest...")
             response = requests.get(
                 url,
                 timeout=self.timeout,
@@ -174,58 +172,47 @@ class UpdateChecker:
                 }
             )
             
-            print(f"Response status: {response.status_code}")
-            
             if response.status_code != 200:
                 error_msg = f"Update check failed: HTTP {response.status_code}"
-                print(f"ERROR: {error_msg}")
+                logger.error(error_msg)
                 self._handle_error(error_msg)
                 return None
-            
-            print("Parsing manifest JSON...")
+
             data = response.json()
-            print(f"Manifest data: {data}")
-            
+            logger.debug("Manifest data: %s", data)
+
             update_info = UpdateInfo(data)
-            print(f"Latest version from manifest: {update_info.version}")
-            print(f"Download URL: {update_info.download_url}")
-            
+
             self.last_check_time = datetime.now()
             self.latest_update_info = update_info
-            
-            # Check if update is available
-            print(f"Comparing versions: {update_info.version} vs {self.current_version}")
+
             if update_info.is_newer_than(self.current_version):
-                print(f"OK - Update available: {update_info.version}")
-                
-                # Check if it's mandatory
                 is_mandatory = update_info.requires_mandatory_update(self.current_version)
-                print(f"Mandatory: {is_mandatory}")
-                
+                logger.info("Update available: %s (mandatory=%s, url=%s)",
+                            update_info.version, is_mandatory,
+                            update_info.download_url)
+
                 if is_mandatory:
                     self._handle_mandatory_update(update_info)
                 else:
                     self._handle_update_available(update_info)
-                
-                print("=" * 60)
+
                 return update_info
             else:
-                print(f"OK - No update needed - already on latest version")
-                print("=" * 60)
-            
+                logger.info("No update needed - %s is the latest version",
+                            self.current_version)
+
             return None
-            
+
         except requests.RequestException as e:
             error_msg = f"Update check failed: {str(e)}"
-            print(f"ERROR: {error_msg}")
+            logger.error(error_msg)
             self._handle_error(error_msg)
-            print("=" * 60)
             return None
         except Exception as e:
             error_msg = f"Update check error: {str(e)}"
-            print(f"ERROR: {error_msg}")
+            logger.exception(error_msg)
             self._handle_error(error_msg)
-            print("=" * 60)
             return None
     
     def _check_loop(self) -> None:
@@ -246,24 +233,24 @@ class UpdateChecker:
         if self.update_available_callback:
             try:
                 self.update_available_callback(info)
-            except Exception as e:
-                print(f"Error in update callback: {e}")
+            except Exception:
+                logger.exception("Error in update callback")
     
     def _handle_mandatory_update(self, info: UpdateInfo) -> None:
         """Handle mandatory update notification."""
         if self.mandatory_update_callback:
             try:
                 self.mandatory_update_callback(info)
-            except Exception as e:
-                print(f"Error in mandatory update callback: {e}")
+            except Exception:
+                logger.exception("Error in mandatory update callback")
     
     def _handle_error(self, error_msg: str) -> None:
         """Handle update check error."""
         if self.error_callback:
             try:
                 self.error_callback(error_msg)
-            except Exception as e:
-                print(f"Error in error callback: {e}")
+            except Exception:
+                logger.exception("Error in error callback")
     
     def get_time_since_last_check(self) -> Optional[timedelta]:
         """Get time elapsed since last successful check."""

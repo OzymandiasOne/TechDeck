@@ -2,11 +2,15 @@
 Update notification and download dialog.
 """
 
+import logging
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton,
     QProgressBar, QHBoxLayout, QMessageBox, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer
+
+logger = logging.getLogger(__name__)
 
 
 class UpdateDialog(QDialog):
@@ -274,13 +278,12 @@ class UpdateDialog(QDialog):
 
     def _on_complete(self, installer_path):
         """Download complete - launch installer."""
-        print(f"[DIALOG] _on_complete called! Installer path: {installer_path}", flush=True)
+        logger.info("Download complete, launching installer: %s", installer_path)
         from techdeck.core.update_downloader import run_installer_and_exit
 
         self.status_label.setText("Download complete! Launching installer...")
         self.progress_bar.setValue(100)
 
-        print("[DIALOG] Setting up QTimer to launch installer in 1 second...", flush=True)
         # Give user a moment to see completion, then launch installer
         QTimer.singleShot(1000, lambda: run_installer_and_exit(installer_path))
 

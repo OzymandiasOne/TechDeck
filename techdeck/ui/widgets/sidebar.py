@@ -14,10 +14,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
+import logging
 import re
 from pathlib import Path
 
 from techdeck.ui.theme_aware import ThemeAware
+
+logger = logging.getLogger(__name__)
 
 
 def _icon_folder_for_theme(theme_name: str) -> str:
@@ -110,9 +113,9 @@ class NavButton(QPushButton):
                     self.icon_label.setPixmap(_tint_svg(path, color, 20))
                     return
                 except Exception as e:
-                    print(f"Error loading icon {icon_path}: {e}")
+                    logger.warning("Error loading icon %s: %s", icon_path, e)
             else:
-                print(f"Icon file not found: {icon_path}")
+                logger.warning("Icon file not found: %s", icon_path)
         # Fallback bullet
         self.icon_label.setText("•")
         self.icon_label.setStyleSheet(f"font-size: 18px; color: {color};")

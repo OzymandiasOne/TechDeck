@@ -36,10 +36,13 @@ blind at least once:
                         hand-carried delivery channel for usage data from
                         machines whose webhook sends have never gone through.
   Settings snapshot   - kits, sort modes, per-app directory overrides
-  Log tails           - plugin_runs.log (run history, tick-guard reports) +
-                        plugin_detail.log (every line a plugin printed, so a
-                        run that reported OK but logged a silent in-run warning
-                        is diagnosable — the 911-Setup blank-forecast class)
+  Log tails           - app.log (everything outside plugin runs: startup step
+                        timings, updater outcomes, discovery errors, unhandled
+                        exception tracebacks) + plugin_runs.log (run history,
+                        tick-guard reports) + plugin_detail.log (every line a
+                        plugin printed, so a run that reported OK but logged a
+                        silent in-run warning is diagnosable — the 911-Setup
+                        blank-forecast class)
   Live UI probe       - library/home grid geometry (the stacked-card class)
 
 Rules: read-only, never raises (every section is individually guarded), no
@@ -317,6 +320,18 @@ def _collect_logs() -> list[str]:
                          f"{datetime.fromtimestamp(f.stat().st_mtime):%Y-%m-%d %H:%M}")
         except OSError:
             pass
+    # app.log: everything outside plugin runs — startup step timings, update
+    # check/download outcomes, settings-save deferrals, plugin-discovery
+    # errors, and unhandled-exception tracebacks (sys/threading excepthooks).
+    app_log = log_dir / "app.log"
+    if app_log.is_file():
+        try:
+            tail = app_log.read_text(encoding="utf-8", errors="replace").splitlines()[-250:]
+            lines.append("")
+            lines.append(f"--- app.log (last {len(tail)} lines) ---")
+            lines.extend(tail)
+        except OSError as exc:
+            lines.append(f"app.log unreadable: {exc}")
     run_log = log_dir / "plugin_runs.log"
     if run_log.is_file():
         try:

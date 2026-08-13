@@ -5,7 +5,7 @@ FIXED: Inline button styling for Run Selected button
 PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
-import sys
+import logging
 import time
 import random
 from pathlib import Path
@@ -38,6 +38,8 @@ from techdeck.core.update_checker import UpdateChecker
 from techdeck.core.flavor import TalkbackState, TechTipState, CompendiumState
 from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS, SOUND_ERROR
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -158,11 +160,15 @@ class MainWindow(QMainWindow):
 
         # Startup profiling — mirrors the helper in __main__.py
         import time as _time
+        from techdeck.core.logging_setup import startup_logger, startup_profiling_enabled
         self._t0 = _time.perf_counter()
+        _startup_log = startup_logger()
+        _profile = startup_profiling_enabled()
 
         def _step(name: str):
-            ms = (_time.perf_counter() - self._t0) * 1000.0
-            print(f"[MainWindow +{ms:6.0f} ms] {name}", file=sys.stderr, flush=True)
+            if _profile:
+                ms = (_time.perf_counter() - self._t0) * 1000.0
+                _startup_log.info("[MainWindow +%6.0f ms] %s", ms, name)
 
         self._step = _step
 
@@ -229,6 +235,9 @@ class MainWindow(QMainWindow):
         )
         self.update_checker.set_update_callback(self._on_update_available)
         self.update_checker.set_mandatory_update_callback(self._on_mandatory_update)
+        # Log-only: a failed check (proxy, offline, GitHub Pages down) used to
+        # vanish entirely — now it at least leaves a line in app.log.
+        self.update_checker.set_error_callback(self._on_update_check_error)
         
         # Create main layout
         self._setup_ui()
@@ -1025,25 +1034,26 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
-        print(f"[SHELL] _on_update_available called! Version: {update_info.version}", flush=True)
+        logger.info("Update available: %s - showing dialog", update_info.version)
         # Emit signal to show dialog on main thread
-        print("[SHELL] Emitting show_update_signal", flush=True)
         self.show_update_signal.emit(update_info, False)
-    
+
     def _on_mandatory_update(self, update_info):
         """Handle mandatory update notification (called from background thread)."""
-        print(f"[SHELL] _on_mandatory_update called! Version: {update_info.version}", flush=True)
+        logger.info("Mandatory update required: %s - showing dialog", update_info.version)
         # Emit signal to show dialog on main thread
-        print("[SHELL] Emitting show_update_signal (mandatory)", flush=True)
         self.show_update_signal.emit(update_info, True)
-    
+
+    def _on_update_check_error(self, error_msg: str):
+        """Update-check failure (called from background thread). Log only —
+        no UI: a user behind a blocked proxy shouldn't get nagged, but the
+        debug report needs the evidence."""
+        logger.warning("Update check failed: %s", error_msg)
+
     def _show_update_dialog_slot(self, update_info, mandatory):
         """Show update dialog (Qt slot - always runs on main GUI thread)."""
-        print(f"[SHELL] _show_update_dialog_slot called! Mandatory: {mandatory}", flush=True)
         dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
-        print("[SHELL] Calling dialog.exec()", flush=True)
         dialog.exec()
-        print("[SHELL] Dialog closed", flush=True)
     
     def check_for_updates_manual(self):
         """Manually check for updates (called from Settings page)."""

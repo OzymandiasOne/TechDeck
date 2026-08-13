@@ -18,6 +18,7 @@ and layout.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -43,6 +44,8 @@ from techdeck.ui.widgets.assistant_terminal import (
 )
 from techdeck.ui.widgets.assistant_notes import NotesPanel
 from techdeck.ui.widgets.assistant_schedule import SchedulePanel, TasksPanel
+
+logger = logging.getLogger(__name__)
 
 TAB_TERMINAL, TAB_SCHEDULE, TAB_NOTES, TAB_TASKS = range(4)
 _TAB_KEYS = {"terminal": TAB_TERMINAL, "schedule": TAB_SCHEDULE,
@@ -458,7 +461,7 @@ class AssistantPage(QWidget, ThemeAware):
                 already_sent=self.store.sent_reminders(),
             )
         except Exception as exc:
-            print(f"[assistant] reminder check failed: {exc}")
+            logger.warning("Reminder check failed: %s", exc)
             return
 
         shown = []
@@ -486,7 +489,7 @@ class AssistantPage(QWidget, ThemeAware):
                 sidebar.set_current_page(page_id)
                 window._on_page_changed(page_id)
         except Exception as exc:
-            print(f"[assistant] could not open {page_id}: {exc}")
+            logger.warning("Could not open %s: %s", page_id, exc)
 
     def _on_notification_clicked(self):
         """Clicking a toast (or the tray icon) brings TechDeck forward on the
@@ -502,7 +505,7 @@ class AssistantPage(QWidget, ThemeAware):
                     sidebar.set_current_page("assistant")
                     window._on_page_changed("assistant")
         except Exception as exc:
-            print(f"[assistant] could not surface the window: {exc}")
+            logger.warning("Could not surface the window: %s", exc)
         self._show_tab(TAB_SCHEDULE)
 
     def _on_data_changed(self):

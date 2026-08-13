@@ -4,13 +4,15 @@ Downloads and installs updates from GitHub releases.
 """
 
 import hashlib
+import logging
 import requests
 import subprocess
 import tempfile
 import threading
 from pathlib import Path
-from typing import Optional
 from PySide6.QtCore import QObject, Signal
+
+logger = logging.getLogger(__name__)
 
 
 def sha256_file(path) -> str:
@@ -65,16 +67,14 @@ class UpdateDownloader(QObject):
     
     def _download(self):
         """Download installer in background."""
-        import sys
-        print(f"[DOWNLOADER] Starting download from: {self.download_url}", flush=True)
+        logger.info("Starting installer download from: %s", self.download_url)
         try:
             # Create temp directory for installer
             temp_dir = Path(tempfile.gettempdir()) / "TechDeck"
             temp_dir.mkdir(exist_ok=True)
             installer_path = temp_dir / f"TechDeck-Setup-{self.version}.exe"
-            
+
             # Download with progress tracking
-            print("[DOWNLOADER] Sending HTTP request...", flush=True)
             response = requests.get(
                 self.download_url,
                 stream=True,
@@ -82,9 +82,8 @@ class UpdateDownloader(QObject):
                 timeout=30
             )
             
-            print(f"[DOWNLOADER] Response status: {response.status_code}", flush=True)
             if response.status_code != 200:
-                print(f"[DOWNLOADER] Emitting download_failed signal", flush=True)
+                logger.error("Installer download failed: HTTP %s", response.status_code)
                 self.download_failed.emit(f"Download failed: HTTP {response.status_code}")
                 return
             
@@ -111,28 +110,26 @@ class UpdateDownloader(QObject):
             actual = hasher.hexdigest()
             if self.expected_sha256:
                 if not sha256_matches(actual, self.expected_sha256):
-                    print(f"[DOWNLOADER] SHA-256 mismatch: expected "
-                          f"{self.expected_sha256}, got {actual}", flush=True)
+                    logger.error("Installer SHA-256 mismatch: expected %s, got %s",
+                                 self.expected_sha256, actual)
                     installer_path.unlink(missing_ok=True)
                     self.download_failed.emit(
                         "Update verification failed: the downloaded installer "
                         "does not match the expected checksum. The update was "
                         "not installed. Please try again later.")
                     return
-                print("[DOWNLOADER] SHA-256 verified OK", flush=True)
+                logger.info("Installer SHA-256 verified OK")
             else:
-                print("[DOWNLOADER] No SHA-256 in manifest; download "
-                      f"unverified (sha256={actual})", flush=True)
+                logger.warning("No SHA-256 in manifest; download unverified "
+                               "(sha256=%s)", actual)
 
             self.download_complete.emit(str(installer_path))
             
         except requests.RequestException as e:
-            print(f"[DOWNLOADER] RequestException: {e}", flush=True)
+            logger.error("Installer download network error: %s", e)
             self.download_failed.emit(f"Network error: {str(e)}")
         except Exception as e:
-            print(f"[DOWNLOADER] Exception: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
+            logger.exception("Installer download error")
             self.download_failed.emit(f"Download error: {str(e)}")
     
     def cancel(self):
@@ -153,16 +150,15 @@ def run_installer_and_exit(installer_path: str) -> None:
         installer_path: Path to downloaded installer .exe
     """
     import sys
-    import os
-    print(f"[INSTALLER] Launching installer: {installer_path}", flush=True)
-    
+    logger.info("Launching installer: %s", installer_path)
+
     # Get TechDeck executable path
     if getattr(sys, 'frozen', False):
         # Running as compiled .exe
         techdeck_exe = sys.executable
     else:
         # Running from Python - can't auto-restart
-        print("[INSTALLER] Running from Python, cannot auto-restart", flush=True)
+        logger.info("Running from Python, cannot auto-restart")
         subprocess.Popen([installer_path])
         sys.exit(0)
         return
@@ -194,7 +190,7 @@ del "%~f0"
 
     try:
         restart_script.write_text(batch_content, encoding='utf-8')
-        print(f"[INSTALLER] Created restart script: {restart_script}", flush=True)
+        logger.info("Created restart script: %s", restart_script)
 
         # Launch the restart script in a HIDDEN console (CREATE_NO_WINDOW),
         # not DETACHED_PROCESS: a detached cmd has no console at all, so every
@@ -209,11 +205,12 @@ del "%~f0"
             stderr=subprocess.DEVNULL
         )
         
-        print("[INSTALLER] Restart script launched, exiting TechDeck...", flush=True)
+        logger.info("Restart script launched, exiting TechDeck...")
         sys.exit(0)
-        
-    except Exception as e:
-        print(f"[INSTALLER] Failed to create restart script: {e}", flush=True)
+
+    except Exception:
+        logger.exception("Failed to create restart script; running installer "
+                         "without auto-restart")
         # Fallback: just run installer without restart
         subprocess.Popen([installer_path])
         sys.exit(0)
