@@ -2,7 +2,10 @@
 
 import hashlib
 
-from techdeck.core.update_checker import UpdateInfo
+import requests
+
+from techdeck.core import update_checker as uc
+from techdeck.core.update_checker import UpdateChecker, UpdateInfo
 from techdeck.core.update_downloader import sha256_file, sha256_matches
 
 
@@ -54,3 +57,51 @@ def test_sha256_matches_normalizes_and_rejects():
     # An unpinned/empty expected hash must never count as verified.
     assert sha256_matches("abc", "") is False
     assert sha256_matches("", "abc") is False
+
+
+# ---- last_error: "up to date" vs "the check failed" -------------------------
+# check_now() returns None for BOTH. last_error is what lets the manual
+# Settings check tell them apart — it used to say "you're running the latest
+# version" on a dead network.
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.status_code = 200
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_failed_check_sets_last_error(monkeypatch):
+    checker = UpdateChecker("1.0.0", "https://example.invalid/manifest.json")
+
+    def _boom(*args, **kwargs):
+        raise requests.RequestException("connection refused")
+    monkeypatch.setattr(uc.requests, "get", _boom)
+
+    assert checker.check_now() is None
+    assert checker.last_error is not None
+    assert "connection refused" in checker.last_error
+
+
+def test_clean_no_update_clears_last_error(monkeypatch):
+    checker = UpdateChecker("1.0.0", "https://example.invalid/manifest.json")
+    checker.last_error = "stale error from an earlier failed check"
+
+    monkeypatch.setattr(
+        uc.requests, "get",
+        lambda *a, **k: _FakeResponse({"version": "1.0.0"}))
+
+    assert checker.check_now() is None      # same version -> no update
+    assert checker.last_error is None       # ...and NOT an error
+
+
+def test_http_error_sets_last_error(monkeypatch):
+    checker = UpdateChecker("1.0.0", "https://example.invalid/manifest.json")
+    response = _FakeResponse({})
+    response.status_code = 503
+    monkeypatch.setattr(uc.requests, "get", lambda *a, **k: response)
+
+    assert checker.check_now() is None
+    assert "503" in (checker.last_error or "")

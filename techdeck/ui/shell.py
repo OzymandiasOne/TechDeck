@@ -1058,15 +1058,27 @@ class MainWindow(QMainWindow):
     def check_for_updates_manual(self):
         """Manually check for updates (called from Settings page)."""
         update_info = self.update_checker.check_now()
-        
+
         if update_info is None:
-            # No update available
-            QMessageBox.information(
-                self,
-                "No Updates",
-                f"You're running the latest version of TechDeck ({APP_VERSION}).",
-                QMessageBox.StandardButton.Ok
-            )
+            # None means EITHER "already latest" OR "the check failed" —
+            # last_error tells them apart. This used to report "latest
+            # version" on a dead network / blocked proxy.
+            error = self.update_checker.last_error
+            if error:
+                QMessageBox.warning(
+                    self,
+                    "Update Check Failed",
+                    f"Couldn't check for updates:\n{error}\n\n"
+                    "Check your network connection (or VPN) and try again.",
+                    QMessageBox.StandardButton.Ok
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "No Updates",
+                    f"You're running the latest version of TechDeck ({APP_VERSION}).",
+                    QMessageBox.StandardButton.Ok
+                )
         # If update found, callbacks will handle showing the dialog
     
     def _center_on_primary_screen(self):

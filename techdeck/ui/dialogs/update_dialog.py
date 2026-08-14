@@ -293,12 +293,20 @@ class UpdateDialog(QDialog):
         QTimer.singleShot(0, lambda: self._update_error_ui(error_msg))
 
     def _update_error_ui(self, error_msg):
-        """Update UI to show error (must be called on main thread)."""
+        """Update UI to show error (must be called on main thread).
+
+        The Update button is RE-ENABLED as "Try Again" — it used to stay
+        disabled, so a dropped connection meant reopening the dialog to
+        retry, and on a MANDATORY update the only live button left was
+        "Quit TechDeck". _start_download already tears down and rebuilds
+        the downloader, so retrying is just clicking again."""
         self.status_label.setText(f"Download failed: {error_msg}")
         self.status_label.setStyleSheet(f"color: {self.theme.error}; font-size: 12px;")
         self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
 
-        self.update_btn.setEnabled(False)
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Try Again")
 
         if hasattr(self, 'later_btn') and self.later_btn is not None:
             self.later_btn.setEnabled(True)

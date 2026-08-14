@@ -108,6 +108,11 @@ class UpdateChecker:
         # Last check time
         self.last_check_time: Optional[datetime] = None
         self.latest_update_info: Optional[UpdateInfo] = None
+        # Why the last check_now() returned None: an error string, or None
+        # for a clean "already on the latest". Lets the manual Settings check
+        # tell "you're up to date" apart from "the check failed" — it used to
+        # report the latest version on a dead network.
+        self.last_error: Optional[str] = None
     
     def set_update_callback(self, callback: Callable[[UpdateInfo], None]) -> None:
         """Set callback for when non-mandatory update is available."""
@@ -185,6 +190,7 @@ class UpdateChecker:
 
             self.last_check_time = datetime.now()
             self.latest_update_info = update_info
+            self.last_error = None
 
             if update_info.is_newer_than(self.current_version):
                 is_mandatory = update_info.requires_mandatory_update(self.current_version)
@@ -246,6 +252,7 @@ class UpdateChecker:
     
     def _handle_error(self, error_msg: str) -> None:
         """Handle update check error."""
+        self.last_error = error_msg
         if self.error_callback:
             try:
                 self.error_callback(error_msg)
