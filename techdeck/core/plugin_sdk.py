@@ -398,6 +398,78 @@ def find_911_batch_folder(qtdr_root: Path, batch: str) -> Optional[Path]:
     return None
 
 
+def request_922_batch_folder(
+    params: dict, base_override: str = ""
+) -> Optional[tuple]:
+    """Resolve the 922 batch for this run by FOLDER PICK, not typed number.
+
+    The one batch-entry flow for 922 plugins (promoted from 922 LST Organizer
+    v3.2.0, which pioneered it; before this, six plugins hand-copied a typed
+    request_batch_number + parse + find dance that had drifted three ways).
+
+    Order:
+      1. Family cache hit — an earlier 922 plugin in this queued run already
+         picked/typed the batch (``shared_state["922"]["batch_number"]``);
+         reuse it without prompting.
+      2. Folder pick via request_directory, starting at the 922 root — Sentry
+         Drone capable (no ``style=`` passed), native dialog otherwise. The
+         batch number comes from the picked folder's NAME ("Batch 483").
+      3. Seed the family cache so every later 922 plugin (including the
+         still-typed Batch Repeater) reuses this answer.
+
+    Returns ``(batch_no, batch_path)``, or ``None`` when the user cancelled
+    the pick (the run's cancel flag is already set by then — just return).
+    Raises UserFacingError for a missing root, an unrecognizable folder, or a
+    cached batch whose folder has vanished.
+    """
+    log = params.get("log", print)
+
+    root = resolve_922_root((base_override or "").strip())
+    if root is None or not root.exists():
+        raise UserFacingError(
+            "Couldn't find the '922 QTDR Production Packages' folder.",
+            "Make sure OneDrive is synced, or set the Base Directory in this "
+            "plugin's Settings, then run again.")
+
+    # 1. Family cache — never re-prompt inside one queued run. The bucket is
+    # the literal "922" (matching run_session's fixed buckets), NOT
+    # params['plugin_family'], so the answer is shared exactly like
+    # request_batch_number's.
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("922", {}).get("batch_number")
+    if cached:
+        batch_no = parse_922_batch(str(cached)) or str(cached)
+        batch_path = find_922_batch_path(root, batch_no)
+        if batch_path is None:
+            raise UserFacingError(
+                f"Couldn't find 'Batch {batch_no}' under the 922 folder.",
+                "Check the batch folder exists (or run the batch's folder "
+                "setup first), then run again.")
+        log(f"Batch {batch_no} (shared from an earlier plugin)")
+        return batch_no, batch_path
+
+    # 2. Folder pick (drone-capable: style defaults to sentry_style(params)).
+    raw = request_directory(params, "Select the 922 batch folder", str(root))
+    if not raw:
+        # request_directory already flagged the run cancelled.
+        log("Folder selection cancelled - nothing was run.")
+        return None
+
+    batch_path = Path(raw)
+    batch_no = parse_922_batch(batch_path.name)
+    if not batch_path.is_dir() or not batch_no:
+        raise UserFacingError(
+            f"'{batch_path.name}' doesn't look like a 922 batch folder.",
+            "Run it again and pick the batch's own folder (the one named "
+            "like 'Batch 483').")
+
+    # 3. Seed the family cache for the rest of the queued run.
+    if shared_state is not None:
+        shared_state.setdefault("922", {})["batch_number"] = batch_no
+    log(f"Batch {batch_no}: {batch_path}")
+    return batch_no, batch_path
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Console input
 # ─────────────────────────────────────────────────────────────────────────────

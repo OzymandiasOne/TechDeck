@@ -2,7 +2,7 @@
   "id": "922_difficulty_stamper",
   "name": "922 Difficulty Stamper",
   "description": "Scans a 922 batch's part drawings for the DriveWorks DIFFICULT label, stamps DIFFICULT on that order's work packet, then removes the label from the drawings it came from. Re-running keeps packets honest: an order that is no longer difficult has its stamp removed.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -12,7 +12,7 @@
       "Close the work-packet PDFs if they're open in a viewer, so they can be re-saved with the stamp."
     ],
     "how_it_works": [
-      "Enter the batch number.",
+      "Pick the batch's own 'Batch NNN' folder when the picker opens - no batch number typing.",
       "For each order it reads every part drawing under CAD-AND-SHOP-PRINTS and looks for the DIFFICULT label DriveWorks prints on parts with a compound cut.",
       "If any part in the order is difficult, it stamps DIFFICULT in red on the first page of that order's work packet.",
       "Once the packet is stamped, the blue DIFFICULT label is removed from the part drawings it came from - the packet now carries the flag, so the drawing doesn't need to.",
@@ -22,7 +22,7 @@
       "Work packets stamped DIFFICULT, cleaned-up part drawings, plus a summary listing which orders are difficult and which parts made them difficult."
     ]
   },
-  "icon": "\u26a0\ufe0f",
+  "icon": "⚠️",
   "requires_admin": false,
   "settings": {
     "fields": [
@@ -71,6 +71,15 @@
         "max": 10.0,
         "step": 0.5,
         "suffix": " in"
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

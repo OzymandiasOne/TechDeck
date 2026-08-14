@@ -2,12 +2,12 @@
   "id": "922_formingfinder",
   "name": "922 FormingFinder",
   "description": "Discovers formed plate and formed flat bar PDFs in a 922 batch via filename, PO NOTES, and PDF spatial analysis. Copies and merges them, then populates the Bent Plates sheet in the Pallet & Rod Organizer.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
     "setup": [
-      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "Sync the '922 QTDR Production Packages' folder and know which 'Batch NNN' folder you're running.",
       "The batch's order folders and the Pallet & Rod Organizer need to be in place (run 922 Setup first)."
     ],
     "how_it_works": [
@@ -30,6 +30,15 @@
         "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

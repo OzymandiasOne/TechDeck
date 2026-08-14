@@ -558,27 +558,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log("Starting 922 FormingFinder...")
     progress_callback(0)
 
-    raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "473", "Batch 473", "PO #473"):'
-    )
-
-    batch_no = sdk.parse_922_batch(raw or '')
-    if not batch_no:
-        raise ValueError(f"Unrecognised batch input: {raw!r}")
-    log(f"Batch: {batch_no}")
-
-    root = sdk.resolve_922_root(settings.get('base_path', ''))
-    if not root:
-        raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
-            "sync, or set the root in Settings > Apps > 922 FormingFinder."
-        )
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if not batch_path:
-        raise RuntimeError(
-            f"Batch {batch_no} not found under {root} (also checked '1 - Completed')."
-        )
-    log(f"Batch path: {batch_path}")
+    # Batch input = pick the 'Batch NNN' folder (Sentry Drone capable,
+    # family-cache aware — a queued 922 run prompts at most once).
+    picked = sdk.request_922_batch_folder(params, settings.get('base_path', ''))
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     progress_callback(5)
 

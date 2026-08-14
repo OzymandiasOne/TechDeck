@@ -69,16 +69,6 @@ def _is_real_pdf(path: Path) -> bool:
     return not _NOT_A_REAL_PDF_RE.match(path.stem)
 
 
-def parse_batch_number(raw: str) -> Optional[str]:
-    """Extract a numeric batch number from user input.
-
-    Accepts "401", "Batch 401", "PO 401", "PO#401", ... Returns the digit
-    string, or None if there are no digits.
-    """
-    match = re.search(r'\d+', raw or "")
-    return match.group(0) if match else None
-
-
 def _is_label_span(text: str) -> bool:
     """True when a span IS the DIFFICULT label (not merely contains it)."""
     return (text or "").strip().upper() == DIFFICULT_LABEL
@@ -321,30 +311,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     h_offset = float(settings.get('h_offset_inches', 4.0) or 4.0)
     v_offset = float(settings.get('v_offset_inches', 6.5) or 6.5)
 
-    root = sdk.resolve_922_root(base_path)
-    if root is None or not root.exists():
-        raise sdk.UserFacingError(
-            "Couldn't find the '922 QTDR Production Packages' folder.",
-            "Make sure OneDrive is synced, or set the Base Directory in this "
-            "plugin's Settings, then run again.")
-
-    raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "488", "Batch 488", "PO 488"):')
-    batch_no = parse_batch_number((raw or "").strip())
-    if not batch_no:
-        raise sdk.UserFacingError(
-            "That isn't a batch number I can read.",
-            'Run it again and enter the batch number (e.g. "488" or "Batch 488").')
-
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if batch_path is None:
-        raise sdk.UserFacingError(
-            f"Couldn't find Batch {batch_no} (checked the live folder and "
-            f"'1 - Completed').",
-            "Double-check the batch number and that OneDrive is synced, then "
-            "run again.")
-
-    log(f"Batch folder: {batch_path.name}")
+    # Batch input = pick the 'Batch NNN' folder (Sentry Drone capable,
+    # family-cache aware — inside 922 Setup this never prompts; a queued 922
+    # run prompts at most once).
+    picked = sdk.request_922_batch_folder(params, base_path)
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
 
     order_dirs = [
         d for d in sorted(batch_path.iterdir())

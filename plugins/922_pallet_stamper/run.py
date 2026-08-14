@@ -36,27 +36,6 @@ _STAMP_SPAN_RE = re.compile(
 _RED_COLOR_INT = 0xFF0000
 
 
-def get_console_input(params: Dict[str, Any], prompt: str) -> str:
-    """Get input from user via TechDeck console, falling back to stdin."""
-    console = params.get('console')
-    if console and hasattr(console, 'request_input'):
-        return console.request_input(prompt)
-    return input(f"{prompt}: ")
-
-
-def parse_batch_number(raw: str) -> Optional[str]:
-    """
-    Extract a numeric batch number from user input.
-
-    Accepts any of:
-        "401", "Batch 401", "batch 401", "PO 401", "po 401", "PO#401", etc.
-
-    Returns the digit string (e.g. "401"), or None if no digits found.
-    """
-    match = re.search(r'\d+', raw)
-    return match.group(0) if match else None
-
-
 def anchor_xy(page, h_offset_in: float, v_offset_in: float):
     """
     Calculate anchor coordinates for stamp based on page rotation.
@@ -201,35 +180,14 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     h_offset = float(settings.get('h_offset_inches', 4.0))
     v_offset = float(settings.get('v_offset_inches', 7.0))
 
-    root = sdk.resolve_922_root(base_path)
-    if root is None or not root.exists():
-        raise sdk.UserFacingError(
-            "Couldn't find the '922 QTDR Production Packages' folder.",
-            "Make sure OneDrive is synced, or set the Base Directory in this "
-            "plugin's Settings, then run again.")
+    # Batch input = pick the 'Batch NNN' folder (Sentry Drone capable,
+    # family-cache aware — inside 922 Setup the up-front pick seeds the cache
+    # so this never prompts; standalone it opens the folder picker once).
+    picked = sdk.request_922_batch_folder(params, base_path)
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
 
-    # Prompt for batch number via console (family-shared cache aware)
-    raw_input = sdk.request_batch_number(
-        params,
-        'Enter batch number (e.g. "401", "Batch 401", "PO 401"):'
-    )
-    batch_no = parse_batch_number(raw_input.strip())
-
-    if not batch_no:
-        raise sdk.UserFacingError(
-            "That isn't a batch number I can read.",
-            'Run it again and enter the batch number (e.g. "401" or "Batch 401").')
-
-    log(f"Batch number: {batch_no}")
-
-    # Construct paths (checks the live root and the 1 - Completed archive)
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if batch_path is None:
-        raise sdk.UserFacingError(
-            f"Couldn't find Batch {batch_no} (checked the live folder and "
-            f"'1 - Completed').",
-            "Double-check the batch number and that OneDrive is synced, then "
-            "run again.")
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     xl_path = doc_folder / f"PO H{batch_no} Pallet & Rod Organizer.xlsx"
 

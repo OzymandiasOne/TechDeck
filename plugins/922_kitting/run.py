@@ -396,26 +396,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             "pywin32 (win32com.client) is not available. Excel COM is required."
         )
 
-    raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "476", "Batch 476", "PO #476"):'
-    )
-
-    batch_no = sdk.parse_922_batch(raw or '')
-    if not batch_no:
-        raise ValueError(f"Unrecognised batch input: {raw!r}")
-    log(f"Batch: {batch_no}")
-
-    root = sdk.resolve_922_root(settings.get('base_path', ''))
-    if not root:
-        raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
-            "sync, or set the root in Settings > Apps > 922 Kitting."
-        )
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if not batch_path:
-        raise RuntimeError(
-            f"Batch {batch_no} not found under {root} (also checked '1 - Completed')."
-        )
+    # Batch input = pick the 'Batch NNN' folder (Sentry Drone capable,
+    # family-cache aware — a queued 922 run prompts at most once).
+    picked = sdk.request_922_batch_folder(params, settings.get('base_path', ''))
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     organizer_path = _find_organizer_workbook(doc_folder, batch_no)
     if not organizer_path:
