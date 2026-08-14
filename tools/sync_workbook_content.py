@@ -205,6 +205,45 @@ ENGINEERING = [
      "regression test asserting every name fits its label.",
      "Thirteen items had been displaying truncated names to operators.",
      "Shared text renderer; all catalog surfaces."),
+    ("Aug 2026", "Always-On Diagnostics Log", "Quality",
+     "Every part of the platform now writes to one rotating diagnostic log, "
+     "including the classes of failure that previously vanished without a "
+     "trace: update-check problems, tools that fail to load, and unhandled "
+     "errors outside a tool run. Startup timings are recorded on every "
+     "machine, and an automated check prevents new code from writing "
+     "diagnostics anywhere the shipped application cannot capture.",
+     "A colleague-reported problem can be diagnosed from their machine's own "
+     "log instead of guesswork over a call, and failures that used to be "
+     "invisible now leave evidence.",
+     "Platform-wide; included in the one-click debug report."),
+    ("Aug 2026", "Run Engine Consolidation", "Quality",
+     "Merged the tool-execution engine's two near-duplicate code paths into "
+     "one and brought window-based tools under the same run tracking as "
+     "background tools - closing a gap where the application could be closed "
+     "mid-run without warning, a cancelled run could be scored as a success, "
+     "and a double-click could start the same tool twice.",
+     "Reliability fixes now land once and apply to every kind of tool, and "
+     "an operator cannot lose work by closing the app during a run.",
+     "Platform-wide; execution engine test coverage grown from 3 to 20 tests."),
+    ("Aug 2026", "Build Pipeline Hardening", "Quality",
+     "The packaging script can no longer report success when part of the "
+     "build failed: a failed installer step now stops the pipeline, the "
+     "packaging tools' output is captured for diagnosis instead of "
+     "discarded, and the release version is cross-checked across every file "
+     "that declares it before anything is built.",
+     "A broken or mislabeled installer cannot be produced by a build that "
+     "claims to have succeeded.",
+     "Every build; version agreement also verified continuously by the test "
+     "suite."),
+    ("Aug 2026", "Point-and-Pick Batch Selection", "Usability",
+     "922-series tools now take their batch by picking the batch's folder "
+     "instead of typing a batch number: the number is read from the chosen "
+     "folder itself, and one pick is shared by every tool queued in the same "
+     "run.",
+     "Eliminates mistyped batch numbers - the easiest way to point a run at "
+     "the wrong batch - and reduces a full multi-tool batch run to a single "
+     "pick.",
+     "Six 922 tools on the shared routine; the standard for new 922 tools."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -504,4 +543,28 @@ PI_NEW = [
      "AT THE START OF THE JOB INSTEAD OF BURIED IN THE PART PRINTS; RE-RUNNING "
      "AFTER A PART CHANGES UPDATES THE PACKET BOTH WAYS, ADDING THE MARKING OR "
      "REMOVING IT"),
+    ("UNIFIED DIAGNOSTIC LOG + CRASH CAPTURE", "COMPLETE",
+     "ONE ROTATING APPLICATION LOG NOW CAPTURES EVERYTHING OUTSIDE TOOL RUNS "
+     "- UPDATER OUTCOMES, TOOLS THAT FAIL TO LOAD, UNHANDLED ERRORS, STARTUP "
+     "TIMINGS; 79 DIAGNOSTIC PRINTS THAT WERE SILENT IN THE SHIPPED BUILD "
+     "CONVERTED, AND AN AUTOMATED GUARD BLOCKS NEW ONES"),
+    ("DEV RUNS LOAD THE REPO TREE", "COMPLETE",
+     "THE COPY-EVERY-EDIT-TO-BOTH-LOCATIONS RULE IS RETIRED: A DEV RUN LOADS "
+     "TOOLS STRAIGHT FROM THE REPOSITORY, SO THE CODE JUST EDITED IS THE CODE "
+     "THAT RUNS; INSTALLED BUILDS ARE UNCHANGED"),
+    ("RUN ENGINE CONSOLIDATION", "COMPLETE",
+     "THE EXECUTION ENGINE'S TWO NEAR-DUPLICATE CODE PATHS MERGED INTO ONE "
+     "AND WINDOW-BASED TOOLS BROUGHT UNDER RUN TRACKING - CLOSE-WITHOUT-"
+     "WARNING, CANCELLED-RUN-SCORED-AS-SUCCESS AND DOUBLE-START ALL CLOSED; "
+     "ENGINE TEST COVERAGE GROWN FROM 3 TO 20 TESTS"),
+    ("BUILD SCRIPT HONESTY", "COMPLETE",
+     "A FAILED INSTALLER STEP NOW FAILS THE BUILD INSTEAD OF REPORTING "
+     "SUCCESS, PACKAGING TOOL OUTPUT IS CAPTURED FOR DIAGNOSIS INSTEAD OF "
+     "DISCARDED, AND THE RELEASE VERSION IS CROSS-CHECKED ACROSS EVERY FILE "
+     "THAT DECLARES IT"),
+    ("922 FOLDER-PICK BATCH ENTRY", "COMPLETE",
+     "FIVE MORE 922 TOOLS TAKE THEIR BATCH BY PICKING THE BATCH FOLDER "
+     "INSTEAD OF TYPING A NUMBER - THE NUMBER IS READ FROM THE FOLDER ITSELF "
+     "AND ONE PICK IS SHARED ACROSS A QUEUED RUN; ONE SHARED ROUTINE REPLACES "
+     "SIX HAND-COPIED PROMPT BLOCKS AND IS THE STANDARD FOR NEW 922 TOOLS"),
 ]
