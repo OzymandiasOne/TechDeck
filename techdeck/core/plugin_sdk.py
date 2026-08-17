@@ -387,6 +387,48 @@ def is_nest_id(text) -> bool:
     return bool(NEST_ID_RE.match(str(text or "").strip()))
 
 
+def load_sibling(plugin_id: str, anchor=None):
+    """Import a sibling plugin's run.py as a module and return it.
+
+    Plugins compose — 911 Setup runs the 911 Teams Cards engine in-process,
+    both it and Teams Cards import 911 Remove Ticket's stamp helpers, and
+    922 Setup runs its stamper/repeater stages — but there was no composition
+    primitive: four hand-rolled spec_from_file_location dances, each of them
+    a silent breakage point when a plugin folder is renamed. This is the one
+    home.
+
+    `anchor` should be the CALLING plugin's ``__file__``: every layout keeps
+    all plugins in one flat dir (dev repo tree, %LOCALAPPDATA% installs, a
+    TECHDECK_PLUGINS_DIR override), so the sibling always sits beside the
+    caller. Without an anchor the dir is resolved the way the app's
+    PluginLoader resolves it.
+
+    Raises UserFacingError when the sibling isn't installed; the sibling's
+    own import errors propagate untouched — callers keep their existing
+    memoize-and-degrade wrappers and decide what a missing sibling means.
+    """
+    import importlib.util
+    if anchor:
+        plugins_dir = Path(anchor).resolve().parents[1]
+    else:
+        from techdeck.core.plugin_loader import PluginLoader
+        plugins_dir = PluginLoader._default_plugins_dir()
+    run_py = plugins_dir / plugin_id / "run.py"
+    if not run_py.is_file():
+        raise UserFacingError(
+            problem=f"The '{plugin_id}' app isn't installed, and this app "
+                    f"needs it.",
+            fix="Update TechDeck so the full app set is installed, then run "
+                "again.",
+            detail=str(run_py),
+        )
+    spec = importlib.util.spec_from_file_location(
+        f"techdeck_sibling_{plugin_id}", str(run_py))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def find_922_batch_path(root: Path, batch: str) -> Optional[Path]:
     """Locate 'Batch {n}' under the 922 root, checking the live root first and
     then the '1 - Completed' archive. Returns None if not found."""

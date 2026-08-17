@@ -164,7 +164,6 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-import importlib.util
 
 
 # ---------------------------------------------------------------------------
@@ -882,12 +881,7 @@ def _load_omit_stamp_helpers(log):
     if _omit_stamps is not None:
         return _omit_stamps or None
     try:
-        path = Path(__file__).resolve().parents[1] / "911_remove_ticket" / "run.py"
-        spec = importlib.util.spec_from_file_location(
-            "techdeck_911_remove_ticket_for_setup", str(path))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _omit_stamps = mod
+        _omit_stamps = sdk.load_sibling("911_remove_ticket", __file__)
     except Exception as e:
         log(f"  WARNING: 911 Remove Ticket helpers unavailable ({e}) - omit PDFs will not be stamped.")
         _omit_stamps = False
@@ -1363,12 +1357,7 @@ def _load_teams_cards(log):
     if _teams_cards is not None:
         return _teams_cards or None
     try:
-        path = Path(__file__).resolve().parents[1] / "911_teams_cards" / "run.py"
-        spec = importlib.util.spec_from_file_location(
-            "techdeck_911_teams_cards_for_setup", str(path))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _teams_cards = mod
+        _teams_cards = sdk.load_sibling("911_teams_cards", __file__)
     except Exception as e:
         log(f"  WARNING: the 911 Teams Cards app is unavailable ({e}) - no "
             f"cards can be created and the schedule cannot be updated.")

@@ -19,7 +19,6 @@ Entry point: run(params, progress_callback, cancel_event).
 """
 
 import datetime as _dt
-import importlib.util
 import json
 import re
 import threading
@@ -42,12 +41,7 @@ def _load_omit_stamp_helpers(log):
     if _omit_stamps is not None:
         return _omit_stamps or None
     try:
-        path = Path(__file__).resolve().parents[1] / "911_remove_ticket" / "run.py"
-        spec = importlib.util.spec_from_file_location(
-            "techdeck_911_remove_ticket_for_cards", str(path))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _omit_stamps = mod
+        _omit_stamps = sdk.load_sibling("911_remove_ticket", __file__)
     except Exception as e:
         log(f"  WARNING: 911 Remove Ticket helpers unavailable ({e}) - the "
             f"schedule's difficulty colours cannot be read.")

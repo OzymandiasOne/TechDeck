@@ -210,3 +210,30 @@ def test_plugin_nest_regexes_are_aliases_not_copies():
     assert offenders == [], (
         "re-typed Hard Rule 3 nest regex (alias sdk.NEST_ID_RE instead): "
         + ", ".join(offenders))
+
+
+def test_load_sibling_resolves_beside_the_anchor(tmp_path):
+    """Sibling plugins always sit in one flat dir beside the caller, in every
+    layout - the anchor (the caller's __file__) is what makes the resolution
+    layout-proof."""
+    from techdeck.core.plugin_sdk import load_sibling
+    plugins = tmp_path / "plugins"
+    (plugins / "911_setup").mkdir(parents=True)
+    sibling = plugins / "911_remove_ticket"
+    sibling.mkdir()
+    (sibling / "run.py").write_text("MAGIC = 'stamp helpers'\n",
+                                    encoding="utf-8")
+
+    mod = load_sibling("911_remove_ticket",
+                       anchor=str(plugins / "911_setup" / "run.py"))
+    assert mod.MAGIC == "stamp helpers"
+
+
+def test_load_sibling_missing_is_user_facing(tmp_path):
+    import pytest
+    from techdeck.core.plugin_sdk import UserFacingError, load_sibling
+    plugins = tmp_path / "plugins"
+    (plugins / "911_setup").mkdir(parents=True)
+    with pytest.raises(UserFacingError):
+        load_sibling("not_installed_app",
+                     anchor=str(plugins / "911_setup" / "run.py"))
