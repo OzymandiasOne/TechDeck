@@ -1479,40 +1479,53 @@ def _is_share_lock(exc: Exception) -> bool:
     return isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
 
 
-def load_workbook_resilient(path, log=None, **kwargs):
-    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders
-    AND turns a locked-open workbook into a clear instruction (not a crash).
+def _resilient_read(op, path, log=None):
+    """The ONE body behind the resilient Excel loaders (they were three
+    hand-copied 15-line twins that had already drifted into three spellings
+    of the same guard).
 
-    A dehydrated workbook fails inside zipfile with OSError [Errno 22] even
-    though the path exists — and zipfile's end-of-central-directory reader
-    CATCHES that OSError itself and re-raises it as BadZipFile ("File is not
-    a zip file"), so the placeholder failure wears two disguises. Hydrate
-    placeholders up front (sequential read — the recall path OneDrive
-    actually honors; zipfile's backwards seek can stall the recall for 60s+
-    and then fail), and treat both exception types as the placeholder
-    signature on the retry. Bit 911 Setup as "File is not a zip file"
-    (v0.8.6.5, LAPTOP-1AMLBK7B).
-
-    A workbook the user still has open in Excel fails with PermissionError
-    [Errno 13] instead — surface `locked_file_error` so they know to close
-    it (bit 902 DXF Prep, v0.8.6.8). Use this for ANY workbook under the
-    OneDrive tree (Hard Rule 13)."""
-    import openpyxl
+    Flow: hydrate a cloud-only placeholder up front (sequential read — the
+    recall path OneDrive actually honors; zipfile's backwards seek can stall
+    the recall for 60s+ and then fail), then run `op`. On failure:
+      * PermissionError / Errno 13 — the file is open in Excel; retrying
+        can't help, so raise locked_file_error's clear instruction.
+      * The placeholder signature — OSError [Errno 22], or BadZipFile
+        (zipfile's end-of-central-directory reader CATCHES that OSError and
+        re-raises it as "File is not a zip file", so the failure wears two
+        disguises) — while the file still stats as a placeholder: hydrate
+        and retry `op` once.
+      * Anything else re-raises untouched.
+    """
     import zipfile
     ensure_local(path, log=log)
     try:
-        return openpyxl.load_workbook(path, **kwargs)
+        return op()
     except Exception as exc:
         if _is_share_lock(exc):
             raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)):
-            raise
-        if not is_cloud_placeholder(path):
+        if not isinstance(exc, (OSError, zipfile.BadZipFile)) \
+                or not is_cloud_placeholder(path):
             raise
         if log:
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
-        return openpyxl.load_workbook(path, **kwargs)
+        return op()
+
+
+def load_workbook_resilient(path, log=None, **kwargs):
+    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders
+    AND turns a locked-open workbook into a clear instruction (not a crash).
+
+    The placeholder failure wears two disguises — OSError [Errno 22], and
+    zipfile.BadZipFile ("File is not a zip file"; bit 911 Setup that way,
+    v0.8.6.5, LAPTOP-1AMLBK7B). A workbook the user still has open in Excel
+    fails with PermissionError [Errno 13] instead — surfaced as
+    `locked_file_error` so they know to close it (bit 902 DXF Prep,
+    v0.8.6.8). Mechanics in `_resilient_read`. Use this for ANY workbook
+    under the OneDrive tree (Hard Rule 13)."""
+    import openpyxl
+    return _resilient_read(
+        lambda: openpyxl.load_workbook(path, **kwargs), path, log=log)
 
 
 def read_excel_resilient(path, log=None, **kwargs):
@@ -1522,19 +1535,8 @@ def read_excel_resilient(path, log=None, **kwargs):
     (sheet_name, header, usecols, ...). Use for ANY user-editable workbook
     read via pandas (Hard Rule 13)."""
     import pandas as pd
-    import zipfile
-    ensure_local(path, log=log)
-    try:
-        return pd.read_excel(path, **kwargs)
-    except Exception as exc:
-        if _is_share_lock(exc):
-            raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
-            raise
-        if log:
-            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
-        hydrate_cloud_file(path, log=log)
-        return pd.read_excel(path, **kwargs)
+    return _resilient_read(
+        lambda: pd.read_excel(path, **kwargs), path, log=log)
 
 
 def open_excel_resilient(path, log=None):
@@ -1543,19 +1545,7 @@ def open_excel_resilient(path, log=None):
     pd.read_excel(xls, sheet_name=...) — the file lock bites at open time, so
     the returned handle reads sheets without re-touching the lock."""
     import pandas as pd
-    import zipfile
-    ensure_local(path, log=log)
-    try:
-        return pd.ExcelFile(path)
-    except Exception as exc:
-        if _is_share_lock(exc):
-            raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
-            raise
-        if log:
-            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
-        hydrate_cloud_file(path, log=log)
-        return pd.ExcelFile(path)
+    return _resilient_read(lambda: pd.ExcelFile(path), path, log=log)
 
 
 def copy_resilient(src, dest, log=None):
