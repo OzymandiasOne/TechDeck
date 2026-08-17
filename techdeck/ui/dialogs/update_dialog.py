@@ -315,8 +315,12 @@ class UpdateDialog(QDialog):
             self.quit_btn.setEnabled(True)
 
     def _quit_app(self):
-        """Quit the application."""
+        """Quit the application (mandatory-update dialog's Quit button)."""
         import sys
+        # Deliberate exit that bypasses closeEvent - stamp it clean so the
+        # next start doesn't read it as a crash.
+        from techdeck.core import hang_watchdog
+        hang_watchdog.mark_clean_exit()
         sys.exit(0)
 
 

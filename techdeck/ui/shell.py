@@ -245,6 +245,10 @@ class MainWindow(QMainWindow):
         # Start update checker after UI is ready (delayed by 3 seconds)
         QTimer.singleShot(3000, self.update_checker.start)
 
+        # After a crash/freeze, offer a debug report once on the next start
+        # (well after the fade-in so startup feel is untouched).
+        QTimer.singleShot(4000, self._maybe_offer_debug_report)
+
         # Startup fade-in. Window opens at opacity 0 so it is invisible behind
         # the splash subprocess while warmup_pages() runs. __main__.py calls
         # start_fadein() AFTER the splash closes, so the user sees a clean
@@ -1055,6 +1059,39 @@ class MainWindow(QMainWindow):
         dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
         dialog.exec()
     
+    def _maybe_offer_debug_report(self):
+        """If the PREVIOUS session ended dirty (killed / crashed / froze),
+        offer to generate a debug report right now — the report is excellent
+        but was buried behind Settings -> Help & Feedback, so crashes went
+        unreported unless someone coached the user there over Teams.
+
+        Self-limiting: the watchdog rotates the state file at every startup,
+        so one dirty exit produces exactly one offer. Dev runs are excluded —
+        killing `python -m techdeck` is routine, not a field crash."""
+        from techdeck.ui.dev_mode import is_dev_build
+        if is_dev_build():
+            return
+        from techdeck.core import hang_watchdog
+        from techdeck.core.debug_report import should_offer_debug_report
+        prev = hang_watchdog.previous_session()
+        if not should_offer_debug_report(prev):
+            return
+        logger.info("Previous session ended dirty - offering a debug report")
+        reply = QMessageBox.question(
+            self,
+            "TechDeck didn't close cleanly",
+            "It looks like TechDeck crashed or was shut down the hard way "
+            "last time.\n\nCreate a debug report now? It captures what the "
+            "app was doing when it stopped, saves to your Desktop, and can "
+            "be sent to a TechDeck admin.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Reuse the Settings page's generate-and-reveal flow (busy
+            # cursor, Explorer select, where-to-send message) — one home.
+            self.settings_page._generate_debug_report()
+
     def check_for_updates_manual(self):
         """Manually check for updates (called from Settings page)."""
         update_info = self.update_checker.check_now()

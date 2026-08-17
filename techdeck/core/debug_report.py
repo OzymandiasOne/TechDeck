@@ -356,6 +356,21 @@ def _collect_logs() -> list[str]:
     return lines
 
 
+def should_offer_debug_report(prev_session) -> bool:
+    """True when the PREVIOUS session ended dirty — killed, crashed, or
+    frozen-then-restarted — so the shell should offer to generate a report
+    on this start. The offer is self-limiting: the state file rotates every
+    startup, so one dirty exit produces exactly one offer.
+
+    Only an explicit ``clean_exit: false`` counts. A missing file, a
+    malformed dict, or an old-format snapshot without the key must never
+    nag (and note: a successful auto-update marks its exit clean before
+    launching the installer, so updating is not a "crash")."""
+    if not isinstance(prev_session, dict):
+        return False
+    return prev_session.get("clean_exit") is False
+
+
 def _collect_previous_session() -> list[str]:
     """What the LAST session was doing when it ended — the section that
     survives 'it froze so I restarted it'. clean_exit False means that process

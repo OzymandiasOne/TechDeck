@@ -214,7 +214,9 @@ ENGINEERING = [
      "diagnostics anywhere the shipped application cannot capture.",
      "A colleague-reported problem can be diagnosed from their machine's own "
      "log instead of guesswork over a call, and failures that used to be "
-     "invisible now leave evidence.",
+     "invisible now leave evidence. After an abnormal shutdown, the next "
+     "start offers to create the diagnostic report on the spot, so crashes "
+     "get reported without anyone having to find the buried menu option.",
      "Platform-wide; included in the one-click debug report."),
     ("Aug 2026", "Run Engine Consolidation", "Quality",
      "Merged the tool-execution engine's two near-duplicate code paths into "

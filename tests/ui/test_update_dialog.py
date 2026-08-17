@@ -32,6 +32,26 @@ def test_failed_download_reenables_update_as_try_again(qapp):
         dialog.deleteLater()
 
 
+def test_quit_button_stamps_a_clean_exit(qapp, monkeypatch):
+    """The mandatory dialog's Quit bypasses closeEvent — without the stamp
+    it read as a crash and would trigger the crash-report offer on the
+    next start."""
+    import pytest as _pytest
+    from techdeck.core import hang_watchdog
+
+    marked = []
+    monkeypatch.setattr(hang_watchdog, "mark_clean_exit",
+                        lambda: marked.append(True))
+
+    dialog = UpdateDialog(_info(), mandatory=True)
+    try:
+        with _pytest.raises(SystemExit):
+            dialog._quit_app()
+        assert marked == [True]
+    finally:
+        dialog.deleteLater()
+
+
 def test_mandatory_failed_download_is_not_quit_only(qapp):
     """The worst case: a mandatory update whose download failed used to
     leave 'Quit TechDeck' as the ONLY enabled button."""

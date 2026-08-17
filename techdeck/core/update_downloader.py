@@ -152,6 +152,13 @@ def run_installer_and_exit(installer_path: str) -> None:
     import sys
     logger.info("Launching installer: %s", installer_path)
 
+    # This exit bypasses MainWindow.closeEvent (sys.exit from a timer slot),
+    # so stamp the clean exit HERE - without it every successful auto-update
+    # recorded clean_exit:false and looked like a crash in the next debug
+    # report (and would trigger the crash-report offer on restart).
+    from techdeck.core import hang_watchdog
+    hang_watchdog.mark_clean_exit()
+
     # Get TechDeck executable path
     if getattr(sys, 'frozen', False):
         # Running as compiled .exe
