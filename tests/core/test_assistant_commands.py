@@ -283,3 +283,24 @@ def test_an_unrecognisable_command_points_at_help(brain):
 def test_help_is_reachable_both_ways(brain):
     assert "/schedule" in _text(brain.handle("/help", NOW))
     assert "/schedule" in _text(brain.handle("help", NOW))
+
+
+@pytest.mark.parametrize("asked", [
+    "/about", "what is this", "what is this?", "what does this do",
+    "what am i looking at", "how does this work",
+])
+def test_asking_what_this_is_explains_the_page(brain, asked):
+    """It used to shrug. The answer has to actually say what the page is, name
+    the parts, and repeat the promise that talking files nothing."""
+    said = _text(brain.handle(asked, NOW))
+    assert "Assistant" in said
+    for part in ("Tasks", "Schedule", "Personal Notes", "/help"):
+        assert part in said, part
+    assert brain.store.tasks == []
+
+
+def test_the_page_tour_drops_woogy_in_the_professional_theme(tmp_path):
+    brain = AssistantBrain(AssistantStore(tmp_path / "a"), professional=True)
+    said = _text(brain.handle("what is this", NOW))
+    assert "Woogy" not in said
+    assert "Personal Notes" in said and "/help" in said

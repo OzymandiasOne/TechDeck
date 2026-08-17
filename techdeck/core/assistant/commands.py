@@ -96,10 +96,55 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
   /remind [on|off|<minutes>]        desktop reminders before each block
+  /about                            what this page is, in short
   /clear                            wipe the terminal (this one really does delete it)
 
 Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1-p4.
 When: today · tomorrow · friday · 8/14 · in 2 days · at 2pm · due eod.
+"""
+
+# "What is this?" is the first thing anybody types at a page they have never
+# seen before, and it used to fall through to the goblin, who shrugged at it.
+# Shrugging is right for a vent and wrong for a genuine question, so this is a
+# real answer: what the page is, what the four parts do, and where the promise
+# about not filing things comes from. Woogy's voice, because he is the one
+# being asked, but every line of it is true.
+ABOUT_TEXT = """\
+This is the Assistant. Woogy lives in here. Hi.
+
+It is for keeping your own day straight, and it is four things:
+
+  Talking to Woogy   Type anything you want. Woogy answers. Nothing gets
+                     saved and nothing turns into a chore, so you can yell
+                     about OneDrive as much as you need to.
+  Tasks              Only what you ASK for gets filed. Press “Add a task”, or
+                     type  /task fix the PO sheet 45m urgent due friday
+                     Or just /task, and Woogy files the last thing you said.
+  Schedule           Turns those tasks into real time blocks for the day,
+                     around your hours and your meetings. /schedule builds it.
+                     It saves out as a calendar file that Outlook can open.
+  Personal Notes     For things you want to keep. Gate codes. Numbers.
+
+It all stays on this computer. Woogy cannot phone anybody.
+
+/help has every command. Woogy can read. Woogy practised.
+"""
+
+# The professional theme mutes Woogy everywhere else, so it gets the same
+# content with none of him in it.
+ABOUT_TEXT_PLAIN = """\
+The Assistant is a personal organizer built into TechDeck.
+
+  Terminal         Free text is conversation. Nothing typed here is filed,
+                   and nothing is sent anywhere.
+  Tasks            Filed only on an explicit request: the “Add a task”
+                   button, or  /task fix the PO sheet 45m urgent due friday
+  Schedule         Builds a time-blocked plan from your open tasks, around
+                   your working hours. Exports as .ics for Outlook.
+  Personal Notes   Plain-text notes, searchable with /find.
+
+Everything is stored locally on this machine.
+Type /help for the full command list.
 """
 
 
@@ -108,6 +153,7 @@ class AssistantBrain:
 
     def __init__(self, store: AssistantStore, professional: bool = False):
         self.store = store
+        self.professional = professional
         # The thing that answers when the user just wants to talk.
         self.goblin = Goblin(professional=professional)
         # The last free-text line, so a bare `/task` (or the page's "make that
@@ -134,6 +180,8 @@ class AssistantBrain:
 
         handlers = {
             "help": self._cmd_help, "?": self._cmd_help,
+            "about": self._cmd_about, "whatisthis": self._cmd_about,
+            "explain": self._cmd_about,
             "schedule": self._cmd_schedule, "plan": self._cmd_schedule,
             "replan": self._cmd_replan,
             "task": self._cmd_task, "todo": self._cmd_task, "add": self._cmd_task,
@@ -164,6 +212,13 @@ class AssistantBrain:
 
     def _cmd_help(self, args: str, now: datetime) -> Reply:
         return Reply().say(HELP_TEXT, ROLE_SYSTEM)
+
+    def _cmd_about(self, args: str, now: datetime) -> Reply:
+        """What IS this. Reached by `/about` and, more importantly, by anybody
+        typing "what is this" at the terminal, which used to get a shrug from
+        the goblin. See `nlp._RE_ABOUT`."""
+        return Reply().say(
+            ABOUT_TEXT_PLAIN if self.professional else ABOUT_TEXT, ROLE_SYSTEM)
 
     def _cmd_remind(self, args: str, now: datetime) -> Reply:
         """`/remind` reports, `/remind on|off` toggles, `/remind 15` sets the
@@ -602,6 +657,8 @@ class AssistantBrain:
 
         if intent.kind == "help":
             return self._cmd_help("", now)
+        if intent.kind == "about":
+            return self._cmd_about("", now)
         if intent.kind == "note":
             return self._capture_note(intent.text or raw, now)
         if intent.kind == "schedule":

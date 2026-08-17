@@ -544,6 +544,7 @@ INTENTS = (
     "delete",
     "search",
     "help",
+    "about",        # "what IS this" — the page explains itself
 )
 
 _RE_NOTE = re.compile(r"^\s*(?:note|jot|remember)\s*[:\-]?\s+", re.I)
@@ -570,6 +571,38 @@ _RE_DELETE = re.compile(r"^\s*(?:delete|remove|drop|forget)\s*[:\-]?\s*", re.I)
 _RE_SEARCH = re.compile(r"^\s*(?:find|search|look up|where'?s)\s*[:\-]?\s*", re.I)
 _RE_HELP = re.compile(r"^\s*(?:help|what can you do|commands?)\s*\??\s*$", re.I)
 
+# "What is this?" — the first thing anybody types at a page they have never
+# seen, and for a long time it fell through to the goblin, who shrugged
+# ("Woogy don't know. Woogy is just a guy."). A vent deserves a shrug; asking
+# what the thing IS deserves an answer. So it is an INTENT, not a mood, and it
+# never reaches the goblin at all.
+#
+# **Anchored to the end of the line, and that anchor is the whole safety
+# guard.** "what is this" is asking about the page; "what is this nest doing in
+# batch 481" is conversation, and the anchor is the only thing that tells them
+# apart. Widen the phrase list freely, never drop the `$`.
+_RE_ABOUT = re.compile(
+    r"^\s*(?:so|ok|okay|um+|uh+|wait|hey|hey woogy|woogy)?[\s,]*"
+    r"(?:"
+    # what is this / what's this thing / what is this page for
+    r"what(?:'?s| is| was| the hell is| the heck is)\s+(?:all\s+)?this"
+    r"(?:\s+(?:thing|page|tab|terminal|window|screen|app|box|assistant))?"
+    r"(?:\s+(?:for|about|do|does|even))?"
+    # what does this do / what do i do here
+    r"|what (?:do|does|can) (?:this|it|that|i)(?:\s+thing)?"
+    r"(?:\s+(?:do|for))?(?:\s+(?:here|with this|even))?"
+    # what am i looking at
+    r"|what am i (?:even )?(?:looking at|doing here|supposed to (?:do|type))"
+    # what are you (for) / who is woogy
+    r"|(?:what|who)(?:'?s| is| are)\s+(?:you|woogy|this assistant|the assistant)"
+    r"(?:\s+for)?"
+    # how does this work / how do i use this
+    r"|how (?:does|do) (?:this|it|i use (?:this|it))(?:\s+work)?"
+    r"|explain (?:this|yourself|the page|it)"
+    r"|what(?:'?s| is) (?:going on|this) here"
+    r")"
+    r"\s*[.!?]*\s*$", re.I)
+
 
 def parse_intent(text: str) -> Intent:
     """Classify one free-text terminal line.
@@ -589,6 +622,10 @@ def parse_intent(text: str) -> Intent:
 
     if _RE_HELP.match(raw):
         return Intent("help")
+    # Before everything else that looks at the front of the line: "what's this"
+    # must not be read as an agenda question ("what's on today").
+    if _RE_ABOUT.match(raw):
+        return Intent("about", raw)
     if raw.lstrip().startswith(("- ", "* ", "• ")) or "\n" in raw:
         return Intent("note", raw)
     match = _RE_NOTE.match(raw)

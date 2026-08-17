@@ -205,6 +205,7 @@ def test_bullet_block():
     ("what's on today", "agenda"),
     ("find rev c", "search"),
     ("help", "help"),
+    ("what is this", "about"),
     ("remind me to call Dan", "task"),
     ("add order the 4130 tube", "task"),
     ("/task is a command, not free text", "chat"),
@@ -227,6 +228,49 @@ def test_unmatched_text_is_conversation_never_a_capture(text):
     unmistakable request does, and the phrases below are ones people say
     mid-vent, "i need to get out of here" is not a to-do item."""
     assert nlp.parse_intent(text).kind == "chat"
+
+
+@pytest.mark.parametrize("text", [
+    "what is this",
+    "what is this?",
+    "whats this",
+    "what's this",
+    "what is this thing",
+    "what is this page for",
+    "whats this for",
+    "what does this do",
+    "what do i do here",
+    "what am i looking at",
+    "what are you",
+    "what are you for",
+    "who is woogy",
+    "how does this work",
+    "how do i use this",
+    "explain this",
+    "whats going on here",
+    "so what is this",
+    "hey woogy what is this",
+    "WHAT IS THIS",
+    "what the hell is this",
+])
+def test_asking_what_the_page_is_gets_an_answer_not_a_shrug(text):
+    """The first thing anybody types at a page they've never seen. It used to
+    fall through to the goblin, who shrugged at it ("Woogy don't know")."""
+    assert nlp.parse_intent(text).kind == "about"
+
+
+@pytest.mark.parametrize("text", [
+    "what is this nest doing in batch 481",
+    "what is this stupid PO sheet",
+    "what is this batch missing",
+    "what did you do today",
+    "what?",
+])
+def test_a_real_sentence_starting_with_what_is_this_is_still_conversation(text):
+    """`_RE_ABOUT` is anchored to the end of the line, and that anchor is the
+    only thing separating "what is this" from a sentence that starts the same
+    way. Losing it would answer every one of these with a page tour."""
+    assert nlp.parse_intent(text).kind != "about"
 
 
 def test_explicit_task_verbs_still_capture():
