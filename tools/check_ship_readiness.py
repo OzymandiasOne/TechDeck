@@ -59,6 +59,23 @@ Checks (E = error, fails the build; W = warning):
       (added 2026-08-05 when 922 LST Organizer gained a folder pick). Escape
       hatch: a pick the drone must never touch passes style=""; a plugin
       whose every picker call does so is exempt.
+  E12 no raw .save() on a PyMuPDF doc opened FROM A FILE (Hard Rule 5): fitz
+      cannot save in place on Windows (the open doc holds a handle on its own
+      source file), and the hand-rolled tmp+os.replace idiom has shipped the
+      save-before-close bug once already (922 Pallet Stamper carried the
+      pre-fix ordering long after the SDK fixed it). Use
+      sdk.save_pdf_atomic(doc, dest) - it saves to a temp, CLOSES the doc,
+      then replaces. A no-arg fitz.open() (a brand-new in-memory doc) is
+      exempt: saving a new doc to a new path is fine.
+  E13 no raw workbook/PDF content reads (Hard Rule 13): on a OneDrive
+      Files-On-Demand tree a file can exist while its CONTENT is cloud-only,
+      and a file open in Excel raises PermissionError - both crash raw reads
+      with tracebacks users can't act on. load_workbook -> use
+      sdk.load_workbook_resilient; pd.read_excel -> sdk.read_excel_resilient;
+      pd.ExcelFile -> sdk.open_excel_resilient. fitz.open(path) / PdfReader
+      must have sdk.ensure_local in the SAME function (hydrate at the read
+      site - the resilient calls are cheap no-ops on local files, so there is
+      no legitimate raw-read case).
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -161,6 +178,125 @@ def find_drone_picker_calls(tree: ast.AST) -> list[str]:
             continue  # deliberately drone-free prompt
         hits.append(name)
     return hits
+
+
+def _call_name(node: ast.Call) -> str:
+    """The called name for both foo(...) and obj.foo(...) shapes ('' if
+    neither)."""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _is_fitz_open_from_file(node: ast.Call) -> bool:
+    """True for fitz.open(<positional args>) — a doc opened FROM A FILE.
+    fitz.open() (new empty doc) and fitz.open(stream=...) (in-memory) are
+    exempt: neither holds a handle on a source file."""
+    func = node.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "open"
+            and isinstance(func.value, ast.Name) and func.value.id == "fitz"):
+        return False
+    return len(node.args) > 0
+
+
+# E12: raw .save() on a fitz doc that was opened from a file (Hard Rule 5).
+def find_raw_fitz_saves(tree: ast.AST) -> list[int]:
+    """Line numbers of X.save(...) calls where X was assigned from
+    fitz.open(<args>) anywhere in the file. Saving such a doc raw is the
+    cannot-save-in-place class; sdk.save_pdf_atomic is the required path."""
+    opened_from_file: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
+                and _is_fitz_open_from_file(node.value):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    opened_from_file.add(target.id)
+
+    hits: list[int] = []
+    for node in _iter_calls_skipping_main(tree):
+        func = node.func
+        if (isinstance(func, ast.Attribute) and func.attr == "save"
+                and isinstance(func.value, ast.Name)
+                and func.value.id in opened_from_file):
+            hits.append(node.lineno)
+    return sorted(hits)
+
+
+# E13: raw content reads that die on OneDrive placeholders / locked files
+# (Hard Rule 13). Each maps to its resilient SDK counterpart.
+RAW_READ_CALLS = {
+    "load_workbook": "sdk.load_workbook_resilient",
+    "read_excel": "sdk.read_excel_resilient",
+    "ExcelFile": "sdk.open_excel_resilient",
+}
+
+
+def find_raw_content_reads(tree: ast.AST) -> list[tuple[int, str, str]]:
+    """(lineno, called_name, replacement) for raw Excel-read calls.
+
+    pd.read_excel(xls, ...) is EXEMPT when its first argument is a name bound
+    from sdk.open_excel_resilient(...) anywhere in the file — the file was
+    already opened resiliently and the ExcelFile handle is in memory, so the
+    placeholder/locked classes can't bite that read (922 Batch Repeater's
+    MPL pattern)."""
+    resilient_handles: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
+                and _call_name(node.value) == "open_excel_resilient":
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    resilient_handles.add(target.id)
+
+    hits: list[tuple[int, str, str]] = []
+    for node in _iter_calls_skipping_main(tree):
+        name = _call_name(node)
+        if name not in RAW_READ_CALLS:
+            continue
+        if name == "read_excel" and node.args \
+                and isinstance(node.args[0], ast.Name) \
+                and node.args[0].id in resilient_handles:
+            continue  # reading from an already-resilient ExcelFile handle
+        hits.append((node.lineno, name, RAW_READ_CALLS[name]))
+    return sorted(hits)
+
+
+def find_unhydrated_pdf_opens(tree: ast.AST) -> list[tuple[int, str]]:
+    """(lineno, called_name) for fitz.open(path)/PdfReader(path) calls in a
+    scope with NO sdk.ensure_local call. The guard must sit at the read site:
+    ensure_local is a cheap no-op on an already-local file, so hydrating next
+    to the open is always safe and makes the pattern locally verifiable."""
+    hits: list[tuple[int, str]] = []
+
+    def scan_scope(body: list) -> None:
+        """One function body (or the module top level). Nested defs are their
+        own scopes and are NOT descended into here."""
+        calls: list[ast.Call] = []
+        stack: list[ast.AST] = list(body)
+        while stack:
+            node = stack.pop()
+            if _is_main_guard(node):
+                continue
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scan_scope(node.body)
+                continue
+            if isinstance(node, ast.Call):
+                calls.append(node)
+            stack.extend(ast.iter_child_nodes(node))
+
+        has_guard = any(_call_name(c) == "ensure_local" for c in calls)
+        if has_guard:
+            return
+        for call in calls:
+            if _is_fitz_open_from_file(call):
+                hits.append((call.lineno, "fitz.open"))
+            elif _call_name(call) == "PdfReader" and call.args:
+                hits.append((call.lineno, "PdfReader"))
+
+    scan_scope(tree.body if isinstance(tree, ast.Module) else [tree])
+    return sorted(hits)
 
 
 def find_bypassed_batch_prompts(tree: ast.AST) -> list[str]:
@@ -446,6 +582,32 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                         f"'utf-8-sig' - that always emits a BOM; write "
                         f"'utf-8' instead"
                     )
+
+        # --- raw fitz in-place save (E12, Hard Rule 5)
+        for line_no in find_raw_fitz_saves(tree):
+            errors.append(
+                f"{pid}: {rel}:{line_no} calls .save() on a fitz doc opened "
+                f"from a file - fitz cannot save in place on Windows (Hard "
+                f"Rule 5); use sdk.save_pdf_atomic(doc, dest), which saves "
+                f"to a temp, CLOSES the doc, then replaces"
+            )
+
+        # --- raw Excel content reads (E13, Hard Rule 13)
+        for line_no, name, replacement in find_raw_content_reads(tree):
+            errors.append(
+                f"{pid}: {rel}:{line_no} calls raw {name}() - that dies on "
+                f"OneDrive cloud placeholders and files open in Excel (Hard "
+                f"Rule 13); use {replacement}"
+            )
+
+        # --- PDF opens without hydration (E13, Hard Rule 13)
+        for line_no, name in find_unhydrated_pdf_opens(tree):
+            errors.append(
+                f"{pid}: {rel}:{line_no} calls {name}() with no "
+                f"sdk.ensure_local in the same function - a cloud-only file "
+                f"crashes the read (Hard Rule 13); hydrate at the read site "
+                f"(ensure_local is a cheap no-op on a local file)"
+            )
 
         fp, tp, rel_count = extract_imports(py_file, "", module_map)
 
