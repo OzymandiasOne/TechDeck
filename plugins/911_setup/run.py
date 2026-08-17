@@ -148,8 +148,6 @@ import threading
 from functools import cmp_to_key
 from pathlib import Path
 
-import openpyxl
-from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -959,7 +957,9 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
                                               log, difficulty):
                 log(f"  WARNING: {w}")
 
-        doc.save(str(dest_path), garbage=3, deflate=True)
+        # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
+        # from the source PDF, not dest_path, and the finally below closes it.
+        sdk.save_pdf_atomic(doc, dest_path, close=False)
 
         kept = total_pages - len(remove_pages)
         log(f"  Drawings PDF: {dest_path.name} ({kept} page(s), removed {len(remove_pages)} MOVE TICKET page(s))")
@@ -970,7 +970,10 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         return False
     finally:
         if doc is not None:
-            doc.close()
+            try:
+                doc.close()
+            except ValueError:
+                pass  # already closed (save_pdf_atomic closes when source == dest)
 
 
 # ---------------------------------------------------------------------------
@@ -1763,7 +1766,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     log(f"Forecast copy : {forecast_copy}")
 
     log("Loading 911 Forecast sheet...")
-    forecast_wb = load_workbook(forecast_copy, data_only=True)
+    forecast_wb = sdk.load_workbook_resilient(forecast_copy, log=log, data_only=True)
     # Locate the forecast columns once, by header name (Hard Rules 1 & 2).
     forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols = \
         _locate_forecast(forecast_wb, log)

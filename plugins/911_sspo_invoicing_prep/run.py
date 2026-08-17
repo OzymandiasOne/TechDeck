@@ -170,7 +170,10 @@ def _read_po_map(copy_path, log, cancel_event):
     roll off to it) — first sheet wins on duplicate keys. PO and Line are copied
     verbatim (Line is sometimes the text 'SSPO', not a number).
     """
-    wb = openpyxl.load_workbook(copy_path, data_only=True, read_only=True)
+    # Resilient even on the local copy: it can be open in Excel, and the
+    # resilient loader is a cheap no-op on a healthy local file (Hard Rule 13).
+    wb = sdk.load_workbook_resilient(copy_path, log=log, data_only=True,
+                                     read_only=True)
     po_map = {}
     try:
         for sheet_name in FORECAST_SHEETS:

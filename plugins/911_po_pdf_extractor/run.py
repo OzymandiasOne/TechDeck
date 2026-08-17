@@ -28,7 +28,7 @@ import threading
 
 # Third-party imports
 import fitz  # PyMuPDF
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
 try:
@@ -346,7 +346,9 @@ def write_to_excel(output_path: Path, records: List[Dict], log):
     ]
     
     if output_path.exists():
-        wb = load_workbook(str(output_path))
+        # Resilient: the output workbook may be open in Excel or cloud-only
+        # (Hard Rule 13).
+        wb = sdk.load_workbook_resilient(str(output_path), log=log)
         ws = wb.active
     else:
         wb = Workbook()

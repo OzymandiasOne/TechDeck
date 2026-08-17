@@ -488,7 +488,9 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         doc.delete_pages(sorted(remove_pages))
         warnings.extend(_stamp_first_page(doc[0], batch, pdf_path.stem, material,
                                           log, difficulty))
-        doc.save(str(output_path), garbage=3, deflate=True)
+        # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
+        # from pdf_path, not output_path, and the finally below closes it.
+        sdk.save_pdf_atomic(doc, output_path, close=False)
 
         removed = len(remove_pages)
         kept = total - removed
@@ -499,7 +501,10 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         log(f"  ERROR processing {pdf_path.name}: {e}")
         return False, warnings
     finally:
-        doc.close()
+        try:
+            doc.close()
+        except ValueError:
+            pass  # already closed (save_pdf_atomic closes when source == dest)
 
 
 def _detect_batch(pdf_dir: Path) -> str:

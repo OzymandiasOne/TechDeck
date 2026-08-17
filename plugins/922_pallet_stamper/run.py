@@ -119,10 +119,9 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
         True if successful, False otherwise
     """
     try:
-        tmp = pdf_path + ".tmp"
-
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
         doc = fitz.open(pdf_path)
+        saved = False
         try:
             page = doc[0]
 
@@ -146,11 +145,19 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
                 rotate=text_rotate
             )
 
-            doc.save(tmp, incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
+            # In-place edit: save_pdf_atomic saves to a temp, CLOSES the doc
+            # (Windows needs the source handle released), then replaces
+            # (Hard Rule 5) - this used to be hand-rolled here and missed the
+            # SDK's later fixes.
+            sdk.save_pdf_atomic(doc, pdf_path)
+            saved = True
         finally:
-            doc.close()
+            if not saved:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
-        os.replace(tmp, pdf_path)
         return True
 
     except Exception as e:
