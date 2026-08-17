@@ -372,6 +372,21 @@ def normalize_911_batch(raw: str) -> str:
     return (raw or "").strip().upper()
 
 
+# Hard Rule 3: THE nest-id shape. Legacy numeric nests ([PS]?\d{3,}) plus
+# alphanumeric IDs like 5CDAVW (4-8 chars, must contain a digit so footer
+# text like "TOTALS" is rejected; first seen GX030, May 2026). This is the
+# single home — plugins alias it (`_NEST_RE = sdk.NEST_ID_RE`), never
+# re-type it: the pattern has been revised once already (the alphanumeric
+# branch), and the next revision must not need six separate edits.
+NEST_ID_RE = re.compile(
+    r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+
+
+def is_nest_id(text) -> bool:
+    """True when `text` is nest-id shaped per Hard Rule 3 (trimmed first)."""
+    return bool(NEST_ID_RE.match(str(text or "").strip()))
+
+
 def find_922_batch_path(root: Path, batch: str) -> Optional[Path]:
     """Locate 'Batch {n}' under the 922 root, checking the live root first and
     then the '1 - Completed' archive. Returns None if not found."""

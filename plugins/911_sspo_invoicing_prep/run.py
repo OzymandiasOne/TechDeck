@@ -65,7 +65,7 @@ from PySide6.QtWidgets import QMessageBox
 
 # Hard Rule 3 nest-number regex: accept legacy numeric IDs (503633, P08229) AND
 # alphanumeric IDs that contain a digit (5CDAWK); reject footer/total/junk text.
-NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 REQUIRED_HEADERS = ["Batch", "Nest Pkg Nbr"]
 

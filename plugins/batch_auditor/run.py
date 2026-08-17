@@ -28,10 +28,7 @@ except ModuleNotFoundError:
 
 # Legacy numeric nests ([PS]?\d{3,}) plus alphanumeric IDs like 5CDAVW
 # (4-8 chars, must contain a digit so footer text like "TOTALS" is rejected).
-_NEST_RE = re.compile(
-    r'^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$',
-    re.IGNORECASE,
-)
+_NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 
 # ── status helpers ──────────────────────────────────────────────────────────

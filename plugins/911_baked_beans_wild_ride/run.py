@@ -98,7 +98,7 @@ _DYPN_RE = re.compile(r"^[A-Z]{0,3}\d{4,}-\d{1,4}$", re.IGNORECASE)
 _BATCHNEST_LABEL_RE = re.compile(r"^BATCH\s*/?\s*NEST$", re.IGNORECASE)
 _PART_LABEL_RE = re.compile(r"^PART\s*#?$", re.IGNORECASE)
 # Nest shape = the Hard-Rule-3 nest regex (numeric or alphanumeric-with-digit).
-_NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+_NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 # How far into a sheet we look for the summary labels / the DYPN. The summary
 # block sits in the top rows; generous bounds keep a moved block findable

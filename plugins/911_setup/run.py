@@ -177,10 +177,7 @@ import importlib.util
 # The at-least-one-digit requirement keeps footer/total text like "TOTALS"
 # out, which is the whole reason this filter exists.
 # ---------------------------------------------------------------------------
-_NEST_RE = re.compile(
-    r'^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$',
-    re.IGNORECASE,
-)
+_NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 
 # ---------------------------------------------------------------------------

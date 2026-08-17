@@ -60,7 +60,7 @@ except ImportError:
 VERSION = "2.1.0"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
-NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 # A DYPN / part id: letters + digits, then at least one dashed suffix
 # (H4143481-3, H4143408-145, H4130401-22M, R5711906-401, H5532004-19-2).
