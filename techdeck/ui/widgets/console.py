@@ -1033,7 +1033,9 @@ class ConsoleWidget(QWidget, ThemeAware):
         # reads exactly like every other appended message (anchors otherwise
         # render in Qt's default link blue).
         from techdeck.ui.theme_manager import get_theme_manager
-        body_color = get_theme_manager().get_current_palette().text
+        # console-surface line: console_text, never body text (a theme's
+        # console can be darker/lighter than its app surfaces)
+        body_color = get_theme_manager().get_current_palette().console_text
         url = QUrl.fromLocalFile(target_path).toString()
         lead = ""
         if prefix:
@@ -1053,7 +1055,9 @@ class ConsoleWidget(QWidget, ThemeAware):
         spans is HTML-escaped verbatim."""
         if body_color is None:
             from techdeck.ui.theme_manager import get_theme_manager
-            body_color = get_theme_manager().get_current_palette().text
+            # console-surface line: console_text, never body text (a theme's
+            # console can be darker/lighter than its app surfaces)
+            body_color = get_theme_manager().get_current_palette().console_text
         parts = []
         pos = 0
         for m in self._LINK_MARKUP.finditer(text):
@@ -1072,7 +1076,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         line). techdeck:// urls dispatch inside the app; file/https urls open
         with the OS. `color` tints the whole line (default: theme text)."""
         from techdeck.ui.theme_manager import get_theme_manager
-        body_color = color or get_theme_manager().get_current_palette().text
+        body_color = color or get_theme_manager().get_current_palette().console_text
         html = self.markup_to_html(text, body_color)
         self._append_line(
             f'<span style="color: {body_color};">{html}</span>')
@@ -1339,7 +1343,7 @@ class ConsoleWidget(QWidget, ThemeAware):
             f"QTabBar#consoleTabBar::tab {{ background: {p.surface}; color: {p.text_secondary};"
             " font-weight: bold; padding: 6px 14px; margin-right: 3px; border: none;"
             " border-top-left-radius: 8px; border-top-right-radius: 8px; }"
-            f"QTabBar#consoleTabBar::tab:selected {{ background: {body_bg}; color: {p.text}; }}"
+            f"QTabBar#consoleTabBar::tab:selected {{ background: {body_bg}; color: {p.console_text}; }}"
             f"QTabBar#consoleTabBar::tab:hover:!selected {{ background: {p.surface_hover}; }}"
         )
         # Re-tint the Dashboard close button if the tab is present.

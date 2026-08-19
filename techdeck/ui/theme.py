@@ -319,51 +319,52 @@ QPushButton:hover {
     ),
 
     "halloween": ColorPalette(
-        # FULL PUMPKIN: the app IS the jack-o'-lantern. Background, panels,
-        # sidebar, console — all the run-button orange (#FF7A1A family), with
-        # near-black carved-out text and buttons (the lantern's eyes), poison
-        # green as the counter-accent. A loud seasonal novelty on purpose.
-        text="#2A1503",            # carved near-black
-        text_secondary="#5C3410",  # deep brown
+        # THE TRIAD: pumpkin body, witching-purple trim, carved-dark mouth.
+        # Background/panels/sidebar stay the run-button orange; buttons,
+        # borders, and selection go deep purple; the console is the one dark
+        # panel — the lantern's cut-out mouth, glowing amber, where the
+        # Puppet Master's phosphor face stays crisp.
+        text="#2A1503",            # carved near-black on orange
+        text_secondary="#45166E",  # deep purple secondary text
         background="#FF7A1A",      # THE orange
         surface="#F26E0C",         # a shade deeper so panels read as panels
         surface_hover="#FF9440",
 
-        accent="#241203",          # black cutouts — buttons like lantern eyes
-        accent_hover="#3A2008",
-        accent_pressed="#120901",
+        accent="#4A1F7A",          # witching purple — buttons + highlights
+        accent_hover="#5D2B96",
+        accent_pressed="#38175E",
 
-        accent_two="#1F9E1F",      # poison green CTA, deepened to hold on orange
+        accent_two="#1F9E1F",      # poison green CTA (phosphor kin)
         accent_two_hover="#2DBA2D",
         accent_two_pressed="#166E16",
 
-        border="#B34F08",
-        border_strong="#7A3505",
-        divider="#E9650A",
+        border="#4A1F7A",
+        border_strong="#38175E",
+        divider="#B34F08",
 
-        console_bg="#E9650A",      # the console glows orange too
-        console_text="#2A1503",
+        console_bg="#070310",      # the dark from before — his home
+        console_text="#FFAF5E",    # candlelight amber
 
         success="#0B6E2F",
         warning="#8A5300",
         error="#A31212",
-        info="#5B21B6",            # witching purple, last trace
+        info="#5B21B6",
 
-        tile_selected="#FFA35C",
-        shadow="rgba(42, 21, 3, 0.35)",
+        tile_selected="#CBA8F0",   # light purple selection tint
+        shadow="rgba(56, 23, 94, 0.40)",
 
         tile_missing_bg="#F0700F",
-        tile_missing_text="#8A4A12",
-        tile_missing_border="#C25708",
+        tile_missing_text="#45166E",
+        tile_missing_border="#4A1F7A",
 
-        accent_text="#FF9440",     # orange text inside the black buttons
-        accent_two_text="#FFFFFF", # white on the deep green CTA
+        accent_text="#F2E9F8",     # near-white on the purple buttons
+        accent_two_text="#FFFFFF",
         extra_stylesheet="""
 QLineEdit:focus, QTextEdit:focus {
-    border: 2px solid #241203;
+    border: 2px solid #4A1F7A;
 }
 QPushButton[class="primary"] {
-    border: 1px solid #241203;
+    border: 1px solid #4A1F7A;
 }
 """,
     ),

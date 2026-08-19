@@ -7,7 +7,8 @@ def test_halloween_theme_is_registered_and_builtin():
     assert "halloween" in THEMES
     assert is_builtin_theme("halloween")
     assert THEMES["halloween"].background == "#FF7A1A"  # the app IS pumpkin
-    assert THEMES["halloween"].accent == "#241203"       # carved-black buttons
+    assert THEMES["halloween"].accent == "#4A1F7A"       # witching-purple buttons
+    assert THEMES["halloween"].console_bg == "#070310"  # the dark carved mouth
     css = generate_stylesheet("halloween")
     assert "#FF7A1A" in css
 
