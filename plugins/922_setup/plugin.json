@@ -2,7 +2,7 @@
   "id": "922_setup",
   "name": "922 Setup",
   "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Batch Folder Setup (order folders from the REV C PO sheet, per-order PO workbook copy, work-packet PDFs filed in), Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order via a Power Automate webhook), Batch Repeater (pull repeats, distribute CAD/binders, label REPEAT cards), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -14,7 +14,8 @@
     "how_it_works": [
       "Pick the batch folder, then choose which stages to run in the toggle window (they run top to bottom).",
       "Batch Folder Setup builds an order folder per order and files the work-packet PDFs in; Generate Teams Cards posts the D922 pipeline buckets and one card per order.",
-      "Pallet Stamper stamps each order's work packet with its batch and pallet, then Batch Repeater pulls repeats from prior batches. Stamping runs before the repeater on purpose, so repeats never get stamped."
+      "Pallet Stamper stamps each order's work packet with its batch and pallet, then Batch Repeater pulls repeats from prior batches. Stamping runs before the repeater on purpose, so repeats never get stamped.",
+      "Apply pallet labels to existing cards (off by default): puts each order's PALLET 1/2/3 label on the card that is already on the board. Use it when the cards were made before the Pallet & Rod Organizer was filled in - it never creates a card, so you never get duplicates, it leaves REPEAT and material labels alone, and it is safe to run twice."
     ],
     "output": [
       "Order folders built and filled, Teams cards posted to the D922 PIPELINE plan, work packets stamped, and repeat orders pulled into a REPEAT BATCHES folder.",
@@ -39,6 +40,15 @@
         "type": "string",
         "label": "Teams Webhook URL (override)",
         "description": "Leave blank to use TechDeck's built-in card-creation flow. Only set this to point at a different Power Automate flow (get the URL from that flow's trigger). Use the Dry run toggle below to preview without posting.",
+        "placeholder": "Blank = TechDeck's built-in flow",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "labeler_webhook_url",
+        "type": "string",
+        "label": "Pallet Labeler Webhook URL (override)",
+        "description": "Used by the 'Apply pallet labels to existing cards' stage only. Leave blank to use TechDeck's built-in pallet-labeling flow. This is a DIFFERENT flow from the card-creation one above - that flow creates cards, this one only updates cards that already exist.",
         "placeholder": "Blank = TechDeck's built-in flow",
         "required": false,
         "default": ""

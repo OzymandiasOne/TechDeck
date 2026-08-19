@@ -109,14 +109,6 @@ TOOL_SECTIONS = [
    "Iterates the work-order PDFs and overlays the PO and pallet detail so the "
    "floor paperwork is labelled without manual editing.",
    "Active", "0.7.4"),
-  ("922 Pallet Labeler",
-   "Applies each order's pallet label to the coordination cards already on the "
-   "board.",
-   "Cards are created early in the batch, before pallets are assigned, so their "
-   "pallet labels come out blank and cannot be re-posted without duplicating the "
-   "board. Reads the finished pallet assignments and labels the existing cards in "
-   "one pass, leaving every other label untouched.",
-   "Active", "0.8.8"),
   ("922 Difficulty Stamper",
    "Marks the work packets of orders containing a part that is difficult to "
    "produce.",
