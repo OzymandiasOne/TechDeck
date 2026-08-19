@@ -264,7 +264,7 @@ class Sidebar(QWidget, ThemeAware):
         for icon_name, text, page_id in pages:
             btn = NavButton(
                 str(icons_dir / icon_name), text, page_id,
-                icon_color=self.theme.text,
+                icon_color=self.theme.sidebar_text or self.theme.text,
             )
             btn.clicked.connect(lambda checked, pid=page_id: self._on_nav_clicked(pid))
             self.nav_buttons.append(btn)
@@ -281,7 +281,7 @@ class Sidebar(QWidget, ThemeAware):
         if is_dev_build():
             self.devkit_btn = NavButton(
                 str(icons_dir / "devkit.svg"), "DevKit", "devkit",
-                icon_color=self.theme.text,
+                icon_color=self.theme.sidebar_text or self.theme.text,
             )
             self.devkit_btn.clicked.connect(
                 lambda checked: self._on_nav_clicked("devkit"))
@@ -295,7 +295,7 @@ class Sidebar(QWidget, ThemeAware):
 
         account_btn = NavButton(
             str(icons_dir / "account.svg"), "My Account", "account",
-            icon_color=self.theme.text,
+            icon_color=self.theme.sidebar_text or self.theme.text,
         )
         account_btn.clicked.connect(lambda checked: self._on_nav_clicked("account"))
         self.nav_buttons.append(account_btn)
@@ -344,23 +344,25 @@ class Sidebar(QWidget, ThemeAware):
         """Rebuild every theme-sensitive surface on theme change."""
         self.theme = self.get_current_palette()
         icons_dir = self._current_icons_dir()
+        side_bg = self.theme.sidebar_bg or self.theme.surface
+        side_fg = self.theme.sidebar_text or self.theme.text
 
         # Sidebar bg + right border
         self.setStyleSheet(f"""
             Sidebar {{
-                background-color: {self.theme.surface};
+                background-color: {side_bg};
                 border-right: 1px solid {self.theme.border};
             }}
         """)
-        self.header.setStyleSheet(f"background-color: {self.theme.surface};")
-        self.nav_container.setStyleSheet(f"background-color: {self.theme.surface};")
+        self.header.setStyleSheet(f"background-color: {side_bg};")
+        self.nav_container.setStyleSheet(f"background-color: {side_bg};")
 
         # Toggle button
         toggle_icon = (self._expand_icon_path() if self.collapsed
                        else self._collapse_icon_path())
         if toggle_icon.exists():
             try:
-                pix = _tint_svg(toggle_icon, self.theme.text, 16)
+                pix = _tint_svg(toggle_icon, side_fg, 16)
                 self.toggle_btn.setIcon(QIcon(pix))
                 self.toggle_btn.setText("")
             except Exception:
@@ -375,7 +377,7 @@ class Sidebar(QWidget, ThemeAware):
                 border: none;
                 font-size: 14px;
                 border-radius: 6px;
-                color: {self.theme.text};
+                color: {side_fg};
             }}
             QPushButton:hover {{
                 background-color: rgba(127, 127, 127, 0.12);
@@ -386,7 +388,7 @@ class Sidebar(QWidget, ThemeAware):
         self.app_name.setStyleSheet(f"""
             font-size: 15px;
             font-weight: 600;
-            color: {self.theme.text};
+            color: {side_fg};
             background-color: transparent;
             border: none;
             padding: 0px;
@@ -398,8 +400,8 @@ class Sidebar(QWidget, ThemeAware):
             new_icon_path = str(icons_dir / Path(btn.icon_path).name)
             btn.update_theme(
                 icon_path=new_icon_path,
-                icon_color=self.theme.text,
-                text_color=self.theme.text,
+                icon_color=side_fg,
+                text_color=side_fg,
             )
 
         # Submit Feedback keeps the theme's CTA accent
@@ -462,7 +464,7 @@ class Sidebar(QWidget, ThemeAware):
                        else self._collapse_icon_path())
         if toggle_icon.exists():
             try:
-                pix = _tint_svg(toggle_icon, self.theme.text, 16)
+                pix = _tint_svg(toggle_icon, side_fg, 16)
                 self.toggle_btn.setIcon(QIcon(pix))
                 self.toggle_btn.setText("")
                 return

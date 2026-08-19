@@ -65,6 +65,12 @@ class ColorPalette:
     # selected items, etc.). Defaults to white; light-accent themes override.
     accent_text: str = "#FFFFFF"
     accent_two_text: str = "#FFFFFF"
+    # Sidebar overrides — empty falls back to surface/text/surface_hover.
+    # Lets a theme (halloween) give the nav ribbon its own identity without
+    # dragging every other surface-colored card along with it.
+    sidebar_bg: str = ""
+    sidebar_text: str = ""
+    sidebar_hover: str = ""
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -326,8 +332,8 @@ QPushButton:hover {
         # Puppet Master's phosphor face stays crisp.
         text="#2A1503",            # carved near-black on orange
         text_secondary="#45166E",  # deep purple secondary text
-        background="#FF7A1A",      # THE orange
-        surface="#F26E0C",         # a shade deeper so panels read as panels
+        background="#C25708",      # darker pumpkin — the tiles pop against it
+        surface="#FF7A1A",         # THE run-button orange — tiles/cards wear it
         surface_hover="#FF9440",
 
         accent="#4A1F7A",          # witching purple — buttons + highlights
@@ -340,9 +346,9 @@ QPushButton:hover {
 
         border="#4A1F7A",
         border_strong="#38175E",
-        divider="#B34F08",
+        divider="#A34E07",
 
-        console_bg="#070310",      # the dark from before — his home
+        console_bg="#12081C",      # dark witching purple — his home
         console_text="#FFAF5E",    # candlelight amber
 
         success="#0B6E2F",
@@ -359,6 +365,9 @@ QPushButton:hover {
 
         accent_text="#F2E9F8",     # near-white on the purple buttons
         accent_two_text="#FFFFFF",
+        sidebar_bg="#1E0F2E",      # the nav ribbon goes dark witching purple
+        sidebar_text="#E8DCF5",
+        sidebar_hover="#2E1745",
         extra_stylesheet="""
 QLineEdit:focus, QTextEdit:focus {
     border: 2px solid #4A1F7A;
@@ -617,12 +626,12 @@ QPushButton[class="cta"]:pressed {{
 
 /* ===== Sidebar ===== */
 Sidebar {{
-    background-color: {theme.background};
+    background-color: {theme.sidebar_bg or theme.surface};
     border-right: 1px solid {theme.console_bg};
 }}
 
 QWidget[objectName="sidebar"] {{
-    background-color: {theme.background};
+    background-color: {theme.sidebar_bg or theme.surface};
 }}
 
 ConsoleWidget {{
@@ -635,7 +644,7 @@ Sidebar > QWidget[class="separator"] {{
 
 QListWidget {{
     background-color: {theme.console_bg};
-    color: {theme.text};
+    color: {theme.console_text};
     border: none;
     outline: none;
 }}

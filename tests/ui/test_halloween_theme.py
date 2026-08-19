@@ -6,9 +6,11 @@ from techdeck.ui.theme import THEMES, generate_stylesheet, is_builtin_theme
 def test_halloween_theme_is_registered_and_builtin():
     assert "halloween" in THEMES
     assert is_builtin_theme("halloween")
-    assert THEMES["halloween"].background == "#FF7A1A"  # the app IS pumpkin
+    assert THEMES["halloween"].background == "#C25708"  # darker pumpkin body
+    assert THEMES["halloween"].surface == "#FF7A1A"      # tiles wear THE orange
     assert THEMES["halloween"].accent == "#4A1F7A"       # witching-purple buttons
-    assert THEMES["halloween"].console_bg == "#070310"  # the dark carved mouth
+    assert THEMES["halloween"].console_bg == "#12081C"   # dark-purple console
+    assert THEMES["halloween"].sidebar_bg == "#1E0F2E"   # dark-purple ribbon
     css = generate_stylesheet("halloween")
     assert "#FF7A1A" in css
 
