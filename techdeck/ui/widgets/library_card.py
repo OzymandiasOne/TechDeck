@@ -35,7 +35,7 @@ class PluginInfoDialog(QDialog):
         title_font.setPointSize(13)
         title_font.setWeight(QFont.Weight.DemiBold)
         title.setFont(title_font)
-        title.setStyleSheet(f"color: {theme.text}; background: transparent;")
+        title.setStyleSheet(f"color: {theme.card_text or theme.text}; background: transparent;")
 
         body = QLabel(description)
         body.setWordWrap(True)
@@ -111,7 +111,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         name_font.setPointSize(9)
         name_font.setWeight(QFont.Weight.Medium)
         self.name_label.setFont(name_font)
-        self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
+        self.name_label.setStyleSheet(f"color: {theme.card_text or theme.text}; background-color: transparent;")
 
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
@@ -146,7 +146,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         """Called automatically when theme changes."""
         self.theme = self.get_current_palette()
         self._update_card_style()
-        self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
+        self.name_label.setStyleSheet(f"color: {self.theme.card_text or self.theme.text}; background-color: transparent;")
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, TILE_ICON))
         self._style_family_badge()
 

@@ -71,6 +71,10 @@ class ColorPalette:
     sidebar_bg: str = ""
     sidebar_text: str = ""
     sidebar_hover: str = ""
+    # Tile/card label override — empty falls back to text. For themes whose
+    # cards and page background need opposite text tones (halloween: light
+    # text on the purple body, dark text on the orange cards).
+    card_text: str = ""
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -330,9 +334,9 @@ QPushButton:hover {
         # borders, and selection go deep purple; the console is the one dark
         # panel — the lantern's cut-out mouth, glowing amber, where the
         # Puppet Master's phosphor face stays crisp.
-        text="#2A1503",            # carved near-black on orange
-        text_secondary="#45166E",  # deep purple secondary text
-        background="#C25708",      # darker pumpkin — the tiles pop against it
+        text="#E8DCF5",            # pale lavender on the purple body
+        text_secondary="#B9A6D4",  # lavender-grey secondary
+        background="#1E0F2E",      # the sidebar purple — one continuous body
         surface="#FF7A1A",         # THE run-button orange — tiles/cards wear it
         surface_hover="#FF9440",
 
@@ -368,12 +372,36 @@ QPushButton:hover {
         sidebar_bg="#1E0F2E",      # the nav ribbon goes dark witching purple
         sidebar_text="#E8DCF5",
         sidebar_hover="#2E1745",
+        card_text="#2A1503",       # carved-dark tile names on orange cards
         extra_stylesheet="""
+/* the resizable pane the console lives on: brighter purple */
+ConsoleWidget {
+    background-color: #3D2166;
+}
+/* the command line wears the darker pumpkin */
+QLineEdit {
+    background-color: #C25708;
+    color: #2A1503;
+}
 QLineEdit:focus, QTextEdit:focus {
     border: 2px solid #4A1F7A;
 }
 QPushButton[class="primary"] {
     border: 1px solid #4A1F7A;
+}
+/* dark text re-asserted on ORANGE surfaces (global text is light for the
+   purple body): frame-hosted labels, combos, checkables, plain buttons */
+QFrame QLabel {
+    color: #2A1503;
+}
+QComboBox, QComboBox QAbstractItemView {
+    color: #2A1503;
+}
+QCheckBox, QRadioButton {
+    color: #2A1503;
+}
+QPushButton {
+    color: #2A1503;
 }
 """,
     ),
