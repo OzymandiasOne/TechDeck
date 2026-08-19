@@ -1858,18 +1858,23 @@ class AnalysisWindow(PluginWindow):
         form is up; _thickness_submit restores it with the viewer size."""
         self._saved_min = self.minimumSize()
         self.setMinimumSize(520, 320)
-        hint = self.sizeHint()   # the form page + window chrome only
+        width = 690   # user-preferred form width (measured off their live
+                      # window, 2026-08-19); layout minimum wins if larger
+        # Height at THAT width - the wrapping hint label gets taller as the
+        # window gets narrower, so ask the layout, not the preferred hint.
+        page = self.stack.widget(0)
+        lay = page.layout()
+        base_h = (lay.heightForWidth(width) if lay.hasHeightForWidth()
+                  else self.sizeHint().height())
         # Swap the scroll area's token hint for what its rows actually need.
         rows_h = self._thick_form.sizeHint().height()
-        height = max(320, hint.height() - self._thick_scroll.sizeHint().height()
+        height = max(320, base_h - self._thick_scroll.sizeHint().height()
                      + rows_h + 24)
         screen = self.screen()
         if screen is not None:
             avail = screen.availableGeometry()
             height = min(height, int(avail.height() * 0.85))
-            width = min(hint.width(), int(avail.width() * 0.85))
-        else:
-            width = hint.width()
+            width = min(width, int(avail.width() * 0.85))
         self.resize(width, height)
 
     def _populate_thickness_rows(self):
