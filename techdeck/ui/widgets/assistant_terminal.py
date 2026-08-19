@@ -279,7 +279,7 @@ class TabStrip(QWidget, ThemeAware):
         sheet = f"""
             QPushButton {{
                 background-color: {palette.surface};
-                color: {palette.text_secondary};
+                color: {palette.card_text or palette.text_secondary};
                 font-weight: bold;
                 padding: 7px 16px;
                 border: none;
@@ -292,7 +292,7 @@ class TabStrip(QWidget, ThemeAware):
             }}
             QPushButton:checked {{
                 background-color: {palette.console_bg};
-                color: {palette.card_text or palette.text};
+                color: {palette.console_text};
             }}
         """
         for button in self._buttons.values():

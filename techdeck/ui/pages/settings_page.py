@@ -100,7 +100,7 @@ class SettingsPage(QWidget, ThemeAware):
             }}
             QTabBar::tab:selected {{
                 background-color: {theme.background};
-                color: {theme.card_text or theme.text};
+                color: {theme.text};
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {theme.surface_hover};
