@@ -615,6 +615,15 @@ def _parse(path):
                 ent = _build_entity(val, groups, idxs)
                 if ent is not None:
                     entities.append(ent)
+            elif val == "POLYLINE":
+                # Heavy POLYLINE (the only polyline flavor in R12 exports,
+                # which is what most customer files are) - holes/slots drawn
+                # this way must offset like LWPOLYLINEs.
+                ent, i = _build_polyline_patch(pairs, i + 1)
+                if ent is not None:
+                    entities.append(ent)
+                else:
+                    skipped["POLYLINE"] = skipped.get("POLYLINE", 0) + 1
             else:
                 if val not in ("SEQEND", "VERTEX"):
                     skipped[val] = skipped.get(val, 0) + 1
@@ -676,6 +685,46 @@ def _build_entity(etype, groups, idxs):
     except KeyError:
         return None
     return ent
+
+
+def _build_polyline_patch(pairs, j):
+    """Heavy POLYLINE -> patchable entity, same shape as an LWPOLYLINE's so
+    loop building/offsetting/patching treat both alike. Consumes the VERTEX
+    records through SEQEND and returns (entity, next_index) - entity is None
+    (with the records still consumed) for 3D/mesh/spline-fit polylines, which
+    can't be offset as flat outlines."""
+    groups, idxs, j = _collect(pairs, j)
+    layer, idx8, flags = "0", None, 0
+    for (code, val), idx in zip(groups, idxs):
+        if code == 8:
+            layer, idx8 = val, idx
+        elif code == 70:
+            flags = int(val)
+    verts = []  # [x, y, bulge, idx10, idx20, idx42] - matches LWPOLYLINE
+    n = len(pairs)
+    while j < n and pairs[j] == (0, "VERTEX"):
+        vgroups, vidxs, j = _collect(pairs, j + 1)
+        v = [None, None, 0.0, None, None, None]
+        vflags = 0
+        for (c, vv), idx in zip(vgroups, vidxs):
+            if c == 10:
+                v[0], v[3] = float(vv), idx
+            elif c == 20:
+                v[1], v[4] = float(vv), idx
+            elif c == 42:
+                v[2], v[5] = float(vv), idx
+            elif c == 70:
+                vflags = int(vv)
+        # Spline frame control points (flag 16) aren't outline geometry
+        if v[0] is not None and v[1] is not None and not (vflags & 16):
+            verts.append(v)
+    if j < n and pairs[j] == (0, "SEQEND"):
+        _g, _i, j = _collect(pairs, j + 1)
+    # 2=curve-fit, 4=spline-fit, 8=3D polyline, 16=3D mesh, 64=polyface mesh
+    if flags & (2 | 4 | 8 | 16 | 64) or len(verts) < 2:
+        return None, j
+    return {"etype": "POLYLINE", "layer": layer, "idx8": idx8,
+            "verts": verts, "closed": bool(flags & 1)}, j
 
 
 # ---------------------------------------------------------------------------
@@ -813,8 +862,44 @@ def _chain_loops(free_ents):
     return loops, leftover
 
 
+def _prep_poly_loop(ent):
+    """Normalize a polyline's vertices for loop offsetting; returns True
+    when it traces a CLOSED loop.
+
+    Real exports often write a closed shape as an OPEN polyline whose last
+    vertex repeats the first (R12 heavy polylines especially), and some add
+    coincident consecutive vertices mid-outline. Both would break offsetting:
+    a zero-length span can't be offset, and a dropped-from-geometry vertex
+    that never gets patched would keep its OLD coordinates in the output and
+    kink the outline. So duplicates are removed from the working vertex list
+    and recorded in ent["copatch"] = {kept_vertex_index: [vert, ...]};
+    _patch_segments rewrites each recorded vertex alongside the vertex it
+    coincides with."""
+    vs = list(ent["verts"])
+    closed = ent["closed"]
+    copatch = {}
+    # A trailing vertex that repeats the first is a closure, not geometry.
+    while len(vs) >= 3 and _dist((vs[-1][0], vs[-1][1]),
+                                 (vs[0][0], vs[0][1])) < CHAIN_TOL:
+        copatch.setdefault(0, []).append(vs.pop())
+        closed = True
+    # Collapse coincident consecutive vertices. The dropped vertex's bulge
+    # governs the span that SURVIVES (the kept vertex's own span is the
+    # zero-length one), so carry its bulge value and 42-code patch index.
+    kept = [vs[0]]
+    for v in vs[1:]:
+        if _dist((v[0], v[1]), (kept[-1][0], kept[-1][1])) < CHAIN_TOL:
+            kept[-1][2], kept[-1][5] = v[2], v[5]
+            copatch.setdefault(len(kept) - 1, []).append(v)
+        else:
+            kept.append(v)
+    ent["verts"] = kept
+    ent["copatch"] = copatch
+    return closed
+
+
 def _poly_to_segs(ent):
-    """Closed LWPOLYLINE -> traversal segments (bulge -> true arc)."""
+    """Closed LWPOLYLINE/POLYLINE -> traversal segments (bulge -> true arc)."""
     vs = ent["verts"]
     segs = []
     for i in range(len(vs)):
@@ -1016,6 +1101,12 @@ def _patch_segments(segs, replace):
             p = _seg_start(seg)
             replace[2 * vert[3] + 1] = _fmt(p[0])
             replace[2 * vert[4] + 1] = _fmt(p[1])
+            # Duplicate vertices _prep_poly_loop dropped from the geometry
+            # still exist in the FILE - move them with the vertex they
+            # coincide with or they'd kink the offset outline.
+            for dup in ent.get("copatch", {}).get(vi, ()):
+                replace[2 * dup[3] + 1] = _fmt(p[0])
+                replace[2 * dup[4] + 1] = _fmt(p[1])
             if seg["k"] == "a":
                 new_bulge = math.tan(_sweep(seg) / 4.0)
                 if not seg["ccw"]:
@@ -1103,16 +1194,22 @@ def _classify(parsed):
     ents = parsed["entities"]
     circles = [e for e in ents if e["etype"] == "CIRCLE"]
     free = [e for e in ents if e["etype"] in ("LINE", "ARC")]
-    polys = [e for e in ents if e["etype"] == "LWPOLYLINE"]
+    polys = [e for e in ents if e["etype"] in ("LWPOLYLINE", "POLYLINE")]
 
     loops = []
+    open_polys = 0
     for ent in polys:
-        if ent["closed"]:
+        if _prep_poly_loop(ent):
             loops.append(_poly_to_segs(ent))
+        else:
+            open_polys += 1
     chained, leftover = _chain_loops(free)
     loops.extend(chained)
 
     warnings = []
+    if open_polys:
+        warnings.append(f"{open_polys} polyline(s) don't close into a loop "
+                        "- left unchanged.")
     if leftover:
         warnings.append(f"{leftover} line/arc entities don't form a closed "
                         "outline - left unchanged.")
@@ -1187,9 +1284,9 @@ def _unit_scale(insunits, log):
 #   under the cap gets the full increase even if the result lands past 2t.
 _MEDIUM_MIN = 0.500
 GUIDELINE_BANDS = [  # (min thickness inclusive, band name, per-side offset)
-    (0.188, "Grande", 0.0156),
-    (_MEDIUM_MIN, "Medium", 0.0313),
-    (1.250, "Venti", 0.0468),
+    (0.188, "Grande", 0.015625),   # +1/32" dia
+    (_MEDIUM_MIN, "Medium", 0.03125),   # +1/16" dia
+    (1.250, "Venti", 0.046875),   # +3/32" dia
 ]
 GUIDELINE_MAX_THICKNESS = 3.0   # "3 and UP" -> no offset (special scenarios
                                 # go through the manual Adjust Dimensions)
@@ -1263,7 +1360,11 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
         shrink = edge_offset * scale            # per-side profile offset
     else:
         band = guideline_band(thickness)
-        stats["band"] = band[0] if band else "no offset for this thickness"
+        # Band label carries the actual diameter increase so the console and
+        # the status label always show the NUMBER applied, not just a name -
+        # a tester couldn't tell .094 was in effect from "Venti" alone.
+        stats["band"] = (f"{band[0]} (+{_fmt(2.0 * band[1])}\" dia)" if band
+                         else "no offset for this thickness")
         t_du = thickness * scale                # thickness in drawing units
         per_side_du = (band[1] * scale) if band else 0.0
 
@@ -1630,6 +1731,23 @@ class AnalysisWindow(PluginWindow):
             '3"-and-up plate gets no increase.')
         hint.setWordWrap(True)
         layout.addWidget(hint)
+        # "Apply to all" fast path for big batches (hidden for one file):
+        # type a thickness once, Enter/click fills every per-file box (each
+        # stays editable afterwards for the odd different plate).
+        self._thick_all_host = QWidget()
+        all_row = QHBoxLayout(self._thick_all_host)
+        all_row.setContentsMargins(0, 0, 0, 0)
+        all_row.addWidget(QLabel("Same thickness for all files:"))
+        self.ed_thick_all = QLineEdit()
+        self.ed_thick_all.setPlaceholderText("e.g. 0.500 or 1/2")
+        self.ed_thick_all.textChanged.connect(self._thick_all_validate)
+        self.ed_thick_all.installEventFilter(self)
+        all_row.addWidget(self.ed_thick_all, 1)
+        self.btn_thick_all = QPushButton("Apply to all")
+        self.btn_thick_all.setEnabled(False)
+        self.btn_thick_all.clicked.connect(self._apply_thickness_to_all)
+        all_row.addWidget(self.btn_thick_all)
+        layout.addWidget(self._thick_all_host)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         host = QWidget()
@@ -1673,6 +1791,8 @@ class AnalysisWindow(PluginWindow):
             self._thick_form.removeRow(0)
         self._thick_edits = {}
         many = len(self._queue) > 1
+        self._thick_all_host.setVisible(many)
+        self.ed_thick_all.clear()
         self.lbl_thick_title.setText(
             f"Enter plate thickness for each file ({len(self._queue)} files)"
             if many else
@@ -1701,11 +1821,30 @@ class AnalysisWindow(PluginWindow):
 
     def eventFilter(self, obj, event):
         if (event.type() == QEvent.KeyPress
-                and event.key() in (Qt.Key_Return, Qt.Key_Enter)
-                and any(obj is e for e in self._thick_edits.values())):
-            self._thickness_enter(obj)
-            return True  # consumed - never reaches keyPressEvent below
+                and event.key() in (Qt.Key_Return, Qt.Key_Enter)):
+            if obj is self.ed_thick_all:
+                self._apply_thickness_to_all()
+                return True
+            if any(obj is e for e in self._thick_edits.values()):
+                self._thickness_enter(obj)
+                return True  # consumed - never reaches keyPressEvent below
         return super().eventFilter(obj, event)
+
+    def _thick_all_validate(self):
+        self.btn_thick_all.setEnabled(
+            _parse_thickness(self.ed_thick_all.text()) is not None)
+
+    def _apply_thickness_to_all(self):
+        """Copy the apply-to-all thickness into every per-file box, then move
+        focus onward so the keyboard flow is: value, Enter, Enter (submit)."""
+        if _parse_thickness(self.ed_thick_all.text()) is None:
+            self.ed_thick_all.setFocus()
+            self.ed_thick_all.selectAll()
+            return
+        for e in self._thick_edits.values():
+            e.setText(self.ed_thick_all.text())
+        if self.btn_thick_continue.isEnabled():
+            self.btn_thick_continue.setFocus()
 
     def _thickness_enter(self, edit=None):
         """Enter in a thickness box submits once every box parses;
@@ -2260,7 +2399,9 @@ class AnalysisWindow(PluginWindow):
             return
         dlg = AdjustDimensionsDialog(self, self._source_path, info,
                                      self._settings, self._log,
-                                     self._on_success)
+                                     self._on_success,
+                                     thickness=self._thicknesses.get(
+                                         self._orig_path))
         dlg.exec()
         if dlg.written_path and dlg.chk_open.isChecked():
             # The OFFSET output becomes the viewed document; Save now
@@ -2295,7 +2436,8 @@ class AdjustDimensionsDialog(QDialog):
     fails so the values can be backed off; ``written_path`` holds the output
     path after a successful write."""
 
-    def __init__(self, parent, src_path, info, settings, log, on_success):
+    def __init__(self, parent, src_path, info, settings, log, on_success,
+                 thickness=None):
         super().__init__(parent)
         self.setWindowTitle("Adjust Dimensions")
         self._src = Path(src_path)
@@ -2303,6 +2445,10 @@ class AdjustDimensionsDialog(QDialog):
         self._log = log
         self._on_success = on_success
         self.written_path = None
+        self._default_hole = _fmt(_num(settings, "hole_increase",
+                                       DEFAULT_HOLE_INCREASE))
+        self._default_edge = _fmt(_num(settings, "edge_offset",
+                                       DEFAULT_EDGE_OFFSET))
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
@@ -2316,12 +2462,21 @@ class AdjustDimensionsDialog(QDialog):
                                     "below are converted automatically."))
 
         form = QFormLayout()
-        self.ed_hole = QLineEdit(_fmt(_num(settings, "hole_increase",
-                                           DEFAULT_HOLE_INCREASE)))
-        self.ed_edge = QLineEdit(_fmt(_num(settings, "edge_offset",
-                                           DEFAULT_EDGE_OFFSET)))
+        # Thickness fills the hole increase from the customer guideline
+        # table (and zeroes the profile offset - guidelines never touch it);
+        # both stay editable. Prefilled when the review flow knows the
+        # thickness, so this dialog no longer "comes up as" the flat 1/16"
+        # settings default on a plate whose band says otherwise.
+        self.ed_thickness = QLineEdit()
+        self.ed_thickness.setPlaceholderText(
+            "optional - fills the guideline amount below")
+        self.lbl_band = QLabel("")
+        self.ed_hole = QLineEdit(self._default_hole)
+        self.ed_edge = QLineEdit(self._default_edge)
         self.ed_layer = QLineEdit((settings.get("holes_layer")
                                    or DEFAULT_HOLES_LAYER).strip())
+        form.addRow("Plate thickness (in):", self.ed_thickness)
+        form.addRow("", self.lbl_band)
         form.addRow("Increase hole diameters by (in):", self.ed_hole)
         form.addRow("Offset outer profile per side by (in):", self.ed_edge)
         form.addRow("Move hole geometry to layer:", self.ed_layer)
@@ -2345,7 +2500,35 @@ class AdjustDimensionsDialog(QDialog):
 
         self.ed_hole.textChanged.connect(self._refresh_result)
         self.ed_edge.textChanged.connect(self._refresh_result)
+        self.ed_thickness.textChanged.connect(self._thickness_changed)
+        if thickness is not None:
+            self.ed_thickness.setText(f"{thickness:g}")  # fires _thickness_changed
         self._refresh_result()
+
+    def _thickness_changed(self):
+        """Push the guideline amount for the entered thickness into the
+        offset boxes; clearing the box restores the settings defaults."""
+        text = self.ed_thickness.text().strip()
+        if not text:
+            self.lbl_band.setText("")
+            self.ed_hole.setText(self._default_hole)
+            self.ed_edge.setText(self._default_edge)
+            return
+        t = _parse_thickness(text)
+        if t is None:
+            self.lbl_band.setText("Enter inches - decimals or fractions.")
+            return
+        band = guideline_band(t)
+        if band is None:
+            self.lbl_band.setText(
+                'Guidelines: no offset for under-0.188" or 3"-and-up plate.')
+            self.ed_hole.setText("0")
+        else:
+            self.lbl_band.setText(
+                f"Guideline band {band[0]}: +{_fmt(2.0 * band[1])}\" dia, "
+                "profile untouched.")
+            self.ed_hole.setText(_fmt(2.0 * band[1]))
+        self.ed_edge.setText("0")  # guidelines never offset the outer profile
 
     @staticmethod
     def _group_diameters(diameters, delta=0.0):

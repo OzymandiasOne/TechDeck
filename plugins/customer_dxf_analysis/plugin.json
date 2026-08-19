@@ -2,18 +2,19 @@
   "id": "customer_dxf_analysis",
   "name": "Customer DXF Analysis",
   "description": "DXF analysis toolkit: interactive quoting viewer (layer-colored flat pattern, per-line measurements, layer reassignment incl. WELD, total linear inches, DXF export) plus automated customer-guideline offsets - enter the plate thickness and every hole/cutout is increased per the customer's band table (2x-thickness cap, below-minimum warnings), then review each file and Save over the original or Export a copy. Batch mode queues a whole folder for one-by-one review. Manual amounts remain available via Adjust Dimensions.",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "author": "Anthony Sieben",
   "family": "General",
   "details": {
     "setup": [
       "Have the customer DXF file (or a folder of them) ready - you pick it when the app opens.",
-      "For automated offsets, know each part's plate thickness; you enter them up front."
+      "For automated offsets, know each part's plate thickness; you enter them up front (one \"apply to all\" box fills every file at once when they share a thickness)."
     ],
     "how_it_works": [
       "Choose a single file or a whole folder, and whether to apply automated offsets.",
       "The viewer shows the geometry layer-colored with per-line lengths and a total linear-inch count; you can reassign layers and adjust dimensions.",
-      "With automated offsets on, it applies the customer's thickness-based hole and cutout offsets to a temp copy for review."
+      "With automated offsets on, it applies the customer's thickness-based hole and cutout offsets to a temp copy for review - holes and slots drawn as polylines (old-style R12 exports included) are detected the same as circles and lines.",
+      "Adjust Dimensions has a plate-thickness box that fills in the guideline amount for you; you can still type any manual value over it."
     ],
     "output": [
       "A reviewed DXF - Save overwrites the original, Export writes an offset copy - plus the linear-inch totals for quoting."
