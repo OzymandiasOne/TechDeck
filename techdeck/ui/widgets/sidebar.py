@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 def _icon_folder_for_theme(theme_name: str) -> str:
     """Light icons for dark backgrounds, dark icons for light backgrounds."""
-    return "light" if theme_name in ("dark", "blue", "cyberpunk", "matrix", "halloween") else "dark"
+    return "light" if theme_name in ("dark", "blue", "cyberpunk", "matrix") else "dark"
 
 
 def _tint_svg(path: Path, color: str, size: int = 20) -> QPixmap:
