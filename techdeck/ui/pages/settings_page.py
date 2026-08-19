@@ -720,9 +720,16 @@ class SettingsPage(QWidget, ThemeAware):
     # ──────────────────────────────────────────────────────────────────────
 
     def _refresh_theme_combo(self):
+        from techdeck.core.constants import halloween_active
         current = self.settings.get_theme()
         self.theme_combo.clear()
         for name in get_theme_names():
+            # The halloween theme is seasonal stock: listed only during the
+            # season (or while it IS the active theme, so a session open
+            # across Nov 2 can still switch away from it).
+            if (name == "halloween" and name != current
+                    and not halloween_active(settings=self.settings)):
+                continue
             self.theme_combo.addItem(name.replace("_", " ").title(), name)
         idx = self.theme_combo.findData(current)
         if idx >= 0:

@@ -317,6 +317,55 @@ QPushButton:hover {
 }
 """,
     ),
+
+    "halloween": ColorPalette(
+        # Poison green on deep witching purple, pumpkin CTA. The green family
+        # deliberately echoes the Puppet Master's phosphor tiers — in October
+        # the whole app looks like something he could be living behind.
+        text="#F2E9D8",            # bone white
+        text_secondary="#A08FB8",  # dusty lavender
+        background="#0D0711",
+        surface="#1A0E24",
+        surface_hover="#251536",
+
+        accent="#58D858",          # poison green (phosphor kin)
+        accent_hover="#79E879",
+        accent_pressed="#3FAE3F",
+
+        accent_two="#FF7A1A",      # pumpkin — the Run button glows like a jack-o'-lantern
+        accent_two_hover="#FF9440",
+        accent_two_pressed="#CC5E0E",
+
+        border="#2E1B3E",
+        border_strong="#56308A",
+        divider="#221331",
+
+        console_bg="#070310",
+        console_text="#FFAF5E",    # candlelight amber; his face stays phosphor
+
+        success="#58D858",
+        warning="#FFC02E",
+        error="#FF3B30",
+        info="#B78CFF",
+
+        tile_selected="#3A2154",
+        shadow="rgba(255, 122, 26, 0.25)",
+
+        tile_missing_bg="#140A1E",
+        tile_missing_text="#56308A",
+        tile_missing_border="#2E1B3E",
+
+        accent_text="#08140A",     # dark text on the bright green accent
+        accent_two_text="#211003", # dark text on pumpkin
+        extra_stylesheet="""
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #FF7A1A;
+}
+QPushButton[class="primary"] {
+    border: 1px solid #FF7A1A;
+}
+""",
+    ),
 }
 
 # "Professional" = the light theme with the playful features hidden (for client
@@ -371,7 +420,7 @@ def delete_custom_theme(name: str, custom_dir: Path) -> None:
 
 def is_builtin_theme(name: str) -> bool:
     return name.lower() in ("dark", "light", "professional", "cherry_blossom",
-                            "blue", "cyberpunk", "matrix")
+                            "blue", "cyberpunk", "matrix", "halloween")
 
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────
