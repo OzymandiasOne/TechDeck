@@ -481,8 +481,10 @@ class Sidebar(QWidget, ThemeAware):
     def _on_nav_clicked(self, page_id: str):
         """Handle navigation button click."""
         for btn in self.nav_buttons:
-            if btn.page_id != page_id:
-                btn.setChecked(False)
+            # Re-assert the clicked one too: checkable buttons TOGGLE on
+            # click, so re-clicking the current tab was cycling its
+            # highlight dim -> off. Selection is not a toggle.
+            btn.setChecked(btn.page_id == page_id)
 
         if page_id != self._current_page_id:
             from techdeck.core.audio_manager import get_audio_manager, SOUND_NAV

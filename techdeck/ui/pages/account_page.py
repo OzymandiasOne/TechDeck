@@ -292,12 +292,12 @@ class AccountPage(QWidget, ThemeAware):
             }}
             QTabBar::tab:selected {{
                 background-color: {t.background};
-                color: {t.text};
+                color: {t.card_text or t.text};
                 border-bottom: 3px solid {t.accent};
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {t.surface_hover};
-                color: {t.text};
+                color: {t.card_text or t.text};
             }}
         """)
 

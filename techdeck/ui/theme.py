@@ -71,6 +71,9 @@ class ColorPalette:
     sidebar_bg: str = ""
     sidebar_text: str = ""
     sidebar_hover: str = ""
+    # Border for controls sitting ON surface — empty falls back to border.
+    # (halloween: purple borders read wrong on the orange controls)
+    card_border: str = ""
     # Tile/card label override — empty falls back to text. For themes whose
     # cards and page background need opposite text tones (halloween: light
     # text on the purple body, dark text on the orange cards).
@@ -378,6 +381,7 @@ QPushButton:hover {
         sidebar_text="#E8DCF5",
         sidebar_hover="#2E1745",
         card_text="#2A1503",       # carved-dark tile names on orange cards
+        card_border="#B34F08",     # darker-orange borders on orange controls
         splitter_handle="#4A1F7A",       # the console's resize edge: witching purple
         splitter_handle_hover="#5D2B96",
         extra_stylesheet="""

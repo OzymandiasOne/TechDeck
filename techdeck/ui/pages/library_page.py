@@ -210,7 +210,7 @@ class LibraryPage(QWidget, ThemeAware):
         combo_style = f"""
             QComboBox {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border};
                 border-radius: 8px;
                 padding: 6px 10px;
@@ -235,7 +235,7 @@ class LibraryPage(QWidget, ThemeAware):
             }}
             QComboBox QAbstractItemView {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border};
                 border-radius: 4px;
                 selection-background-color: {theme.tile_selected};
@@ -251,7 +251,7 @@ class LibraryPage(QWidget, ThemeAware):
         surface_btn_style = f"""
             QPushButton {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border};
                 border-radius: 8px;
                 font-weight: 500;

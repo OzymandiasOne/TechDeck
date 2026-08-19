@@ -100,7 +100,7 @@ class SettingsPage(QWidget, ThemeAware):
             }}
             QTabBar::tab:selected {{
                 background-color: {theme.background};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {theme.surface_hover};
@@ -965,7 +965,7 @@ class SettingsPage(QWidget, ThemeAware):
         return f"""
             QComboBox {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border};
                 border-radius: 8px;
                 padding: 6px 10px;
@@ -981,7 +981,7 @@ class SettingsPage(QWidget, ThemeAware):
                 background: transparent; border: none; margin-right: 6px;
             }}
             QComboBox QAbstractItemView {{
-                background-color: {theme.surface}; color: {theme.text};
+                background-color: {theme.surface}; color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border}; border-radius: 4px;
                 selection-background-color: {theme.tile_selected}; outline: none;
             }}

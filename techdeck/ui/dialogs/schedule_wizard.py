@@ -765,7 +765,7 @@ class ScheduleWizard(QDialog, ThemeAware):
                     border: 1px solid {palette.border};
                     border-radius: 8px;
                     gridline-color: {palette.border};
-                    color: {palette.text};
+                    color: {palette.card_text or palette.text};
                 }}
                 QHeaderView::section {{
                     background: {palette.background};

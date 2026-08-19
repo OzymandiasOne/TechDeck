@@ -288,11 +288,11 @@ class TabStrip(QWidget, ThemeAware):
             }}
             QPushButton:hover:!checked {{
                 background-color: {palette.surface_hover};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
             }}
             QPushButton:checked {{
                 background-color: {palette.console_bg};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
             }}
         """
         for button in self._buttons.values():
@@ -342,7 +342,7 @@ class ChipBar(QWidget, ThemeAware):
         sheet = f"""
             QPushButton {{
                 background-color: {palette.surface};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
                 border: 1px solid {palette.border};
                 border-radius: 13px;
                 padding: 5px 14px;

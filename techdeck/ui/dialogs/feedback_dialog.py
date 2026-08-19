@@ -140,7 +140,7 @@ class FeedbackDialog(QDialog):
         return f"""
             QComboBox {{
                 background-color: {t.surface};
-                color: {t.text};
+                color: {t.card_text or t.text};
                 border: 1px solid {t.border};
                 border-radius: 8px;
                 padding: 6px 10px;
@@ -156,7 +156,7 @@ class FeedbackDialog(QDialog):
                 background: transparent; border: none; margin-right: 6px;
             }}
             QComboBox QAbstractItemView {{
-                background-color: {t.surface}; color: {t.text};
+                background-color: {t.surface}; color: {t.card_text or t.text};
                 border: 1px solid {t.border}; border-radius: 4px;
                 selection-background-color: {t.tile_selected}; outline: none;
             }}

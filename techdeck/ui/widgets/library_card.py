@@ -187,7 +187,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         if hasattr(self, "info_btn"):
             self.info_btn.setStyleSheet(f"""
                 QPushButton {{
-                    color: {self.theme.text_secondary};
+                    color: {self.theme.card_text or self.theme.text_secondary};
                     background: transparent;
                     border: none;
                     padding: 0px;

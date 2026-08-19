@@ -217,7 +217,7 @@ class UpdateDialog(QDialog):
                 border: 1px solid {t.border};
                 border-radius: 8px;
                 text-align: center;
-                color: {t.text};
+                color: {t.card_text or t.text};
                 height: 25px;
             }}
             QProgressBar::chunk {{

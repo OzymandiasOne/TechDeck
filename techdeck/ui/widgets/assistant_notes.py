@@ -274,11 +274,11 @@ class NotesPanel(QWidget, ThemeAware):
             QListWidget::item {{
                 padding: 7px 8px;
                 border-radius: 6px;
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
             }}
             QListWidget::item:selected {{
                 background: {palette.tile_selected};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
             }}
             QListWidget::item:hover:!selected {{
                 background: {palette.surface_hover};

@@ -232,7 +232,7 @@ class SelectionDialog(QDialog):
         return f"""
             QTreeWidget {{
                 background-color: {t.surface};
-                color: {t.text};
+                color: {t.card_text or t.text};
                 border: 1px solid {t.border};
                 border-radius: 8px;
                 padding: 6px;
@@ -241,7 +241,7 @@ class SelectionDialog(QDialog):
             QTreeWidget::item {{ height: 28px; }}
             QTreeWidget::item:selected {{
                 background-color: {t.tile_selected};
-                color: {t.text};
+                color: {t.card_text or t.text};
                 border-radius: 4px;
             }}
             QTreeView::indicator {{

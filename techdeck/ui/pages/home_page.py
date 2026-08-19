@@ -204,7 +204,7 @@ class HomePage(QWidget, ThemeAware):
             }}
             QComboBox QAbstractItemView {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border_strong};
                 border-radius: 8px;
                 selection-background-color: {theme.surface_hover};
