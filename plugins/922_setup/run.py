@@ -117,10 +117,17 @@ DEFAULT_WEBHOOK_URL = (
 # The 'TechDeck 922 Pallet Labeler' Power Automate flow (#4) — the SECOND
 # PASS that labels cards which already exist. Separate flow, separate URL: #1
 # creates cards and would duplicate the board if re-posted, #4 only updates.
-# TODO(flow): paste the flow's HTTP POST URL here once it is built, and ship an
-# app update. Until then the stage previews and reports a warning outcome
-# rather than pretending it posted.
-DEFAULT_LABELER_WEBHOOK_URL = ""
+# Baked in so a fresh install labels out of the box (a blank default silently
+# dry-runs on every machine but the author's — v0.8.6.8 shipped that way for
+# both 922 webhooks). The Settings field stays as an OVERRIDE.
+# Built + verified live 2026-08-19 against Batches 490 and 489.
+DEFAULT_LABELER_WEBHOOK_URL = (
+    "https://REDACTED-ENVIRONMENT.api"
+    ".powerplatform.com:443/powerautomate/automations/direct/cu/13/workflows/"
+    "aeeef154166f49e996df9b22d3c0775e/triggers/manual/paths/invoke"
+    "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=REDACTED"
+)
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
