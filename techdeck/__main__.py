@@ -74,7 +74,21 @@ def _current_theme_name() -> str:
             return "dark"
         with open(settings_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("settings", {}).get("theme", "dark")
+        stored = data.get("settings", {}).get("theme", "dark")
+        # Mirror SettingsManager.get_theme's seasonal default so the splash
+        # matches the theme the app will come up in. constants is pure
+        # python (no PySide6), so importing it here keeps the splash light.
+        # No halloween.gif shipped yet -> the dark.gif fallback covers it.
+        try:
+            from techdeck.core.constants import is_halloween_season
+            import datetime
+            if (is_halloween_season() and stored != "professional"
+                    and data.get("settings", {}).get("halloween_opt_out_year")
+                    != datetime.date.today().year):
+                return "halloween"
+        except Exception:
+            pass
+        return stored
     except Exception:
         return "dark"
 

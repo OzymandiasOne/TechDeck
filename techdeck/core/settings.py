@@ -642,14 +642,39 @@ class SettingsManager:
     # ========== App Settings ==========
     
     def get_theme(self) -> str:
-        """Get current theme name."""
-        return self.data.get("settings", {}).get("theme", "dark")
+        """Get current theme name.
+
+        During the Halloween season the seasonal theme is the DEFAULT: it
+        overrides the stored choice unless the stored theme is professional
+        (client presentations stay sober — checked on the STORED value, not
+        is_professional(), which calls back here) or the user opted out by
+        picking another theme during a season (set_theme records the year;
+        the opt-out expires with the year, so next October the magic
+        returns). Out of season the stored theme rules, untouched."""
+        block = self.data.get("settings", {})
+        stored = block.get("theme", "dark")
+        from techdeck.core.constants import is_halloween_season
+        if is_halloween_season() and stored != "professional":
+            import datetime
+            if block.get("halloween_opt_out_year") != datetime.date.today().year:
+                return "halloween"
+        return stored
 
     def set_theme(self, theme_name: str) -> None:
-        """Set current theme."""
+        """Set current theme. Choosing a NON-halloween theme during the
+        season records this year's opt-out so the seasonal default respects
+        an explicit choice; choosing halloween clears it."""
         if "settings" not in self.data:
             self.data["settings"] = {}
         self.data["settings"]["theme"] = theme_name
+        from techdeck.core.constants import is_halloween_season
+        if is_halloween_season():
+            import datetime
+            if theme_name == "halloween":
+                self.data["settings"].pop("halloween_opt_out_year", None)
+            else:
+                self.data["settings"]["halloween_opt_out_year"] = (
+                    datetime.date.today().year)
         self.save()
 
     def is_professional(self) -> bool:

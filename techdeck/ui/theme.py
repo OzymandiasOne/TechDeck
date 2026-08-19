@@ -328,13 +328,13 @@ QPushButton:hover {
         surface="#1A0E24",
         surface_hover="#251536",
 
-        accent="#58D858",          # poison green (phosphor kin)
-        accent_hover="#79E879",
-        accent_pressed="#3FAE3F",
+        accent="#FF7A1A",          # pumpkin — the primary; buttons glow like jack-o'-lanterns
+        accent_hover="#FF9440",
+        accent_pressed="#CC5E0E",
 
-        accent_two="#FF7A1A",      # pumpkin — the Run button glows like a jack-o'-lantern
-        accent_two_hover="#FF9440",
-        accent_two_pressed="#CC5E0E",
+        accent_two="#58D858",      # poison green CTA (phosphor kin)
+        accent_two_hover="#79E879",
+        accent_two_pressed="#3FAE3F",
 
         border="#2E1B3E",
         border_strong="#56308A",
@@ -355,8 +355,8 @@ QPushButton:hover {
         tile_missing_text="#56308A",
         tile_missing_border="#2E1B3E",
 
-        accent_text="#08140A",     # dark text on the bright green accent
-        accent_two_text="#211003", # dark text on pumpkin
+        accent_text="#211003",     # dark text on pumpkin
+        accent_two_text="#08140A", # dark text on the bright green CTA
         extra_stylesheet="""
 QLineEdit:focus, QTextEdit:focus {
     border: 2px solid #FF7A1A;

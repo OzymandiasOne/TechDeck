@@ -66,3 +66,45 @@ def test_window_constant_shape():
     (m0, d0), (m1, d1) = HALLOWEEN_SEASON
     assert (m0, d0) == (10, 1)
     assert (m1, d1) == (11, 2)
+
+
+# ── the seasonal default theme ────────────────────────────────────────────
+
+def _mgr(tmp_path):
+    from techdeck.core.settings import SettingsManager
+    return SettingsManager(settings_dir=tmp_path)
+
+
+def test_halloween_is_the_default_theme_in_season(tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    s = _mgr(tmp_path)
+    assert s.get_theme() == "halloween"          # overrides the dark default
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "0")
+    assert s.get_theme() == "dark"               # out of season: untouched
+
+
+def test_professional_users_never_get_the_seasonal_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    s = _mgr(tmp_path)
+    s.set_theme("professional")
+    assert s.get_theme() == "professional"
+    assert s.is_professional()
+
+
+def test_picking_another_theme_in_season_sticks(tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    s = _mgr(tmp_path)
+    assert s.get_theme() == "halloween"
+    s.set_theme("cyberpunk")                     # explicit opt-out
+    assert s.get_theme() == "cyberpunk"
+    s.set_theme("halloween")                     # opting back in works
+    assert s.get_theme() == "halloween"
+
+
+def test_opt_out_expires_with_the_year(tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    s = _mgr(tmp_path)
+    s.set_theme("cyberpunk")
+    # Fake last year's opt-out: next October the magic returns.
+    s.data["settings"]["halloween_opt_out_year"] = 2025
+    assert s.get_theme() == "halloween"

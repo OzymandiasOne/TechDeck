@@ -6,8 +6,10 @@ from techdeck.ui.theme import THEMES, generate_stylesheet, is_builtin_theme
 def test_halloween_theme_is_registered_and_builtin():
     assert "halloween" in THEMES
     assert is_builtin_theme("halloween")
+    assert THEMES["halloween"].accent == "#FF7A1A"      # pumpkin is PRIMARY
+    assert THEMES["halloween"].accent_two == "#58D858"   # poison-green CTA
     css = generate_stylesheet("halloween")
-    assert "#FF7A1A" in css          # pumpkin CTA made it into the sheet
+    assert "#FF7A1A" in css
 
 
 def test_halloween_counts_as_a_dark_theme_for_icons():
