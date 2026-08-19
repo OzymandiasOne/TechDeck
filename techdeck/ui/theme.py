@@ -378,8 +378,8 @@ QPushButton:hover {
         sidebar_text="#E8DCF5",
         sidebar_hover="#2E1745",
         card_text="#2A1503",       # carved-dark tile names on orange cards
-        splitter_handle="#000000",       # the console's resize edge: black
-        splitter_handle_hover="#241203",
+        splitter_handle="#4A1F7A",       # the console's resize edge: witching purple
+        splitter_handle_hover="#5D2B96",
         extra_stylesheet="""
 /* the resizable pane the console lives on: brighter purple */
 ConsoleWidget {
