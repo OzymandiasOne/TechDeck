@@ -45,6 +45,56 @@ def puppet_master_enabled() -> bool:
     return PUPPET_MASTER_ENABLED
 
 
+# ── The Halloween season gate ──────────────────────────────────────────────
+# Every Halloween-update feature (theme visuals, the bat, the ghost, /seance,
+# limited Emporium stock, garden props, the Haunting) checks ONE switch:
+# halloween_active(). Two layers:
+#
+#   is_halloween_season()  — the calendar window, Oct 1 – Nov 2 inclusive
+#                            (long enough to be an event, gone before anyone
+#                            reports it as a bug). TECHDECK_HALLOWEEN=1/0
+#                            overrides it for dev work in any month — same
+#                            contract as TECHDECK_PUPPET_MASTER above.
+#   halloween_active()     — the season AND not the professional theme; the
+#                            professional theme suppresses ALL of it, exactly
+#                            like every other personality feature.
+#
+# Features must check the function at USE time (never cache it at import), so
+# a session left open across Nov 2 midnight quietly reverts to normal.
+
+HALLOWEEN_SEASON = ((10, 1), (11, 2))   # inclusive (month, day) window
+
+
+def is_halloween_season(today=None) -> bool:
+    """True inside the Halloween window. Pass ``today`` (a date) for pure
+    calendar logic — tests do; otherwise the env override wins, then the
+    real clock."""
+    if today is None:
+        override = _os.environ.get("TECHDECK_HALLOWEEN", "").strip().lower()
+        if override:
+            return override in _TRUTHY
+        import datetime
+        today = datetime.date.today()
+    return (HALLOWEEN_SEASON[0] <= (today.month, today.day)
+            <= HALLOWEEN_SEASON[1])
+
+
+def halloween_active(settings=None) -> bool:
+    """The one switch Halloween features check: season on AND the
+    professional theme off. ``settings`` injectable for tests; defaults to
+    the real SettingsManager (imported lazily — settings.py imports this
+    module)."""
+    if not is_halloween_season():
+        return False
+    try:
+        if settings is None:
+            from techdeck.core.settings import SettingsManager
+            settings = SettingsManager()
+        return not settings.is_professional()
+    except Exception:
+        return False
+
+
 # Application metadata
 APP_NAME = "TechDeck"
 APP_VERSION = "0.8.7"  # New Assistant page: talk to Woogy, plan a time-blocked day, keep notes and tasks, get Windows reminders; new 922 Difficulty Stamper carries the DIFFICULT label onto work packets; set your own profile picture
