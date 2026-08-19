@@ -319,16 +319,17 @@ QPushButton:hover {
     ),
 
     "halloween": ColorPalette(
-        # Poison green on deep witching purple, pumpkin CTA. The green family
-        # deliberately echoes the Puppet Master's phosphor tiers — in October
-        # the whole app looks like something he could be living behind.
-        text="#F2E9D8",            # bone white
-        text_secondary="#A08FB8",  # dusty lavender
-        background="#0D0711",
-        surface="#1A0E24",
-        surface_hover="#251536",
+        # ORANGE-DOMINANT: the whole app is a jack-o'-lantern lit from
+        # inside — near-black ember backgrounds, warm brown surfaces, pumpkin
+        # primary. Poison green (the Puppet Master's phosphor kin) is the
+        # counter-accent; purple survives only as the info color.
+        text="#F5E9DC",            # bone white
+        text_secondary="#C89B72",  # dusty amber
+        background="#170C04",
+        surface="#251307",
+        surface_hover="#331C0B",
 
-        accent="#FF7A1A",          # pumpkin — the primary; buttons glow like jack-o'-lanterns
+        accent="#FF7A1A",          # pumpkin — the primary
         accent_hover="#FF9440",
         accent_pressed="#CC5E0E",
 
@@ -336,24 +337,24 @@ QPushButton:hover {
         accent_two_hover="#79E879",
         accent_two_pressed="#3FAE3F",
 
-        border="#2E1B3E",
-        border_strong="#56308A",
-        divider="#221331",
+        border="#3A2210",
+        border_strong="#8A4F16",
+        divider="#2B1708",
 
-        console_bg="#070310",
+        console_bg="#0F0702",
         console_text="#FFAF5E",    # candlelight amber; his face stays phosphor
 
         success="#58D858",
         warning="#FFC02E",
-        error="#FF3B30",
-        info="#B78CFF",
+        error="#FF453A",
+        info="#B78CFF",            # the last trace of witching purple
 
-        tile_selected="#3A2154",
-        shadow="rgba(255, 122, 26, 0.25)",
+        tile_selected="#46280F",
+        shadow="rgba(255, 122, 26, 0.30)",
 
-        tile_missing_bg="#140A1E",
-        tile_missing_text="#56308A",
-        tile_missing_border="#2E1B3E",
+        tile_missing_bg="#1D0F06",
+        tile_missing_text="#8A4F16",
+        tile_missing_border="#3A2210",
 
         accent_text="#211003",     # dark text on pumpkin
         accent_two_text="#08140A", # dark text on the bright green CTA
