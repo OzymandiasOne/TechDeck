@@ -1345,14 +1345,22 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
     increase once a feature measures 2x the thickness, features under the
     1/2-thickness minimum flagged in stats["below_min"], and the outer
     profile left untouched.
+
+    Failures are PER FEATURE, not per file: a feature whose offset would be
+    degenerate is recorded in stats["failed"] (a "what: why" string each)
+    and left unchanged while every other feature still offsets. The file
+    only raises when NOTHING could be applied - LoopOffsetError when every
+    attempted offset failed, ValueError when there is no supported geometry
+    at all.
     """
     parsed = _parse(src)
     scale = _unit_scale(parsed["insunits"], log)
     circles, loop_info, warnings = _classify(parsed)
 
     stats = {"holes": 0, "cutouts": 0, "profiles": 0, "unchanged": 0,
-             "below_min": [], "band": None, "warnings": warnings}
+             "below_min": [], "failed": [], "band": None, "warnings": warnings}
     replace = {}
+    applied = 0     # offsets actually written (any kind)
 
     if thickness is None:
         def grow_for(measure):
@@ -1378,6 +1386,26 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
         if thickness is not None and measure < 0.5 * (thickness * scale) - 1e-9:
             stats["below_min"].append(measure / scale)  # report in inches
 
+    if not circles and not loop_info:
+        raise ValueError("No supported geometry (circles or closed outlines) "
+                         "found in this file.")
+
+    def offset_loop_into(li, s, desc):
+        """Offset one loop; on failure record it and leave the loop alone.
+        Patches into a LOCAL dict first so a failure mid-patch can't leave
+        half a loop's coordinates rewritten. Returns the segs to relayer."""
+        nonlocal applied
+        try:
+            new_segs = _offset_loop(li["segs"], s)
+            local = {}
+            _patch_segments(new_segs, local)
+        except LoopOffsetError as e:
+            stats["failed"].append(f"{desc}: {e}")
+            return li["segs"], False
+        replace.update(local)
+        applied += 1
+        return new_segs, True
+
     # Circles: holes grow; a standalone circle IS a round plate (profile).
     for c in circles:
         if c["is_hole"]:
@@ -1387,11 +1415,14 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
             if grow:
                 new_r = c["r"] + grow
                 if new_r <= 0:
-                    raise LoopOffsetError(
-                        f"Shrinking hole R{c['r']:.4f} by {-grow:.4f} would "
-                        "invert it.")
-                replace[2 * c["gi"][40] + 1] = _fmt(new_r)
-                stats["holes"] += 1
+                    stats["failed"].append(
+                        f"hole Ø{measure:.4f} at ({c['c'][0]:.3f}, "
+                        f"{c['c'][1]:.3f}): shrinking by {-grow:.4f} "
+                        "would invert it")
+                else:
+                    replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+                    stats["holes"] += 1
+                    applied += 1
             else:
                 stats["unchanged"] += 1
             _relayer(c, holes_layer, replace, warnings)
@@ -1399,25 +1430,29 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
             if shrink:
                 new_r = c["r"] - shrink
                 if new_r <= 0:
-                    raise LoopOffsetError(
-                        f"Shrinking circle R{c['r']:.4f} by {shrink:.4f} "
-                        "would invert it.")
-                replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+                    stats["failed"].append(
+                        f"round profile Ø{2 * c['r']:.4f}: shrinking by "
+                        f"{shrink:.4f} per side would invert it")
+                else:
+                    replace[2 * c["gi"][40] + 1] = _fmt(new_r)
+                    applied += 1
             stats["profiles"] += 1
 
     # Loops: cutouts expand their opening; outer profiles pull inward.
     for li in loop_info:
         interior_left = li["area"] > 0
+        b = li["bbox"]
         if li["is_cutout"]:
-            b = li["bbox"]
             measure = min(b[2] - b[0], b[3] - b[1])   # a slot's WIDTH
             check_minimum(measure)
             grow = grow_for(measure)
             if grow:
                 s = -grow if interior_left else grow  # expand the opening
-                new_segs = _offset_loop(li["segs"], s)
-                _patch_segments(new_segs, replace)
-                stats["cutouts"] += 1
+                new_segs, ok = offset_loop_into(
+                    li, s, f"cutout {b[2] - b[0]:.3f} x {b[3] - b[1]:.3f} "
+                           f"near ({b[0]:.3f}, {b[1]:.3f})")
+                if ok:
+                    stats["cutouts"] += 1
             else:
                 new_segs = li["segs"]
                 stats["unchanged"] += 1
@@ -1426,19 +1461,23 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
         else:
             if shrink:
                 s = shrink if interior_left else -shrink  # pull edges inward
-                new_segs = _offset_loop(li["segs"], s)
-                _patch_segments(new_segs, replace)
-            b = li["bbox"]
+                offset_loop_into(
+                    li, s, f"outer profile {b[2] - b[0]:.3f} x "
+                           f"{b[3] - b[1]:.3f}")
             stats["profiles"] += 1
             stats["profile_size"] = (b[2] - b[0], b[3] - b[1])
 
-    if not stats["holes"] and not stats["cutouts"] and not stats["profiles"]:
-        raise ValueError("No supported geometry (circles or closed outlines) "
-                         "found in this file.")
+    if stats["failed"] and not applied:
+        raise LoopOffsetError("No offsets could be applied - "
+                              + "; ".join(stats["failed"]))
 
     # --- add the HOLES layer if any hole geometry moved to it -------------
+    # Keyed on the interior features that were RELAYERED (capped/failed ones
+    # move to the layer too), not on the grown counts - a file whose every
+    # feature is >=2x thickness still needs the layer defined.
     insert_lines, insert_at, handseed_patch = (None, -1, None)
-    if stats["holes"] or stats["cutouts"]:
+    if (any(c["is_hole"] for c in circles)
+            or any(li["is_cutout"] for li in loop_info)):
         insert_lines, insert_at, handseed_patch = _layer_insert(parsed, holes_layer)
     if handseed_patch is not None:
         replace[handseed_patch[0]] = handseed_patch[1]
@@ -1472,9 +1511,13 @@ def _log_offset_stats(log, src, dest, stats, edge_offset):
                            f"{size[1] - 2 * edge_offset:.4g})" if size else ""))
         else:
             bits.append("profile untouched")
+    if stats.get("failed"):
+        bits.append(f"{len(stats['failed'])} FAILED")
     if stats.get("band"):
         bits.append(f"band: {stats['band']}")
     log(f"  {src.name} -> {dest.name}: " + (", ".join(bits) or "no changes"))
+    for f in stats.get("failed", []):
+        log(f"    FAILED (left unchanged): {f}")
     for m in stats.get("below_min", []):
         log(f"    WARNING: an interior feature measures {m:.4f}\" - below "
             f"the customer's 1/2-thickness minimum.")
@@ -1895,6 +1938,7 @@ class AnalysisWindow(PluginWindow):
         self._offsets_applied = False
         show_path = orig_path
         stats = None
+        fail_reason = None
         if self._automated and thickness is not None:
             try:
                 sdk.ensure_local(orig_path, log=self._log)
@@ -1910,7 +1954,17 @@ class AnalysisWindow(PluginWindow):
                 self._offsets_applied = True
                 _log_offset_stats(self._log, Path(orig_path), Path(orig_path),
                                   stats, 0.0)
+                if stats.get("failed"):
+                    # Partial: the rest of the file IS offset; say exactly
+                    # which features aren't so nobody has to guess.
+                    QMessageBox.warning(
+                        self, "Customer DXF Analysis",
+                        f"{Path(orig_path).name}: offsets applied, but "
+                        f"{len(stats['failed'])} feature(s) could not be "
+                        "offset and were left unchanged:\n\n- "
+                        + "\n- ".join(stats["failed"]))
             except (LoopOffsetError, ValueError) as e:
+                fail_reason = str(e)
                 self._log(f"  OFFSETS FAILED for {Path(orig_path).name}: {e}")
                 QMessageBox.warning(
                     self, "Customer DXF Analysis",
@@ -1921,13 +1975,16 @@ class AnalysisWindow(PluginWindow):
             self._set_offsets_status("applied", stats=stats,
                                      thickness=thickness)
         elif self._automated and thickness is not None:
-            self._set_offsets_status("failed")
+            self._set_offsets_status("failed", reason=fail_reason)
         else:
             self._set_offsets_status("none")
 
-    def _set_offsets_status(self, state, stats=None, thickness=None):
+    def _set_offsets_status(self, state, stats=None, thickness=None,
+                            reason=None):
         """The toolbar verdict label: green check when offsets were applied,
-        amber when nothing was touched, red when they failed."""
+        amber when nothing was touched, red when they failed - with the WHY
+        on it (failure reason / per-feature failure count), so the verdict
+        never leaves the user guessing what happened."""
         if state == "applied":
             head = "<span style='color:#43A047;'>✓ Offsets applied</span>"
             bits = []
@@ -1943,15 +2000,26 @@ class AnalysisWindow(PluginWindow):
             if bits:
                 text += (" <span style='color:#9E9E9E;'>("
                          + " · ".join(bits) + ")</span>")
+            if stats and stats.get("failed"):
+                text += (f" <span style='color:#E53935;'>⚠ "
+                         f"{len(stats['failed'])} not offset (see console)"
+                         f"</span>")
             if stats and stats.get("below_min"):
                 text += (f" <span style='color:#E53935;'>⚠ "
                          f"{len(stats['below_min'])} below 1/2-t minimum"
                          f"</span>")
             self.lbl_offsets.setText(text)
         elif state == "failed":
-            self.lbl_offsets.setText(
-                "<span style='color:#E53935;'>⚠ Offsets failed - "
-                "showing original</span>")
+            text = ("<span style='color:#E53935;'>⚠ Offsets failed - "
+                    "showing original</span>")
+            short = (reason or "").splitlines()[0] if reason else ""
+            if len(short) > 80:
+                short = short[:77] + "..."
+            if short:
+                short = (short.replace("&", "&amp;").replace("<", "&lt;")
+                         .replace(">", "&gt;"))
+                text += (f" <span style='color:#9E9E9E;'>({short})</span>")
+            self.lbl_offsets.setText(text)
         elif state == "done":
             self.lbl_offsets.setText(
                 "<span style='color:#43A047;'>✓ Batch review "
@@ -2591,6 +2659,13 @@ class AdjustDimensionsDialog(QDialog):
             return  # dialog stays open so the values can be adjusted
         self.written_path = dest
         _log_offset_stats(self._log, self._src, dest, stats, edge)
+        if stats.get("failed"):
+            QMessageBox.warning(
+                self, "Adjust Dimensions",
+                f"{dest.name} was written, but "
+                f"{len(stats['failed'])} feature(s) could not be offset "
+                "and were left unchanged:\n\n- "
+                + "\n- ".join(stats["failed"]))
         if callable(self._on_success):
             self._on_success()
         self.accept()

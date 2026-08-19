@@ -160,6 +160,56 @@ def test_measure_dxf_sees_polyline_cutouts(dxa, tmp_path):
     assert info["profiles"] == 1
 
 
+def _circle(x, y, r):
+    return ["0", "CIRCLE", "8", "0",
+            "10", str(x), "20", str(y), "40", str(r)]
+
+
+# --- per-feature failures (2026-08-19: "is this for all offsets or just
+# that line?" - failures must be per FEATURE, with the rest still offset) ---
+
+def test_one_bad_feature_does_not_fail_the_file(dxa, tmp_path):
+    # Manual mode, shrinking hole diameters by 1": the 0.5" hole inverts
+    # (fails), the 4" hole shrinks fine - file written, failure recorded.
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10)
+        + _circle(2, 2, 0.25) + _circle(6, 5, 2.0)))
+    dest = tmp_path / "part OFFSET.dxf"
+    stats = dxa.process_dxf(str(src), str(dest), -1.0, 0.0, "HOLES",
+                            lambda *_: None)
+    assert stats["holes"] == 1
+    assert len(stats["failed"]) == 1
+    assert "invert" in stats["failed"][0]
+    assert dest.exists()
+    parsed = dxa._parse(str(dest))
+    radii = sorted(e["r"] for e in parsed["entities"]
+                   if e["etype"] == "CIRCLE")
+    assert radii == pytest.approx([0.25, 1.5])  # failed one untouched
+
+
+def test_all_features_failing_raises_with_the_reasons(dxa, tmp_path):
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(2, 2, 0.25)))
+    dest = tmp_path / "part OFFSET.dxf"
+    with pytest.raises(dxa.LoopOffsetError, match="No offsets could be applied"):
+        dxa.process_dxf(str(src), str(dest), -1.0, 0.0, "HOLES",
+                        lambda *_: None)
+
+
+def test_all_capped_file_still_defines_the_holes_layer(dxa, tmp_path):
+    # Every feature >=2x thickness: nothing grows, but the features are
+    # still moved to HOLES - the layer record must be added or strict CAD
+    # readers reject the output over an undefined layer.
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(5, 5, 2.0)))
+    dest = tmp_path / "part OFFSET.dxf"
+    stats = dxa.process_dxf(str(src), str(dest), 0.0, 0.0, "HOLES",
+                            lambda *_: None, thickness=0.5)
+    assert stats["holes"] == 0 and stats["unchanged"] == 1
+    parsed = dxa._parse(str(dest))
+    assert "HOLES" in parsed["layer_names"]
+
+
 def test_two_x_thickness_cap_still_applies_to_polylines(dxa, tmp_path):
     # 2" opening on 0.5" plate measures past 2x thickness -> left unchanged.
     src = _write(tmp_path, "part.dxf", _dxf(
