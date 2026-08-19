@@ -372,6 +372,63 @@ def normalize_911_batch(raw: str) -> str:
     return (raw or "").strip().upper()
 
 
+# Hard Rule 3: THE nest-id shape. Legacy numeric nests ([PS]?\d{3,}) plus
+# alphanumeric IDs like 5CDAVW (4-8 chars, must contain a digit so footer
+# text like "TOTALS" is rejected; first seen GX030, May 2026). This is the
+# single home — plugins alias it (`_NEST_RE = sdk.NEST_ID_RE`), never
+# re-type it: the pattern has been revised once already (the alphanumeric
+# branch), and the next revision must not need six separate edits.
+NEST_ID_RE = re.compile(
+    r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+
+
+def is_nest_id(text) -> bool:
+    """True when `text` is nest-id shaped per Hard Rule 3 (trimmed first)."""
+    return bool(NEST_ID_RE.match(str(text or "").strip()))
+
+
+def load_sibling(plugin_id: str, anchor=None):
+    """Import a sibling plugin's run.py as a module and return it.
+
+    Plugins compose — 911 Setup runs the 911 Teams Cards engine in-process,
+    both it and Teams Cards import 911 Remove Ticket's stamp helpers, and
+    922 Setup runs its stamper/repeater stages — but there was no composition
+    primitive: four hand-rolled spec_from_file_location dances, each of them
+    a silent breakage point when a plugin folder is renamed. This is the one
+    home.
+
+    `anchor` should be the CALLING plugin's ``__file__``: every layout keeps
+    all plugins in one flat dir (dev repo tree, %LOCALAPPDATA% installs, a
+    TECHDECK_PLUGINS_DIR override), so the sibling always sits beside the
+    caller. Without an anchor the dir is resolved the way the app's
+    PluginLoader resolves it.
+
+    Raises UserFacingError when the sibling isn't installed; the sibling's
+    own import errors propagate untouched — callers keep their existing
+    memoize-and-degrade wrappers and decide what a missing sibling means.
+    """
+    import importlib.util
+    if anchor:
+        plugins_dir = Path(anchor).resolve().parents[1]
+    else:
+        from techdeck.core.plugin_loader import PluginLoader
+        plugins_dir = PluginLoader._default_plugins_dir()
+    run_py = plugins_dir / plugin_id / "run.py"
+    if not run_py.is_file():
+        raise UserFacingError(
+            problem=f"The '{plugin_id}' app isn't installed, and this app "
+                    f"needs it.",
+            fix="Update TechDeck so the full app set is installed, then run "
+                "again.",
+            detail=str(run_py),
+        )
+    spec = importlib.util.spec_from_file_location(
+        f"techdeck_sibling_{plugin_id}", str(run_py))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def find_922_batch_path(root: Path, batch: str) -> Optional[Path]:
     """Locate 'Batch {n}' under the 922 root, checking the live root first and
     then the '1 - Completed' archive. Returns None if not found."""
@@ -398,6 +455,78 @@ def find_911_batch_folder(qtdr_root: Path, batch: str) -> Optional[Path]:
     return None
 
 
+def request_922_batch_folder(
+    params: dict, base_override: str = ""
+) -> Optional[tuple]:
+    """Resolve the 922 batch for this run by FOLDER PICK, not typed number.
+
+    The one batch-entry flow for 922 plugins (promoted from 922 LST Organizer
+    v3.2.0, which pioneered it; before this, six plugins hand-copied a typed
+    request_batch_number + parse + find dance that had drifted three ways).
+
+    Order:
+      1. Family cache hit — an earlier 922 plugin in this queued run already
+         picked/typed the batch (``shared_state["922"]["batch_number"]``);
+         reuse it without prompting.
+      2. Folder pick via request_directory, starting at the 922 root — Sentry
+         Drone capable (no ``style=`` passed), native dialog otherwise. The
+         batch number comes from the picked folder's NAME ("Batch 483").
+      3. Seed the family cache so every later 922 plugin (including the
+         still-typed Batch Repeater) reuses this answer.
+
+    Returns ``(batch_no, batch_path)``, or ``None`` when the user cancelled
+    the pick (the run's cancel flag is already set by then — just return).
+    Raises UserFacingError for a missing root, an unrecognizable folder, or a
+    cached batch whose folder has vanished.
+    """
+    log = params.get("log", print)
+
+    root = resolve_922_root((base_override or "").strip())
+    if root is None or not root.exists():
+        raise UserFacingError(
+            "Couldn't find the '922 QTDR Production Packages' folder.",
+            "Make sure OneDrive is synced, or set the Base Directory in this "
+            "plugin's Settings, then run again.")
+
+    # 1. Family cache — never re-prompt inside one queued run. The bucket is
+    # the literal "922" (matching run_session's fixed buckets), NOT
+    # params['plugin_family'], so the answer is shared exactly like
+    # request_batch_number's.
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("922", {}).get("batch_number")
+    if cached:
+        batch_no = parse_922_batch(str(cached)) or str(cached)
+        batch_path = find_922_batch_path(root, batch_no)
+        if batch_path is None:
+            raise UserFacingError(
+                f"Couldn't find 'Batch {batch_no}' under the 922 folder.",
+                "Check the batch folder exists (or run the batch's folder "
+                "setup first), then run again.")
+        log(f"Batch {batch_no} (shared from an earlier plugin)")
+        return batch_no, batch_path
+
+    # 2. Folder pick (drone-capable: style defaults to sentry_style(params)).
+    raw = request_directory(params, "Select the 922 batch folder", str(root))
+    if not raw:
+        # request_directory already flagged the run cancelled.
+        log("Folder selection cancelled - nothing was run.")
+        return None
+
+    batch_path = Path(raw)
+    batch_no = parse_922_batch(batch_path.name)
+    if not batch_path.is_dir() or not batch_no:
+        raise UserFacingError(
+            f"'{batch_path.name}' doesn't look like a 922 batch folder.",
+            "Run it again and pick the batch's own folder (the one named "
+            "like 'Batch 483').")
+
+    # 3. Seed the family cache for the rest of the queued run.
+    if shared_state is not None:
+        shared_state.setdefault("922", {})["batch_number"] = batch_no
+    log(f"Batch {batch_no}: {batch_path}")
+    return batch_no, batch_path
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Console input
 # ─────────────────────────────────────────────────────────────────────────────
@@ -416,6 +545,33 @@ def request_text(params: dict, prompt: str) -> str:
     if console is not None and hasattr(console, "request_input"):
         return console.request_input(prompt)
     return input(prompt + " ")
+
+
+def _user_cancelled(params: dict):
+    """Record that the USER backed out of a prompt, then return None.
+
+    The executor decides SUCCESS vs CANCELLED from ONE thing: whether
+    ``cancel_event`` is set when ``run()`` returns (plugin_executor ~line 559).
+    A plugin that closed a dialog and simply ``return``ed therefore reported a
+    clean SUCCESS — success chime, tickets awarded, usage logged — for a run
+    the user explicitly abandoned (reported 2026-08-10 against 911 Setup's
+    master toggle window; six plugins had the identical hole).
+
+    Setting the flag HERE closes the class instead of the instance: every
+    cancellable prompt below funnels through this, so no plugin — present or
+    future — can forget. Call sites keep their existing
+    ``if not choice: return`` shape and now correctly report CANCELLED.
+
+    Deliberately tolerant: a missing/unset ``cancel_event`` (headless, CLI
+    test, an older executor) just means nothing to flag, never a crash.
+    """
+    event = params.get("cancel_event")
+    if event is not None:
+        try:
+            event.set()
+        except Exception:
+            pass
+    return None
 
 
 def sentry_style(params: dict) -> Optional[str]:
@@ -462,13 +618,15 @@ def request_directory(params: dict, title: str = "Select Folder",
     if console is not None and hasattr(console, "request_directory"):
         if style:
             try:
-                return console.request_directory(title, start_dir, style)
+                picked = console.request_directory(title, start_dir, style)
             except TypeError:
                 # Older console signature without style (version tolerance).
-                return console.request_directory(title, start_dir)
-        return console.request_directory(title, start_dir)
+                picked = console.request_directory(title, start_dir)
+        else:
+            picked = console.request_directory(title, start_dir)
+        return picked or _user_cancelled(params)
     raw = input(f"{title} (paste path): ").strip().strip('"')
-    return raw or None
+    return raw or _user_cancelled(params)
 
 
 def request_file(params: dict, title: str = "Select File", start_dir: str = "",
@@ -489,13 +647,15 @@ def request_file(params: dict, title: str = "Select File", start_dir: str = "",
     if console is not None and hasattr(console, "request_file"):
         if style:
             try:
-                return console.request_file(title, start_dir, name_filter, style)
+                picked = console.request_file(title, start_dir, name_filter, style)
             except TypeError:
                 # Older console signature without style (version tolerance).
-                return console.request_file(title, start_dir, name_filter)
-        return console.request_file(title, start_dir, name_filter)
+                picked = console.request_file(title, start_dir, name_filter)
+        else:
+            picked = console.request_file(title, start_dir, name_filter)
+        return picked or _user_cancelled(params)
     raw = input(f"{title} (paste path): ").strip().strip('"')
-    return raw or None
+    return raw or _user_cancelled(params)
 
 
 def pick_directory_gui(params: dict, title: str = "Select Folder",
@@ -536,14 +696,15 @@ def _pick_gui(params: dict, title: str, start_dir: str, parent,
                 else:
                     picked = chopper_picker.pick_file_chopper(
                         parent, title, start_dir, name_filter)
-                return picked or None
+                return picked or _user_cancelled(params)
         except Exception:
             pass   # fall through to the native dialog
     if name_filter is None:
-        return QFileDialog.getExistingDirectory(parent, title, start_dir) or None
+        return (QFileDialog.getExistingDirectory(parent, title, start_dir)
+                or _user_cancelled(params))
     path, _selected = QFileDialog.getOpenFileName(parent, title, start_dir,
                                                   name_filter)
-    return path or None
+    return path or _user_cancelled(params)
 
 
 def request_choice(params: dict, title: str, prompt: str,
@@ -559,7 +720,7 @@ def request_choice(params: dict, title: str, prompt: str,
     options = [str(o) for o in options]
     console = params.get("console")
     if console is not None and hasattr(console, "request_choice"):
-        return console.request_choice(title, prompt, options)
+        return console.request_choice(title, prompt, options) or _user_cancelled(params)
     menu = "  ".join(f"[{i + 1}] {o}" for i, o in enumerate(options))
     raw = input(f"{prompt} {menu} > ").strip()
     if raw.isdigit() and 1 <= int(raw) <= len(options):
@@ -567,7 +728,37 @@ def request_choice(params: dict, title: str, prompt: str,
     for o in options:
         if raw.lower() == o.lower():
             return o
-    return None
+    return _user_cancelled(params)
+
+
+def request_selection(params: dict, items, done_items=None,
+                      **kwargs) -> Optional[list]:
+    """Ask the user to tick which of ``items`` to run (SelectionDialog), and
+    block until submit. Returns the chosen items, or None if they cancelled.
+
+    ``items`` are display strings; ``done_items`` are flagged "already done".
+    ``kwargs`` pass through to the dialog (window_title, header, root_label,
+    noun, done_label, prompt_note, subhead_prefix, run_button_text,
+    disabled_items, disabled_label, ...).
+
+    Headless — or on an older TechDeck whose console lacks the method — every
+    item is returned, so a scripted run selects everything instead of hanging.
+    Note the difference from a CANCEL: no dialog means "run it all", an empty
+    submit means "run nothing", and only a cancel flags the run.
+
+    Prefer this over calling ``console.request_selection`` directly: three
+    plugins did, each re-implementing the hasattr fallback, and each having to
+    remember to set ``cancel_event`` by hand — one of them (Baked Beans)
+    didn't, so cancelling its process picker scored a ticket-earning success.
+    This routes through :func:`_user_cancelled` like every other prompt.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "request_selection"):
+        picked = console.request_selection(list(items), done_items, **kwargs)
+        if picked is None:
+            return _user_cancelled(params)
+        return list(picked)
+    return list(items)
 
 
 def request_nest_targets(params: dict, title: str, start_dir: str = "",
@@ -616,7 +807,62 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
-def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[dict]:
+def load_toggle_memory(memory_key: str) -> dict:
+    """The selections last submitted under ``memory_key`` ({} if none/unreadable)."""
+    try:
+        from techdeck.core.settings import SettingsManager
+        return dict(SettingsManager().get_toggle_memory(memory_key) or {})
+    except Exception:
+        return {}
+
+
+def save_toggle_memory(memory_key: str, result: dict) -> None:
+    """Remember a GroupedToggleDialog result. Never raises — failing to
+    remember a preference must not sink the run that just succeeded."""
+    try:
+        from techdeck.core.settings import SettingsManager
+        SettingsManager().set_toggle_memory(memory_key, result)
+    except Exception:
+        pass
+
+
+def apply_toggle_memory(groups: list, remembered: dict) -> list:
+    """``groups`` with each toggle's ``checked`` replaced by what the user last
+    submitted. Pure — returns a new list, mutating nothing.
+
+    The merge is by KEY, in one direction only, and that is what makes the
+    memory survive an app update:
+
+      * key in groups AND remembered -> the remembered state wins
+      * key in groups, NOT remembered -> its DECLARED default. A toggle added
+        by an update ships at whatever default it declares; it never inherits
+        a state the user was never shown.
+      * key remembered, NOT in groups -> dropped. Removing or renaming a
+        toggle retires its memory instead of resurrecting a dead key.
+
+    A child marked ``disabled`` stays unchecked no matter what is remembered —
+    disabled means unavailable, not merely off.
+    """
+    out = []
+    for g in groups:
+        saved = remembered.get(g.get("key")) or {}
+        merged = dict(g)
+        if "enabled" in saved:
+            merged["checked"] = bool(saved["enabled"])
+        saved_opts = saved.get("options") or {}
+        children = []
+        for c in g.get("children") or []:
+            child = dict(c)
+            if not child.get("disabled") and child.get("key") in saved_opts:
+                child["checked"] = bool(saved_opts[child["key"]])
+            children.append(child)
+        merged["children"] = children
+        out.append(merged)
+    return out
+
+
+def request_grouped_toggles(params: dict, groups: list, remember_as: str = "",
+                            **kwargs) -> Optional[dict]:
     """Show the two-level master toggle dialog (stages as checkable parents,
     per-stage option toggles as children — GroupedToggleDialog) and block
     until submit. ``groups`` spec and the returned
@@ -625,22 +871,50 @@ def request_grouped_toggles(params: dict, groups: list, **kwargs) -> Optional[di
     pass through (window_title, header, subtext, run_button_text). Returns
     None if the user cancelled.
 
+    ``remember_as`` (normally the plugin id) makes the dialog STICKY: it opens
+    with whatever was last submitted under that key and saves the new answer on
+    submit, so a user who always runs the same subset sets it up once. Stored
+    in settings.json, which an app update leaves alone — see
+    SettingsManager.get_toggle_memory and apply_toggle_memory for the merge
+    rules that keep it sane across added/removed toggles. A cancel saves
+    nothing. Omit it and the dialog is stateless, exactly as before.
+
     Headless — or on an older TechDeck whose console lacks the method — it
     returns every group/child at its declared default (an all-defaults
-    submit), so scripted runs never hang on a dialog.
+    submit), so scripted runs never hang on a dialog. Remembered state is
+    applied there too, so a scripted run matches what the GUI would have
+    offered.
     """
+    if remember_as:
+        remembered = load_toggle_memory(remember_as)
+        if remembered:
+            groups = apply_toggle_memory(groups, remembered)
+
     console = params.get("console")
     if console is not None and hasattr(console, "request_grouped_toggles"):
         try:
-            return console.request_grouped_toggles(groups, **kwargs)
+            result = console.request_grouped_toggles(groups, **kwargs)
         except TypeError:
             # Older console signature without these kwargs (version tolerance).
-            return console.request_grouped_toggles(groups)
-    return {g["key"]: {"enabled": bool(g.get("checked", True)),
-                       "options": {c["key"]: (not c.get("disabled")
-                                              and bool(c.get("checked", True)))
-                                   for c in g.get("children", [])}}
-            for g in groups}
+            result = console.request_grouped_toggles(groups)
+    else:
+        result = {g["key"]: {"enabled": bool(g.get("checked", True)),
+                             "options": {c["key"]: (not c.get("disabled")
+                                                    and bool(c.get("checked", True)))
+                                         for c in g.get("children", [])}}
+                  for g in groups}
+
+    if result is None:
+        # Closing the master window abandons the whole run -- flag it so the
+        # executor reports CANCELLED instead of chiming success and paying out
+        # tickets for work nobody asked for (2026-08-10).
+        return _user_cancelled(params)
+
+    # Only a real submit is remembered -- a cancel means "not this time",
+    # never "make that my default".
+    if remember_as:
+        save_toggle_memory(remember_as, result)
+    return result
 
 
 def plugin_settings(plugin_id: str) -> dict:
@@ -760,9 +1034,39 @@ def header_map(ws, header_row: int) -> dict[str, int]:
     return out
 
 
-def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
+def header_col(hdr: dict, name: str) -> Optional[int]:
+    """Column for `name` in a header_map, tolerating a header that has GROWN.
+
+    Exact match first, then the leftmost header that STARTS WITH `name`. Use
+    this instead of `hdr.get("NAME")` for any header a person maintains and
+    might append to.
+
+    Why it exists: the EB 922 Schedule's rating column was renamed `RATING` →
+    `RATING/PC COUNT`, and both difficulty readers looked it up exactly. They
+    silently found nothing — every Teams card posted with no difficulty label
+    and every packet stamped none, for weeks, behind a dismissable warning
+    (2026-08-11). Header names are lookup KEYS but they are also human text,
+    and humans add words to them.
+    """
+    target = name.strip().upper()
+    if target in hdr:
+        return hdr[target]
+    matches = [col for key, col in hdr.items() if key.startswith(target)]
+    return min(matches) if matches else None
+
+
+def find_header_row(ws, required: Iterable[str], max_scan: int = 30,
+                    prefix_ok: bool = False):
     """Scan the first `max_scan` rows for the row containing all `required`
-    header names. Returns (row_index, header_map) or (None, {})."""
+    header names. Returns (row_index, header_map) or (None, {}).
+
+    Matching is EXACT by default. Pass ``prefix_ok=True`` when a required
+    header is one a person maintains and may have appended to — then `RATING`
+    also satisfies `RATING/PC COUNT`. It stays opt-in because loosening it
+    everywhere would let a required `QTY` latch onto `QTY SHIPPED` on some
+    other sheet and silently read the wrong column. Pair it with
+    :func:`header_col` to pull those columns back out.
+    """
     required_upper = [r.strip().upper() for r in required]
     limit = min(ws.max_row, max_scan)
     for r in range(1, limit + 1):
@@ -771,7 +1075,12 @@ def find_header_row(ws, required: Iterable[str], max_scan: int = 30):
             v = ws.cell(row=r, column=c).value
             if isinstance(v, str) and v.strip():
                 row_map[v.strip().upper()] = c
-        if all(name in row_map for name in required_upper):
+        if prefix_ok:
+            ok = all(header_col(row_map, name) is not None
+                     for name in required_upper)
+        else:
+            ok = all(name in row_map for name in required_upper)
+        if ok:
             return r, row_map
     return None, {}
 
@@ -1068,21 +1377,66 @@ def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
         out.close()
 
 
-def save_pdf_atomic(doc, dest_path: Path) -> None:
+def save_pdf_atomic(doc, dest_path: Path, close: bool = True) -> None:
     """Save an open fitz document and atomically replace dest_path.
 
-    fitz cannot save in place (especially after redactions), so write to a
-    temp file on the same volume and os.replace it over the target. The caller
-    still owns `doc` and should close it afterwards.
+    fitz cannot save in place (especially after redactions), so write to a temp
+    file beside the target and os.replace it over the destination.
+
+    ORDER MATTERS ON WINDOWS. An open fitz document keeps a handle on the file
+    it was opened from, so replacing that same path while the doc is still open
+    fails with ``PermissionError [WinError 5] Access is denied`` — the classic
+    in-place-edit case (open a PDF, stamp it, save it back) this helper exists
+    to serve. The document is therefore CLOSED before the replace, and `close`
+    defaults to True: on return, `doc` is closed and must not be used or closed
+    again (fitz raises ``ValueError: document closed`` on a second close).
+
+    Pass ``close=False`` only when `doc` was built from scratch or opened from a
+    DIFFERENT file than `dest_path` and you still need it afterwards — if the
+    doc's own source path IS `dest_path`, it is closed anyway, because leaving
+    it open cannot work.
+
+    A failed save or replace never leaves a stray ``tmp*.pdf`` behind: partial
+    temp files are cleaned up on the way out. (They are genuinely dangerous
+    here — a leftover temp PDF in a 922 order folder gets picked up as that
+    order's work packet by anything that takes "the first PDF in the folder".)
     """
     import fitz
     dest_path = Path(dest_path)
+
     with tempfile.NamedTemporaryFile(
         suffix=".pdf", delete=False, dir=str(dest_path.parent)
     ) as tmp:
         tmp_path = Path(tmp.name)
-    doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
-    os.replace(str(tmp_path), str(dest_path))
+
+    try:
+        doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
+
+        # Release the source handle before swapping the file underneath it.
+        if close or _doc_source_is(doc, dest_path):
+            try:
+                doc.close()
+            except Exception:
+                pass
+
+        os.replace(str(tmp_path), str(dest_path))
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _doc_source_is(doc, dest_path: Path) -> bool:
+    """True when `doc` was opened from `dest_path` (so it holds that handle)."""
+    try:
+        src = getattr(doc, "name", None)
+        if not src:
+            return False
+        return Path(src).resolve() == Path(dest_path).resolve()
+    except Exception:
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1182,40 +1536,53 @@ def _is_share_lock(exc: Exception) -> bool:
     return isinstance(exc, PermissionError) or getattr(exc, "errno", None) == 13
 
 
-def load_workbook_resilient(path, log=None, **kwargs):
-    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders
-    AND turns a locked-open workbook into a clear instruction (not a crash).
+def _resilient_read(op, path, log=None):
+    """The ONE body behind the resilient Excel loaders (they were three
+    hand-copied 15-line twins that had already drifted into three spellings
+    of the same guard).
 
-    A dehydrated workbook fails inside zipfile with OSError [Errno 22] even
-    though the path exists — and zipfile's end-of-central-directory reader
-    CATCHES that OSError itself and re-raises it as BadZipFile ("File is not
-    a zip file"), so the placeholder failure wears two disguises. Hydrate
-    placeholders up front (sequential read — the recall path OneDrive
-    actually honors; zipfile's backwards seek can stall the recall for 60s+
-    and then fail), and treat both exception types as the placeholder
-    signature on the retry. Bit 911 Setup as "File is not a zip file"
-    (v0.8.6.5, LAPTOP-1AMLBK7B).
-
-    A workbook the user still has open in Excel fails with PermissionError
-    [Errno 13] instead — surface `locked_file_error` so they know to close
-    it (bit 902 DXF Prep, v0.8.6.8). Use this for ANY workbook under the
-    OneDrive tree (Hard Rule 13)."""
-    import openpyxl
+    Flow: hydrate a cloud-only placeholder up front (sequential read — the
+    recall path OneDrive actually honors; zipfile's backwards seek can stall
+    the recall for 60s+ and then fail), then run `op`. On failure:
+      * PermissionError / Errno 13 — the file is open in Excel; retrying
+        can't help, so raise locked_file_error's clear instruction.
+      * The placeholder signature — OSError [Errno 22], or BadZipFile
+        (zipfile's end-of-central-directory reader CATCHES that OSError and
+        re-raises it as "File is not a zip file", so the failure wears two
+        disguises) — while the file still stats as a placeholder: hydrate
+        and retry `op` once.
+      * Anything else re-raises untouched.
+    """
     import zipfile
     ensure_local(path, log=log)
     try:
-        return openpyxl.load_workbook(path, **kwargs)
+        return op()
     except Exception as exc:
         if _is_share_lock(exc):
             raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)):
-            raise
-        if not is_cloud_placeholder(path):
+        if not isinstance(exc, (OSError, zipfile.BadZipFile)) \
+                or not is_cloud_placeholder(path):
             raise
         if log:
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
-        return openpyxl.load_workbook(path, **kwargs)
+        return op()
+
+
+def load_workbook_resilient(path, log=None, **kwargs):
+    """openpyxl.load_workbook that survives OneDrive cloud-only placeholders
+    AND turns a locked-open workbook into a clear instruction (not a crash).
+
+    The placeholder failure wears two disguises — OSError [Errno 22], and
+    zipfile.BadZipFile ("File is not a zip file"; bit 911 Setup that way,
+    v0.8.6.5, LAPTOP-1AMLBK7B). A workbook the user still has open in Excel
+    fails with PermissionError [Errno 13] instead — surfaced as
+    `locked_file_error` so they know to close it (bit 902 DXF Prep,
+    v0.8.6.8). Mechanics in `_resilient_read`. Use this for ANY workbook
+    under the OneDrive tree (Hard Rule 13)."""
+    import openpyxl
+    return _resilient_read(
+        lambda: openpyxl.load_workbook(path, **kwargs), path, log=log)
 
 
 def read_excel_resilient(path, log=None, **kwargs):
@@ -1225,19 +1592,8 @@ def read_excel_resilient(path, log=None, **kwargs):
     (sheet_name, header, usecols, ...). Use for ANY user-editable workbook
     read via pandas (Hard Rule 13)."""
     import pandas as pd
-    import zipfile
-    ensure_local(path, log=log)
-    try:
-        return pd.read_excel(path, **kwargs)
-    except Exception as exc:
-        if _is_share_lock(exc):
-            raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
-            raise
-        if log:
-            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
-        hydrate_cloud_file(path, log=log)
-        return pd.read_excel(path, **kwargs)
+    return _resilient_read(
+        lambda: pd.read_excel(path, **kwargs), path, log=log)
 
 
 def open_excel_resilient(path, log=None):
@@ -1246,19 +1602,7 @@ def open_excel_resilient(path, log=None):
     pd.read_excel(xls, sheet_name=...) — the file lock bites at open time, so
     the returned handle reads sheets without re-touching the lock."""
     import pandas as pd
-    import zipfile
-    ensure_local(path, log=log)
-    try:
-        return pd.ExcelFile(path)
-    except Exception as exc:
-        if _is_share_lock(exc):
-            raise locked_file_error(path, exc) from exc
-        if not isinstance(exc, (OSError, zipfile.BadZipFile)) or not is_cloud_placeholder(path):
-            raise
-        if log:
-            log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
-        hydrate_cloud_file(path, log=log)
-        return pd.ExcelFile(path)
+    return _resilient_read(lambda: pd.ExcelFile(path), path, log=log)
 
 
 def copy_resilient(src, dest, log=None):

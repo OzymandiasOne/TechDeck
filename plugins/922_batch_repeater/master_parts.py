@@ -6,8 +6,8 @@ The MASTER PARTS sheet in 922 MPL.xlsx is a true per-piece catalog: one row per
 physical piece renamed between batches, e.g. -4 -> -4A), and a part-type
 classification driven by the EB 922 H# Quote MATERIAL PRICING sheet.
 
-Lives inside the plugin folder (NOT techdeck.core) so the Hard Rule 12 plugin
-copy ships it to installed machines without a TechDeck release.
+Lives inside the plugin folder (NOT techdeck.core) so a plugin-folder copy to
+installed machines ships it without a TechDeck release.
 """
 
 import re

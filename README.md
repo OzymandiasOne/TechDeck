@@ -1,4 +1,4 @@
-# TechDeck v0.8.6.12 - 922 Pipeline Fixes
+# TechDeck v0.8.7 - The Assistant
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,110 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7
+
+**A new Assistant page.** There's a new tab in the sidebar: your own desk inside TechDeck.
+It's a terminal you can talk to, with a Schedule, a Tasks list and Personal Notes beside
+it, and a command line along the bottom that works from any of them.
+
+**Talk to it, and nothing gets filed behind your back.** Type whatever you want at the
+terminal - think out loud, complain about OneDrive at 6:40 in the morning - and Woogy
+answers. Nothing you say becomes a task, a note or a calendar entry unless you actually
+ask for it: press "Add a task", type `/task`, or say "remind me to call Dan at 9am". Your
+conversation is kept between sessions, and it never leaves your machine.
+
+**Build a schedule that fits the day.** Tell it what's on your plate - one line per job,
+however you'd say it out loud ("fix the PO sheet 45m urgent due friday") - and it lays out
+a real timetable. Anything due today goes first, then whatever gives you the most back for
+the time it costs, so five quick wins don't sit behind one big job all morning. It pads
+every estimate (everyone under-estimates), works around your meetings and your lunch,
+splits long jobs across gaps but never into useless five-minute slivers, and leaves a
+breather after a long stretch. Anything that won't fit is listed with the reason instead of
+quietly disappearing.
+
+**Send the plan to Outlook.** Export it as a calendar file and open it - the whole day
+lands on your real calendar, so the reminders reach you on your phone and in meetings.
+Markdown and plain text exports are there too for pasting into Teams.
+
+**Reminders while you work.** Windows notifications before each block starts, a summary of
+the day each morning, and a once-a-day nudge about anything past its date. It never fires
+late, never fires twice, and stays quiet outside your working hours. These come from
+TechDeck itself, so they only arrive while it's open - that's what the calendar export is
+for.
+
+**Notes to yourself.** Nested bullets, Tab to indent, saves as you type.
+
+**922 Difficulty Stamper.** A new app that carries the DriveWorks DIFFICULT label forward
+onto the paperwork the floor actually sees. It reads every part drawing under an order's
+CAD-AND-SHOP-PRINTS folder, and if any part carries the label it stamps DIFFICULT in red on
+page one of that order's work packet, sitting just below the pallet stamp. Re-running never
+double-stamps, and an order whose parts are no longer difficult has its old stamp removed.
+Drawings it can't read are reported rather than treated as clean.
+
+**Set your own profile picture.** My Account has a proper identity card now: your picture,
+your name, your email. Hover the circle to change it. Your picture shows next to your
+messages in the Assistant, and clicking it there brings you back to My Account.
+
+**Smaller fixes.** Saving a PDF could fail on files the app still had open. The "Build Your
+Own" tile in My Stuff shows the beyblade you actually built rather than a placeholder.
+
+## What's New in v0.8.6.13
+
+**911 Teams Cards is now its own app.** Card generation has moved out of 911 Setup into a
+separate tool, so you can post cards without running a setup and run a setup without
+posting cards. It needs no batch number - the EB 922 Schedule's queue is the work list -
+and it reads whichever batches happen to be waiting. 911 Setup still offers the stage as
+an optional first step if you want both in one pass, but it now starts switched off.
+
+**Pick exactly which nests get a card.** The new app opens a tick-list of every nest
+waiting on the schedule, showing each one's difficulty, its saw-cut or tube-laser routing,
+and its due date. Everything is ticked to begin with, so carding the whole queue is still
+one click. Anything you untick stays queued and is offered again next time.
+
+**The schedule keeps itself up to date.** As work completes, TechDeck now advances the
+STATUS column for you instead of leaving it to be retyped: a nest moves off the card queue
+once its card is posted, and off the setup queue once its batch is set up. Only nests that
+genuinely reached the next stage move, and if someone else has the schedule open the cards
+still go out - the console just lists the rows to change by hand.
+
+**911 Setup remembers your action checklist.** The window that asks which steps to run now
+reopens with whatever you picked last time, saved between sessions and across updates. A
+site that always skips a step sets it up once instead of unticking it on every run.
+
+**Cancelling a run now reports as cancelled.** Closing an app's first window used to play
+the success sound and award tickets for work that never happened. Backing out of any
+folder picker, file picker, or checklist window is now recorded as a cancelled run.
+
+**Difficulty labels are working again.** The rating column on the EB 922 Schedule was
+renamed, and TechDeck was still looking for the old name - so it quietly stopped finding
+any ratings at all. Packets stamped no difficulty label and Teams cards carried none.
+Column lookups now tolerate a heading that has had words added to it.
+
+**Smaller fixes.** A run-completion message could come out with two lines run together.
+
+### Feedback Fixes
+
+*"Could the Teams card generation be separate from 911 Setup? I don't want to make Teams
+cards every time I run the setup - sometimes I re-run the setup because something changed
+and I just want an updated version."*
+911 Teams Cards is now a standalone app, and the stage inside 911 Setup defaults to off.
+
+*"Sometimes I only want to make a couple of Teams cards. Ideally I'd be able to select
+which of the orders in the schedule I want, and only make those."*
+The new app opens a tick-list of the waiting nests; untick any you don't want yet.
+
+*"Could the schedule's status column be updated automatically as cards are made?"*
+It is - nests move to NEED SETUP when their card posts, and to NEED MODEL once their batch
+is set up.
+
+*"911 Setup feels less streamlined now - we have to keep toggling off the Teams card
+generation and the difficulty label before we can enter our batch number. Could there be
+default toggle sets?"*
+The checklist window now remembers your selection between sessions, so those toggles stay
+where you leave them.
 
 ---
 
@@ -653,7 +757,8 @@ Explorer and on pinned shortcuts.
 | Plugin | Description |
 |---|---|
 | 902 DXF Prep | Batch DXF cleanup and prep for Boost 902 part files - IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles against the PO spreadsheet |
-| 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs - plus a Teams card for every nest the EB 922 Schedule marks NEED TEAMS/SETUP, posted to the MODELING bucket of the SOPO D911 PIPELINE plan with its difficulty and saw/tube-laser labels and its scheduled due date |
+| 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs, inspection sheets and Move Ticket Omit stamping - behind a checklist of what to run that remembers your selection between sessions |
+| 911 Teams Cards | Posts one Teams modeling card per 911 nest the EB 922 Schedule marks NEED TEAMS/SETUP, into the MODELING bucket of the SOPO D911 PIPELINE plan with its difficulty, its saw-cut or tube-laser machine and its scheduled due date, then moves each nest's status along the schedule as its card goes out. Pick which nests you want cards for - all ticked by default - and the rest stay queued for next time. Needs no batch number |
 | 911 Batch Repeater | Finds repeat parts for a 911 batch via the 911 Master Parts List (compiled from completed nests) and copies each repeat's CAD files (SolidWorks model, drawing, and PDF) from its completed source nest into a REPEAT folder inside the target nest. If you own the Sentry Drone and have switched it on for this app, the two-phase drone picker locks the batch folder, zooms inside, then lets you lock multiple nests before striking them - those nests run with the default grabs. Otherwise: a folder dialog plus a nest-selection window where any nest expands to toggle exactly what it grabs (models, PDFs, overwrite existing) |
 | 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets |
 | 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |
@@ -664,8 +769,9 @@ Explorer and on pinned shortcuts.
 | 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically |
 | 922 Setup | Full 922 batch prep behind a master toggle window: builds the batch's order folders from the PO REV C workbook (one per ORDER-PPN, with a per-order copy of the PO workbook and each order's work packet PDF filed in from the Work Packets folder), creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number |
 | 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info |
-| 922 FormingFinder | Discovers formed plate PDFs via filename, PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet |
-| 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; detects formed plates, merges all kit pages into a single PDF |
+| 922 Difficulty Stamper | Reads every part drawing in a batch and finds the ones marked DIFFICULT (parts with a compound cut), then stamps DIFFICULT in red on the front page of that order's work packet, so the difficulty is visible on the paperwork the floor works from instead of buried in the part prints. Once the packet is stamped, the blue label is removed from the part drawings it came from - the packet now carries the flag. Run it again after a part is changed and the stamp updates itself - orders that are no longer difficult have the stamp removed. Reports which parts made each order difficult, which orders aren't modeled yet, and any drawing it couldn't read |
+| 922 FormingFinder | Discovers formed plate AND formed flat bar PDFs via filename (the " F" suffix), PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet |
+| 922 Kitting | Formats and prints kitting paperwork for an entire 922 batch; checks every kit page for parts missing their source material before anything prints (stop and fix, or proceed anyway), tags formed parts (plates and flat bars) from the Bent Plates sheet, merges all kit pages into a single PDF |
 | 922 Batch Repeater | Copies repeat orders from prior 922 batches, distributes CAD prints + binders to matching orders, labels each repeat's Teams card REPEAT and moves it to MODEL CHECK - and keeps the 922 MPL up to date (writes the new batch's PO column and updates the MASTER PARTS catalog: how many times each part has been made, in which batches, and its alternate part names) |
 | 922 LST Organizer | Gathers a batch's tube .lst files into per-material folders and writes one color-coded PDF that reconciles the PO's tube count against what was actually pulled; files it can't confidently place go to a Needs Review folder |
 | 922 Runtime Genie | Scans CNC machine time PDFs, matches LST reference, outputs estimate with 40% buffer |

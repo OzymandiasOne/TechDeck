@@ -5,7 +5,7 @@ FIXED: Inline button styling for Run Selected button
 PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
-import sys
+import logging
 import time
 import random
 from pathlib import Path
@@ -38,6 +38,8 @@ from techdeck.core.update_checker import UpdateChecker
 from techdeck.core.flavor import TalkbackState, TechTipState, CompendiumState
 from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS, SOUND_ERROR
 from techdeck.ui.dialogs.update_dialog import UpdateDialog
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -107,7 +109,7 @@ class MainWindow(QMainWindow):
         "Herded all the data in",
         "Convinced the files in",
         "Rustled that paperwork in",
-        "PDF bothered and quit their jobs in"
+        "PDF bothered and quit their jobs in",
         "Hullaballooed for",
         "Did the thing in",
         "Knocked that out in",
@@ -158,11 +160,15 @@ class MainWindow(QMainWindow):
 
         # Startup profiling — mirrors the helper in __main__.py
         import time as _time
+        from techdeck.core.logging_setup import startup_logger, startup_profiling_enabled
         self._t0 = _time.perf_counter()
+        _startup_log = startup_logger()
+        _profile = startup_profiling_enabled()
 
         def _step(name: str):
-            ms = (_time.perf_counter() - self._t0) * 1000.0
-            print(f"[MainWindow +{ms:6.0f} ms] {name}", file=sys.stderr, flush=True)
+            if _profile:
+                ms = (_time.perf_counter() - self._t0) * 1000.0
+                _startup_log.info("[MainWindow +%6.0f ms] %s", ms, name)
 
         self._step = _step
 
@@ -229,12 +235,19 @@ class MainWindow(QMainWindow):
         )
         self.update_checker.set_update_callback(self._on_update_available)
         self.update_checker.set_mandatory_update_callback(self._on_mandatory_update)
+        # Log-only: a failed check (proxy, offline, GitHub Pages down) used to
+        # vanish entirely — now it at least leaves a line in app.log.
+        self.update_checker.set_error_callback(self._on_update_check_error)
         
         # Create main layout
         self._setup_ui()
         
         # Start update checker after UI is ready (delayed by 3 seconds)
         QTimer.singleShot(3000, self.update_checker.start)
+
+        # After a crash/freeze, offer a debug report once on the next start
+        # (well after the fade-in so startup feel is untouched).
+        QTimer.singleShot(4000, self._maybe_offer_debug_report)
 
         # Startup fade-in. Window opens at opacity 0 so it is invisible behind
         # the splash subprocess while warmup_pages() runs. __main__.py calls
@@ -410,6 +423,15 @@ class MainWindow(QMainWindow):
         self._step("account page built")
         QApplication.processEvents()
 
+        # Assistant page — the personal organizer (terminal + schedule + notes
+        # + tasks). Self-contained: it owns its own store under
+        # %LOCALAPPDATA%\TechDeck\assistant and shares nothing with the plugin
+        # console beyond the theme.
+        from techdeck.ui.pages.assistant_page import AssistantPage
+        self.assistant_page = AssistantPage(self.settings)
+        self._step("assistant page built")
+        QApplication.processEvents()
+
         # DevKit page — developer tools, source builds only. Only constructed
         # when running from source, so the source-only tools/devkit package is
         # never imported in a frozen exe.
@@ -427,6 +449,7 @@ class MainWindow(QMainWindow):
         self.page_stack.addWidget(self.library_page)  # 1: Library
         self.page_stack.addWidget(self.settings_page) # 2: Settings
         self.page_stack.addWidget(self.account_page)  # 3: Account
+        self.page_stack.addWidget(self.assistant_page)  # 4: Assistant
         if self.devkit_page is not None:
             self._devkit_page_index = self.page_stack.addWidget(self.devkit_page)
 
@@ -522,13 +545,20 @@ class MainWindow(QMainWindow):
             "home": 0,
             "library": 1,
             "settings": 2,
-            "account": 3
+            "account": 3,
+            "assistant": 4,
         }
         if self._devkit_page_index is not None:
             page_map["devkit"] = self._devkit_page_index
 
         index = page_map.get(page_id, 0)
         self.page_stack.setCurrentIndex(index)
+
+        # The Assistant's panels are edited from several places (terminal,
+        # wizard, tabs) — re-sync them on arrival so nothing is stale, and put
+        # the caret in the command line so it's typeable straight away.
+        if page_id == "assistant":
+            self.assistant_page.refresh()
 
         # NOTE: we used to call library_page.refresh() here on every Library
         # click, which rebuilt all 10 plugin cards from scratch and caused a
@@ -1008,38 +1038,84 @@ class MainWindow(QMainWindow):
 
     def _on_update_available(self, update_info):
         """Handle optional update notification (called from background thread)."""
-        print(f"[SHELL] _on_update_available called! Version: {update_info.version}", flush=True)
+        logger.info("Update available: %s - showing dialog", update_info.version)
         # Emit signal to show dialog on main thread
-        print("[SHELL] Emitting show_update_signal", flush=True)
         self.show_update_signal.emit(update_info, False)
-    
+
     def _on_mandatory_update(self, update_info):
         """Handle mandatory update notification (called from background thread)."""
-        print(f"[SHELL] _on_mandatory_update called! Version: {update_info.version}", flush=True)
+        logger.info("Mandatory update required: %s - showing dialog", update_info.version)
         # Emit signal to show dialog on main thread
-        print("[SHELL] Emitting show_update_signal (mandatory)", flush=True)
         self.show_update_signal.emit(update_info, True)
-    
+
+    def _on_update_check_error(self, error_msg: str):
+        """Update-check failure (called from background thread). Log only —
+        no UI: a user behind a blocked proxy shouldn't get nagged, but the
+        debug report needs the evidence."""
+        logger.warning("Update check failed: %s", error_msg)
+
     def _show_update_dialog_slot(self, update_info, mandatory):
         """Show update dialog (Qt slot - always runs on main GUI thread)."""
-        print(f"[SHELL] _show_update_dialog_slot called! Mandatory: {mandatory}", flush=True)
         dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
-        print("[SHELL] Calling dialog.exec()", flush=True)
         dialog.exec()
-        print("[SHELL] Dialog closed", flush=True)
     
+    def _maybe_offer_debug_report(self):
+        """If the PREVIOUS session ended dirty (killed / crashed / froze),
+        offer to generate a debug report right now — the report is excellent
+        but was buried behind Settings -> Help & Feedback, so crashes went
+        unreported unless someone coached the user there over Teams.
+
+        Self-limiting: the watchdog rotates the state file at every startup,
+        so one dirty exit produces exactly one offer. Dev runs are excluded —
+        killing `python -m techdeck` is routine, not a field crash."""
+        from techdeck.ui.dev_mode import is_dev_build
+        if is_dev_build():
+            return
+        from techdeck.core import hang_watchdog
+        from techdeck.core.debug_report import should_offer_debug_report
+        prev = hang_watchdog.previous_session()
+        if not should_offer_debug_report(prev):
+            return
+        logger.info("Previous session ended dirty - offering a debug report")
+        reply = QMessageBox.question(
+            self,
+            "TechDeck didn't close cleanly",
+            "It looks like TechDeck crashed or was shut down the hard way "
+            "last time.\n\nCreate a debug report now? It captures what the "
+            "app was doing when it stopped, saves to your Desktop, and can "
+            "be sent to a TechDeck admin.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Reuse the Settings page's generate-and-reveal flow (busy
+            # cursor, Explorer select, where-to-send message) — one home.
+            self.settings_page._generate_debug_report()
+
     def check_for_updates_manual(self):
         """Manually check for updates (called from Settings page)."""
         update_info = self.update_checker.check_now()
-        
+
         if update_info is None:
-            # No update available
-            QMessageBox.information(
-                self,
-                "No Updates",
-                f"You're running the latest version of TechDeck ({APP_VERSION}).",
-                QMessageBox.StandardButton.Ok
-            )
+            # None means EITHER "already latest" OR "the check failed" —
+            # last_error tells them apart. This used to report "latest
+            # version" on a dead network / blocked proxy.
+            error = self.update_checker.last_error
+            if error:
+                QMessageBox.warning(
+                    self,
+                    "Update Check Failed",
+                    f"Couldn't check for updates:\n{error}\n\n"
+                    "Check your network connection (or VPN) and try again.",
+                    QMessageBox.StandardButton.Ok
+                )
+            else:
+                QMessageBox.information(
+                    self,
+                    "No Updates",
+                    f"You're running the latest version of TechDeck ({APP_VERSION}).",
+                    QMessageBox.StandardButton.Ok
+                )
         # If update found, callbacks will handle showing the dialog
     
     def _center_on_primary_screen(self):

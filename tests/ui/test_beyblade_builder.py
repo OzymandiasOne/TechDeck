@@ -2,8 +2,8 @@
 
 
 class FakeSettings:
-    def __init__(self, owned=(), equipped=None):
-        self._owned, self._eq = set(owned), equipped
+    def __init__(self, owned=(), equipped=None, build=None):
+        self._owned, self._eq, self._build = set(owned), equipped, build
 
     def is_unlocked(self, item_id):
         return item_id in self._owned
@@ -13,6 +13,12 @@ class FakeSettings:
 
     def set_equipped_spinner(self, v):
         self._eq = v
+
+    def get_beyblade_build(self):
+        return self._build
+
+    def set_beyblade_build(self, v):
+        self._build = v
 
 
 def _builder(owned, equipped=None):
@@ -78,6 +84,70 @@ def test_builder_survives_owning_a_single_design(qapp):
     assert d.choice["top"] == "ironclad"
     d._equip()
     assert s.get_equipped_spinner() == "beyblade:ironclad/ironclad/ironclad"
+
+
+def test_equip_records_the_build_separately_from_the_equipped_slot(qapp):
+    """The My Stuff tile shows what they BUILT, so it must survive equipping
+    something else afterwards."""
+    d, s = _builder({"spinner_beyblade", "bey_tidewing"})
+    d._cycle("top", 1)
+    d._equip()
+    built = s.get_beyblade_build()
+    assert built and built.startswith("beyblade:")
+
+    s.set_equipped_spinner("spinner_classic")     # wear a plain spinner instead
+    assert s.get_beyblade_build() == built        # the build is still theirs
+
+
+# ---- the "Build Your Own" tile icon -----------------------------------------
+
+def _icon_source(settings):
+    """Which of the two the tile would draw, without needing a live widget."""
+    from techdeck.ui import beyblade as BB
+    build = settings.get_beyblade_build()
+    if not build:
+        eq = settings.get_equipped_spinner()
+        if eq and eq.startswith(BB.VARIANT_PREFIX):
+            build = eq
+    return "build" if build else "silhouette"
+
+
+def test_tile_shows_a_silhouette_until_something_is_built(qapp):
+    # Buying a beyblade auto-equips it under its CATALOG id - that is a
+    # purchase, not a build, so the tile must still show the placeholder.
+    s = FakeSettings({"spinner_beyblade"}, equipped="spinner_beyblade")
+    assert _icon_source(s) == "silhouette"
+
+
+def test_tile_shows_the_build_once_one_exists(qapp):
+    s = FakeSettings({"spinner_beyblade", "bey_tidewing"})
+    s.set_beyblade_build("beyblade:tidewing/classic/tidewing")
+    assert _icon_source(s) == "build"
+
+
+def test_a_build_made_before_it_was_recorded_still_shows(qapp):
+    """Migration: older saves kept the combo only in the equipped slot."""
+    s = FakeSettings({"spinner_beyblade"}, equipped="beyblade:classic/classic/classic")
+    assert _icon_source(s) == "build"
+
+
+def test_silhouette_keeps_the_internal_structure(qapp):
+    """A flat one-colour cut-out of a top-down beyblade is an anonymous blob -
+    every feature that identifies it is internal, so the shape must survive."""
+    from techdeck.ui import beyblade as BB
+    from techdeck.ui import pixel_art
+    composed = BB.compose(BB.DEFAULT)
+    sil = BB.silhouette("#6a6488")
+    assert sil is not None
+
+    def opaque(d):
+        return sum(1 for r in d["rows"] for ch in r
+                   if ch not in pixel_art.TRANSPARENT_CHARS)
+
+    assert opaque(sil) == opaque(composed)        # same silhouette
+    assert sil["rows"] == composed["rows"]        # same internal structure
+    assert len(set(sil["palette"].values())) > 1  # ...and it is not one flat blob
+    assert sil["symmetry"] == composed["symmetry"]
 
 
 def test_build_tile_only_shows_once_parts_are_owned(qapp):

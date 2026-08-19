@@ -2,11 +2,15 @@
 Update notification and download dialog.
 """
 
+import logging
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton,
     QProgressBar, QHBoxLayout, QMessageBox, QFrame, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer
+
+logger = logging.getLogger(__name__)
 
 
 class UpdateDialog(QDialog):
@@ -274,13 +278,12 @@ class UpdateDialog(QDialog):
 
     def _on_complete(self, installer_path):
         """Download complete - launch installer."""
-        print(f"[DIALOG] _on_complete called! Installer path: {installer_path}", flush=True)
+        logger.info("Download complete, launching installer: %s", installer_path)
         from techdeck.core.update_downloader import run_installer_and_exit
 
         self.status_label.setText("Download complete! Launching installer...")
         self.progress_bar.setValue(100)
 
-        print("[DIALOG] Setting up QTimer to launch installer in 1 second...", flush=True)
         # Give user a moment to see completion, then launch installer
         QTimer.singleShot(1000, lambda: run_installer_and_exit(installer_path))
 
@@ -290,12 +293,20 @@ class UpdateDialog(QDialog):
         QTimer.singleShot(0, lambda: self._update_error_ui(error_msg))
 
     def _update_error_ui(self, error_msg):
-        """Update UI to show error (must be called on main thread)."""
+        """Update UI to show error (must be called on main thread).
+
+        The Update button is RE-ENABLED as "Try Again" — it used to stay
+        disabled, so a dropped connection meant reopening the dialog to
+        retry, and on a MANDATORY update the only live button left was
+        "Quit TechDeck". _start_download already tears down and rebuilds
+        the downloader, so retrying is just clicking again."""
         self.status_label.setText(f"Download failed: {error_msg}")
         self.status_label.setStyleSheet(f"color: {self.theme.error}; font-size: 12px;")
         self.progress_bar.setVisible(False)
+        self.progress_bar.setValue(0)
 
-        self.update_btn.setEnabled(False)
+        self.update_btn.setEnabled(True)
+        self.update_btn.setText("Try Again")
 
         if hasattr(self, 'later_btn') and self.later_btn is not None:
             self.later_btn.setEnabled(True)
@@ -304,8 +315,12 @@ class UpdateDialog(QDialog):
             self.quit_btn.setEnabled(True)
 
     def _quit_app(self):
-        """Quit the application."""
+        """Quit the application (mandatory-update dialog's Quit button)."""
         import sys
+        # Deliberate exit that bypasses closeEvent - stamp it clean so the
+        # next start doesn't read it as a crash.
+        from techdeck.core import hang_watchdog
+        hang_watchdog.mark_clean_exit()
         sys.exit(0)
 
 

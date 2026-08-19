@@ -98,7 +98,7 @@ _DYPN_RE = re.compile(r"^[A-Z]{0,3}\d{4,}-\d{1,4}$", re.IGNORECASE)
 _BATCHNEST_LABEL_RE = re.compile(r"^BATCH\s*/?\s*NEST$", re.IGNORECASE)
 _PART_LABEL_RE = re.compile(r"^PART\s*#?$", re.IGNORECASE)
 # Nest shape = the Hard-Rule-3 nest regex (numeric or alphanumeric-with-digit).
-_NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+_NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 # How far into a sheet we look for the summary labels / the DYPN. The summary
 # block sits in the top rows; generous bounds keep a moved block findable
@@ -307,9 +307,8 @@ def _choose_process(params, log) -> bool:
     greyed out so users can see where the track is headed. Returns True to
     proceed, False on cancel. Headless (no console) boards straight away."""
     console = params.get("console")
-    if console is None or not hasattr(console, "request_selection"):
-        return True
-    picks = console.request_selection(
+    picks = sdk.request_selection(
+        params,
         [STEP_RUN_SHEET, STEP_CONSOLIDATE],
         None,
         window_title="911 Baked Beans Wild Ride",
@@ -322,6 +321,8 @@ def _choose_process(params, log) -> bool:
         disabled_items={STEP_RUN_SHEET},
         disabled_label="coming soon",
     )
+    # A cancel is already flagged by the SDK, so the executor reports
+    # CANCELLED rather than paying out for a ride nobody took.
     if picks is None or STEP_CONSOLIDATE not in picks:
         log("Nobody boarded the ride.")
         return False

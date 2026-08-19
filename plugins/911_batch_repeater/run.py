@@ -59,7 +59,7 @@ MPL_FILENAME = "911 MASTER PARTS LIST.xlsx"
 
 # Nest-number-shaped folder names (Hard Rule 3) — filters out support folders
 # like NEST PACKAGES / DTSV FILES / WPDD SKETCHES in the batch folder.
-_NEST_RE = re.compile(r"^(?:[PS]?\d{3,}|(?=[A-Z0-9]*\d)[A-Z0-9]{4,8})$", re.IGNORECASE)
+_NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 
 
 # ---------------------------------------------------------------------------

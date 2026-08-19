@@ -604,7 +604,8 @@ def _choose_steps(params, work_folder: Path, batch_root: Path, batch: str,
         labels = [STEP_LABELS[i] for i in (1, 2, 3)]
         done = {STEP_LABELS[i]
                 for i in _detect_done_steps(work_folder, batch_root, batch)}
-        selection = console.request_selection(
+        selection = sdk.request_selection(
+            params,
             labels,
             done,
             window_title=f"902 DXF Prep - Batch {batch}",
@@ -619,8 +620,7 @@ def _choose_steps(params, work_folder: Path, batch_root: Path, batch: str,
         )
         if selection is None:
             log("Process selection cancelled - nothing was run.")
-            cancel_event.set()  # user cancel: not a successful (ticket-earning) run
-            return None
+            return None   # sdk.request_selection already flagged the cancel
         return sorted(int(label[0]) for label in selection)
 
     raw = sdk.request_text(

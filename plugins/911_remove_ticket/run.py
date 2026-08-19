@@ -257,16 +257,19 @@ def _load_difficulty_map(params, log):
         ws = wb[DIFFICULTY_SHEET]
         # Scan for the header row, never assume row 1 (Hard Rule 2); the SDK
         # returns (row_index, {UPPERCASE HEADER: col}).
-        hdr_row, hdr = sdk.find_header_row(ws, [_COL_BATCH_NEST, _COL_RATING])
+        # prefix_ok: the rating header grew to 'RATING/PC COUNT' and an
+        # exact match silently found nothing (2026-08-11).
+        hdr_row, hdr = sdk.find_header_row(
+            ws, [_COL_BATCH_NEST, _COL_RATING], prefix_ok=True)
         if not hdr_row:
             return {}, (f"{path.name} has no row containing both "
                         f"'{_COL_BATCH_NEST}' and '{_COL_RATING}' on the "
                         f"'{DIFFICULTY_SHEET}' sheet, so no difficulty labels "
                         f"were stamped.")
-        c_dept = hdr.get(_COL_DEPT)
-        c_key = hdr.get(_COL_BATCH_NEST)
-        c_rate = hdr.get(_COL_RATING)
-        c_stat = hdr.get(_COL_STATUS)
+        c_dept = sdk.header_col(hdr, _COL_DEPT)
+        c_key = sdk.header_col(hdr, _COL_BATCH_NEST)
+        c_rate = sdk.header_col(hdr, _COL_RATING)
+        c_stat = sdk.header_col(hdr, _COL_STATUS)
         theme_rgbs = _theme_rgbs(wb)
 
         out = {}
@@ -485,7 +488,9 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         doc.delete_pages(sorted(remove_pages))
         warnings.extend(_stamp_first_page(doc[0], batch, pdf_path.stem, material,
                                           log, difficulty))
-        doc.save(str(output_path), garbage=3, deflate=True)
+        # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
+        # from pdf_path, not output_path, and the finally below closes it.
+        sdk.save_pdf_atomic(doc, output_path, close=False)
 
         removed = len(remove_pages)
         kept = total - removed
@@ -496,7 +501,10 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         log(f"  ERROR processing {pdf_path.name}: {e}")
         return False, warnings
     finally:
-        doc.close()
+        try:
+            doc.close()
+        except ValueError:
+            pass  # already closed (save_pdf_atomic closes when source == dest)
 
 
 def _detect_batch(pdf_dir: Path) -> str:

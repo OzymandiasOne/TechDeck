@@ -28,6 +28,23 @@ if ($versionLine) {
     exit 1
 }
 
+# Version cross-check: TechDeck-Setup.iss hardcodes its own copy of the
+# version. A stale .iss used to compile an old-named installer while the
+# build still reported success. Fail fast instead.
+$issPath = "TechDeck-Setup.iss"
+$issLine = Get-Content $issPath | Select-String '#define MyAppVersion "(.*)"'
+if (-not $issLine) {
+    Write-Host "ERROR: Could not read MyAppVersion from $issPath" -ForegroundColor Red
+    exit 1
+}
+$issVersion = $issLine.Matches.Groups[1].Value
+if ($issVersion -ne $version) {
+    Write-Host "ERROR: Version mismatch - constants.py says $version but $issPath says $issVersion" -ForegroundColor Red
+    Write-Host "Update the '#define MyAppVersion' line in $issPath to match." -ForegroundColor Red
+    exit 1
+}
+Write-Host "Installer script version matches: $issVersion" -ForegroundColor Green
+
 # Step 1: Clean previous builds
 Write-Host "`n[1/8] Cleaning previous builds..." -ForegroundColor Yellow
 if (Test-Path "build") { 
@@ -96,13 +113,18 @@ Write-Host "  [OK] Ship-readiness check passed" -ForegroundColor Green
 Write-Host "`n[5/8] Running PyInstaller..." -ForegroundColor Yellow
 Write-Host "  This may take 2-5 minutes..." -ForegroundColor Gray
 
-pyinstaller TechDeck.spec --clean 2>&1 | Out-Null
+# Full output goes to build\pyinstaller.log (build\ is gitignored) so a
+# failed build is diagnosable - Out-Null used to discard everything.
+if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+$pyiLog = "build\pyinstaller.log"
+pyinstaller TechDeck.spec --clean 2>&1 | Out-File -FilePath $pyiLog -Encoding utf8
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [FAIL] PyInstaller failed" -ForegroundColor Red
+    Write-Host "  [FAIL] PyInstaller failed - last 20 lines of $pyiLog :" -ForegroundColor Red
+    Get-Content $pyiLog -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
     exit 1
 }
-Write-Host "  [OK] PyInstaller completed successfully" -ForegroundColor Green
+Write-Host "  [OK] PyInstaller completed successfully (full output: $pyiLog)" -ForegroundColor Green
 
 # Step 6: Verify build output
 Write-Host "`n[6/8] Verifying build output..." -ForegroundColor Yellow
@@ -166,21 +188,27 @@ if (-not $SkipInstaller) {
         }
     }
     
+    # Every failure below exits 1. This step used to fall through to the
+    # summary and exit 0 with no installer - a false-green any automation
+    # (or a tired human) would read as a successful build.
     if ($iscc) {
-        & $iscc "TechDeck-Setup.iss" 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            $installerPath = "installer_output\TechDeck-$version-Setup.exe"
-            if (Test-Path $installerPath) {
-                $installerSize = [math]::Round((Get-Item $installerPath).Length / 1MB, 2)
-                Write-Host "  [OK] Installer created: $installerSize MB" -ForegroundColor Green
-            } else {
-                Write-Host "  [FAIL] Installer not found at expected path" -ForegroundColor Red
-            }
-        } else {
-            Write-Host "  [FAIL] Inno Setup compilation failed" -ForegroundColor Red
+        $isccLog = "build\iscc.log"
+        & $iscc "TechDeck-Setup.iss" 2>&1 | Out-File -FilePath $isccLog -Encoding utf8
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [FAIL] Inno Setup compilation failed - last 20 lines of $isccLog :" -ForegroundColor Red
+            Get-Content $isccLog -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            exit 1
         }
+        $installerPath = "installer_output\TechDeck-$version-Setup.exe"
+        if (-not (Test-Path $installerPath)) {
+            Write-Host "  [FAIL] Installer not found at $installerPath (full ISCC output: $isccLog)" -ForegroundColor Red
+            exit 1
+        }
+        $installerSize = [math]::Round((Get-Item $installerPath).Length / 1MB, 2)
+        Write-Host "  [OK] Installer created: $installerSize MB" -ForegroundColor Green
     } else {
-        Write-Host "  [WARN] Inno Setup not found - skipping installer" -ForegroundColor Yellow
+        Write-Host "  [FAIL] Inno Setup (ISCC.exe) not found - install it, or build with -SkipInstaller if you only need the exe" -ForegroundColor Red
+        exit 1
     }
 } else {
     Write-Host "`n[7/8] Skipping installer build" -ForegroundColor Gray

@@ -52,7 +52,7 @@ except ModuleNotFoundError:
 
 import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -555,49 +555,15 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     dry_run = bool(settings.get("dry_run", False))
     do_organize = bool(settings.get("organize_by_material", True))
 
-    # Batch input = pick the 'Batch NNN' folder itself. The SDK opens the
-    # Sentry Drone kill-cam picker when the drone is owned and armed for this
-    # app, otherwise a normal folder dialog. A cache hit from an earlier 922
-    # plugin in this multi-run skips the pick entirely; a fresh pick seeds
-    # that same family cache so later 922 stages never re-prompt (Hard Rule 10).
-    root = sdk.resolve_922_root((settings.get("base_path") or "").strip())
-    shared_state = params.get("shared_state")
-    cached = (shared_state or {}).get("922", {}).get("batch_number")
-    if cached:
-        batch_no = sdk.parse_922_batch(str(cached)) or str(cached)
-        log(f"Batch {batch_no} (shared from an earlier plugin)")
-        if not root or not root.is_dir():
-            raise sdk.UserFacingError(
-                "Could not locate '922 QTDR Production Packages'.",
-                "Make sure OneDrive is synced, or set Base Directory in "
-                "Settings > Apps > 922 LST Organizer, then run again.")
-        batch_path = sdk.find_922_batch_path(root, batch_no)
-        if not batch_path:
-            raise sdk.UserFacingError(
-                f"Batch {batch_no} not found under {root} (also checked "
-                "'1 - Completed').",
-                "Double-check that batch folder exists there, then run again.")
-    else:
-        start_dir = str(root) if (root and root.is_dir()) else ""
-        raw = sdk.request_directory(params, "Select the 922 batch folder", start_dir)
-        if cancel_event.is_set():
-            return
-        if not raw:
-            log("Folder selection cancelled - nothing was run.")
-            cancel_event.set()  # user cancel: not a ticket-earning run
-            return
-        batch_path = Path(raw)
-        batch_no = sdk.parse_922_batch(batch_path.name)
-        if not batch_path.is_dir() or not batch_no:
-            raise sdk.UserFacingError(
-                f"'{batch_path.name}' doesn't look like a 922 batch folder.",
-                "Run again and pick the batch's own folder (the one named "
-                "like 'Batch 483').")
-        # Seed the family batch cache immediately: the folder the user just
-        # picked IS this run's batch, so same-family plugins never re-prompt.
-        if shared_state is not None:
-            shared_state.setdefault("922", {})["batch_number"] = batch_no
-    log(f"Batch {batch_no}: {batch_path}")
+    # Batch input = pick the 'Batch NNN' folder itself, via the shared SDK
+    # helper this plugin's v3.2 flow was promoted into (Sentry Drone capable,
+    # family-cache aware: a cache hit from an earlier 922 plugin skips the
+    # pick; a fresh pick seeds that cache so later 922 stages never re-prompt
+    # — Hard Rule 10 preserved without a typed prompt).
+    picked = sdk.request_922_batch_folder(params, settings.get("base_path") or "")
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
     if dry_run:
         log("DRY RUN - no files will be copied or moved.")
 

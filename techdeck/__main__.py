@@ -10,11 +10,14 @@ in parallel.
 """
 
 import json
+import logging
 import os
 import sys
 import subprocess
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 # ── UTF-8 stdio ─────────────────────────────────────────────────────────────
@@ -29,16 +32,23 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
-# ── Startup timing (set TECHDECK_PROFILE_STARTUP=1 to enable verbose logs) ──
-_PROFILE_STARTUP = True
+# ── Startup timing ─────────────────────────────────────────────────────────
+# Step timings go to app.log via the root logger (and to stderr in dev runs).
+# ON by default so every field machine records real startup numbers; set
+# TECHDECK_PROFILE_STARTUP=0 to silence them. logging_setup imports only
+# stdlib + constants — no PySide6 — so this is safe pre-splash.
+from techdeck.core.logging_setup import (
+    setup_logging, install_excepthooks, startup_logger, startup_profiling_enabled,
+)
+
 _STARTUP_T0 = time.perf_counter()
 
 
 def _log_step(name: str):
-    if not _PROFILE_STARTUP:
+    if not startup_profiling_enabled():
         return
     elapsed_ms = (time.perf_counter() - _STARTUP_T0) * 1000.0
-    print(f"[startup +{elapsed_ms:6.0f} ms] {name}", file=sys.stderr, flush=True)
+    startup_logger().info("[startup +%6.0f ms] %s", elapsed_ms, name)
 
 
 # ── Asset paths ────────────────────────────────────────────────────────────
@@ -111,7 +121,7 @@ def _launch_splash() -> "subprocess.Popen | None":
             creationflags=creationflags,
         )
     except Exception as exc:
-        print(f"[splash] subprocess launch failed: {exc}", file=sys.stderr)
+        logger.warning("Splash subprocess launch failed: %s", exc)
         return None
 
 
@@ -153,6 +163,12 @@ def main():
     # Frozen-build splash-mode handler: must run before anything else.
     if _handle_frozen_splash_mode():
         return
+
+    # App log + crash hooks before anything can fail. The splash process
+    # never gets here (it exits inside the handler above), so only ONE
+    # process ever writes app.log.
+    setup_logging()
+    install_excepthooks()
 
     _log_step("main() entered")
 

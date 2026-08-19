@@ -762,22 +762,11 @@ def _dialog_groups() -> list:
 
 
 def _load_sibling(plugin_id: str, log):
-    """Import the installed sibling plugin's run.py as a uniquely named
-    module. Both dev and installed layouts keep every plugin in one flat
-    plugins dir, so the sibling is always next to this folder. Returns the
-    module, or None (logged) when it isn't installed / fails to import."""
-    import importlib.util
-    path = Path(__file__).resolve().parents[1] / plugin_id / "run.py"
-    if not path.is_file():
-        log(f"ERROR: sibling plugin '{plugin_id}' is not installed "
-            f"(missing {path}).")
-        return None
+    """Import the installed sibling plugin's run.py (sdk.load_sibling — one
+    home for the sibling-resolution dance). Returns the module, or None
+    (logged) when it isn't installed / fails to import."""
     try:
-        spec = importlib.util.spec_from_file_location(
-            f"techdeck_922_setup_stage_{plugin_id}", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return sdk.load_sibling(plugin_id, __file__)
     except Exception as exc:
         log(f"ERROR: could not load sibling plugin '{plugin_id}': {exc}")
         return None

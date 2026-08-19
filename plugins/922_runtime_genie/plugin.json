@@ -2,16 +2,16 @@
   "id": "922_runtime_genie",
   "name": "922 Runtime Genie",
   "description": "Scans 7000 folders in a 922 batch for CNC machine time, matches against LST files, and outputs a run time estimate with 40% buffer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
     "setup": [
-      "Sync the '922 QTDR Production Packages' folder and know the batch number.",
+      "Sync the '922 QTDR Production Packages' folder and know which 'Batch NNN' folder you're running.",
       "The batch's LST reference files go in the 'Batch {N} - Documentation' LST folder, and the CNC machine-time PDFs live in the orders' 7000 folders."
     ],
     "how_it_works": [
-      "Enter the batch number. The app scans the 7000 folders for CNC machine-time PDFs and matches them to the LST reference files.",
+      "Pick the batch's own 'Batch NNN' folder when the picker opens - no batch number typing. The app scans the 7000 folders for CNC machine-time PDFs and matches them to the LST reference files.",
       "It sums the machine times and adds a 40% buffer."
     ],
     "output": [
@@ -29,6 +29,15 @@
         "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

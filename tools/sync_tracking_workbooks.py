@@ -21,6 +21,7 @@ team and never uses in-house names.
 from __future__ import annotations
 
 import functools
+import re
 import shutil
 import sys
 from copy import copy
@@ -38,7 +39,27 @@ DOCS = Path(__file__).resolve().parents[2] / "Other Documents"
 VC = DOCS / "TechDeck Version Controller.xlsx"
 PI = DOCS / "TECH_PROCESS_IMPROVEMENT.xlsm"
 TODAY = date.today().strftime("%b %d, %Y").replace(" 0", " ")
-CURRENT_VERSION = "0.8.6.12"
+
+
+def _current_version() -> str:
+    """The app's version, read from its one source of truth.
+
+    This used to be a hardcoded literal here, which meant the release
+    checklist had a silent step nobody had written down: bump the app, then
+    remember to bump a copy in a tools script. On the v0.8.6.13 release it was
+    already stale — the workbook's OVERVIEW was stamped with the PREVIOUS
+    version on the same run that added the new VERSION HISTORY row, so the
+    management-facing sheet contradicted itself. Read it instead.
+    """
+    src = (Path(__file__).resolve().parents[1]
+           / "techdeck" / "core" / "constants.py").read_text(encoding="utf-8")
+    m = re.search(r'^APP_VERSION\s*=\s*["\']([^"\']+)["\']', src, re.M)
+    if not m:
+        raise SystemExit("Could not read APP_VERSION from constants.py")
+    return m.group(1)
+
+
+CURRENT_VERSION = _current_version()
 
 
 # --------------------------------------------------------------------- helpers

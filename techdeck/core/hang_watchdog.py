@@ -126,11 +126,11 @@ def _snapshot(main_window) -> dict:
         state["active_plugins"] = active
         now = time.time()
         state["silent_for_s"] = {
-            pid: round(now - executor.last_activity.get(pid, now), 1)
+            pid: round(now - (executor.get_last_activity(pid) or now), 1)
             for pid in active
         }
         state["run_elapsed_s"] = {
-            pid: round(now - executor.start_times.get(pid, now), 1)
+            pid: round(executor.get_execution_time(pid) or 0.0, 1)
             for pid in active
         }
     except Exception:

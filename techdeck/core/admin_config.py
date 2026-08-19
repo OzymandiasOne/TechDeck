@@ -7,10 +7,13 @@ User config is stored in LocalAppData (per-user, user-writable).
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class UserRole(Enum):
@@ -79,7 +82,7 @@ class AdminConfigManager:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self._config = json.load(f)
             except (json.JSONDecodeError, IOError, PermissionError) as e:
-                print(f"Warning: Could not load admin config: {e}")
+                logger.warning("Could not load admin config: %s", e)
                 self._config = self._get_defaults()
         else:
             self._config = self._get_defaults()
@@ -107,7 +110,7 @@ class AdminConfigManager:
             return True
             
         except (IOError, PermissionError) as e:
-            print(f"Error: Could not save admin config (requires admin): {e}")
+            logger.error("Could not save admin config (requires admin): %s", e)
             return False
     
     def _get_defaults(self) -> Dict[str, Any]:

@@ -39,13 +39,21 @@ class _Executor:
     # freeze at IMPORT time, and the seconds a loaded full-suite run spends
     # between import and this test inflate the measured silence (bit 2026-08-05:
     # 545.9 vs 540 ± 5 under -q while passing standalone).
+    # Mirrors PluginExecutor's accessor methods (the RunningPlugin registry
+    # replaced the old start_times/last_activity dicts).
     def __init__(self):
         now = time.time()
-        self.start_times = {"902_dxf_prep": now - 600}
-        self.last_activity = {"902_dxf_prep": now - 540}
+        self._started_at = now - 600
+        self._last_activity = now - 540
 
     def get_active_plugins(self):
         return ["902_dxf_prep"]
+
+    def get_execution_time(self, plugin_id):
+        return time.time() - self._started_at
+
+    def get_last_activity(self, plugin_id):
+        return self._last_activity
 
 
 class _Settings:

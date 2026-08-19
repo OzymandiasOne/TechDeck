@@ -77,6 +77,37 @@ def _default_spinner_icon(target=72):
         return None
 
 
+def _build_tile_icon(settings, target=72):
+    """Icon for the "Build Your Own" tile: the player's OWN build.
+
+    Before they have built anything the tile shows a one-colour silhouette of a
+    beyblade — it reads as "your build goes here" and, unlike the old themed
+    spinner thumbnail, never looks like a thing they already own.
+
+    Buying a beyblade auto-equips it under its CATALOG id, so the equipped slot
+    alone can't answer "have they built something?" — only a `beyblade:` variant
+    means the builder actually ran. That is why the stored build is checked
+    first; the equipped slot is consulted only as a migration path for players
+    who built one before the build was recorded separately.
+    """
+    from techdeck.ui import beyblade as _bb, pixel_art
+    try:
+        build = settings.get_beyblade_build()
+        if not build:
+            equipped = settings.get_equipped_spinner()
+            if equipped and equipped.startswith(_bb.VARIANT_PREFIX):
+                build = equipped
+        data = (_bb.compose(_bb.parse_variant(build)) if build
+                else _bb.silhouette(EMP["tile_dim"]))
+        if data is None:
+            return None
+        pm = pixel_art.render(data, scale=2)
+        return pm.scaled(target, target, Qt.AspectRatioMode.KeepAspectRatio,
+                         Qt.TransformationMode.FastTransformation)
+    except Exception:
+        return None
+
+
 class _HeaderBox(QWidget):
     """A full-width, opaque STICKY header. It paints the wall across its width (so
     it's invisible against the page wall) with the MY STUFF box on the left, and
@@ -129,10 +160,7 @@ class InventoryTile(QFrame):
         self.setFixedSize(self.SIZE, self.HEIGHT)
         self.setStyleSheet("InventoryTile { background: transparent; }")
 
-        if item["sprite"]:
-            self._icon = _load_pixmap(item["sprite"], 72)
-        else:
-            self._icon = _default_spinner_icon(72)
+        self._icon = self._load_icon()
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -190,6 +218,13 @@ class InventoryTile(QFrame):
         self.action_btn.setEnabled(enabled)
         self.action_btn.setStyleSheet(self._btn_qss(bg, edge))
 
+    def _load_icon(self):
+        if self.item["kind"] == "build":
+            return _build_tile_icon(self.page.settings, 72)
+        if self.item["sprite"]:
+            return _load_pixmap(self.item["sprite"], 72)
+        return _default_spinner_icon(72)
+
     def _is_equipped(self, s):
         k = self.item["kind"]
         if k == "spinner":
@@ -205,6 +240,11 @@ class InventoryTile(QFrame):
         if self.item["kind"] == "build":
             self.equipped = False
             self._set_btn("BUILD", EMP["owned"], "#b184e0", True)
+            # Re-read the icon: this tile shows the player's build, so it has to
+            # change the moment they finish building one.
+            self._icon = self._load_icon()
+            if self._icon is not None:
+                self.icon.setPixmap(self._icon)
         elif self.item["kind"] in ("spinner", "background"):
             self.equipped = self._is_equipped(s)
             if self.equipped:

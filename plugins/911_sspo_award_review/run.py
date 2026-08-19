@@ -102,7 +102,6 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -1894,7 +1893,9 @@ def add_static_pivots(out_path, plate_rows, nonplate_rows, log):
     """Fallback when Excel COM is unavailable: reopen the workbook with openpyxl
     and append a static nest -> Sum of Est Cut Hours summary (+ grand total) to
     each sheet, mirroring what the real PivotTable would have shown."""
-    wb = openpyxl.load_workbook(out_path)
+    # Resilient: the just-written workbook may already be open in Excel or
+    # syncing as cloud-only (Hard Rule 13).
+    wb = sdk.load_workbook_resilient(out_path, log=log)
     for sheet_name, rows in (("Plates", plate_rows), ("Non-Plates", nonplate_rows)):
         if sheet_name in wb.sheetnames:
             _write_static_summary(wb[sheet_name], rows)

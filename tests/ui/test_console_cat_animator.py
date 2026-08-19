@@ -584,7 +584,10 @@ def test_remove_history_line(qapp):
     assert not console.remove_history_line("unique needle")   # already gone
 
 
-def test_summon_link_retires_the_invitation(qapp, tmp_path):
+def test_summon_link_retires_the_invitation(qapp, tmp_path, monkeypatch):
+    # Lift the Halloween hold the sanctioned way — the summon link is gated
+    # (constants.puppet_master_enabled) and must do nothing while he's held.
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
     from techdeck.core.command_handler import CommandHandler
     from techdeck.core.settings import SettingsManager
     console = ConsoleWidget()

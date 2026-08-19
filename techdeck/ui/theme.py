@@ -5,10 +5,13 @@ Supports built-in and user-defined custom themes.
 """
 
 import json
+import logging
 import sys
 from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
 from typing import Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -346,7 +349,7 @@ def load_custom_themes(custom_dir: Path) -> None:
             name = path.stem.lower()
             THEMES[name] = palette_from_dict(data)
         except Exception as e:
-            print(f"[theme] Could not load custom theme {path.name}: {e}")
+            logger.warning("Could not load custom theme %s: %s", path.name, e)
 
 
 def save_custom_theme(name: str, palette: ColorPalette, custom_dir: Path) -> None:

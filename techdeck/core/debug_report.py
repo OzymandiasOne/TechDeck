@@ -36,12 +36,15 @@ blind at least once:
                         hand-carried delivery channel for usage data from
                         machines whose webhook sends have never gone through.
   Settings snapshot   - kits, sort modes, per-app directory overrides
-  Log tails           - plugin_runs.log (run history, tick-guard reports) +
-                        plugin_detail.log (every line a plugin printed, so a
-                        run that reported OK but logged a silent in-run warning
-                        is diagnosable — the 911-Setup blank-forecast class) +
-                        puppet_master_unmatched.log (questions the console cat
-                        deflected — the harvest list for growing his script,
+  Log tails           - app.log (everything outside plugin runs: startup step
+                        timings, updater outcomes, discovery errors, unhandled
+                        exception tracebacks) + plugin_runs.log (run history,
+                        tick-guard reports) + plugin_detail.log (every line a
+                        plugin printed, so a run that reported OK but logged a
+                        silent in-run warning is diagnosable — the 911-Setup
+                        blank-forecast class) + puppet_master_unmatched.log
+                        (questions the console cat deflected — the harvest
+                        list for growing his script,
                         assets/puppet_master/responses.txt)
   Live UI probe       - library/home grid geometry (the stacked-card class)
 
@@ -320,6 +323,18 @@ def _collect_logs() -> list[str]:
                          f"{datetime.fromtimestamp(f.stat().st_mtime):%Y-%m-%d %H:%M}")
         except OSError:
             pass
+    # app.log: everything outside plugin runs — startup step timings, update
+    # check/download outcomes, settings-save deferrals, plugin-discovery
+    # errors, and unhandled-exception tracebacks (sys/threading excepthooks).
+    app_log = log_dir / "app.log"
+    if app_log.is_file():
+        try:
+            tail = app_log.read_text(encoding="utf-8", errors="replace").splitlines()[-250:]
+            lines.append("")
+            lines.append(f"--- app.log (last {len(tail)} lines) ---")
+            lines.extend(tail)
+        except OSError as exc:
+            lines.append(f"app.log unreadable: {exc}")
     run_log = log_dir / "plugin_runs.log"
     if run_log.is_file():
         try:
@@ -354,6 +369,21 @@ def _collect_logs() -> list[str]:
         except OSError as exc:
             lines.append(f"puppet_master_unmatched.log unreadable: {exc}")
     return lines
+
+
+def should_offer_debug_report(prev_session) -> bool:
+    """True when the PREVIOUS session ended dirty — killed, crashed, or
+    frozen-then-restarted — so the shell should offer to generate a report
+    on this start. The offer is self-limiting: the state file rotates every
+    startup, so one dirty exit produces exactly one offer.
+
+    Only an explicit ``clean_exit: false`` counts. A missing file, a
+    malformed dict, or an old-format snapshot without the key must never
+    nag (and note: a successful auto-update marks its exit clean before
+    launching the installer, so updating is not a "crash")."""
+    if not isinstance(prev_session, dict):
+        return False
+    return prev_session.get("clean_exit") is False
 
 
 def _collect_previous_session() -> list[str]:

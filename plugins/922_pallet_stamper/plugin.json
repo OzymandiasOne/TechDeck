@@ -2,7 +2,7 @@
   "id": "922_pallet_stamper",
   "name": "922 Pallet Stamper",
   "description": "Stamp work-packet PDFs with PO batch number and pallet assignments. Failed stamps (e.g. OneDrive cloud errors) are retried after the main pass; anything still unstamped is listed with its pallet in a popup for manual stamping.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -12,7 +12,7 @@
       "Close the work-packet PDFs if they're open in a viewer, so they can be re-saved with the stamp."
     ],
     "how_it_works": [
-      "Enter the batch number. The app reads which order goes on which pallet from the organizer.",
+      "Pick the batch's own 'Batch NNN' folder when the picker opens - no batch number typing. The app reads which order goes on which pallet from the organizer.",
       "For each order folder it stamps the work-packet PDF's first page with 'Batch {n} Pallet {n}' in red, replacing any old stamp."
     ],
     "output": [
@@ -68,6 +68,15 @@
         "max": 10.0,
         "step": 0.5,
         "suffix": " in"
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

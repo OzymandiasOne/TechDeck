@@ -177,3 +177,63 @@ def test_visible_sheetnames_filters_hidden():
     hidden2.sheet_state = "veryHidden"
     wb.create_sheet("Notes")
     assert plugin_sdk.visible_sheetnames(wb) == ["PO- 4130", "Notes"]
+
+
+def test_nest_id_re_is_the_hard_rule_3_shape():
+    """The canonical nest-id pattern (single home since 2026-08-17; six
+    plugins alias it as their local _NEST_RE). Positive: legacy numeric,
+    P/S-prefixed, alphanumeric-with-digit. Negative: the junk that used to
+    leak in as nests."""
+    from techdeck.core.plugin_sdk import NEST_ID_RE, is_nest_id
+    for good in ("503633", "P08229", "S045123", "5CDAVW", "9FANDR", "GX030"):
+        assert NEST_ID_RE.match(good), good
+        assert is_nest_id(f"  {good}  "), good
+    for junk in ("TOTALS", "NEST PACKAGES", "", "12", "ABCDEFGH", "WPDD"):
+        assert not is_nest_id(junk), junk
+
+
+def test_plugin_nest_regexes_are_aliases_not_copies():
+    """The pattern was revised once (the alphanumeric branch) and the fix
+    had to land in six files. Guard the dedup: no plugin may re-compile a
+    pattern containing the nest shape's tell ([PS]?\d{3,})."""
+    from pathlib import Path
+    plugins = Path(__file__).resolve().parents[2] / "plugins"
+    offenders = []
+    for py in plugins.rglob("*.py"):
+        for i, line in enumerate(
+                py.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            # Only actual pattern strings count - a comment DESCRIBING the
+            # shape is fine (batch_auditor documents it in prose).
+            if "[PS]?" in line and ("re.compile" in line
+                                    or 'r"' in line or "r'" in line):
+                offenders.append(f"{py.relative_to(plugins.parent)}:{i}")
+    assert offenders == [], (
+        "re-typed Hard Rule 3 nest regex (alias sdk.NEST_ID_RE instead): "
+        + ", ".join(offenders))
+
+
+def test_load_sibling_resolves_beside_the_anchor(tmp_path):
+    """Sibling plugins always sit in one flat dir beside the caller, in every
+    layout - the anchor (the caller's __file__) is what makes the resolution
+    layout-proof."""
+    from techdeck.core.plugin_sdk import load_sibling
+    plugins = tmp_path / "plugins"
+    (plugins / "911_setup").mkdir(parents=True)
+    sibling = plugins / "911_remove_ticket"
+    sibling.mkdir()
+    (sibling / "run.py").write_text("MAGIC = 'stamp helpers'\n",
+                                    encoding="utf-8")
+
+    mod = load_sibling("911_remove_ticket",
+                       anchor=str(plugins / "911_setup" / "run.py"))
+    assert mod.MAGIC == "stamp helpers"
+
+
+def test_load_sibling_missing_is_user_facing(tmp_path):
+    import pytest
+    from techdeck.core.plugin_sdk import UserFacingError, load_sibling
+    plugins = tmp_path / "plugins"
+    (plugins / "911_setup").mkdir(parents=True)
+    with pytest.raises(UserFacingError):
+        load_sibling("not_installed_app",
+                     anchor=str(plugins / "911_setup" / "run.py"))

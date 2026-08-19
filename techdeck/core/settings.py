@@ -5,6 +5,7 @@ Manages profiles, user data, app configuration, and plugin settings.
 """
 
 import json
+import logging
 import os
 import sys
 import threading
@@ -14,6 +15,8 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import tempfile
 import shutil
+
+logger = logging.getLogger(__name__)
 
 from techdeck.core.constants import (
     DEFAULT_PROFILE_NAME,
@@ -140,12 +143,12 @@ class SettingsManager:
                 self._validate_and_migrate()
                 return
             except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Could not load settings: {e}")
+                logger.warning("Could not load settings: %s", e)
                 # Corrupt live file — try the last-known-good backup before
                 # discarding the user's profile/tickets/unlocks.
                 if self._load_from_backup():
                     return
-                print("Creating new settings file.")
+                logger.warning("Creating new settings file.")
                 self._create_default_settings()
         else:
             # Live file absent. On an older build a crash between unlink and
@@ -166,9 +169,9 @@ class SettingsManager:
             with open(backup_path, 'r', encoding='utf-8') as f:
                 self.data = json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Settings backup also unreadable: {e}")
+            logger.error("Settings backup also unreadable: %s", e)
             return False
-        print(f"Recovered settings from backup: {backup_path}")
+        logger.warning("Recovered settings from backup: %s", backup_path)
         self._validate_and_migrate()
         return True
     
@@ -197,8 +200,8 @@ class SettingsManager:
                 except RuntimeError:
                     continue
             if payload is None:
-                print("Warning: settings save skipped (document busy); "
-                      "will persist on the next write")
+                logger.warning("Settings save skipped (document busy); "
+                               "will persist on the next write")
                 return
 
             try:
@@ -250,8 +253,8 @@ class SettingsManager:
                 # Defer rather than raise: a raise here propagates into the
                 # plugin executor and flips a SUCCESSFUL run to ERROR. The
                 # in-memory document is intact and the next write retries.
-                print(f"Warning: settings save deferred ({e}); "
-                      "will retry on the next write")
+                logger.warning("Settings save deferred (%s); "
+                               "will retry on the next write", e)
     
     def _create_default_settings(self) -> None:
         """Create default settings structure."""
@@ -605,7 +608,37 @@ class SettingsManager:
         
         self.data["user"].update(kwargs)
         self.save()
-    
+
+    # ========== Profile picture ==========
+    # The image itself is a FILE beside settings.json, not base64 inside it:
+    # settings.json is rewritten in full on every change (tickets, tiles, a
+    # plugin setting), and carrying a quarter-megabyte of photo through every
+    # one of those writes is a cost paid forever for a picture that changes
+    # once. The UI owns the encoding; this only owns the location.
+
+    AVATAR_FILE_NAME = "avatar.png"
+
+    def avatar_path(self) -> Path:
+        """Where the user's profile picture lives, set or not."""
+        return self.settings_dir / self.AVATAR_FILE_NAME
+
+    def has_avatar(self) -> bool:
+        try:
+            return self.avatar_path().is_file()
+        except OSError:
+            return False
+
+    def clear_avatar(self) -> bool:
+        """Delete the picture, falling back to initials. True if one went."""
+        path = self.avatar_path()
+        try:
+            if path.is_file():
+                path.unlink()
+                return True
+        except OSError as exc:
+            logger.warning("Could not remove profile picture: %s", exc)
+        return False
+
     # ========== App Settings ==========
     
     def get_theme(self) -> str:
@@ -664,6 +697,32 @@ class SettingsManager:
 
     def set_feedback_feature_state(self, state: Dict[str, Any]) -> None:
         self.data["feedback_features"] = dict(state)
+        self.save()
+
+    # ---- Remembered master-toggle selections --------------------------------
+    # What each plugin's GroupedToggleDialog was last submitted with, keyed by
+    # a caller-chosen memory key (normally the plugin id). Lives at the top
+    # level of settings.json rather than under plugin_settings, so it can never
+    # collide with a plugin's own Settings > Apps fields.
+    #
+    # Kept here (not in the plugin folder) so it survives an app update: the
+    # installer replaces plugins/, but %LOCALAPPDATA%\TechDeck\settings.json is
+    # user data and is left alone. Asked for by A.T. 2026-08-07 -- Saco was
+    # re-unticking the same two toggles on every single 911 Setup run.
+
+    def get_toggle_memory(self, memory_key: str) -> Dict[str, Any]:
+        store = self.data.get("toggle_memory")
+        if not isinstance(store, dict):
+            return {}
+        remembered = store.get(memory_key)
+        return remembered if isinstance(remembered, dict) else {}
+
+    def set_toggle_memory(self, memory_key: str, state: Dict[str, Any]) -> None:
+        store = self.data.get("toggle_memory")
+        if not isinstance(store, dict):
+            store = {}
+        store[memory_key] = dict(state)
+        self.data["toggle_memory"] = store
         self.save()
 
     # ========== Plugin Settings ==========
@@ -923,6 +982,7 @@ class SettingsManager:
         s["unlocked_items"] = []
         s["equipped_spinner"] = None
         s["equipped_background"] = None
+        s["beyblade_build"] = None      # parts are re-locked; the build with them
         self.save()
 
     def get_equipped_spinner(self) -> Optional[str]:
@@ -931,6 +991,21 @@ class SettingsManager:
 
     def set_equipped_spinner(self, item_id: Optional[str]) -> None:
         self.data.setdefault("settings", {})["equipped_spinner"] = item_id
+        self.save()
+
+    def get_beyblade_build(self) -> Optional[str]:
+        """The last combination the player assembled in the beyblade builder.
+
+        Kept SEPARATE from `equipped_spinner` on purpose: the equipped slot is
+        whatever they are spinning right now, and equipping a plain spinner
+        would otherwise erase the fact that they ever built anything. This is
+        what the "Build Your Own" tile shows, so their build stays on the tile
+        regardless of what is currently equipped.
+        """
+        return self.data.get("settings", {}).get("beyblade_build")
+
+    def set_beyblade_build(self, variant: Optional[str]) -> None:
+        self.data.setdefault("settings", {})["beyblade_build"] = variant
         self.save()
 
     # The My House / Garden background wallpaper. Stored as the sprite FILENAME

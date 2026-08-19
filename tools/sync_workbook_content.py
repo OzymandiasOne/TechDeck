@@ -16,6 +16,15 @@ feature is simply described by what it DOES:
 
 # ---- Version Controller :: SYSTEM FEATURES  (name, what, value, status) -----
 SYSTEM_FEATURES = [
+    ("Scheduling Board Status Automation",
+     "The shared planning schedule's status column is advanced by the platform "
+     "as each job progresses -- off the card queue once its Teams card is "
+     "posted, off the setup queue once its batch is set up -- instead of being "
+     "retyped by hand.",
+     "Removes a manual bookkeeping step that planning previously repeated for "
+     "every job, and keeps the board an accurate picture of what is actually "
+     "waiting rather than what someone last remembered to update.",
+     "Active"),
     ("Recognition & Rewards Economy",
      "Activity credits accrue as operators run automation tools and submit "
      "feedback, and are redeemed in an in-app rewards catalog.",
@@ -110,6 +119,13 @@ ENGINEERING = [
      "unregistered modules or malformed configuration.",
      "A tool that would fail on an operator machine cannot be released.",
      "Enforced on every build; covers every deployed tool."),
+    ("Aug 2026", "Shared PDF Write Reliability", "Quality",
+     "Corrected a fault in the shared routine tools use to rewrite a PDF in "
+     "place: the file was being swapped while still held open, which failed on "
+     "Windows and could leave a partial temporary file next to the original.",
+     "Prevents a class of failure where a document is left unwritten and a "
+     "stray temporary file could be mistaken for the real paperwork.",
+     "Shared component; available to every tool that writes a PDF."),
     ("Jul 2026", "Continuous Integration", "Testing",
      "The full test suite now runs automatically on every code change, not "
      "only ahead of a release.",
@@ -189,6 +205,47 @@ ENGINEERING = [
      "regression test asserting every name fits its label.",
      "Thirteen items had been displaying truncated names to operators.",
      "Shared text renderer; all catalog surfaces."),
+    ("Aug 2026", "Always-On Diagnostics Log", "Quality",
+     "Every part of the platform now writes to one rotating diagnostic log, "
+     "including the classes of failure that previously vanished without a "
+     "trace: update-check problems, tools that fail to load, and unhandled "
+     "errors outside a tool run. Startup timings are recorded on every "
+     "machine, and an automated check prevents new code from writing "
+     "diagnostics anywhere the shipped application cannot capture.",
+     "A colleague-reported problem can be diagnosed from their machine's own "
+     "log instead of guesswork over a call, and failures that used to be "
+     "invisible now leave evidence. After an abnormal shutdown, the next "
+     "start offers to create the diagnostic report on the spot, so crashes "
+     "get reported without anyone having to find the buried menu option.",
+     "Platform-wide; included in the one-click debug report."),
+    ("Aug 2026", "Run Engine Consolidation", "Quality",
+     "Merged the tool-execution engine's two near-duplicate code paths into "
+     "one and brought window-based tools under the same run tracking as "
+     "background tools - closing a gap where the application could be closed "
+     "mid-run without warning, a cancelled run could be scored as a success, "
+     "and a double-click could start the same tool twice.",
+     "Reliability fixes now land once and apply to every kind of tool, and "
+     "an operator cannot lose work by closing the app during a run.",
+     "Platform-wide; execution engine test coverage grown from 3 to 20 tests."),
+    ("Aug 2026", "Build Pipeline Hardening", "Quality",
+     "The packaging script can no longer report success when part of the "
+     "build failed: a failed installer step now stops the pipeline, the "
+     "packaging tools' output is captured for diagnosis instead of "
+     "discarded, and the release version is cross-checked across every file "
+     "that declares it before anything is built.",
+     "A broken or mislabeled installer cannot be produced by a build that "
+     "claims to have succeeded.",
+     "Every build; version agreement also verified continuously by the test "
+     "suite."),
+    ("Aug 2026", "Point-and-Pick Batch Selection", "Usability",
+     "922-series tools now take their batch by picking the batch's folder "
+     "instead of typing a batch number: the number is read from the chosen "
+     "folder itself, and one pick is shared by every tool queued in the same "
+     "run.",
+     "Eliminates mistyped batch numbers - the easiest way to point a run at "
+     "the wrong batch - and reduces a full multi-tool batch run to a single "
+     "pick.",
+     "Six 922 tools on the shared routine; the standard for new 922 tools."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -209,6 +266,59 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "", "Feature",
+     "Flat bar forming moves in-house: the design automation system now marks "
+     "a formed flat bar's files the same way it marks formed plates, the "
+     "forming search gathers formed flat bars alongside formed plates by all "
+     "three of its methods, and kit paperwork tags those parts automatically - "
+     "no separate list-keeping for the new forming work. Kit paperwork "
+     "generation also gains an input check: any kit line whose part has no "
+     "source material recorded is flagged before anything prints, with the "
+     "choice to stop and fix the purchase-order data or knowingly proceed. "
+     "And the packet difficulty marking now finishes the job: once a work "
+     "packet carries the mark, the original marking is removed from the part "
+     "drawings it came from, so the flag lives on the paperwork the floor "
+     "works from - re-running still keeps packets honest in both directions.",
+     "922 FormingFinder, 922 Kitting, 922 Difficulty Stamper"),
+    ("Beta 0.8.7", "Aug 13, 2026", "Feature",
+     "Adds a personal planning workspace to the platform. Staff can capture "
+     "what is on their plate in plain language and have the day laid out as a "
+     "worked schedule: commitments with a date are placed first, the remainder "
+     "ordered by value returned against time spent, every estimate padded "
+     "against optimism, and meetings and breaks worked around. Anything that "
+     "will not fit in the available hours is reported with the reason rather "
+     "than silently dropped, which turns an over-committed day into a "
+     "conversation before it becomes a missed deadline. The finished plan "
+     "exports to Outlook, so reminders reach staff on any device, and the "
+     "platform also prompts locally before each block begins. A running notes "
+     "and task list sits alongside it. "
+     "A new packet-marking tool carries the engineering difficulty flag from "
+     "the CAD models through to the printed work packet, so a compound-cut "
+     "part is visible to the floor at the point of work instead of only in the "
+     "model. Re-running is safe in both directions: it will not mark a packet "
+     "twice, and a job whose parts are no longer flagged has its previous mark "
+     "removed. Parts whose drawings cannot be read are reported rather than "
+     "assumed clear. "
+     "Also: staff can set a profile picture, and a reliability defect that "
+     "could fail a document save when the file was still held open is fixed.",
+     "Released"),
+    ("Beta 0.8.6.13", "Aug 11, 2026", "Feature",
+     "Coordination-card creation for the 911 pipeline is now a standalone tool, "
+     "so cards can be raised without running a batch setup and a setup can be "
+     "re-run without re-raising cards - a change requested directly by the "
+     "planning group. Operators can now select which of the waiting jobs to "
+     "raise cards for rather than the whole queue. The shared planning "
+     "schedule's status column is maintained by the platform as work "
+     "progresses, removing a manual bookkeeping step and keeping the board an "
+     "accurate picture of what is actually waiting. Setup tools remember each "
+     "operator's chosen steps between sessions, so a site that skips a step "
+     "configures it once instead of every run. Two reliability defects fixed: "
+     "abandoning a tool at its first prompt was being recorded as a completed "
+     "run, and a renamed column heading on the planning schedule had silently "
+     "stopped difficulty ratings from reaching either the printed packets or "
+     "the coordination cards - column lookups now tolerate headings that gain "
+     "extra wording.",
+     "Released"),
     ("Beta 0.8.6.11", "Aug 5, 2026", "Feature",
      "Task-card creation for the 911 pipeline is now automated: setup reads the "
      "master schedule and raises one card per job awaiting modeling, carrying "
@@ -406,4 +516,57 @@ PI_NEW = [
      "ATTACHED, AND THE IN-APP UPDATER READS A SEPARATE PUBLISHED MANIFEST; "
      "UPDATING THE MANIFEST IS THE DELIBERATE GO-LIVE STEP, SO A BUILD CAN BE "
      "PUBLISHED AND VERIFIED BEFORE ANY OPERATOR IS OFFERED IT"),
+    ("SCHEDULING BOARD - AUTOMATIC STATUS ADVANCE", "COMPLETE",
+     "THE PLANNING SCHEDULE'S STATUS COLUMN NOW ADVANCES ITSELF AS WORK "
+     "COMPLETES - A JOB MOVES OFF THE CARD QUEUE WHEN ITS TEAMS CARD IS "
+     "POSTED AND OFF THE SETUP QUEUE WHEN ITS BATCH IS SET UP; ONLY JOBS THAT "
+     "GENUINELY REACHED THE NEXT STAGE MOVE, AND A SCHEDULE OPEN ON ANOTHER "
+     "MACHINE LISTS THE ROWS TO CHANGE BY HAND RATHER THAN BLOCKING THE RUN"),
+    ("IN-HOUSE FLAT BAR FORMING SUPPORT", "COMPLETE",
+     "FORMED FLAT BARS NOW FLOW THROUGH THE SAME AUTOMATED PIPELINE AS FORMED "
+     "PLATES: THE DESIGN AUTOMATION SYSTEM APPENDS THE FORMED FILENAME SUFFIX "
+     "TO A FLAT BAR WHEN ITS MATERIAL STATE IS SWITCHED TO FORMED, THE "
+     "FORMING SEARCH GATHERS THEM BY ALL THREE OF ITS METHODS, AND KIT "
+     "PAPERWORK TAGS THEM FORMED AUTOMATICALLY"),
+    ("KITTING SOURCE MATERIAL PRE-CHECK", "COMPLETE",
+     "EVERY KIT PAGE IS CHECKED BEFORE ANYTHING PRINTS; A LINE WITH A PART "
+     "BUT NO SOURCE MATERIAL HALTS THE RUN WITH THE LIST OF OFFENDERS AND "
+     "THE CHOICE TO FIX THE PURCHASE ORDER FIRST OR PROCEED ANYWAY"),
+    ("DIFFICULTY LABEL MOVES TO THE PACKET", "COMPLETE",
+     "ONCE A WORK PACKET IS STAMPED DIFFICULT, THE BLUE LABEL IS REMOVED "
+     "FROM THE PART DRAWINGS IT CAME FROM; A METADATA MARKER KEEPS RE-RUNS "
+     "HONEST, SO A STRIPPED DRAWING STILL READS AS DIFFICULT UNTIL THE PART "
+     "IS REGENERATED"),
+    ("PART DIFFICULTY CARRIED ONTO THE WORK PACKET", "COMPLETE",
+     "PARTS REQUIRING A COMPOUND CUT ARE MARKED DIFFICULT ON THEIR ENGINEERING "
+     "DRAWING BY THE DESIGN AUTOMATION SYSTEM; A NEW TOOL READS EVERY PART "
+     "DRAWING IN A BATCH AND STAMPS THAT MARKING ONTO THE FRONT PAGE OF THE "
+     "WORK PACKET THE SHOP FLOOR ACTUALLY WORKS FROM, SO DIFFICULTY IS VISIBLE "
+     "AT THE START OF THE JOB INSTEAD OF BURIED IN THE PART PRINTS; RE-RUNNING "
+     "AFTER A PART CHANGES UPDATES THE PACKET BOTH WAYS, ADDING THE MARKING OR "
+     "REMOVING IT"),
+    ("UNIFIED DIAGNOSTIC LOG + CRASH CAPTURE", "COMPLETE",
+     "ONE ROTATING APPLICATION LOG NOW CAPTURES EVERYTHING OUTSIDE TOOL RUNS "
+     "- UPDATER OUTCOMES, TOOLS THAT FAIL TO LOAD, UNHANDLED ERRORS, STARTUP "
+     "TIMINGS; 79 DIAGNOSTIC PRINTS THAT WERE SILENT IN THE SHIPPED BUILD "
+     "CONVERTED, AND AN AUTOMATED GUARD BLOCKS NEW ONES"),
+    ("DEV RUNS LOAD THE REPO TREE", "COMPLETE",
+     "THE COPY-EVERY-EDIT-TO-BOTH-LOCATIONS RULE IS RETIRED: A DEV RUN LOADS "
+     "TOOLS STRAIGHT FROM THE REPOSITORY, SO THE CODE JUST EDITED IS THE CODE "
+     "THAT RUNS; INSTALLED BUILDS ARE UNCHANGED"),
+    ("RUN ENGINE CONSOLIDATION", "COMPLETE",
+     "THE EXECUTION ENGINE'S TWO NEAR-DUPLICATE CODE PATHS MERGED INTO ONE "
+     "AND WINDOW-BASED TOOLS BROUGHT UNDER RUN TRACKING - CLOSE-WITHOUT-"
+     "WARNING, CANCELLED-RUN-SCORED-AS-SUCCESS AND DOUBLE-START ALL CLOSED; "
+     "ENGINE TEST COVERAGE GROWN FROM 3 TO 20 TESTS"),
+    ("BUILD SCRIPT HONESTY", "COMPLETE",
+     "A FAILED INSTALLER STEP NOW FAILS THE BUILD INSTEAD OF REPORTING "
+     "SUCCESS, PACKAGING TOOL OUTPUT IS CAPTURED FOR DIAGNOSIS INSTEAD OF "
+     "DISCARDED, AND THE RELEASE VERSION IS CROSS-CHECKED ACROSS EVERY FILE "
+     "THAT DECLARES IT"),
+    ("922 FOLDER-PICK BATCH ENTRY", "COMPLETE",
+     "FIVE MORE 922 TOOLS TAKE THEIR BATCH BY PICKING THE BATCH FOLDER "
+     "INSTEAD OF TYPING A NUMBER - THE NUMBER IS READ FROM THE FOLDER ITSELF "
+     "AND ONE PICK IS SHARED ACROSS A QUEUED RUN; ONE SHARED ROUTINE REPLACES "
+     "SIX HAND-COPIED PROMPT BLOCKS AND IS THE STANDARD FOR NEW 922 TOOLS"),
 ]

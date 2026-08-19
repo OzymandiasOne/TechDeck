@@ -3,8 +3,12 @@ TechDeck Plugin Window
 Base window class for plugins with built-in theming and lifecycle management
 """
 
+import logging
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from PySide6.QtCore import Qt
+
+logger = logging.getLogger(__name__)
 
 
 class PluginWindow(QWidget):
@@ -64,7 +68,8 @@ class PluginWindow(QWidget):
                 self.setStyleSheet(stylesheet)
         except Exception as e:
             # If theme manager not available, use basic styling
-            print(f"Could not apply theme: {e}")
+            logger.warning("Could not apply theme to plugin window %r: %s",
+                           self.plugin_id, e)
         
     def set_content(self, widget: QWidget):
         """

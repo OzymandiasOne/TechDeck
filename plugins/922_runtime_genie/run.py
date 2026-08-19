@@ -77,37 +77,18 @@ def _find_7000_folders(order_dir: Path) -> list[Path]:
 
 def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log = params.get('log', print)
-    console = params.get('console')
     settings = params.get('settings', {}) or {}
 
     log("Starting 922 Runtime Genie...")
     progress_callback(0)
 
-    # ── Batch number ───────────────────────────────────────────────────────────
-    raw = sdk.request_batch_number(
-        params, 'Enter batch number (e.g. "403", "Batch 403", "PO #403"):'
-    )
-
-    batch_no = sdk.parse_922_batch(raw or '')
-    if not batch_no:
-        raise ValueError(f"Unrecognised batch input: {raw!r}")
-    log(f"Batch: {batch_no}")
-
-    # ── Locate batch root ──────────────────────────────────────────────────────
-    root = sdk.resolve_922_root(settings.get('base_path', ''))
-    if not root:
-        raise RuntimeError(
-            "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
-            "is synced, or set the root in Settings > Apps > 922 Runtime Genie."
-        )
-
-    batch_path = sdk.find_922_batch_path(root, batch_no)
-    if not batch_path:
-        raise RuntimeError(
-            f"Batch {batch_no} not found under {root} "
-            "(also checked '1 - Completed'). Verify OneDrive is synced."
-        )
-    log(f"Batch path: {batch_path}")
+    # ── Batch input = pick the 'Batch NNN' folder ─────────────────────────────
+    # (Sentry Drone capable, family-cache aware — a queued 922 run prompts at
+    # most once.)
+    picked = sdk.request_922_batch_folder(params, settings.get('base_path', ''))
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled — the helper already flagged the run
+    batch_no, batch_path = picked
     progress_callback(5)
 
     # ── LST reference stems ────────────────────────────────────────────────────
