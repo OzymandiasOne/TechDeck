@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsPathItem, QGraphicsSimpleTextItem, QGraphicsItem,
     QSplitter, QFileDialog, QMessageBox, QGroupBox, QAbstractItemView,
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QStackedWidget,
-    QScrollArea
+    QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import (Qt, QEvent, QRect, QRectF, QTimer,
                             QItemSelectionModel)
@@ -1755,8 +1755,22 @@ class AnalysisWindow(PluginWindow):
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_thickness_page())
         self.stack.addWidget(container)
+        self.stack.currentChanged.connect(self._sync_stack_size_policy)
         self.stack.setCurrentIndex(1)
+        self._sync_stack_size_policy(1)
         self.set_content(self.stack)
+
+    def _sync_stack_size_policy(self, index):
+        """Only the CURRENT page feeds the window's size hints. Without this
+        QStackedWidget reports the max over ALL pages, so the little
+        thickness form could never open (or be shrunk) below the viewer's
+        minimum size."""
+        for i in range(self.stack.count()):
+            w = self.stack.widget(i)
+            if w is not None:
+                pol = (QSizePolicy.Preferred if i == index
+                       else QSizePolicy.Ignored)
+                w.setSizePolicy(pol, pol)
 
     def _build_thickness_page(self):
         page = QWidget()
@@ -1791,12 +1805,10 @@ class AnalysisWindow(PluginWindow):
         self.btn_thick_all.clicked.connect(self._apply_thickness_to_all)
         all_row.addWidget(self.btn_thick_all)
         layout.addWidget(self._thick_all_host)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        host = QWidget()
-        self._thick_form = QFormLayout(host)
-        scroll.setWidget(host)
-        layout.addWidget(scroll, 1)
+        # Cancel / Apply offsets sit ABOVE the per-file rows (right-aligned,
+        # so Apply offsets lines up under Apply to all) - on a long batch the
+        # old bottom placement left them stranded below a mostly-empty
+        # scroll area (user request 2026-08-19).
         btn_row = QHBoxLayout()
         self.btn_thick_continue = QPushButton("Apply offsets")
         self.btn_thick_continue.setEnabled(False)
@@ -1807,6 +1819,13 @@ class AnalysisWindow(PluginWindow):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(self.btn_thick_continue)
         layout.addLayout(btn_row)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        self._thick_form = QFormLayout(host)
+        scroll.setWidget(host)
+        layout.addWidget(scroll, 1)
+        self._thick_scroll = scroll   # _compact_to_entry_form sizes around it
         return page
 
     # ----- review flow (single or queued batch) -----------------------------
@@ -1825,9 +1844,33 @@ class AnalysisWindow(PluginWindow):
         if automated:
             self._populate_thickness_rows()
             self.stack.setCurrentIndex(0)
+            self._compact_to_entry_form()
         else:
             self.stack.setCurrentIndex(1)
             self._advance_queue()
+
+    def _compact_to_entry_form(self):
+        """Open the thickness page at the size of its own content - wide
+        enough for the form, tall enough that the window bottom hugs the
+        last file row (capped to the screen for huge batches) - instead of
+        the viewer's 1320x840. PluginWindow's 800x600 minimum would hold
+        ~140px of dead space under a short batch, so it's relaxed while the
+        form is up; _thickness_submit restores it with the viewer size."""
+        self._saved_min = self.minimumSize()
+        self.setMinimumSize(520, 320)
+        hint = self.sizeHint()   # the form page + window chrome only
+        # Swap the scroll area's token hint for what its rows actually need.
+        rows_h = self._thick_form.sizeHint().height()
+        height = max(320, hint.height() - self._thick_scroll.sizeHint().height()
+                     + rows_h + 24)
+        screen = self.screen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            height = min(height, int(avail.height() * 0.85))
+            width = min(hint.width(), int(avail.width() * 0.85))
+        else:
+            width = hint.width()
+        self.resize(width, height)
 
     def _populate_thickness_rows(self):
         while self._thick_form.rowCount():
@@ -1910,6 +1953,9 @@ class AnalysisWindow(PluginWindow):
                 return
             self._thicknesses[p] = t
         self.stack.setCurrentIndex(1)
+        if getattr(self, "_saved_min", None) is not None:
+            self.setMinimumSize(self._saved_min)  # PluginWindow's baseline
+        self.resize(1320, 840)  # back to the viewer's working size
         self.stack.currentWidget().setFocus()  # so Enter now reaches Save
         self._advance_queue()
 
