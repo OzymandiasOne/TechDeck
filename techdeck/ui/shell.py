@@ -889,11 +889,11 @@ class MainWindow(QMainWindow):
                 background-color: {theme.background};
             }}
             QSplitter::handle {{
-                background-color: {theme.divider};
+                background-color: {theme.splitter_handle or theme.divider};
                 height: 2px;
             }}
             QSplitter::handle:hover {{
-                background-color: {theme.border_strong};
+                background-color: {theme.splitter_handle_hover or theme.border_strong};
             }}
         """
         # Clear first + force polish so Qt actually repaints the handle.

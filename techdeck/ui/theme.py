@@ -75,6 +75,11 @@ class ColorPalette:
     # cards and page background need opposite text tones (halloween: light
     # text on the purple body, dark text on the orange cards).
     card_text: str = ""
+    # Splitter handle override (the console's resize edge) — empty falls
+    # back to divider / border_strong. Per-widget styled in shell.py, so a
+    # stylesheet override can't reach it; it needs a slot.
+    splitter_handle: str = ""
+    splitter_handle_hover: str = ""
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -373,6 +378,8 @@ QPushButton:hover {
         sidebar_text="#E8DCF5",
         sidebar_hover="#2E1745",
         card_text="#2A1503",       # carved-dark tile names on orange cards
+        splitter_handle="#000000",       # the console's resize edge: black
+        splitter_handle_hover="#241203",
         extra_stylesheet="""
 /* the resizable pane the console lives on: brighter purple */
 ConsoleWidget {

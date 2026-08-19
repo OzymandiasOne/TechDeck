@@ -8,6 +8,7 @@ def test_halloween_theme_is_registered_and_builtin():
     assert is_builtin_theme("halloween")
     assert THEMES["halloween"].background == "#1E0F2E"  # purple body
     assert THEMES["halloween"].card_text == "#2A1503"    # dark tile names
+    assert THEMES["halloween"].splitter_handle == "#000000"  # black resize edge
     assert THEMES["halloween"].surface == "#FF7A1A"      # tiles wear THE orange
     assert THEMES["halloween"].accent == "#4A1F7A"       # witching-purple buttons
     assert THEMES["halloween"].console_bg == "#12081C"   # dark-purple console
