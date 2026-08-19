@@ -403,19 +403,33 @@ QLineEdit:focus, QTextEdit:focus {
 QPushButton[class="primary"] {
     border: 1px solid #4A1F7A;
 }
-/* dark text re-asserted on ORANGE surfaces (global text is light for the
-   purple body): frame-hosted labels, combos, checkables, plain buttons */
-QFrame QLabel {
-    color: #2A1503;
-}
+/* dark text re-asserted on ORANGE-surfaced controls (global text is light
+   for the purple body). NEVER a broad frame/label rule here: pages'
+   scroll/stack contents are purple, and a blanket rule darkened their
+   headings into the void (Settings/Account, DevKit board columns). */
 QComboBox, QComboBox QAbstractItemView {
-    color: #2A1503;
-}
-QCheckBox, QRadioButton {
     color: #2A1503;
 }
 QPushButton {
     color: #2A1503;
+}
+/* multi-line inputs match the command line (the console's own QTextEdits
+   are per-widget styled and unaffected) */
+QTextEdit {
+    background-color: #C25708;
+    color: #2A1503;
+}
+/* the DevKit header band is an orange surface with bare labels/checkables */
+#devkitHeader QLabel, #devkitHeader QCheckBox {
+    color: #2A1503;
+}
+/* lists: the base QListWidget rule is silently beaten by the later QFrame
+   family rule in every theme (both same specificity, QFrame wins by order),
+   so lists actually paint SURFACE - unnoticeable in one-tone themes, a big
+   orange slab here. Re-assert the dark list look after the QFrame rule. */
+QListWidget {
+    background-color: #12081C;
+    color: #FFAF5E;
 }
 """,
     ),

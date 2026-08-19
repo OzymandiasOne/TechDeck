@@ -90,7 +90,7 @@ class SettingsPage(QWidget, ThemeAware):
             }}
             QTabBar::tab {{
                 background-color: {theme.surface};
-                color: {theme.text_secondary};
+                color: {theme.card_text or theme.text_secondary};
                 font-weight: bold;
                 padding: 7px 16px;
                 margin-right: 3px;

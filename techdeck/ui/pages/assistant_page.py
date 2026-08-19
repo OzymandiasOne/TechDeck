@@ -82,6 +82,13 @@ class AssistantPage(QWidget, ThemeAware):
 
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
+        # Paint our own QSS background (pages are background-colored via the
+        # QStackedWidget > QWidget rule). Without this the page is
+        # TRANSPARENT and shows the stack itself, which is QFrame-family and
+        # paints SURFACE — invisible in one-tone themes, but halloween's
+        # orange surface bled through the whole page (pixel-probed).
+        from PySide6.QtCore import Qt as _Qt
+        self.setAttribute(_Qt.WidgetAttribute.WA_StyledBackground, True)
         self.settings = settings
         self.store = AssistantStore()
         # Professional theme mutes the goblin, a client demo gets plain

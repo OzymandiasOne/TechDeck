@@ -281,7 +281,7 @@ class AccountPage(QWidget, ThemeAware):
             }}
             QTabBar::tab {{
                 background-color: {t.surface};
-                color: {t.text_secondary};
+                color: {t.card_text or t.text_secondary};
                 font-weight: bold;
                 padding: 8px 18px;
                 margin-right: 3px;
@@ -292,7 +292,7 @@ class AccountPage(QWidget, ThemeAware):
             }}
             QTabBar::tab:selected {{
                 background-color: {t.background};
-                color: {t.accent};
+                color: {t.text};
                 border-bottom: 3px solid {t.accent};
             }}
             QTabBar::tab:hover:!selected {{
