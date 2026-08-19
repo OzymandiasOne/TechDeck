@@ -1282,7 +1282,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         p = self.get_current_palette()
         btn.setStyleSheet(
             "QToolButton#dashCloseBtn { border: none; background: transparent;"
-            f" color: {p.text_secondary}; font-size: 16px; font-weight: bold;"
+            f" color: {p.card_text or p.text_secondary}; font-size: 16px; font-weight: bold;"
             " padding: 0; margin: 0 0 3px -7px; }"
             f"QToolButton#dashCloseBtn:hover {{ color: {p.text}; }}"
         )
@@ -1340,7 +1340,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         # fill so they still read as separate tabs.
         self.tab_bar.setStyleSheet(
             "QTabBar#consoleTabBar { background: transparent; }"
-            f"QTabBar#consoleTabBar::tab {{ background: {p.surface}; color: {p.text_secondary};"
+            f"QTabBar#consoleTabBar::tab {{ background: {p.surface}; color: {p.card_text or p.text_secondary};"
             " font-weight: bold; padding: 6px 14px; margin-right: 3px; border: none;"
             " border-top-left-radius: 8px; border-top-right-radius: 8px; }"
             f"QTabBar#consoleTabBar::tab:selected {{ background: {body_bg}; color: {p.console_text}; }}"

@@ -177,7 +177,7 @@ class HomePage(QWidget, ThemeAware):
         self.profile_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {theme.surface};
-                color: {theme.text};
+                color: {theme.card_text or theme.text};
                 border: 1px solid {theme.border};
                 border-radius: 8px;
                 padding: 6px 12px;

@@ -378,6 +378,13 @@ QPushButton:hover {
 ConsoleWidget {
     background-color: #3D2166;
 }
+/* the console's resize edge: black */
+QSplitter::handle {
+    background-color: #000000;
+}
+QSplitter::handle:hover {
+    background-color: #241203;
+}
 /* the command line wears the darker pumpkin */
 QLineEdit {
     background-color: #C25708;
