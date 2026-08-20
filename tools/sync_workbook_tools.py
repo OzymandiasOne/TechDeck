@@ -66,11 +66,12 @@ TOOL_SECTIONS = [
    "raises a blocking warning for anything it cannot place.",
    "Active", "0.8.6.6"),
   ("911 Inspection Dimensions",
-   "Reads the dimensions and weld preps off each part drawing in a nest "
-   "package and writes them out for the inspection sheets.",
+   "Reads the dimensions off each part drawing in a batch and fills them "
+   "onto that part's inspection sheet.",
    "Reads the drawings themselves on the machine -- no outside service -- and "
-   "lists each part's dimensions and weld preps, leaving out reference-only "
-   "figures and stock notes, and flagging any drawing it could not read.",
+   "types each part's dimensions into its inspection sheet, leaving out "
+   "reference-only figures and stock notes, never overwriting a sheet already "
+   "filled in by hand, and flagging any drawing it could not read.",
    "Pilot", "0.8.8"),
   ("911 Baked Beans Wild Ride",
    "Consolidates a folder of completed per-part pricing calculations into one "
