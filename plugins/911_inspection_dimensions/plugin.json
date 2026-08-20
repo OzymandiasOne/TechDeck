@@ -1,0 +1,51 @@
+{
+  "id": "911_inspection_dimensions",
+  "name": "911 Inspection Dimensions",
+  "description": "Reads every PART SKETCH drawing in a folder of nest PDFs and logs each part's dimensions to a text file",
+  "version": "0.1.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 3600,
+  "details": {
+    "setup": [
+      "Put the nest package PDFs you want read into one folder (the MOVE TICKET OMIT packets work as-is).",
+      "Nothing else to install - the drawing reader is built into TechDeck."
+    ],
+    "how_it_works": [
+      "Opens every PDF in the folder and finds the PART SKETCH pages.",
+      "Reads the drawing picture on each page and picks out every dimension on it - lengths, radii (R .40), diameters, angles, and snipe sizes like .50 X .50.",
+      "Any dimension marked REF is listed separately and is NOT counted as an inspection dimension.",
+      "Notes on the drawing (things like '0.375 THK MECHANICAL SQUARE STEEL TUBE') are listed as notes, not dimensions.",
+      "Extra view pages that follow a part sketch are read too and rolled into that part."
+    ],
+    "output": [
+      "One text file in the folder you picked, named '911 Inspection Dimensions - <folder> - <date>.txt'.",
+      "Each part gets its part number, work order, size and FAB DIM from the title block, then its dimension list.",
+      "Anything the reader was unsure about is flagged with CHECK so you can eyeball it against the drawing."
+    ]
+  },
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "Default PDF folder",
+        "description": "Folder the pick-a-folder dialog opens in. Leave blank to start wherever you were last.",
+        "placeholder": "C:\\Users\\...\\Downloads",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
+      }
+    ]
+  }
+}
