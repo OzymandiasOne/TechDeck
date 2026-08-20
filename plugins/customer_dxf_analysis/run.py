@@ -22,6 +22,7 @@ The DXF parsers are self-contained (stdlib only) so the frozen build needs no
 new hiddenimports. ASCII DXF only.
 """
 
+import datetime
 import math
 import os
 import re
@@ -520,9 +521,19 @@ DEFAULT_EDGE_OFFSET = 0.0625     # per side, inches
 DEFAULT_HOLES_LAYER = "HOLES"
 HOLES_LAYER_ACI = 1              # red
 
+# Every offset pass that changes geometry prepends a DXF comment (group 999)
+# starting with this, so a later run can prove the file was already offset.
+# One stamp per pass - a twice-offset file carries two.
+OFFSET_STAMP_PREFIX = "TECHDECK OFFSETS APPLIED"
+
 
 class LoopOffsetError(Exception):
     """A loop couldn't be offset safely - the file is skipped, not mangled."""
+
+
+class _SkipOffsets(Exception):
+    """Internal flow control: user declined re-offsetting an already-offset
+    file - the review shows it as-is."""
 
 
 # ---------------------------------------------------------------------------
@@ -1307,11 +1318,37 @@ def guideline_band(thickness):
     return band
 
 
-def measure_dxf(src):
+def _prior_offsets_from(parsed, holes_layer):
+    """Evidence this parsed DXF already went through an offset pass.
+
+    Returns a list of human-readable strings (empty = clean): the TechDeck
+    stamps when present (one per prior pass), else a single heuristic note
+    when geometry already sits on the holes layer - which is how outputs
+    from BEFORE the stamp existed (or a hand-offset file) look."""
+    stamps = [v for c, v in parsed["pairs"]
+              if c == 999 and v.startswith(OFFSET_STAMP_PREFIX)]
+    if stamps:
+        return stamps
+    target = (holes_layer or DEFAULT_HOLES_LAYER).strip().upper()
+    if any((e.get("layer") or "").upper() == target
+           for e in parsed["entities"]):
+        return [f'no TechDeck stamp, but geometry already sits on the '
+                f'"{holes_layer}" layer - a previous offset pass (an older '
+                "TechDeck, or by hand) likely produced this file"]
+    return []
+
+
+def detect_prior_offsets(src, holes_layer=DEFAULT_HOLES_LAYER):
+    """Has `src` already been offset? List of descriptions; empty = clean."""
+    return _prior_offsets_from(_parse(src), holes_layer)
+
+
+def measure_dxf(src, holes_layer=DEFAULT_HOLES_LAYER):
     """Read-only analysis for the Adjust Dimensions dialog.
 
     Returns {holes: [diameter...], cutouts, profiles, profile_size (w, h)
-    or None, insunits, warnings} in drawing units - nothing is written.
+    or None, insunits, warnings, prior_offsets} in drawing units - nothing
+    is written.
     """
     parsed = _parse(src)
     circles, loop_info, warnings = _classify(parsed)
@@ -1331,7 +1368,8 @@ def measure_dxf(src):
                 profile_size = (2.0 * c["r"], 2.0 * c["r"])
     return {"holes": holes, "cutouts": cutouts, "profiles": profiles,
             "profile_size": profile_size, "insunits": parsed["insunits"],
-            "warnings": warnings}
+            "warnings": warnings,
+            "prior_offsets": _prior_offsets_from(parsed, holes_layer)}
 
 
 def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
@@ -1483,6 +1521,17 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
         replace[handseed_patch[0]] = handseed_patch[1]
 
     out = []
+    if applied:
+        # Leave proof of the pass at the top of the file (DXF 999 comment;
+        # CAD readers ignore it) so a later run can warn instead of
+        # silently stacking another offset on top. One stamp per pass.
+        if thickness is not None:
+            detail = f'thickness={thickness:g}" band={stats["band"]}'
+        else:
+            detail = (f'manual hole diameters +{hole_increase:g}", '
+                      f'profile {edge_offset:g}"/side')
+        out += ["999", f"{OFFSET_STAMP_PREFIX} "
+                       f"{datetime.date.today().isoformat()} {detail}"]
     for ln_idx, ln in enumerate(parsed["lines"]):
         if ln_idx == insert_at and insert_lines:
             out.extend(insert_lines)
@@ -1990,15 +2039,24 @@ class AnalysisWindow(PluginWindow):
         show_path = orig_path
         stats = None
         fail_reason = None
+        skipped_prior = False
         if self._automated and thickness is not None:
             try:
                 sdk.ensure_local(orig_path, log=self._log)
+                holes_layer = (self._settings.get("holes_layer")
+                               or DEFAULT_HOLES_LAYER).strip()
+                prior = detect_prior_offsets(orig_path, holes_layer)
+                if prior and not self._confirm_reoffset(orig_path, prior):
+                    skipped_prior = True
+                    self._log(f"  {Path(orig_path).name}: already offset - "
+                              "shown as-is, nothing added.")
+                    for p in prior:
+                        self._log(f"    PRIOR PASS: {p}")
+                    raise _SkipOffsets()
                 fd, tmp = tempfile.mkstemp(suffix=".dxf", prefix="tdk_offset_")
                 os.close(fd)
                 stats = process_dxf(
-                    orig_path, tmp, 0.0, 0.0,
-                    (self._settings.get("holes_layer")
-                     or DEFAULT_HOLES_LAYER).strip(),
+                    orig_path, tmp, 0.0, 0.0, holes_layer,
                     self._log, thickness=thickness)
                 self._temp_path = tmp
                 show_path = tmp
@@ -2014,6 +2072,8 @@ class AnalysisWindow(PluginWindow):
                         f"{len(stats['failed'])} feature(s) could not be "
                         "offset and were left unchanged:\n\n- "
                         + "\n- ".join(stats["failed"]))
+            except _SkipOffsets:
+                pass
             except (LoopOffsetError, ValueError) as e:
                 fail_reason = str(e)
                 self._log(f"  OFFSETS FAILED for {Path(orig_path).name}: {e}")
@@ -2025,10 +2085,31 @@ class AnalysisWindow(PluginWindow):
         if self._offsets_applied:
             self._set_offsets_status("applied", stats=stats,
                                      thickness=thickness)
+        elif skipped_prior:
+            self._set_offsets_status("already")
         elif self._automated and thickness is not None:
             self._set_offsets_status("failed", reason=fail_reason)
         else:
             self._set_offsets_status("none")
+
+    def _confirm_reoffset(self, orig_path, prior):
+        """The already-offset guard. Default answer = DON'T stack another
+        pass (so the Enter-Enter batch flow can never compound offsets)."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Customer DXF Analysis")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(
+            f"{Path(orig_path).name} looks like it ALREADY has offsets "
+            "applied:\n\n- " + "\n- ".join(prior)
+            + "\n\nOffsetting it again STACKS on top - holes grow with "
+            "every pass. Apply offsets anyway?")
+        btn_again = box.addButton("Offset AGAIN",
+                                  QMessageBox.ButtonRole.DestructiveRole)
+        btn_skip = box.addButton("Show as-is (no new offsets)",
+                                 QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_skip)
+        box.exec()
+        return box.clickedButton() is btn_again
 
     def _set_offsets_status(self, state, stats=None, thickness=None,
                             reason=None):
@@ -2071,6 +2152,10 @@ class AnalysisWindow(PluginWindow):
                          .replace(">", "&gt;"))
                 text += (f" <span style='color:#9E9E9E;'>({short})</span>")
             self.lbl_offsets.setText(text)
+        elif state == "already":
+            self.lbl_offsets.setText(
+                "<span style='color:#FFB300;'>⏭ Already offset - shown "
+                "as-is, nothing added</span>")
         elif state == "done":
             self.lbl_offsets.setText(
                 "<span style='color:#43A047;'>✓ Batch review "
@@ -2510,7 +2595,9 @@ class AnalysisWindow(PluginWindow):
             return
         try:
             sdk.ensure_local(self._source_path, log=self._log)
-            info = measure_dxf(self._source_path)
+            info = measure_dxf(self._source_path,
+                               holes_layer=(self._settings.get("holes_layer")
+                                            or DEFAULT_HOLES_LAYER).strip())
         except Exception as e:
             QMessageBox.critical(self, "Customer DXF Analysis",
                                  f"Could not analyze this DXF:\n{e}")
@@ -2576,6 +2663,13 @@ class AdjustDimensionsDialog(QDialog):
         summary = QLabel("Detected: " + self._detected_text())
         summary.setWordWrap(True)
         layout.addWidget(summary)
+        if info.get("prior_offsets"):
+            warn = QLabel("⚠ This file already has offsets applied ("
+                          + "; ".join(info["prior_offsets"])
+                          + ") - writing again STACKS another pass on top.")
+            warn.setWordWrap(True)
+            warn.setStyleSheet("color: #E53935;")
+            layout.addWidget(warn)
         if info["insunits"] == 4:
             layout.addWidget(QLabel("Metric file (mm) - the inch values "
                                     "below are converted automatically."))

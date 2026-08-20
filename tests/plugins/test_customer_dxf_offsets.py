@@ -210,6 +210,74 @@ def test_all_capped_file_still_defines_the_holes_layer(dxa, tmp_path):
     assert "HOLES" in parsed["layer_names"]
 
 
+# --- already-offset guard (2026-08-19: parts came back up to 1/4" over
+# nominal - consistent with a batch being offset more than once; every
+# geometry-changing pass now stamps the file and later runs detect it) ----
+
+def test_offset_output_is_stamped_and_stacks_are_counted(dxa, tmp_path):
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(5, 5, 0.5)))
+    one = tmp_path / "one.dxf"
+    two = tmp_path / "two.dxf"
+    dxa.process_dxf(str(src), str(one), 0.0, 0.0, "HOLES",
+                    lambda *_: None, thickness=2.0)
+    prior = dxa.detect_prior_offsets(str(one))
+    assert len(prior) == 1
+    assert prior[0].startswith(dxa.OFFSET_STAMP_PREFIX)
+    assert "Venti" in prior[0]
+    # a second pass over the stamped file works AND leaves two stamps
+    dxa.process_dxf(str(one), str(two), 0.0, 0.0, "HOLES",
+                    lambda *_: None, thickness=2.0)
+    assert len(dxa.detect_prior_offsets(str(two))) == 2
+    parsed = dxa._parse(str(two))
+    circles = [e for e in parsed["entities"] if e["etype"] == "CIRCLE"]
+    assert circles[0]["r"] == pytest.approx(0.5 + 2 * 0.046875)
+
+
+def test_clean_file_is_not_flagged(dxa, tmp_path):
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(5, 5, 0.5)))
+    assert dxa.detect_prior_offsets(str(src)) == []
+
+
+def test_holes_layer_heuristic_catches_unstamped_outputs(dxa, tmp_path):
+    # How outputs from the pre-stamp versions look: no comment, but the
+    # hole geometry was moved to the HOLES layer.
+    circle = ["0", "CIRCLE", "8", "HOLES",
+              "10", "5", "20", "5", "40", "0.5"]
+    src = _write(tmp_path, "part.dxf", _dxf(_square_lines(0, 0, 10) + circle))
+    prior = dxa.detect_prior_offsets(str(src))
+    assert len(prior) == 1 and "HOLES" in prior[0]
+    # ...and the layer name is respected, not hardcoded
+    assert dxa.detect_prior_offsets(str(src), holes_layer="CUTOUTS") == []
+
+
+def test_stamp_survives_the_viewer_save_path(dxa, tmp_path):
+    # Save-over-original goes through export_with_layers on the offset
+    # temp; the stamp must ride along or the guard never sees saved files.
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(5, 5, 0.5)))
+    tmp = tmp_path / "tmp.dxf"
+    dxa.process_dxf(str(src), str(tmp), 0.0, 0.0, "HOLES",
+                    lambda *_: None, thickness=2.0)
+    entities, _colors, _skipped, _units = dxa.parse_dxf(str(tmp))
+    text, _enc = dxa.export_with_layers(str(tmp), entities)
+    assert dxa.OFFSET_STAMP_PREFIX in text
+    saved = tmp_path / "saved.dxf"
+    saved.write_text(text, encoding="utf-8", newline="")
+    assert len(dxa.detect_prior_offsets(str(saved))) == 1
+
+
+def test_measure_dxf_reports_prior_offsets(dxa, tmp_path):
+    src = _write(tmp_path, "part.dxf", _dxf(
+        _square_lines(0, 0, 10) + _circle(5, 5, 0.5)))
+    dest = tmp_path / "part OFFSET.dxf"
+    dxa.process_dxf(str(src), str(dest), 0.0, 0.0, "HOLES",
+                    lambda *_: None, thickness=2.0)
+    assert dxa.measure_dxf(str(src))["prior_offsets"] == []
+    assert len(dxa.measure_dxf(str(dest))["prior_offsets"]) == 1
+
+
 def test_two_x_thickness_cap_still_applies_to_polylines(dxa, tmp_path):
     # 2" opening on 0.5" plate measures past 2x thickness -> left unchanged.
     src = _write(tmp_path, "part.dxf", _dxf(
