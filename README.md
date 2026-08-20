@@ -1,4 +1,4 @@
-# TechDeck v0.8.7 - The Assistant
+# TechDeck v0.8.7.1 - Inspection Dimensions
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,82 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.1
+
+**911 Inspection Dimensions - a new app that fills your inspection sheets.** Point it at a
+batch and it reads every PART SKETCH drawing in the nest packages, pulls off each
+dimension, and types them onto that part's QF-QU-09 inspection tab - the same tab 911
+Setup created. The drawings are pictures with no real text in them, so the app reads them
+the way you do: by looking. All of that happens on your machine; nothing is sent anywhere.
+It also captures the weld preps - the KB codes on their leader lines, with the side each
+one applies to. REF dimensions and numbers inside drawing notes are excluded and listed
+separately so you can see what was skipped. A tab that already has numbers on it is never
+touched, so re-running is safe. TYP dimensions land last on the list, since the drawing
+prints them once but the feature repeats - copy the tail entries down as needed. This one
+is early and experimental: check its work while you get a feel for it.
+
+**922 Setup - Pallet Labeler stage.** If a batch got its Teams cards before the Pallet &
+Rod Organizer was filled in, those cards went out with no pallet labels - and re-running
+Setup would duplicate them, not label them. The new Pallet Labeler stage (off by default)
+fixes exactly that: it finds the existing cards and puts the right pallet labels on them.
+
+**922 apps - pick the batch folder.** No more typing batch numbers into 922 apps. You pick
+the `Batch NNN` folder instead, the number is read from the folder name, and a queued run
+of several 922 apps asks once, not once per app.
+
+**Formed flat bars.** Flat bars are now formed in-house, and the paperwork keeps up:
+FormingFinder gathers formed flat bar PDFs (`BAR F`) alongside formed plates, and Kitting
+tags those parts FORMED just like bent plates.
+
+**Kitting - catch missing source material before printing.** If any kit line has a part
+but no source material, Kitting now stops BEFORE anything prints and shows you the lines -
+fix and re-run, or proceed anyway with a warning.
+
+**Difficulty Stamper - the label moves, it doesn't multiply.** Once an order's work packet
+is stamped DIFFICULT, the blue label is stripped off the part drawing itself, so the
+paperwork the floor sees is the single source of the flag. Re-runs stay honest either way:
+no double stamps, and an order that's no longer difficult gets its old stamp removed.
+
+**Updates that fail can retry.** A failed update download now offers a retry instead of a
+dead end, and the manual "Check for updates" button reports what actually happened. Updates
+also exit the app cleanly now.
+
+**After a crash, TechDeck offers you a debug report.** If the app went down hard, the next
+start offers a one-click debug report you can send in - no more reconstructing what
+happened from memory.
+
+**Smaller fixes.** The Assistant gives a real answer to "what is this" instead of a shrug.
+App diagnostics now land in a rotating log file, so weird one-off problems are diagnosable
+after the fact.
+
+### Feedback Fixes
+
+*"Entering thicknesses one file at a time is tedious when a batch has a lot of parts."*
+The Customer DXF Analysis thickness page now has a "Same thickness for all files" box -
+type the value once, apply to all, done. Rows stay individually editable for the odd
+different plate, and the page itself was compacted with the buttons up top so long batches
+don't push them off screen.
+
+*"Holes and slots drawn as polylines aren't detected, so no offset is applied."* Correct,
+and fixed. Older DXF exports (R12-style, common in customer files) draw everything as
+old-style polylines, which the offset engine skipped entirely. It now reads and offsets
+them like everything else - including shapes "closed" by repeating the first point, and
+circles drawn as two-arc polylines. Verified against the reporting crew's own files.
+
+*"Offsets for 1.25-3 inch plate should be .094 but came up as .063."* The automated bands
+were right - the .063 came from the Adjust Dimensions dialog, which always prefilled the
+flat 1/16" default no matter the plate. The dialog now asks for plate thickness and
+prefills the correct guideline amount, and the applied amount shows on the toolbar so you
+can verify it at a glance.
+
+*"Parts showed as unable to offset, yet the DXFs measured up to 1/4 inch over nominal."*
+Two guards, one honest answer. Offset failures are now reported per feature, with reasons -
+the rest of the file still offsets, and the failed features are listed by name. And every
+offset pass now stamps the file, so offsetting a file that was already offset warns you
+first and defaults to NOT stacking another pass on top.
 
 ---
 

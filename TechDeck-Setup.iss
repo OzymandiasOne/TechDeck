@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.7 - New Assistant page: talk to Woogy, plan a time-blocked day, keep notes and tasks, get Windows reminders; new 922 Difficulty Stamper carries the DIFFICULT label onto work packets; set your own profile picture
+; Version 0.8.7.1 - New 911 Inspection Dimensions app (OCR the part sketches, fill the QF-QU-09 tabs); 922 Setup Pallet Labeler stage; 922 batch entry by folder pick; formed flat bars; Customer DXF Analysis v2.2.x feedback fixes
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7"
+#define MyAppVersion "0.8.7.1"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
