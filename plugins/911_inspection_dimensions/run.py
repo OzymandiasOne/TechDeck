@@ -12,6 +12,13 @@ read directly, which is where the part number / work order / FAB DIM come from.
 Two things the reader deliberately does NOT count as inspection dimensions:
   * anything labelled REF (reference only) - listed separately,
   * numbers that live inside a drawing NOTE ("0.375 THK MECHANICAL SQUARE STEEL TUBE").
+
+When the nest workbook is sitting next to the packet (the normal case in a batch
+folder), the dimensions are also typed onto that part's QF-QU-09 inspection tab -
+the one 911 Setup already copied out of the INSPECTION SHEET template. Only the
+colour-filled TARGET cells are written; MIN and MAX beside them are array formulas
+that derive themselves from the nominal, and a tab that already has numbers on it
+is never touched.
 """
 
 import os
@@ -29,7 +36,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -84,7 +91,10 @@ _TRANSLATE = {
 for _i, _ch in enumerate("０１２３４５６７８９"):
     _TRANSLATE[ord(_ch)] = str(_i)
 
-_EDGE_JUNK = re.compile(r"^[\s\-_=~|,'`\"]+|[\s\-_=~|,'`\"]+$")
+# Arrowheads and extension lines touching a dimension come back as leading/trailing
+# punctuation. Both a left arrow ("-.46") and a right one ("+.46") happen - missing the
+# "+" dropped a real .46 off H5370103-32.
+_EDGE_JUNK = re.compile(r"^[\s\-+_=~|,'`\"<>*]+|[\s\-+_=~|,'`\"<>*]+$")
 
 
 def _norm(text):
@@ -119,8 +129,10 @@ COMPOUND_RE = re.compile(r"^(%s)(?:X(%s))+$" % (_NUM, _NUM))
 COUNT_PREFIX_RE = re.compile(r"^\(?(\d{1,2})\)?X(.+)$")
 ANGLE_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*(?:°|DEG)$")
 FRACTION_RE = re.compile(r"^(\d+)-(\d+)/(\d+)$")
-# a chamfer callout: 1.00 X 45 deg
+# A chamfer callout, written either way round on these drawings:
+#   "1.00 X 45°" (land first) and "45° X .5" (angle first).
 CHAMFER_RE = re.compile(r"^(%s)X(\d+(?:\.\d+)?)(?:°|DEG)$" % _NUM)
+CHAMFER_REV_RE = re.compile(r"^(\d+(?:\.\d+)?)(?:°|DEG)X(%s)$" % _NUM)
 
 
 def classify(raw):
@@ -134,6 +146,9 @@ def classify(raw):
     cham = CHAMFER_RE.match(t)
     if cham:
         return "chamfer", "%s X %s deg" % (cham.group(1), cham.group(2)), mods
+    cham = CHAMFER_REV_RE.match(t)
+    if cham:
+        return "chamfer", "%s deg X %s" % (cham.group(1), cham.group(2)), mods
 
     ang = ANGLE_RE.match(t)
     if ang:
@@ -401,9 +416,48 @@ def _read_boxes(page, clip, log):
     return merged
 
 
+_X_TAIL_RE = re.compile(r"^X\s*(%s)$" % _NUM)
+
+
+def _join_split_chamfers(items):
+    """Stitch a chamfer the detector split into two boxes.
+
+    "45° X .5" often comes back as an angle box and a separate "X.5" box. Left
+    alone the angle loses its land and the "X.5" parses as nothing, so the whole
+    callout collapses to a bare 45 deg (bit H5370103-32).
+    """
+    out = []
+    used = set()
+    for i, it in enumerate(items):
+        if i in used:
+            continue
+        if not ANGLE_RE.match(it["word"].replace(" ", "")):
+            continue
+        x0, y0, x1, y1 = it["bb"]
+        h = max(1.0, y1 - y0)
+        for j, other in enumerate(items):
+            if j == i or j in used:
+                continue
+            m = _X_TAIL_RE.match(other["word"].replace(" ", ""))
+            if not m:
+                continue
+            ox0, oy0, ox1, oy1 = other["bb"]
+            yover = min(y1, oy1) - max(y0, oy0)
+            if yover > 0.4 * h and -0.2 * h <= (ox0 - x1) <= 2.0 * h:
+                merged = dict(it)
+                merged["raw"] = "%s X %s" % (it["word"], m.group(1))
+                merged["word"] = merged["raw"]
+                merged["bb"] = (min(x0, ox0), min(y0, oy0), max(x1, ox1), max(y1, oy1))
+                merged["score"] = min(it["score"], other["score"])
+                out.append(merged)
+                used.update((i, j))
+                break
+    return [it for k, it in enumerate(items) if k not in used] + out
+
+
 def read_drawing(page, clip, log):
     """Return (dimensions, notes, weld preps) for one drawing page."""
-    items = _read_boxes(page, clip, log)
+    items = _join_split_chamfers(_read_boxes(page, clip, log))
     welds = weld_preps(items)
     notes = _note_lines(items)
     in_note = {id(m) for n in notes for m in n["members"]}
@@ -468,6 +522,252 @@ def title_block(page):
             out["work_order"] = line
             break
     return out
+
+
+# ------------------------------------------------------- writing the nominals
+# QF-QU-09 grid. Ten two-row "Characteristic" slots down the sheet; each slot row
+# carries FIVE "Specification Requirement" groups across. Only the group's TARGET
+# cell is ours to fill - the template's own instruction (AV15) reads "Put Nominals
+# in Color-Filled Columns (Use degree sign to indicate angles)", and those
+# colour-filled cells are exactly these five columns. MIN and MAX next to each one
+# are array formulas that derive themselves from the nominal (+/- 0.1 linear from
+# the tolerance table at AV19:AY23, +/- 1 for degrees), so writing anything into
+# them would destroy the sheet's own arithmetic.
+SLOT_ROWS = tuple(range(16, 36, 2))
+VALUE_COLS = ("L", "S", "Z", "AG", "AN")
+MAX_NOMINALS = len(SLOT_ROWS) * len(VALUE_COLS)
+
+_PART_CELL = "A16"
+_NEST_WORKBOOK_GLOBS = ("911 BATCH*.xlsx", "911 PLATE BATCH*.xlsx")
+# Sheets that are never a per-part inspection tab.
+_NON_PART_SHEETS = {"NEST", "SCRIBE VERIFICATION", "COVER SHEET",
+                    "SOURCE MATERIAL INFO", "INSPECTION SHEET"}
+
+
+def _as_nominal(text):
+    """A dimension value as the sheet wants it: a number, or 'NN°' for an angle."""
+    t = str(text).strip()
+    if t.lower().endswith("deg"):
+        return t[:-3].strip() + "°"
+    try:
+        return float(t)
+    except ValueError:
+        return t
+
+
+def nominals_for(dims):
+    """Flatten one part's dimensions into the ordered values to type into the form.
+
+    Compound callouts become separate entries because that is how they are
+    inspected and how the sheets are filled by hand: a chamfer "45 deg X .5" is an
+    angle plus a land, and a snipe ".50 X .50" is two lengths.
+
+    TYP dimensions go LAST (the user's call). A TYP callout is printed once but the
+    feature repeats, and the drawing never says how many times - so the reader
+    cannot know the count. Putting them at the end of the run means the reviewer
+    can copy the final entries out as many times as the part actually needs,
+    without having to unpick them from the middle of the list.
+    """
+    plain, typ = [], []
+    for d in dims:
+        if d["ref"]:
+            continue
+        parts = [_as_nominal(p) for p in str(d["value"]).split(" X ")]
+        (typ if "TYP" in d["mods"] else plain).append(parts)
+    out = []
+    for group in plain + typ:
+        out.extend(group)
+    return out
+
+
+def sheet_nominals(ws):
+    """Every nominal already on an inspection tab (blank-stripped)."""
+    found = []
+    for row in SLOT_ROWS:
+        for col in VALUE_COLS:
+            v = ws["%s%d" % (col, row)].value
+            if v not in (None, ""):
+                found.append(v)
+    return found
+
+
+def write_nominals(ws, values):
+    """Lay values across the form's five groups, wrapping to the next slot row."""
+    written = 0
+    for index, value in enumerate(values[:MAX_NOMINALS]):
+        row = SLOT_ROWS[index // len(VALUE_COLS)]
+        col = VALUE_COLS[index % len(VALUE_COLS)]
+        ws["%s%d" % (col, row)] = value
+        written += 1
+    return written, max(0, len(values) - MAX_NOMINALS)
+
+
+def _tab_part_number(ws):
+    """The part a tab belongs to, from the part-number cell 911 Setup stamps."""
+    raw = ws[_PART_CELL].value
+    if not raw:
+        return ""
+    # the cell carries "<DYPN>\n<HULL>" (or the hull run on with spaces)
+    return str(raw).replace("\r", "\n").split("\n")[0].strip().split()[0].upper()
+
+
+def inspection_tabs(wb):
+    """Per-part inspection tabs, as {sheet name: part number}."""
+    tabs = {}
+    for name in wb.sheetnames:
+        if name.strip().upper() in _NON_PART_SHEETS:
+            continue
+        ws = wb[name]
+        if ws.sheet_state != "visible":
+            continue
+        part = _tab_part_number(ws)
+        if part:
+            tabs[name] = part
+    return tabs
+
+
+def find_nest_workbook(folder):
+    """The '911 BATCH <batch> <nest>.xlsx' in a nest folder, if there is one."""
+    for pattern in _NEST_WORKBOOK_GLOBS:
+        hits = [p for p in glob.glob(os.path.join(folder, pattern))
+                if not os.path.basename(p).startswith("~$")]
+        if hits:
+            return sorted(hits)[0]
+    return None
+
+
+def fill_nest_workbook(workbook_path, parts, log, dry_run=False):
+    """Write each part's nominals onto its inspection tab(s). Returns per-tab rows.
+
+    A tab that already carries nominals is left exactly as it is - those are
+    somebody's judgement calls and this reader has no business overwriting them.
+    """
+    results = []
+    wb = sdk.load_workbook_resilient(workbook_path, log=log)
+    try:
+        tabs = inspection_tabs(wb)
+        if not tabs:
+            return [{"tab": "-", "part": "-", "status": "no inspection tabs in this workbook"}]
+
+        by_part = {}
+        for rec in parts:
+            if rec.get("part") and not rec.get("problem"):
+                by_part.setdefault(rec["part"].upper(), rec)
+
+        touched = 0
+        for name, part in tabs.items():
+            ws = wb[name]
+            rec = by_part.get(part)
+            row = {"tab": name, "part": part, "written": 0, "status": ""}
+            if rec is None:
+                row["status"] = "no drawing read for this part"
+                results.append(row)
+                continue
+            existing = sheet_nominals(ws)
+            if existing:
+                row["status"] = ("already filled in (%d value(s)) - left alone"
+                                 % len(existing))
+                results.append(row)
+                continue
+            values = nominals_for(rec["dims"])
+            if not values:
+                row["status"] = "no dimensions found on the drawing"
+                results.append(row)
+                continue
+            written, dropped = write_nominals(ws, values)
+            touched += 1
+            row["written"] = written
+            row["values"] = values[:MAX_NOMINALS]
+            # echo it back onto the part record so the text report can show it
+            if not rec.get("filled"):
+                rec["filled"] = {"tab": name, "values": row["values"]}
+            row["status"] = "filled %d nominal(s)%s" % (
+                written, " - %d MORE THAN THE FORM HOLDS, not written" % dropped if dropped else "")
+            results.append(row)
+
+        if touched and not dry_run:
+            _save_workbook(wb, workbook_path, log)
+        elif touched:
+            log("   [dry run] %d tab(s) would be filled - nothing saved" % touched)
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
+    return results
+
+
+def _save_workbook(wb, dest, log):
+    """Save via a temp file then replace, so a failed write can't shred the original."""
+    import tempfile
+
+    handle, tmp = tempfile.mkstemp(suffix=".xlsx", prefix="techdeck_insp_",
+                                   dir=os.path.dirname(dest))
+    os.close(handle)
+    try:
+        wb.save(tmp)
+        wb.close()
+        os.replace(tmp, dest)
+        log("   saved %s" % os.path.basename(dest))
+    except PermissionError as exc:
+        raise sdk.locked_file_error(dest, exc)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+
+
+def _packet_pdf(folder):
+    """The nest package PDF in a folder - the MOVE TICKET OMIT copy if there is one."""
+    pdfs = [p for p in sorted(glob.glob(os.path.join(folder, "*.pdf")))
+            if not os.path.basename(p).startswith("~$")]
+    if not pdfs:
+        return None
+    omit = [p for p in pdfs if "MOVE TICKET OMIT" in os.path.basename(p).upper()]
+    return omit[0] if omit else None
+
+
+def discover_jobs(folder):
+    """Work out what the user picked and pair each packet PDF with its workbook.
+
+    Three shapes are all valid and are told apart by what is on disk, so the user
+    never has to say which one they meant:
+      * a BATCH folder  - nest folders one level down, each with a workbook,
+      * a single NEST folder,
+      * a plain folder of packet PDFs with no workbooks (read-only report).
+    """
+    jobs = []
+    seen = set()
+
+    def add(pdf, workbook):
+        key = os.path.normcase(os.path.abspath(pdf))
+        if key not in seen:
+            seen.add(key)
+            jobs.append({"pdf": pdf, "workbook": workbook,
+                         "nest": os.path.basename(os.path.dirname(pdf))})
+
+    # the picked folder itself as a nest folder
+    own = _packet_pdf(folder)
+    if own:
+        add(own, find_nest_workbook(folder))
+
+    # nest folders one level down
+    for entry in sorted(os.listdir(folder)):
+        sub = os.path.join(folder, entry)
+        if not os.path.isdir(sub):
+            continue
+        pdf = _packet_pdf(sub)
+        if pdf:
+            add(pdf, find_nest_workbook(sub))
+
+    # a plain folder of PDFs (no MOVE TICKET OMIT naming, no workbooks)
+    if not jobs:
+        for pdf in sorted(glob.glob(os.path.join(folder, "*.pdf"))):
+            if not os.path.basename(pdf).startswith("~$"):
+                add(pdf, None)
+    return jobs
 
 
 # ------------------------------------------------------------------------- report
@@ -535,7 +835,7 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
     return parts
 
 
-def build_report(folder, results, elapsed):
+def build_report(folder, results, fills, elapsed):
     """Render the whole run as the text file the user gets."""
     now = datetime.datetime.now()
     out = []
@@ -616,6 +916,9 @@ def build_report(folder, results, elapsed):
                     if weld["score"] < 0.55:
                         low_conf.append("%s - %s: weld prep %s"
                                         % (pdf_name, rec.get("part", "?"), weld["code"]))
+            if rec.get("filled"):
+                add("    -> written to inspection tab %s: %s"
+                    % (rec["filled"]["tab"], ", ".join(str(v) for v in rec["filled"]["values"])))
             if refs:
                 add("    Reference only (not inspected): %s"
                     % ", ".join(_fmt_dim(d).replace("   <-- CHECK (low confidence)", "") for d in refs))
@@ -625,6 +928,24 @@ def build_report(folder, results, elapsed):
                     add("      %s" % note)
         add("")
 
+    if fills:
+        add("=" * 78)
+        add("INSPECTION SHEETS FILLED IN")
+        add("=" * 78)
+        add("Nominals are written into the colour-filled TARGET cells only. Excel works")
+        add("out MIN and MAX from each one by itself, so those are left alone.")
+        add("A tab that already had numbers typed into it was NOT touched.")
+        add("")
+        add("TYP dimensions are written LAST in each part's run. The drawing prints them")
+        add("once but the feature repeats, and it never says how many times - so copy the")
+        add("last entries across as many times as the part actually needs.")
+        add("")
+        for book, path, rows in fills:
+            add("  %s" % book)
+            for row in rows:
+                add("    %-16s %-18s %s" % (row["tab"], row["part"], row["status"]))
+            add("")
+
     add("=" * 78)
     add("SUMMARY")
     add("=" * 78)
@@ -633,6 +954,7 @@ def build_report(folder, results, elapsed):
     add("Dimensions logged   : %d" % total_dims)
     add("Reference (skipped) : %d" % total_ref)
     add("Weld preps logged   : %d" % total_welds)
+    add("Sheet tabs filled   : %d" % sum(1 for _, _, rows in fills for r in rows if r.get("written")))
     add("Time                : %.0f seconds" % elapsed)
     if problems:
         add("")
@@ -664,15 +986,26 @@ def run(params, progress_callback, cancel_event):
         cancel_event.set()
         return
 
-    pdfs = sorted(glob.glob(os.path.join(folder, "*.pdf")))
-    pdfs = [p for p in pdfs if not os.path.basename(p).startswith("~$")]
-    if not pdfs:
-        raise sdk.UserFacingError(
-            "There are no PDF files in that folder.",
-            "Pick the folder that holds the nest package PDFs and run it again.",
-        )
+    dry_run = bool(settings.get("dry_run"))
+    if dry_run:
+        log("DRY RUN - the report is written but no workbook is changed.")
 
-    log("Reading %d PDF(s) from %s" % (len(pdfs), folder))
+    jobs = discover_jobs(folder)
+    if not jobs:
+        raise sdk.UserFacingError(
+            "There are no nest package PDFs in that folder.",
+            "Pick a batch folder (the one holding the nest folders), a single nest "
+            "folder, or a folder of nest package PDFs, then run it again.",
+        )
+    pdfs = [j["pdf"] for j in jobs]
+    fillable = [j for j in jobs if j["workbook"]]
+
+    log("Reading %d nest package(s) from %s" % (len(jobs), folder))
+    if fillable:
+        log("%d of them have a nest workbook - their inspection sheets will be filled in."
+            % len(fillable))
+    else:
+        log("No nest workbooks alongside them, so this run is a read-only report.")
     log("")
 
     # rough page budget so the bar moves sensibly across the whole run
@@ -696,12 +1029,14 @@ def run(params, progress_callback, cancel_event):
     started = time.time()
     results = []
     failed = []
-    for path in pdfs:
+    fills = []
+    for job in jobs:
         sdk.raise_if_cancelled(cancel_event)
+        path = job["pdf"]
         name = os.path.basename(path)
         log("%s" % name)
         try:
-            results.append((name, process_pdf(path, log, cancel_event, tick)))
+            parts = process_pdf(path, log, cancel_event, tick)
         except sdk.PluginCancelled:
             raise
         except sdk.UserFacingError:
@@ -710,18 +1045,43 @@ def run(params, progress_callback, cancel_event):
             log("   ! could not read this PDF: %s" % exc)
             failed.append("%s (%s)" % (name, exc))
             results.append((name, []))
+            continue
+        results.append((name, parts))
+
+        if not job["workbook"]:
+            continue
+        sdk.raise_if_cancelled(cancel_event)
+        book = os.path.basename(job["workbook"])
+        try:
+            rows = fill_nest_workbook(job["workbook"], parts, log, dry_run=dry_run)
+        except sdk.PluginCancelled:
+            raise
+        except sdk.UserFacingError as exc:
+            log("   ! %s" % exc)
+            failed.append("%s (%s)" % (book, exc))
+            continue
+        except Exception as exc:
+            log("   ! could not fill %s: %s" % (book, exc))
+            failed.append("%s (%s)" % (book, exc))
+            continue
+        fills.append((book, job["workbook"], rows))
+        for row in rows:
+            log("   %-14s %-18s %s" % (row["tab"], row["part"], row["status"]))
     elapsed = time.time() - started
 
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
     out_name = "911 Inspection Dimensions - %s - %s.txt" % (os.path.basename(folder.rstrip("\\/")), stamp)
     out_path = os.path.join(folder, out_name)
     with open(out_path, "w", encoding="utf-8") as handle:
-        handle.write(build_report(folder, results, elapsed))
+        handle.write(build_report(folder, results, fills, elapsed))
 
     parts = sum(len(p) for _, p in results)
     dims = sum(len([d for d in rec["dims"] if not d["ref"]]) for _, p in results for rec in p)
+    filled_tabs = sum(1 for _, _, rows in fills for r in rows if r.get("written"))
     log("")
     log("Read %d part(s), logged %d dimension(s) in %.0f seconds." % (parts, dims, elapsed))
+    if fills:
+        log("Filled %d inspection sheet tab(s) across %d workbook(s)." % (filled_tabs, len(fills)))
     log("Saved: %s" % out_path)
 
     if console is not None and hasattr(console, "append_link"):

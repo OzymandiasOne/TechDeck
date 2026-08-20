@@ -1,8 +1,8 @@
 {
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
-  "description": "Reads every PART SKETCH drawing in a folder of nest PDFs and logs each part's dimensions and weld preps to a text file",
-  "version": "0.2.0",
+  "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions onto its inspection sheet",
+  "version": "0.3.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -10,20 +10,22 @@
   "timeout": 3600,
   "details": {
     "setup": [
-      "Put the nest package PDFs you want read into one folder (the MOVE TICKET OMIT packets work as-is).",
+      "Set the batch up first (911 Setup) so each nest workbook already has its inspection sheet tabs.",
       "Nothing else to install - the drawing reader is built into TechDeck."
     ],
     "how_it_works": [
-      "Opens every PDF in the folder and finds the PART SKETCH pages.",
-      "Reads the drawing picture on each page and picks out every dimension on it - lengths, radii (R .40), diameters, angles, and snipe sizes like .50 X .50.",
-      "Picks up the weld preps too - any KB code called out on the drawing, with the side it applies to (NS = near side, FS = far side).",
-      "Any dimension marked REF is listed separately and is NOT counted as an inspection dimension.",
-      "Notes on the drawing (things like '0.375 THK MECHANICAL SQUARE STEEL TUBE') are listed as notes, not dimensions.",
-      "Extra view pages that follow a part sketch are read too and rolled into that part."
+      "Point it at a batch folder, one nest folder, or just a folder of nest package PDFs.",
+      "Finds the PART SKETCH pages and reads the drawing picture on each one.",
+      "Picks out every dimension - lengths, radii (R .40), diameters, angles, chamfers and snipes like .50 X .50.",
+      "Types those numbers into the matching part's inspection sheet tab, in the colour-filled TARGET boxes. Excel works out MIN and MAX from each one on its own.",
+      "TYP dimensions go in LAST. The drawing prints them once but the feature repeats and never says how many times, so copy the last ones across as many times as the part needs.",
+      "Anything marked REF is left out, and so are numbers that are part of a note on the drawing. Both are listed in the report so you can see them.",
+      "A tab that already has numbers typed in is never touched.",
+      "Weld preps (the KB codes) are read and reported, but not written onto the sheet yet."
     ],
     "output": [
-      "One text file in the folder you picked, named '911 Inspection Dimensions - <folder> - <date>.txt'.",
-      "Each part gets its part number, work order, size and FAB DIM from the title block, then its dimension list and its weld preps.",
+      "The inspection sheet tabs in each nest workbook, filled in and ready to review.",
+      "One text file in the folder you picked listing every part, its dimensions, its weld preps, and exactly what was written to which tab.",
       "Anything the reader was unsure about is flagged with CHECK so you can eyeball it against the drawing."
     ]
   },
@@ -32,11 +34,19 @@
       {
         "key": "base_path",
         "type": "directory",
-        "label": "Default PDF folder",
+        "label": "Default folder",
         "description": "Folder the pick-a-folder dialog opens in. Leave blank to start wherever you were last.",
         "placeholder": "C:\\Users\\...\\Downloads",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "dry_run",
+        "type": "boolean",
+        "label": "Dry run (don't change any workbook)",
+        "description": "Read the drawings and write the report, but leave every nest workbook untouched. Use it to see what would be filled in before letting it write.",
+        "required": false,
+        "default": false
       },
       {
         "key": "sentry_drone",
