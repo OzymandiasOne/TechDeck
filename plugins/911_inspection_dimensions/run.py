@@ -591,15 +591,60 @@ def sheet_nominals(ws):
     return found
 
 
+def writable_slots(ws):
+    """The nominal cells that can actually take a value, in fill order.
+
+    Not every sheet still has all fifty. On some tabs a whole group has been
+    merged into one free-text box (K18:P18 on V092 503838's -244 and -238), which
+    leaves its nominal cell a read-only MergedCell - assigning to it raises
+    "'MergedCell' object attribute 'value' is read-only". Skip those and carry on
+    into the next slot rather than writing into somebody's note.
+    """
+    from openpyxl.cell.cell import MergedCell
+
+    slots = []
+    for row in SLOT_ROWS:
+        for col in VALUE_COLS:
+            cell = ws["%s%d" % (col, row)]
+            if not isinstance(cell, MergedCell):
+                slots.append(cell)
+    return slots
+
+
+# The MIN cell that belongs to each group's nominal. Used only to check the group's
+# arithmetic is still live before trusting a nominal written into it.
+_MIN_COL = {"L": "N", "S": "U", "Z": "AB", "AG": "AI", "AN": "AP"}
+
+
+def _tolerance_is_live(ws, cell):
+    """False when this group's MIN has been hand-typed over its array formula.
+
+    Seen in the wild on V092 503838 '-244', where MIN/MAX were replaced with literal
+    '40°'/'50°'. Writing a nominal into such a group leaves a number sitting next to
+    somebody else's tolerance, which on a QA form is worse than not filling it - so
+    the caller flags it instead of letting it pass silently.
+    """
+    from openpyxl.worksheet.formula import ArrayFormula
+
+    col = _MIN_COL.get(cell.column_letter)
+    if not col:
+        return True
+    value = ws["%s%d" % (col, cell.row)].value
+    if isinstance(value, ArrayFormula):
+        return True
+    return isinstance(value, str) and value.startswith("=")
+
+
 def write_nominals(ws, values):
     """Lay values across the form's five groups, wrapping to the next slot row."""
-    written = 0
-    for index, value in enumerate(values[:MAX_NOMINALS]):
-        row = SLOT_ROWS[index // len(VALUE_COLS)]
-        col = VALUE_COLS[index % len(VALUE_COLS)]
-        ws["%s%d" % (col, row)] = value
+    slots = writable_slots(ws)
+    written, stale = 0, []
+    for cell, value in zip(slots, values):
+        cell.value = value
         written += 1
-    return written, max(0, len(values) - MAX_NOMINALS)
+        if not _tolerance_is_live(ws, cell):
+            stale.append(cell.coordinate)
+    return written, max(0, len(values) - len(slots)), stale
 
 
 def _tab_part_number(ws):
@@ -674,15 +719,19 @@ def fill_nest_workbook(workbook_path, parts, log, dry_run=False):
                 row["status"] = "no dimensions found on the drawing"
                 results.append(row)
                 continue
-            written, dropped = write_nominals(ws, values)
+            written, dropped, stale = write_nominals(ws, values)
             touched += 1
             row["written"] = written
             row["values"] = values[:MAX_NOMINALS]
             # echo it back onto the part record so the text report can show it
             if not rec.get("filled"):
                 rec["filled"] = {"tab": name, "values": row["values"]}
-            row["status"] = "filled %d nominal(s)%s" % (
-                written, " - %d MORE THAN THE FORM HOLDS, not written" % dropped if dropped else "")
+            row["stale"] = stale
+            row["status"] = "filled %d nominal(s)%s%s" % (
+                written,
+                " - %d did NOT fit on the form, write them in by hand" % dropped if dropped else "",
+                " - CHECK %s: min/max there was typed in by hand, so it will NOT follow the"
+                " new nominal" % ", ".join(stale) if stale else "")
             results.append(row)
 
         if touched and not dry_run:
