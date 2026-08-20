@@ -1,8 +1,8 @@
 """911 Inspection Dimensions.
 
 Reads the PART SKETCH pages out of a folder of 911 nest-package PDFs and logs every
-dimension printed on each drawing, so the numbers can be dropped onto an inspection
-sheet instead of being typed off the paper by hand.
+dimension printed on each drawing - plus the weld preps (the KB codes) - so they can
+be dropped onto an inspection sheet instead of being typed off the paper by hand.
 
 The drawings are RASTER images inside the PDF (there is no selectable text on them),
 so the dimensions come out of an on-device OCR pass (RapidOCR / ONNX Runtime - no
@@ -29,7 +29,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -101,6 +101,15 @@ MODIFIER_WORDS = {
     "SNIPE", "CUT", "NEAT", "PL", "PLCS", "PLC", "EA", "DEG", "BOTH", "SIDES",
     "NS", "FS", "AND", "OR", "TO", "OF",
 }
+
+# --- weld preps -------------------------------------------------------------
+# A weld prep is called out as a code starting "KB" on a leader line, usually with
+# the side it applies to on the line underneath ("KB114" / "NS & FS" = near side and
+# far side). Codes come back from OCR with the leader dash glued on ("-KB114") and
+# sometimes with the digits spaced out ("KB 1 1 4"), so match on the space-stripped
+# text after trimming leading punctuation.
+WELD_PREP_RE = re.compile(r"^KB[A-Z0-9]{1,6}$")
+SIDE_RE = re.compile(r"^(?:[NFB]S(?:&[NFB]S)?|BOTHSIDES?|NEARSIDE|FARSIDE)$")
 # Modifiers that ride along on the dimension itself.
 TRAILING_MODS = ("TYP", "REF", "THK", "MIN", "MAX", "NOM", "SNIPE")
 
@@ -194,6 +203,81 @@ def _near_label(item, items, label):
             if -0.2 * w <= gap <= 2.5 * h:
                 return True
     return False
+
+
+def _weld_code(word):
+    """Normalise one OCR token to a weld-prep code, or None."""
+    t = re.sub(r"^[^A-Z0-9]+", "", word).replace(" ", "")
+    if not t.startswith("KB"):
+        return None
+    # trim a side note that OCR glued onto the code ("KB114NS&FS")
+    m = re.match(r"^(KB[A-Z0-9]{1,6}?)((?:[NFB]S(?:&[NFB]S)?)?)$", t)
+    if not m:
+        return None
+    code = m.group(1)
+    if not WELD_PREP_RE.match(code) or not any(c.isdigit() for c in code):
+        return None
+    return code, _fmt_side(m.group(2))
+
+
+def _fmt_side(side):
+    """Put the spaces back into a side note the glue-strip ran together."""
+    return re.sub(r"\s+", " ", (side or "").replace("&", " & ")).strip()
+
+
+def weld_preps(items):
+    """Find the KB weld-prep callouts and the side each applies to.
+
+    Run over the RAW box list, independent of the note/dimension passes - a weld
+    prep is neither, and must not be lost to either one.
+    """
+    found = []
+    for it in items:
+        parsed = _weld_code(it["word"])
+        if not parsed:
+            continue
+        code, glued_side = parsed
+        side = glued_side
+        if not side:
+            side = _side_note(it, items)
+        found.append({"code": code, "side": side, "score": it["score"], "bb": it["bb"]})
+
+    # one callout can be detected twice (both OCR passes, slightly different boxes)
+    unique = []
+    for w in sorted(found, key=lambda d: (-len(d["side"]), -d["score"])):
+        cx, cy = (w["bb"][0] + w["bb"][2]) / 2.0, (w["bb"][1] + w["bb"][3]) / 2.0
+        h = max(1.0, w["bb"][3] - w["bb"][1])
+        if any(u["code"] == w["code"]
+               and abs(cx - (u["bb"][0] + u["bb"][2]) / 2.0) < 3 * h
+               and abs(cy - (u["bb"][1] + u["bb"][3]) / 2.0) < 3 * h
+               for u in unique):
+            continue
+        unique.append(w)
+    unique.sort(key=lambda d: (round(d["bb"][1] / 60.0), d["bb"][0]))
+    return unique
+
+
+def _side_note(item, items):
+    """The NS / FS / NS & FS label sitting under (or beside) a weld-prep code."""
+    x0, y0, x1, y1 = item["bb"]
+    h = max(1.0, y1 - y0)
+    best = ""
+    for other in items:
+        if other is item:
+            continue
+        flat = other["word"].replace(" ", "")
+        if not SIDE_RE.match(flat):
+            continue
+        ox0, oy0, ox1, oy1 = other["bb"]
+        xover = min(x1, ox1) - max(x0, ox0)
+        yover = min(y1, oy1) - max(y0, oy0)
+        close = (xover > 0.3 * min(x1 - x0, ox1 - ox0)
+                 and -0.2 * h <= max(oy0 - y1, y0 - oy1) <= 1.6 * h)
+        beside = (yover > 0.4 * min(h, oy1 - oy0)
+                  and -0.2 * h <= max(ox0 - x1, x0 - ox1) <= 2.5 * h)
+        if (close or beside) and len(other["word"]) > len(best):
+            best = other["word"]
+    return _fmt_side(best)
 
 
 def _note_lines(items):
@@ -318,8 +402,9 @@ def _read_boxes(page, clip, log):
 
 
 def read_drawing(page, clip, log):
-    """Return (dimensions, notes) for one drawing page."""
+    """Return (dimensions, notes, weld preps) for one drawing page."""
     items = _read_boxes(page, clip, log)
+    welds = weld_preps(items)
     notes = _note_lines(items)
     in_note = {id(m) for n in notes for m in n["members"]}
 
@@ -346,7 +431,7 @@ def read_drawing(page, clip, log):
             "bb": it["bb"],
         })
     dims.sort(key=lambda d: (round(d["bb"][1] / 60.0), d["bb"][0]))
-    return dims, [n["text"] for n in notes]
+    return dims, [n["text"] for n in notes], welds
 
 
 _FIELD_RE = {
@@ -413,7 +498,7 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
                 info = title_block(page)
                 record = dict(info)
                 record.update({"page": index + 1, "dims": [], "notes": [],
-                               "views": 0, "problem": ""})
+                               "welds": [], "views": 0, "problem": ""})
                 parts.append(record)
                 if clip is None:
                     record["problem"] = (
@@ -429,17 +514,22 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
             else:
                 continue
 
-            dims, notes = read_drawing(page, clip, log)
+            dims, notes, welds = read_drawing(page, clip, log)
             record["dims"].extend(dims)
             for note in notes:
                 if note not in record["notes"]:
                     record["notes"].append(note)
+            for weld in welds:
+                if not any(w["code"] == weld["code"] and w["side"] == weld["side"]
+                           for w in record["welds"]):
+                    record["welds"].append(weld)
             if progress:
                 progress()
             keep = len([d for d in dims if not d["ref"]])
-            log("   page %d  %-18s %d dimension(s)%s"
+            log("   page %d  %-18s %d dimension(s)%s%s"
                 % (index + 1, record.get("part", "?"), keep,
-                   ", %d REF" % (len(dims) - keep) if len(dims) - keep else ""))
+                   ", %d REF" % (len(dims) - keep) if len(dims) - keep else "",
+                   ", weld prep %s" % "/".join(w["code"] for w in welds) if welds else ""))
     finally:
         doc.close()
     return parts
@@ -456,13 +546,15 @@ def build_report(folder, results, elapsed):
     add("Run    : %s" % now.strftime("%Y-%m-%d %H:%M"))
     add("Reader : TechDeck 911 Inspection Dimensions v%s" % VERSION)
     add("")
-    add("Dimensions are read off the drawing picture, so CHECK them against the")
-    add("paperwork before they go on an inspection sheet. Anything the reader was")
-    add("unsure about is marked CHECK. Dimensions marked REF on the drawing are")
-    add("listed under 'Reference only' and are NOT inspection dimensions.")
+    add("Dimensions and weld preps are read off the drawing picture, so CHECK them")
+    add("against the paperwork before they go on an inspection sheet. Anything the")
+    add("reader was unsure about is marked CHECK. Dimensions marked REF on the")
+    add("drawing are listed under 'Reference only' and are NOT inspection")
+    add("dimensions. Weld preps are the KB codes called out on the drawing, with")
+    add("the side each one applies to (NS = near side, FS = far side).")
     add("")
 
-    total_parts = total_dims = total_ref = 0
+    total_parts = total_dims = total_ref = total_welds = 0
     problems = []
     low_conf = []
 
@@ -514,6 +606,16 @@ def build_report(folder, results, elapsed):
             else:
                 add("    DIMENSIONS (0)   ** nothing readable - check this drawing by hand **")
                 problems.append("%s - %s: no dimensions read" % (pdf_name, rec.get("part", "?")))
+            if rec["welds"]:
+                total_welds += len(rec["welds"])
+                add("    WELD PREPS (%d)" % len(rec["welds"]))
+                for weld in rec["welds"]:
+                    side = ("  %s" % weld["side"]) if weld["side"] else "  (no side marked)"
+                    flag = "   <-- CHECK (low confidence)" if weld["score"] < 0.55 else ""
+                    add("      - %s%s%s" % (weld["code"], side, flag))
+                    if weld["score"] < 0.55:
+                        low_conf.append("%s - %s: weld prep %s"
+                                        % (pdf_name, rec.get("part", "?"), weld["code"]))
             if refs:
                 add("    Reference only (not inspected): %s"
                     % ", ".join(_fmt_dim(d).replace("   <-- CHECK (low confidence)", "") for d in refs))
@@ -530,6 +632,7 @@ def build_report(folder, results, elapsed):
     add("Parts found         : %d" % total_parts)
     add("Dimensions logged   : %d" % total_dims)
     add("Reference (skipped) : %d" % total_ref)
+    add("Weld preps logged   : %d" % total_welds)
     add("Time                : %.0f seconds" % elapsed)
     if problems:
         add("")

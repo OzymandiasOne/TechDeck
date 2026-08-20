@@ -1,8 +1,8 @@
 {
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
-  "description": "Reads every PART SKETCH drawing in a folder of nest PDFs and logs each part's dimensions to a text file",
-  "version": "0.1.0",
+  "description": "Reads every PART SKETCH drawing in a folder of nest PDFs and logs each part's dimensions and weld preps to a text file",
+  "version": "0.2.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -16,13 +16,14 @@
     "how_it_works": [
       "Opens every PDF in the folder and finds the PART SKETCH pages.",
       "Reads the drawing picture on each page and picks out every dimension on it - lengths, radii (R .40), diameters, angles, and snipe sizes like .50 X .50.",
+      "Picks up the weld preps too - any KB code called out on the drawing, with the side it applies to (NS = near side, FS = far side).",
       "Any dimension marked REF is listed separately and is NOT counted as an inspection dimension.",
       "Notes on the drawing (things like '0.375 THK MECHANICAL SQUARE STEEL TUBE') are listed as notes, not dimensions.",
       "Extra view pages that follow a part sketch are read too and rolled into that part."
     ],
     "output": [
       "One text file in the folder you picked, named '911 Inspection Dimensions - <folder> - <date>.txt'.",
-      "Each part gets its part number, work order, size and FAB DIM from the title block, then its dimension list.",
+      "Each part gets its part number, work order, size and FAB DIM from the title block, then its dimension list and its weld preps.",
       "Anything the reader was unsure about is flagged with CHECK so you can eyeball it against the drawing."
     ]
   },
