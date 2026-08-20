@@ -2103,6 +2103,55 @@ def caution(d):             # 922 difficulty stamper
     _draw_grid(d, _CAUTION_GRID, _CAUTION_TONES)
 
 
+_INSPECTION_DIMS_GRID = [
+    "................................",
+    "................................",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwddddddaaaaaaaaaaaaaaaawwww..",
+    "..wwddddddaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwaaaaaaaaaaaaaaaawwww..",
+    "..wwwwddwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwddwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwddwwwwwwwwwwwwddwwwwww..",
+    "..wwwwwwddwwwwwwwwwwwwddwwwwww..",
+    "..wwwwddddddddddddddddddddwwww..",
+    "..wwwwddddddddddddddddddddwwww..",
+    "..wwwwwwddwwwwwwwwwwwwddwwwwww..",
+    "..wwwwwwddwwwwwwwwwwwwddwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+    "................................",
+]
+_INSPECTION_DIMS_TONES = {"d": "#064678", "a": "#b7b6b6", "w": "#e6e5e5"}
+
+def inspection_dims(d):    # 911 Inspection Dimensions
+    """A part on a drawing sheet, dimensioned on two axes.
+
+    Tournament, 2026-08-20: calipers were the obvious subject and lost outright -
+    a beam on two jaws reads as a sawhorse at 16x16, and the upright dial version
+    rendered as a robot (round head, two legs). A bare dimension line reads as a
+    DUMBBELL. What survived is letting the SHEET silhouette carry the read so the
+    dimension only has to be legible as a mark on it, and running the dimension as
+    one continuous stroke - two separate arrowheads on a sheet read as eyes.
+    """
+    _draw_grid(d, _INSPECTION_DIMS_GRID, _INSPECTION_DIMS_TONES)
+
+
 ICONS = {
     "clipboard": clipboard,
     "repeat": repeat,
@@ -2121,6 +2170,7 @@ ICONS = {
     "badge": badge,
     "qr": qr,
     "caution": caution,
+    "inspection_dims": inspection_dims,
 }
 # Icons8 symbols (themed like the plugin tiles; sym_-prefixed keys).
 ICONS.update({

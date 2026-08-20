@@ -57,6 +57,7 @@ PLUGIN_ICON_KEYS = {
     "902_dxf_prep":         "ruler",
     "911_baked_beans_wild_ride": "mr_beans",
     "sheet_metal_calculators": "calculator",
+    "911_inspection_dimensions": "inspection_dims",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
