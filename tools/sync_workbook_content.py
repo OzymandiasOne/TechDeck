@@ -325,7 +325,8 @@ VERSION_ROWS = [
      "assumed clear. "
      "Also: staff can set a profile picture, and a reliability defect that "
      "could fail a document save when the file was still held open is fixed.",
-     "Released"),
+     "Personal Planning Workspace (new), 922 Difficulty Stamper (new), "
+     "profile pictures, document-save reliability fix"),
     ("Beta 0.8.6.13", "Aug 11, 2026", "Feature",
      "Coordination-card creation for the 911 pipeline is now a standalone tool, "
      "so cards can be raised without running a batch setup and a setup can be "
@@ -342,7 +343,8 @@ VERSION_ROWS = [
      "stopped difficulty ratings from reaching either the printed packets or "
      "the coordination cards - column lookups now tolerate headings that gain "
      "extra wording.",
-     "Released"),
+     "911 Teams Cards (new), 911 Setup, 922 Setup, scheduling-board status "
+     "automation"),
     ("Beta 0.8.6.11", "Aug 5, 2026", "Feature",
      "Task-card creation for the 911 pipeline is now automated: setup reads the "
      "master schedule and raises one card per job awaiting modeling, carrying "
@@ -463,6 +465,22 @@ PI_NEW = [
      "PART'S INSPECTION SHEET; RUNS ENTIRELY ON THE MACHINE WITH NO OUTSIDE "
      "SERVICE, SKIPS REFERENCE-ONLY FIGURES AND STOCK NOTES, NEVER OVERWRITES "
      "A SHEET ALREADY FILLED IN BY HAND, AND FLAGS ANY DRAWING IT COULD NOT READ"),
+    ("922 PALLET LABELER STAGE", "COMPLETE",
+     "BATCH PREPARATION GAINS A CARD-LABELLING STAGE THAT ADDS PALLET LABELS "
+     "TO COORDINATION CARDS RAISED BEFORE PALLET ASSIGNMENTS EXISTED; "
+     "PREVIOUSLY THOSE CARDS STAYED UNLABELLED BECAUSE RE-RUNNING SETUP WOULD "
+     "DUPLICATE THE BOARD RATHER THAN LABEL IT"),
+    ("CUSTOMER DXF FIELD-REPORTED FIXES", "COMPLETE",
+     "FIVE DEFECTS REPORTED BY THE QUOTING CREW RESOLVED: BATCH-WIDE "
+     "THICKNESS ENTRY, LEGACY-FORMAT CUSTOMER FILES (PREVIOUSLY SKIPPED "
+     "SILENTLY) NOW FULLY PROCESSED, MANUAL ADJUSTMENTS PREFILL THE CORRECT "
+     "CUSTOMER-GUIDELINE AMOUNT, FAILURES REPORTED PER FEATURE WITH REASONS, "
+     "AND RE-PROCESSING AN ALREADY-PROCESSED FILE WARNS BEFORE COMPOUNDING; "
+     "ROOT CAUSES CONFIRMED AGAINST THE REPORTING CREW'S OWN FILES"),
+    ("UPDATE DOWNLOAD RETRY", "COMPLETE",
+     "A FAILED UPDATE DOWNLOAD NOW OFFERS A RETRY INSTEAD OF A DEAD END, THE "
+     "MANUAL UPDATE CHECK REPORTS ITS REAL OUTCOME, AND UPDATES EXIT THE "
+     "APPLICATION CLEANLY"),
     ("DESKTOP WIDGET LINE", "COMPLETE",
      "SEVEN EARNABLE DESK WIDGETS ADDED TO THE REWARDS CATALOG, EACH BUILT "
      "FROM THREE INDEPENDENTLY SWAPPABLE ART LAYERS"),

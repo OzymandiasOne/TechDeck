@@ -410,7 +410,11 @@ def sync_version_controller(write):
     vh = wb["VERSION HISTORY"]
     for old, new in C.VERSION_RENAMES.items():
         r = find_row(vh, old)
-        if r:
+        # Skip a rename whose target row already exists: that re-key already
+        # happened on a past run, and applying it again re-keys a LATER
+        # "In Development" row backwards onto an old version. Five duplicate
+        # "Beta 0.8.6.11" rows accumulated exactly this way (found 2026-08-20).
+        if r and not find_row(vh, new):
             vh.cell(row=r, column=1).value = new
             notes.append(f"  VERSION HISTORY            ~ {old}  ->  {new}")
 
