@@ -57,7 +57,9 @@ PLUGIN_ICON_KEYS = {
     "902_dxf_prep":         "ruler",
     "911_baked_beans_wild_ride": "mr_beans",
     "sheet_metal_calculators": "calculator",
-    "911_inspection_dimensions": "inspection_dims",
+    # Placeholder at the user's request (2026-08-20) - the drawn `inspection_dims`
+    # tile is still in generate_tile_icons_32.py, so swapping back is this one line.
+    "911_inspection_dimensions": "steam_circled",
 }
 
 # Generated pack sets (tools/generate_pack_icons.py) searched when a key is not a
