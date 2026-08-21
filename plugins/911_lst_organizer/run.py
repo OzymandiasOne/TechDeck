@@ -1,5 +1,5 @@
 """
-911 LST Organizer Plugin - v2.1.0
+911 LST Organizer Plugin - v2.2.0
 Single-file TechDeck plugin.
 
 Pulls the .lst files for exactly the parts a nest's 1D cutting-pattern diagram
@@ -10,8 +10,11 @@ real 911 workflow 2026-07-07):
    ...\\911 QTDR\\S035\\503874\\PRODUCTION PAPERWORK) via the native dialog.
 2. The '1D' PDF inside it (name always contains '1D', e.g. 'S035 503874 1D.pdf')
    is parsed with PyMuPDF: the 'Parts Id.' table lists the parts to pull. A part
-   from ANOTHER nest is prefixed with its nest number ('503874-H4143481-3');
-   unprefixed parts belong to the current nest.
+   may be prefixed with its nest number; unprefixed parts belong to the current
+   nest. The prefix separator has drifted across nesting-software exports -
+   '503874-H4143481-3', '503874- H4143481-3', and (since 2026-08, incl. the
+   MULTIPLE ORDERS diagrams that cover two batches at once) '503887 / H4112842-34'
+   - all are accepted (v2.2.0; the slash form previously parsed as ZERO parts).
 3. Each foreign nest is resolved to its batch by FILESYSTEM lookup - a nest
    folder sits directly under its batch folder, so we scan '911 QTDR\\*\\{nest}'
    (current batch first, then every top-level batch, then the
@@ -57,7 +60,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
 NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
@@ -65,6 +68,11 @@ NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
 # A DYPN / part id: letters + digits, then at least one dashed suffix
 # (H4143481-3, H4143408-145, H4130401-22M, R5711906-401, H5532004-19-2).
 PART_RE = re.compile(r"^[A-Z]{1,3}\d{4,}(?:-[A-Z0-9]+)+$", re.IGNORECASE)
+
+# '{nest}<sep>{part}': the nest-prefix separator is '-' or '/' with optional
+# whitespace around it (both shapes appear in real 1D exports; see
+# _classify_token). Groups are validated against NEST_RE / PART_RE after.
+PREFIXED_PART_RE = re.compile(r"^([A-Z0-9]+)\s*[-/]\s*(\S+)$", re.IGNORECASE)
 
 DEST_FOLDER_NAME = "LST"
 ARCHIVE_DIR_NAME = "02 - Complete Packages"
@@ -94,20 +102,22 @@ def find_1d_pdf(folder: Path, batch: str, nest: str) -> Optional[Path]:
 def _classify_token(token: str, current_nest: str) -> Optional[Tuple[str, str]]:
     """A Parts Id token -> (nest, part), or None if it isn't a part line.
 
-    'H4143481-3'        -> (current nest, 'H4143481-3')
-    '503874-H4143481-3' -> ('503874', 'H4143481-3')
-    '503874- H4143481-3'-> ('503874', 'H4143481-3')   (multi-nest bar-nest layout)
+    'H4143481-3'           -> (current nest, 'H4143481-3')
+    '503874-H4143481-3'    -> ('503874', 'H4143481-3')
+    '503874- H4143481-3'   -> ('503874', 'H4143481-3')   (multi-nest bar layout)
+    '503887 / H4112842-34' -> ('503887', 'H4112842-34')  (2026-08 slash exports)
     """
     token = token.strip().upper()
     if PART_RE.match(token):
         return current_nest, token
-    # Multi-nest bar diagrams render the prefix as '{nest}- {part}' (or
-    # '{nest} - {part}') with whitespace around the separating hyphen, so
-    # strip both sides before matching (a leading space would sink PART_RE).
-    head, sep, tail = token.partition("-")
-    head, tail = head.strip(), tail.strip()
-    if sep and NEST_RE.match(head) and PART_RE.match(tail):
-        return head, tail
+    # A nest-prefixed part. The separator drifts between exports: a plain
+    # hyphen, a hyphen with whitespace, or (since 2026-08 - every part line on
+    # the MULTIPLE ORDERS diagrams AND new single-order ones) ' / '. Splitting
+    # on the first hyphen alone cut '503887 / H4112842-34' INSIDE the part
+    # number, so those diagrams parsed as zero parts (CDAUGHAN-LT, 2026-08-21).
+    m = PREFIXED_PART_RE.match(token)
+    if m and NEST_RE.match(m.group(1)) and PART_RE.match(m.group(2)):
+        return m.group(1), m.group(2)
     return None
 
 
