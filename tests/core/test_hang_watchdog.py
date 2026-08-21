@@ -4,6 +4,7 @@ is exercised by blocking a real thread; the rest is pure-function coverage of
 the snapshot and the file rotation that preserves a dead session's state."""
 
 import json
+import sys
 import time
 
 import pytest
@@ -108,8 +109,9 @@ def test_state_signature_ignores_volatile_counters():
 def test_startup_rotates_the_dead_sessions_state_aside(logs):
     """The whole point: restarting to clear a freeze must NOT destroy the record
     of what froze."""
-    logs.mkdir(parents=True)
-    (logs / "session_state.json").write_text(
+    live = hang_watchdog.state_path()
+    live.parent.mkdir(parents=True, exist_ok=True)
+    live.write_text(
         json.dumps({"clean_exit": False, "active_plugins": ["902_dxf_prep"]}),
         encoding="utf-8",
     )
@@ -175,6 +177,45 @@ def test_watchdog_dumps_stacks_when_the_heartbeat_stops(logs, monkeypatch):
         assert "recovered" in hang_watchdog.hang_log_path().read_text(encoding="utf-8")
     finally:
         wd.mark_clean_exit()
+
+
+def test_dev_runs_get_their_own_watchdog_tree(logs, monkeypatch):
+    """Source runs write under logs\\dev; frozen builds keep the shared logs
+    dir. All three files must live together either way."""
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    dev_dir = hang_watchdog._dir()
+    assert dev_dir == logs / "dev"
+    assert {p.parent for p in (hang_watchdog.hang_log_path(),
+                               hang_watchdog.state_path(),
+                               hang_watchdog.previous_state_path())} == {dev_dir}
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert hang_watchdog._dir() == logs
+    assert hang_watchdog.state_path().parent == logs
+
+
+def test_a_killed_dev_run_cannot_poison_the_installed_apps_crash_offer(
+        logs, monkeypatch):
+    """The defect this split exists for: killing `python -m techdeck` is
+    routine, but its clean_exit:false used to land in the SAME
+    last_session.json the installed exe reads at its next launch - which
+    popped the "TechDeck didn't close cleanly" offer for a crash that never
+    happened (LAPTOP-VI327KUH, 2026-08-20/21)."""
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    dev = hang_watchdog.HangWatchdog(main_window=None)
+    dev.start()
+    dev._write_state()                    # ...and the dev run is killed here
+    dev._stop.set()
+    written = json.loads(hang_watchdog.state_path().read_text(encoding="utf-8"))
+    assert written["clean_exit"] is False and written["frozen"] is False
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    frozen = hang_watchdog.HangWatchdog(main_window=None)
+    frozen.start()                        # the installed app's next launch
+    try:
+        assert hang_watchdog.previous_session() is None   # no ghost crash
+    finally:
+        frozen.mark_clean_exit()
 
 
 def test_module_start_is_idempotent(logs):

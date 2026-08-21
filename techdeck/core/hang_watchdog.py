@@ -41,6 +41,7 @@ from __future__ import annotations
 import faulthandler
 import json
 import os
+import sys
 import threading
 import time
 from datetime import datetime
@@ -67,16 +68,30 @@ _HANG_LOG_MAX_BYTES = 1_000_000
 _watchdog: Optional["HangWatchdog"] = None
 
 
+def _dir() -> Path:
+    """Where this build's watchdog files live. Frozen builds use the shared
+    %LOCALAPPDATA%\\TechDeck\\logs; source runs (`python -m techdeck`) get a
+    'dev' subfolder. One shared directory meant a KILLED dev run (routine:
+    Ctrl+C, IDE stop) left `clean_exit: false` in the very last_session.json
+    the installed exe reads at its next launch - popping the "TechDeck didn't
+    close cleanly" offer for a crash that never happened - and a dev run
+    starting while the installed app was open rotated the LIVE session's
+    state aside mid-flight (LAPTOP-VI327KUH, 2026-08-20/21). Separate trees
+    also keep dev stack dumps out of a field machine's hang.log."""
+    base = _run_log_dir()
+    return base if getattr(sys, "frozen", False) else base / "dev"
+
+
 def hang_log_path() -> Path:
-    return _run_log_dir() / "hang.log"
+    return _dir() / "hang.log"
 
 
 def state_path() -> Path:
-    return _run_log_dir() / "session_state.json"
+    return _dir() / "session_state.json"
 
 
 def previous_state_path() -> Path:
-    return _run_log_dir() / "last_session.json"
+    return _dir() / "last_session.json"
 
 
 def previous_session() -> Optional[dict]:
@@ -200,7 +215,7 @@ class HangWatchdog:
     # -- lifecycle ---------------------------------------------------------
 
     def start(self) -> None:
-        log_dir = _run_log_dir()
+        log_dir = _dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         self._rotate_hang_log()
         self._rotate_state_file()
@@ -332,6 +347,7 @@ class HangWatchdog:
         payload["session_started"] = self._started_at.strftime("%Y-%m-%d %H:%M:%S")
         payload["written"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         payload["clean_exit"] = self._clean_exit
+        payload["frozen"] = bool(getattr(sys, "frozen", False))
         payload["ui_thread_stale_s"] = round(time.monotonic() - self._last_beat, 1)
         try:
             state_path().write_text(
