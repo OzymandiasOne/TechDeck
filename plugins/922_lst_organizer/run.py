@@ -570,6 +570,15 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     lst_dir = batch_path / f"Batch {batch_no} - Documentation" / "LST"
     lst_dir.mkdir(parents=True, exist_ok=True)
 
+    # Run ahead of the serial per-folder scan below: background workers walk
+    # the batch tree and hydrate every .lst (plus the Documentation workbooks,
+    # for the PO reconcile later) so cloud-only folders stop stalling the scan
+    # loop one folder at a time.
+    def _read_set():
+        yield from (batch_path / f"Batch {batch_no} - Documentation").glob("*.xlsx")
+        yield from batch_path.rglob("*.lst")
+    sdk.prefetch_paths(_read_set(), cancel_event=cancel_event)
+
     # ── Phase 1: gather ──
     log("Scanning order folders for .lst files...")
     order_dirs = _order_dirs(batch_path, batch_no)

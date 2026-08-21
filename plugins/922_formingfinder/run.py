@@ -567,6 +567,16 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     progress_callback(5)
 
+    # The moment the batch is known, start hydrating everything this run will
+    # read (the PO/organizer workbooks, then every PDF in the batch tree) in
+    # the background — the downloads overlap the overwrite prompt below and
+    # Methods 1-3's own serial walk, so Method 3's per-PDF content sniff hits
+    # local files instead of stalling on OneDrive one file at a time.
+    def _read_set():
+        yield from doc_folder.glob("*.xlsx")
+        yield from batch_path.rglob("*.pdf")
+    prefetch = sdk.prefetch_paths(_read_set(), cancel_event=cancel_event)
+
     # Existing-forming check: prompt before doing any work.
     forming_dir = doc_folder / f"Forming {batch_no}"
     if forming_dir.exists() and any(forming_dir.iterdir()):
@@ -576,6 +586,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         else:
             ans = input(prompt + ": ")
         if (ans or "").strip().lower() not in {"y", "yes"}:
+            prefetch.stop()
             log("Aborted -- existing forming preserved.")
             return
         log("Overwriting existing forming.")

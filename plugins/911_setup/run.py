@@ -1604,6 +1604,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     if existing_nests:
         log(f"Already set up: {', '.join(n for n in all_nests if n in existing_nests)}")
 
+    # While the nest-selection dialog is up, hydrate every nest packet PDF in
+    # the background. Step 2.7 reads ALL the packets regardless of which nests
+    # get ticked, so none of this is wasted work even for a partial run.
+    sdk.prefetch_paths((batch_folder / "NEST PACKAGES").glob("*.pdf"),
+                       cancel_event=cancel_event)
+
     if console is not None and hasattr(console, "request_nest_selection"):
         selection = console.request_nest_selection(batch_number, all_nests, existing_nests)
         if selection is None:
