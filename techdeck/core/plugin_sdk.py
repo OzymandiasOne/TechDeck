@@ -1466,11 +1466,17 @@ def is_cloud_placeholder(path) -> bool:
     return bool(attrs & _CLOUD_ATTRS)
 
 
-def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) -> None:
+def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5,
+                       should_stop=None) -> None:
     """Force OneDrive to download a cloud-only file by reading it end to end.
 
     Raises RuntimeError with user-actionable instructions if the content
     still can't be pulled (OneDrive client stopped, signed out, or offline).
+
+    `should_stop` (optional zero-arg callable) is polled between 1 MiB chunks;
+    when it returns True the read stops and the function returns quietly —
+    used by the background prefetcher so a cancelled run doesn't keep pulling
+    a half-downloaded file. Foreground callers leave it unset.
     """
     path = Path(path)
     last_err = None
@@ -1478,7 +1484,8 @@ def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) ->
         try:
             with open(path, "rb") as fh:
                 while fh.read(1024 * 1024):
-                    pass
+                    if should_stop is not None and should_stop():
+                        return
             return
         except OSError as exc:
             last_err = exc
@@ -1506,6 +1513,107 @@ def ensure_local(path, log=None) -> None:
         if log:
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
+
+
+class PrefetchHandle:
+    """Handle returned by prefetch_paths(). stop() ends the background work;
+    the counters are informational (hydrated = files actually downloaded)."""
+
+    def __init__(self):
+        import threading
+        self._stop = threading.Event()
+        self._threads: list = []
+        self.checked = 0
+        self.hydrated = 0
+
+    def stop(self) -> None:
+        """Ask the background workers to finish up. Returns immediately."""
+        self._stop.set()
+
+    def done(self) -> bool:
+        return all(not t.is_alive() for t in self._threads)
+
+
+def prefetch_paths(paths, cancel_event=None, max_workers: int = 3) -> PrefetchHandle:
+    """Hydrate OneDrive cloud-only files in the BACKGROUND, best-effort.
+
+    The streaming trick: start this the moment a folder pick tells you which
+    files the run will read, and the downloads overlap the prompts the user is
+    still answering (and the run's own serial work). By the time the read
+    loops arrive, content is local and ensure_local is a single stat call.
+
+    - `paths` may be any iterable of paths; a lazy generator such as
+      `folder.rglob('*.pdf')` is ideal — the directory walk itself then also
+      happens off-thread.
+    - Never raises and never blocks the caller. A file that fails to hydrate
+      is simply left for the foreground read to handle exactly as today, with
+      the resilient loaders' retries and user-facing messages (Hard Rule 13
+      call sites keep their ensure_local either way).
+    - Stops early when the plugin's `cancel_event` is set or handle.stop() is
+      called — checked between files and between 1 MiB chunks of each file.
+    - `max_workers` stays small on purpose: hydration is a full-content
+      download through the OneDrive client, and flooding the sync engine just
+      moves the queue around.
+    """
+    import queue
+    import threading
+
+    handle = PrefetchHandle()
+
+    def _stopping() -> bool:
+        return handle._stop.is_set() or (cancel_event is not None
+                                         and cancel_event.is_set())
+
+    q: "queue.Queue" = queue.Queue(maxsize=max_workers * 2)
+    _SENTINEL = object()
+
+    def _put(item) -> bool:
+        # Bounded put that can't wedge the producer thread forever if the
+        # workers have already bailed out after a stop/cancel.
+        while True:
+            try:
+                q.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                if _stopping():
+                    return False
+
+    def _producer():
+        try:
+            for p in paths:
+                if _stopping() or not _put(p):
+                    break
+        except Exception:
+            pass  # a dying generator must not kill the app
+        finally:
+            for _ in range(max_workers):
+                if not _put(_SENTINEL):
+                    break
+
+    def _worker():
+        while True:
+            item = q.get()
+            if item is _SENTINEL or _stopping():
+                break
+            handle.checked += 1
+            try:
+                if is_cloud_placeholder(item):
+                    # Single attempt, no retries: this is opportunistic. The
+                    # foreground read keeps the full retry + error messaging.
+                    hydrate_cloud_file(item, attempts=1, should_stop=_stopping)
+                    handle.hydrated += 1
+            except Exception:
+                pass
+
+    threads = [threading.Thread(target=_producer, daemon=True,
+                                name="techdeck-prefetch-scan")]
+    threads += [threading.Thread(target=_worker, daemon=True,
+                                 name=f"techdeck-prefetch-{i}")
+                for i in range(max_workers)]
+    handle._threads = threads
+    for t in threads:
+        t.start()
+    return handle
 
 
 def locked_file_error(path, cause: Exception | None = None) -> "UserFacingError":
