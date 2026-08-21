@@ -402,7 +402,12 @@ class Disturbance(QWidget):
 class SeanceRitual(QObject):
     """Drives the four beats and owns every widget the ritual creates."""
 
-    TICK_MS = 33
+    # 60fps. At 30 a 5px drift moved in visible 1px steps — the judder was
+    # the frame rate, not the curve. Everything here is cheap to repaint (a
+    # few hundred fillRects in a 130px window), so the rate is the fix.
+    TICK_MS = 16
+    SHUDDER_EVERY_MS = 33   # …but the shudder keeps its own slower cadence,
+                            # or it stops reading as a shake and just blurs
     DISTURB_MS = 2000
     MANIFEST_MS = 1500
     EMERGE_MS = 2900        # the whole climb, surface crossing included
@@ -424,6 +429,7 @@ class SeanceRitual(QObject):
         self._climb_from = None
         self._climb_to = None
         self._anchor = None          # where he floats about, once he is free
+        self._shudder_due = 0.0      # ms accumulator for the slower shake
         self.tear_strength = 0.0     # 0 shut, 1 fully torn (drives the glow)
         self._bubble = None
         self._timer = QTimer(self)
@@ -522,7 +528,10 @@ class SeanceRitual(QObject):
             self._disturb.dim = pulse * (0.25 + 0.60 * t)
             self._disturb.band_y = (t * 2.4) % 1.0 if t > 0.35 else -1.0
             self._disturb.update()
-        if self._home_pos is not None and self._host is not None:
+        self._shudder_due -= self.TICK_MS
+        if (self._home_pos is not None and self._host is not None
+                and self._shudder_due <= 0):
+            self._shudder_due = self.SHUDDER_EVERY_MS
             # amplitude grows with the dread
             amp = int(2 + 7 * t)
             self._host.move(self._home_pos
@@ -611,7 +620,10 @@ class SeanceRitual(QObject):
             self._disturb.dim = 0.34 * self.tear_strength
             self._disturb.band_y = -1.0
             self._disturb.update()
-        if self._home_pos is not None and self._host is not None:
+        self._shudder_due -= self.TICK_MS
+        if (self._home_pos is not None and self._host is not None
+                and self._shudder_due <= 0):
+            self._shudder_due = self.SHUDDER_EVERY_MS
             # a flinch, not the full shudder — the frame reacts to being
             # opened, then settles the instant it is through
             jolt = int(4 * self.tear_strength)
@@ -640,11 +652,20 @@ class SeanceRitual(QObject):
 
     @staticmethod
     def _float_offset(t: float):
-        """A gentle, non-repeating drift. Two out-of-phase sines per axis so
-        the loop never reads as a loop — small enough to be breathing rather
-        than bobbing."""
-        return (math.sin(t * 0.9) * 5.0 + math.sin(t * 0.37) * 2.0,
-                math.sin(t * 0.6) * 4.0 + math.cos(t * 0.23) * 2.0)
+        """A live, non-repeating drift. Two out-of-phase sines per axis so
+        the loop never reads as a loop; the fast pair carries the motion and
+        the slow pair wanders the centre so he never traces the same path
+        twice. Amplitudes stay small — he is breathing, not bobbing.
+
+        The frequencies are picked, not guessed. Window positions are whole
+        pixels, so what the eye reads as judder is how long he SITS on one
+        pixel, and that is set by speed, not frame rate: the original curve
+        was slow enough to freeze for 1.2s at each turnaround. These four
+        were searched for the shortest simultaneous stall on both axes
+        (~300ms, at ~12 position changes/sec) — when one axis is turning
+        around the other is still travelling, so he never quite stops."""
+        return (math.sin(t * 2.4) * 6.0 + math.sin(t * 0.7) * 2.5,
+                math.sin(t * 1.6) * 5.0 + math.cos(t * 0.43) * 2.5)
 
     def _beat_linger(self):
         """Free: he says hello, floats in place, and waits to be picked up.

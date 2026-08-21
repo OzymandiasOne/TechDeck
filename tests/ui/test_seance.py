@@ -320,8 +320,8 @@ def test_he_floats_gently_in_place(qapp):
     xs = [p.x() - anchor.x() for p in seen]
     ys = [p.y() - anchor.y() for p in seen]
     assert len(set(xs)) > 3 and len(set(ys)) > 3, "he should be moving"
-    assert max(abs(v) for v in xs) <= 8, "drift, not a bob"
-    assert max(abs(v) for v in ys) <= 7
+    assert max(abs(v) for v in xs) <= 10, "drift, not a bob"
+    assert max(abs(v) for v in ys) <= 9
     assert min(xs) < 0 < max(xs), "he should wander both ways, not sail off"
     ritual.dismiss()
 
@@ -342,7 +342,7 @@ def test_dragging_re_anchors_him_where_he_is_dropped(qapp):
     for _ in range(60):
         ritual._tick()
     drift = ritual._app.art_global_pos() - dropped
-    assert abs(drift.x()) <= 8 and abs(drift.y()) <= 7, (
+    assert abs(drift.x()) <= 10 and abs(drift.y()) <= 9, (
         "he should be floating about where he was dropped")
     ritual.dismiss()
 
