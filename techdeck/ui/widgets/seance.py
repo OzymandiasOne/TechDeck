@@ -10,10 +10,19 @@ The apparition is drawn from ONE grid by ONE painter, into TWO surfaces:
                 size, painting rows [:k] — the part that is out.
 
 The slices are complementary, so their union is always the whole creature:
-nothing ever looks erased, which is the point. What sells "it came OUT" is
-that the top-level is not clipped by the console — once it holds every row
-it simply floats up across the console's edge and over the app, which the
-veil could never do.
+nothing ever looks erased, which is the point.
+
+The split point is GEOMETRIC, not abstract, and that is the whole trick. The
+console's top edge is treated as a SURFACE: rows still below it belong to the
+veil (which its own widget bounds clip anyway), rows that have crossed above
+it belong to the apparition. The ghost then physically RISES through that
+line, so the hand-off is driven by real motion.
+
+(The first version split at an arbitrary row index while the ghost held
+still. Being pixel-perfect, that hand-off was literally invisible — the union
+never changed, so nothing happened on screen. A perfect crossfade between two
+identical renderings is a no-op; the motion through a fixed boundary is what
+the eye reads as emergence.)
 
 Because both halves call the same `paint_ghost` with the same cell size at
 the same global rect, the seam is aligned by construction rather than by
@@ -21,9 +30,10 @@ tuning: there is no second art asset and no second renderer to drift.
 
 The ritual is four beats:
     disturb   the window shudders and the lights fail (nothing answers yet)
-    manifest  the ghost fades up inside the console
-    emerge    the complementary hand-off above
-    rise      it floats out over the app, bobbing, then fades
+    manifest  the ghost fades up low inside the console
+    emerge    it hauls itself up through the console's top edge — a glowing
+              tear marks where it is breaking through
+    linger    free above the app, bobbing, then it fades
 
 Nothing here may ever break the console: the whole thing is a toy, so every
 entry point is guarded and `dismiss()` is idempotent.
@@ -35,7 +45,7 @@ import math
 import random
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import QWidget
 
 # ── the apparition, hand-editable (house style: a glyph grid + a legend) ──
@@ -168,14 +178,23 @@ class ConsoleVeil(QWidget):
         top_left = out.mapTo(self._console, QPoint(0, 0))
         self.setGeometry(QRect(top_left, out.size()))
 
-    def centre_ghost(self):
-        """Park the ghost mid-console — fully inside, so it manifests as a
-        whole creature rather than something already half-escaped."""
+    def place_ghost_low(self):
+        """Park the ghost low in the console — fully inside, and far enough
+        below the surface that hauling itself out is a real journey."""
         self._sync_geometry()
+        drop = int((self.height() - GRID_H * CELL) * 0.72)
         self.ghost_pos = QPoint(
             (self.width() - GRID_W * CELL) // 2,
-            (self.height() - GRID_H * CELL) // 2,
+            max(0, drop),
         )
+
+    def surface_global_y(self) -> int:
+        """The screen y of the console's top edge — the surface the ghost
+        comes through, and the line that decides which half owns which row."""
+        return self.mapToGlobal(QPoint(0, 0)).y()
+
+    def set_ghost_global(self, art_pos: QPoint):
+        self.ghost_pos = self.mapFromGlobal(art_pos)
 
     def ghost_global_pos(self) -> QPoint:
         """Where the art's top-left sits in SCREEN coords — the apparition
@@ -272,13 +291,22 @@ class Disturbance(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.dim = 0.0          # 0..1 wash
         self.band_y = -1.0      # normalised scan-band position, <0 = none
+        # The tear: a split of cold light along the console's top edge, in
+        # THIS widget's coords. It lives here rather than on the apparition
+        # because it must be as wide as the console, not as wide as the
+        # ghost — a ghost-wide glow reads as a halo, a console-wide slit
+        # reads as the box being opened.
+        self.tear_y = -1.0
+        self.tear_x0 = 0
+        self.tear_x1 = 0
+        self.tear_strength = 0.0
         self.sync()
 
     def sync(self):
         self.setGeometry(self._host.rect())
 
     def paintEvent(self, event):
-        if self.dim <= 0.0 and self.band_y < 0:
+        if self.dim <= 0.0 and self.band_y < 0 and self.tear_strength <= 0.0:
             return
         painter = QPainter(self)
         if self.dim > 0.0:
@@ -291,7 +319,32 @@ class Disturbance(QWidget):
             glow = QColor(190, 214, 236)
             glow.setAlphaF(0.10)
             painter.fillRect(0, y, self.width(), h, glow)
+        if self.tear_strength > 0.0 and self.tear_x1 > self.tear_x0:
+            self._paint_tear(painter)
         painter.end()
+
+    def _paint_tear(self, painter: QPainter):
+        """The console's top edge, split open. Brightest at the middle of
+        the rip and feathered to nothing at its ends, so it reads as a
+        wound in that edge rather than a drawn line."""
+        strength = self.tear_strength
+        reach = int(16 * strength) + 3
+        y = int(self.tear_y)
+        width = self.tear_x1 - self.tear_x0
+        # vertical falloff: glow above and below the split
+        band = QRect(self.tear_x0, y - reach, width, reach * 2)
+        vert = QLinearGradient(0.0, float(band.top()), 0.0, float(band.bottom()))
+        vert.setColorAt(0.0, QColor(214, 236, 255, 0))
+        vert.setColorAt(0.5, QColor(214, 236, 255, int(95 * strength)))
+        vert.setColorAt(1.0, QColor(214, 236, 255, 0))
+        painter.fillRect(band, vert)
+        # the split itself, feathered along its length
+        core = QLinearGradient(float(self.tear_x0), 0.0,
+                               float(self.tear_x1), 0.0)
+        core.setColorAt(0.0, QColor(238, 248, 255, 0))
+        core.setColorAt(0.5, QColor(238, 248, 255, int(235 * strength)))
+        core.setColorAt(1.0, QColor(238, 248, 255, 0))
+        painter.fillRect(QRect(self.tear_x0, y - 1, width, 3), core)
 
 
 class SeanceRitual(QObject):
@@ -299,9 +352,8 @@ class SeanceRitual(QObject):
 
     TICK_MS = 33
     DISTURB_MS = 2000
-    MANIFEST_MS = 1700
-    EMERGE_MS = 1500
-    RISE_MS = 1700
+    MANIFEST_MS = 1500
+    EMERGE_MS = 2900        # the whole climb, surface crossing included
     LINGER_MS = 22000       # it hangs around, then fades of its own accord
     FADE_MS = 1400
 
@@ -315,8 +367,9 @@ class SeanceRitual(QObject):
         self._elapsed = 0
         self._phase = "disturb"
         self._home_pos = None        # the host's geometry before we shook it
-        self._rise_from = None
-        self._rise_to = None
+        self._climb_from = None
+        self._climb_to = None
+        self.tear_strength = 0.0     # 0 shut, 1 fully torn (drives the glow)
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
         self._timer.timeout.connect(self._tick)
@@ -329,7 +382,7 @@ class SeanceRitual(QObject):
 
     def start(self):
         self._veil = ConsoleVeil(self._console)
-        self._veil.centre_ghost()
+        self._veil.place_ghost_low()
         self._veil.show()
         self._veil.raise_()
         if self._host is not None:
@@ -366,13 +419,18 @@ class SeanceRitual(QObject):
                 pass
             self._app = None
 
-    def _restore_host(self):
+    def _settle_host(self):
+        """Put the window back where it was, but KEEP the anchor — the
+        breakthrough still has a jolt to spend."""
         if self._home_pos is not None and self._host is not None:
             try:
                 self._host.move(self._home_pos)
             except RuntimeError:
                 pass
-            self._home_pos = None
+
+    def _restore_host(self):
+        self._settle_host()
+        self._home_pos = None
 
     # ── the beats ────────────────────────────────────────────────────────
     def _tick(self):
@@ -403,7 +461,7 @@ class SeanceRitual(QObject):
                             + QPoint(random.randint(-amp, amp),
                                      random.randint(-amp, amp)))
         if self._elapsed >= self.DISTURB_MS:
-            self._restore_host()
+            self._settle_host()
             self._advance("manifest")
 
     def _beat_manifest(self):
@@ -421,7 +479,7 @@ class SeanceRitual(QObject):
             self._begin_emerge()
 
     def _begin_emerge(self):
-        """Hand the top rows over to a real window, pinned to the same rect."""
+        """Hand the surface line to a real window and start the climb."""
         if self._veil is None:
             self.dismiss()
             return
@@ -430,56 +488,93 @@ class SeanceRitual(QObject):
         self._app.move_art_to(self._veil.ghost_global_pos())
         self._app.show()
         self._app.raise_()
+        self._climb_from = self._veil.ghost_global_pos()
+        # far enough that it ends up clear of the console entirely
+        surface = self._veil.surface_global_y()
+        self._climb_to = QPoint(self._climb_from.x(),
+                                surface - GRID_H * CELL - SIZE_H // 2)
         self._advance("emerge")
 
     def _beat_emerge(self):
+        """One continuous haul upward. Which half owns which row is decided
+        by the surface line every frame, so the creature is never in two
+        places and never in none."""
         t = min(1.0, self._elapsed / self.EMERGE_MS)
-        k = int(round(t * GRID_H))
-        if self._veil is not None:
-            self._veil.rows_from = k       # keeps rows [k:] …
-            self._veil.alpha = 1.0
-            self._veil.update()
-        if self._app is not None:
-            self._app.rows_to = k          # … and this takes rows [:k]
-            self._app.update()
-        if self._elapsed >= self.EMERGE_MS:
-            # the console's half is spent; only the free thing remains
-            if self._veil is not None:
-                self._veil.hide()
-                self._veil.deleteLater()
-                self._veil = None
-            self._start_rise()
-
-    def _start_rise(self):
-        if self._app is None:
+        # heaves, then eases out — smoothstep reads as effort
+        ease = t * t * (3.0 - 2.0 * t)
+        if self._veil is None or self._app is None or not self._climb_from:
             self.dismiss()
             return
-        self._app.rows_to = GRID_H
-        start = self._app.art_global_pos()
-        self._rise_from = start
-        # up and out: clear of the console, into the app it was called from
-        climb = SIZE_H * 2 + (self._console.height() // 3 if self._console else 0)
-        self._rise_to = QPoint(start.x(), start.y() - climb)
-        self._advance("rise")
 
-    def _beat_rise(self):
-        t = min(1.0, self._elapsed / self.RISE_MS)
-        ease = 1.0 - (1.0 - t) ** 2            # decelerating climb
-        if self._app is not None and self._rise_from and self._rise_to:
-            x = self._rise_from.x() + math.sin(t * math.pi * 2.0) * 9
-            y = (self._rise_from.y()
-                 + (self._rise_to.y() - self._rise_from.y()) * ease)
-            self._app.move_art_to(QPoint(int(x), int(y)))
-        if self._elapsed >= self.RISE_MS:
+        self._veil._sync_geometry()      # a splitter drag must not strand it
+        surface = self._veil.surface_global_y()
+        sway = math.sin(t * math.pi * 3.0) * (7.0 * (1.0 - t))
+        art = QPoint(
+            int(self._climb_from.x() + sway),
+            int(self._climb_from.y()
+                + (self._climb_to.y() - self._climb_from.y()) * ease),
+        )
+        # rows that have crossed the surface belong to the free half
+        crossed = max(0, min(GRID_H,
+                             int(math.ceil((surface - art.y()) / CELL))))
+
+        self._veil.set_ghost_global(art)
+        self._veil.rows_from = crossed
+        self._veil.alpha = 1.0
+        self._veil.update()
+
+        self._app.move_art_to(art)
+        self._app.rows_to = crossed
+        self._app.update()
+
+        # the tear opens as it breaks through and closes once it is clear
+        through = crossed / GRID_H
+        self.tear_strength = (
+            0.0 if crossed in (0, GRID_H) else math.sin(through * math.pi))
+        if self._disturb is not None and self._host is not None:
+            self._disturb.sync()
+            origin = self._host.mapToGlobal(QPoint(0, 0))
+            left = self._veil.mapToGlobal(QPoint(0, 0))
+            self._disturb.tear_y = surface - origin.y()
+            self._disturb.tear_x0 = left.x() - origin.x()
+            self._disturb.tear_x1 = self._disturb.tear_x0 + self._veil.width()
+            self._disturb.tear_strength = self.tear_strength
+            # the room holds its breath while it is halfway through
+            self._disturb.dim = 0.34 * self.tear_strength
+            self._disturb.band_y = -1.0
+            self._disturb.update()
+        if self._home_pos is not None and self._host is not None:
+            # a flinch, not the full shudder — the frame reacts to being
+            # opened, then settles the instant it is through
+            jolt = int(4 * self.tear_strength)
+            if jolt:
+                self._host.move(self._home_pos
+                                + QPoint(random.randint(-jolt, jolt),
+                                         random.randint(-jolt, jolt)))
+            else:
+                self._settle_host()
+
+        if self._elapsed >= self.EMERGE_MS:
+            self._veil.hide()
+            self._veil.deleteLater()
+            self._veil = None
+            self._app.rows_to = GRID_H
+            self._app.update()
+            self.tear_strength = 0.0
+            self._settle_host()
+            if self._disturb is not None:
+                self._disturb.dim = 0.0
+                self._disturb.tear_strength = 0.0
+                self._disturb.update()
             self._advance("linger")
 
     def _beat_linger(self):
         """Free: it bobs where it surfaced until it loses interest."""
-        if self._app is not None and self._rise_to is not None:
+        if self._app is not None and self._climb_to is not None:
             t = self._elapsed / 1000.0
             self._app.move_art_to(QPoint(
-                int(self._rise_to.x() + math.sin(t * 1.1) * 14),
-                int(self._rise_to.y() + math.sin(t * 0.7) * 8)))
+                int(self._climb_to.x() + math.sin(t * 1.1) * 14),
+                int(self._climb_to.y() + math.sin(t * 0.7) * 8)))
         if self._elapsed >= self.LINGER_MS:
             self._advance("fade")
 

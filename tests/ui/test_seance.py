@@ -74,7 +74,7 @@ def test_ritual_walks_every_beat_and_cleans_up(qapp):
     console, ritual = _ritual(qapp)
     # compress the whole ceremony so the test is instant
     ritual.DISTURB_MS = ritual.MANIFEST_MS = 60
-    ritual.EMERGE_MS = ritual.RISE_MS = 60
+    ritual.EMERGE_MS = 60
     ritual.LINGER_MS = ritual.FADE_MS = 60
 
     ritual.start()
@@ -88,12 +88,9 @@ def test_ritual_walks_every_beat_and_cleans_up(qapp):
     assert ritual._app is not None, "the free half must exist by now"
 
     _pump(ritual)
-    assert ritual._phase == "rise"
+    assert ritual._phase == "linger"
     assert ritual._veil is None, "the console half is spent once it is out"
     assert ritual._app.rows_to == GRID_H, "the free half owns every row"
-
-    _pump(ritual)
-    assert ritual._phase == "linger"
     _pump(ritual)
     assert ritual._phase == "fade"
     _pump(ritual)
@@ -101,20 +98,66 @@ def test_ritual_walks_every_beat_and_cleans_up(qapp):
     assert ritual._app is None and ritual._veil is None
 
 
-def test_halves_are_complementary_and_aligned_mid_emerge(qapp):
+def _into_emerge(qapp, emerge_ms=900):
     console, ritual = _ritual(qapp)
     ritual.DISTURB_MS = ritual.MANIFEST_MS = 60
-    ritual.EMERGE_MS = 300
+    ritual.EMERGE_MS = emerge_ms
     ritual.start()
     _pump(ritual)
-    _pump(ritual)                       # into the emerge
+    _pump(ritual)                       # disturb -> manifest -> emerge
     assert ritual._phase == "emerge"
+    return console, ritual
+
+
+def test_halves_are_complementary_and_aligned_mid_emerge(qapp):
+    console, ritual = _into_emerge(qapp)
     veil, app = ritual._veil, ritual._app
     assert veil is not None and app is not None
     # every row belongs to exactly one half…
     assert app.rows_to == veil.rows_from
     # …and both draw at the same screen point, at the same scale.
     assert app.art_global_pos() == veil.ghost_global_pos()
+    ritual.dismiss()
+
+
+def test_split_tracks_the_surface_line(qapp):
+    """THE invariant of the redesign: the row that changes hands is the one
+    crossing the console's top edge — not an abstract counter. That is what
+    makes the hand-off read as rising THROUGH a surface."""
+    import math
+    from techdeck.ui.widgets.seance import CELL
+    console, ritual = _into_emerge(qapp, emerge_ms=900)
+    seen = set()
+    for _ in range(60):
+        if ritual._phase != "emerge":
+            break
+        veil, app = ritual._veil, ritual._app
+        surface = veil.surface_global_y()
+        art_y = app.art_global_pos().y()
+        expected = max(0, min(GRID_H, int(math.ceil((surface - art_y) / CELL))))
+        assert app.rows_to == expected, "split drifted off the surface line"
+        assert veil.rows_from == expected
+        seen.add(expected)
+        ritual._tick()
+    # it really travelled: it began submerged and ended up out
+    assert min(seen) == 0 and max(seen) == GRID_H, sorted(seen)
+    ritual.dismiss()
+
+
+def test_the_tear_only_burns_while_it_is_crossing(qapp):
+    """No tear before it breaks the surface, none once it is clear."""
+    console, ritual = _into_emerge(qapp, emerge_ms=900)
+    strengths = []
+    for _ in range(60):
+        if ritual._phase != "emerge":
+            break
+        strengths.append((ritual._app.rows_to, ritual.tear_strength))
+        ritual._tick()
+    for rows, strength in strengths:
+        if rows in (0, GRID_H):
+            assert strength == 0.0, "the tear must be shut when not crossing"
+        else:
+            assert strength > 0.0, "it should glow while breaking through"
     ritual.dismiss()
 
 
