@@ -33,23 +33,35 @@ def test_seam_is_invisible_at_every_split(qapp):
         assert _render([(0, k), (k, GRID_H)]) == whole, f"seam visible at {k}"
 
 
-def test_art_grid_is_rectangular_and_legal():
-    from techdeck.ui.widgets.seance import GHOST_ART, GHOST_TONES
-    for r, row in enumerate(GHOST_ART):
-        assert len(row) == GRID_W, f"row {r} is {len(row)} wide"
-        assert set(row) <= set(GHOST_TONES) | {"."}, f"row {r} has stray glyphs"
+def test_the_real_sprite_loads_not_the_fallback(qapp):
+    """The art is an editable asset now — a missing/corrupt file falls back
+    to a featureless blob, so assert we are actually rendering the ghost."""
+    from techdeck.ui.widgets.seance import (
+        GHOST_ROWS, GHOST_SPRITE, _FALLBACK, _sprite_path,
+    )
+    assert _sprite_path().exists(), "assets/sprites/ghost.tdart is missing"
+    assert GHOST_ROWS != _FALLBACK["rows"], "fell back to the blank shape"
+    assert GRID_W > 0 and GRID_H > 0
+    for r, row in enumerate(GHOST_ROWS):
+        assert len(row) == GRID_W, f"row {r} is ragged"
+    # the palette is the FILE's, so recolouring in Pixel Studio just works
+    assert GHOST_SPRITE["palette"], "the sprite should carry its own palette"
 
 
-def test_outline_only_traces_empty_cells_touching_the_body():
-    from techdeck.ui.widgets.seance import GHOST_ART, OUTLINE_CELLS
-    assert OUTLINE_CELLS
-    for r, c in OUTLINE_CELLS:
-        assert GHOST_ART[r][c] == ".", "outline must never overwrite the art"
-        touches = any(
-            0 <= r + dr < GRID_H and 0 <= c + dc < GRID_W
-            and GHOST_ART[r + dr][c + dc] != "."
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)))
-        assert touches
+def test_sprite_edits_reach_the_render(qapp, tmp_path, monkeypatch):
+    """Editing ghost.tdart in Pixel Studio must actually change him."""
+    import json
+    import techdeck.ui.widgets.seance as seance
+    edited = tmp_path / "ghost.tdart"
+    edited.write_text(json.dumps({
+        "format": "tdart", "version": 1,
+        "palette": {"B": "#FF0000"},
+        "rows": ["BBBB", "BBBB"],
+    }), encoding="utf-8")
+    monkeypatch.setattr(seance, "_sprite_path", lambda: edited)
+    loaded = seance._load_sprite()
+    assert loaded["rows"] == ["BBBB", "BBBB"]
+    assert loaded["palette"]["B"] == "#FF0000"
 
 
 def _ritual(qapp, tmp_console=None):
@@ -352,4 +364,42 @@ def test_double_click_shoos_him(qapp):
     assert ritual._app.on_shoo is not None, "the gesture must be wired up"
     ritual._app.on_shoo()
     assert ritual._phase == "fade"
+    ritual.dismiss()
+
+
+def test_the_greeting_stops_being_said(qapp):
+    """He says his piece and the bubble goes — it does not hang around for
+    as long as he does."""
+    console, ritual = _ritual(qapp)
+    ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
+    ritual.GREET_AFTER_MS = 0
+    ritual.GREET_READ_MS = 120
+    ritual.start()
+    _pump(ritual); _pump(ritual); _pump(ritual)
+    assert ritual._phase == "linger"
+    ritual._tick()
+    assert ritual._bubble is not None, "he should have greeted us"
+
+    for _ in range(200):                  # past typing + the read window
+        ritual._tick()
+    assert ritual._bubble is None, "the greeting should have expired"
+    assert ritual._phase == "linger", "…but he is still here"
+    assert ritual._app is not None
+    ritual.dismiss()
+
+
+def test_he_only_greets_once(qapp):
+    """Once said, it stays said — no loop of hellos while he floats."""
+    console, ritual = _ritual(qapp)
+    ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
+    ritual.GREET_AFTER_MS = 0
+    ritual.GREET_READ_MS = 60
+    ritual.start()
+    _pump(ritual); _pump(ritual); _pump(ritual)
+    for _ in range(300):
+        ritual._tick()
+    assert ritual._bubble is None
+    for _ in range(300):
+        ritual._tick()
+    assert ritual._bubble is None, "he should not start talking again"
     ritual.dismiss()

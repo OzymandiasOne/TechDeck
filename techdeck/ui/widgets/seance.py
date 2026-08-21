@@ -47,111 +47,110 @@ from __future__ import annotations
 import math
 import random
 
+import logging
+import sys
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import QWidget
 
-# ── the apparition, hand-editable (house style: a glyph grid + a legend) ──
-#   .  transparent      H  lit edge (the side the light is on)
-#   B  body             S  shaded edge
-#   E  void (eyes and mouth — always the darkest thing on screen)
-GHOST_ART = [
-    "........................",
-    "........BBBBBBBB........",
-    "......HBBBBBBBBBBB......",
-    ".....HHBBBBBBBBBBBS.....",
-    "....HHHBBBBBBBBBBBSS....",
-    "...HHHHBBBBBBBBBBBSSS...",
-    "...HHHHBBBBBBBBBBBSSS...",
-    "..HHHHHEBBBBBBBBEBSSSS..",
-    "..HHHHEEEBBBBBBEEESSSS..",
-    "..HHHHEEEBBBBBBEEESSSS..",
-    "..HHHHEEEBBBBBBEEESSSS..",
-    "..HHHHHEBBBBBBBBEBSSSS..",
-    "..HHHHHBBBBBBBBBBBSSSS..",
-    "..HHHHHBBBBEEBBBBBSSSS..",
-    "..HHHHHBBBEEEEBBBBSSSS..",
-    "..HHHHHBBBEEEEBBBBSSSS..",
-    "..HHHHHBBBBEEBBBBBSSSS..",
-    "..HHHHHBBBBBBBBBBBSSSS..",
-    "..HHHHHBBBBBBBBBBBSSSS..",
-    "..HHHHHBBBBBBBBBBBSSSS..",
-    "..HHHHHBBBBBBBBBBBSSSS..",
-    "....HHHB..BBBB..BBSS....",
-    "....HHH...BBBB...BSS....",
-    "....HHH....BB....BSS....",
-    ".....H.....BB.....S.....",
-]
+from techdeck.ui import pixel_art
 
-# Spectral, and deliberately NOT theme-tinted: it must read as a foreign
-# thing on both the near-black console and the bright app behind it.
-GHOST_TONES = {
-    "H": QColor("#EAF6FF"),
-    "B": QColor("#BFD8EC"),
-    "S": QColor("#7E9CBB"),
-    "E": QColor("#101A26"),
-}
-GHOST_OUTLINE = QColor("#0A1018")
-
-GRID_W = len(GHOST_ART[0])
-GRID_H = len(GHOST_ART)
+# ── the apparition ───────────────────────────────────────────────────────
+# The art is a .tdart sprite, so it opens in DevKit -> Pixel Studio like any
+# other TechDeck sprite: assets/sprites/ghost.tdart. Legend as authored —
+#   H lit edge · B body · S shaded edge · E void (eyes and mouth)
+# — but nothing here depends on those letters: the palette comes from the
+# file, so recolouring or adding tones in the studio just works.
+#
+# Loaded ONCE at import (the widget sizes below are derived from it), so an
+# edit shows up on the next app start rather than the next /seance.
+GHOST_SPRITE_NAME = "ghost.tdart"
 CELL = 5                     # px per art cell — both halves MUST share this
 MARGIN = 1                   # a cell of slack so the outline never clips
+GHOST_OUTLINE = "#0A1018"
+
+# Spectral, and deliberately NOT theme-tinted: he has to read as a foreign
+# thing on both the near-black console and the bright app. Kept separate from
+# the sprite's palette so recolouring the art cannot break his speech bubble.
+GHOST_INK = QColor("#101A26")
+GHOST_PALE = QColor("#EAF6FF")
+
+# Last-resort silhouette if the sprite is missing from a build — he appears
+# as a blank shape rather than not at all.
+_FALLBACK = {
+    "format": "tdart", "version": 1,
+    "palette": {"B": "#BFD8EC"},
+    "rows": ["." * 6 + "B" * 12 + "." * 6] * 20,
+}
+
+
+def _sprite_path() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets"
+    return base / "sprites" / GHOST_SPRITE_NAME
+
+
+def _load_sprite():
+    try:
+        return pixel_art.normalize(pixel_art.load(_sprite_path()))
+    except Exception as exc:
+        # Loud on purpose: the fallback is a featureless blob, so a silent
+        # miss here would ship a blank ghost that still "works".
+        logging.getLogger(__name__).warning(
+            "seance: could not load %s (%s) — using the blank fallback",
+            _sprite_path(), exc)
+        return pixel_art.normalize(dict(_FALLBACK))
+
+
+GHOST_SPRITE = _load_sprite()
+GHOST_ROWS = GHOST_SPRITE["rows"]
+GRID_W, GRID_H = pixel_art.dimensions(GHOST_SPRITE)
 SIZE_W = (GRID_W + 2 * MARGIN) * CELL
 SIZE_H = (GRID_H + 2 * MARGIN) * CELL
 
-_SOLID = set("HBSE")
+_PIXMAP = None
 
 
-def _outline_cells():
-    """Transparent cells that touch the silhouette — traced once, so the
-    ghost keeps a dark edge against the bright app behind it."""
-    edge = set()
-    for r, row in enumerate(GHOST_ART):
-        for c, ch in enumerate(row):
-            if ch in _SOLID:
-                continue
-            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                rr, cc = r + dr, c + dc
-                if 0 <= rr < GRID_H and 0 <= cc < GRID_W:
-                    if GHOST_ART[rr][cc] in _SOLID:
-                        edge.add((r, c))
-                        break
-    return frozenset(edge)
-
-
-OUTLINE_CELLS = _outline_cells()
+def ghost_pixmap():
+    """The whole ghost, rendered once at CELL scale with the house outline
+    trace. Both halves slice THIS, which is what makes the seam exact: two
+    complementary slices of one pixmap are that pixmap."""
+    global _PIXMAP
+    if _PIXMAP is None:
+        _PIXMAP = pixel_art.render(GHOST_SPRITE, scale=CELL, outline=True,
+                                   outline_color=GHOST_OUTLINE)
+    return _PIXMAP
 
 
 def paint_ghost(painter: QPainter, row_from: int, row_to: int,
                 alpha: float = 1.0, origin: QPoint | None = None):
     """Paint art rows [row_from, row_to) at `origin`, `alpha` 0..1.
 
-    THE seam guarantee: the veil and the apparition both call this, with
-    complementary row ranges, at the same origin and CELL. A cell belongs to
-    exactly one of the two ranges, so the union is the whole ghost and the
-    join is invisible — including the traced outline, which is filtered by
-    row here rather than recomputed per surface.
+    THE seam guarantee: the veil and the apparition both call this with
+    complementary row ranges, at the same origin and CELL, against the same
+    cached pixmap — so a row belongs to exactly one of them and the union is
+    the whole creature. (The outline is baked into the pixmap, so it is
+    sliced along with everything else and cannot double up at the join.)
     """
-    if alpha <= 0.0:
+    lo, hi = max(0, row_from), min(GRID_H, row_to)
+    if alpha <= 0.0 or hi <= lo:
         return
     origin = origin or QPoint(MARGIN * CELL, MARGIN * CELL)
-    lo = max(0, row_from)
-    hi = min(GRID_H, row_to)
-    painter.setPen(Qt.PenStyle.NoPen)
-
-    for r in range(lo, hi):
-        for c in range(GRID_W):
-            ch = GHOST_ART[r][c]
-            if ch in _SOLID:
-                colour = QColor(GHOST_TONES[ch])
-            elif (r, c) in OUTLINE_CELLS:
-                colour = QColor(GHOST_OUTLINE)
-            else:
-                continue
-            colour.setAlphaF(colour.alphaF() * alpha)
-            painter.fillRect(origin.x() + c * CELL, origin.y() + r * CELL,
-                             CELL, CELL, colour)
+    pix = ghost_pixmap()
+    # the outline lives OUTSIDE the grid, so slice a cell of slack either
+    # side and let the neighbouring half own its own edge
+    top = lo * CELL
+    height = (hi - lo) * CELL
+    if alpha < 1.0:
+        painter.setOpacity(alpha)
+    painter.drawPixmap(origin.x(), origin.y() + top, pix.width(), height,
+                       pix, 0, top, pix.width(), height)
+    if alpha < 1.0:
+        painter.setOpacity(1.0)
 
 
 class ConsoleVeil(QWidget):
@@ -412,6 +411,7 @@ class SeanceRitual(QObject):
     MANIFEST_MS = 1500
     EMERGE_MS = 2900        # the whole climb, surface crossing included
     GREET_AFTER_MS = 700    # a beat to settle before it says anything
+    GREET_READ_MS = 2200    # …and how long it hangs after the last letter
     GREETING = "o hi"
     LINGER_MS = 22000       # it hangs around, then fades of its own accord
     FADE_MS = 1400
@@ -432,6 +432,7 @@ class SeanceRitual(QObject):
         self._shudder_due = 0.0      # ms accumulator for the slower shake
         self.tear_strength = 0.0     # 0 shut, 1 fully torn (drives the glow)
         self._bubble = None
+        self._bubble_until = None    # ms mark (into linger) to stop talking
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
         self._timer.timeout.connect(self._tick)
@@ -682,10 +683,14 @@ class SeanceRitual(QObject):
         else:
             art = QPoint(int(self._anchor.x() + dx), int(self._anchor.y() + dy))
             self._app.move_art_to(art)
-        if self._bubble is None and self._elapsed >= self.GREET_AFTER_MS:
+        if (self._bubble is None and self._bubble_until is None
+                and self._elapsed >= self.GREET_AFTER_MS):
             self._greet(art)
-        elif self._bubble is not None and not self._app.dragging:
-            self._place_bubble(art)         # glued, so it drifts with him
+        elif self._bubble is not None:
+            if self._elapsed >= self._bubble_until:
+                self._drop_bubble()         # said his piece
+            elif not self._app.dragging:
+                self._place_bubble(art)     # glued, so it drifts with him
 
     def banish(self):
         """Shoo him away (double-click, and what a caller would use to end
@@ -701,8 +706,8 @@ class SeanceRitual(QObject):
             from techdeck.ui.widgets.moth_widget import SpeechBubble
             self._bubble = SpeechBubble(
                 self.GREETING,
-                fg=QColor(GHOST_TONES["E"]),
-                bg=QColor(GHOST_TONES["H"]),
+                fg=QColor(GHOST_INK),
+                bg=QColor(GHOST_PALE),
                 frame=QColor(GHOST_OUTLINE),
                 corner="bl",
             )
@@ -711,6 +716,12 @@ class SeanceRitual(QObject):
             return
         if self._app is not None:
             self._app.companion = self._bubble
+        # gone once it has been typed out and read
+        try:
+            typing = self._bubble.type_ms()
+        except Exception:
+            typing = 300
+        self._bubble_until = self._elapsed + typing + self.GREET_READ_MS
         self._place_bubble(art)
         self._bubble.show()
         self._bubble.raise_()
