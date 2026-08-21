@@ -33,7 +33,7 @@ The ritual is four beats:
     manifest  the ghost fades up low inside the console
     emerge    it hauls itself up through the console's top edge — a glowing
               tear marks where it is breaking through
-    linger    free above the app, bobbing, then it fades
+    linger    free above the app, bobbing — it says hello — then it fades
 
 Nothing here may ever break the console: the whole thing is a toy, so every
 entry point is guarded and `dismiss()` is idempotent.
@@ -230,6 +230,7 @@ class Apparition(QWidget):
         self.setFixedSize(SIZE_W, SIZE_H)
         self.rows_to = 0
         self.alpha = 1.0
+        self.companion = None     # the speech bubble, while one is up
         self._host = host
         self._host_pos = None
         if host is not None:
@@ -254,11 +255,23 @@ class Apparition(QWidget):
                 self._host_pos = new
                 if not delta.isNull():
                     self.move(self.pos() + delta)
+                    if self.companion is not None:
+                        self.companion.move(self.companion.pos() + delta)
             elif et == QEvent.Type.WindowStateChange:
-                self.setVisible(not self._host.isMinimized())
+                self._set_all_visible(not self._host.isMinimized())
             elif et == QEvent.Type.Hide:
-                self.hide()
+                self._set_all_visible(False)
         return super().eventFilter(obj, event)
+
+    def _set_all_visible(self, visible: bool):
+        """The bubble is a separate top-level, so it has to be dragged
+        through minimise/restore with us or it hangs in empty space."""
+        self.setVisible(visible)
+        if self.companion is not None:
+            try:
+                self.companion.setVisible(visible)
+            except RuntimeError:
+                self.companion = None
 
     def detach(self):
         if self._host is not None:
@@ -354,6 +367,8 @@ class SeanceRitual(QObject):
     DISTURB_MS = 2000
     MANIFEST_MS = 1500
     EMERGE_MS = 2900        # the whole climb, surface crossing included
+    GREET_AFTER_MS = 700    # a beat to settle before it says anything
+    GREETING = "o hi"
     LINGER_MS = 22000       # it hangs around, then fades of its own accord
     FADE_MS = 1400
 
@@ -370,6 +385,7 @@ class SeanceRitual(QObject):
         self._climb_from = None
         self._climb_to = None
         self.tear_strength = 0.0     # 0 shut, 1 fully torn (drives the glow)
+        self._bubble = None
         self._timer = QTimer(self)
         self._timer.setInterval(self.TICK_MS)
         self._timer.timeout.connect(self._tick)
@@ -397,10 +413,22 @@ class SeanceRitual(QObject):
         self._phase = "disturb"
         self._timer.start()
 
+    def _drop_bubble(self):
+        if self._bubble is not None:
+            try:
+                self._bubble.hide()
+                self._bubble.deleteLater()
+            except RuntimeError:
+                pass
+            self._bubble = None
+        if self._app is not None:
+            self._app.companion = None
+
     def dismiss(self):
         """Idempotent teardown — /clear, a second /seance, or the fade end."""
         self._timer.stop()
         self._restore_host()
+        self._drop_bubble()
         for w in (self._veil, self._disturb):
             if w is not None:
                 try:
@@ -569,17 +597,69 @@ class SeanceRitual(QObject):
             self._advance("linger")
 
     def _beat_linger(self):
-        """Free: it bobs where it surfaced until it loses interest."""
+        """Free: it bobs where it surfaced, says hello, and eventually
+        loses interest."""
         if self._app is not None and self._climb_to is not None:
             t = self._elapsed / 1000.0
-            self._app.move_art_to(QPoint(
-                int(self._climb_to.x() + math.sin(t * 1.1) * 14),
-                int(self._climb_to.y() + math.sin(t * 0.7) * 8)))
+            art = QPoint(int(self._climb_to.x() + math.sin(t * 1.1) * 14),
+                         int(self._climb_to.y() + math.sin(t * 0.7) * 8))
+            self._app.move_art_to(art)
+            if self._bubble is None and self._elapsed >= self.GREET_AFTER_MS:
+                self._greet(art)
+            elif self._bubble is not None:
+                self._place_bubble(art)     # glued, so it bobs with him
         if self._elapsed >= self.LINGER_MS:
             self._advance("fade")
 
+    def _greet(self, art: QPoint):
+        """Say hello, in the house speech bubble — coloured from the GHOST's
+        palette rather than the theme's, because he is deliberately not a
+        TechDeck-tinted thing and neither is anything he says."""
+        try:
+            from techdeck.ui.widgets.moth_widget import SpeechBubble
+            self._bubble = SpeechBubble(
+                self.GREETING,
+                fg=QColor(GHOST_TONES["E"]),
+                bg=QColor(GHOST_TONES["H"]),
+                frame=QColor(GHOST_OUTLINE),
+                corner="bl",
+            )
+        except Exception:
+            self._bubble = None         # never let a flourish break the toy
+            return
+        if self._app is not None:
+            self._app.companion = self._bubble
+        self._place_bubble(art)
+        self._bubble.show()
+        self._bubble.raise_()
+
+    def _place_bubble(self, art: QPoint):
+        """Park it above him with the tail pointing down at his head."""
+        if self._bubble is None:
+            return
+        centre_x = art.x() + (GRID_W * CELL) // 2
+        corner = "bl"
+        try:
+            tip_x, tip_y = self._bubble.tip_offset(corner)
+        except Exception:
+            tip_x, tip_y = 0, self._bubble.height()
+        pos = QPoint(centre_x - tip_x, art.y() - 6 - tip_y)
+        if self._host is not None:
+            # clamp into the window it haunts, never the screen (a maximized
+            # window on a second monitor otherwise flings it off-app)
+            top_left = self._host.mapToGlobal(QPoint(0, 0))
+            left = top_left.x() + 4
+            right = top_left.x() + self._host.width() - self._bubble.width() - 4
+            top = top_left.y() + 4
+            if right > left:
+                pos.setX(max(left, min(pos.x(), right)))
+            pos.setY(max(top, pos.y()))
+        self._bubble.move(pos)
+
     def _beat_fade(self):
         t = min(1.0, self._elapsed / self.FADE_MS)
+        if self._bubble is not None:
+            self._drop_bubble()      # he stops talking before he stops being
         if self._app is not None:
             self._app.alpha = 1.0 - t
             self._app.update()

@@ -237,3 +237,48 @@ def test_second_seance_does_not_stack(qapp, tmp_path, monkeypatch):
     handler.handle_command("/seance")
     assert handler._seance is first, "a second call must not summon a rival"
     handler.stop_session_effects()
+
+
+def test_he_says_hello_once_he_settles(qapp):
+    """The greeting arrives after the climb, rides along while he bobs, and
+    never outlives him."""
+    console, ritual = _ritual(qapp)
+    ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
+    ritual.GREET_AFTER_MS = 60
+    ritual.LINGER_MS = 100000            # stay put so we can watch him
+    ritual.start()
+    _pump(ritual); _pump(ritual); _pump(ritual)
+    assert ritual._phase == "linger"
+    assert ritual._bubble is None, "not before he has settled"
+
+    for _ in range(6):
+        ritual._tick()
+    assert ritual._bubble is not None, "he should have said something"
+    assert ritual._app.companion is ritual._bubble, (
+        "the bubble must travel with him through minimise/restore")
+
+    # it stays glued to him as he bobs
+    before = ritual._bubble.pos()
+    for _ in range(30):
+        ritual._tick()
+    assert ritual._bubble.pos() != before
+
+    ritual.dismiss()
+    assert ritual._bubble is None
+
+
+def test_the_greeting_is_dropped_before_he_fades(qapp):
+    console, ritual = _ritual(qapp)
+    ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
+    ritual.GREET_AFTER_MS = 0
+    ritual.LINGER_MS = 60
+    ritual.FADE_MS = 60
+    ritual.start()
+    _pump(ritual); _pump(ritual); _pump(ritual)   # into linger
+    ritual._tick()
+    assert ritual._bubble is not None
+    _pump(ritual)                                  # into fade
+    assert ritual._phase == "fade"
+    ritual._tick()
+    assert ritual._bubble is None, "he stops talking before he stops being"
+    ritual.dismiss()
