@@ -335,7 +335,7 @@ def _collect_logs() -> list[str]:
     run_log = log_dir / "plugin_runs.log"
     if run_log.is_file():
         try:
-            tail = run_log.read_text(encoding="utf-8", errors="replace").splitlines()[-250:]
+            tail = run_log.read_text(encoding="utf-8", errors="replace").splitlines()[-600:]
             lines.append("")
             lines.append(f"--- plugin_runs.log (last {len(tail)} lines) ---")
             lines.extend(tail)
@@ -347,7 +347,9 @@ def _collect_logs() -> list[str]:
     detail_log = log_dir / "plugin_detail.log"
     if detail_log.is_file():
         try:
-            tail = detail_log.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
+            # 1500 lines ≈ a few dozen runs — enough history that a colleague's
+            # report can be mined for step-level timing, not just the last run.
+            tail = detail_log.read_text(encoding="utf-8", errors="replace").splitlines()[-1500:]
             lines.append("")
             lines.append(f"--- plugin_detail.log (last {len(tail)} lines) ---")
             lines.extend(tail)
