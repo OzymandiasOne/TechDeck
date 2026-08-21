@@ -451,11 +451,179 @@ def matrix_summon_frame(source_cells, final_cells, progress: float,
     return out
 
 
+# ── the /seance summon: two candles, and something answers ───────────────
+# The third entrance, and the only seasonal one (Halloween). Where the
+# startup link grows a face out of darkness and /puppetmaster corrupts the
+# console's own text, a seance CALLS: two candles rise in the dark, their
+# wicks catch, and the face condenses out of the pooled candlelight between
+# them. Once he is fully here the flames gutter out — they were only ever
+# the invitation, so the final frame is exactly the face.
+#
+# The candles stand INSIDE the face grid, in the blank flanks beside his
+# lower face (rows 9-14, columns 1-7 and 47-53 — symmetric by construction
+# at FACE_WIDTH 55), so the block never changes size and the live render
+# needs no knowledge of any of this.
+
+# Hand-editable parallel grids, house style (like MOTH_FRAMES / SPINNER_ART):
+# the glyph grid and its tier grid. Tier letters: b=blaze (the hot tip),
+# f=flame, e=ember (the wick), w=wax (the unlit body).
+CANDLE_ART = [
+    "   ^   ",
+    "  (@)  ",
+    "   |   ",
+    "  |#|  ",
+    "  |#|  ",
+    " (===) ",
+]
+CANDLE_TIERS = [
+    "   b   ",
+    "  fbf  ",
+    "   e   ",
+    "  www  ",
+    "  www  ",
+    " wwwww ",
+]
+
+# Tip glyphs cycled while a candle burns. Only the tip changes shape; the
+# rest of the flicker is brightness, which reads as candlelight far better
+# than shape-hopping does.
+CANDLE_TIPS = "^^" + chr(39) + "^·^" + chr(39) + "^"
+
+CANDLE_ROWS = len(CANDLE_ART)
+CANDLE_W = len(CANDLE_ART[0])
+# Top-left origin of each candle in FACE_ART coordinates.
+CANDLE_ORIGINS = ((9, 1), (9, FACE_WIDTH - CANDLE_W - 1))
+# The flames themselves — the light source the face condenses around.
+CANDLE_FLAMES = tuple((r + 1, c + 3) for r, c in CANDLE_ORIGINS)
+
+# Warm counterpart to PHOSPHOR, kept as its own dict so the candles can
+# never be mistaken for him: he is cold green, the invitation is firelight.
+CANDLELIGHT = {
+    "wax": "#6B4A2A",
+    "ember": "#B4661E",
+    "flame": "#FF9A2E",
+    "blaze": "#FFE08A",
+}
+_TIER_LETTER = {"b": "blaze", "f": "flame", "e": "ember", "w": "wax"}
+_FLAME_TIERS = ("ember", "flame", "blaze")
+
+_SEANCE_WAX = (0.02, 0.17)      # the candles rise out of the dark
+_SEANCE_SPARK = (0.21, 0.30)    # wicks catch, left first then right
+_SEANCE_FACE = (0.42, 0.88)     # he condenses out of the pooled light
+_SEANCE_GUTTER = (0.90, 0.99)   # the flames snuff; only he remains
+
+
+def _seance_face_schedule(final_cells, seed: int):
+    """Per-cell materialization time for the face, spreading outward from
+    the two flames — he forms out of the light, not out of nowhere."""
+    filled = [(r, c) for r, row in enumerate(final_cells)
+              for c, (ch, _) in enumerate(row) if ch != " "]
+    if not filled:
+        return {}
+    dists = {pos: min(_dist(pos, f) for f in CANDLE_FLAMES) for pos in filled}
+    far = max(dists.values()) or 1.0
+    span = _SEANCE_FACE[1] - _SEANCE_FACE[0]
+    schedule = {}
+    for pos in filled:
+        u = _cell_hash(pos[0], pos[1], seed) / 0x7FFFFFFF
+        schedule[pos] = (_SEANCE_FACE[0] + span * (dists[pos] / far)
+                         + 0.03 * (u - 0.5))
+    return schedule
+
+
+def _candle_cell(local_r: int, local_c: int, progress: float, lit_at: float,
+                 tick: int, side: int, seed: int):
+    """One candle cell, or None where the candle is not (yet) drawn.
+
+    The body rises bottom-up out of the dark and then just stands; the flame
+    exists only between its wick catching and the gutter.
+    """
+    ch = CANDLE_ART[local_r][local_c]
+    if ch == " ":
+        return None
+    tier = _TIER_LETTER[CANDLE_TIERS[local_r][local_c]]
+    is_flame = tier in ("flame", "blaze")
+
+    # The gutter: the flame collapses to a dying ember and the whole candle
+    # sinks back into the dark TOP-DOWN — the exact reverse of the way it
+    # rose, so nothing ever pops out in a single frame.
+    if progress >= _SEANCE_GUTTER[1]:
+        return None
+    if progress >= _SEANCE_GUTTER[0]:
+        gone = ((progress - _SEANCE_GUTTER[0])
+                / (_SEANCE_GUTTER[1] - _SEANCE_GUTTER[0]))
+        if gone >= (local_r + 1) / CANDLE_ROWS:
+            return None
+        if is_flame:
+            return None if local_r == 0 else ("·", "ember")
+        return (ch, "wax")
+
+    if is_flame:
+        if progress < lit_at:
+            return None
+        if local_r == 0:                    # the wandering tip
+            ch = CANDLE_TIPS[(tick + side * 3) % len(CANDLE_TIPS)]
+        n = _cell_hash(local_r, local_c, seed, tick + side * 97)
+        return (ch, _FLAME_TIERS[n % 3])
+
+    # The body rises out of the dark BOTTOM-UP — base first, wick last —
+    # which the gutter then reverses exactly (it sinks top-down).
+    depth = local_r / max(1, CANDLE_ROWS - 1)      # 0 at the tip, 1 at the base
+    up_at = (_SEANCE_WAX[0]
+             + (_SEANCE_WAX[1] - _SEANCE_WAX[0]) * (1.0 - depth))
+    if progress < up_at:
+        return None
+    if tier == "ember":                     # the wick: cold until it catches
+        return (ch, "ember" if progress >= lit_at else "wax")
+    return (ch, "wax")
+
+
+def seance_frame(final_cells, progress: float, seed: int = 0):
+    """One frame of the /seance summon (see choreography above).
+
+    Deterministic for a given seed. progress 0.0 -> darkness; 1.0 -> exactly
+    final_cells (the candles have guttered and only the face remains).
+    """
+    if progress >= 1.0:
+        return [list(row) for row in final_cells]
+    rows = len(final_cells)
+    width = len(final_cells[0])
+    tick = int(progress * 40)
+    out = [[(" ", None)] * width for _ in range(rows)]
+
+    for (r, c), t_mat in _seance_face_schedule(final_cells, seed).items():
+        if progress < t_mat:
+            continue
+        ch, tier = final_cells[r][c]
+        # Late cells rise faster so nothing pops — and every cell targets
+        # FULL brightness by the time the gutter starts, so the candles die
+        # on a face that is already all the way here.
+        rise = max(0.02, (_SEANCE_GUTTER[0] - t_mat) / 3)
+        rank = min(_TIER_RANK[tier], int((progress - t_mat) / rise))
+        out[r][c] = (ch, _TIER_BY_RANK[rank])
+
+    span = _SEANCE_SPARK[1] - _SEANCE_SPARK[0]
+    for side, (top_r, left_c) in enumerate(CANDLE_ORIGINS):
+        lit_at = _SEANCE_SPARK[0] + span * side   # left catches, then right
+        for lr in range(CANDLE_ROWS):
+            r = top_r + lr
+            if not 0 <= r < rows:
+                continue
+            for lc in range(CANDLE_W):
+                c = left_c + lc
+                if not 0 <= c < width:
+                    continue
+                cell = _candle_cell(lr, lc, progress, lit_at, tick, side, seed)
+                if cell is not None:
+                    out[r][c] = cell
+    return out
+
+
 def face_html(cells, palette=None) -> str:
     """Render composed cells to HTML (consecutive same-tier runs merged into
     one span) for insertion into the console document. Rows joined with \\n —
     the caller wraps them in a white-space:pre block."""
-    palette = palette or PHOSPHOR
+    palette = palette or {**PHOSPHOR, **CANDLELIGHT}
     lines = []
     for row in cells:
         parts = []
@@ -898,6 +1066,8 @@ TIMELINES = {
     "materialize": [(0.10, 500), (0.24, 600), (0.30, 250),
                     (0.46, 1000), (1.0, 1800)],
     "matrix": [(0.35, 1100), (1.0, 1900)],
+    "seance": [(0.17, 900), (0.30, 600), (0.42, 800),
+               (0.88, 1900), (1.0, 600)],
     # /clear: the face decays to rain and dies — nothing condenses after,
     # so visually it's over by ~0.5; the short tail segment closes it out.
     "dissolve": [(0.5, 1100), (1.0, 120)],
@@ -1292,6 +1462,11 @@ class ConsoleCat(QObject):
             cells = matrix_summon_frame(self._source_cells,
                                         self._matrix_final,
                                         progress, seed=self._seed)
+        elif self._mode == "seance":
+            final = compose_face(iris=self._iris, mouth=0,
+                                 blink=False)
+            cells = seance_frame(final, progress,
+                                 seed=self._seed)
         elif self._mode == "dissolve":
             assert self._source_cells is not None
             blank = [[(" ", None)] * len(self._source_cells[0])
@@ -1383,7 +1558,7 @@ class ConsoleCat(QObject):
         if not hasattr(self, "_fmt_cache"):
             self._fmt_cache = {}
             font = _cat_font()
-            for tier, color in PHOSPHOR.items():
+            for tier, color in {**PHOSPHOR, **CANDLELIGHT}.items():
                 fmt = QTextCharFormat()
                 fmt.setFont(font)
                 fmt.setForeground(QColor(color))

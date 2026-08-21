@@ -611,3 +611,76 @@ def test_double_summon_is_ignored(qapp):
     count = console.output.document().characterCount()
     cat.summon("matrix")     # already present — must be a no-op
     assert console.output.document().characterCount() == count
+
+
+# ── /seance: the seasonal entrance ───────────────────────────────────────
+
+def _handler(console, tmp_path):
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    return CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+
+
+def test_seance_summon_reaches_live(qapp, monkeypatch):
+    """End-to-end on the real timer machinery, compressed."""
+    import techdeck.ui.widgets.console_cat as cc
+    monkeypatch.setitem(cc.TIMELINES, "seance", [(1.0, 120)])
+    console, cat = _cat()
+    cat.summon("seance")
+    from PySide6.QtCore import QDeadlineTimer, QEventLoop
+    deadline = QDeadlineTimer(3000)
+    while cat._state != "live" and not deadline.hasExpired():
+        qapp.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, 50)
+    assert cat._state == "live"
+    text = console.output.toPlainText()
+    assert "@" in text                       # he is here…
+    assert "#" not in text                   # …and the candles are not
+    cat.dismiss()
+
+
+def test_seance_needs_the_season(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "0")
+    console = ConsoleWidget()
+    handler = _handler(console, tmp_path)
+    handler.handle_command("/seance")
+    # Out of season it is indistinguishable from a typo — no hint it exists.
+    assert "Unknown command: /seance" in console.output.toPlainText()
+    assert handler.active_cat() is None
+
+
+def test_seance_needs_him_unheld(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "0")
+    console = ConsoleWidget()
+    handler = _handler(console, tmp_path)
+    handler.handle_command("/seance")
+    assert "Unknown command: /seance" in console.output.toPlainText()
+    assert handler.active_cat() is None
+
+
+def test_seance_summons_him_in_season(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
+    console = ConsoleWidget()
+    handler = _handler(console, tmp_path)
+    handler.handle_command("/seance")
+    assert "Unknown command" not in console.output.toPlainText()
+    cat = handler._cat
+    assert cat is not None and cat.is_present
+    assert cat._mode == "seance"
+    cat._timer.stop(); cat._raise_timer.stop()
+    cat.dismiss()
+
+
+def test_seance_is_absent_from_help(qapp, tmp_path, monkeypatch):
+    """Those who know, know — same contract as /puppetmaster."""
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
+    console = ConsoleWidget()
+    handler = _handler(console, tmp_path)
+    handler.handle_command("/help")
+    readout = console.pinned.toPlainText()
+    assert "Available commands:" in readout
+    assert "/seance" not in readout
+    assert "/puppetmaster" not in readout

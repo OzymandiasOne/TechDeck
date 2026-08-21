@@ -3,6 +3,8 @@
 import pytest
 
 from techdeck.ui.widgets.console_cat import (
+    CANDLE_ART, CANDLE_FLAMES, CANDLE_ORIGINS, CANDLE_ROWS,
+    CANDLE_TIERS, CANDLE_W, CANDLELIGHT, seance_frame,
     FACE_ART, FACE_WIDTH, EYE_BOXES, PUPIL, MOUTH_FRAMES, MOUTH_TOP,
     GRIN_ROW, IRIS_COLS, IRIS_ROWS, PHOSPHOR, CHAR_TIER,
     compose_face, face_html, matrix_summon_frame, summon_frame,
@@ -274,3 +276,98 @@ def test_face_html_emits_tier_colors_and_rows():
     assert html.count("\n") == len(FACE_ART) - 1
     for color in (PHOSPHOR["dim"], PHOSPHOR["bright"], PHOSPHOR["peak"]):
         assert color in html
+
+
+# ── the seance summon (candles) ──────────────────────────────────────────
+
+def _split_by_kind(frame):
+    """Partition a frame into face cells and candle cells. The two palettes
+    have disjoint tier names, so the tier alone says which is which."""
+    face, candle = set(), set()
+    for r, row in enumerate(frame):
+        for c, (ch, tier) in enumerate(row):
+            if tier in PHOSPHOR:
+                face.add((r, c))
+            elif tier in CANDLELIGHT:
+                candle.add((r, c))
+    return face, candle
+
+
+def test_candle_grids_are_parallel_and_legal():
+    assert len(CANDLE_TIERS) == len(CANDLE_ART) == CANDLE_ROWS
+    for art_row, tier_row in zip(CANDLE_ART, CANDLE_TIERS):
+        assert len(art_row) == len(tier_row) == CANDLE_W
+        for ch, letter in zip(art_row, tier_row):
+            assert (ch == " ") == (letter == " "), "grids must agree on gaps"
+    # every tier letter used must resolve to a real candlelight colour
+    used = {ln for row in CANDLE_TIERS for ln in row if ln != " "}
+    assert used <= set("bfew")
+
+
+def test_candles_stand_in_blank_flanks_of_the_face():
+    """A future FACE_ART edit must not silently collide with the candles."""
+    for top_r, left_c in CANDLE_ORIGINS:
+        for lr in range(CANDLE_ROWS):
+            row = FACE_ART[top_r + lr]
+            assert row[left_c:left_c + CANDLE_W].strip() == "", (top_r + lr)
+
+
+def test_seance_starts_dark_and_ends_on_the_face():
+    final = compose_face()
+    assert all(ch == " " for row in seance_frame(final, 0.0, seed=5)
+               for ch, _ in row)
+    assert seance_frame(final, 1.0, seed=5) == final
+
+
+def test_seance_is_deterministic_per_seed():
+    final = compose_face()
+    assert seance_frame(final, 0.6, seed=5) == seance_frame(final, 0.6, seed=5)
+    assert seance_frame(final, 0.6, seed=5) != seance_frame(final, 0.6, seed=6)
+
+
+def test_seance_candles_come_before_any_face():
+    """The ritual reads in order: wax rises, wicks catch, THEN he answers."""
+    final = compose_face()
+    face, candle = _split_by_kind(seance_frame(final, 0.10, seed=5))
+    assert candle and not face                  # bodies rising in the dark
+    assert not any(seance_frame(final, 0.10, seed=5)[r][c][1]
+                   in ("flame", "blaze")
+                   for r, c in candle)          # …but nothing lit yet
+    face, candle = _split_by_kind(seance_frame(final, 0.36, seed=5))
+    assert candle and not face                  # both lit, he is still absent
+
+
+def test_seance_left_candle_catches_first():
+    final = compose_face()
+    frame = seance_frame(final, 0.25, seed=5)
+    lit = {c for r, row in enumerate(frame)
+           for c, (_, tier) in enumerate(row) if tier in ("flame", "blaze")}
+    assert lit, "the left candle should be burning by 0.25"
+    left_flame_col, right_flame_col = (c for _, c in CANDLE_FLAMES)
+    assert min(lit) < left_flame_col + CANDLE_W
+    assert max(lit) < right_flame_col, "the right one has not caught yet"
+
+
+def test_seance_candles_gutter_out_completely():
+    final = compose_face()
+    # mid-gutter the flames are dying embers and the wax is sinking…
+    _, candle = _split_by_kind(seance_frame(final, 0.93, seed=5))
+    assert candle
+    # …and by the end nothing warm remains: only him.
+    _, candle = _split_by_kind(seance_frame(final, 1.0, seed=5))
+    assert not candle
+
+
+def test_seance_face_is_complete_before_the_gutter_finishes():
+    """He must be all the way here before the light that called him dies."""
+    final = compose_face()
+    frame = seance_frame(final, 0.97, seed=5)
+    for r, row in enumerate(final):
+        for c, cell in enumerate(row):
+            if cell[0] != " ":
+                assert frame[r][c] == cell, (r, c)
+
+
+def test_candlelight_is_disjoint_from_phosphor():
+    """He is cold green; the invitation is firelight. Never confuse them."""
+    assert not (set(CANDLELIGHT) & set(PHOSPHOR))

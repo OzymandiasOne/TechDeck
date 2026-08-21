@@ -10,7 +10,9 @@ import threading
 from typing import Callable
 from pathlib import Path
 from techdeck.core.settings import SettingsManager
-from techdeck.core.constants import APP_VERSION, puppet_master_enabled
+from techdeck.core.constants import (
+    APP_VERSION, halloween_active, puppet_master_enabled,
+)
 from techdeck.core.flavor import generate_haiku, generate_musing
 from techdeck.core.audio_manager import (
     get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
@@ -93,6 +95,7 @@ class CommandHandler:
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
             '/puppetmaster': self._cmd_puppetmaster,
+            '/seance': self._cmd_seance,
             '/admin': self._cmd_admin,
             '/tickets': self._cmd_tickets,
             '/reset': self._cmd_reset,
@@ -108,7 +111,13 @@ class CommandHandler:
     # was already absent from /help ("those who know, know") — this makes the
     # command itself dormant too, until constants.PUPPET_MASTER_ENABLED flips
     # for Halloween 2026.
-    _HELD_COMMANDS = {'/puppetmaster'}
+    _HELD_COMMANDS = {'/puppetmaster', '/seance'}
+
+    # Commands that only exist DURING the Halloween season (constants.
+    # halloween_active — which also folds in the professional-theme
+    # suppression). Out of season they behave exactly like a typo, so the
+    # app has no seasonal residue in the other eleven months.
+    _SEASONAL_COMMANDS = {'/seance'}
     _ADMIN_HELP = (
         "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
         "  /reset store     - Clear all Emporium purchases"
@@ -121,7 +130,9 @@ class CommandHandler:
 
         if cmd in self.commands and not (
                 cmd in self._ADMIN_COMMANDS and not self._admin_mode) and not (
-                cmd in self._HELD_COMMANDS and not puppet_master_enabled()):
+                cmd in self._HELD_COMMANDS and not puppet_master_enabled()) \
+                and not (cmd in self._SEASONAL_COMMANDS
+                         and not halloween_active(settings=self.settings)):
             self.commands[cmd](args)
         else:
             self.console.append_error(f"Unknown command: {cmd}")
@@ -182,6 +193,17 @@ class CommandHandler:
         if cat.is_present:
             return
         cat.summon("matrix")
+
+    def _cmd_seance(self, args: str):
+        """The seasonal way in: two candles rise in the console, their wicks
+        catch, and he condenses out of the pooled candlelight — which then
+        gutters out, having served its purpose. Halloween only (gated by
+        _SEASONAL_COMMANDS → halloween_active), and deliberately absent from
+        /help like its siblings."""
+        cat = self._console_cat()
+        if cat.is_present:
+            return
+        cat.summon("seance")
 
     # ------------------------------------------------------------------ #
     #  Core commands
