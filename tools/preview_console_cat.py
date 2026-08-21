@@ -25,14 +25,13 @@ from PySide6.QtGui import (  # noqa: E402
 )
 
 from techdeck.ui.widgets.console_cat import (  # noqa: E402
-    CANDLELIGHT, FACE_ART as FACE_GRID, PHOSPHOR, compose_face, seance_frame,
-    summon_frame,
+    FACE_ART as FACE_GRID, PHOSPHOR, compose_face, summon_frame,
 )
 
 BG = "#070B07"
 LABEL = "#2FA84F"
 HALO_TIERS = {"bright", "peak"}
-_TIER_COLORS = {**PHOSPHOR, **CANDLELIGHT}
+_TIER_COLORS = dict(PHOSPHOR)
 
 VARIANTS = [
     ("center / closed", dict(iris=(2, 1), mouth=0)),
@@ -46,9 +45,6 @@ VARIANTS = [
 # lids · eyes opening · open wide · seed points · early flower · mid flower
 # · late flower · brightening · done
 SUMMON_STAGES = [0.10, 0.22, 0.36, 0.42, 0.52, 0.65, 0.78, 0.90, 1.0]
-# The seance beats: wax rises, wicks catch, the calling, he answers, gutter.
-SEANCE_STAGES = [0.08, 0.14, 0.25, 0.33, 0.45, 0.60,
-                 0.75, 0.88, 0.94, 1.0]
 SUMMON_SEED = 7
 
 
@@ -97,8 +93,6 @@ def render(panels, out_path: Path):
                     continue
                 x = ox + c * cw
                 y = oy + r * chh + fm.ascent()
-                # Candle tiers live in their own palette (the seance sheet
-                # renders both families side by side).
                 colour = _TIER_COLORS[tier]
                 if tier in HALO_TIERS:
                     halo = QColor(colour)
@@ -122,8 +116,6 @@ def main():
                         default=ROOT / "console_cat_preview.png")
     parser.add_argument("--summon-out", type=Path,
                         default=ROOT / "console_cat_summon.png")
-    parser.add_argument("--seance-out", type=Path,
-                        default=ROOT / "console_cat_seance.png")
     args = parser.parse_args()
     render([(label, compose_face(**kwargs)) for label, kwargs in VARIANTS],
            args.out)
@@ -131,9 +123,6 @@ def main():
     render([(f"summon {int(p * 100)}%",
              summon_frame(final, p, seed=SUMMON_SEED))
             for p in SUMMON_STAGES], args.summon_out)
-    render([(f"seance {int(p * 100)}%",
-             seance_frame(final, p, seed=SUMMON_SEED))
-            for p in SEANCE_STAGES], args.seance_out)
 
 
 if __name__ == "__main__":

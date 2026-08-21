@@ -71,6 +71,7 @@ class CommandHandler:
         self._rogue_player = None  # kept alive here to prevent GC
         self._spinner = None       # /fidget window; /clear closes it
         self._cat = None           # the Cheshire Cat; lazy (see _console_cat)
+        self._seance = None        # the /seance ritual, while one is running
         self._admin_mode = False   # /admin toggles; gates _ADMIN_COMMANDS
 
         # Command registry. Theme switching deliberately is NOT here —
@@ -111,7 +112,7 @@ class CommandHandler:
     # was already absent from /help ("those who know, know") — this makes the
     # command itself dormant too, until constants.PUPPET_MASTER_ENABLED flips
     # for Halloween 2026.
-    _HELD_COMMANDS = {'/puppetmaster', '/seance'}
+    _HELD_COMMANDS = {'/puppetmaster'}
 
     # Commands that only exist DURING the Halloween season (constants.
     # halloween_active — which also folds in the professional-theme
@@ -195,15 +196,22 @@ class CommandHandler:
         cat.summon("matrix")
 
     def _cmd_seance(self, args: str):
-        """The seasonal way in: two candles rise in the console, their wicks
-        catch, and he condenses out of the pooled candlelight — which then
-        gutters out, having served its purpose. Halloween only (gated by
-        _SEASONAL_COMMANDS → halloween_active), and deliberately absent from
-        /help like its siblings."""
-        cat = self._console_cat()
-        if cat.is_present:
+        """Call something up. TechDeck itself is disturbed — the window
+        shudders, the lights fail — and then a shape resolves inside the
+        console and climbs OUT of it into the app (widgets/seance.py).
+
+        Nothing to do with the Puppet Master: he is not what answers a
+        seance, so this is gated on the season alone. Halloween only
+        (_SEASONAL_COMMANDS → halloween_active) and absent from /help."""
+        if self._seance is not None and self._seance.is_running:
             return
-        cat.summon("seance")
+        from techdeck.ui.widgets.seance import SeanceRitual
+        self._seance = SeanceRitual(self.console, host=self.main_window)
+        try:
+            self._seance.start()
+        except Exception:
+            # A toy must never take the console down with it.
+            self._stop_seance()
 
     # ------------------------------------------------------------------ #
     #  Core commands
@@ -730,10 +738,20 @@ class CommandHandler:
         self._stop_rave(announce=False)
         self._stop_moth()
         self._stop_spinner()
+        self._stop_seance()
         if self._cat is not None:
             # The document is being wiped with the /clear — reset, don't
             # try to excise a range from a vanishing document.
             self._cat.stop()
+
+    def _stop_seance(self):
+        """Banish the /seance apparition if one is up (used by /clear)."""
+        if self._seance is not None:
+            try:
+                self._seance.dismiss()
+            except Exception:
+                pass
+            self._seance = None
 
     def _stop_spinner(self):
         """Close the /fidget spinner window if one is open (used by /clear)."""
