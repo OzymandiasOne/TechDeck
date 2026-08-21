@@ -33,7 +33,10 @@ The ritual is four beats:
     manifest  the ghost fades up low inside the console
     emerge    it hauls itself up through the console's top edge — a glowing
               tear marks where it is breaking through
-    linger    free above the app, bobbing — it says hello — then it fades
+    linger    free above the app: it says hello, floats gently in place, and
+              can be dragged anywhere. It STAYS until dismissed (double-click
+              to shoo, or /clear) — a thing you can pick up should not
+              evaporate on a timer while you are holding it.
 
 Nothing here may ever break the console: the whole thing is a toy, so every
 entry point is guarded and `dismiss()` is idempotent.
@@ -226,8 +229,14 @@ class Apparition(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        # Interactive, unlike the veil: he can be picked up and put down.
+        # (That does mean his window swallows clicks meant for whatever is
+        # underneath — the same trade the moth and the fidget spinner make.)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setFixedSize(SIZE_W, SIZE_H)
+        self.dragging = False
+        self.on_shoo = None       # set by the ritual: double-click to banish
+        self._drag_pos = None
         self.rows_to = 0
         self.alpha = 1.0
         self.companion = None     # the speech bubble, while one is up
@@ -280,6 +289,36 @@ class Apparition(QWidget):
             except RuntimeError:
                 pass
             self._host = None
+
+    # -- picked up and put down -------------------------------------------
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self._drag_pos = event.globalPosition().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event):
+        if not (self.dragging and event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        now = event.globalPosition().toPoint()
+        delta = now - self._drag_pos
+        self._drag_pos = now
+        self.move(self.pos() + delta)
+        if self.companion is not None:      # his bubble comes with him
+            try:
+                self.companion.move(self.companion.pos() + delta)
+            except RuntimeError:
+                self.companion = None
+
+    def mouseReleaseEvent(self, event):
+        self.dragging = False
+        self._drag_pos = None
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def mouseDoubleClickEvent(self, event):
+        """Shoo him — the moth's contract, so the gesture is already known."""
+        if self.on_shoo is not None:
+            self.on_shoo()
 
     def paintEvent(self, event):
         if self.rows_to <= 0:
@@ -384,6 +423,7 @@ class SeanceRitual(QObject):
         self._home_pos = None        # the host's geometry before we shook it
         self._climb_from = None
         self._climb_to = None
+        self._anchor = None          # where he floats about, once he is free
         self.tear_strength = 0.0     # 0 shut, 1 fully torn (drives the glow)
         self._bubble = None
         self._timer = QTimer(self)
@@ -589,6 +629,8 @@ class SeanceRitual(QObject):
             self._app.rows_to = GRID_H
             self._app.update()
             self.tear_strength = 0.0
+            self._anchor = self._climb_to
+            self._app.on_shoo = self.banish
             self._settle_host()
             if self._disturb is not None:
                 self._disturb.dim = 0.0
@@ -596,19 +638,38 @@ class SeanceRitual(QObject):
                 self._disturb.update()
             self._advance("linger")
 
+    @staticmethod
+    def _float_offset(t: float):
+        """A gentle, non-repeating drift. Two out-of-phase sines per axis so
+        the loop never reads as a loop — small enough to be breathing rather
+        than bobbing."""
+        return (math.sin(t * 0.9) * 5.0 + math.sin(t * 0.37) * 2.0,
+                math.sin(t * 0.6) * 4.0 + math.cos(t * 0.23) * 2.0)
+
     def _beat_linger(self):
-        """Free: it bobs where it surfaced, says hello, and eventually
-        loses interest."""
-        if self._app is not None and self._climb_to is not None:
-            t = self._elapsed / 1000.0
-            art = QPoint(int(self._climb_to.x() + math.sin(t * 1.1) * 14),
-                         int(self._climb_to.y() + math.sin(t * 0.7) * 8))
+        """Free: he says hello, floats in place, and waits to be picked up.
+        No timer takes him away — see banish()."""
+        if self._app is None or self._anchor is None:
+            return
+        dx, dy = self._float_offset(self._elapsed / 1000.0)
+        if self._app.dragging:
+            # He follows the cursor; re-anchor under him so letting go does
+            # not snap the float back to where he was summoned.
+            here = self._app.art_global_pos()
+            self._anchor = QPoint(int(here.x() - dx), int(here.y() - dy))
+            art = here
+        else:
+            art = QPoint(int(self._anchor.x() + dx), int(self._anchor.y() + dy))
             self._app.move_art_to(art)
-            if self._bubble is None and self._elapsed >= self.GREET_AFTER_MS:
-                self._greet(art)
-            elif self._bubble is not None:
-                self._place_bubble(art)     # glued, so it bobs with him
-        if self._elapsed >= self.LINGER_MS:
+        if self._bubble is None and self._elapsed >= self.GREET_AFTER_MS:
+            self._greet(art)
+        elif self._bubble is not None and not self._app.dragging:
+            self._place_bubble(art)         # glued, so it drifts with him
+
+    def banish(self):
+        """Shoo him away (double-click, and what a caller would use to end
+        him politely) — he fades rather than blinking out."""
+        if self._phase == "linger":
             self._advance("fade")
 
     def _greet(self, art: QPoint):

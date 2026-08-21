@@ -91,7 +91,8 @@ def test_ritual_walks_every_beat_and_cleans_up(qapp):
     assert ritual._phase == "linger"
     assert ritual._veil is None, "the console half is spent once it is out"
     assert ritual._app.rows_to == GRID_H, "the free half owns every row"
-    _pump(ritual)
+
+    ritual.banish()                       # he leaves when shooed, not on a clock
     assert ritual._phase == "fade"
     _pump(ritual)
     assert not ritual.is_running
@@ -182,15 +183,16 @@ def test_veil_never_touches_the_console_document(qapp):
     assert console.output.toPlainText() == before
 
 
-def test_veil_is_click_through(qapp):
-    """It sits over the console — it must never eat the user's typing."""
+def test_veil_is_click_through_but_he_is_not(qapp):
+    """The veil sits over the console and must never eat the user's typing.
+    He, on the other hand, has to be grabbable."""
     from PySide6.QtCore import Qt
     console = ConsoleWidget()
     veil = ConsoleVeil(console)
     assert veil.testAttribute(
         Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     apparition = Apparition()
-    assert apparition.testAttribute(
+    assert not apparition.testAttribute(
         Qt.WidgetAttribute.WA_TransparentForMouseEvents)
     assert apparition.testAttribute(
         Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -271,14 +273,83 @@ def test_the_greeting_is_dropped_before_he_fades(qapp):
     console, ritual = _ritual(qapp)
     ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
     ritual.GREET_AFTER_MS = 0
-    ritual.LINGER_MS = 60
     ritual.FADE_MS = 60
     ritual.start()
     _pump(ritual); _pump(ritual); _pump(ritual)   # into linger
     ritual._tick()
     assert ritual._bubble is not None
-    _pump(ritual)                                  # into fade
+    ritual.banish()
     assert ritual._phase == "fade"
     ritual._tick()
     assert ritual._bubble is None, "he stops talking before he stops being"
+    ritual.dismiss()
+
+
+# ── he is a resident, not a cutscene ─────────────────────────────────────
+
+def _to_linger(qapp):
+    console, ritual = _ritual(qapp)
+    ritual.DISTURB_MS = ritual.MANIFEST_MS = ritual.EMERGE_MS = 60
+    ritual.GREET_AFTER_MS = 100000        # keep the bubble out of the way
+    ritual.start()
+    _pump(ritual); _pump(ritual); _pump(ritual)
+    assert ritual._phase == "linger"
+    return console, ritual
+
+
+def test_he_stays_until_shooed(qapp):
+    """No timer takes him away — you can keep him as long as you like."""
+    console, ritual = _to_linger(qapp)
+    for _ in range(400):                  # far past any old linger timeout
+        ritual._tick()
+    assert ritual._phase == "linger"
+    assert ritual._app is not None
+    ritual.banish()
+    assert ritual._phase == "fade"
+    ritual.dismiss()
+
+
+def test_he_floats_gently_in_place(qapp):
+    """Movement is a drift, not a bob: small, and it comes back."""
+    console, ritual = _to_linger(qapp)
+    anchor = ritual._anchor
+    seen = []
+    for _ in range(240):
+        ritual._tick()
+        seen.append(ritual._app.art_global_pos())
+    xs = [p.x() - anchor.x() for p in seen]
+    ys = [p.y() - anchor.y() for p in seen]
+    assert len(set(xs)) > 3 and len(set(ys)) > 3, "he should be moving"
+    assert max(abs(v) for v in xs) <= 8, "drift, not a bob"
+    assert max(abs(v) for v in ys) <= 7
+    assert min(xs) < 0 < max(xs), "he should wander both ways, not sail off"
+    ritual.dismiss()
+
+
+def test_dragging_re_anchors_him_where_he_is_dropped(qapp):
+    """Let go and he floats about the NEW spot, not where he was summoned."""
+    console, ritual = _to_linger(qapp)
+    start_anchor = QPoint(ritual._anchor)
+    app = ritual._app
+
+    app.dragging = True                   # as the mouse handlers would
+    app.move_art_to(QPoint(start_anchor.x() + 260, start_anchor.y() - 120))
+    ritual._tick()
+    app.dragging = False
+    dropped = QPoint(ritual._anchor)
+    assert dropped != start_anchor, "the anchor must follow him"
+
+    for _ in range(60):
+        ritual._tick()
+    drift = ritual._app.art_global_pos() - dropped
+    assert abs(drift.x()) <= 8 and abs(drift.y()) <= 7, (
+        "he should be floating about where he was dropped")
+    ritual.dismiss()
+
+
+def test_double_click_shoos_him(qapp):
+    console, ritual = _to_linger(qapp)
+    assert ritual._app.on_shoo is not None, "the gesture must be wired up"
+    ritual._app.on_shoo()
+    assert ritual._phase == "fade"
     ritual.dismiss()
