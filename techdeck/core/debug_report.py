@@ -381,9 +381,17 @@ def _collect_previous_session() -> list[str]:
         return ["<no previous session snapshot — first run since the watchdog "
                 "shipped, or the logs dir was cleared>"]
     clean = prev.get("clean_exit")
+    # 'frozen' was stamped into the snapshot when dev runs got their own
+    # logs\dev tree; older snapshots don't carry it. A dev-run snapshot can
+    # only appear here in a report GENERATED from a dev run - the trees no
+    # longer cross - but say so anyway rather than read like a field crash.
+    frozen = prev.get("frozen")
+    build = ("?" if frozen is None
+             else "frozen exe" if frozen else "dev run (python -m techdeck)")
     lines = [
         f"Ended cleanly:    {clean}"
         + ("" if clean else "   <-- killed, crashed, or frozen-then-restarted"),
+        f"Build:            {build}",
         f"Session started:  {prev.get('session_started')}",
         f"Last written:     {prev.get('written')}   (pid {prev.get('pid')})",
         f"UI thread stale:  {prev.get('ui_thread_stale_s')}s at that moment",
