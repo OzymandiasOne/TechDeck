@@ -31,5 +31,12 @@ pypdf==6.4.1
 qrcode==8.2               # QR Code Generator plugin
 Pillow==12.2.0            # imported as `PIL`; QR image render + asset tooling
 
+# --- Drawing reader (911 Inspection Dimensions) ---
+# On-device OCR: no network call, no external exe, models ship inside the package.
+# rapidocr-onnxruntime pulls onnxruntime + opencv-python + pyclipper + Shapely + PyYAML.
+rapidocr-onnxruntime==1.2.3
+onnxruntime==1.27.0
+opencv-python==4.13.0.92   # imported as `cv2`; a rapidocr dependency
+
 # --- Build only (not imported at runtime) ---
 pyinstaller==6.15.0

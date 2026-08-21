@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
 a = Analysis(
     ['techdeck\\__main__.py'],
@@ -8,6 +9,12 @@ a = Analysis(
     datas=[
         ('plugins', 'plugins'),
         ('assets', 'assets'),
+        # 911 Inspection Dimensions reads the drawings with RapidOCR, whose ONNX models
+        # and per-model config.yaml files are package DATA, not code - PyInstaller does
+        # not follow them from the imports, so the frozen exe raises FileNotFoundError
+        # on the first run without these. (collect_data_files pulls the .onnx + .yaml +
+        # the character dictionary out of site-packages/rapidocr_onnxruntime.)
+        *collect_data_files('rapidocr_onnxruntime'),
     ],
     hiddenimports=[
         # First-party modules only imported dynamically by plugins (which PyInstaller's
@@ -32,6 +39,11 @@ a = Analysis(
         'qrcode.image.styledpil', 'qrcode.image.svg', 'qrcode.image.styles',
         'qrcode.image.styles.moduledrawers', 'qrcode.image.styles.colormasks',
         'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont',
+        # Only imported by 911_inspection_dimensions' run.py: the on-device drawing
+        # reader (RapidOCR on ONNX Runtime) plus the array/vision libs it pulls in.
+        # No network and no external exe - the models ship in datas above.
+        'rapidocr_onnxruntime', 'onnxruntime', 'onnxruntime.capi',
+        'onnxruntime.capi._pybind_state', 'numpy', 'cv2', 'yaml', 'shapely', 'pyclipper',
         'win32com', 'win32com.client', 'pythoncom', 'pywintypes'
     ],
     hookspath=[],

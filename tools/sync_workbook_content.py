@@ -258,15 +258,24 @@ ENGINEERING = [
 # the release turns that key into the version number. Applied BEFORE the upsert
 # so the row is updated in place rather than duplicated.
 VERSION_RENAMES = {
-    "In Development": "Beta 0.8.6.11",
-    # Entries stay listed once applied - find_row returns None the second time,
-    # so the map is idempotent and doubles as a record of past re-keys.
+    # Past re-keys (a dict can hold each old key once, so superseded targets
+    # move to this comment): "In Development" -> "Beta 0.8.6.11".
+    "In Development": "Beta 0.8.7.1",
     "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("In Development", "", "Feature",
+    ("Beta 0.8.7.1", "Aug 20, 2026", "Feature",
+     "A new inspection-data capture tool reads every dimension off the part "
+     "sketch drawings in a batch's nest packages - the drawings are scanned "
+     "images with no machine-readable text, so the tool reads them by "
+     "on-device image recognition, with nothing sent off the machine - and "
+     "types the values onto each part's inspection sheet, including weld-prep "
+     "codes with the side each applies to. Reference dimensions and note text "
+     "are excluded and reported separately, and a sheet that already has "
+     "values is never overwritten. This removes the slowest manual step in "
+     "inspection prep: reading each drawing and keying its dimensions by hand. "
      "Flat bar forming moves in-house: the design automation system now marks "
      "a formed flat bar's files the same way it marks formed plates, the "
      "forming search gathers formed flat bars alongside formed plates by all "
@@ -278,8 +287,23 @@ VERSION_ROWS = [
      "And the packet difficulty marking now finishes the job: once a work "
      "packet carries the mark, the original marking is removed from the part "
      "drawings it came from, so the flag lives on the paperwork the floor "
-     "works from - re-running still keeps packets honest in both directions.",
-     "922 FormingFinder, 922 Kitting, 922 Difficulty Stamper"),
+     "works from - re-running still keeps packets honest in both directions. "
+     "Batch preparation gains a card-labelling stage that adds pallet labels "
+     "to coordination cards raised before pallet assignments existed, closing "
+     "a gap where those cards stayed unlabelled. All 922 tools now take their "
+     "batch by picking the batch folder rather than typing a number, and a "
+     "queued run of several tools asks once. Customer geometry quoting "
+     "resolves a set of field-reported defects: thickness entry applies to a "
+     "whole batch at once, legacy-format customer files (previously skipped "
+     "silently) are fully processed, manual adjustments prefill the correct "
+     "customer-guideline amount for the plate, failures are reported per "
+     "feature with reasons, and re-processing an already-processed file warns "
+     "before compounding. Updates that fail to download can be retried, and "
+     "after an unexpected stoppage the next start offers a one-click "
+     "diagnostic report.",
+     "911 Inspection Dimensions (new), 922 Setup, 922 FormingFinder, "
+     "922 Kitting, 922 Difficulty Stamper, 922 LST Organizer, "
+     "922 Batch Repeater, 922 Runtime Genie, Customer DXF Analysis"),
     ("Beta 0.8.7", "Aug 13, 2026", "Feature",
      "Adds a personal planning workspace to the platform. Staff can capture "
      "what is on their plate in plain language and have the day laid out as a "
@@ -301,7 +325,8 @@ VERSION_ROWS = [
      "assumed clear. "
      "Also: staff can set a profile picture, and a reliability defect that "
      "could fail a document save when the file was still held open is fixed.",
-     "Released"),
+     "Personal Planning Workspace (new), 922 Difficulty Stamper (new), "
+     "profile pictures, document-save reliability fix"),
     ("Beta 0.8.6.13", "Aug 11, 2026", "Feature",
      "Coordination-card creation for the 911 pipeline is now a standalone tool, "
      "so cards can be raised without running a batch setup and a setup can be "
@@ -318,7 +343,8 @@ VERSION_ROWS = [
      "stopped difficulty ratings from reaching either the printed packets or "
      "the coordination cards - column lookups now tolerate headings that gain "
      "extra wording.",
-     "Released"),
+     "911 Teams Cards (new), 911 Setup, 922 Setup, scheduling-board status "
+     "automation"),
     ("Beta 0.8.6.11", "Aug 5, 2026", "Feature",
      "Task-card creation for the 911 pipeline is now automated: setup reads the "
      "master schedule and raises one card per job awaiting modeling, carrying "
@@ -433,6 +459,28 @@ PI_RENAMES = {
 
 # ---- Process Improvement log :: NEW entries (task, state, description) ------
 PI_NEW = [
+    ("DRAWING DIMENSION READER", "PILOT",
+     "READS THE DIMENSIONS DIRECTLY OFF THE PART DRAWINGS IN A 911 NEST "
+     "PACKAGE -- INCLUDING THE WELD PREP CALLOUTS -- AND FILLS THEM ONTO EACH "
+     "PART'S INSPECTION SHEET; RUNS ENTIRELY ON THE MACHINE WITH NO OUTSIDE "
+     "SERVICE, SKIPS REFERENCE-ONLY FIGURES AND STOCK NOTES, NEVER OVERWRITES "
+     "A SHEET ALREADY FILLED IN BY HAND, AND FLAGS ANY DRAWING IT COULD NOT READ"),
+    ("922 PALLET LABELER STAGE", "COMPLETE",
+     "BATCH PREPARATION GAINS A CARD-LABELLING STAGE THAT ADDS PALLET LABELS "
+     "TO COORDINATION CARDS RAISED BEFORE PALLET ASSIGNMENTS EXISTED; "
+     "PREVIOUSLY THOSE CARDS STAYED UNLABELLED BECAUSE RE-RUNNING SETUP WOULD "
+     "DUPLICATE THE BOARD RATHER THAN LABEL IT"),
+    ("CUSTOMER DXF FIELD-REPORTED FIXES", "COMPLETE",
+     "FIVE DEFECTS REPORTED BY THE QUOTING CREW RESOLVED: BATCH-WIDE "
+     "THICKNESS ENTRY, LEGACY-FORMAT CUSTOMER FILES (PREVIOUSLY SKIPPED "
+     "SILENTLY) NOW FULLY PROCESSED, MANUAL ADJUSTMENTS PREFILL THE CORRECT "
+     "CUSTOMER-GUIDELINE AMOUNT, FAILURES REPORTED PER FEATURE WITH REASONS, "
+     "AND RE-PROCESSING AN ALREADY-PROCESSED FILE WARNS BEFORE COMPOUNDING; "
+     "ROOT CAUSES CONFIRMED AGAINST THE REPORTING CREW'S OWN FILES"),
+    ("UPDATE DOWNLOAD RETRY", "COMPLETE",
+     "A FAILED UPDATE DOWNLOAD NOW OFFERS A RETRY INSTEAD OF A DEAD END, THE "
+     "MANUAL UPDATE CHECK REPORTS ITS REAL OUTCOME, AND UPDATES EXIT THE "
+     "APPLICATION CLEANLY"),
     ("DESKTOP WIDGET LINE", "COMPLETE",
      "SEVEN EARNABLE DESK WIDGETS ADDED TO THE REWARDS CATALOG, EACH BUILT "
      "FROM THREE INDEPENDENTLY SWAPPABLE ART LAYERS"),

@@ -1,4 +1,4 @@
-# TechDeck v0.8.7 - The Assistant
+# TechDeck v0.8.7.1 - Inspection Dimensions
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,82 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.1
+
+**911 Inspection Dimensions - a new app that fills your inspection sheets.** Point it at a
+batch and it reads every PART SKETCH drawing in the nest packages, pulls off each
+dimension, and types them onto that part's QF-QU-09 inspection tab - the same tab 911
+Setup created. The drawings are pictures with no real text in them, so the app reads them
+the way you do: by looking. All of that happens on your machine; nothing is sent anywhere.
+It also captures the weld preps - the KB codes on their leader lines, with the side each
+one applies to. REF dimensions and numbers inside drawing notes are excluded and listed
+separately so you can see what was skipped. A tab that already has numbers on it is never
+touched, so re-running is safe. TYP dimensions land last on the list, since the drawing
+prints them once but the feature repeats - copy the tail entries down as needed. This one
+is early and experimental: check its work while you get a feel for it.
+
+**922 Setup - Pallet Labeler stage.** If a batch got its Teams cards before the Pallet &
+Rod Organizer was filled in, those cards went out with no pallet labels - and re-running
+Setup would duplicate them, not label them. The new Pallet Labeler stage (off by default)
+fixes exactly that: it finds the existing cards and puts the right pallet labels on them.
+
+**922 apps - pick the batch folder.** No more typing batch numbers into 922 apps. You pick
+the `Batch NNN` folder instead, the number is read from the folder name, and a queued run
+of several 922 apps asks once, not once per app.
+
+**Formed flat bars.** Flat bars are now formed in-house, and the paperwork keeps up:
+FormingFinder gathers formed flat bar PDFs (`BAR F`) alongside formed plates, and Kitting
+tags those parts FORMED just like bent plates.
+
+**Kitting - catch missing source material before printing.** If any kit line has a part
+but no source material, Kitting now stops BEFORE anything prints and shows you the lines -
+fix and re-run, or proceed anyway with a warning.
+
+**Difficulty Stamper - the label moves, it doesn't multiply.** Once an order's work packet
+is stamped DIFFICULT, the blue label is stripped off the part drawing itself, so the
+paperwork the floor sees is the single source of the flag. Re-runs stay honest either way:
+no double stamps, and an order that's no longer difficult gets its old stamp removed.
+
+**Updates that fail can retry.** A failed update download now offers a retry instead of a
+dead end, and the manual "Check for updates" button reports what actually happened. Updates
+also exit the app cleanly now.
+
+**After a crash, TechDeck offers you a debug report.** If the app went down hard, the next
+start offers a one-click debug report you can send in - no more reconstructing what
+happened from memory.
+
+**Smaller fixes.** The Assistant gives a real answer to "what is this" instead of a shrug.
+App diagnostics now land in a rotating log file, so weird one-off problems are diagnosable
+after the fact.
+
+### Feedback Fixes
+
+*"Entering thicknesses one file at a time is tedious when a batch has a lot of parts."*
+The Customer DXF Analysis thickness page now has a "Same thickness for all files" box -
+type the value once, apply to all, done. Rows stay individually editable for the odd
+different plate, and the page itself was compacted with the buttons up top so long batches
+don't push them off screen.
+
+*"Holes and slots drawn as polylines aren't detected, so no offset is applied."* Correct,
+and fixed. Older DXF exports (R12-style, common in customer files) draw everything as
+old-style polylines, which the offset engine skipped entirely. It now reads and offsets
+them like everything else - including shapes "closed" by repeating the first point, and
+circles drawn as two-arc polylines. Verified against the reporting crew's own files.
+
+*"Offsets for 1.25-3 inch plate should be .094 but came up as .063."* The automated bands
+were right - the .063 came from the Adjust Dimensions dialog, which always prefilled the
+flat 1/16" default no matter the plate. The dialog now asks for plate thickness and
+prefills the correct guideline amount, and the applied amount shows on the toolbar so you
+can verify it at a glance.
+
+*"Parts showed as unable to offset, yet the DXFs measured up to 1/4 inch over nominal."*
+Two guards, one honest answer. Offset failures are now reported per feature, with reasons -
+the rest of the file still offsets, and the failed features are listed by name. And every
+offset pass now stamps the file, so offsetting a file that was already offset warns you
+first and defaults to NOT stacking another pass on top.
 
 ---
 
@@ -763,11 +839,12 @@ Explorer and on pinned shortcuts.
 | 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets |
 | 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |
 | 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
+| 911 Inspection Dimensions | Reads every PART SKETCH drawing in a batch and fills each part's dimensions straight onto its inspection sheet, so the numbers don't have to be typed off the paper. Only the coloured nominal boxes get written - the sheet still works out its own min and max - and a tab you have already filled in is never touched, so it is safe to run again. Logs lengths, radii (R .40), chamfers, snipes, and the weld preps (the KB codes, with the side each one applies to); leaves out anything marked REF and anything that is part of a note on the drawing (both listed separately so you can see them). Also pulls the part number, work order, size and FAB DIM off the title block, and flags any drawing it could not read so nothing goes missing quietly |
 | 911 SSPO Award Review | (Formerly 911 Runtime Estimator.) Runs off an award package (folder of order folders); estimates plate cutting time from actual D911 throughput (a pieces-per-hour table by thickness band derived from 18.5 months of closed actuals - includes setup/handling) plus stock/material from each nest's packet PDF - the old exact-linear-inch times (each work order's DXF geometry / a thickness-driven feed rate) still computed as far-right reference columns - and writes one workbook with Plates and Non-Plates sheets (data table + real Excel PivotTable each), a Shape Ft Req sheet totalling each shape nest's stock feet (Summary-of-Batches lengths / 12, rounded up per length) for receiving, and a Working Forecast Input sheet (per-nest Source Material / Pieces / Orders from the nest packet, shape Total Ft Req, blank REM columns) that copy-pastes straight into the Working Forecast List |
 | 911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus a top-level "D911 Workorder Close Outs" sheet (Scheduling Group set to Closed) |
 | 911 Baked Beans Wild Ride | Consolidates a folder of filled NC-calc pricing sheets into one review list (DYPN, Batch, Nest, Total Bevels, Total Complex Bevels, Total Cut Lin per part + totals row, sorted by batch/nest/part), saved into that same folder and named from the batch + nest the sheets themselves declare |
 | 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically |
-| 922 Setup | Full 922 batch prep behind a master toggle window: builds the batch's order folders from the PO REV C workbook (one per ORDER-PPN, with a per-order copy of the PO workbook and each order's work packet PDF filed in from the Work Packets folder), creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number |
+| 922 Setup | Full 922 batch prep behind a master toggle window: builds the batch's order folders from the PO REV C workbook (one per ORDER-PPN, with a per-order copy of the PO workbook and each order's work packet PDF filed in from the Work Packets folder), creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number. A separate off-by-default stage applies each order's pallet label to the cards already on the board - for when the cards were made before the pallets were assigned - without creating any new ones |
 | 922 Pallet Stamper | Stamps work-packet PDFs with batch and pallet info |
 | 922 Difficulty Stamper | Reads every part drawing in a batch and finds the ones marked DIFFICULT (parts with a compound cut), then stamps DIFFICULT in red on the front page of that order's work packet, so the difficulty is visible on the paperwork the floor works from instead of buried in the part prints. Once the packet is stamped, the blue label is removed from the part drawings it came from - the packet now carries the flag. Run it again after a part is changed and the stamp updates itself - orders that are no longer difficult have the stamp removed. Reports which parts made each order difficult, which orders aren't modeled yet, and any drawing it couldn't read |
 | 922 FormingFinder | Discovers formed plate AND formed flat bar PDFs via filename (the " F" suffix), PO NOTES, and PDF spatial analysis; copies, merges, and populates the Bent Plates sheet |
