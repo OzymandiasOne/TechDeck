@@ -109,7 +109,7 @@ _NEST_TOKEN_RE = re.compile(r"\b(\d{5,6})\b")
 
 def _stamp_font():
     """(fontname, fontfile) — Century Gothic Bold, or Helvetica bold fallback."""
-    if STAMP_FONT_FILE.exists():
+    if sdk.exists(STAMP_FONT_FILE):
         return STAMP_FONT_NAME, str(STAMP_FONT_FILE)
     return "hebo", None
 
@@ -123,10 +123,10 @@ def _schedule_path(params) -> Path | None:
     override = (settings.get("schedule_path") or "").strip()
     if override:
         p = Path(override)
-        return p if p.exists() else None
+        return p if sdk.exists(p) else None
     for root in sdk.pilot_program_roots():
         p = Path(root) / DIFFICULTY_REL
-        if p.exists():
+        if sdk.exists(p):
             return p
     return None
 
@@ -464,7 +464,7 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
     warnings = []
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
     except Exception as e:
         log(f"  ERROR opening {pdf_path.name}: {e}")
         return False, warnings
@@ -575,7 +575,7 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
         raw_dir = prompt("Enter path to PDF directory:")
         pdf_dir = Path(raw_dir.strip())
 
-    if not pdf_dir.exists() or not pdf_dir.is_dir():
+    if not sdk.exists(pdf_dir) or not sdk.is_dir(pdf_dir):
         raise sdk.UserFacingError(
             f"That folder doesn't exist: {pdf_dir}",
             "Check the path and pick the correct PDF folder, then run again.")
@@ -621,7 +621,7 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
     log(f"\nProcessing {len(selected_pdfs)} file(s)...")
 
     output_dir = pdf_dir / "Move Ticket Omit"
-    output_dir.mkdir(exist_ok=True)
+    sdk.ensure_dir(output_dir)
 
     processed = 0
     skipped = 0

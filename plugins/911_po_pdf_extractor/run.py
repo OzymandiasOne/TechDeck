@@ -300,7 +300,7 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Dict]:
     doc = None
     try:
         sdk.ensure_local(pdf_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
     except FileNotFoundError:
         raise ValueError(f"PDF file not found: {pdf_path}")
     except Exception as e:
@@ -345,7 +345,7 @@ def write_to_excel(output_path: Path, records: List[Dict], log):
         'SHIP', 'CUSTOMER', 'INTERCOMPANY', 'SUPPLIER'
     ]
     
-    if output_path.exists():
+    if sdk.exists(output_path):
         # Resilient: the output workbook may be open in Excel or cloud-only
         # (Hard Rule 13).
         wb = sdk.load_workbook_resilient(str(output_path), log=log)
@@ -360,7 +360,7 @@ def write_to_excel(output_path: Path, records: List[Dict], log):
         row = [record.get(h, '') for h in headers]
         ws.append(row)
     
-    wb.save(str(output_path))
+    sdk.save_workbook(wb, output_path)
 
 
 def check_sequential_lines(records: List[Dict]) -> Dict[str, List[int]]:
@@ -488,14 +488,14 @@ def write_missing_items_excel(output_path: Path, missing_items: List[Dict],
                 ws.cell(row=current_row, column=2, value=f"LINE {line_no}")
                 current_row += 1
     
-    wb.save(str(output_path))
+    sdk.save_workbook(wb, output_path)
     log(f"   Missing items report: {output_path.name}")
 
 
 def write_analysis_txt(output_path: Path, summary_counts: Dict[str, int], 
                        missing_lines_per_po: Dict[str, List[int]], log):
     """Write summary analysis to text file including missing LINE numbers."""
-    with open(output_path, 'w', encoding='utf-8') as f:
+    with open(sdk.long_path(output_path), 'w', encoding='utf-8') as f:
         # Section 1: Missing cell data counts
         f.write("=" * 60 + "\n")
         f.write("MISSING CELL DATA\n")
@@ -534,11 +534,11 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     folder_input = get_console_input(params, "Enter folder path containing PO packet PDFs")
     
     folder = Path(folder_input.strip()).expanduser().resolve()
-    if not folder.exists():
+    if not sdk.exists(folder):
         raise sdk.UserFacingError(
             f"That folder doesn't exist: {folder}",
             "Check the path and pick the correct folder, then run again.")
-    if not folder.is_dir():
+    if not sdk.is_dir(folder):
         raise sdk.UserFacingError(
             f"That's a file, not a folder: {folder}",
             "Pick the folder that holds the PO PDFs, then run again.")
@@ -569,7 +569,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     # Create output folder
     output_folder = folder / output_base_name
-    output_folder.mkdir(exist_ok=True)
+    sdk.ensure_dir(output_folder)
     
     # Define output paths
     xlsx_path = output_folder / output_filename

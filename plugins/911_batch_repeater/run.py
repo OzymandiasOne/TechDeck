@@ -111,7 +111,7 @@ def _load_mpl_index(mpl_path: Path, log) -> dict[str, list[dict]]:
 
 def _find_nest_excel(nest_folder: Path, batch_number: str, nest_number: str) -> Path | None:
     expected = nest_folder / f"911 BATCH {batch_number} {nest_number}.xlsx"
-    if expected.exists():
+    if sdk.exists(expected):
         return expected
     candidates = [
         f for f in nest_folder.glob("*.xlsx")
@@ -174,7 +174,7 @@ def _has_repeat_files(nest_dir: Path) -> bool:
     """True if this nest's REPEAT folder already holds anything."""
     d = nest_dir / "REPEAT"
     try:
-        return d.is_dir() and any(d.iterdir())
+        return sdk.is_dir(d) and any(d.iterdir())
     except OSError:
         return False
 
@@ -255,7 +255,7 @@ def _pick_source(sources: list[dict], qtdr_root: Path,
         return ("self_only", None)
     for src in candidates:
         src_dir = qtdr_root / Path(src["rel"])
-        if src_dir.is_dir():
+        if sdk.is_dir(src_dir):
             return ("ok", src, src_dir)
     return ("missing", candidates[0])
 
@@ -266,15 +266,15 @@ def _copy_part(src_dir: Path, dest_dir: Path, exts: set[str], overwrite: bool,
     copied = skipped = 0
     for f in sorted(src_dir.iterdir()):
         sdk.raise_if_cancelled(cancel_event)
-        if not f.is_file() or f.suffix.lower() not in exts:
+        if not sdk.is_file(f) or f.suffix.lower() not in exts:
             continue
         dest = dest_dir / f.name
-        if dest.exists() and not overwrite:
+        if sdk.exists(dest) and not overwrite:
             skipped += 1
             continue
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        sdk.ensure_dir(dest_dir)
         sdk.ensure_local(f, log=log)  # OneDrive placeholder -> download (Hard Rule 13)
-        shutil.copy2(f, dest)
+        shutil.copy2(sdk.long_path(f), sdk.long_path(dest))
         copied += 1
     return copied, skipped
 
@@ -294,7 +294,7 @@ def run(params, progress_callback, cancel_event):
     # Step 1 - Resolve the QTDR root
     # ------------------------------------------------------------------ #
     qtdr_root = sdk.resolve_911_qtdr_root(settings.get("qtdr_base_path", ""))
-    if qtdr_root is None or not qtdr_root.exists():
+    if qtdr_root is None or not sdk.exists(qtdr_root):
         raise sdk.UserFacingError(
             "Couldn't find the 911 QTDR folder.",
             "Make sure OneDrive is synced, or set the 911 QTDR root in "
@@ -351,7 +351,7 @@ def run(params, progress_callback, cancel_event):
                 return
         batch_folder = Path(raw)
         batch_number = sdk.normalize_911_batch(batch_folder.name)
-        if not batch_folder.is_dir() or not re.fullmatch(r"[A-Z0-9]+", batch_number):
+        if not sdk.is_dir(batch_folder) or not re.fullmatch(r"[A-Z0-9]+", batch_number):
             raise sdk.UserFacingError(
                 f"'{batch_folder.name}' doesn't look like a 911 batch folder.",
                 "Run again and pick the batch's own folder directly under the "
@@ -372,7 +372,7 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     mpl_override = str(settings.get("mpl_path", "") or "").strip()
     mpl_path = Path(mpl_override) if mpl_override else _default_mpl_path(qtdr_root)
-    if not mpl_path.exists():
+    if not sdk.exists(mpl_path):
         raise sdk.UserFacingError(
             f"Couldn't find the 911 MASTER PARTS LIST.\n  {mpl_path}",
             "Make sure OneDrive is synced (the list lives in the REPEATER "
@@ -403,7 +403,7 @@ def run(params, progress_callback, cancel_event):
     # ------------------------------------------------------------------ #
     nest_folders = sorted(
         d for d in batch_folder.iterdir()
-        if d.is_dir() and _NEST_RE.match(d.name))
+        if sdk.is_dir(d) and _NEST_RE.match(d.name))
 
     if not nest_folders:
         log(f"No nest subfolders found in {batch_folder.name}. Has 911 Setup been run?")

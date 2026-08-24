@@ -153,7 +153,7 @@ def _copy_forecast(settings, out_dir, log):
         return None
     fname = str(settings.get("forecast_filename", "") or "").strip() or DEFAULT_FORECAST_FILENAME
     src = Path(fdir) / fname
-    if not src.exists():
+    if not sdk.exists(src):
         log(f"WARNING: forecast workbook not found at {src} - "
             "PO / PO Line will be left blank.")
         return None
@@ -228,7 +228,7 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
 
     # Title block: ASA logo over merged A1:D5, manual-fill invoice fields at F2/F3.
     ws.merge_cells("A1:D5")
-    if logo_path.exists():
+    if sdk.exists(logo_path):
         img = XLImage(str(logo_path))
         img.width, img.height = LOGO_SIZE
         ws.add_image(img, "A1")
@@ -329,7 +329,7 @@ def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
     today = date.today()
     fname = _safe_filename(
         f"D911 Workorder Close Outs {today.month}-{today.day}-{today.year}.xlsx")
-    wb.save(out_dir / fname)
+    sdk.save_workbook(wb, out_dir / fname)
     return fname
 
 
@@ -365,7 +365,7 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
 
     # ---- Tab 2: Invoice Supplement, built from scratch ---------------------------
     _build_supplement(wb, hmap, rows, po_info, logo_path)
-    wb.save(out_path)
+    sdk.save_workbook(wb, out_path)
 
 
 def split_workbook(src_path, out_dir, settings, log,
@@ -380,7 +380,7 @@ def split_workbook(src_path, out_dir, settings, log,
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(out_dir)
     forecast_copy = None
     try:
         forecast_copy = _copy_forecast(settings, out_dir, log)
@@ -443,7 +443,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 log(f"  WARNING: {batch} {nest} not found in the forecast - "
                     "PO / PO Line left blank.")
             sub_dir = out_dir / _safe_filename(f"{batch} {nest} Invoicing Docs")
-            sub_dir.mkdir(exist_ok=True)
+            sdk.ensure_dir(sub_dir)
             fname = _safe_filename(f"{batch} {nest} Pricing Back Up.xlsx")
             _write_output(headers, hmap, rows, po_info, logo_path,
                           sub_dir / fname, log)
@@ -459,7 +459,7 @@ def split_workbook(src_path, out_dir, settings, log,
     finally:
         # The forecast copy is working scratch only - always remove it, even on
         # error/cancel, so it never lingers next to the real output files.
-        if forecast_copy is not None and forecast_copy.exists():
+        if forecast_copy is not None and sdk.exists(forecast_copy):
             try:
                 forecast_copy.unlink()
                 log("Removed the temporary forecast copy.")

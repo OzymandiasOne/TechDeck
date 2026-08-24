@@ -108,7 +108,7 @@ def inspect_drawing(pdf_path: Path, log) -> Optional[Tuple[bool, bool]]:
     """
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
     except Exception as e:
         log(f"WARNING: Could not read {pdf_path.name}: {e}")
         return None
@@ -134,7 +134,7 @@ def strip_label(pdf_path: Path, log) -> Optional[int]:
     """
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
         saved = False
         try:
             count = 0
@@ -179,12 +179,12 @@ def find_part_drawings(order_dir: Path) -> List[Path]:
     """
     cad = None
     for child in order_dir.iterdir():
-        if child.is_dir() and child.name.strip().casefold() == _CAD_FOLDER.casefold():
+        if sdk.is_dir(child) and child.name.strip().casefold() == _CAD_FOLDER.casefold():
             cad = child
             break
     if cad is None:
         return []
-    return sorted(p for p in cad.rglob("*.pdf") if p.is_file() and _is_real_pdf(p))
+    return sorted(p for p in cad.rglob("*.pdf") if sdk.is_file(p) and _is_real_pdf(p))
 
 
 def find_work_packet(order_dir: Path) -> Optional[Path]:
@@ -195,7 +195,7 @@ def find_work_packet(order_dir: Path) -> Optional[Path]:
     the same file the Pallet Stamper picks.
     """
     pdfs = sorted(p for p in order_dir.iterdir()
-                  if p.is_file() and p.suffix.lower() == ".pdf" and _is_real_pdf(p))
+                  if sdk.is_file(p) and p.suffix.lower() == ".pdf" and _is_real_pdf(p))
     if not pdfs:
         return None
     order_no = order_dir.name.split('-', 1)[0].strip().upper()
@@ -240,7 +240,7 @@ def apply_stamp(pdf_path: Path, want_stamp: bool, font_size: int,
     """
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
         saved = False
         try:
             page = doc[0]
@@ -321,7 +321,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     order_dirs = [
         d for d in sorted(batch_path.iterdir())
-        if d.is_dir()
+        if sdk.is_dir(d)
         and not d.name.endswith(_NON_ORDER_SUFFIX)
         and d.name.strip().casefold() not in _NON_ORDER_NAMES
     ]

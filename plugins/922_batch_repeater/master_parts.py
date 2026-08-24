@@ -80,7 +80,7 @@ def find_batch_po_candidates(batch_dir: Path,
     def scan(folder: Path, location: str):
         nonlocal old_rev_seen
         try:
-            files = [p for p in folder.iterdir() if p.is_file()]
+            files = [p for p in folder.iterdir() if sdk.is_file(p)]
         except OSError:
             return
         for f in files:
@@ -92,7 +92,7 @@ def find_batch_po_candidates(batch_dir: Path,
                 old_rev_seen = True
 
     try:
-        children = sorted(p for p in batch_dir.iterdir() if p.is_dir())
+        children = sorted(p for p in batch_dir.iterdir() if sdk.is_dir(p))
     except OSError:
         children = []
 

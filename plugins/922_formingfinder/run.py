@@ -330,7 +330,7 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=N
     over the flat one if both exist."""
     order_folder = None
     for child in batch_path.iterdir():
-        if not child.is_dir():
+        if not sdk.is_dir(child):
             continue
         if child.name == order or child.name.startswith(f"{order}-"):
             order_folder = child
@@ -341,7 +341,7 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=N
     # CAD-AND-SHOP-PRINTS case-insensitive
     cad_root = None
     for child in order_folder.iterdir():
-        if child.is_dir() and child.name.lower() == "cad-and-shop-prints":
+        if sdk.is_dir(child) and child.name.lower() == "cad-and-shop-prints":
             cad_root = child
             break
     if not cad_root:
@@ -393,7 +393,7 @@ def _is_formed_pdf(pdf: Path) -> bool:
     """Open PDF; return True if Check A (UP X deg R) or Check B (spatial) passes."""
     try:
         sdk.ensure_local(pdf)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(pdf)
+        doc = fitz.open(sdk.long_path(pdf))
     except Exception:
         return False
     try:
@@ -544,7 +544,7 @@ def _update_bent_plates(
     # Row 1 title (merged cell; write to top-left)
     ws.cell(row=1, column=1, value=f"BATCH {batch_no}: FORMED PARTS")
 
-    wb.save(organizer_path)
+    sdk.save_workbook(wb, organizer_path)
     wb.close()
 
 
@@ -579,7 +579,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # Existing-forming check: prompt before doing any work.
     forming_dir = doc_folder / f"Forming {batch_no}"
-    if forming_dir.exists() and any(forming_dir.iterdir()):
+    if sdk.exists(forming_dir) and any(forming_dir.iterdir()):
         prompt = "Looks like this batch already has forming. Overwrite existing? Y/N"
         if console and hasattr(console, 'request_input'):
             ans = console.request_input(prompt)
@@ -662,7 +662,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log(f"Total unique formed parts: {len(combined)}")
 
     # Phase 2: copy PDFs into Forming subfolder
-    forming_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(forming_dir)
     log(f"Output folder: {forming_dir}")
 
     sorted_for_copy = sorted(combined.values(), key=lambda e: e['dypn'].casefold())
@@ -673,7 +673,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             return
         src = f['pdf_path']
         dest = forming_dir / src.name
-        shutil.copy2(src, dest)
+        shutil.copy2(sdk.long_path(src), sdk.long_path(dest))
         methods_str = ",".join(str(m) for m in sorted(f['methods']))
         log(f"  copied {dest.name}  (methods: {methods_str})")
         copied_paths.append(dest)

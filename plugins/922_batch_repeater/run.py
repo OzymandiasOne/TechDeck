@@ -102,18 +102,18 @@ def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
 
     # 1) Active root
     candidate1 = base_path / target
-    if candidate1.exists():
+    if sdk.exists(candidate1):
         return candidate1
 
     # 2) Direct child of completed
     candidate2 = completed_root / target
-    if candidate2.exists():
+    if sdk.exists(candidate2):
         return candidate2
 
     # 3) Nested child (recursive search). Poll cancel_event while walking the
     # '1 - Completed' archive — it can be a very large OneDrive tree, and without
     # the check a Cancel click can't interrupt this walk.
-    if completed_root.exists():
+    if sdk.exists(completed_root):
         target_lower = target.lower()
         for i, (root, dirs, _) in enumerate(os.walk(completed_root)):
             if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
@@ -151,7 +151,7 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
     problems: list = []
     checked = total_lsts = 0
     try:
-        folders = sorted((d for d in repeat_root.iterdir() if d.is_dir()),
+        folders = sorted((d for d in repeat_root.iterdir() if sdk.is_dir(d)),
                          key=lambda d: d.name.lower())
     except (FileNotFoundError, PermissionError) as e:
         log(f"WARNING: could not read REPEAT BATCHES: {e}")
@@ -398,7 +398,7 @@ def _batch_folder_ppns(batch_folder: Path, log) -> list:
         for entry in sorted(os.listdir(batch_folder)):
             p = batch_folder / entry
             n = entry.lower()
-            if not p.is_dir() or "documentation" in n or "repeat" in n:
+            if not sdk.is_dir(p) or "documentation" in n or "repeat" in n:
                 continue
             if "-" not in entry:
                 continue
@@ -464,7 +464,7 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
         if dry_run:
             log("Dry run enabled in Settings -> MPL changes NOT saved.")
             return 0
-        wb.save(spreadsheet_path)
+        sdk.save_workbook(wb, spreadsheet_path)
         log("MPL saved.")
         return 0
     except PermissionError:
@@ -507,14 +507,14 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     spreadsheet_filename = (settings.get('spreadsheet_filename', '') or '').strip() or '922 MPL.xlsx'
 
     base_path = sdk.resolve_922_root(base_directory)
-    if base_path is None or not base_path.exists():
+    if base_path is None or not sdk.exists(base_path):
         raise sdk.UserFacingError(
             "Couldn't find the '922 QTDR Production Packages' folder.",
             "Make sure OneDrive is synced, or set the Base Directory in this "
             "plugin's Settings, then run again.")
 
     spreadsheet_path = base_path / spreadsheet_filename
-    if not spreadsheet_path.exists():
+    if not sdk.exists(spreadsheet_path):
         raise sdk.UserFacingError(
             f"Couldn't find the spreadsheet '{spreadsheet_filename}'.",
             "Make sure OneDrive is synced and the file name matches this "
@@ -553,7 +553,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         matched_folder = None
         try:
             for entry in os.listdir(base_path):
-                if (base_path / entry).is_dir() and number_pattern.search(entry):
+                if sdk.is_dir(base_path / entry) and number_pattern.search(entry):
                     matched_folder = entry
                     break
         except (FileNotFoundError, PermissionError) as e:
@@ -597,7 +597,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # The batch folder is needed first - the batch's own PO workbook lives in
     # its Documentation/order folders.
     new_po_folder = base_path / actual_batch_name
-    new_po_folder.mkdir(exist_ok=True)
+    sdk.ensure_dir(new_po_folder)
     log(f"Batch folder: {new_po_folder.name}")
 
     mpl_errors = 0
@@ -701,8 +701,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # below copies until the user submits the dialog.
     # ------------------------------------------------------------------ #
     existing_repeat_dirs = []
-    if repeat_batch_folder.exists():
-        existing_repeat_dirs = [d.name for d in repeat_batch_folder.iterdir() if d.is_dir()]
+    if sdk.exists(repeat_batch_folder):
+        existing_repeat_dirs = [d.name for d in repeat_batch_folder.iterdir() if sdk.is_dir(d)]
     done_orders = {
         order for order in orders_to_copy
         if any(_order_matches_folder(order, name) for name in existing_repeat_dirs)
@@ -737,7 +737,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log(f"Pulling {len(orders_to_copy)} repeat(s)")
 
     # Create the destination only now that we know there's something to pull.
-    repeat_batch_folder.mkdir(exist_ok=True)
+    sdk.ensure_dir(repeat_batch_folder)
     log("Created: REPEAT BATCHES")
     log("")
     log("Copying order folders...")
@@ -776,7 +776,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         try:
             for entry in os.listdir(batch_root):
                 entry_path = batch_root / entry
-                if entry_path.is_dir() and _order_matches_folder(order, entry):
+                if sdk.is_dir(entry_path) and _order_matches_folder(order, entry):
                     found_folder = entry_path
                     break
         except (FileNotFoundError, PermissionError) as e:
@@ -791,7 +791,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         
         destination_folder = repeat_batch_folder / found_folder.name
         try:
-            shutil.copytree(found_folder, destination_folder, dirs_exist_ok=True)
+            shutil.copytree(sdk.long_path(found_folder),
+                            sdk.long_path(destination_folder), dirs_exist_ok=True)
             log(f"Copied {order} from Batch {source_po}")
             copied_count += 1
             copied_repeats.append(destination_folder)
@@ -806,7 +807,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # repeat pulled last week is still feeding this batch. See
     # _audit_repeat_shop_prints for why "no 7000 folder" isn't a finding.
     lst_problems: list = []
-    if repeat_batch_folder.exists() and not cancel_event.is_set():
+    if sdk.exists(repeat_batch_folder) and not cancel_event.is_set():
         log("")
         log("Checking repeat folders for CAD-AND-SHOP-PRINTS / 7000 .lst files...")
         checked, total_lsts, lst_problems = _audit_repeat_shop_prints(
@@ -840,7 +841,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         try:
             for entry in os.listdir(new_po_folder):
                 entry_path = new_po_folder / entry
-                if not entry_path.is_dir():
+                if not sdk.is_dir(entry_path):
                     continue
                 if entry == "REPEAT BATCHES" or "documentation" in entry.lower():
                     continue
@@ -870,9 +871,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             binder_src = None
             try:
                 for child in repeat_folder.iterdir():
-                    if child.is_dir() and "cad" in child.name.lower():
+                    if sdk.is_dir(child) and "cad" in child.name.lower():
                         cad_src = child
-                    elif (child.is_file()
+                    elif (sdk.is_file(child)
                           and child.name.lower().startswith("binder")
                           and child.suffix.lower() == ".pdf"):
                         binder_src = child
@@ -887,10 +888,13 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             for dest_root in matches:
                 try:
                     if cad_src:
-                        shutil.copytree(cad_src, dest_root / cad_src.name, dirs_exist_ok=True)
+                        shutil.copytree(sdk.long_path(cad_src),
+                                        sdk.long_path(dest_root / cad_src.name),
+                                        dirs_exist_ok=True)
                     if binder_src:
                         sdk.ensure_local(binder_src, log)  # Hard Rule 13
-                        shutil.copy2(binder_src, dest_root / binder_src.name)
+                        shutil.copy2(sdk.long_path(binder_src),
+                                     sdk.long_path(dest_root / binder_src.name))
                     log(f"  {repeat_folder.name} -> {dest_root.name}")
                     distributed_count += 1
                 except Exception as e:

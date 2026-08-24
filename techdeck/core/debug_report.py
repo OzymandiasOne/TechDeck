@@ -182,7 +182,32 @@ def _collect_environment() -> list[str]:
             continue
         seen.add(kl)
         lines.append(f"{k:<18} = {os.environ.get(k, '<unset>')}")
+    lines.extend(_collect_long_path_support())
     return lines
+
+
+def _collect_long_path_support() -> list[str]:
+    """Whether this machine lifts Windows' 260-char path cap process-wide.
+
+    TechDeck does not rely on it (sdk.long_path prefixes paths itself, which
+    works either way), but when a report shows a MAX_PATH failure this line
+    says whether the machine had the OS-level escape hatch on - which is the
+    difference between "we missed a call site" and "the OS never allowed it".
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            value = winreg.QueryValueEx(key, "LongPathsEnabled")[0]
+        state = "ON" if value else "OFF (260-char cap enforced)"
+    except OSError:
+        state = "not set (260-char cap enforced)"
+    except Exception as exc:                      # noqa: BLE001 - diagnostics
+        state = f"<unreadable: {exc}>"
+    return [f"{'LongPathsEnabled':<18} = {state}"]
 
 
 def _collect_onedrive_discovery() -> list[str]:

@@ -302,7 +302,7 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Tuple]:
 
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(str(pdf_path))
+        doc = fitz.open(sdk.long_path(pdf_path))
     except Exception as e:
         raise RuntimeError(f"Could not open PDF '{pdf_path}': {e}")
 
@@ -430,14 +430,14 @@ def create_analysis_text(txt_path: Path, missing_counts: Dict[str, int], log) ->
     lines.append("=" * 50)
     
     # Write to file
-    with open(txt_path, 'w', encoding='utf-8') as f:
+    with open(sdk.long_path(txt_path), 'w', encoding='utf-8') as f:
         f.write('\n'.join(lines))
 
 
 
 def load_or_create_workbook(xlsx_path: Path) -> Tuple[Workbook, Worksheet]:
     """Load existing workbook or create new one."""
-    if xlsx_path.exists():
+    if sdk.exists(xlsx_path):
         wb = retry_file_op(load_workbook, filename=str(xlsx_path))
         ws = wb[wb.sheetnames[0]] if wb.sheetnames else wb.create_sheet("PartSketches")
     else:
@@ -552,14 +552,14 @@ def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path], all_rows: Lis
     try:
         for pdf in pdfs:
             sdk.ensure_local(pdf)
-            pdf_reader = PdfReader(str(pdf))
+            pdf_reader = PdfReader(sdk.long_path(pdf))
             packet_name = pdf.stem  # Strip .pdf for comparison
             for page_idx, page_num in enumerate(range(1, len(pdf_reader.pages) + 1)):
                 if (packet_name, page_num) in valid_pages:
                     pdf_writer.add_page(pdf_reader.pages[page_idx])
         
         if len(pdf_writer.pages) > 0:
-            with open(pdf_output, "wb") as f:
+            with open(sdk.long_path(pdf_output), "wb") as f:
                 pdf_writer.write(f)
             return pdf_output
     except Exception as e:
@@ -581,7 +581,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     folder_input = get_console_input(params, "Enter folder path containing PDFs")
     
     folder = Path(folder_input.strip()).expanduser().resolve()
-    if not folder.exists() or not folder.is_dir():
+    if not sdk.exists(folder) or not sdk.is_dir(folder):
         raise sdk.UserFacingError(
             f"That folder doesn't exist: {folder}",
             "Check the path and pick the correct folder, then run again.")
@@ -611,7 +611,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     # === CREATE ORGANIZED OUTPUT FOLDER ===
     output_name = output_filename.replace('.xlsx', '')
     output_folder = folder / output_name
-    output_folder.mkdir(exist_ok=True)
+    sdk.ensure_dir(output_folder)
     
     xlsx_path = output_folder / output_filename
     log(f"Output folder: {output_folder.name}/")

@@ -192,7 +192,7 @@ def _resolve_batch_context(params, cancel_event, log):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return None, None, None, None, []
     work_folder = Path(raw.strip().strip('"'))
-    if not work_folder.is_dir():
+    if not sdk.is_dir(work_folder):
         log(f"ERROR: folder not found: {work_folder}")
         return None, None, None, None, []
     log(f"Working folder: {work_folder}")
@@ -235,12 +235,12 @@ def _find_dxf_folder(batch_folder: Path, batch: str, log) -> Path | None:
         return batch_folder
     # Pasted the DXF folder itself while its files sit in numbered subfolders?
     if "DXF" in batch_folder.name.upper() or any(
-            d.is_dir() and d.name.isdigit() and any(True for _ in d.glob("*.dxf"))
+            sdk.is_dir(d) and d.name.isdigit() and any(True for _ in d.glob("*.dxf"))
             for d in batch_folder.iterdir()):
         return batch_folder
     candidates = []
     for d in batch_folder.iterdir():
-        if not d.is_dir():
+        if not sdk.is_dir(d):
             continue
         name = d.name.upper()
         if "DXF" in name and "CONVERT" not in name:
@@ -260,7 +260,7 @@ def _find_dxf_folder(batch_folder: Path, batch: str, log) -> Path | None:
 def _loose_dxfs(dxf_folder: Path) -> list[Path]:
     """The .dxf files sitting directly in the DXF folder (not in numbered
     subfolders / EXTRA), sorted by name."""
-    return sorted(p for p in dxf_folder.glob("*.dxf") if p.is_file())
+    return sorted(p for p in dxf_folder.glob("*.dxf") if sdk.is_file(p))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
         log("No .igs/.iges files in the selected folder - skipping the IGES copy.")
     else:
         convert_dir = batch_root / f"{batch} - IGES CONVERT"
-        convert_dir.mkdir(exist_ok=True)
+        sdk.ensure_dir(convert_dir)
         log(f"IGES working folder: {convert_dir.name} ({len(iges)} .igs found)")
         copied = skipped = 0
         for i, p in enumerate(iges):
@@ -287,11 +287,11 @@ def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
                 log("Cancelled.")
                 return False
             dest = convert_dir / p.name
-            if dest.exists():
+            if sdk.exists(dest):
                 skipped += 1
                 continue
             sdk.ensure_local(p, log=log)  # OneDrive placeholder-safe (Hard Rule 13)
-            shutil.copy2(p, dest)
+            shutil.copy2(sdk.long_path(p), sdk.long_path(dest))
             copied += 1
             if copied % 25 == 0:
                 log(f"  copied {copied}/{len(iges)}...")
@@ -304,7 +304,7 @@ def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
         log("WARNING: no PO rows read - QTY workbook not built.")
         return True
     qty_path = batch_root / f"{batch} QTY.xlsx"
-    if qty_path.exists():
+    if sdk.exists(qty_path):
         log(f"NOTE: {qty_path.name} already exists - leaving it untouched "
             f"(it may hold review notes). Delete it and rerun Setup to rebuild.")
         return True
@@ -367,7 +367,7 @@ def _write_qty_workbook(qty_path: Path, po_rows, log) -> None:
     ws.column_dimensions["C"].width = 50
     ws.auto_filter.ref = f"A1:C{ws.max_row}"
     ws.freeze_panes = "A2"
-    wb.save(qty_path)
+    sdk.save_workbook(wb, qty_path)
     n_multi = sum(1 for v in totals.values() if v > 1)
     log(f"QTY workbook written: {qty_path.name} "
         f"({len(rows)} rows, {len(totals)} distinct parts, {n_multi} multi-qty).")
@@ -379,7 +379,7 @@ def _write_qty_workbook(qty_path: Path, po_rows, log) -> None:
 
 def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event) -> bool:
     existing_numbered = [d for d in dxf_folder.iterdir()
-                         if d.is_dir() and d.name.isdigit()]
+                         if sdk.is_dir(d) and d.name.isdigit()]
     if existing_numbered:
         log(f"ERROR: {dxf_folder.name} already has numbered subfolders "
             f"({len(existing_numbered)}) - it looks sorted already. "
@@ -406,7 +406,7 @@ def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event) ->
             unchanged += 1
             continue
         target = p.with_name(cleaned + p.suffix.lower())
-        if target.exists():
+        if sdk.exists(target):
             problems.append(f"DUPLICATE after cleanup (left as-is): {p.name} -> {target.name}")
             continue
         p.rename(target)
@@ -425,7 +425,7 @@ def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event) ->
             log("Cancelled mid-sort - rerun step 2 to finish.")
             return False
         sub = dxf_folder / str(idx // CHUNK_SIZE + 1)
-        sub.mkdir(exist_ok=True)
+        sdk.ensure_dir(sub)
         p.rename(sub / p.name)
         progress_callback(50 + int(48 * (idx + 1) / len(files)))
     log(f"Sorted {len(files)} file(s) into {n_folders} folder(s) of {CHUNK_SIZE}.")
@@ -443,7 +443,7 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
                            po_rows, log, progress_callback, cancel_event) -> bool:
     # 1) Recombine: pull files out of numbered subfolders, drop empty ones.
     numbered = sorted((d for d in dxf_folder.iterdir()
-                       if d.is_dir() and d.name.isdigit()),
+                       if sdk.is_dir(d) and d.name.isdigit()),
                       key=lambda d: int(d.name))
     moved = 0
     for d in numbered:
@@ -452,7 +452,7 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
                 log("Cancelled mid-recombine - rerun step 3 to finish.")
                 return False
             dest = dxf_folder / p.name
-            if dest.exists():
+            if sdk.exists(dest):
                 log(f"  WARNING: {p.name} exists in both {d.name}\\ and the main "
                     f"folder - left in {d.name}\\.")
                 continue
@@ -501,16 +501,16 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
     extras_moved = []
     if extra_parts or unrecognized:
         extra_dir = dxf_folder / "EXTRA"
-        extra_dir.mkdir(exist_ok=True)
+        sdk.ensure_dir(extra_dir)
         for part in extra_parts:
             p = by_part[part]
             dest = extra_dir / p.name
-            if not dest.exists():
+            if not sdk.exists(dest):
                 p.rename(dest)
             extras_moved.append(p.name)
         for p in unrecognized:
             dest = extra_dir / p.name
-            if not dest.exists():
+            if not sdk.exists(dest):
                 p.rename(dest)
             extras_moved.append(p.name + "  (unrecognized filename)")
         log(f"Moved {len(extras_moved)} extra file(s) to {extra_dir.name}\\.")
@@ -524,13 +524,13 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
         if total <= 1 or part not in by_part or part in extra_parts:
             continue
         p = by_part[part]
-        if not p.exists():
+        if not sdk.exists(p):
             continue
         want = f"({int(total)}x) {clean_stem(p.stem)}{p.suffix}"
         if p.name == want:
             continue
         target = p.with_name(want)
-        if target.exists():
+        if sdk.exists(target):
             log(f"  WARNING: {want} already exists - left {p.name} alone.")
             continue
         p.rename(target)
@@ -583,13 +583,13 @@ def _detect_done_steps(work_folder: Path, batch_root: Path, batch: str) -> set[i
     """Which steps show an "already done" flag in the picker. Heuristic only -
     every step is idempotent, so re-running a flagged one is always safe."""
     done: set[int] = set()
-    if (batch_root / f"{batch} - IGES CONVERT").is_dir():
+    if sdk.is_dir(batch_root / f"{batch} - IGES CONVERT"):
         done.add(1)
     dxf = _find_dxf_folder(work_folder, batch, lambda *_: None)
-    if dxf is not None and any(d.is_dir() and d.name.isdigit()
+    if dxf is not None and any(sdk.is_dir(d) and d.name.isdigit()
                                for d in dxf.iterdir()):
         done.add(2)
-    if (batch_root / f"{batch} - MISSING PARTS.txt").exists():
+    if sdk.exists(batch_root / f"{batch} - MISSING PARTS.txt"):
         done.add(3)
     return done
 

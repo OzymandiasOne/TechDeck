@@ -38,7 +38,7 @@ SKIP_FOLDER_NAMES = frozenset({"repeat batches"})
 def _collect_lst_stems(lst_dir: Path) -> Set[str]:
     """Return case-folded stems of all .lst files found recursively in lst_dir."""
     stems: Set[str] = set()
-    if not lst_dir.exists():
+    if not sdk.exists(lst_dir):
         return stems
     for p in lst_dir.rglob("*.lst"):
         stems.add(p.stem.casefold())
@@ -50,7 +50,7 @@ def _extract_machine_time(pdf_path: Path) -> tuple[Optional[float], Optional[str
     """Return (value_in_minutes, error_message). Value is None on failure."""
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-        reader = PdfReader(str(pdf_path))
+        reader = PdfReader(sdk.long_path(pdf_path))
         for page in reader.pages:
             text = page.extract_text() or ""
             m = _MACHINE_TIME_RE.search(text)
@@ -66,7 +66,7 @@ def _find_7000_folders(order_dir: Path) -> list[Path]:
     """Find all 7000 folders that live under a CAD-AND-SHOP-PRINTS subtree."""
     results = []
     for p in order_dir.rglob("7000"):
-        if not p.is_dir():
+        if not sdk.is_dir(p):
             continue
         parts_lower = [seg.lower() for seg in p.parts]
         if "cad-and-shop-prints" in parts_lower:
@@ -103,7 +103,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # ── Order folders ──────────────────────────────────────────────────────────
     doc_folder_name = f"Batch {batch_no} - Documentation"
     order_dirs = []
-    for child in sorted(d for d in batch_path.iterdir() if d.is_dir()):
+    for child in sorted(d for d in batch_path.iterdir() if sdk.is_dir(d)):
         if child.name == doc_folder_name:
             continue
         if child.name.strip().casefold() in SKIP_FOLDER_NAMES:
@@ -174,9 +174,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     final_hours = total_hours * 1.4
 
     # ── Write output file ──────────────────────────────────────────────────────
-    lst_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(lst_dir)
     out_path = lst_dir / f"Run Time Estimate - Batch {batch_no}.txt"
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open(sdk.long_path(out_path), "w", encoding="utf-8") as f:
         f.write(f"Run Time Estimate - Batch {batch_no}\n")
         f.write("=" * 30 + "\n")
         f.write(f"Parts matched : {matched_count}\n")
