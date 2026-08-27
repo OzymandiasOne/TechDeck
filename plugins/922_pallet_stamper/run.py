@@ -165,6 +165,60 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
         return False
 
 
+def unstamp_drawings(order_dir, packet, log) -> int:
+    """Take OUR pallet stamp back OFF any drawing in the order folder.
+
+    Runs before this fix stamped the drawing binder instead of the work packet
+    ("the first PDF in the folder" - Binder1.pdf sorts ahead of BK394153.pdf),
+    and that red stamp is still sitting on the print the floor reads. Skipping
+    the binder from now on stops the bleeding; this heals what already
+    happened, the same two-way idempotency the Difficulty Stamper has.
+
+    Only a DRAWING is touched, and only if it actually carries our stamp - a
+    file with nothing to remove is never rewritten. Returns how many were
+    cleaned.
+    """
+    removed = 0
+    for pdf in sorted(order_dir.iterdir()):
+        if pdf.suffix.lower() != ".pdf" or not sdk.is_real_pdf(pdf):
+            continue
+        if packet is not None and pdf == packet:
+            continue
+        try:
+            sdk.ensure_local(pdf)
+            doc = fitz.open(sdk.long_path(pdf))
+        except Exception as e:
+            log(f"  NOTE: couldn't check {pdf.name} for a stray stamp ({e})")
+            continue
+        saved = False
+        try:
+            page = doc[0]
+            # One open, both questions - a second open would cost another
+            # OneDrive round-trip on a file we probably won't touch.
+            if not sdk.text_has_title_block(page.get_text()):
+                continue
+            rects = _find_all_stamp_rects(page)
+            if not rects:
+                continue
+            for r in rects:
+                page.add_redact_annot(r, fill=(1, 1, 1))
+            page.apply_redactions()
+            sdk.save_pdf_atomic(doc, pdf)   # closes doc (Hard Rule 5)
+            saved = True
+            removed += 1
+            log(f"  Removed a stray pallet stamp from {pdf.name} (it's a "
+                f"drawing, not a work packet)")
+        except Exception as e:
+            log(f"  NOTE: couldn't clean the stray stamp off {pdf.name} ({e})")
+        finally:
+            if not saved:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
+    return removed
+
+
 def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     """
     Main plugin execution function.
@@ -249,6 +303,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     total = len(subfolders)
     stamped_count = 0
     skipped_count = 0
+    unstamped_count = 0   # stray stamps taken back off drawings
     failures: list = []  # (order_no, pallet_no, pdf_path) - retried after the main pass
 
     log(f"Processing {total} order folders...")
@@ -274,15 +329,23 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             skipped_count += 1
             continue
 
-        # Find first PDF in order folder
-        pdfs = [f for f in sub.iterdir() if f.suffix.lower() == '.pdf']
+        # Find the order's WORK PACKET - not merely the first PDF in the
+        # folder. Drawing binders (Binder1.pdf ...) live in the same folder and
+        # sort ahead of the packet, so "first PDF" stamped the drawing
+        # (reported 2026-08-20). sdk.find_work_packet reads the page-1 title
+        # block to tell them apart; None means there is no packet here.
+        packet = sdk.find_work_packet(sub, log=log)
 
-        if not pdfs:
-            log(f"WARNING: No PDF found in {sub.name}")
+        # Clean up BEFORE the no-packet bail-out: a folder holding only
+        # drawings can still be carrying a stray stamp from a pre-fix run.
+        unstamped_count += unstamp_drawings(sub, packet, log)
+
+        if packet is None:
+            log(f"WARNING: No work-packet PDF found in {sub.name}")
             skipped_count += 1
             continue
 
-        pdf_path = str(pdfs[0])
+        pdf_path = str(packet)
         if stamp_single(pdf_path, batch_no, pallet_no, font_size, h_offset, v_offset, log):
             log(f"Stamped {order_no} -> Pallet {pallet_no}")
             stamped_count += 1
@@ -323,6 +386,9 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     if skipped_count > 0:
         log(f"Skipped: {skipped_count}")
+
+    if unstamped_count > 0:
+        log(f"Stray stamps removed from drawings: {unstamped_count}")
 
     if error_count > 0:
         log(f"NOT stamped (after retry): {error_count}")

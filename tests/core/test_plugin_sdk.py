@@ -292,3 +292,101 @@ def test_hydrate_cloud_file_should_stop_returns_quietly(tmp_path):
     # should_stop=True after the first chunk: returns without error.
     plugin_sdk.hydrate_cloud_file(f, should_stop=lambda: True)
     plugin_sdk.hydrate_cloud_file(f, should_stop=lambda: False)
+
+
+# ── work-packet vs drawing binder (922 order folders) ────────────────────────
+# A 922 order folder holds the order's work packet AND, often, the drawing
+# binder that was exported alongside it. Windows lists 'Binder1.pdf' BEFORE
+# 'BK394153 NOFORN.pdf', so every app that took "the first PDF in the folder"
+# was stamping the drawing (reported by a Pallet Stamper user, 2026-08-20).
+# Name alone can't settle it - a binder isn't always named 'Binder' - so the
+# page-1 title block is what decides.
+
+def _make_pdf(path, lines):
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=792, height=612)
+    y = 72
+    for line in lines:
+        page.insert_text(fitz.Point(72, y), line, fontsize=10)
+        y += 16
+    doc.save(str(path))
+    doc.close()
+
+
+_DRAWING_TEXT = ["DO NOT SCALE DRAWING", "UNLESS OTHERWISE SPECIFIED",
+                 "ENG APPR.", "MFG APPR.", "SHEET 1 OF 1"]
+_PACKET_TEXT = ["QA FRM 922", "Work Instruction Description:",
+                "Order#:  BK394153", "Lead Trade:  922"]
+
+
+def test_is_drawing_pdf_tells_a_title_block_from_a_work_packet(tmp_path):
+    drawing = tmp_path / "Binder1.pdf"
+    packet = tmp_path / "BK394153.pdf"
+    _make_pdf(drawing, _DRAWING_TEXT)
+    _make_pdf(packet, _PACKET_TEXT)
+    assert plugin_sdk.is_drawing_pdf(drawing) is True
+    assert plugin_sdk.is_drawing_pdf(packet) is False
+
+
+def test_is_drawing_pdf_calls_an_unreadable_file_a_packet(tmp_path):
+    """A read error must NOT read as 'this is a drawing' - that would silently
+    skip a real work packet and the run would still look clean."""
+    broken = tmp_path / "BK394153.pdf"
+    broken.write_bytes(b"not a pdf at all")
+    assert plugin_sdk.is_drawing_pdf(broken) is False
+
+
+def test_find_work_packet_skips_the_drawing_binder(tmp_path):
+    """The reported bug: 'Binder1.pdf' sorts first and used to win."""
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    _make_pdf(order / "Binder1.pdf", _DRAWING_TEXT)
+    _make_pdf(order / "BK394153 NOFORN.pdf", _PACKET_TEXT)
+
+    assert plugin_sdk.find_work_packet(order).name == "BK394153 NOFORN.pdf"
+
+
+def test_find_work_packet_catches_a_binder_not_named_binder(tmp_path):
+    """Name ranking is only a hint; the title-block read is the decision."""
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    _make_pdf(order / "AAA shop print.pdf", _DRAWING_TEXT)
+    _make_pdf(order / "work packet.pdf", _PACKET_TEXT)
+
+    assert plugin_sdk.find_work_packet(order).name == "work packet.pdf"
+
+
+def test_find_work_packet_returns_none_when_only_drawings_are_there(tmp_path):
+    """Callers must get 'nothing to do', never 'stamp the first PDF anyway'."""
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    _make_pdf(order / "Binder1.pdf", _DRAWING_TEXT)
+    _make_pdf(order / "Binder2.pdf", _DRAWING_TEXT)
+
+    assert plugin_sdk.find_work_packet(order) is None
+
+
+def test_find_work_packet_ignores_lock_and_temp_files(tmp_path):
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    (order / "~$BK394153.pdf").write_bytes(b"%PDF-1.4\n")
+    (order / "tmpzz99aa11.pdf").write_bytes(b"%PDF-1.4\n")
+    _make_pdf(order / "BK394153.pdf", _PACKET_TEXT)
+
+    assert plugin_sdk.find_work_packet(order).name == "BK394153.pdf"
+
+
+def test_find_work_packet_prefers_the_order_numbered_pdf(tmp_path):
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    _make_pdf(order / "AAA other.pdf", _PACKET_TEXT)
+    _make_pdf(order / "BK394153.pdf", _PACKET_TEXT)
+
+    assert plugin_sdk.find_work_packet(order).name == "BK394153.pdf"
+
+
+def test_find_work_packet_on_an_empty_folder(tmp_path):
+    order = tmp_path / "BK394153-R7924463-H9"
+    order.mkdir()
+    assert plugin_sdk.find_work_packet(order) is None

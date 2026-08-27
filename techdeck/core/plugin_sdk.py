@@ -1360,6 +1360,117 @@ def read_qf_qu_09(po_path: Path):
 # PDF helpers (PyMuPDF / fitz)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# A part DRAWING carries the standard title-block boilerplate (the tolerance
+# block ASA's and Electric Boat's prints share); a 922 work packet never does.
+# Measured over EVERY PDF in the live 922 batch folders 2026-08-27: all four
+# markers appear on 224 of 224 drawing binders and on 0 of 257 work packets.
+# The packets answer instead to their own "Lead Trade" / "Work Instruction"
+# text, but the absence of a title block is the cleaner test - it needs no
+# guess about which packet layout a batch happens to use.
+_TITLE_BLOCK_MARKERS = (
+    "DO NOT SCALE DRAWING",
+    "UNLESS OTHERWISE SPECIFIED",
+    "ENG APPR",
+    "MFG APPR",
+)
+# Two of four. One marker alone could plausibly appear in a packet's notes; all
+# four is stricter than a scanned or oddly-encoded print can be relied on to be.
+_TITLE_BLOCK_MIN_HITS = 2
+
+# Office lock files (~$...) and stray Python temp files (tmpab12cd34.pdf) are
+# not real PDFs of ours. A leftover temp PDF in an order folder would otherwise
+# be picked as that order's work packet by "the first PDF in the folder".
+_NOT_A_REAL_PDF_RE = re.compile(r'^(~\$|tmp[a-z0-9_]{6,}$)', re.IGNORECASE)
+
+# Drawing binders are exported as Binder1.pdf / Binder7.pdf / BinderH9.pdf.
+# This is only a RANKING hint - the title-block read is what actually decides.
+_BINDER_NAME_RE = re.compile(r'^binder', re.IGNORECASE)
+
+
+def is_real_pdf(path) -> bool:
+    """False for Office lock files and leftover temp PDFs, which are never ours."""
+    return not _NOT_A_REAL_PDF_RE.match(Path(path).stem)
+
+
+def is_drawing_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a part DRAWING (a title-block print).
+
+    This is how a drawing binder is told apart from a work packet. Name alone
+    cannot do it: the binders sort BEFORE the packet in an order folder
+    ('Binder1.pdf' before 'BK394153 NOFORN.pdf' in Windows' case-insensitive
+    order), so "the first PDF in the folder" stamps the drawing (reported by a
+    922 Pallet Stamper user, 2026-08-20), and a binder is not always named
+    'Binder'.
+
+    An UNREADABLE PDF answers False on purpose. Treating a read error as "this
+    is a drawing" would silently skip a real work packet and the run would look
+    clean; answering False sends the caller on to its own open, which reports
+    the failure properly.
+    """
+    import fitz
+    path = Path(path)
+    try:
+        ensure_local(path)
+        doc = fitz.open(long_path(path))
+        try:
+            text = doc[0].get_text().upper()
+        finally:
+            doc.close()
+    except Exception as exc:
+        if log:
+            log(f"  NOTE: couldn't read {path.name} to check for a title "
+                f"block ({exc}); treating it as a work packet.")
+        return False
+    return text_has_title_block(text)
+
+
+def text_has_title_block(page_text: str) -> bool:
+    """The title-block test on text you have ALREADY read.
+
+    `is_drawing_pdf` opens the file for you; use this one when you are inside
+    an open document anyway and a second open would cost another OneDrive
+    round-trip.
+    """
+    text = (page_text or "").upper()
+    hits = sum(1 for marker in _TITLE_BLOCK_MARKERS if marker in text)
+    return hits >= _TITLE_BLOCK_MIN_HITS
+
+
+def find_work_packet(order_dir, log=None) -> Optional[Path]:
+    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+
+    Returns None when the folder holds no work packet - INCLUDING the case
+    where every PDF in it is a drawing binder. Callers must treat that as
+    "nothing to do here", never as "stamp the first PDF anyway".
+
+    Candidates are ranked by NAME (a PDF named for the order first, a
+    Binder*.pdf last) and then each is confirmed by READING it: the first one
+    whose page 1 is not a title-block drawing wins. The ranking only decides
+    which file gets read first, so a binder that isn't named 'Binder' is still
+    caught, and the common case costs a single page-1 read.
+    """
+    order_dir = Path(order_dir)
+    pdfs = [p for p in sorted(order_dir.iterdir())
+            if is_file(p) and p.suffix.lower() == ".pdf" and is_real_pdf(p)]
+    if not pdfs:
+        return None
+
+    order_no = order_dir.name.split('-', 1)[0].strip().upper()
+
+    def rank(p: Path) -> tuple:
+        named_for_order = p.stem.strip().upper().startswith(order_no)
+        looks_like_binder = bool(_BINDER_NAME_RE.match(p.stem))
+        return (0 if named_for_order else 1, 1 if looks_like_binder else 0, p.name)
+
+    for pdf in sorted(pdfs, key=rank):
+        if not is_drawing_pdf(pdf, log=log):
+            return pdf
+        if log:
+            log(f"  Skipping {pdf.name} - it's a drawing (ASA title block), "
+                f"not a work packet.")
+    return None
+
+
 def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
     """Merge `pdfs` (in order) into a single PDF at out_path."""
     import fitz

@@ -60,13 +60,9 @@ _NON_ORDER_SUFFIX = "- Documentation"
 _NON_ORDER_NAMES = {"repeat batches"}
 
 # Office lock files (~$…) and stray Python temp files (tmpab12cd34.pdf) are not
-# real PDFs of ours. A leftover temp PDF in an order folder would otherwise be
-# picked up as that order's work packet by "the first PDF in the folder".
-_NOT_A_REAL_PDF_RE = re.compile(r'^(~\$|tmp[a-z0-9_]{6,}$)', re.IGNORECASE)
-
-
-def _is_real_pdf(path: Path) -> bool:
-    return not _NOT_A_REAL_PDF_RE.match(path.stem)
+# real PDFs of ours. Single home is the SDK, which the work-packet finder uses
+# too - this used to be a second copy of the same regex.
+_is_real_pdf = sdk.is_real_pdf
 
 
 def _is_label_span(text: str) -> bool:
@@ -187,22 +183,17 @@ def find_part_drawings(order_dir: Path) -> List[Path]:
     return sorted(p for p in cad.rglob("*.pdf") if sdk.is_file(p) and _is_real_pdf(p))
 
 
-def find_work_packet(order_dir: Path) -> Optional[Path]:
-    """The order's work-packet PDF.
+def find_work_packet(order_dir: Path, log=None) -> Optional[Path]:
+    """The order's work-packet PDF - the same file the Pallet Stamper picks.
 
-    Prefer a PDF whose name starts with the order number (the folder is
-    "{ORDER}-{PPN}"), otherwise fall back to the first PDF in the folder -
-    the same file the Pallet Stamper picks.
+    Single home is `sdk.find_work_packet`: it ranks by name and then CONFIRMS
+    by reading the page-1 title block, so a drawing binder sitting in the order
+    folder is never mistaken for the packet. The name-only version this used to
+    be still fell through to "the first PDF in the folder" when nothing was
+    named for the order, which is exactly how the Pallet Stamper stamped
+    binders (reported 2026-08-20).
     """
-    pdfs = sorted(p for p in order_dir.iterdir()
-                  if sdk.is_file(p) and p.suffix.lower() == ".pdf" and _is_real_pdf(p))
-    if not pdfs:
-        return None
-    order_no = order_dir.name.split('-', 1)[0].strip().upper()
-    for p in pdfs:
-        if p.stem.strip().upper().startswith(order_no):
-            return p
-    return pdfs[0]
+    return sdk.find_work_packet(order_dir, log=log)
 
 
 def anchor_xy(page, h_offset_in: float, v_offset_in: float) -> Tuple[float, float]:
@@ -370,7 +361,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         hits = ([p.name for p in labeled] +
                 [f"{n} (label already on the packet)" for n in stripped_before])
 
-        packet = find_work_packet(order_dir)
+        packet = find_work_packet(order_dir, log=log)
         if packet is None:
             if hits:
                 no_packet.append(f"{order_no} ({len(hits)} difficult part(s))")

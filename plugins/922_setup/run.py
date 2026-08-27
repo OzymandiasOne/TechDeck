@@ -895,10 +895,13 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
 
     # Orders with a folder that still has no work-packet PDF (nothing placed
     # this run AND none already inside) are worth a heads-up.
+    # "Has a PDF" is not the same as "has a work packet": a drawing binder
+    # (Binder1.pdf ...) lands in the same folder, so counting any PDF hid the
+    # orders that genuinely have no packet. sdk.find_work_packet reads the
+    # page-1 title block and returns None when every PDF there is a drawing.
     no_pdf = [o for o, folders in order_to_folders.items()
               if o not in matched_orders
-              and any(not any(p.suffix.lower() == ".pdf" for p in f.iterdir())
-                      for f in folders)]
+              and any(sdk.find_work_packet(f, log=None) is None for f in folders)]
     if no_pdf:
         warnings.append("No work-packet PDF found for: "
                         + ", ".join(sorted(no_pdf))
