@@ -324,11 +324,16 @@ class NotesPanel(QWidget, ThemeAware):
         terminal's /note, a link). Unlike the refresh path this one does clear
         an active filter, because the user's intent is to see that note."""
         if self._select_row(note_id):
+            # _on_selected ignores a re-select of the note already on screen
+            # (see there), so re-show it here: this path means something else
+            # edited it and the user asked to look at it.
+            self._show_note(self.store.get_note(note_id))
             self.editor.setFocus()
             return
         if self.search.text():
             self.search.clear()          # refresh() re-lists everything
             if self._select_row(note_id):
+                self._show_note(self.store.get_note(note_id))
                 self.editor.setFocus()
 
     def _select_row(self, note_id: str) -> bool:
@@ -351,6 +356,16 @@ class NotesPanel(QWidget, ThemeAware):
 
     def _on_selected(self, current, _previous):
         if self._loading:
+            return
+        if current is not None and self._current is not None                 and current.data(Qt.ItemDataRole.UserRole) == self._current.id:
+            # The note already on screen was re-selected by a LIST REBUILD, not
+            # by the user picking a different note. That happens every 700ms
+            # while you type: autosave fires -> `changed` -> the page refreshes
+            # this panel -> list.clear() + setCurrentRow() re-emits this signal.
+            # Re-showing the note would call setPlainText() and slam the caret
+            # back to the top of the note mid-sentence. Nothing changed under
+            # us, so do nothing. (An explicit jump goes through select_note(),
+            # which re-shows on purpose.)
             return
         self._flush()
         if current is None:
