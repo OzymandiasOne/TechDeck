@@ -68,11 +68,11 @@ def _find_batch_list(batch_folder: Path, batch_number: str) -> Path:
     files, and the card title's stock code comes out of this workbook.
     """
     exact = batch_folder / f"{batch_number} BATCH LIST.xlsx"
-    if exact.exists():
+    if sdk.exists(exact):
         return exact
 
     for f in batch_folder.iterdir():
-        if (f.is_file()
+        if (sdk.is_file(f)
                 and f.suffix.lower() == ".xlsx"
                 and "BATCH LIST" in f.name.upper()
                 and not f.name.startswith("~")):
@@ -321,7 +321,7 @@ def _read_batch_list_materials(qtdr_root: Path, batch: str, log):
     ({}, why) and the batch's cards are simply created without a code.
     """
     batch_folder = qtdr_root / batch
-    if not batch_folder.is_dir():
+    if not sdk.is_dir(batch_folder):
         return {}, (f"No batch folder '{batch}' under {qtdr_root} - its cards "
                     f"have no source-material code.")
     try:
@@ -457,7 +457,7 @@ def _load_posted_titles(log) -> set:
     """Titles this machine has already posted. Unreadable ledger -> empty set
     (degrade to the flow's own dedupe rather than blocking the run)."""
     path = _ledger_path()
-    if not path.is_file():
+    if not sdk.is_file(path):
         return set()
     try:
         # utf-8-SIG on the read: the ledger is documented as user-editable
@@ -479,7 +479,7 @@ def _record_posted_titles(titles, log) -> None:
     path = _ledger_path()
     merged = sorted(_load_posted_titles(log) | set(titles))
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        sdk.ensure_dir(path.parent)
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"plan": "EB SOPO D911", "titles": merged}, fh, indent=2)
     except OSError as exc:

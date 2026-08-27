@@ -749,11 +749,11 @@ def _labeled_value(text: str, label: str):
 
 def _find_nest_pdf(folder: Path, nest_number: str):
     """The PDF in `folder` whose stem contains the nest number, or None."""
-    if not folder.exists():
+    if not sdk.exists(folder):
         return None
     nest_upper = nest_number.upper()
     for f in folder.iterdir():
-        if (f.is_file() and f.suffix.lower() == ".pdf"
+        if (sdk.is_file(f) and f.suffix.lower() == ".pdf"
                 and nest_upper in f.stem.upper()):
             return f
     return None
@@ -1003,7 +1003,7 @@ def parse_nest_pdf(pdf_path: Path) -> dict:
            "orders": None, "source_code": None,
            "machine": None, "fuel": None}
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-    doc = fitz.open(str(pdf_path))
+    doc = fitz.open(sdk.long_path(pdf_path))
     try:
         pages = [p.get_text() for p in doc]
         # Word boxes for page 1 only: the Machine/Fuel header table needs
@@ -1122,7 +1122,7 @@ def _looks_like_order(folder: Path) -> bool:
     try:
         for sub in folder.iterdir():
             name_up = sub.name.upper()
-            if sub.is_dir():
+            if sdk.is_dir(sub):
                 if "CUI" in name_up and "TECH" in name_up:
                     return True
                 if name_up in ("NEST PACKAGES", "WPDD SKETCHES"):
@@ -1157,7 +1157,7 @@ def discover_order_folders(root: Path, log) -> list:
     def walk(folder: Path, depth: int) -> None:
         try:
             subs = sorted((d for d in folder.iterdir()
-                           if d.is_dir() and not d.name.startswith(".")),
+                           if sdk.is_dir(d) and not d.name.startswith(".")),
                           key=lambda p: p.name.upper())
         except OSError:
             return
@@ -1181,13 +1181,13 @@ def find_cui_folder(order_folder: Path) -> Optional[Path]:
     SKETCHES folder or a *BATCH*LIST*.xlsx. Returns the order folder itself if
     the packets live directly under it."""
     for sub in order_folder.iterdir():
-        if sub.is_dir() and "CUI" in sub.name.upper() and "TECH" in sub.name.upper():
+        if sdk.is_dir(sub) and "CUI" in sub.name.upper() and "TECH" in sub.name.upper():
             return sub
     # Fallback: a subfolder holding the packet folders or a batch list.
     for sub in order_folder.iterdir():
-        if not sub.is_dir():
+        if not sdk.is_dir(sub):
             continue
-        names = {c.name.upper() for c in sub.iterdir() if c.is_dir()} if sub.exists() else set()
+        names = {c.name.upper() for c in sub.iterdir() if sdk.is_dir(c)} if sdk.exists(sub) else set()
         if "NEST PACKAGES" in names or "WPDD SKETCHES" in names:
             return sub
         if any("BATCH" in f.name.upper() and "LIST" in f.name.upper()
@@ -1202,11 +1202,11 @@ def find_pdf_folder(cui_folder: Path) -> Optional[Path]:
     'WPDD SKETCHES', then the CUI folder itself."""
     for name in ("NEST PACKAGES", "WPDD SKETCHES"):
         cand = cui_folder / name
-        if cand.exists() and any(cand.glob("*.pdf")):
+        if sdk.exists(cand) and any(cand.glob("*.pdf")):
             return cand
     # Case-insensitive scan.
     for sub in cui_folder.iterdir():
-        if sub.is_dir() and sub.name.upper() in ("NEST PACKAGES", "WPDD SKETCHES"):
+        if sdk.is_dir(sub) and sub.name.upper() in ("NEST PACKAGES", "WPDD SKETCHES"):
             if any(sub.glob("*.pdf")):
                 return sub
     if any(cui_folder.glob("*.pdf")):
@@ -1220,7 +1220,7 @@ def find_iges_folder(cui_folder: Path) -> Optional[Path]:
     if cui_folder is None:
         return None
     for sub in cui_folder.iterdir():
-        if sub.is_dir() and sub.name.strip().upper() == "IGES FILES":
+        if sdk.is_dir(sub) and sub.name.strip().upper() == "IGES FILES":
             return sub
     return None
 
@@ -1611,7 +1611,7 @@ def write_workbook(out_path: Path, data_headers, plate_rows, nonplate_rows,
 
     write_analysis_sheet(wb, plate_rows, log)
 
-    wb.save(str(out_path))
+    sdk.save_workbook(wb, out_path)
     return [("Plates", len(plate_rows)), ("Non-Plates", len(nonplate_rows))]
 
 
@@ -1899,7 +1899,7 @@ def add_static_pivots(out_path, plate_rows, nonplate_rows, log):
     for sheet_name, rows in (("Plates", plate_rows), ("Non-Plates", nonplate_rows)):
         if sheet_name in wb.sheetnames:
             _write_static_summary(wb[sheet_name], rows)
-    wb.save(out_path)
+    sdk.save_workbook(wb, out_path)
     log("  Wrote static nest summary (Excel PivotTable unavailable).")
 
 
@@ -1998,7 +1998,7 @@ def run(params: dict, progress_callback, cancel_event):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return
     root = Path(raw.strip().strip('"'))
-    if not root.exists() or not root.is_dir():
+    if not sdk.exists(root) or not sdk.is_dir(root):
         raise sdk.UserFacingError(
             f"That folder doesn't exist: {root}",
             "Check the path and pick the ROOT folder of order folders, then run again.")

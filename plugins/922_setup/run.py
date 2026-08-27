@@ -182,7 +182,7 @@ def _read_pallet_organizer(batch_path: Path, batch: str, log):
     warnings: list[str] = []
     xl_path = (batch_path / f"Batch {batch} - Documentation"
                / f"PO H{batch} Pallet & Rod Organizer.xlsx")
-    if not xl_path.is_file():
+    if not sdk.is_file(xl_path):
         warnings.append(f"Pallet & Rod Organizer not found "
                         f"({xl_path.name}) - cards will have NO labels.")
         return None, warnings
@@ -284,7 +284,7 @@ def _labels_for_folder(folder: str, organizer: dict | None, label_map: dict,
 
 
 def _is_order_folder(entry: Path) -> bool:
-    if not entry.is_dir():
+    if not sdk.is_dir(entry):
         return False
     name = entry.name
     if name.startswith(("~", ".", "$")):
@@ -398,7 +398,7 @@ def _run_pallet_labels(params: dict, progress_callback, cancel_event,
     for i, entry in enumerate(sorted(batch_path.iterdir())):
         if i % 64 == 0:
             sdk.raise_if_cancelled(cancel_event)
-        if (entry.is_dir() and not _ignored_reason(entry.name)
+        if (sdk.is_dir(entry) and not _ignored_reason(entry.name)
                 and _is_order_folder(entry)):
             folders.append(entry.name)
     if not folders:
@@ -564,7 +564,7 @@ def _pick_batch_folder(params: dict, cancel_event):
     start_dir = ""
     try:
         root = sdk.resolve_922_root(settings.get("base_path", ""))
-        if root is not None and root.exists():
+        if root is not None and sdk.exists(root):
             start_dir = str(root)
     except Exception:
         pass
@@ -580,7 +580,7 @@ def _pick_batch_folder(params: dict, cancel_event):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return None, None
     batch_path = Path(raw)
-    if not batch_path.is_dir():
+    if not sdk.is_dir(batch_path):
         log(f"ERROR: '{batch_path}' is not a folder.")
         return None, None
     # 'Batch 483' -> '483' (needed for card titles/buckets + file discovery).
@@ -614,7 +614,7 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         if cancel_event is not None and i % 64 == 0 and cancel_event.is_set():
             log("Cancelled.")
             return
-        if not entry.is_dir():
+        if not sdk.is_dir(entry):
             continue
         reason = _ignored_reason(entry.name)
         if reason:
@@ -726,7 +726,7 @@ def _find_rev_c_workbook(batch_path: Path, batch: str) -> Path:
     folder (both matched loosely — layouts vary). Raises UserFacingError
     when the folder or workbook is missing."""
     doc_dir = next((e for e in sorted(batch_path.iterdir())
-                    if e.is_dir() and _DOC_RE.search(e.name)), None)
+                    if sdk.is_dir(e) and _DOC_RE.search(e.name)), None)
     if doc_dir is None:
         raise sdk.UserFacingError(
             f"No 'Batch {batch} - Documentation' folder inside "
@@ -787,14 +787,14 @@ def _order_pdf_sources(batch_path: Path, log) -> list[Path]:
     'Work Packets' folder inside the batch folder; batches from before the
     convention have the PDFs loose in the batch root, so fall back there."""
     wp_dir = next((e for e in sorted(batch_path.iterdir())
-                   if e.is_dir() and _WORK_PACKETS_RE.match(e.name)), None)
+                   if sdk.is_dir(e) and _WORK_PACKETS_RE.match(e.name)), None)
     if wp_dir is not None:
         pdfs = [p for p in sorted(wp_dir.iterdir())
-                if p.is_file() and p.suffix.lower() == ".pdf"]
+                if sdk.is_file(p) and p.suffix.lower() == ".pdf"]
         log(f"Work Packets folder: {len(pdfs)} PDF(s).")
         return pdfs
     pdfs = [p for p in sorted(batch_path.iterdir())
-            if p.is_file() and p.suffix.lower() == ".pdf"]
+            if sdk.is_file(p) and p.suffix.lower() == ".pdf"]
     if pdfs:
         log(f"No 'Work Packets' folder - using {len(pdfs)} PDF(s) loose in "
             f"the batch folder.")
@@ -840,12 +840,12 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
         if i % 16 == 0 and cancel_event.is_set():
             return False
         folder = batch_path / f"{order}-{ppn}"
-        if not folder.exists():
-            folder.mkdir()
+        if not sdk.exists(folder):
+            sdk.ensure_dir(folder)
             made_folders += 1
         order_to_folders.setdefault(order.upper(), []).append(folder)
         dest = folder / f"{ppn}.xlsx"
-        if not dest.exists():
+        if not sdk.exists(dest):
             sdk.copy_resilient(rev_c, dest, log)
             made_copies += 1
         progress_callback(20 + 50 * (i + 1) // len(pairs))
@@ -878,13 +878,13 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
         # several): copy to each folder that doesn't have it yet, then remove
         # the source once all of them do.
         dests = [f / pdf.name for f in order_to_folders[hit]]
-        missing = [d for d in dests if not d.exists()]
+        missing = [d for d in dests if not sdk.exists(d)]
         if not missing:
             warnings.append(f"'{pdf.name}' already exists in its order "
                             f"folder(s) - left where it is.")
             continue
         for d in missing:
-            shutil.copy2(str(pdf), str(d))
+            shutil.copy2(sdk.long_path(pdf), sdk.long_path(d))
         pdf.unlink()
         moved += 1
         matched_orders.add(hit)

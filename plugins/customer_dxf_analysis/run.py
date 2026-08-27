@@ -1537,7 +1537,7 @@ def process_dxf(src, dest, hole_increase, edge_offset, holes_layer, log,
             out.extend(insert_lines)
         out.append(replace.get(ln_idx, ln))
     text = parsed["newline"].join(out) + parsed["newline"]
-    with open(dest, "w", encoding=parsed["enc"], newline="") as fh:
+    with open(sdk.long_path(dest), "w", encoding=parsed["enc"], newline="") as fh:
         fh.write(text)
     return stats
 
@@ -2877,7 +2877,7 @@ def run(params: dict, progress_callback, cancel_event):
 
     if mode == "Single file":
         default = (settings.get("default_dxf") or "").strip()
-        if default and Path(default).is_file():
+        if default and sdk.is_file(Path(default)):
             files = [default]
         else:
             # sdk.pick_* = the same dialog, plus Sentry Drone when the user

@@ -534,17 +534,21 @@ class PluginExecutor:
         """
         plugin_id = plugin.id
         start_time = time.time()  # PHASE 2: Track execution time
-        
+        # Short per-run token stamped onto every detail-log line and the
+        # RUN START/end summary lines, so back-to-back runs of the same plugin
+        # can be segmented exactly when mining the logs for timing.
+        run_token = f"{int(start_time * 1000) & 0xFFFFFF:06x}"
+
         # PHASE 1 FIX: Thread-safe access to result
         with self._lock:
             result = self.results[plugin_id]
             result.status = PluginStatus.RUNNING
-        
+
         # Create wrapped callbacks that are thread-safe
         def safe_log(message: str):
             self._touch_activity(plugin_id)
             try:
-                get_detail_logger().info("%s | %s", plugin_id, message)
+                get_detail_logger().info("%s [%s] | %s", plugin_id, run_token, message)
             except Exception as e:
                 # Detail logging must never break a run. debug level: this
                 # fires per log line, so a broken handler must not flood
@@ -556,12 +560,25 @@ class PluginExecutor:
                 except Exception as e:
                     logger.warning("Error in log callback: %s", e)
 
+        # Last progress value persisted to the detail log; list so the nested
+        # function can rebind it.
+        _last_logged_progress = [-100]
+
         def safe_progress(value: int):
             self._touch_activity(plugin_id)
+            clamped = max(0, min(100, value))  # Clamp progress to 0-100
+            # Persist the completion curve (every >=5-point move) so log mining
+            # can map elapsed time to progress. Console/UI is unaffected.
+            if abs(clamped - _last_logged_progress[0]) >= 5 or clamped in (0, 100):
+                if clamped != _last_logged_progress[0]:
+                    _last_logged_progress[0] = clamped
+                    try:
+                        get_detail_logger().info(
+                            "%s [%s] | [progress] %d%%", plugin_id, run_token, clamped)
+                    except Exception as e:
+                        logger.debug("Detail log write failed: %s", e)
             if progress_callback:
                 try:
-                    # Clamp progress to 0-100
-                    clamped = max(0, min(100, value))
                     with self._lock:
                         result.progress = clamped
                     progress_callback(clamped)
@@ -577,13 +594,13 @@ class PluginExecutor:
             safe_progress(0)
             if threaded:
                 get_run_logger().info(
-                    "RUN START %s (v%s) idle_limit=%ss",
-                    plugin_id, plugin.version, timeout,
+                    "RUN START %s (v%s) idle_limit=%ss run=%s",
+                    plugin_id, plugin.version, timeout, run_token,
                 )
             else:
                 get_run_logger().info(
-                    "RUN START %s (v%s) [main thread]",
-                    plugin_id, plugin.version,
+                    "RUN START %s (v%s) [main thread] run=%s",
+                    plugin_id, plugin.version, run_token,
                 )
 
             # Load plugin module
@@ -637,8 +654,9 @@ class PluginExecutor:
                         safe_log("Plugin execution cancelled")
                     result.execution_time = execution_time
                 get_run_logger().warning(
-                    "RUN %s %s after %.1fs",
-                    "TIMEOUT" if timed_out else "CANCELLED", plugin_id, execution_time,
+                    "RUN %s %s after %.1fs run=%s",
+                    "TIMEOUT" if timed_out else "CANCELLED", plugin_id,
+                    execution_time, run_token,
                 )
             else:
                 outcome_status, outcome_msg = self._run_outcome_from(plugin_params)
@@ -656,9 +674,9 @@ class PluginExecutor:
                 settings_manager.increment_plugin_runs(plugin_id)
                 safe_progress(100)
                 get_run_logger().info(
-                    "RUN %s %s in %.1fs",
+                    "RUN %s %s in %.1fs run=%s",
                     "WARNING" if outcome_status is not None else "OK",
-                    plugin_id, execution_time,
+                    plugin_id, execution_time, run_token,
                 )
                 try:
                     from techdeck.core.usage_tracker import record_run
@@ -679,8 +697,8 @@ class PluginExecutor:
                 result.execution_time = execution_time
             safe_log("Plugin execution cancelled")
             get_run_logger().info(
-                "RUN CANCELLED %s after %.1fs (cooperative)",
-                plugin_id, execution_time,
+                "RUN CANCELLED %s after %.1fs (cooperative) run=%s",
+                plugin_id, execution_time, run_token,
             )
 
         except InputAborted as exc:
@@ -699,9 +717,9 @@ class PluginExecutor:
                     safe_log(f"Plugin input cancelled: {exc.reason}")
                 result.execution_time = execution_time
             get_run_logger().info(
-                "RUN %s %s after %.1fs (input aborted: %s)",
+                "RUN %s %s after %.1fs (input aborted: %s) run=%s",
                 "PAUSED" if exc.reason == "paused" else "CANCELLED",
-                plugin_id, execution_time, exc.reason,
+                plugin_id, execution_time, exc.reason, run_token,
             )
 
         except Exception as e:
@@ -736,8 +754,8 @@ class PluginExecutor:
                 safe_log(f"Plugin error: {str(e)}")
             safe_progress(0)
             get_run_logger().error(
-                "RUN ERROR %s after %.1fs\n%s",
-                plugin_id, execution_time, traceback.format_exc(),
+                "RUN ERROR %s after %.1fs run=%s\n%s",
+                plugin_id, execution_time, run_token, traceback.format_exc(),
             )
 
         finally:

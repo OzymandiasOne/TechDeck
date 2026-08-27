@@ -76,6 +76,20 @@ Checks (E = error, fails the build; W = warning):
       must have sdk.ensure_local in the SAME function (hydrate at the read
       site - the resilient calls are cheap no-ops on local files, so there is
       no legitimate raw-read case).
+  E14 no file operation on a raw path that Windows fails past MAX_PATH
+      (Hard Rule 14): the Pilot Program tree burns ~190 of the 260 characters
+      Win32 allows, so a descriptive output name tips a write over and it
+      dies with "FileNotFoundError [Errno 2] No such file or directory" -
+      pointing at a folder that plainly exists (911 SSPO Award Review at 277
+      chars, DESKTOP-DD35L5F, 2026-08-21; the user "fixed" it by renaming the
+      award folder). .mkdir()/os.makedirs -> sdk.ensure_dir; Workbook.save ->
+      sdk.save_workbook; shutil copy/move/rmtree -> wrap each path in
+      sdk.long_path (or sdk.copy_resilient for a copy). Paths built from
+      __file__ are exempt (plugin-bundled files sit under a short path).
+      .exists()/.is_file()/.is_dir() are the same class but FAIL SILENTLY -
+      they answer False for a file that is right there, so a "create it if
+      missing" guard fires and overwrites real work; use sdk.exists /
+      sdk.is_file / sdk.is_dir.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
@@ -296,6 +310,99 @@ def find_unhydrated_pdf_opens(tree: ast.AST) -> list[tuple[int, str]]:
                 hits.append((call.lineno, "PdfReader"))
 
     scan_scope(tree.body if isinstance(tree, ast.Module) else [tree])
+    return sorted(hits)
+
+
+# E14: file operations that break past Windows' 260-char MAX_PATH cap
+# (Hard Rule 14). The Pilot Program tree burns ~190 characters before a plugin
+# adds anything, so a descriptive output name tips the write over and Win32
+# fails it with "FileNotFoundError [Errno 2] No such file or directory" -
+# naming a folder that plainly exists (911 SSPO Award Review at 277 chars,
+# DESKTOP-DD35L5F, 2026-08-21). Every operation below must route through an
+# SDK helper or wrap its path in sdk.long_path().
+# These answer False instead of raising, so an over-length path silently
+# reads as "not there" - the guard fires and the plugin overwrites real work.
+SILENT_PATH_PREDICATES = {"exists", "is_file", "is_dir"}
+
+SHUTIL_PATH_OPS = {
+    "copy", "copy2", "copyfile", "copytree", "move", "rmtree", "make_archive",
+}
+
+
+def _is_long_path_wrapped(node: ast.AST) -> bool:
+    """True for sdk.long_path(...) / long_path(...) — the escape hatch that
+    makes a path survive MAX_PATH."""
+    return isinstance(node, ast.Call) and _call_name(node) == "long_path"
+
+
+def _is_short_by_construction(node: ast.AST) -> bool:
+    """True for a path that cannot be long: one built from __file__ (a
+    plugin-bundled template, which lives under a short install path)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id == "__file__":
+            return True
+    return False
+
+
+def find_max_path_risks(tree: ast.AST) -> list[tuple[int, str, str]]:
+    """(lineno, what, fix) for plugin file operations that die past 260 chars.
+
+    Three mechanically-checkable classes:
+      * .mkdir() / os.makedirs()   -> sdk.ensure_dir (makedirs walks up to the
+        drive root and chokes on the extended-length prefix, so the prefix
+        cannot simply be applied at the call site)
+      * openpyxl Workbook .save()  -> sdk.save_workbook
+      * shutil path ops            -> wrap each path in sdk.long_path
+
+    Anything already routed through an SDK helper, or already wrapped, passes.
+    """
+    workbooks: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
+                and _call_name(node.value) in ("Workbook", "load_workbook",
+                                               "load_workbook_resilient"):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    workbooks.add(target.id)
+
+    hits: list[tuple[int, str, str]] = []
+    for node in _iter_calls_skipping_main(tree):
+        name = _call_name(node)
+
+        if name in SILENT_PATH_PREDICATES and isinstance(node.func, ast.Attribute)                 and not node.args:
+            hits.append((node.lineno, f".{name}()",
+                         f"sdk.{name}(path) - the raw "
+                         f"call answers False for a file that exists, so "
+                         f"every 'create it if missing' guard misfires"))
+            continue
+
+        if name in ("mkdir", "makedirs"):
+            hits.append((node.lineno, f"{name}()",
+                         "sdk.ensure_dir(path) - it creates each level with "
+                         "the long-path prefix (os.makedirs cannot)"))
+            continue
+
+        if name == "save" and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) \
+                and node.func.value.id in workbooks:
+            if not (node.args and _is_long_path_wrapped(node.args[0])):
+                hits.append((node.lineno, "Workbook.save()",
+                             "sdk.save_workbook(wb, path) - long-path safe, "
+                             "creates the parent folder, and reports a "
+                             "locked destination in plain English"))
+            continue
+
+        if isinstance(node.func, ast.Attribute) and name in SHUTIL_PATH_OPS \
+                and isinstance(node.func.value, ast.Name) \
+                and node.func.value.id == "shutil":
+            for arg in node.args:
+                if _is_long_path_wrapped(arg) or _is_short_by_construction(arg):
+                    continue
+                hits.append((node.lineno, f"shutil.{name}()",
+                             "wrap each path in sdk.long_path(...), or use "
+                             "sdk.copy_resilient(src, dest, log) for a copy"))
+                break
+
     return sorted(hits)
 
 
@@ -607,6 +714,15 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 f"sdk.ensure_local in the same function - a cloud-only file "
                 f"crashes the read (Hard Rule 13); hydrate at the read site "
                 f"(ensure_local is a cheap no-op on a local file)"
+            )
+
+        # --- file ops that break past MAX_PATH (E14, Hard Rule 14)
+        for line_no, what, fix in find_max_path_risks(tree):
+            errors.append(
+                f"{pid}: {rel}:{line_no} calls {what} on a raw path - "
+                f"Windows fails it past 260 characters with a baffling "
+                f"'No such file or directory' on a folder that exists "
+                f"(Hard Rule 14); use {fix}"
             )
 
         fp, tp, rel_count = extract_imports(py_file, "", module_map)

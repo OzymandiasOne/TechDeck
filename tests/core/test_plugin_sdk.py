@@ -237,3 +237,58 @@ def test_load_sibling_missing_is_user_facing(tmp_path):
     with pytest.raises(UserFacingError):
         load_sibling("not_installed_app",
                      anchor=str(plugins / "911_setup" / "run.py"))
+
+
+# ── background prefetcher (prefetch_paths) ──────────────────────────────────
+def _wait_done(handle, timeout=5.0):
+    import time
+    deadline = time.time() + timeout
+    while not handle.done() and time.time() < deadline:
+        time.sleep(0.01)
+    assert handle.done(), "prefetch threads did not finish in time"
+
+
+def test_prefetch_paths_hydrates_only_placeholders(monkeypatch):
+    hydrated = []
+    monkeypatch.setattr(plugin_sdk, "is_cloud_placeholder",
+                        lambda p: str(p).endswith("cloud"))
+    monkeypatch.setattr(plugin_sdk, "hydrate_cloud_file",
+                        lambda p, **kw: hydrated.append(str(p)))
+    h = plugin_sdk.prefetch_paths(["a.cloud", "b.local", "c.cloud"])
+    _wait_done(h)
+    assert sorted(hydrated) == ["a.cloud", "c.cloud"]
+    assert h.checked == 3 and h.hydrated == 2
+
+
+def test_prefetch_paths_stops_on_cancel(monkeypatch):
+    monkeypatch.setattr(plugin_sdk, "is_cloud_placeholder", lambda p: False)
+    cancel = threading.Event()
+    cancel.set()
+    h = plugin_sdk.prefetch_paths((f"f{i}" for i in range(10_000)),
+                                  cancel_event=cancel)
+    _wait_done(h)
+    # Producer bails before feeding the queue when cancel is already set.
+    assert h.checked < 100
+
+
+def test_prefetch_paths_survives_bad_generator_and_hydrate_errors(monkeypatch):
+    monkeypatch.setattr(plugin_sdk, "is_cloud_placeholder", lambda p: True)
+
+    def _boom(p, **kw):
+        raise OSError("cloud gone")
+    monkeypatch.setattr(plugin_sdk, "hydrate_cloud_file", _boom)
+
+    def gen():
+        yield "one"
+        raise RuntimeError("walk died")
+    h = plugin_sdk.prefetch_paths(gen())
+    _wait_done(h)  # neither the generator nor hydrate failures may leak
+    assert h.checked == 1 and h.hydrated == 0
+
+
+def test_hydrate_cloud_file_should_stop_returns_quietly(tmp_path):
+    f = tmp_path / "big.bin"
+    f.write_bytes(b"x" * (2 * 1024 * 1024))
+    # should_stop=True after the first chunk: returns without error.
+    plugin_sdk.hydrate_cloud_file(f, should_stop=lambda: True)
+    plugin_sdk.hydrate_cloud_file(f, should_stop=lambda: False)

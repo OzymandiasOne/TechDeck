@@ -261,11 +261,11 @@ def _find_batch_list(batch_folder: Path, batch_number: str) -> Path:
     Falls back to any .xlsx containing 'BATCH LIST' if exact name not found.
     """
     exact = batch_folder / f"{batch_number} BATCH LIST.xlsx"
-    if exact.exists():
+    if sdk.exists(exact):
         return exact
 
     for f in batch_folder.iterdir():
-        if (f.is_file()
+        if (sdk.is_file(f)
                 and f.suffix.lower() == ".xlsx"
                 and "BATCH LIST" in f.name.upper()
                 and not f.name.startswith("~")):
@@ -362,7 +362,7 @@ def _parse_packet_summary_qtys(pdf_path: Path) -> dict:
     if not PYMUPDF_AVAILABLE:
         return qtys
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(sdk.long_path(pdf_path))
     try:
         for page in doc:
             text = page.get_text()
@@ -500,7 +500,7 @@ def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log)
         a, b = ws.cell(3, col_a).value, ws.cell(3, col_b).value
         ws.cell(3, col_a).value = b
         ws.cell(3, col_b).value = a
-        wb.save(batch_list_path)
+        sdk.save_workbook(wb, batch_list_path)
         wb.close()
         log(f"  Swapped BATCH LIST headers: '{b}' <-> '{a}' "
             f"(cols {get_column_letter(col_a)}/{get_column_letter(col_b)}).")
@@ -800,11 +800,11 @@ def _find_nest_pdf(nest_packages_folder: Path, nest_number: str):
     """Return the PDF in NEST PACKAGES whose stem contains the nest number,
     or None. Shared by the MIL/MATERIAL read (Step 6) and the drawings
     extraction (Step 9) so both look at the same nest-scoped packet."""
-    if not nest_packages_folder.exists():
+    if not sdk.exists(nest_packages_folder):
         return None
     nest_upper = nest_number.upper()
     for f in nest_packages_folder.iterdir():
-        if (f.is_file() and f.suffix.lower() == ".pdf"
+        if (sdk.is_file(f) and f.suffix.lower() == ".pdf"
                 and nest_upper in f.stem.upper()):
             return f
     return None
@@ -826,7 +826,7 @@ def _extract_pdf_data(pdf_path: Path) -> tuple:
         )
 
     sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-    doc = fitz.open(str(pdf_path))
+    doc = fitz.open(sdk.long_path(pdf_path))
     full_text = "".join(page.get_text() for page in doc)
     doc.close()
 
@@ -846,7 +846,7 @@ def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) ->
     (the one whose filename contains the nest number). Scoping to the nest's
     own packet prevents one nest from inheriting another nest's MIL spec.
     """
-    if not nest_packages_folder.exists():
+    if not sdk.exists(nest_packages_folder):
         log(f"  WARNING: NEST PACKAGES folder not found: {nest_packages_folder}")
         return None, None
 
@@ -906,7 +906,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
 
     Returns True if the output PDF was written successfully.
     """
-    if not nest_packages_folder.exists():
+    if not sdk.exists(nest_packages_folder):
         log("  WARNING: NEST PACKAGES folder not found -- skipping drawings.")
         return False
 
@@ -921,7 +921,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
     doc = None
     try:
         sdk.ensure_local(matching_pdf)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(str(matching_pdf))
+        doc = fitz.open(sdk.long_path(matching_pdf))
         total_pages = len(doc)
 
         stamps = _load_omit_stamp_helpers(log)
@@ -1309,7 +1309,7 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
         excel = None
         if tmp_dir is not None:
             try:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+                shutil.rmtree(sdk.long_path(tmp_dir), ignore_errors=True)
             except Exception:
                 pass
         pythoncom.CoUninitialize()
@@ -1325,7 +1325,7 @@ def _find_template_911(template_dir: Path) -> Path:
     Matches any .xlsx whose name starts with '911 BATCH' (case-insensitive).
     """
     for f in template_dir.iterdir():
-        if (f.is_file()
+        if (sdk.is_file(f)
                 and f.suffix.lower() == ".xlsx"
                 and f.stem.upper().startswith("911 BATCH")
                 and not f.name.startswith("~")):
@@ -1550,14 +1550,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     log(f"QTDR root    : {qtdr_root}")
     log(f"Batch folder : {batch_folder}")
 
-    if not qtdr_root.exists():
+    if not sdk.exists(qtdr_root):
         raise FileNotFoundError(
             f"911 QTDR root not found: {qtdr_root}\n"
             f"Check the '911 QTDR Base Directory' setting for this plugin, or "
             f"verify your OneDrive sync."
         )
 
-    if not batch_folder.exists():
+    if not sdk.exists(batch_folder):
         raise FileNotFoundError(
             f"Batch folder not found: {batch_folder}\n"
             f"Verify the batch number '{batch_number}' is correct and the folder exists."
@@ -1600,9 +1600,15 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # below this point runs until the user submits the dialog. Order is
     # preserved by filtering against all_nests (a set membership test).
     # ------------------------------------------------------------------ #
-    existing_nests = {n for n in all_nests if (batch_folder / n).is_dir()}
+    existing_nests = {n for n in all_nests if sdk.is_dir(batch_folder / n)}
     if existing_nests:
         log(f"Already set up: {', '.join(n for n in all_nests if n in existing_nests)}")
+
+    # While the nest-selection dialog is up, hydrate every nest packet PDF in
+    # the background. Step 2.7 reads ALL the packets regardless of which nests
+    # get ticked, so none of this is wasted work even for a partial run.
+    sdk.prefetch_paths((batch_folder / "NEST PACKAGES").glob("*.pdf"),
+                       cancel_event=cancel_event)
 
     if console is not None and hasattr(console, "request_nest_selection"):
         selection = console.request_nest_selection(batch_number, all_nests, existing_nests)
@@ -1652,11 +1658,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log("Creating nest folders...")
         for nest in nest_numbers:
             nest_dir = batch_folder / nest
-            nest_dir.mkdir(exist_ok=True)
+            sdk.ensure_dir(nest_dir)
             log(f"  Folder: {nest_dir.name}")
     else:
         log("[skipped] Nest Folder Setup unchecked.")
-        missing = [n for n in nest_numbers if not (batch_folder / n).is_dir()]
+        missing = [n for n in nest_numbers if not sdk.is_dir(batch_folder / n)]
         if missing:
             log(f"  WARNING: {len(missing)} nest folder(s) do not exist and were "
                 f"NOT created: {', '.join(missing[:10])}"
@@ -1680,7 +1686,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         for nest in nest_numbers:
             dest_path = batch_folder / nest / f"911 BATCH {batch_number} {nest}.xlsx"
             nest_excel_paths[nest] = dest_path
-        absent = [n for n, p in nest_excel_paths.items() if not p.exists()]
+        absent = [n for n, p in nest_excel_paths.items() if not sdk.exists(p)]
         if absent:
             log(f"  WARNING: no existing nest workbook for {len(absent)} nest(s): "
                 f"{', '.join(absent[:10])}" + (" ..." if len(absent) > 10 else ""))
@@ -1688,7 +1694,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log("Copying 911 BATCH template...")
         template_dir = _template_dir(qtdr_override, template_subdir)
 
-        if not template_dir.exists():
+        if not sdk.exists(template_dir):
             raise FileNotFoundError(
                 f"Template directory not found: {template_dir}\n"
                 f"Check the 'Template Subfolder' setting for this plugin."
@@ -1700,14 +1706,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # Scribe-verification doc copied into each nest folder (one copy per
         # nest). Same SACO template dir; a missing source is non-fatal.
         scribe_src = template_dir / _SCRIBE_DOC_FILENAME
-        scribe_available = scribe_src.exists()
+        scribe_available = sdk.exists(scribe_src)
         if not scribe_available:
             log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
 
         for nest in nest_numbers:
             dest_name = f"911 BATCH {batch_number} {nest}.xlsx"
             dest_path = batch_folder / nest / dest_name
-            shutil.copy2(template_path, dest_path)
+            shutil.copy2(sdk.long_path(template_path), sdk.long_path(dest_path))
             nest_excel_paths[nest] = dest_path
             log(f"  Copied -> {dest_name}")
 
@@ -1717,16 +1723,16 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 # Earlier versions dropped the doc loose in the nest root;
                 # relocate such a copy instead of duplicating it.
                 legacy_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
-                if scribe_dest.exists():
+                if sdk.exists(scribe_dest):
                     log(f"  Scribe doc already in {nest} -- skipped")
                 else:
                     try:
-                        scribe_dir.mkdir(exist_ok=True)
-                        if legacy_dest.exists():
+                        sdk.ensure_dir(scribe_dir)
+                        if sdk.exists(legacy_dest):
                             legacy_dest.replace(scribe_dest)
                             log(f"  Scribe doc moved -> {nest}\\{_SCRIBE_SUBFOLDER}")
                         else:
-                            shutil.copy2(scribe_src, scribe_dest)
+                            shutil.copy2(sdk.long_path(scribe_src), sdk.long_path(scribe_dest))
                             log(f"  Scribe doc -> {nest}\\{_SCRIBE_SUBFOLDER}")
                     except Exception as e:
                         log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
@@ -1740,7 +1746,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     log("Copying Working Forecast List...")
     forecast_src = _forecast_dir(forecast_override) / forecast_filename
-    if not forecast_src.exists():
+    if not sdk.exists(forecast_src):
         raise FileNotFoundError(
             f"Working Forecast List not found at:\n{forecast_src}\n"
             "Check the 'Forecast and Inventory Reports Directory' and "
@@ -1876,7 +1882,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
         # -- Save and close openpyxl workbook before Excel COM opens it --
         log(f"  Saving {nest_excel.name}...")
-        wb.save(nest_excel)
+        sdk.save_workbook(wb, nest_excel)
         wb.close()
 
         # -- Step 8b: Copy inspection sheets via Excel COM ---------------

@@ -751,19 +751,19 @@ def _save_workbook(wb, dest, log):
     import tempfile
 
     handle, tmp = tempfile.mkstemp(suffix=".xlsx", prefix="techdeck_insp_",
-                                   dir=os.path.dirname(dest))
+                                   dir=sdk.long_path(os.path.dirname(dest)))
     os.close(handle)
     try:
-        wb.save(tmp)
+        wb.save(sdk.long_path(tmp))
         wb.close()
-        os.replace(tmp, dest)
+        os.replace(sdk.long_path(tmp), sdk.long_path(dest))
         log("   saved %s" % os.path.basename(dest))
     except PermissionError as exc:
         raise sdk.locked_file_error(dest, exc)
     finally:
-        if os.path.exists(tmp):
+        if os.path.exists(sdk.long_path(tmp)):
             try:
-                os.remove(tmp)
+                os.remove(sdk.long_path(tmp))
             except Exception:
                 pass
 
@@ -834,7 +834,7 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
     import fitz
 
     sdk.ensure_local(pdf_path, log=log)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(sdk.long_path(pdf_path))
     parts = []
     try:
         for index, page in enumerate(doc):
@@ -1065,7 +1065,7 @@ def run(params, progress_callback, cancel_event):
         sdk.raise_if_cancelled(cancel_event)
         try:
             sdk.ensure_local(path, log=log)
-            with fitz.open(path) as doc:
+            with fitz.open(sdk.long_path(path)) as doc:
                 total_pages += sum(1 for pg in doc if drawing_clip(pg) is not None)
         except Exception:
             total_pages += 1
@@ -1121,7 +1121,7 @@ def run(params, progress_callback, cancel_event):
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
     out_name = "911 Inspection Dimensions - %s - %s.txt" % (os.path.basename(folder.rstrip("\\/")), stamp)
     out_path = os.path.join(folder, out_name)
-    with open(out_path, "w", encoding="utf-8") as handle:
+    with open(sdk.long_path(out_path), "w", encoding="utf-8") as handle:
         handle.write(build_report(folder, results, fills, elapsed))
 
     parts = sum(len(p) for _, p in results)

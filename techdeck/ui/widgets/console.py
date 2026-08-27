@@ -13,6 +13,7 @@ from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer, QEvent,
 from PySide6.QtGui import QTextCursor, QFont, QDesktopServices
 import re
 import threading
+import time
 
 from techdeck.ui.widgets.dashboard import DashboardView
 from techdeck.ui.theme_aware import ThemeAware
@@ -68,7 +69,40 @@ class ConsoleWidget(QWidget, ThemeAware):
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
-    
+
+    # waiting_for_input is a property so every open/close transition (11 set
+    # sites: request_input, the dialogs, abort_input) lands a timestamped
+    # marker in plugin_detail.log — log mining can then separate "user at a
+    # prompt" from "plugin actually working". The idle watchdog keeps reading
+    # it exactly as before.
+    @property
+    def waiting_for_input(self) -> bool:
+        return getattr(self, "_waiting_for_input", False)
+
+    @waiting_for_input.setter
+    def waiting_for_input(self, value) -> None:
+        value = bool(value)
+        prev = getattr(self, "_waiting_for_input", False)
+        self._waiting_for_input = value
+        if value == prev:
+            return
+        try:
+            # Lazy import: plugin_executor imports this module at top level.
+            from techdeck.core.plugin_executor import get_detail_logger
+            if value:
+                self._prompt_opened_monotonic = time.monotonic()
+                get_detail_logger().info("prompt | open")
+            else:
+                opened = getattr(self, "_prompt_opened_monotonic", None)
+                if opened is None:
+                    get_detail_logger().info("prompt | closed")
+                else:
+                    get_detail_logger().info(
+                        "prompt | closed after %.1fs", time.monotonic() - opened)
+        except Exception:
+            # Prompt-timing markers must never break input handling.
+            pass
+
     def __init__(self, parent=None):
         super().__init__(parent)
         

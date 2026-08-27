@@ -411,7 +411,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log(f"Workbook: {organizer_path.name}")
 
     kitting_dir = doc_folder / "Kitting"
-    kitting_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(kitting_dir)
     final_pdf = kitting_dir / f"Kitting {batch_no}.pdf"
     labels_pdf = kitting_dir / f"Bin Labels {batch_no}.pdf"
     progress_callback(5)
@@ -421,7 +421,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log(f"Staging dir: {stage_dir}")
     staged_workbook = stage_dir / organizer_path.name
     pdf_dir = stage_dir / "pdfs"
-    pdf_dir.mkdir(exist_ok=True)
+    sdk.ensure_dir(pdf_dir)
 
     sdk.copy_resilient(organizer_path, staged_workbook, log)  # hydrate + locked-open message
 
@@ -514,7 +514,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             try:
                 ws_kit.PageSetup.PrintArea = labels_print_area
                 ws_kit.ExportAsFixedFormat(_XL_TYPE_PDF, str(label_pdf))
-                if not label_pdf.exists():
+                if not sdk.exists(label_pdf):
                     raise RuntimeError(f"Labels PDF was not written: {label_pdf}")
                 label_pdf_paths.append(label_pdf)
             finally:
@@ -529,7 +529,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 out_pdf = pdf_dir / f"p{idx:02d}.pdf"
                 ws_kit.ExportAsFixedFormat(_XL_TYPE_PDF, str(out_pdf))
 
-                if not out_pdf.exists():
+                if not sdk.exists(out_pdf):
                     raise RuntimeError(f"PDF was not written: {out_pdf}")
 
                 pdf_paths.append(out_pdf)
@@ -561,12 +561,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         try:
             for p in pdf_paths:
                 sdk.ensure_local(p)  # OneDrive placeholder -> download first (Hard Rule 13)
-                src = fitz.open(p)
+                src = fitz.open(sdk.long_path(p))
                 try:
                     merged.insert_pdf(src)
                 finally:
                     src.close()
-            merged.save(str(final_pdf))
+            merged.save(sdk.long_path(final_pdf))
         finally:
             merged.close()
         progress_callback(94)
@@ -577,19 +577,19 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         try:
             for p in label_pdf_paths:
                 sdk.ensure_local(p)  # OneDrive placeholder -> download first (Hard Rule 13)
-                src = fitz.open(p)
+                src = fitz.open(sdk.long_path(p))
                 try:
                     merged_labels.insert_pdf(src)
                 finally:
                     src.close()
-            merged_labels.save(str(labels_pdf))
+            merged_labels.save(sdk.long_path(labels_pdf))
         finally:
             merged_labels.close()
         progress_callback(96)
 
         # Copy staged workbook back over the OneDrive original
         log("Copying workbook back to OneDrive...")
-        shutil.copy2(staged_workbook, organizer_path)
+        shutil.copy2(sdk.long_path(staged_workbook), sdk.long_path(organizer_path))
         progress_callback(100)
 
         log("=" * 50)
@@ -621,7 +621,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         except Exception:
             pass
         try:
-            shutil.rmtree(stage_dir, ignore_errors=True)
+            shutil.rmtree(sdk.long_path(stage_dir), ignore_errors=True)
         except Exception:
             pass
 

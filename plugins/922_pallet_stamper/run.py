@@ -120,7 +120,7 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
     """
     try:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 13)
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(sdk.long_path(pdf_path))
         saved = False
         try:
             page = doc[0]
@@ -198,7 +198,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     doc_folder = batch_path / f"Batch {batch_no} - Documentation"
     xl_path = doc_folder / f"PO H{batch_no} Pallet & Rod Organizer.xlsx"
 
-    if not xl_path.is_file():
+    if not sdk.is_file(xl_path):
         raise sdk.UserFacingError(
             f"Couldn't find the Pallet & Rod Organizer for Batch {batch_no}.",
             f"Expected it here: {xl_path}. Make sure it exists and OneDrive is "
@@ -241,7 +241,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # reflects real orders only and we don't warn on a non-order folder.
     subfolders = [
         sub for sub in batch_path.iterdir()
-        if sub.is_dir()
+        if sdk.is_dir(sub)
         and not sub.name.endswith("- Documentation")
         and sub.name.strip().casefold() != "repeat batches"
     ]
