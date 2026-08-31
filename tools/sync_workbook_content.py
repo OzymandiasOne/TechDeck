@@ -246,6 +246,21 @@ ENGINEERING = [
      "the wrong batch - and reduces a full multi-tool batch run to a single "
      "pick.",
      "Six 922 tools on the shared routine; the standard for new 922 tools."),
+    ("Aug 2026", "Complete Part Coverage on Kit Paperwork", "Quality",
+     "Two tools preparing the same batch disagreed on how many parts it "
+     "contained, which is how two silent omissions were found. Both are "
+     "corrected: the forming tool now identifies a part by its order as well "
+     "as its part number, so a part built for two different orders is "
+     "recorded and gathered once for each rather than once in total; and the "
+     "kitting tool now recognises an order with more parts than its standard "
+     "checklist can hold and reprints that order on the larger layout instead "
+     "of stopping at ten.",
+     "A part could be left off the shop paperwork with no error raised - the "
+     "only signal was the two tools disagreeing. Neither omission is possible "
+     "now, and an order large enough to outgrow even the larger layout raises "
+     "a warning rather than passing quietly.",
+     "922 forming and kitting; verified end to end against a live production "
+     "batch."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
