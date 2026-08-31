@@ -570,6 +570,8 @@ def _as_nominal(text):
 # build (both load the plugin from its own folder).
 _BEVEL_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bevel_table.csv")
 _BEVEL_CACHE = None
+# What a usable angle nominal looks like once folded: a bare number, nothing else.
+ANGLE_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
 
 def bevel_table(log=None):
@@ -651,7 +653,12 @@ def weld_prep_angles(weld, log=None):
             continue
         # the table carries the print's own wording ("22 1/2", "45 TYP", "52.0")
         value = _angle_decimal(re.sub(r"\s*TYP$", "", angle).strip())
-        if value:
+        # Anything that is not a bare number is a transcription that needs a human,
+        # not a nominal. Two sheets used to carry a compound cell ("30 / 30" on
+        # FB064, "50 / 25" on SB716 where 50 was the INCLUDED angle) which would
+        # have typed the literal string "30 / 30 deg" into a QA form. Drop it here
+        # so a bad cell can never reach a sheet, whatever the table says.
+        if value and ANGLE_VALUE_RE.match(value):
             out.append("%s°" % value)
     return tuple(out)
 
@@ -1131,8 +1138,21 @@ def build_report(folder, results, fills, elapsed):
                                               % (pdf_name, rec.get("part", "?"), weld["code"]))
                     else:
                         angles = weld_prep_angles(weld)
-                        add("          -> wrote %s onto the inspection sheet"
-                            % (", ".join(angles) if angles else "nothing (no angle on the sheet)"))
+                        if angles:
+                            add("          -> wrote %s onto the inspection sheet"
+                                % ", ".join(angles))
+                        else:
+                            # A taper-only sheet (KB702-729, KB738) or one cut square
+                            # (SB610) genuinely prints no bevel angle. Nothing to
+                            # write, but the reviewer has to be told - a prep that
+                            # quietly contributes nothing looks the same on the form
+                            # as one that was never on the drawing.
+                            add("          -> nothing written: this sheet prints no "
+                                "bevel angle (taper only / cut square)")
+                            bevel_problems.append(
+                                "%s - %s: %s prints no bevel angle (%s) - nothing written"
+                                % (pdf_name, rec.get("part", "?"), weld["code"],
+                                   row["type"] or "no type"))
             if rec.get("filled"):
                 add("    -> written to inspection tab %s: %s"
                     % (rec["filled"]["tab"], ", ".join(str(v) for v in rec["filled"]["values"])))
