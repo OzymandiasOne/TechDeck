@@ -1,8 +1,8 @@
 {
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
-  "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions onto its inspection sheet",
-  "version": "0.3.0",
+  "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions and weld-prep bevel angles onto its inspection sheet",
+  "version": "0.4.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -21,7 +21,8 @@
       "TYP dimensions go in LAST. The drawing prints them once but the feature repeats and never says how many times, so copy the last ones across as many times as the part needs.",
       "Anything marked REF is left out, and so are numbers that are part of a note on the drawing. Both are listed in the report so you can see them.",
       "A tab that already has numbers typed in is never touched.",
-      "Weld preps (the KB codes) are read and reported, but not written onto the sheet yet."
+      "Weld preps (the KB/SB/FB/WB bevel codes) are looked up in the Electric Boat bevel book and their bevel angle goes on the sheet too - one entry per side the drawing names, so \"KB114 NS & FS\" writes two.",
+      "A bevel code that has been VOIDed writes nothing and is listed with the code that replaces it, so a retired bevel never lands on an inspection sheet."
     ],
     "output": [
       "The inspection sheet tabs in each nest workbook, filled in and ready to review.",

@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -113,12 +113,16 @@ MODIFIER_WORDS = {
 }
 
 # --- weld preps -------------------------------------------------------------
-# A weld prep is called out as a code starting "KB" on a leader line, usually with
-# the side it applies to on the line underneath ("KB114" / "NS & FS" = near side and
-# far side). Codes come back from OCR with the leader dash glued on ("-KB114") and
+# A weld prep is called out as a bevel code on a leader line, usually with the side
+# it applies to on the line underneath ("KB114" / "NS & FS" = near side and far
+# side). Codes come back from OCR with the leader dash glued on ("-KB114") and
 # sometimes with the digits spaced out ("KB 1 1 4"), so match on the space-stripped
 # text after trimming leading punctuation.
-WELD_PREP_RE = re.compile(r"^KB[A-Z0-9]{1,6}$")
+#
+# The bevel book uses four prefixes, not just KB: KB (standard), SB (shell), FB
+# (flange) and WB (web). Matching only KB silently dropped every shell and flange
+# prep on the drawing - and SB alone is 198 of the 947 sheets.
+WELD_PREP_RE = re.compile(r"^(?:KB|SB|FB|WB)[A-Z0-9]{1,6}$")
 SIDE_RE = re.compile(r"^(?:[NFB]S(?:&[NFB]S)?|BOTHSIDES?|NEARSIDE|FARSIDE)$")
 # Modifiers that ride along on the dimension itself.
 TRAILING_MODS = ("TYP", "REF", "THK", "MIN", "MAX", "NOM", "SNIPE")
@@ -220,13 +224,16 @@ def _near_label(item, items, label):
     return False
 
 
+_PREFIXES = ("KB", "SB", "FB", "WB")
+
+
 def _weld_code(word):
     """Normalise one OCR token to a weld-prep code, or None."""
     t = re.sub(r"^[^A-Z0-9]+", "", word).replace(" ", "")
-    if not t.startswith("KB"):
+    if not t.startswith(_PREFIXES):
         return None
     # trim a side note that OCR glued onto the code ("KB114NS&FS")
-    m = re.match(r"^(KB[A-Z0-9]{1,6}?)((?:[NFB]S(?:&[NFB]S)?)?)$", t)
+    m = re.match(r"^((?:KB|SB|FB|WB)[A-Z0-9]{1,6}?)((?:[NFB]S(?:&[NFB]S)?)?)$", t)
     if not m:
         return None
     code = m.group(1)
@@ -555,12 +562,126 @@ def _as_nominal(text):
         return t
 
 
-def nominals_for(dims):
+# ------------------------------------------------------------- bevel reference
+# bevel_table.csv is the Electric Boat bevel book (Dept 470/459/415 "BEVEL
+# TEMPLATE" sheets) transcribed to one row per code: the near/far side angles, the
+# max land, and whether the sheet has been VOIDed in favour of another code.
+# It ships next to run.py, so it resolves the same way in dev and in the frozen
+# build (both load the plugin from its own folder).
+_BEVEL_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bevel_table.csv")
+_BEVEL_CACHE = None
+
+
+def bevel_table(log=None):
+    """The bevel book as {code: row}, loaded once. Empty dict if it is missing."""
+    global _BEVEL_CACHE
+    if _BEVEL_CACHE is not None:
+        return _BEVEL_CACHE
+    import csv
+
+    table = {}
+    try:
+        with open(_BEVEL_CSV, newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                table[row["code"].upper()] = row
+                # Two sheets are filed under a KB name but printed as WB (KB066 /
+                # KB076 read WB066 / WB076). A drawing calls the PRINTED number, so
+                # index both spellings at the same row.
+                printed = (row.get("printed_no") or "").upper()
+                if printed and printed not in table:
+                    table[printed] = row
+    except OSError as exc:
+        if log:
+            log("   ! bevel table not readable (%s) - weld preps will be reported "
+                "but not looked up" % exc)
+    _BEVEL_CACHE = table
+    return table
+
+
+def bevel_lookup(code, log=None):
+    """One weld-prep code's bevel data, or None when it is not in the book."""
+    return bevel_table(log).get(str(code).upper())
+
+
+def _weld_faces(side):
+    """The faces a side note names, as ('NS',), ('FS',), ('NS', 'FS') or ().
+
+    "BS" is the drawings' shorthand for both sides and has to land on two faces
+    like "NS & FS" does - reading it as a single unknown face wrote one angle
+    where the sheet wants two.
+    """
+    flat = (side or "").upper().replace(" ", "").replace("&", "").replace("/", "")
+    if "BOTH" in flat or "BS" in flat:
+        return ("NS", "FS")
+    return tuple(f for f in ("NS", "FS") if f in flat)
+
+
+def weld_prep_angles(weld, log=None):
+    """The angle nominals a weld prep contributes, as ('45°', ...).
+
+    ONE ENTRY PER FACE THE DRAWING NAMES - so "KB114  NS & FS" is two 45 deg
+    entries, not one. Verified against the hand-filled sheet for H4136024-41 on
+    S026, which reads 35.41 / 45 deg / 45 deg: the part is one tube with the same
+    bevel cut on the near and far side, and each one is a separate thing to
+    inspect. Emitting a single angle there under-filled the sheet by one row.
+
+    KB114 is a SINGLE N/S BEVEL, so the book only carries a near-side angle - when
+    the drawing applies it to both faces, that same angle stands for both. A true
+    double bevel (KB200, 22.5/22.5) carries an angle per face and each is used.
+
+    Only the ANGLE is written. The land on these sheets is a MAX ("0-1/16 MAX
+    LAND"), not a target, and the QF-QU-09 group derives a +/-0.1 band around
+    whatever nominal is typed in - so writing 0.06 there would assert a 0.06 +/- 0.1
+    land the print never called for. The land is carried into the report instead.
+    """
+    row = bevel_lookup(weld["code"], log)
+    if not row or row.get("status"):
+        return ()                                # unknown or VOID - caller reports it
+    ns, fs = row["ns_angle"].strip(), row["fs_angle"].strip()
+    faces = _weld_faces(weld.get("side"))
+    if faces:
+        # one per named face, falling back to whichever angle the sheet does carry
+        picked = [{"NS": ns, "FS": fs}[f] or ns or fs for f in faces]
+    else:
+        # no side note - take the sheet at face value: every angle it specifies
+        picked = [a for a in (ns, fs) if a]
+    out = []
+    for angle in picked:
+        if not angle:
+            continue
+        # the table carries the print's own wording ("22 1/2", "45 TYP", "52.0")
+        value = _angle_decimal(re.sub(r"\s*TYP$", "", angle).strip())
+        if value:
+            out.append("%s°" % value)
+    return tuple(out)
+
+
+def _angle_decimal(angle):
+    """'22 1/2' -> '22.5'. A handful of older sheets print the angle as a mixed
+    fraction; the inspection form and every other angle on it are decimal, so fold
+    them rather than leaving one odd '22 1/2°' among the '22.5°'s."""
+    m = re.match(r"^(\d+)\s+(\d+)/(\d+)$", angle)
+    if not m:
+        return angle
+    whole, num, den = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not den:
+        return angle
+    value = whole + num / den
+    return ("%.10f" % value).rstrip("0").rstrip(".")
+
+
+def nominals_for(dims, welds=(), log=None):
     """Flatten one part's dimensions into the ordered values to type into the form.
 
     Compound callouts become separate entries because that is how they are
     inspected and how the sheets are filled by hand: a chamfer "45 deg X .5" is an
     angle plus a land, and a snipe ".50 X .50" is two lengths.
+
+    Weld-prep angles go in after the printed dimensions and BEFORE the TYP block.
+    The completed sheets carry them (the 45 deg entries on 503577 '24-41' come from
+    the weld prep, not the drawing) - the drawing only names the bevel code, and
+    the angle lives in the bevel book. They must not land after the TYP block or
+    they break up the run of repeats the reviewer copies out.
 
     TYP dimensions go LAST (the user's call). A TYP callout is printed once but the
     feature repeats, and the drawing never says how many times - so the reader
@@ -574,8 +695,20 @@ def nominals_for(dims):
             continue
         parts = [_as_nominal(p) for p in str(d["value"]).split(" X ")]
         (typ if "TYP" in d["mods"] else plain).append(parts)
+
+    # Not de-duplicated: a repeated angle is a repeated FEATURE. "KB114 NS & FS" is
+    # two 45 deg bevels on one part and the hand-filled sheets carry both.
+    # process_pdf already collapses the same (code, side) seen on more than one view
+    # page, so nothing double-counts here.
+    bevel = []
+    for weld in welds or ():
+        bevel.extend(weld_prep_angles(weld, log))
+
     out = []
-    for group in plain + typ:
+    for group in plain:
+        out.extend(group)
+    out.extend(bevel)
+    for group in typ:
         out.extend(group)
     return out
 
@@ -714,7 +847,7 @@ def fill_nest_workbook(workbook_path, parts, log, dry_run=False):
                                  % len(existing))
                 results.append(row)
                 continue
-            values = nominals_for(rec["dims"])
+            values = nominals_for(rec["dims"], rec.get("welds"), log)
             if not values:
                 row["status"] = "no dimensions found on the drawing"
                 results.append(row)
@@ -906,6 +1039,7 @@ def build_report(folder, results, fills, elapsed):
     total_parts = total_dims = total_ref = total_welds = 0
     problems = []
     low_conf = []
+    bevel_problems = []
 
     for pdf_name, parts in results:
         add("=" * 78)
@@ -965,6 +1099,40 @@ def build_report(folder, results, fills, elapsed):
                     if weld["score"] < 0.55:
                         low_conf.append("%s - %s: weld prep %s"
                                         % (pdf_name, rec.get("part", "?"), weld["code"]))
+                    # what the bevel book says this code is, and what went on the sheet
+                    row = bevel_lookup(weld["code"])
+                    if row is None:
+                        add("          NOT IN THE BEVEL BOOK - nothing written, look it up by hand")
+                        bevel_problems.append(
+                            "%s - %s: %s is not in the bevel book"
+                            % (pdf_name, rec.get("part", "?"), weld["code"]))
+                        continue
+                    bits = []
+                    if row["ns_angle"]:
+                        bits.append("NS %s deg" % row["ns_angle"])
+                    if row["fs_angle"]:
+                        bits.append("FS %s deg" % row["fs_angle"])
+                    if row["max_land"]:
+                        bits.append("land %s" % row["max_land"])
+                    add("          bevel book: %s%s"
+                        % (row["type"] or "?", ("  -  " + ", ".join(bits)) if bits else ""))
+                    if row["status"] == "VOID":
+                        add("          *** %s IS VOID ***%s - nothing written"
+                            % (weld["code"],
+                               " use %s instead" % row["replacement"] if row["replacement"] else ""))
+                        bevel_problems.append(
+                            "%s - %s: %s is VOID%s"
+                            % (pdf_name, rec.get("part", "?"), weld["code"],
+                               " - use %s" % row["replacement"] if row["replacement"] else ""))
+                    elif row["status"] == "NO SKETCH":
+                        add("          *** %s has no sketch in the book *** - nothing written"
+                            % weld["code"])
+                        bevel_problems.append("%s - %s: %s has no sketch"
+                                              % (pdf_name, rec.get("part", "?"), weld["code"]))
+                    else:
+                        angles = weld_prep_angles(weld)
+                        add("          -> wrote %s onto the inspection sheet"
+                            % (", ".join(angles) if angles else "nothing (no angle on the sheet)"))
             if rec.get("filled"):
                 add("    -> written to inspection tab %s: %s"
                     % (rec["filled"]["tab"], ", ".join(str(v) for v in rec["filled"]["values"])))
@@ -1010,6 +1178,15 @@ def build_report(folder, results, fills, elapsed):
         add("NEEDS A HUMAN LOOK (%d)" % len(problems))
         for p in problems:
             add("  - %s" % p)
+    if bevel_problems:
+        add("")
+        add("-" * 78)
+        add("WELD PREPS THAT NEED A DECISION (%d) - nothing was written for these"
+            % len(bevel_problems))
+        add("-" * 78)
+        for p in bevel_problems:
+            add("  - %s" % p)
+
     if low_conf:
         add("")
         add("LOW CONFIDENCE READINGS (%d) - verify these against the drawing" % len(low_conf))
