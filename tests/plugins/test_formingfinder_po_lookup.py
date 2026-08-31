@@ -8,6 +8,11 @@ guard trusts that sheet) stamped FORMED on the rods of Kitting 485 pages 30/35
 (2026-08-05). A BEND note still wins outright; with the PO silent, the
 source-material DESCRIPTION decides; conflicting evidence warns instead of
 guessing.
+
+The lookup is keyed by (ORDER, DYPN): one batch can build the same part for two
+orders, and each order needs its own binder copy and Bent Plates row (Batch 490:
+BL427447 and BM352088 both build R7211262-H2-3, and DYPN-only keying silently
+dropped the second - only 922 Kitting, which walks per order, caught it).
 """
 
 import importlib.util
@@ -65,7 +70,7 @@ def test_bend_note_still_wins(ff, tmp_path):
         ["BK499434", "R6455461-H51", "R6455461-H51-2", "262028653-11", "BEND"],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    assert lookup["r6455461-h51-2"]["SOURCE MATERIAL"] == "262028653-11"
+    assert lookup[("bk499434", "r6455461-h51-2")]["SOURCE MATERIAL"] == "262028653-11"
 
 
 def test_silent_po_picks_the_plate_over_the_rod(ff, tmp_path):
@@ -75,7 +80,7 @@ def test_silent_po_picks_the_plate_over_the_rod(ff, tmp_path):
         ["X7371983", "H7441366-H417", "H7441366-H417-3", "262028653-50", ""],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    row = lookup["h7441366-h417-3"]
+    row = lookup[("x7371983", "h7441366-h417-3")]
     assert row["SOURCE MATERIAL"] == "262028653-50"
     # The choice note is stashed for the caller to log when the part is
     # actually discovered as formed (not spammed for every PO DYPN).
@@ -89,7 +94,7 @@ def test_silent_po_picks_the_plate_in_either_row_order(ff, tmp_path):
         ["BL392386", "R7653561-H10", "R7653561-H10-2", "262028653-12", ""],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    assert lookup["r7653561-h10-2"]["SOURCE MATERIAL"] == "262028653-11"
+    assert lookup[("bl392386", "r7653561-h10-2")]["SOURCE MATERIAL"] == "262028653-11"
 
 
 def test_single_row_needs_no_description(ff, tmp_path):
@@ -97,7 +102,7 @@ def test_single_row_needs_no_description(ff, tmp_path):
         ["X8390862", "H7655461-H12", "H7655461-H12-4", 218019941, ""],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    assert lookup["h7655461-h12-4"]["SOURCE MATERIAL"] == 218019941
+    assert lookup[("x8390862", "h7655461-h12-4")]["SOURCE MATERIAL"] == 218019941
 
 
 def test_conflicting_descriptions_warn_instead_of_guessing(ff, tmp_path):
@@ -108,7 +113,7 @@ def test_conflicting_descriptions_warn_instead_of_guessing(ff, tmp_path):
         ["X1", "P-1", "P-1-2", "262028653-12", ""],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    row = lookup["p-1-2"]
+    row = lookup[("x1", "p-1-2")]
     assert row["SOURCE MATERIAL"] == "262028653-18"  # not the rod
     assert "verify the FORMED tag" in row["_PICK_WARN"]
 
@@ -119,7 +124,7 @@ def test_two_plates_warn_instead_of_guessing(ff, tmp_path):
         ["X1", "P-1", "P-1-2", "262028653-50", ""],
     ], _MATERIALS)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    row = lookup["p-1-2"]
+    row = lookup[("x1", "p-1-2")]
     assert row["SOURCE MATERIAL"] == "262028653-11"
     assert "_PICK_WARN" in row
 
@@ -134,7 +139,7 @@ def test_missing_source_material_sheet_degrades_to_first_row(ff, tmp_path):
     path = tmp_path / "po.xlsx"
     wb.save(path)
     lookup = ff._load_po_lookup(path, lambda *a: None)
-    row = lookup["p-1-2"]
+    row = lookup[("x1", "p-1-2")]
     assert row["SOURCE MATERIAL"] == "262028653-48"
     assert "_PICK_WARN" in row
 
@@ -172,7 +177,7 @@ def test_silent_po_picks_the_flat_bar_over_the_rod(ff, tmp_path):
         ["X1", "P-2", "P-2-3", "262028652-77", ""],   # flat bar
     ], materials)
     lookup = ff._load_po_lookup(po, lambda *a: None)
-    row = lookup["p-2-3"]
+    row = lookup[("x1", "p-2-3")]
     assert row["SOURCE MATERIAL"] == "262028652-77"
     assert "using flat bar 262028652-77" in row["_PICK_NOTE"]
 
@@ -194,3 +199,60 @@ def test_dypn_from_filename(ff, name, dypn):
 ])
 def test_formed_suffix(ff, name, formed):
     assert ff._has_formed_suffix(name) is formed
+
+
+# --- the same part built for two orders --------------------------------------
+
+def test_same_dypn_in_two_orders_keeps_both(ff, tmp_path):
+    """Batch 490: BL427447 and BM352088 both build R7211262-H2-3, each with the
+    same plate/rod pair. Keying by DYPN alone collapsed them to one row."""
+    po = _po_workbook(tmp_path, [
+        ["BL427447", "R7211262-H2", "R7211262-H2-3", "262028653-48", ""],
+        ["BL427447", "R7211262-H2", "R7211262-H2-3", "262028653-50", ""],
+        ["BM352088", "R7211262-H2", "R7211262-H2-3", "262028653-48", ""],
+        ["BM352088", "R7211262-H2", "R7211262-H2-3", "262028653-50", ""],
+    ], _MATERIALS)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    assert ("bl427447", "r7211262-h2-3") in lookup
+    assert ("bm352088", "r7211262-h2-3") in lookup
+    # Each order still picks the PLATE over the rod, independently.
+    for order in ("bl427447", "bm352088"):
+        row = lookup[(order, "r7211262-h2-3")]
+        assert row["SOURCE MATERIAL"] == "262028653-50"
+        assert row["ORDER"].casefold() == order
+
+
+def test_row_with_no_order_still_indexes(ff, tmp_path):
+    po = _po_workbook(tmp_path, [
+        [None, "P-9", "P-9-1", "262028653-50", ""],
+    ], _MATERIALS)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    assert lookup[("", "p-9-1")]["SOURCE MATERIAL"] == "262028653-50"
+
+
+@pytest.mark.parametrize("folder,expected", [
+    ("BL427447-R7211262-H2", "BL427447"),
+    ("X6524642-H7918266-H27", "X6524642"),
+    ("BM347140-R8653362-H15L", "BM347140"),
+])
+def test_order_from_folder_name(ff, folder, expected):
+    assert ff._order_from_folder_name(folder) == expected
+
+
+def test_order_for_pdf_uses_the_top_level_folder(ff, tmp_path):
+    batch = tmp_path / "Batch 490"
+    pdf = batch / "BL427447-R7211262-H2" / "CAD-AND-SHOP-PRINTS" / "x PLT F.pdf"
+    assert ff._order_for_pdf(pdf, batch, {"bl427447"}) == "BL427447"
+    # No PO to check against -> still splits on the first hyphen.
+    assert ff._order_for_pdf(pdf, batch, set()) == "BL427447"
+    # A PDF sitting loose in the batch root belongs to no order.
+    assert ff._order_for_pdf(batch / "loose.pdf", batch, set()) == ""
+
+
+def test_unique_dest_suffixes_repeat_filenames(ff, tmp_path):
+    used: set[str] = set()
+    names = [ff._unique_dest(tmp_path, "R7211262-H2-3 PLT F.pdf", used).name
+             for _ in range(3)]
+    assert names == ["R7211262-H2-3 PLT F.pdf",
+                     "R7211262-H2-3 PLT F (2).pdf",
+                     "R7211262-H2-3 PLT F (3).pdf"]

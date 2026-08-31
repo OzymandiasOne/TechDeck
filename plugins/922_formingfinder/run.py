@@ -12,6 +12,12 @@ three methods:
 Copies all discovered PDFs into Batch {n} - Documentation/Forming {n}/, merges
 them into Forming {n}.pdf, and writes one row per part to the Bent Plates
 sheet of the Pallet & Rod Organizer workbook (sorted by SOURCE MATERIAL).
+
+Everything here is keyed by (ORDER, DYPN), never DYPN alone: two orders in one
+batch routinely carry the SAME formed part, and each order needs its own binder
+copy and its own Bent Plates row (Batch 490: BL427447 and BM352088 both build
+R7211262-H2-3; DYPN-only keying dropped the second one, and only 922 Kitting -
+which walks per order - noticed).
 """
 from __future__ import annotations
 
@@ -89,6 +95,49 @@ def _is_skipped(pdf: Path, batch_path: Path, batch_no: str) -> bool:
     if doc_name in parts_lower:
         return True
     return False
+
+
+# ORDER helpers ----------------------------------------------------------------
+
+def _order_from_folder_name(folder: str) -> str:
+    """Order number from a batch order folder name - the DYPN always follows
+    the first hyphen ('BL427447-R7211262-H2' -> 'BL427447')."""
+    return folder.split("-", 1)[0].strip()
+
+
+def _order_for_pdf(pdf: Path, batch_path: Path, known_orders: set[str]) -> str:
+    """The ORDER a discovered PDF belongs to = its top-level batch folder.
+    Prefer a name the PO actually knows (whole folder, then the leading token);
+    fall back to the leading token so a missing PO still separates orders.
+    '' when the PDF isn't under an order folder at all."""
+    try:
+        rel = pdf.relative_to(batch_path)
+    except ValueError:
+        return ""
+    if len(rel.parts) < 2:
+        return ""
+    folder = rel.parts[0]
+    guess = _order_from_folder_name(folder)
+    if known_orders:
+        if folder.casefold() in known_orders:
+            return folder
+        if guess.casefold() in known_orders:
+            return guess
+    return guess
+
+
+def _unique_dest(forming_dir: Path, name: str, used: set[str]) -> Path:
+    """Destination for a binder copy, de-duplicated by name. Two orders can
+    carry the same formed part, so their drawings share a filename - both
+    belong in the binder, so the second becomes '<name> (2).pdf' (the Explorer
+    convention) and both get merged into Forming {n}.pdf."""
+    stem, suffix = Path(name).stem, Path(name).suffix
+    candidate, i = name, 1
+    while candidate.casefold() in used:
+        i += 1
+        candidate = f"{stem} ({i}){suffix}"
+    used.add(candidate.casefold())
+    return forming_dir / candidate
 
 
 # PO workbook ------------------------------------------------------------------
@@ -177,7 +226,11 @@ def _load_material_descs(wb, log) -> dict[str, str]:
 
 
 def _load_po_lookup(po_path: Path, log) -> dict:
-    """Return {dypn_casefold: row metadata} for the Bent Plates rows.
+    """Return {(order_casefold, dypn_casefold): row metadata} for Bent Plates.
+
+    Keyed by ORDER *and* DYPN because one batch can run the same part for two
+    orders (Batch 490: BL427447 + BM352088 both build R7211262-H2-3) and each
+    needs its own row. Within one order:
 
     A DYPN can appear on SEVERAL PO rows with DIFFERENT source materials — the
     dual-material parts carry a formed PLATE and a ROD under one part number
@@ -233,15 +286,18 @@ def _load_po_lookup(po_path: Path, log) -> dict:
 
     descs = _load_material_descs(wb, log)
 
-    # Collect EVERY row per DYPN - first-wins loses the plate/rod distinction.
-    rows_by_dypn: dict[str, list[dict]] = {}
+    # Collect EVERY row per (ORDER, DYPN) - first-wins loses the plate/rod
+    # distinction, and dropping ORDER loses the second order entirely.
+    rows_by_key: dict[tuple[str, str], list[dict]] = {}
     for r in range(header_row + 1, ws.max_row + 1):
         dypn = cell_val(r, 'DYPN')
         if not dypn:
             continue
-        key = str(dypn).strip().casefold()
-        rows_by_dypn.setdefault(key, []).append({
-            'ORDER': cell_val(r, 'ORDER'),
+        order = cell_val(r, 'ORDER')
+        key = (str(order).strip().casefold() if order not in (None, '') else '',
+               str(dypn).strip().casefold())
+        rows_by_key.setdefault(key, []).append({
+            'ORDER': order,
             'PPN': cell_val(r, 'PPN'),
             'DYPN': str(dypn).strip(),
             'NOTES': cell_val(r, 'NOTES'),
@@ -255,8 +311,8 @@ def _load_po_lookup(po_path: Path, log) -> dict:
             return "unknown"
         return _material_kind(descs.get(str(sm).strip().casefold(), ""))
 
-    lookup: dict[str, dict] = {}
-    for key, rows in rows_by_dypn.items():
+    lookup: dict[tuple[str, str], dict] = {}
+    for key, rows in rows_by_key.items():
         bend = [r for r in rows if r.get('NOTES')
                 and 'bend' in str(r['NOTES']).lower()]
         if bend:
@@ -295,10 +351,12 @@ def _load_po_lookup(po_path: Path, log) -> dict:
 
 # Method 1 ---------------------------------------------------------------------
 
-def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=None) -> dict[str, dict]:
+def _method1(batch_path: Path, batch_no: str, known_orders: set[str],
+             log=lambda *_: None, cancel_event=None) -> dict[tuple[str, str], dict]:
     """Recursively scan for PDFs with 'PLT F' or 'BAR F' in the filename
-    (case-sensitive)."""
-    found: dict[str, dict] = {}
+    (case-sensitive). Keyed by (ORDER, DYPN) so the same part in two orders
+    yields two entries."""
+    found: dict[tuple[str, str], dict] = {}
     # Poll cancel_event during the rglob walk — over a OneDrive batch tree this
     # single call can run for a long time, and without the check a Cancel click
     # can't interrupt it (the worker thread is stuck in this loop). Emit a
@@ -316,9 +374,11 @@ def _method1(batch_path: Path, batch_no: str, log=lambda *_: None, cancel_event=
         dypn = _dypn_from_filename(pdf.name)
         if not dypn:
             continue
-        key = dypn.casefold()
+        order = _order_for_pdf(pdf, batch_path, known_orders)
+        key = (order.casefold(), dypn.casefold())
         if key not in found:
-            found[key] = {'dypn': dypn, 'pdf_path': pdf, 'methods': {1}}
+            found[key] = {'order': order, 'dypn': dypn,
+                          'pdf_path': pdf, 'methods': {1}}
     return found
 
 
@@ -365,9 +425,11 @@ def _resolve_method2_pdf(batch_path: Path, order: str, dypn: str, cancel_event=N
     return formed_match or flat_match
 
 
-def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[str, dict]:
-    """Find DYPNs where PO NOTES contain 'bend'; resolve each to a PDF on disk."""
-    found: dict[str, dict] = {}
+def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[tuple[str, str], dict]:
+    """Find DYPNs where PO NOTES contain 'bend'; resolve each to a PDF on disk.
+    po_lookup is already keyed by (ORDER, DYPN), so a part shared by two orders
+    resolves once per order."""
+    found: dict[tuple[str, str], dict] = {}
     for key, meta in po_lookup.items():
         if cancel_event is not None and cancel_event.is_set():
             break
@@ -383,7 +445,8 @@ def _method2(batch_path: Path, po_lookup: dict, log, cancel_event=None) -> dict[
         if not pdf:
             log(f"  Method 2: PDF not found on disk for {dypn} (order {order})")
             continue
-        found[key] = {'dypn': dypn, 'pdf_path': pdf, 'methods': {2}}
+        found[key] = {'order': str(order).strip(), 'dypn': dypn,
+                      'pdf_path': pdf, 'methods': {2}}
     return found
 
 
@@ -456,14 +519,15 @@ def _is_formed_pdf(pdf: Path) -> bool:
 def _method3(
     batch_path: Path,
     batch_no: str,
-    already_found: set[str],
+    known_orders: set[str],
+    already_found: set[tuple[str, str]],
     log,
     progress_callback,
     cancel_event: threading.Event,
     progress_start: int,
     progress_end: int,
-) -> dict[str, dict]:
-    found: dict[str, dict] = {}
+) -> dict[tuple[str, str], dict]:
+    found: dict[tuple[str, str], dict] = {}
     candidates: list[Path] = []
     for i, pdf in enumerate(batch_path.rglob("*.pdf")):
         if i % 64 == 0 and cancel_event.is_set():
@@ -485,12 +549,14 @@ def _method3(
         dypn = _dypn_from_filename(pdf.name)
         if not dypn:
             continue
-        key = dypn.casefold()
+        order = _order_for_pdf(pdf, batch_path, known_orders)
+        key = (order.casefold(), dypn.casefold())
         if key in already_found:
             continue
         if _is_formed_pdf(pdf):
-            found[key] = {'dypn': dypn, 'pdf_path': pdf, 'methods': {3}}
-            log(f"  Method 3: formed part detected -- {dypn}")
+            found[key] = {'order': order, 'dypn': dypn,
+                          'pdf_path': pdf, 'methods': {3}}
+            log(f"  Method 3: formed part detected -- {dypn} (order {order or '?'})")
     return found
 
 
@@ -596,10 +662,18 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     if po_path:
         log(f"PO workbook: {po_path.name}")
         po_lookup = _load_po_lookup(po_path, log)
-        log(f"  PO rows indexed: {len(po_lookup)}")
+        log(f"  PO (order, DYPN) pairs indexed: {len(po_lookup)}")
     else:
         log("WARNING: PO workbook (QF-QU-09) not found. Skipping Method 2 and PO metadata lookup.")
         po_lookup = {}
+
+    # Orders the PO knows about - used to read the ORDER off a discovered PDF's
+    # folder, and as a DYPN-only metadata fallback when a PDF sits outside any
+    # order folder.
+    known_orders = {k[0] for k in po_lookup if k[0]}
+    po_by_dypn: dict[str, dict] = {}
+    for (_order, dypn_key), meta in po_lookup.items():
+        po_by_dypn.setdefault(dypn_key, meta)
     progress_callback(10)
     if cancel_event.is_set():
         log("Cancelled.")
@@ -607,7 +681,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # Method 1
     log("Method 1: scanning filenames for 'PLT F' / 'BAR F'...")
-    m1 = _method1(batch_path, batch_no, log, cancel_event)
+    m1 = _method1(batch_path, batch_no, known_orders, log, cancel_event)
     log(f"  Method 1 found: {len(m1)} DYPN(s)")
     progress_callback(25)
     if cancel_event.is_set():
@@ -627,13 +701,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         return
 
     # Combine Methods 1 and 2 results before running Method 3 (which skips duplicates)
-    combined: dict[str, dict] = {}
+    combined: dict[tuple[str, str], dict] = {}
     for src in (m1, m2):
         for key, entry in src.items():
             if key in combined:
                 combined[key]['methods'].update(entry['methods'])
             else:
                 combined[key] = {
+                    'order': entry.get('order', ''),
                     'dypn': entry['dypn'],
                     'pdf_path': entry['pdf_path'],
                     'methods': set(entry['methods']),
@@ -642,7 +717,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # Method 3
     log("Method 3: scanning PDFs for formed-part visual signature...")
     m3 = _method3(
-        batch_path, batch_no, set(combined.keys()),
+        batch_path, batch_no, known_orders, set(combined.keys()),
         log, progress_callback, cancel_event,
         progress_start=40, progress_end=70,
     )
@@ -659,23 +734,33 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         progress_callback(100)
         return
 
-    log(f"Total unique formed parts: {len(combined)}")
+    dupes = len(combined) - len({k[1] for k in combined})
+    log(f"Total formed parts (order + DYPN): {len(combined)}")
+    if dupes:
+        log(f"  ({dupes} of them are the same part run for more than one order "
+            f"- each gets its own binder copy and Bent Plates row)")
 
     # Phase 2: copy PDFs into Forming subfolder
     sdk.ensure_dir(forming_dir)
     log(f"Output folder: {forming_dir}")
 
-    sorted_for_copy = sorted(combined.values(), key=lambda e: e['dypn'].casefold())
+    # Sort by DYPN then ORDER so the ' (2)' suffix lands on the same order
+    # every run (the lower order number keeps the plain filename).
+    sorted_for_copy = sorted(
+        combined.values(),
+        key=lambda e: (e['dypn'].casefold(), (e.get('order') or '').casefold()))
     copied_paths: list[Path] = []
+    used_names: set[str] = set()
     for f in sorted_for_copy:
         if cancel_event.is_set():
             log("Cancelled.")
             return
         src = f['pdf_path']
-        dest = forming_dir / src.name
+        dest = _unique_dest(forming_dir, src.name, used_names)
         shutil.copy2(sdk.long_path(src), sdk.long_path(dest))
         methods_str = ",".join(str(m) for m in sorted(f['methods']))
-        log(f"  copied {dest.name}  (methods: {methods_str})")
+        log(f"  copied {dest.name}  (order {f.get('order') or '?'}, "
+            f"methods: {methods_str})")
         copied_paths.append(dest)
     progress_callback(85)
 
@@ -688,7 +773,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # Build Bent Plates row data (sorted by SOURCE MATERIAL)
     rows_data: list[dict] = []
     for f in sorted_for_copy:
-        meta = po_lookup.get(f['dypn'].casefold(), {})
+        order = f.get('order') or ''
+        meta = po_lookup.get((order.casefold(), f['dypn'].casefold()))
+        if meta is None:
+            # PDF outside any known order folder - fall back to DYPN-only
+            # metadata so the row still carries PPN / SOURCE MATERIAL.
+            meta = po_by_dypn.get(f['dypn'].casefold(), {})
         # Surface the plate-vs-rod choice only for parts actually discovered
         # as formed - it decides which kit row 922 Kitting stamps FORMED.
         if meta.get('_PICK_NOTE'):
@@ -696,7 +786,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         if meta.get('_PICK_WARN'):
             log(f"  {meta['_PICK_WARN']}")
         rows_data.append({
-            'ORDER': meta.get('ORDER'),
+            'ORDER': meta.get('ORDER') or (order or None),
             'PPN': meta.get('PPN'),
             'DYPN': f['dypn'],
             'SOURCE MATERIAL': meta.get('SOURCE MATERIAL'),
@@ -705,9 +795,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     def _sort_key(row):
         sm = row.get('SOURCE MATERIAL')
+        dypn = str(row.get('DYPN') or '')
+        order = str(row.get('ORDER') or '')
         if sm is None or sm == '':
-            return (1, '')
-        return (0, str(sm))
+            return (1, '', dypn, order)
+        return (0, str(sm), dypn, order)
     rows_data.sort(key=_sort_key)
 
     organizer_path = _find_organizer_workbook(doc_folder, batch_no)
