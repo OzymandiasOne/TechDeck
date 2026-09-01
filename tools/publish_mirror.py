@@ -140,12 +140,18 @@ def main() -> int:
     print("  [ok] no private paths remain in any commit")
     run([sys.executable, str(REPO / "tools" / "check_publish_scrub.py"), str(MIRROR)], REPO)
 
-    tags = run(["git", "tag", "--merged", branch], MIRROR, capture=True).split()
+    tags = run(["git", "tag", "--merged", "refs/heads/" + branch],
+               MIRROR, capture=True).split()
     print("\n" + "=" * 70)
     print("MIRROR READY - nothing has been pushed.")
     print("=" * 70)
     print("\nRun these two to publish (the push is deliberately yours):\n")
-    print(f'  git -C "{MIRROR}" push --force {PUBLIC_URL} "{branch}:refs/heads/main"')
+    # FULLY QUALIFIED on the left. A release branch and its tag share a name here
+    # (v0.8.7.2.1), and git resolves a bare name as refs/tags BEFORE refs/heads -
+    # so "v0.8.7.2.1:refs/heads/main" silently publishes whatever the TAG points
+    # at. They usually agree; the one time they do not is the one that matters.
+    print(f'  git -C "{MIRROR}" push --force {PUBLIC_URL} '
+          f'"refs/heads/{branch}:refs/heads/main"')
     if tags:
         print(f'  git -C "{MIRROR}" push --force {PUBLIC_URL} {" ".join(tags)}')
     else:
