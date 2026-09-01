@@ -1,10 +1,35 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
+# RapidOCR resolves its three engine classes at RUNTIME, by name, out of its own
+# config.yaml:  importlib.import_module('ch_ppocr_v3_det') after a
+# sys.path.append(<package dir>).  Those names never appear in an import statement,
+# so PyInstaller's static analysis cannot see them and the frozen exe shipped the
+# subpackage folders holding only their config.yaml - no __init__.py.  Python then
+# imported each one as an empty NAMESPACE package and RapidOCR() died with
+# "module 'ch_ppocr_v3_det' has no attribute 'TextDetector'" (911 Inspection
+# Dimensions read 0 parts on FTOURIGNY-LT, 2026-09-01).  Put the package dir on
+# pathex and name the modules in hiddenimports so they are frozen properly - that
+# also drags in their own deps (six, pyclipper, shapely) the same way.
+# Gate E15 keeps this list in step with rapidocr's config.yaml.
+try:
+    import rapidocr_onnxruntime as _rapidocr
+
+    _RAPIDOCR_DIR = os.path.dirname(os.path.abspath(_rapidocr.__file__))
+except Exception as _exc:  # pragma: no cover - build-time guard
+    raise SystemExit(
+        "TechDeck.spec: rapidocr_onnxruntime is not importable (%s). "
+        "911 Inspection Dimensions needs it. Run: pip install -r requirements.txt" % _exc
+    )
 
 a = Analysis(
     ['techdeck\\__main__.py'],
-    pathex=[],
+    # RapidOCR's engine subpackages are only reachable from inside its own
+    # package dir (it sys.path.appends it at import time). See the note above.
+    pathex=[_RAPIDOCR_DIR],
     binaries=[],
     datas=[
         ('plugins', 'plugins'),
@@ -44,6 +69,10 @@ a = Analysis(
         # No network and no external exe - the models ship in datas above.
         'rapidocr_onnxruntime', 'onnxruntime', 'onnxruntime.capi',
         'onnxruntime.capi._pybind_state', 'numpy', 'cv2', 'yaml', 'shapely', 'pyclipper',
+        # Named by rapidocr's own config.yaml and imported by NAME at runtime, so
+        # PyInstaller never sees them (see the note at the top of this file). Kept
+        # in step with that config.yaml by ship-readiness gate E15.
+        'ch_ppocr_v3_det', 'ch_ppocr_v3_rec', 'ch_ppocr_v2_cls',
         'win32com', 'win32com.client', 'pythoncom', 'pywintypes'
     ],
     hookspath=[],

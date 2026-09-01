@@ -93,6 +93,20 @@ Checks (E = error, fails the build; W = warning):
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
+  E15 a third-party package that resolves its own submodules by RUNTIME STRING
+      must have every one of those names in TechDeck.spec hiddenimports, and
+      its package dir on pathex. PyInstaller's static analysis only follows
+      import STATEMENTS, so a name that only ever appears as data - RapidOCR
+      reads ch_ppocr_v3_det / _rec / _cls out of its own config.yaml and calls
+      importlib.import_module on them - is silently left out. The build still
+      succeeds: collect_data_files copies each subpackage's config.yaml, so the
+      FOLDER ships without its __init__.py and Python imports it as an empty
+      NAMESPACE package. The failure lands on the user as an AttributeError
+      ("module 'ch_ppocr_v3_det' has no attribute 'TextDetector'"), which is
+      Hard Rule 8 with the import hidden in a config file (911 Inspection
+      Dimensions read 0 parts on FTOURIGNY-LT, 2026-09-01). This gate re-reads
+      the package's own config at build time, so a version bump that renames an
+      engine module fails here instead of on a colleague's machine.
 
 Output is ASCII only (this runs from build.ps1).
 """
@@ -438,6 +452,74 @@ def stdlib_names() -> set[str]:
 
 
 STDLIB = stdlib_names()
+
+
+# E15: packages that import their own submodules by runtime string (Hard Rule 8)
+#
+# One entry per package that names modules in DATA rather than in an import
+# statement. `config` is read relative to the installed package; every
+# `module_name` found under `key` must be in the spec's hiddenimports.
+_RUNTIME_STRING_IMPORTS = (
+    {
+        "package": "rapidocr_onnxruntime",
+        "config": "config.yaml",
+        "key": "module_name",
+        "why": "RapidOCR calls importlib.import_module on these (rapid_ocr_api.py)",
+    },
+)
+
+
+def check_runtime_string_imports(hidden: list[str], errors: list[str],
+                                 warnings: list[str]) -> None:
+    """E15 - submodules named only in a package's own config must be forced in."""
+    import importlib
+
+    for entry in _RUNTIME_STRING_IMPORTS:
+        pkg = entry["package"]
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception as exc:
+            warnings.append(f"E15 skipped for {pkg}: not importable here ({exc}) - "
+                            f"install it (pip install -r requirements.txt) so the "
+                            f"gate can read its config")
+            continue
+
+        pkg_dir = Path(mod.__file__).resolve().parent
+        cfg_path = pkg_dir / entry["config"]
+        try:
+            import yaml
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            errors.append(f"E15 could not read {cfg_path} ({exc}) - TechDeck.spec "
+                          f"cannot be checked against it")
+            continue
+
+        key = entry["key"]
+        names = sorted({sec[key] for sec in (cfg or {}).values()
+                        if isinstance(sec, dict) and sec.get(key)})
+        if not names:
+            errors.append(f"E15 found no '{key}' entries in {cfg_path} - the shape "
+                          f"of {pkg}'s config changed; re-check TechDeck.spec by hand")
+            continue
+
+        missing = [n for n in names if n not in hidden]
+        if missing:
+            errors.append(
+                f"E15 TechDeck.spec hiddenimports is missing {', '.join(missing)} - "
+                f"{entry['why']}, so PyInstaller never sees them and the frozen exe "
+                f"ships each one as an empty namespace package (Hard Rule 8). Add "
+                f"them to hiddenimports and keep {pkg_dir} on pathex."
+            )
+
+        # The subpackage must be a REAL package on disk - a namespace dir here would
+        # freeze as nothing at all, which is the exact failure this gate exists for.
+        for name in names:
+            if not (pkg_dir / name / "__init__.py").is_file():
+                errors.append(
+                    f"E15 {pkg}/{name}/__init__.py is missing - '{name}' is not an "
+                    f"importable package in the installed {pkg}, so hiddenimports "
+                    f"cannot freeze it. Check the pinned version in requirements.txt."
+                )
 
 
 # ---------------------------------------------------------------- spec parsing
@@ -868,6 +950,9 @@ def main() -> int:
         if required not in datas:
             errors.append(f"TechDeck.spec datas is missing {required!r} - that "
                           f"directory will be absent from the build (Hard Rule 7)")
+
+    # E15 - submodules a package imports by runtime string
+    check_runtime_string_imports(hidden, errors, warnings)
 
     module_map = build_module_map()
     reachable_fp, available_tp = compute_frozen_surface(module_map, hidden)
