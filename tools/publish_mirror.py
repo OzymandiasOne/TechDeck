@@ -116,15 +116,24 @@ def main() -> int:
     print(f"Working repo      : {REPO}")
     print(f"Mirror            : {MIRROR}\n")
 
-    print("[1/4] Fresh mirror clone")
+    # Step 0 is the backup, and it is not optional. The mirror this script builds
+    # gets REWRITTEN in step 3, so it is not a backup of anything - a separate
+    # untouched snapshot has to exist before filter-repo is anywhere near the disk.
+    print("[0/5] Unfiltered backup snapshot (before anything risky)")
+    backup = run([sys.executable, str(REPO / "tools" / "backup_repo.py")],
+                 REPO, capture=True)
+    for line in backup.strip().splitlines()[:3]:
+        print("  " + line)
+
+    print("[1/5] Fresh mirror clone")
     if MIRROR.exists():
         rmtree(MIRROR)
     run(["git", "clone", "--quiet", "--mirror", str(REPO), str(MIRROR)], REPO)
 
-    print("\n[2/4] Guard")
+    print("\n[2/5] Guard")
     assert_safe_to_filter(MIRROR)
 
-    print("\n[3/4] Strip private paths and scrub names from every commit")
+    print("\n[3/5] Strip private paths and scrub names from every commit")
     cmd = [sys.executable, "-m", "git_filter_repo", "--force", "--invert-paths"]
     for p in PRIVATE_PATHS:
         cmd += ["--path", p]
@@ -132,7 +141,7 @@ def main() -> int:
             "--replace-message", str(replacements)]
     run(cmd, MIRROR)
 
-    print("\n[4/4] Verify (this is the gate, not a formality)")
+    print("\n[4/5] Verify (this is the gate, not a formality)")
     leftovers = run(["git", "log", "--all", "--oneline", "--"] + PRIVATE_PATHS,
                     MIRROR, capture=True).strip()
     if leftovers:
@@ -140,6 +149,8 @@ def main() -> int:
     print("  [ok] no private paths remain in any commit")
     run([sys.executable, str(REPO / "tools" / "check_publish_scrub.py"), str(MIRROR)], REPO)
 
+    print()
+    print("[5/5] Ready")
     tags = run(["git", "tag", "--merged", "refs/heads/" + branch],
                MIRROR, capture=True).split()
     print("\n" + "=" * 70)
