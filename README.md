@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.1 - Inspection Dimensions
+# TechDeck v0.8.7.2 - Bevel Angles
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,79 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.2
+
+**911 Inspection Dimensions now fills in the weld prep angles too.** The app already read
+the bevel codes off the drawings (KB114 and friends), but it stopped there, because the
+angle isn't printed on the drawing - it lives in the Electric Boat bevel book. All 947
+bevel sheets have been transcribed and now ship with the app, so a code on a drawing turns
+into a real number on the inspection sheet. Some things worth knowing: the prefix isn't
+always KB - SB, FB and WB preps were being skipped entirely before, and SB alone is 198 of
+the 947 sheets. A callout like `KB114  NS & FS` is two entries, one per side, not one. A
+VOIDed code writes nothing and tells you which code replaced it. And a prep whose sheet
+prints no angle at all now lands in a "needs a decision" list instead of quietly writing
+nothing - a prep that contributed nothing used to look exactly like one that was never
+read.
+
+**And it recovers codes the reader gets slightly wrong.** Checked against 90 real packets
+(684 weld preps), a small share of codes came back mangled - a `1` read as a capital `I`, a
+leader line touching the code and reading as an extra digit. Every code in the book is a
+prefix plus digits, so those are corrected outright. Where a digit is genuinely lost, the
+app names the closest in-book code in the report but never substitutes it - `KB122` is 53
+degrees where `KB112` is 40, and a guess on a QA form isn't worth it. Across those 90
+packets every genuine code resolved.
+
+**Apps that read from OneDrive are faster.** Files that live in the cloud have to be pulled
+down before they can be read, and apps were doing that one file at a time in the middle of
+the run. Now the download starts in the background while you're still answering the
+prompts, so the waiting overlaps with the work instead of stacking on top of it.
+FormingFinder, 911 Setup and the 922 LST Organizer use it.
+
+**FormingFinder - the same part on two orders.** If one batch builds the same part number
+for two different orders, only the first one used to make it into the Forming binder and
+the Bent Plates sheet; the second was dropped silently. Both are tracked now, and both get
+a binder copy.
+
+**Kitting - orders with more than ten parts print in full.** The standard Bin Label &
+Checklist page has room for ten parts, so an eleventh part just fell off the bottom with no
+warning. Those orders now print on the Larger Bin Label sheet instead, which holds fifteen,
+and they keep their place in the kitting PDF.
+
+**911 LST Organizer - the new 1D diagram format.** The nesting software started writing
+part lines as `503887 / H4112842-34` (with a slash) instead of a hyphen, and the app read
+those diagrams as having zero parts, so every run failed with "No part ids found". Both
+formats work now.
+
+### Feedback Fixes
+
+_"Can the Pallet Stamper check for the ASA title block and not stamp batch and pallet info
+onto the drawings?"_ - Fixed, and it turned out to be worse than "sometimes". The stamper
+took the first PDF in the order folder, and Windows sorts `Binder1.pdf` ahead of the work
+packet - so once the Batch Repeater has dropped drawing binders into the folders, the stamp
+went on the drawing and the packet the floor actually reads stayed blank. That's 223 of 252
+live order folders today. The suggested test is exactly the fix: the app now reads page 1
+and identifies the packet by the absence of the ASA title block, which is on every drawing
+and no packet. Stamps an earlier run left on drawings are removed. The Difficulty Stamper
+had the same "first PDF" rule and was fixed with it.
+
+_"When you stop typing in an Assistant quick note for a second, the cursor jumps back to
+the start of the first line. Is that meant to happen?"_ - No, that was a bug, and it's
+fixed. The "second" was the autosave: saving refreshed the notes list, and rebuilding the
+list re-opened the note you were already in, which reset the cursor mid-sentence. It now
+leaves the note alone when nothing actually changed.
+
+_"911 SSPO Award Review kept failing with 'No such file or directory', and renaming the
+award folder to something shorter made it work."_ - That was Windows' 260-character path
+limit, not a missing file. The Pilot Program folder tree is already about 190 characters
+deep before an app writes anything, so one descriptive output name tips it over and Windows
+refuses the write - while the error message points at a folder that's plainly there. Fixed
+everywhere, not just in that one app: around 215 file operations across all 25 apps now go
+through a helper that removes the limit, and a build check stops a new one from slipping
+in. Existence checks were the sneaky ones - they answered "no" for files that were right
+there.
 
 ---
 

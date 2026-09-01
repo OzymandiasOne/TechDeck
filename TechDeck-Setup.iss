@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.7.1 - New 911 Inspection Dimensions app (OCR the part sketches, fill the QF-QU-09 tabs); 922 Setup Pallet Labeler stage; 922 batch entry by folder pick; formed flat bars; Customer DXF Analysis v2.2.x feedback fixes
+; Version 0.8.7.2 - Weld-prep bevel angles in 911 Inspection Dimensions; Windows long-path (MAX_PATH) fix; OneDrive prefetch; 922 Pallet Stamper reads the work packet; per-order forming; Kitting oversize orders
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.1"
+#define MyAppVersion "0.8.7.2"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

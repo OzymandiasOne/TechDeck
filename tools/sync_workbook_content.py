@@ -281,6 +281,47 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.2", "Sep 1, 2026", "Feature",
+     "The inspection-data capture tool now completes the weld-prep entries as "
+     "well as the dimensions. Previously it recorded the weld-prep callout "
+     "codes it found on each drawing but could not supply the bevel angle, "
+     "because that value is not printed on the drawing - it is held in the "
+     "customer's bevel reference set. All 947 reference sheets have been "
+     "transcribed and are now carried with the tool, so a callout on a drawing "
+     "becomes a filled-in nominal on the inspection sheet, one entry per face "
+     "the drawing names. Three classes of silent omission were closed in the "
+     "process: three of the four callout prefix families were being skipped "
+     "entirely (one of them accounts for a fifth of the reference set), a "
+     "two-sided callout is now recorded as the two separate entries it "
+     "represents, and a callout whose reference sheet carries no angle is "
+     "raised for a decision rather than left blank - a prep that produced "
+     "nothing previously looked identical to one that was never read. "
+     "Withdrawn codes name their replacement instead of writing a value, and "
+     "where image recognition returns a damaged code the tool repairs the "
+     "unambiguous cases and, for the rest, names the closest valid code for "
+     "review without ever substituting a guess onto a quality form. Validated "
+     "across 90 production packets covering 684 weld preps. "
+     "Reliability work this release removes three defects that each cost "
+     "rework in the field. Pallet and batch marking was applied to the first "
+     "document found in an order folder, which since the introduction of "
+     "drawing binders was usually a drawing rather than the work packet the "
+     "shop floor reads - 223 of 252 live order folders were affected. Marking "
+     "now identifies the work packet by reading it, and marks left on drawings "
+     "by earlier runs are removed. A Windows path-length limit caused file "
+     "writes to fail with a misleading 'file not found' message anywhere the "
+     "customer folder tree ran deep; the limit has been removed across every "
+     "tool, with a build-time check to prevent reintroduction. And where one "
+     "batch builds the same part for two different orders, the forming search "
+     "recorded only the first - both are now tracked. Kit paperwork prints "
+     "orders of more than ten parts in full instead of dropping the overflow, "
+     "and the nest-file gathering tool accepts the nesting software's revised "
+     "cutting-diagram format, which had been causing repeated run failures. "
+     "Tools that read from cloud-synchronised storage now retrieve files "
+     "while the operator is still answering prompts, shortening the runs that "
+     "spend most of their time waiting on downloads.",
+     "911 Inspection Dimensions, 911 LST Organizer, 911 SSPO Award Review, "
+     "922 Pallet Stamper, 922 Difficulty Stamper, 922 Setup, "
+     "922 FormingFinder, 922 Kitting, plus a platform-wide reliability fix"),
     ("Beta 0.8.7.1", "Aug 20, 2026", "Feature",
      "A new inspection-data capture tool reads every dimension off the part "
      "sketch drawings in a batch's nest packages - the drawings are scanned "
@@ -474,6 +515,44 @@ PI_RENAMES = {
 
 # ---- Process Improvement log :: NEW entries (task, state, description) ------
 PI_NEW = [
+    ("WELD PREP ANGLE REFERENCE", "COMPLETE",
+     "THE CUSTOMER'S COMPLETE BEVEL REFERENCE SET (947 SHEETS) TRANSCRIBED AND "
+     "CARRIED WITH THE DRAWING DIMENSION READER, SO A WELD PREP CALLOUT ON A "
+     "DRAWING BECOMES A FILLED-IN BEVEL ANGLE ON THE INSPECTION SHEET, ONE "
+     "ENTRY PER FACE THE DRAWING NAMES; THREE OF THE FOUR CALLOUT FAMILIES "
+     "WERE PREVIOUSLY SKIPPED ENTIRELY, WITHDRAWN CODES NOW NAME THEIR "
+     "REPLACEMENT, AND A CALLOUT WITH NO PUBLISHED ANGLE IS RAISED FOR A "
+     "DECISION RATHER THAN LEFT BLANK; VALIDATED ON 90 PRODUCTION PACKETS "
+     "COVERING 684 WELD PREPS"),
+    ("WORK PACKET MARKING CORRECTION", "COMPLETE",
+     "PALLET AND DIFFICULTY MARKING WAS BEING APPLIED TO THE FIRST DOCUMENT "
+     "FOUND IN AN ORDER FOLDER, WHICH SINCE THE INTRODUCTION OF DRAWING "
+     "BINDERS WAS USUALLY A DRAWING RATHER THAN THE WORK PACKET THE SHOP FLOOR "
+     "READS -- 223 OF 252 LIVE ORDER FOLDERS AFFECTED; THE WORK PACKET IS NOW "
+     "IDENTIFIED BY READING IT, AND MARKS LEFT ON DRAWINGS BY EARLIER RUNS "
+     "ARE REMOVED"),
+    ("LONG FILE PATH RELIABILITY FIX", "COMPLETE",
+     "A WINDOWS PATH-LENGTH LIMIT CAUSED FILE WRITES TO FAIL WITH A MISLEADING "
+     "'FILE NOT FOUND' MESSAGE ANYWHERE THE CUSTOMER FOLDER TREE RAN DEEP; "
+     "THE LIMIT IS REMOVED ACROSS ALL 25 TOOLS (AROUND 215 FILE OPERATIONS), "
+     "WITH A BUILD-TIME CHECK PREVENTING REINTRODUCTION"),
+    ("DUPLICATE-ORDER FORMING TRACKING", "COMPLETE",
+     "WHERE ONE BATCH BUILDS THE SAME PART FOR TWO DIFFERENT ORDERS, THE "
+     "FORMING SEARCH RECORDED ONLY THE FIRST AND DROPPED THE SECOND SILENTLY; "
+     "BOTH ORDERS ARE NOW TRACKED AND BOTH REACH THE FORMING BINDER"),
+    ("OVERSIZE KIT PAPERWORK", "COMPLETE",
+     "AN ORDER OF MORE THAN TEN PARTS PRINTED THE FIRST TEN AND DROPPED THE "
+     "REST WITH NO WARNING; SUCH ORDERS NOW PRINT ON THE LARGER CHECKLIST "
+     "SHEET AND KEEP THEIR PLACE IN THE KIT PAPERWORK"),
+    ("CUTTING DIAGRAM FORMAT UPDATE", "COMPLETE",
+     "THE NESTING SOFTWARE CHANGED HOW IT LABELS PARTS ON ITS CUTTING "
+     "DIAGRAMS, WHICH CAUSED REPEATED RUN FAILURES IN THE NEST-FILE GATHERING "
+     "TOOL; BOTH THE OLD AND NEW FORMATS ARE NOW ACCEPTED"),
+    ("CLOUD FILE PREFETCH", "COMPLETE",
+     "TOOLS THAT READ FROM CLOUD-SYNCHRONISED STORAGE NOW RETRIEVE FILES IN "
+     "THE BACKGROUND WHILE THE OPERATOR IS STILL ANSWERING PROMPTS, INSTEAD OF "
+     "ONE AT A TIME MID-RUN; SHORTENS THE RUNS THAT SPEND MOST OF THEIR TIME "
+     "WAITING ON DOWNLOADS"),
     ("DRAWING DIMENSION READER", "PILOT",
      "READS THE DIMENSIONS DIRECTLY OFF THE PART DRAWINGS IN A 911 NEST "
      "PACKAGE -- INCLUDING THE WELD PREP CALLOUTS -- AND FILLS THEM ONTO EACH "
