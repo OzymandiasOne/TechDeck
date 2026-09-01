@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -596,12 +596,29 @@ _NEST_WORKBOOK_GLOBS = ("911 BATCH*.xlsx", "911 PLATE BATCH*.xlsx")
 _NON_PART_SHEETS = {"NEST", "SCRIBE VERIFICATION", "COVER SHEET",
                     "SOURCE MATERIAL INFO", "INSPECTION SHEET"}
 
+# What a usable angle nominal looks like once folded: a bare number, nothing else.
+# Shared by _as_nominal (a standalone angle off the drawing) and weld_prep_angles
+# (an angle out of the bevel book) - both write the same "NN°" the sheet expects.
+ANGLE_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
-def _as_nominal(text):
-    """A dimension value as the sheet wants it: a number, or 'NN°' for an angle."""
+
+def _as_nominal(text, kind="linear"):
+    """A dimension value as the sheet wants it: a number, or 'NN°' for an angle.
+
+    KIND is not optional information. A chamfer carries "deg" inside its own value
+    string ("1.75 X 45 deg"), but a STANDALONE angle's value is the bare number -
+    the " deg" only ever existed in the printed report, added from the kind. So
+    reading the text alone wrote a standalone angle as a plain number, and the
+    sheet's MIN/MAX array formula branches on `ISNUMBER(SEARCH("°", <cell>))`:
+    without the sign it fell through to the LINEAR tolerance bands and quietly put
+    a +/-.1 tolerance on a 45 degree angle instead of the +/-1 the form intends
+    (V094 503891 tabs '67-199' and '-451', 2026-09-01).
+    """
     t = str(text).strip()
     if t.lower().endswith("deg"):
         return t[:-3].strip() + "°"
+    if kind == "angle" and ANGLE_VALUE_RE.match(t):
+        return t + "°"
     try:
         return float(t)
     except ValueError:
@@ -616,8 +633,6 @@ def _as_nominal(text):
 # build (both load the plugin from its own folder).
 _BEVEL_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bevel_table.csv")
 _BEVEL_CACHE = None
-# What a usable angle nominal looks like once folded: a bare number, nothing else.
-ANGLE_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
 
 def bevel_table(log=None):
@@ -746,7 +761,7 @@ def nominals_for(dims, welds=(), log=None):
     for d in dims:
         if d["ref"]:
             continue
-        parts = [_as_nominal(p) for p in str(d["value"]).split(" X ")]
+        parts = [_as_nominal(p, d["kind"]) for p in str(d["value"]).split(" X ")]
         (typ if "TYP" in d["mods"] else plain).append(parts)
 
     # Not de-duplicated: a repeated angle is a repeated FEATURE. "KB114 NS & FS" is

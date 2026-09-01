@@ -2,7 +2,7 @@
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
   "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions and weld-prep bevel angles onto its inspection sheet",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
