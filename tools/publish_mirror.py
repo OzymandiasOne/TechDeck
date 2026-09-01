@@ -33,7 +33,9 @@ action on purpose: that is the irreversible step.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,6 +51,20 @@ PRIVATE_PATHS = [
     "one_off_apps", "dist", "build", "installer_output",
     "tools/pixel_playground",
 ]
+
+
+def rmtree(path: Path) -> None:
+    """Delete a git directory on Windows.
+
+    git marks pack files and the commit-graph read-only, and shutil.rmtree hands
+    those straight back as PermissionError [WinError 5] - so a plain rmtree cannot
+    clear a previous mirror. Clear the read-only bit and retry.
+    """
+    def on_error(func, target, _exc):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    shutil.rmtree(path, onexc=on_error)
 
 
 def run(cmd: list[str], cwd: Path, capture: bool = False) -> str:
@@ -102,7 +118,7 @@ def main() -> int:
 
     print("[1/4] Fresh mirror clone")
     if MIRROR.exists():
-        shutil.rmtree(MIRROR)
+        rmtree(MIRROR)
     run(["git", "clone", "--quiet", "--mirror", str(REPO), str(MIRROR)], REPO)
 
     print("\n[2/4] Guard")
