@@ -27,6 +27,12 @@ blind at least once:
   Plugin validation   - does every installed plugin load ON THIS MACHINE?
                         (the v0.8.6 plugin_window missing-hiddenimport class)
   Import probe        - is every critical module present in this frozen bundle?
+  Drawing reader      - can the 911 Inspection Dimensions OCR engines actually
+                        be REACHED? RapidOCR loads them by name from its own
+                        config, so a build that missed them still imports OK as
+                        an empty namespace package and only fails on the getattr
+                        (the 2026-09-01 "read 0 parts" class) - a plain import
+                        probe reports [OK] on a completely dead reader.
   Connectivity        - can THIS machine reach a cloud MQTT broker? Seeds the
                         "who's online + nudge" firewall question per-machine,
                         since colleagues can't run a probe script themselves —
@@ -85,6 +91,9 @@ _IMPORT_PROBES = [
     "PIL.Image",
     "win32com.client",
     "pythoncom",
+    # The 911 Inspection Dimensions drawing reader. Importing the top package is
+    # NOT enough to prove it works - see _collect_drawing_reader below.
+    "rapidocr_onnxruntime",
 ]
 
 _REDACT_MARKERS = ("api_key", "token", "password", "secret")
@@ -291,6 +300,63 @@ def _collect_import_probe() -> list[str]:
             lines.append(f"  [OK  ] {name}")
         except Exception as exc:
             lines.append(f"  [FAIL] {name}: {type(exc).__name__}: {exc}")
+    return lines
+
+
+def _collect_drawing_reader() -> list[str]:
+    """Prove the OCR engine classes are really in the build, not just their folders.
+
+    RapidOCR never imports its three engines - it reads their module/class names out
+    of its own config.yaml and calls importlib.import_module. PyInstaller cannot see
+    that, and a build that missed them still SHIPS each folder (collect_data_files
+    copies the config.yaml), so Python imports the folder as an empty NAMESPACE
+    package: the import says OK and the getattr is what fails. A plain import probe
+    reports [OK] on a completely dead reader, which is how "911 Inspection Dimensions
+    read 0 parts" reached a user as "(no PART SKETCH pages found)" (FTOURIGNY-LT,
+    2026-09-01). So probe the getattr, and say where the module actually came from.
+    """
+    import importlib
+
+    lines: list[str] = []
+    try:
+        import yaml
+        import rapidocr_onnxruntime
+    except Exception as exc:
+        return [f"  [FAIL] rapidocr_onnxruntime: {type(exc).__name__}: {exc}",
+                "  The 911 Inspection Dimensions drawing reader cannot run at all."]
+
+    pkg_dir = os.path.dirname(os.path.abspath(rapidocr_onnxruntime.__file__))
+    lines.append(f"Package dir : {pkg_dir}")
+    try:
+        with open(os.path.join(pkg_dir, "config.yaml"), encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        return lines + [f"  [FAIL] config.yaml: {type(exc).__name__}: {exc}"]
+
+    wanted = [(sec["module_name"], sec["class_name"])
+              for sec in cfg.values()
+              if isinstance(sec, dict) and sec.get("module_name") and sec.get("class_name")]
+    if not wanted:
+        return lines + ["  [FAIL] config.yaml names no engine modules - its shape changed"]
+
+    for module_name, class_name in wanted:
+        try:
+            mod = importlib.import_module(module_name)
+        except Exception as exc:
+            lines.append(f"  [FAIL] {module_name}: {type(exc).__name__}: {exc}")
+            continue
+        origin = getattr(mod, "__file__", None) or "<namespace package - NO CODE>"
+        if hasattr(mod, class_name):
+            lines.append(f"  [OK  ] {module_name}.{class_name}")
+        else:
+            lines.append(f"  [FAIL] {module_name} has no attribute '{class_name}' - "
+                         f"it froze as an empty namespace package. Add "
+                         f"'{module_name}' to TechDeck.spec hiddenimports.")
+        lines.append(f"         from {origin}")
+
+    if all(ln.startswith("  [OK") or ln.startswith("         ") or ln.startswith("Package")
+           for ln in lines):
+        lines.append("Reader is complete - 911 Inspection Dimensions can read drawings.")
     return lines
 
 
@@ -636,6 +702,7 @@ def generate_debug_report(main_window=None) -> Path:
     section("ONEDRIVE / LIBRARY DISCOVERY", _collect_onedrive_discovery)
     section("PLUGINS (validated on this machine)", _collect_plugins)
     section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
+    section("DRAWING READER (911 Inspection Dimensions OCR)", _collect_drawing_reader)
     section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
     section("USAGE TELEMETRY (successful-run history)", _collect_usage)
     section("SETTINGS SNAPSHOT", _collect_settings)
