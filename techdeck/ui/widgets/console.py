@@ -898,6 +898,42 @@ class ConsoleWidget(QWidget, ThemeAware):
         title, text = self._warn_args
         QMessageBox.warning(self.window(), title, text)
 
+    def show_report(self, title: str, subtitle: str, body: str,
+                    save_path: str = "") -> None:
+        """Put a plugin's finished report on screen, with a Save-as-.txt button.
+
+        Unlike show_warning this does NOT block: the run is over by the time it
+        opens, and holding the worker thread would leave the app looking busy
+        while somebody reads. The call marshals to the GUI thread, shows the
+        dialog and returns; the window stays up until the user closes it.
+        """
+        from PySide6.QtCore import QThread
+
+        self._report_args = (str(title), str(subtitle), str(body), str(save_path))
+        if QThread.currentThread() == self.thread():
+            self._report_gui()
+            return
+        QMetaObject.invokeMethod(
+            self,
+            "_report_gui",
+            Qt.ConnectionType.BlockingQueuedConnection,
+        )
+
+    @Slot()
+    def _report_gui(self):
+        """GUI-thread half of show_report: build and show the modeless dialog."""
+        from techdeck.ui.dialogs.report_dialog import ReportDialog
+
+        title, subtitle, body, save_path = self._report_args
+        dlg = ReportDialog(title, subtitle, body, save_path, parent=self.window())
+        # Qt collects a dialog whose last Python reference drops, even while it is
+        # on screen (Hard Rule 4). Hold it here and let it clear itself on close.
+        self._open_report = dlg
+        dlg.finished.connect(lambda _=None: setattr(self, "_open_report", None))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     @Slot(str)
     def append_user(self, text: str):
         """Append user message to output."""

@@ -807,6 +807,36 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
+def show_report(params: dict, title: str, subtitle: str, body: str,
+                save_path: str = "") -> str:
+    """Put a finished report on screen with a Save-as-.txt button. Returns a note
+    for the log.
+
+    For a run whose OUTPUT is something a person reads. Writing a .txt into a
+    Pilot Program folder and printing the path means the reader has to go and dig
+    for it; this puts it in front of them and makes saving their choice.
+
+    Does not block -- the window stays up after the run ends (contrast
+    show_warning, which blocks until acknowledged). ``save_path`` is the full file
+    path the Save button writes, so pass one INSIDE the folder the run was pointed
+    at. Headless, or on an older TechDeck with no console.show_report, it falls
+    back to writing the file itself so nothing is ever lost.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "show_report"):
+        try:
+            console.show_report(title, subtitle, body, save_path)
+            return "Report is on screen - press Save as .txt to keep a copy."
+        except Exception:
+            pass
+    if not save_path:
+        params.get("log", print)(body)
+        return "Report printed above."
+    with open(long_path(save_path), "w", encoding="utf-8") as fh:
+        fh.write(body)
+    return "Saved: %s" % save_path
+
+
 def load_toggle_memory(memory_key: str) -> dict:
     """The selections last submitted under ``memory_key`` ({} if none/unreadable)."""
     try:
