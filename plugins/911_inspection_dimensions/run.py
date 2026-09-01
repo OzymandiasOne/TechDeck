@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.1"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -56,27 +56,42 @@ def _engines(log):
     global _ENGINES
     if _ENGINES is not None:
         return _ENGINES
+    # BOTH the import AND the construction have to be guarded. RapidOCR loads its
+    # three engine classes by NAME out of its own config.yaml, so a frozen build
+    # that did not bundle them raises HERE, not at import - and it used to surface
+    # as "could not read this PDF", which made a broken reader look like a packet
+    # with no sketches in it (FTOURIGNY-LT, 2026-09-01).
     try:
         from rapidocr_onnxruntime import RapidOCR
     except Exception as exc:  # pragma: no cover - dependency guard
-        raise sdk.UserFacingError(
-            "The drawing reader could not start up (%s)." % exc,
-            "This app needs the built-in drawing reader. Update TechDeck to the latest "
-            "version, and if it still fails send a Debug Report to a TechDeck admin.",
-        )
+        raise _reader_dead(exc)
     log("Starting the drawing reader...")
-    _ENGINES = [
-        RapidOCR(
-            det_model_path=None,
-            det_limit_side_len=side,
-            det_box_thresh=0.3,
-            cls_model_path=None,
-            rec_model_path=None,
-            text_score=0.3,
-        )
-        for side in _DET_SIDES
-    ]
+    try:
+        _ENGINES = [
+            RapidOCR(
+                det_model_path=None,
+                det_limit_side_len=side,
+                det_box_thresh=0.3,
+                cls_model_path=None,
+                rec_model_path=None,
+                text_score=0.3,
+            )
+            for side in _DET_SIDES
+        ]
+    except Exception as exc:  # pragma: no cover - dependency guard
+        _ENGINES = None
+        raise _reader_dead(exc)
     return _ENGINES
+
+
+def _reader_dead(exc):
+    """The one message for a drawing reader that will not start at all."""
+    return sdk.UserFacingError(
+        "The drawing reader could not start up (%s)." % exc,
+        "Nothing was read and no workbook was changed. This app needs the built-in "
+        "drawing reader, which ships inside TechDeck. Update TechDeck to the latest "
+        "version, and if it still fails send a Debug Report to a TechDeck admin.",
+    )
 
 
 # --------------------------------------------------------------- text normalisation
@@ -1103,7 +1118,7 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
     return parts
 
 
-def build_report(folder, results, fills, elapsed):
+def build_report(folder, results, fills, elapsed, failures=None):
     """Render the whole run as the text file the user gets."""
     now = datetime.datetime.now()
     out = []
@@ -1132,7 +1147,14 @@ def build_report(folder, results, fills, elapsed):
         add("PDF: %s" % pdf_name)
         add("=" * 78)
         if not parts:
-            add("  (no PART SKETCH pages found)")
+            # An unreadable PDF is NOT an empty one - saying "no PART SKETCH pages"
+            # for a packet that actually blew up sent the reader hunting the packet
+            # instead of the error (FTOURIGNY-LT, 2026-09-01).
+            reason = (failures or {}).get(pdf_name)
+            if reason:
+                add("  ** this PDF could not be read: %s" % reason)
+            else:
+                add("  (no PART SKETCH pages found)")
             add("")
             continue
         for rec in parts:
@@ -1429,6 +1451,7 @@ def run(params, progress_callback, cancel_event):
     started = time.time()
     results = []
     failed = []
+    failures = {}
     fills = []
     for job in jobs:
         sdk.raise_if_cancelled(cancel_event)
@@ -1444,6 +1467,7 @@ def run(params, progress_callback, cancel_event):
         except Exception as exc:
             log("   ! could not read this PDF: %s" % exc)
             failed.append("%s (%s)" % (name, exc))
+            failures[name] = str(exc)
             results.append((name, []))
             continue
         results.append((name, parts))
@@ -1473,7 +1497,7 @@ def run(params, progress_callback, cancel_event):
     out_name = "911 Inspection Dimensions - %s - %s.txt" % (os.path.basename(folder.rstrip("\\/")), stamp)
     out_path = os.path.join(folder, out_name)
     with open(sdk.long_path(out_path), "w", encoding="utf-8") as handle:
-        handle.write(build_report(folder, results, fills, elapsed))
+        handle.write(build_report(folder, results, fills, elapsed, failures))
 
     parts = sum(len(p) for _, p in results)
     dims = sum(len([d for d in rec["dims"] if not d["ref"]]) for _, p in results for rec in p)
