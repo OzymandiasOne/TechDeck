@@ -2,7 +2,7 @@
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
   "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions and weld-prep bevel angles onto its inspection sheet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -14,7 +14,9 @@
       "Nothing else to install - the drawing reader is built into TechDeck."
     ],
     "how_it_works": [
-      "Point it at a batch folder, one nest folder, or just a folder of nest package PDFs.",
+      "Point it at an order folder (the one holding the nest folders), one nest folder, or just a folder of nest package PDFs.",
+      "Pick an order folder and you get a list of its nests - tick the ones you want read. Pick a single nest folder and it just runs.",
+      "The 911 QTDR root is never accepted - it holds order folders, not nests, so reading it would mean reading every order at once.",
       "Finds the PART SKETCH pages and reads the drawing picture on each one.",
       "Picks out every dimension - lengths, radii (R .40), diameters, angles, chamfers and snipes like .50 X .50.",
       "Types those numbers into the matching part's inspection sheet tab, in the colour-filled TARGET boxes. Excel works out MIN and MAX from each one on its own.",

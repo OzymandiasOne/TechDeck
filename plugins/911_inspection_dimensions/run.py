@@ -949,44 +949,92 @@ def _packet_pdf(folder):
     return omit[0] if omit else None
 
 
-def discover_jobs(folder):
-    """Work out what the user picked and pair each packet PDF with its workbook.
+def is_nest_folder(folder):
+    """A nest folder we can actually read: one holding a stamped packet PDF."""
+    return _packet_pdf(folder) is not None
 
-    Three shapes are all valid and are told apart by what is on disk, so the user
+
+def _subfolders(folder):
+    try:
+        entries = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [os.path.join(folder, e) for e in entries
+            if sdk.is_dir(os.path.join(folder, e))]
+
+
+# The tree is  911 QTDR \ <order> \ <nest> \ <nest> MOVE TICKET OMIT.pdf , so the
+# roots below sit TWO levels above the work. Named only to make the refusal say why.
+_PROGRAM_ROOT_NAMES = {"911 qtdr", "922 qtdr production packages",
+                       "902 qtdr production packages", "pilot program"}
+
+
+def classify_pick(folder):
+    """What did the user actually pick? "nest", "order", "loose" or "too_high".
+
+    Discovery used to scan one level down and, failing that, sweep up every loose
+    PDF in the picked folder. Point that at the 911 QTDR ROOT and the last branch
+    fired: the order folders one level down hold no packet of their own, so the
+    ten stray QC PDFs sitting beside them became ten jobs and the run started
+    across the whole program (reported 2026-09-01). The shape is now decided
+    STRUCTURALLY, and a folder that is neither a nest nor a holder of nests is
+    refused outright instead of guessed at.
+    """
+    if is_nest_folder(folder):
+        return "nest"
+    subs = _subfolders(folder)
+    if any(is_nest_folder(sub) for sub in subs):
+        return "order"
+    if os.path.basename(os.path.normpath(folder)).strip().lower() in _PROGRAM_ROOT_NAMES:
+        return "too_high"
+    # A plain folder of packet PDFs is only ever a LEAF. If a subfolder holds PDFs
+    # of its own we are standing above the work, not in it - so refuse.
+    loose = [p for p in glob.glob(os.path.join(folder, "*.pdf"))
+             if not os.path.basename(p).startswith("~$")]
+    if loose and not any(glob.glob(os.path.join(sub, "*.pdf")) for sub in subs):
+        return "loose"
+    return "too_high"
+
+
+def discover_jobs(folder, shape=None):
+    """Pair each packet PDF with its workbook, for the shape the user picked.
+
+    Three shapes are valid and are told apart by what is on disk, so the user
     never has to say which one they meant:
-      * a BATCH folder  - nest folders one level down, each with a workbook,
+      * an ORDER folder - nest folders one level down, each with a workbook,
       * a single NEST folder,
       * a plain folder of packet PDFs with no workbooks (read-only report).
     """
     jobs = []
     seen = set()
 
-    def add(pdf, workbook):
+    def add(pdf, workbook, label):
         key = os.path.normcase(os.path.abspath(pdf))
         if key not in seen:
             seen.add(key)
-            jobs.append({"pdf": pdf, "workbook": workbook,
+            jobs.append({"pdf": pdf, "workbook": workbook, "label": label,
                          "nest": os.path.basename(os.path.dirname(pdf))})
 
-    # the picked folder itself as a nest folder
-    own = _packet_pdf(folder)
-    if own:
-        add(own, find_nest_workbook(folder))
+    if shape is None:
+        shape = classify_pick(folder)
 
-    # nest folders one level down
-    for entry in sorted(os.listdir(folder)):
-        sub = os.path.join(folder, entry)
-        if not os.path.isdir(sub):
-            continue
-        pdf = _packet_pdf(sub)
-        if pdf:
-            add(pdf, find_nest_workbook(sub))
+    if shape == "nest":
+        own = _packet_pdf(folder)
+        if own:
+            add(own, find_nest_workbook(folder),
+                os.path.basename(os.path.normpath(folder)))
 
-    # a plain folder of PDFs (no MOVE TICKET OMIT naming, no workbooks)
-    if not jobs:
+    elif shape == "order":
+        for sub in _subfolders(folder):
+            pdf = _packet_pdf(sub)
+            if pdf:
+                add(pdf, find_nest_workbook(sub),
+                    os.path.basename(os.path.normpath(sub)))
+
+    elif shape == "loose":
         for pdf in sorted(glob.glob(os.path.join(folder, "*.pdf"))):
             if not os.path.basename(pdf).startswith("~$"):
-                add(pdf, None)
+                add(pdf, None, os.path.splitext(os.path.basename(pdf))[0])
     return jobs
 
 
@@ -1250,6 +1298,61 @@ def build_report(folder, results, fills, elapsed):
     return "\n".join(out) + "\n"
 
 
+_PICK_TOO_HIGH = (
+    "There are no readable nests in that folder, and nothing one level down "
+    "either - so it is above the work, or its nests have no MOVE TICKET OMIT "
+    "PDF yet.",
+    "Pick ONE of:\n"
+    "  * an order folder (the one holding the nest folders) - you then tick "
+    "which nests to read, or\n"
+    "  * a single nest folder (the one with the MOVE TICKET OMIT PDF in it).\n\n"
+    "The 911 QTDR root is never accepted: every order under it would be read "
+    "in one go.",
+)
+
+
+def choose_nests(params, folder, jobs, log):
+    """Tick which nests to read. Returns the kept jobs, or None if cancelled.
+
+    Shown for every multi-nest pick. Picking a single NEST folder is the one
+    case that skips it - there is nothing to choose between.
+    """
+    labels, seen = [], {}
+    for job in jobs:
+        label = job["label"]
+        if not job["workbook"]:
+            label += "   (no inspection workbook - report only)"
+        # SelectionDialog hands back the chosen STRINGS, so duplicates would be
+        # indistinguishable coming back. Number them instead (as 911 Teams Cards does).
+        if label in seen:
+            seen[label] += 1
+            label = "%s  (#%d)" % (label, seen[label])
+        else:
+            seen[label] = 1
+        job["_pick"] = label
+        labels.append(label)
+
+    picked = sdk.request_selection(
+        params, labels, None,
+        window_title="911 Inspection Dimensions",
+        header="Select Nests to Read",
+        root_label="All nests in %s" % (os.path.basename(os.path.normpath(folder)) or folder),
+        noun="nest",
+        prompt_note=("Every nest found is ticked. Untick any you do not want read "
+                     "yet - nothing in them is opened or changed."),
+        run_button_text="Read Selected",
+    )
+    if picked is None:
+        return None            # sdk.request_selection already flagged the cancel
+
+    keep = set(picked)
+    chosen = [j for j in jobs if j["_pick"] in keep]
+    dropped = len(jobs) - len(chosen)
+    if dropped:
+        log("Skipping %d nest(s) you unticked - nothing in them was touched." % dropped)
+    return chosen
+
+
 # ---------------------------------------------------------------------------- run
 def run(params, progress_callback, cancel_event):
     import time
@@ -1271,13 +1374,29 @@ def run(params, progress_callback, cancel_event):
     if dry_run:
         log("DRY RUN - the report is written but no workbook is changed.")
 
-    jobs = discover_jobs(folder)
+    shape = classify_pick(folder)
+    if shape == "too_high":
+        raise sdk.UserFacingError(*_PICK_TOO_HIGH)
+
+    jobs = discover_jobs(folder, shape)
     if not jobs:
         raise sdk.UserFacingError(
             "There are no nest package PDFs in that folder.",
-            "Pick a batch folder (the one holding the nest folders), a single nest "
+            "Pick an order folder (the one holding the nest folders), a single nest "
             "folder, or a folder of nest package PDFs, then run it again.",
         )
+
+    # A single nest folder is unambiguous; anything wider gets the tick-list first.
+    if shape != "nest":
+        jobs = choose_nests(params, folder, jobs, log)
+        if jobs is None:
+            cancel_event.set()
+            return
+        if not jobs:
+            log("No nests were ticked - nothing to read.")
+            cancel_event.set()
+            return
+
     pdfs = [j["pdf"] for j in jobs]
     fillable = [j for j in jobs if j["workbook"]]
 
