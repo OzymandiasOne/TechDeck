@@ -51,9 +51,13 @@ Name: "launchonstartup"; Description: "Launch {#MyAppName} on Windows startup"; 
 
 [Files]
 ; Main application files from dist\TechDeck\
-Source: "dist\TechDeck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\TechDeck\*"; DestDir: "{app}"; Excludes: "plugins\java_tutor\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled plugins (these will be copied to %LOCALAPPDATA% on first run by the app)
-Source: "plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
+; java_tutor is personal tooling (it needs Claude Code installed) and is
+; excluded from BOTH copy steps above, so a colleague never gets a tile that
+; cannot work on their machine. It stays in the repo and is still
+; gate-checked; see DEV_ONLY_PLUGIN_IDS in tests/tools/test_workbook_roster.py.
+Source: "plugins\*"; DestDir: "{app}\plugins"; Excludes: "java_tutor"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Assets (icons, etc.)
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation (optional - comment out if not present)

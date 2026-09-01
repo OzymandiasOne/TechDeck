@@ -33,6 +33,11 @@ SECTION_FOR_FAMILY = {
 }
 SHARED_SECTION = "QUALITY, ESTIMATING & SHOP TOOLS"
 
+# Personal tooling, not ASA production automation, so it is not on the
+# presented record - the same reason Games are skipped. Kept in step with
+# DEV_ONLY_PLUGINS in TechDeck.spec, which also keeps these out of the build.
+DEV_ONLY_PLUGIN_IDS = {"java_tutor"}
+
 
 def _plugins() -> dict:
     """{display name: family} for every non-Games plugin on disk."""
@@ -40,7 +45,7 @@ def _plugins() -> dict:
     for path in sorted((ROOT / "plugins").glob("*/plugin.json")):
         meta = json.loads(path.read_text(encoding="utf-8-sig"))
         family = meta.get("family", "General")
-        if family == "Games":
+        if family == "Games" or meta.get("id") in DEV_ONLY_PLUGIN_IDS:
             continue
         out[meta["name"]] = family
     return out
