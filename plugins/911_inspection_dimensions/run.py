@@ -36,7 +36,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -154,6 +154,21 @@ CHAMFER_RE = re.compile(r"^(%s)X(\d+(?:\.\d+)?)(?:°|DEG)$" % _NUM)
 CHAMFER_REV_RE = re.compile(r"^(\d+(?:\.\d+)?)(?:°|DEG)X(%s)$" % _NUM)
 
 
+# Every real LENGTH on these drawings is printed to two places, so a length with no
+# decimal point is a misread. Applied to a lone token since v0.1, but a compound
+# ("78 X 68.7") returned before ever reaching that test, so a ".78" read as "78"
+# landed on tab '-451' as a 78in dimension on a 13.66in part (V094 503891,
+# 2026-09-01). It must be applied to the LENGTH halves ONLY: a chamfer's DEGREES
+# half is legitimately a bare integer - across the sample corpus every real chamfer
+# was "<len> X 45 deg", so testing the whole token would have deleted all of them.
+_STRICT_COMPOUNDS = True
+
+
+def _bad_length(t):
+    """True when this component is a LENGTH that no real dimension would print."""
+    return _STRICT_COMPOUNDS and "." not in t
+
+
 def classify(raw):
     """Turn one OCR token into (kind, value, mods), or None if it isn't a dimension."""
     t = _norm(raw).replace(" ", "")
@@ -164,9 +179,13 @@ def classify(raw):
 
     cham = CHAMFER_RE.match(t)
     if cham:
+        if _bad_length(cham.group(1)):      # "<len> X <angle>deg" - group 1 is the land
+            return None
         return "chamfer", "%s X %s deg" % (cham.group(1), cham.group(2)), mods
     cham = CHAMFER_REV_RE.match(t)
     if cham:
+        if _bad_length(cham.group(2)):      # "<angle>deg X <len>" - group 2 is the land
+            return None
         return "chamfer", "%s deg X %s" % (cham.group(1), cham.group(2)), mods
 
     ang = ANGLE_RE.match(t)
@@ -198,7 +217,11 @@ def classify(raw):
     t = _EDGE_JUNK.sub("", t)
 
     if COMPOUND_RE.match(t):
-        return kind, " X ".join(t.split("X")), mods
+        # A snipe / compound is lengths all the way across - no degrees half here.
+        comps = t.split("X")
+        if any(_bad_length(c) for c in comps):
+            return None
+        return kind, " X ".join(comps), mods
     if FRACTION_RE.match(t):
         return kind, t, mods
     if not NUM_RE.match(t):
@@ -1394,9 +1417,18 @@ def choose_nests(params, folder, jobs, log):
 def run(params, progress_callback, cancel_event):
     import time
 
+    global _STRICT_COMPOUNDS
+
     log = params.get("log", print)
     settings = params.get("settings", {})
     console = params.get("console")
+
+    # The escape hatch for the compound-length rule: a module flag rather than an
+    # argument, because classify() sits at the bottom of the OCR pipeline and every
+    # caller in between would otherwise have to carry it. Set once per run.
+    _STRICT_COMPOUNDS = settings.get("strict_compounds", True) is not False
+    if not _STRICT_COMPOUNDS:
+        log("Compound-length check is OFF - a misread like \"78 X 68.7\" will be kept.")
 
     folder = sdk.request_directory(
         params,

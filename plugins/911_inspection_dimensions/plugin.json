@@ -2,7 +2,7 @@
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
   "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions and weld-prep bevel angles onto its inspection sheet",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -42,6 +42,14 @@
         "placeholder": "C:\\Users\\...\\Downloads",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "strict_compounds",
+        "type": "boolean",
+        "label": "Drop compound dimensions whose length has no decimal point",
+        "description": "Every real length on these drawings is printed to two places, so a compound like \"78 X 68.7\" is a misread of \".78 X 68.7\" and is thrown out. The degrees half is never touched - a chamfer's \"45\" is left alone. Untick if you ever see a real dimension go missing, and it goes back to accepting both.",
+        "required": false,
+        "default": true
       },
       {
         "key": "dry_run",
