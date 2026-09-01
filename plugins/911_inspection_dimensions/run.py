@@ -226,6 +226,14 @@ def _near_label(item, items, label):
 
 _PREFIXES = ("KB", "SB", "FB", "WB")
 
+# Every code in the bevel book is a two-letter prefix followed by 3 or 4 DIGITS -
+# checked against all 942, none has a letter in the tail. So a letter that comes
+# back there is always an OCR slip, and in this stroke font it is always one of
+# these: the digit 1 read as a capital I or lower-case l, and 0 read as O.
+# Worth fixing rather than rejecting: on the 30-packet real sweep, KB114 came back
+# as "KBI14" or "KBII4" three times out of 184 preps, and each one was dropped.
+_TAIL_FIX = {"I": "1", "L": "1", "O": "0"}
+
 
 def _weld_code(word):
     """Normalise one OCR token to a weld-prep code, or None."""
@@ -237,9 +245,32 @@ def _weld_code(word):
     if not m:
         return None
     code = m.group(1)
-    if not WELD_PREP_RE.match(code) or not any(c.isdigit() for c in code):
+    code = code[:2] + "".join(_TAIL_FIX.get(c, c) for c in code[2:])
+    if not WELD_PREP_RE.match(code) or not code[2:].isdigit():
         return None
     return code, _fmt_side(m.group(2))
+
+
+def nearest_bevel_code(code, log=None):
+    """An in-book code one edit away from a misread one, or "" if it is ambiguous.
+
+    Only ever SUGGESTED in the report, never substituted - a bevel is a cut on a
+    real part and a plausible-looking guess is worse than saying "look this up".
+    The sweep turned up "KB1141" and "KB1147" (a leader line read as an extra
+    digit) where dropping one character gives KB114 and nothing else.
+    """
+    table = bevel_table(log)
+    if not code or code in table:
+        return ""
+    # A leader line touching the end of the code reads as an extra digit, so try
+    # the trailing character first - that is the shape actually seen ("KB1141",
+    # "KB1147" for KB114). Deleting an INNER character is a much weaker guess and
+    # only offered when exactly one candidate survives.
+    if len(code) > 5 and code[:-1] in table:
+        return code[:-1]
+    cands = {code[:i] + code[i + 1:] for i in range(2, len(code))}
+    hits = sorted(c for c in cands if c in table)
+    return hits[0] if len(hits) == 1 else ""
 
 
 def _fmt_side(side):
@@ -1109,10 +1140,14 @@ def build_report(folder, results, fills, elapsed):
                     # what the bevel book says this code is, and what went on the sheet
                     row = bevel_lookup(weld["code"])
                     if row is None:
-                        add("          NOT IN THE BEVEL BOOK - nothing written, look it up by hand")
+                        near = nearest_bevel_code(weld["code"])
+                        hint = (" - closest code in the book is %s, CHECK the drawing"
+                                % near) if near else ""
+                        add("          NOT IN THE BEVEL BOOK%s - nothing written, "
+                            "look it up by hand" % hint)
                         bevel_problems.append(
-                            "%s - %s: %s is not in the bevel book"
-                            % (pdf_name, rec.get("part", "?"), weld["code"]))
+                            "%s - %s: %s is not in the bevel book%s"
+                            % (pdf_name, rec.get("part", "?"), weld["code"], hint))
                         continue
                     bits = []
                     if row["ns_angle"]:
