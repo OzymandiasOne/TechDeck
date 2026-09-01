@@ -98,6 +98,12 @@ class UpdateDialog(QDialog):
         # initial height, and very long notes scroll instead of ballooning.
         if self.update_info.release_notes:
             notes = QLabel(self.update_info.release_notes)
+            # PlainText, not the QLabel default (AutoText): release notes are now
+            # written as a bulleted list, and AutoText guesses rich text the moment
+            # the notes contain anything angle-bracketed - which would swallow it as
+            # markup. PlainText also guarantees the newlines that make the bullets
+            # bullets actually survive.
+            notes.setTextFormat(Qt.TextFormat.PlainText)
             notes.setWordWrap(True)
             notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             notes.setStyleSheet(f"color: {t.text_secondary}; font-size: 12px;")

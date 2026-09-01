@@ -1,9 +1,9 @@
 ; TechDeck Installer Script
-; Version 0.8.7.2 - Weld-prep bevel angles in 911 Inspection Dimensions; Windows long-path (MAX_PATH) fix; OneDrive prefetch; 922 Pallet Stamper reads the work packet; per-order forming; Kitting oversize orders
+; Version 0.8.7.2.1 - Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.2"
+#define MyAppVersion "0.8.7.2.1"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

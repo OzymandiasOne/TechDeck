@@ -281,6 +281,33 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.2.1", "Sep 1, 2026", "Patch",
+     "Corrective release for the inspection-data capture tool. The image "
+     "recognition component it depends on was omitted from the previous "
+     "build's package, so the tool returned no results and reported the "
+     "drawings as containing no sketch pages - work that had to be entered by "
+     "hand. The component is restored and a build-time check now prevents the "
+     "omission recurring; the tool was re-validated against the production "
+     "packet that reported the fault, recovering 122 dimensions across 24 "
+     "parts and completing 19 inspection sheets. The misleading message was "
+     "treated as a second defect: a component that cannot start is now "
+     "reported as such rather than as an empty drawing set, so the operator "
+     "is directed at the tool instead of the paperwork. "
+     "Two accuracy defects were also closed. Angular dimensions were written "
+     "in a form the inspection sheet read as linear, applying a tolerance an "
+     "order of magnitude tighter than the form intends; they now carry the "
+     "correct tolerance. And a dimension whose leading decimal point was lost "
+     "in recognition was written to a sheet as a value roughly six times the "
+     "part - readings that cannot be valid lengths are now withheld and "
+     "listed for review rather than entered, with an operator-facing switch "
+     "to disable the check if it is ever too strict. "
+     "The tool's run report has been rewritten for the inspector who uses it. "
+     "It now opens on screen at the end of a run, led by the items needing a "
+     "second look, and is saved alongside the work on request rather than "
+     "filed automatically into the folder tree. Selecting the top-level "
+     "customer folder no longer starts a run across every order in the "
+     "programme; the operator is offered the orders and nests to include.",
+     "Inspection Data Capture"),
     ("Beta 0.8.7.2", "Sep 1, 2026", "Feature",
      "The inspection-data capture tool now completes the weld-prep entries as "
      "well as the dimensions. Previously it recorded the weld-prep callout "

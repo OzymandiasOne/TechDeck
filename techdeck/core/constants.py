@@ -47,7 +47,7 @@ def puppet_master_enabled() -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.2"  # Weld-prep bevel angles in 911 Inspection Dimensions; Windows long-path (MAX_PATH) fix; OneDrive prefetch; 922 Pallet Stamper reads the work packet; per-order forming; Kitting oversize orders
+APP_VERSION = "0.8.7.2.1"  # Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

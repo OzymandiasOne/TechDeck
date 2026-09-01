@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.2 - Bevel Angles
+# TechDeck v0.8.7.2.1 - Bevel Angles Patch 1.0
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,56 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.2.1 - Bevel Angles Patch 1.0
+
+A patch on top of v0.8.7.2. Everything below in the v0.8.7.2 notes still applies -
+this fixes what that build got wrong.
+
+**The drawing reader never started in the v0.8.7.2 build.** 911 Inspection Dimensions
+came back with "no PART SKETCH pages found" on packets that plainly have them, and read
+zero parts. The reader itself was fine; three of its parts were missing from the
+installer. The library loads them by name out of its own settings file rather than
+importing them normally, so the packaging step never saw them and left them out - and the
+folders still shipped, empty, which is why it failed with a confusing message instead of
+an obvious one. All three now ship, and the build refuses to run if they ever go missing
+again.
+
+**A dead reader now says so.** That failure was reported as "no PART SKETCH pages found",
+which sent people hunting the packet instead of the app. Anything the reader can't start
+or can't open now says exactly that, and the run stops instead of writing a confident,
+empty report.
+
+**Angle tolerances were wrong on the sheet.** An angle read off the drawing was written
+as a plain number, so Excel gave it the same tolerance as a length - roughly a tenth
+either way instead of a degree. Weld-prep angles were always correct; only angles read
+off the drawing were affected. They now carry the degree symbol, so the form picks the
+right tolerance.
+
+**A misread number reached an inspection sheet.** A `.78` whose leading dot the reader
+lost became a 78-inch dimension on a 13-inch part. Every real length on these drawings is
+printed to two decimal places, so one without a decimal point is now thrown out - but only
+the length half of a callout, never the degrees, because a chamfer's `45` is genuinely a
+whole number. Nothing disappears quietly: a thrown-out reading is listed with what it read
+and what it probably should have been. If it ever throws away something real, there's a
+setting to turn it off without waiting for an update.
+
+**Pointing it at the whole 911 QTDR folder started reading everything.** The app looked
+one level down for work and, finding none, swept up every loose PDF sitting beside the
+order folders - so picking the top-level folder kicked off a run across the entire
+program. It now works out what you picked from what is actually on disk, refuses the
+911 QTDR root outright and says why, and for an order folder gives you a tick-list of its
+nests with all of them ticked.
+
+**The report is now written for the person checking the sheets.** It used to be saved into
+the nest folder and you had to go and find it. It now opens in a window when the run
+finishes, with a Save as .txt button that puts a copy in the folder you picked. It leads
+with what needs a second look - unsure readings, thrown-out numbers, weld preps needing a
+decision, tolerances somebody typed in by hand - then what went on each tab, what was left
+alone, and what was skipped as reference only. The drawing's own notes and the title-block
+fields the sheet already carries are gone.
 
 ---
 
