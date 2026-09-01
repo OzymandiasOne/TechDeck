@@ -98,7 +98,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the

@@ -107,6 +107,12 @@ Checks (E = error, fails the build; W = warning):
       Dimensions read 0 parts on FTOURIGNY-LT, 2026-09-01). This gate re-reads
       the package's own config at build time, so a version bump that renames an
       engine module fails here instead of on a colleague's machine.
+  E16 a run.py that carries its own VERSION constant must match plugin.json's
+      "version". The manifest is what the loader, the Library and the updater
+      report; the constant is what the plugin STAMPS on the output it hands the
+      user. When they drift, a user's report names a build that never existed
+      and a bug lands against the wrong version (911 Inspection Dimensions
+      shipped plugin.json 0.5.0 with VERSION = "0.4.0", 2026-09-01).
 
 Output is ASCII only (this runs from build.ps1).
 """
@@ -125,6 +131,9 @@ REPO = Path(__file__).resolve().parents[1]
 PLUGINS_DIR = REPO / "plugins"
 APP_PKG_DIR = REPO / "techdeck"
 SPEC_FILE = REPO / "TechDeck.spec"
+
+# E16: a plugin's own VERSION constant, which must match plugin.json's "version"
+VERSION_CONST_RE = r"""^VERSION\s*=\s*['"]([^'"]+)['"]"""
 ENTRY_MODULE = "techdeck.__main__"
 
 # "General" is the current family-less bucket; "other" stays accepted as its
@@ -723,6 +732,23 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 errors.append(
                     f"{pid}: folder/id must match the Library name per the naming "
                     f"convention - expected '{expected}' for name '{name}'")
+
+        # --- version drift (E16): the manifest version is what the app reports;
+        # a VERSION constant is what the plugin stamps on ITS OWN output. If they
+        # disagree, the user's report names a build that never existed.
+        declared = manifest.get("version")
+        run_src = plugin_dir / "run.py"
+        if isinstance(declared, str) and run_src.is_file():
+            try:
+                text = run_src.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            found = re.search(VERSION_CONST_RE, text, re.MULTILINE)
+            if found and found.group(1) != declared:
+                errors.append(
+                    f"{pid}: run.py VERSION = '{found.group(1)}' but plugin.json "
+                    f"version is '{declared}' - the plugin stamps one version on "
+                    f"its output while the app reports another")
 
     run_file = plugin_dir / "run.py"
     if not run_file.is_file():

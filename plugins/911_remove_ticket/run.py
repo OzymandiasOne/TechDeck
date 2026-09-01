@@ -57,7 +57,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # Century Gothic bold, under the Quality Requirements section. v1.2.0 made it
