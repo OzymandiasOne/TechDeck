@@ -1,0 +1,26 @@
+{
+  "id": "911_po_pdf_extractor",
+  "name": "911 PO PDF Extractor",
+  "description": "Extract PO packet data from PDFs to Excel with validation reports - prompts for folder when run",
+  "version": "2.3.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "details": {
+    "setup": [
+      "Have the folder of PO packet PDFs ready - you pick it when the app runs (it changes every batch, so it isn't a saved setting).",
+      "Make sure the PDFs are fully synced in OneDrive (not cloud-only placeholders) so they can be read."
+    ],
+    "how_it_works": [
+      "Pick the folder of PO PDFs.",
+      "The app reads each PO packet, pulls the PO data into a structured table, and checks the values as it goes."
+    ],
+    "output": [
+      "An Excel workbook of the extracted PO data, plus a validation report flagging anything that didn't read cleanly."
+    ]
+  },
+  "icon": "📋",
+  "requires_admin": false,
+  "settings": {
+    "fields": []
+  }
+}

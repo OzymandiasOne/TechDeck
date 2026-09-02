@@ -1,25 +1,32 @@
 """
-911 Scripting Prep Plugin for TechDeck v3.0.0
+911 Scripting Prep Plugin for TechDeck v1.0.0
 Builds the SSPO ERP scripting workbook (PO Data + Part Data) from an award
 package's SSPO AWARD REVIEW output and the Working Forecast List.
 
-NEW in v3.0.0 -- the PDF pivot (renamed from '911 PO PDF Extractor'):
-- No longer parses PO packet PDFs. The award data now comes from the 911 SSPO
-  Award Review workbook's 'Working Forecast Input' sheet, which is already
-  reviewed and correct; re-reading the PDFs only re-introduced the extraction
-  failures the award review had already resolved.
+A SEPARATE app from the 911 PO PDF Extractor, not a replacement for it. That
+extractor still reads an INCOMING PO packet from EB and is unchanged; this one
+builds an OUTGOING scripting sheet from data a reviewer has already checked.
+Different direction, different inputs, different output -- so they ship side by
+side. (This briefly shipped as a rewrite of that plugin, 2026-09-02; reverted
+the same day.)
+
+What it does:
+- Award data comes from the 911 SSPO Award Review workbook's 'Working Forecast
+  Input' sheet -- already deduplicated to one line per nest, and already
+  reviewed, so nothing here re-derives from the packet PDFs.
 - ONE workbook, TWO sheets, matching the hand-built scripting format:
-  'PO Data' (17 cols A-Q, was this plugin's 16) and 'Part Data' (18 cols A-R,
-  absorbed from the 911 Sketch Extractor's 17-column layout). A third
-  'Unresolved' sheet appears only when something needs hand entry -- same
-  workbook, so the exception list can't get separated from its data, and the
-  user deletes the sheet once the values are in.
+  'PO Data' (17 cols A-Q) and 'Part Data' (18 cols A-R, laid out like the 911
+  Sketch Extractor's sheet but keyed per NEST rather than per part).
+- A third 'Unresolved' sheet appears only when something needs hand entry --
+  same workbook, so the exception list can't get separated from its data, and
+  the user deletes the sheet once the values are in.
 - MATL / DESC resolve out of the Working Forecast List's 'Inventory Listing'
   sheet, keyed on Source Material -- read from a staged COPY of the live
   workbook, so a run can never touch the shared file (as 911 Setup does).
-- Row 1 carries the source tag for every column (AWARD / FORECAST / FIXED) and
-  app-filled columns are written in red, so the sheet documents itself exactly
-  like the hand-built reference.
+- Headers on row 1, data from row 2. App-filled columns are written in red so
+  the sheet shows at a glance which values it produced. (The hand-built
+  reference had a source-tag row above the headers; those were the author's
+  notes and are not written -- the tags still drive the code.)
 
 Prompts at runtime for:
 - The 911 SSPO AWARD REVIEW workbook (the award package's review output)
@@ -45,7 +52,7 @@ except ModuleNotFoundError:
 
 
 # ===== CONSTANTS =====
-VERSION = "3.0.0"
+VERSION = "1.0.0"
 
 _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 
@@ -68,15 +75,20 @@ INV_MATL_HEADER = "Mat'l Des"
 INV_DESC_HEADER = "Thickness"
 
 # ---------------------------------------------------------------------------
-# Output layout. Row 1 = source tag, row 2 = header, row 3+ = data.
+# Output layout: row 1 = header, row 2+ = data.
+#
+# The second element of each pair is the column's SOURCE, which decides what
+# the app writes there:
 #
 #   AWARD    - computed from the award review workbook
 #   FORECAST - looked up in the Working Forecast List
 #   FIXED    - the same value on every award, written from the tables below
-#   MANUAL   - typed by the user afterwards; header only, cells left blank,
-#              and row 1 left blank so an empty tag reads as 'not generated'
+#   MANUAL   - typed by the user afterwards; header only, cells left blank
 #
-# AWARD/FORECAST columns are written in red, matching the hand-built sheet.
+# These tags are internal. The hand-built reference printed them on a row above
+# the headers, but those were the author's working notes, so the app does not
+# write them (user, 2026-09-02). AWARD/FORECAST columns ARE written in red,
+# matching the reference's colour coding.
 # ---------------------------------------------------------------------------
 RED = Font(color="FFFF0000")
 
@@ -356,13 +368,17 @@ def build_records(award_rows: List[Dict[str, str]],
 
 
 def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> None:
-    """Row 1 source tags, row 2 headers, row 3+ data -- the hand-built layout.
-    AWARD/FORECAST cells are written red so a reviewer can see at a glance
-    which values the app produced."""
+    """Row 1 headers, row 2+ data.
+
+    The hand-built reference carried a source-tag row above the headers
+    (AWARD / FORECAST / FIXED); those were the author's working notes, not part
+    of the format, so they are not written (user, 2026-09-02). The tags still
+    drive the code -- which columns get filled and which are left for a human --
+    they just don't ship in the sheet. AWARD/FORECAST cells stay red so a
+    reviewer can still see at a glance which values the app produced.
+    """
     for idx, (header, tag) in enumerate(columns, start=1):
-        if tag != "MANUAL":
-            ws.cell(row=1, column=idx, value=tag)
-        head_cell = ws.cell(row=2, column=idx, value=header)
+        head_cell = ws.cell(row=1, column=idx, value=header)
         if tag in ("AWARD", "FORECAST"):
             head_cell.font = RED
 
@@ -370,12 +386,12 @@ def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> Non
         for idx, (header, tag) in enumerate(columns, start=1):
             if header not in record:
                 continue
-            cell = ws.cell(row=3 + offset, column=idx, value=record[header])
+            cell = ws.cell(row=2 + offset, column=idx, value=record[header])
             if tag in ("AWARD", "FORECAST"):
                 cell.font = RED
 
     for idx, (header, _tag) in enumerate(columns, start=1):
-        letter = ws.cell(row=2, column=idx).column_letter
+        letter = ws.cell(row=1, column=idx).column_letter
         ws.column_dimensions[letter].width = max(12, min(len(header) + 4, 40))
 
 
@@ -541,8 +557,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Sheets          : PO Data, Part Data%s"
         % (", Unresolved" if unresolved else ""))
     log("")
-    log("Blank by design (manual entry): PO NO, LINE, PROMISE DATE, and every")
-    log("other column whose row 1 tag is empty.")
+    log("Blank by design (manual entry): PO NO, LINE, PROMISE DATE, PART REV,")
+    log("STANDARD CLAUSES, SHIP, and the other columns shown in black.")
     log("=" * 50)
     log("911 Scripting Prep completed successfully!")
 
