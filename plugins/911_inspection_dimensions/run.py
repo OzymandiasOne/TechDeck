@@ -1424,8 +1424,9 @@ def choose_nests(params, folder, jobs, log):
         header="Select Nests to Read",
         root_label="All nests in %s" % (os.path.basename(os.path.normpath(folder)) or folder),
         noun="nest",
-        prompt_note=("Every nest found is ticked. Untick any you do not want read "
-                     "yet - nothing in them is opened or changed."),
+        default_checked=False,   # start empty, like 911 Setup - tick only what you want
+        prompt_note=("Nothing is ticked to start. Tick the nests you want read - "
+                     "nothing in the rest is opened or changed."),
         run_button_text="Read Selected",
     )
     if picked is None:
@@ -1435,7 +1436,7 @@ def choose_nests(params, folder, jobs, log):
     chosen = [j for j in jobs if j["_pick"] in keep]
     dropped = len(jobs) - len(chosen)
     if dropped:
-        log("Skipping %d nest(s) you unticked - nothing in them was touched." % dropped)
+        log("Skipping %d nest(s) you did not tick - nothing in them was touched." % dropped)
     return chosen
 
 

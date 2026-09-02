@@ -1,9 +1,9 @@
-; TechDeck Installer Script
-; Version 0.8.7.2.1 - Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
+﻿; TechDeck Installer Script
+; Version 0.8.7.3 - Scripting Prep - 911 Scripting Prep ships as its own app and the 911 PO PDF Extractor is back beside it
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.2.1"
+#define MyAppVersion "0.8.7.3"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
@@ -53,6 +53,12 @@ Name: "launchonstartup"; Description: "Launch {#MyAppName} on Windows startup"; 
 ; Main application files from dist\TechDeck\
 Source: "dist\TechDeck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled plugins (these will be copied to %LOCALAPPDATA% on first run by the app)
+; NOTE: java_tutor used to need an Excludes: pattern on BOTH lines above to keep
+; personal tooling out of colleagues' installs. It now lives in
+; tools/devkit/java_tutor/, and TechDeck.spec excludes the whole `tools` package
+; from every frozen build - so it cannot reach dist\ in the first place. Keep
+; dev-only tooling under tools/devkit/ and no exclusion is needed here; an
+; Excludes: pattern is string matching, and a rename would have shipped it.
 Source: "plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Assets (icons, etc.)
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs

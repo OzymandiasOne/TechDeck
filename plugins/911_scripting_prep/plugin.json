@@ -1,0 +1,112 @@
+{
+  "id": "911_scripting_prep",
+  "name": "911 Scripting Prep",
+  "description": "Builds the SSPO ERP scripting workbook from a finished 911 SSPO Award Review. A separate app from the 911 PO PDF Extractor - that one reads an INCOMING PO packet from EB; this one builds an OUTGOING scripting sheet from data a reviewer already checked. Reads the review's 'Working Forecast Input' sheet for the award data (DYPN = Order + Nest, pieces, orders, source material, division) and resolves each source code's material designation and size out of a staged read-only COPY of the Working Forecast List's 'Inventory Listing'. Writes ONE workbook with a 'PO Data' sheet (17 columns) and a 'Part Data' sheet (18 columns), headers on row 1 and data from row 2, with the app-filled values in red so the sheet shows at a glance what it produced. Columns that need a human (PO NO, LINE, PROMISE DATE, part rev, clauses, ship-to) get the header and stay blank. Anything whose source material isn't in the forecast is left blank and listed on a third 'Unresolved' sheet rather than being guessed at - delete that sheet once the values are in. Prompts for the award review workbook at runtime.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "911",
+  "details": {
+    "setup": [
+      "Run the 911 SSPO Award Review app on the award package first - this app runs off the workbook it writes.",
+      "You pick that '911 SSPO AWARD REVIEW ...' workbook when this app runs.",
+      "Make sure the Forecast and Inventory Reports folder is synced (not cloud-only) so the Working Forecast List can be copied."
+    ],
+    "how_it_works": [
+      "Pick the award review workbook. The app reads its 'Working Forecast Input' sheet - one line per nest, already reviewed.",
+      "It takes a read-only copy of the live Working Forecast List and looks each source material code up in the 'Inventory Listing' for the material designation and size. The live file is never opened.",
+      "It builds the PO Data and Part Data sheets in the scripting format, fills every column it can source, and leaves the manual-entry columns blank with just their header."
+    ],
+    "output": [
+      "One workbook - 'PO Data' and 'Part Data' sheets - saved next to the award review, with row 1 tagging where each column came from and the generated values in red.",
+      "If any source material isn't in the forecast, a third 'Unresolved' sheet in the same workbook listing exactly which nests need their material and size typed in by hand. Delete the sheet once they are filled in; it isn't created at all when everything resolves."
+    ]
+  },
+  "icon": "🧾",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "forecast_dir",
+        "type": "directory",
+        "label": "Forecast and Inventory Reports Directory",
+        "description": "Path to the 'Forecast and Inventory Reports' folder containing 'Working Forecast List.xlsx'. Leave blank to use the default OneDrive path.",
+        "placeholder": "C:\\Users\\YourName\\American Steel & Alum\\Communication site - Electric Boat ASA Docs\\Pilot Program\\Forecast and Inventory Reports",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "forecast_filename",
+        "type": "string",
+        "label": "Working Forecast Filename",
+        "description": "Name of the forecast workbook inside the Forecast and Inventory Reports folder.",
+        "placeholder": "Working Forecast List.xlsx",
+        "required": false,
+        "default": "Working Forecast List.xlsx"
+      },
+      {
+        "key": "output_dir",
+        "type": "directory",
+        "label": "Output Directory (optional)",
+        "description": "Where to save the scripting workbook. Leave blank to save it next to the award review workbook you pick.",
+        "placeholder": "C:\\Users\\YourName\\Desktop",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "po_qty",
+        "type": "number",
+        "label": "QTY (per PO line)",
+        "description": "Written to the QTY column on every PO Data row. This is the PO line's quantity, not a piece count - the piece and order counts have their own columns (BATCH, SOURCE). Leave at 1 unless an award needs otherwise.",
+        "placeholder": "1",
+        "required": false,
+        "default": 1
+      },
+      {
+        "key": "po_unit_price",
+        "type": "number",
+        "label": "UNIT PRICE (per PO line)",
+        "description": "Written to the UNIT PRICE column on every PO Data row. 0 is the placeholder used when pricing is added later.",
+        "placeholder": "0",
+        "required": false,
+        "default": 0
+      },
+      {
+        "key": "part_rev",
+        "type": "string",
+        "label": "PART REV (optional)",
+        "description": "Fills the PART REV column on every PO Data row. Leave blank to type it yourself - it names a revision that changes award to award.",
+        "placeholder": "OFLD-PLTFORM-REV 108",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "standard_clauses",
+        "type": "string",
+        "label": "STANDARD CLAUSES (optional)",
+        "description": "Fills the STANDARD CLAUSES column on every PO Data row. Leave blank to type it yourself - it cites this award's VIR numbers.",
+        "placeholder": "All work to be performed against line 2 standard clauses. Standard Clauses: ...",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "ship_to",
+        "type": "string",
+        "label": "SHIP (optional)",
+        "description": "Fills the SHIP column on every PO Data row.",
+        "placeholder": "911 QTDR OFFLOAD",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
+      }
+    ]
+  }
+}

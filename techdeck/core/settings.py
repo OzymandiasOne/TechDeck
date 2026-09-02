@@ -38,6 +38,13 @@ _PLUGIN_ID_RENAMES = {
     # Chain entries point at the FINAL id: tile/unlock migration is a single
     # dict lookup (no chaining), so an old->intermediate entry would leave a
     # stale tile for one launch.
+    # 911 Scripting Prep briefly carried this id while it was (wrongly) built
+    # as a replacement for the PO PDF Extractor. It never shipped in a RELEASE,
+    # but a dev run under that name is enough to write the id into a real
+    # settings.json -- which left a dead tile on the Default profile. An id
+    # that ever LOADED needs an entry, shipped or not. The PO PDF Extractor
+    # itself was restored and keeps its own id.
+    "911_sspo_scripting_prep": "911_scripting_prep",
     "911_linear_inch_calc": "911_sspo_award_review",   # renamed 2026-06-04
     "911_runtime_estimator": "911_sspo_award_review",  # renamed 2026-07-13
     "linear_inch_calculator": "customer_dxf_analysis",  # renamed 2026-06-10 (via customer_dxf_quoting)

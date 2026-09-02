@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.2.1 - Bevel Angles Patch 1.0
+# TechDeck v0.8.7.3 - Scripting Prep
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,43 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.3 - Scripting Prep
+
+**911 Scripting Prep is a new app.** It builds the outgoing SSPO scripting sheet from an
+award review someone has already checked, so the sheet is filled in from data that has
+been through review rather than typed again. It writes one workbook with a PO Data sheet
+and a Part Data sheet, headers on the first row and data from the second - the working
+notes that used to sit above the headers are gone. The columns the app fills in are
+still marked in red so they're easy to pick out from the ones you supply.
+
+**911 PO PDF Extractor is back.** It was replaced by Scripting Prep, which was a mistake -
+the two do opposite jobs. The extractor reads an incoming PO packet from Electric Boat;
+Scripting Prep builds the outgoing scripting sheet. Both ship now, side by side, and an
+update no longer removes the extractor. **One thing to do once:** the earlier change took
+the PO PDF Extractor tile off your Home screen. Add it back from the Library and it will
+stay.
+
+**Nests Scripting Prep couldn't resolve stay in the same file.** They used to be written
+to a second workbook sitting beside the first, which is easy to lose track of. They are
+now an "Unresolved" sheet in the same workbook, listed with the reason each one couldn't
+be resolved. Once you've filled the values in you can delete the sheet - something a
+separate file can't do. If everything resolves, the sheet isn't created at all.
+
+**The PO line's QTY and UNIT PRICE are settings.** They were fixed at 1 and 0 in the code,
+which is right for the awards we've seen but not something to rebuild the app over. They
+are now ordinary settings, so a different award is a change you can make yourself.
+
+**A leftover tile clears itself.** Renaming the app mid-development left some machines
+with a tile pointing at a name that no longer exists. It is now removed on launch, with
+no duplicate left behind.
+
+**911 Inspection Dimensions starts with no nests ticked.** It used to arrive with every
+nest in the order ticked, so reading one nest meant unticking the rest. It now matches
+911 Setup - you tick the ones you want. Reading a whole order is the exception, not the
+normal case.
 
 ---
 
@@ -961,6 +998,7 @@ Explorer and on pinned shortcuts.
 | 911 Batch Repeater | Finds repeat parts for a 911 batch via the 911 Master Parts List (compiled from completed nests) and copies each repeat's CAD files (SolidWorks model, drawing, and PDF) from its completed source nest into a REPEAT folder inside the target nest. If you own the Sentry Drone and have switched it on for this app, the two-phase drone picker locks the batch folder, zooms inside, then lets you lock multiple nests before striking them - those nests run with the default grabs. Otherwise: a folder dialog plus a nest-selection window where any nest expands to toggle exactly what it grabs (models, PDFs, overwrite existing) |
 | 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets |
 | 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |
+| 911 Scripting Prep | Builds the SSPO ERP scripting workbook (PO Data + Part Data) from a finished SSPO Award Review plus the Working Forecast List |
 | 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
 | 911 Inspection Dimensions | Reads every PART SKETCH drawing in a batch and fills each part's dimensions straight onto its inspection sheet, so the numbers don't have to be typed off the paper. Only the coloured nominal boxes get written - the sheet still works out its own min and max - and a tab you have already filled in is never touched, so it is safe to run again. Logs lengths, radii (R .40), chamfers, snipes, and the weld preps (the KB codes, with the side each one applies to); leaves out anything marked REF and anything that is part of a note on the drawing (both listed separately so you can see them). Also pulls the part number, work order, size and FAB DIM off the title block, and flags any drawing it could not read so nothing goes missing quietly |
 | 911 SSPO Award Review | (Formerly 911 Runtime Estimator.) Runs off an award package (folder of order folders); estimates plate cutting time from actual D911 throughput (a pieces-per-hour table by thickness band derived from 18.5 months of closed actuals - includes setup/handling) plus stock/material from each nest's packet PDF - the old exact-linear-inch times (each work order's DXF geometry / a thickness-driven feed rate) still computed as far-right reference columns - and writes one workbook with Plates and Non-Plates sheets (data table + real Excel PivotTable each), a Shape Ft Req sheet totalling each shape nest's stock feet (Summary-of-Batches lengths / 12, rounded up per length) for receiving, and a Working Forecast Input sheet (per-nest Source Material / Pieces / Orders from the nest packet, shape Total Ft Req, blank REM columns) that copy-pastes straight into the Working Forecast List |
