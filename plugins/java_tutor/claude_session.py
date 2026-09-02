@@ -126,6 +126,7 @@ class ClaudeSession(QObject):
         session_ready(str)              the CLI reported this turn's session id
         rate_limit(dict)                usage-window info, straight from the CLI
         sandbox_warning(list)           unexpected tools present in the session
+        session_lost()                  the resumed lesson was gone; started fresh
     """
 
     turn_started = Signal()
@@ -136,6 +137,7 @@ class ClaudeSession(QObject):
     session_ready = Signal(str)
     rate_limit = Signal(dict)
     sandbox_warning = Signal(list)
+    session_lost = Signal()
 
     def __init__(self, parent=None, cwd: Path = TUTOR_CWD):
         super().__init__(parent)
@@ -153,6 +155,8 @@ class ClaudeSession(QObject):
         # Tools seen in a session that _DENIED_TOOLS did not know about.
         # Added to the deny list for every later turn (see _check_sandbox).
         self._extra_denied: list[str] = []
+        self._last_message = ""       # for the one retry after a lost session
+        self._retried_fresh = False
 
     # -- state -------------------------------------------------------------
 
@@ -186,6 +190,7 @@ class ClaudeSession(QObject):
         if not message.strip():
             return
 
+        self._last_message = message
         exe = find_claude()
 
         args = [
@@ -301,12 +306,76 @@ class ClaudeSession(QObject):
             # `result` carries the authoritative final text. Prefer it over the
             # accumulated deltas, which can miss a block the stream skipped.
             if evt.get("is_error"):
-                msg = str(evt.get("result") or "The tutor hit an error.")
-                self._fail(msg)
+                # The message can be in `result` OR in an `errors` array (a
+                # failed --resume only fills the latter), and the CLI exits 0
+                # for both, so the exit code proves nothing.
+                raw = evt.get("result")
+                if not raw:
+                    errs = evt.get("errors")
+                    raw = "; ".join(errs) if isinstance(errs, list) and errs else ""
+                self._handle_error(str(raw or "The tutor hit an error."))
             else:
+                self._retried_fresh = False
                 final = evt.get("result")
                 if isinstance(final, str) and final.strip():
                     self._text_parts = [final]
+
+    def _handle_error(self, raw: str) -> None:
+        """Classify a CLI error, recovering where recovery is possible."""
+        low = raw.lower()
+
+        # The lesson we tried to resume is gone - deleted, pruned, or the
+        # folder was cleaned. Without this the app would retry the same dead id
+        # forever and the tutor would look permanently broken.
+        if "no conversation found" in low and not self._retried_fresh:
+            logger.info("java_tutor: session %s is gone; starting fresh", self._session_id)
+            self._session_id = None
+            self._retried_fresh = True
+            self._drop_process()
+            self.session_lost.emit()
+            self.send(self._last_message)
+            return
+
+        if "not logged in" in low or "authentication" in low or "/login" in low:
+            self._fail(
+                "You are not signed in to Claude Code, so the tutor cannot "
+                "answer.\n\n"
+                "Open Claude Code, sign in, then send your message again. "
+                "You do not need to keep it open afterwards.")
+            return
+
+        if "rate limit" in low or "usage limit" in low or "429" in low:
+            self._fail(
+                "You have used up your Claude usage window, so the tutor has to "
+                "stop until it resets.\n\nThe percentage at the bottom right "
+                "tracks it. Your work is saved - come back and pick this lesson "
+                "up from the sidebar.")
+            return
+
+        self._fail(raw)
+
+    def _drop_process(self) -> None:
+        """Let go of the current process without reporting a failure.
+
+        Its signals are DISCONNECTED first: a killed process still emits
+        `finished`, and that slot would otherwise null out the replacement
+        process this call is about to make room for.
+        """
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        try:
+            proc.readyReadStandardOutput.disconnect()
+            proc.readyReadStandardError.disconnect()
+            proc.finished.disconnect()
+            proc.errorOccurred.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        try:
+            proc.kill()
+        except RuntimeError:
+            pass
+        proc.deleteLater()
 
     def _check_sandbox(self, tools: list) -> None:
         """Deny anything the allowlist does not name, from the next turn on.
@@ -354,8 +423,5 @@ class ClaudeSession(QObject):
         self.turn_finished.emit("".join(self._text_parts))
 
     def _fail(self, message: str) -> None:
-        proc, self._proc = self._proc, None
-        if proc is not None:
-            proc.kill()
-            proc.deleteLater()
+        self._drop_process()
         self.turn_failed.emit(message)

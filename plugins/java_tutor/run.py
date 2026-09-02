@@ -174,6 +174,7 @@ class JavaTutorWindow(PluginWindow):
         self._session.session_ready.connect(self._on_session_ready)
         self._session.rate_limit.connect(self._on_rate_limit)
         self._session.sandbox_warning.connect(self._on_sandbox_warning)
+        self._session.session_lost.connect(self._on_session_lost)
 
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setInterval(_STREAM_REPAINT_MS)
@@ -438,6 +439,14 @@ class JavaTutorWindow(PluginWindow):
         self._send_btn.setEnabled(not self._read_only)
         self._stop_btn.setVisible(False)
         self._set_status("Something went wrong.")
+        self._rerender()
+
+    def _on_session_lost(self):
+        """The lesson we tried to continue is gone; a fresh one took over."""
+        self._messages.append(
+            ("error", "That lesson's saved history is gone, so this is a fresh "
+                      "conversation. Your message was sent - the tutor just "
+                      "will not remember what came before it."))
         self._rerender()
 
     def _on_session_ready(self, session_id: str):
