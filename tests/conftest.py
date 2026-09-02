@@ -31,8 +31,12 @@ session closes the class rather than the instances.
 
 
 
+from pathlib import Path
+
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -45,3 +49,36 @@ def _isolate_localappdata(tmp_path_factory):
     mp.setenv("APPDATA", str(fake))
     yield fake
     mp.undo()
+
+
+@pytest.fixture
+def private_doc():
+    """Resolve a repo path that PUBLISHING STRIPS - or skip the test.
+
+    `tools/publish_mirror.py` deletes CLAUDE.md, LESSONS_LEARNED.md, docs/,
+    .claude/ and friends from EVERY commit of the public mirror. So a test that
+    reads one of them by a fixed path passes on every developer machine and
+    fails only on the public repo's CI - the one place the filtered tree is
+    what actually runs. There is no local signal at all.
+
+    Found 2026-09-02: both CLAUDE.md budget gates did exactly that and turned
+    public main red the moment v0.8.7.3 was pushed - a release-time failure,
+    after the tag was cut and the Release published. Same shape as the
+    scrub-map-fixture trap already recorded in the release skill: the working
+    repo and the published repo are different trees, and only one of them runs
+    in CI.
+
+    Guard the read with this fixture. Locally the file is there and the gate
+    runs; on the filtered tree it is absent and the gate skips, which is
+    correct - a rule about CLAUDE.md has nothing to say about a mirror that
+    deliberately has no CLAUDE.md.
+    """
+    def _resolve(relpath: str) -> Path:
+        path = ROOT / relpath
+        if not path.exists():
+            pytest.skip(
+                f"{relpath} is stripped from the published mirror by "
+                f"tools/publish_mirror.py - this gate applies to the working "
+                f"repo only")
+        return path
+    return _resolve

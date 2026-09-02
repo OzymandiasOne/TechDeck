@@ -10,13 +10,11 @@ docs/PLUGINS.md. Every other rule in this repo that matters got a build gate
 the one that stayed advisory, so it was the one that rotted.
 
 This is that gate. It is deliberately dumb: one number, checked on every build.
+
+It reads CLAUDE.md through the `private_doc` fixture rather than by a fixed
+path, because publishing STRIPS CLAUDE.md from the public mirror - reading it
+directly turned public main red on the v0.8.7.3 push. See tests/conftest.py.
 """
-
-from pathlib import Path
-
-import pytest
-
-ROOT = Path(__file__).resolve().parents[2]
 
 # Ratchet DOWN as sections are extracted; never up. Raising this number is the
 # exact move that produced the 42k file, so treat a failure as "what should
@@ -24,8 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 BUDGET = 20_000
 
 
-def test_claude_md_is_within_budget():
-    path = ROOT / "CLAUDE.md"
+def test_claude_md_is_within_budget(private_doc):
+    path = private_doc("CLAUDE.md")
     size = len(path.read_text(encoding="utf-8"))
     assert size <= BUDGET, (
         f"CLAUDE.md is {size:,} chars, over the {BUDGET:,} budget by "
@@ -37,10 +35,10 @@ def test_claude_md_is_within_budget():
         f"LESSONS_LEARNED.md; a procedure goes to the matching skill.")
 
 
-def test_roster_rows_stay_one_liners():
+def test_roster_rows_stay_one_liners(private_doc):
     """The roster is a table of contents, not documentation. It was 21k chars of
     paragraph-length rows - half the file - all of it duplicating docs/PLUGINS.md."""
-    text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    text = private_doc("CLAUDE.md").read_text(encoding="utf-8")
     start = text.index("## Installed Plugins")
     end = text.index("## Corporate Environment Notes")
     fat = [l for l in text[start:end].splitlines()
