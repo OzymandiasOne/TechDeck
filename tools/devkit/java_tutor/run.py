@@ -117,6 +117,41 @@ def _palette() -> dict:
     return pal
 
 
+class InputBox(QTextEdit):
+    """The message box.
+
+    Enter sends; Shift+Enter is a newline. That is the chat convention, and it
+    is the right way round here because most messages are one line - but pasted
+    code is common too, so the newline has to stay reachable. Ctrl+Enter still
+    sends, because it used to be the only way and the muscle memory is real.
+
+    Escape asks the window to cancel the turn in flight and hand the message
+    back, so a send can be taken back and edited rather than retyped.
+    """
+
+    send_requested = Signal()
+    cancel_requested = Signal()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        mods = event.modifiers()
+
+        if key == Qt.Key.Key_Escape:
+            self.cancel_requested.emit()
+            return
+
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # Shift+Enter is the ONLY newline path; every other modifier
+            # combination sends, so Ctrl+Enter keeps working as before.
+            if mods & Qt.KeyboardModifier.ShiftModifier:
+                super().keyPressEvent(event)
+                return
+            self.send_requested.emit()
+            return
+
+        super().keyPressEvent(event)
+
+
 class ChatView(QTextBrowser):
     """The transcript. Renders markdown, hands Copy clicks back to the window."""
 
@@ -170,6 +205,11 @@ class JavaTutorWindow(PluginWindow):
         # Lesson names live in a sidecar, never in Claude's transcripts.
         self._titles = titles.TitleStore()
         self._read_only = False      # viewing an old lesson, not in it
+        # Set by Esc while a turn is in flight. interrupt() makes the turn
+        # END rather than return synchronously, so the undo has to happen
+        # in the finish handler; this carries the intent across.
+        self._cancelling = False
+        self._sent_text = ""       # the message a cancel hands back
 
         self._session = claude_session.ClaudeSession(self)
         self._session.turn_started.connect(self._on_turn_started)
@@ -277,9 +317,12 @@ class JavaTutorWindow(PluginWindow):
         self._resume_bar.setVisible(False)
         col.addWidget(self._resume_bar)
 
-        self._input = QTextEdit()
+        self._input = InputBox()
+        self._input.send_requested.connect(self._send)
+        self._input.cancel_requested.connect(self._cancel_send)
         self._input.setPlaceholderText(
-            "Ask a question, or paste your code here.   (Ctrl+Enter to send)")
+            "Ask a question, or paste your code here.   "
+            "(Enter sends, Shift+Enter for a new line, Esc takes it back)")
         self._input.setFixedHeight(110)
         self._input.setFont(QFont("Consolas", 10))
         col.addWidget(self._input)
@@ -294,6 +337,11 @@ class JavaTutorWindow(PluginWindow):
         row.addWidget(self._usage)
 
         self._stop_btn = QPushButton("Stop")
+        # Stop KEEPS whatever answer streamed in; Esc throws it away and hands
+        # your message back. Two different intentions, so two different controls.
+        self._stop_btn.setToolTip(
+            "Stop the answer here and keep what has arrived.\n"
+            "Press Esc instead to cancel and get your message back.")
         self._stop_btn.clicked.connect(self._session.interrupt)
         self._stop_btn.setVisible(False)
         row.addWidget(self._stop_btn)
@@ -304,13 +352,15 @@ class JavaTutorWindow(PluginWindow):
         row.addWidget(self._send_btn)
         col.addLayout(row)
 
-        # Ctrl+Enter sends; plain Enter stays a newline so pasted code and
-        # multi-line questions work normally.
+        # Enter/Shift+Enter/Esc are handled by InputBox itself (it has to see
+        # the key before QTextEdit inserts a newline). Esc is ALSO a window
+        # shortcut so it still cancels when focus has left the box - during a
+        # turn the box is empty and the user may have clicked elsewhere.
         self._shortcuts = []
-        for seq in ("Ctrl+Return", "Ctrl+Enter"):
-            sc = QShortcut(QKeySequence(seq), self._input)
-            sc.activated.connect(self._send)
-            self._shortcuts.append(sc)   # keep alive
+        esc = QShortcut(QKeySequence("Escape"), self)
+        esc.setContext(Qt.ShortcutContext.WindowShortcut)
+        esc.activated.connect(self._cancel_send)
+        self._shortcuts.append(esc)      # keep alive
 
         return panel
 
@@ -446,6 +496,7 @@ class JavaTutorWindow(PluginWindow):
         if not text:
             return
         self._input.clear()
+        self._sent_text = text
         self._messages.append(("user", text))
         self._streaming = ""
         self._rerender()
@@ -455,6 +506,38 @@ class JavaTutorWindow(PluginWindow):
             self._show_banner(str(exc))
         except RuntimeError as exc:
             self._set_status(str(exc))
+
+    def _cancel_send(self):
+        """Esc: take back the message being answered.
+
+        Stops the turn, drops the user bubble from the transcript, and puts the
+        text back in the box so it can be edited instead of retyped. Silent when
+        nothing is in flight - Esc should not be a way to lose what you typed.
+        """
+        if not self._session.busy:
+            return
+        self._cancelling = True
+        self._set_status("Cancelling...")
+        self._session.interrupt()
+
+    def _undo_send(self):
+        """Roll the transcript and the input box back to just before the send."""
+        self._cancelling = False
+        self._streaming = ""
+        if self._messages and self._messages[-1][0] == "user":
+            self._messages.pop()
+        if self._sent_text:
+            self._input.setPlainText(self._sent_text)
+            cursor = self._input.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self._input.setTextCursor(cursor)
+        self._sent_text = ""
+        self._send_btn.setEnabled(not self._read_only)
+        self._stop_btn.setVisible(False)
+        self._repaint_timer.stop()
+        self._set_status("Cancelled - your message is back in the box.")
+        self._rerender()
+        self._input.setFocus()
 
     # -- engine signals ----------------------------------------------------
 
@@ -475,6 +558,11 @@ class JavaTutorWindow(PluginWindow):
 
     def _on_turn_finished(self, full_text: str):
         self._repaint_timer.stop()
+        if self._cancelling:
+            # An interrupted turn still arrives here, carrying whatever partial
+            # answer streamed in. A cancel wants none of it.
+            self._undo_send()
+            return
         final = full_text or self._streaming
         self._streaming = ""
         if final.strip():
@@ -488,6 +576,9 @@ class JavaTutorWindow(PluginWindow):
 
     def _on_turn_failed(self, message: str):
         self._repaint_timer.stop()
+        if self._cancelling:
+            self._undo_send()
+            return
         if self._streaming.strip():
             self._messages.append(("assistant", self._streaming))
         self._streaming = ""
