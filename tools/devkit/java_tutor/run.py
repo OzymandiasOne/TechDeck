@@ -100,7 +100,21 @@ def _user_facing(message: str):
 
 
 def _palette() -> dict:
-    """Render colours, pulled from the active TechDeck theme where possible."""
+    """Colours for the transcript.
+
+    The chat area is a CODE SURFACE, not a themed panel - the same call an IDE
+    or a terminal makes. It stays dark whatever the app theme is, because the
+    syntax colours in render.py (One Dark: purple keywords, green strings, grey
+    comments) are chosen against a dark background and go unreadable on a light
+    one. A light theme used to repaint `text` dark and `code_bg` pale, which is
+    how "I cannot tell where your text ends and mine begins" happens.
+
+    Everything OUTSIDE the transcript - the window, sidebar, buttons, status bar
+    - is still fully themed. Only this one surface opts out.
+
+    The font family is still taken from the theme: some themes pick a monospace
+    face deliberately (cyberpunk, matrix) and that is a look, not a bug.
+    """
     pal = dict(render.DEFAULTS)
     if get_theme_manager is None:
         return pal
@@ -108,12 +122,9 @@ def _palette() -> dict:
         p = get_theme_manager().get_current_palette()
     except Exception:
         return pal
-    for key, attr in (("text", "text"), ("muted", "text_secondary"),
-                      ("code_bg", "console_bg"), ("code_border", "border"),
-                      ("accent", "accent"), ("font_family", "font_family")):
-        value = getattr(p, attr, None)
-        if value:
-            pal[key] = value
+    family = getattr(p, "font_family", None)
+    if family:
+        pal["font_family"] = family
     return pal
 
 
@@ -170,8 +181,15 @@ class ChatView(QTextBrowser):
         # app-level stylesheet's font-family beats it, so the family has to be
         # set in the widget's OWN stylesheet. Code blocks are always monospace
         # regardless, via their inline family in render.py.
+        # The background has to be set on the WIDGET, not just in the body HTML:
+        # the app-level stylesheet paints QTextBrowser with the theme's panel
+        # colour, and that shows through the margin around the document and
+        # behind the scrollbar. Without this the transcript is a black page
+        # floating on a light surface under any light theme.
         self.setStyleSheet(
-            "QTextBrowser { font-family: %s; font-size: 14px; }" % pal["font_family"])
+            "QTextBrowser { font-family: %s; font-size: 14px; "
+            "background-color: %s; color: %s; border: none; }"
+            % (pal["font_family"], pal["chat_bg"], pal["text"]))
 
     def _on_anchor(self, url):
         text = url.toString()
@@ -325,6 +343,13 @@ class JavaTutorWindow(PluginWindow):
             "(Enter sends, Shift+Enter for a new line, Esc takes it back)")
         self._input.setFixedHeight(110)
         self._input.setFont(QFont("Consolas", 10))
+        # Same code surface as the transcript above it. A themed (often light)
+        # input box sitting under a black transcript reads as a rendering fault,
+        # and this is the box you paste Java into.
+        self._input.setStyleSheet(
+            "QTextEdit { background-color: %s; color: %s; "
+            "border: 1px solid %s; border-radius: 3px; padding: 6px; }"
+            % (self._pal["chat_bg"], self._pal["text"], self._pal["code_border"]))
         col.addWidget(self._input)
 
         row = QHBoxLayout()
@@ -647,30 +672,54 @@ class JavaTutorWindow(PluginWindow):
         if self._streaming:
             parts.append(self._bubble("assistant", self._streaming, pal, live=True))
 
+        # setHtml() rebuilds the document and resets the scrollbar to 0. While a
+        # answer streams this runs every _STREAM_REPAINT_MS, so without saving
+        # the position the view yanks you back to the top a dozen times a second
+        # for the whole answer - it reads as "scrolling is frozen".
+        bar = self._view.verticalScrollBar()
         at_bottom = self._is_at_bottom()
+        previous = bar.value()
+
         self._view.setHtml(
-            f'<body style="color:{pal["text"]};">' + "".join(parts) + "</body>")
+            f'<body style="color:{pal["text"]};background-color:{pal["chat_bg"]};">'
+            + "".join(parts) + "</body>")
+
         if at_bottom:
             self._scroll_to_bottom()
+        else:
+            # Stay where the reader put themselves. maximum() has usually grown,
+            # so the old value still points at roughly the same content.
+            bar.setValue(min(previous, bar.maximum()))
 
     def _bubble(self, role: str, text: str, pal: dict, live: bool = False) -> str:
-        if role == "user":
-            body, codes = render.to_html(text, pal)
-            self._code_blocks.extend(codes)
-            return (
-                f'<table width="100%" cellspacing="0" cellpadding="0" '
-                f'style="margin:10px 0;"><tr><td '
-                f'style="border-left:3px solid {pal["accent"]};padding-left:12px;">'
-                f'<div style="color:{pal["muted"]};font-size:11px;">You</div>'
-                f"{body}</td></tr></table>")
+        """One message. BOTH speakers get a coloured rule and a name.
 
+        The tutor's replies used to be a bare `<div>` with no label at all, so a
+        long answer followed by a short question ran together as one wall of
+        text. Same table shape for both keeps the left edges aligned; only the
+        colour and the name change.
+        """
         if role == "error":
-            return (f'<div style="color:#ff8b8b;margin:10px 0;">{text}</div>')
+            return (f'<table width="100%" cellspacing="0" cellpadding="0" '
+                    f'style="margin:10px 0;"><tr><td '
+                    f'style="border-left:3px solid #ff8b8b;padding-left:12px;">'
+                    f'<div style="color:#ff8b8b;">{text}</div>'
+                    f"</td></tr></table>")
+
+        speaker = "You" if role == "user" else "Java Tutor"
+        colour = pal["user"] if role == "user" else pal["tutor"]
 
         body, codes = render.to_html(text, pal)
         self._code_blocks.extend(codes)
-        caret = ' <span style="color:%s;">|</span>' % pal["accent"] if live else ""
-        return (f'<div style="margin:10px 0 16px 0;">{body}{caret}</div>')
+        caret = f' <span style="color:{colour};">|</span>' if live else ""
+
+        return (
+            f'<table width="100%" cellspacing="0" cellpadding="0" '
+            f'style="margin:14px 0;"><tr><td '
+            f'style="border-left:3px solid {colour};padding-left:12px;">'
+            f'<div style="color:{colour};font-size:11px;font-weight:bold;">'
+            f'{speaker}</div>'
+            f"{body}{caret}</td></tr></table>")
 
     def _copy_code(self, index: int):
         if 0 <= index < len(self._code_blocks):

@@ -18,11 +18,18 @@ import re
 # Defaults are tuned for TechDeck's dark theme; the window passes real theme
 # colours in where it has them.
 DEFAULTS = {
+    # The transcript is a code surface and stays dark whatever the app theme is;
+    # every syntax colour below is chosen against black. See run.py `_palette`.
+    "chat_bg": "#000000",
     "text": "#e6e6e6",
     "muted": "#9aa0a6",
-    "code_bg": "#1b1f24",
+    "code_bg": "#1b1f24",     # lifted off the black so code blocks read as blocks
     "code_border": "#2d333b",
     "accent": "#7aa2f7",
+    # Who is speaking. Two clearly different hues, because the complaint that
+    # produced them was "hard to tell where your text and my text begin".
+    "user": "#61afef",        # you - blue
+    "tutor": "#98c379",       # the tutor - green
     "kw": "#c678dd",        # keywords
     "str": "#98c379",       # strings and chars
     "com": "#7f848e",       # comments
