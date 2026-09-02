@@ -1,4 +1,4 @@
-; TechDeck Installer Script
+﻿; TechDeck Installer Script
 ; Version 0.8.7.2.1 - Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
 ; Requires Inno Setup 6.0 or later
 
@@ -51,13 +51,15 @@ Name: "launchonstartup"; Description: "Launch {#MyAppName} on Windows startup"; 
 
 [Files]
 ; Main application files from dist\TechDeck\
-Source: "dist\TechDeck\*"; DestDir: "{app}"; Excludes: "plugins\java_tutor\*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\TechDeck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled plugins (these will be copied to %LOCALAPPDATA% on first run by the app)
-; java_tutor is personal tooling (it needs Claude Code installed) and is
-; excluded from BOTH copy steps above, so a colleague never gets a tile that
-; cannot work on their machine. It stays in the repo and is still
-; gate-checked; see DEV_ONLY_PLUGIN_IDS in tests/tools/test_workbook_roster.py.
-Source: "plugins\*"; DestDir: "{app}\plugins"; Excludes: "java_tutor"; Flags: ignoreversion recursesubdirs createallsubdirs
+; NOTE: java_tutor used to need an Excludes: pattern on BOTH lines above to keep
+; personal tooling out of colleagues' installs. It now lives in
+; tools/devkit/java_tutor/, and TechDeck.spec excludes the whole `tools` package
+; from every frozen build - so it cannot reach dist\ in the first place. Keep
+; dev-only tooling under tools/devkit/ and no exclusion is needed here; an
+; Excludes: pattern is string matching, and a rename would have shipped it.
+Source: "plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Assets (icons, etc.)
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Documentation (optional - comment out if not present)

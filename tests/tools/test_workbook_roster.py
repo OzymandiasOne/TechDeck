@@ -33,10 +33,12 @@ SECTION_FOR_FAMILY = {
 }
 SHARED_SECTION = "QUALITY, ESTIMATING & SHOP TOOLS"
 
-# Personal tooling, not ASA production automation, so it is not on the
-# presented record - the same reason Games are skipped. Kept in step with
-# DEV_ONLY_PLUGINS in TechDeck.spec, which also keeps these out of the build.
-DEV_ONLY_PLUGIN_IDS = {"java_tutor"}
+# Dev-only tooling is no longer an allowlist to maintain here. It lives under
+# tools/devkit/, which TechDeck.spec excludes from every frozen build, so it is
+# not in plugins/ and never reaches this scan. (The comment this replaces
+# pointed at a DEV_ONLY_PLUGINS in TechDeck.spec that did not exist - the kind
+# of rot a hand-maintained second list attracts.) Games are still skipped
+# below: those DO ship, they are just not ASA production automation.
 
 
 def _plugins() -> dict:
@@ -45,7 +47,7 @@ def _plugins() -> dict:
     for path in sorted((ROOT / "plugins").glob("*/plugin.json")):
         meta = json.loads(path.read_text(encoding="utf-8-sig"))
         family = meta.get("family", "General")
-        if family == "Games" or meta.get("id") in DEV_ONLY_PLUGIN_IDS:
+        if family == "Games":
             continue
         out[meta["name"]] = family
     return out

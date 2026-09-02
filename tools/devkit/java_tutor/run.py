@@ -25,7 +25,10 @@ try:
     from techdeck.core.plugin_window import PluginWindow
 except ModuleNotFoundError:  # standalone / headless testing
     import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    # tools/devkit/java_tutor/<file> -> parents[3] is the repo root.
+    # (Was parents[2] while this lived in plugins/; the DevKit move made it
+    # wrong. tests/tools/test_devkit_java_tutor.py pins the depth.)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     from techdeck.core.plugin_window import PluginWindow
 
 try:
