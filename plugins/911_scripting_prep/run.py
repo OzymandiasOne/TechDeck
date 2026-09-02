@@ -10,7 +10,10 @@ NEW in v3.0.0 -- the PDF pivot (renamed from '911 PO PDF Extractor'):
   failures the award review had already resolved.
 - ONE workbook, TWO sheets, matching the hand-built scripting format:
   'PO Data' (17 cols A-Q, was this plugin's 16) and 'Part Data' (18 cols A-R,
-  absorbed from the 911 Sketch Extractor's 17-column layout).
+  absorbed from the 911 Sketch Extractor's 17-column layout). A third
+  'Unresolved' sheet appears only when something needs hand entry -- same
+  workbook, so the exception list can't get separated from its data, and the
+  user deletes the sheet once the values are in.
 - MATL / DESC resolve out of the Working Forecast List's 'Inventory Listing'
   sheet, keyed on Source Material -- read from a staged COPY of the live
   workbook, so a run can never touch the shared file (as 911 Setup does).
@@ -352,26 +355,15 @@ def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> Non
         ws.column_dimensions[letter].width = max(12, min(len(header) + 4, 40))
 
 
-def write_output(output_path: Path, po_rows: List[Dict], part_rows: List[Dict],
-                 log) -> None:
-    """The two-sheet scripting workbook."""
-    wb = Workbook()
-    ws_po = wb.active or wb.create_sheet()
-    ws_po.title = "PO Data"
-    _write_sheet(ws_po, PO_COLUMNS, po_rows)
+def _write_unresolved_sheet(wb, unresolved: List[Dict], total: int) -> None:
+    """Third sheet: one row per nest whose Source Material didn't resolve.
 
-    ws_part = wb.create_sheet("Part Data")
-    _write_sheet(ws_part, PART_COLUMNS, part_rows)
-
-    sdk.save_workbook(wb, output_path, log)
-
-
-def write_validation(output_path: Path, unresolved: List[Dict], total: int,
-                     log) -> None:
-    """One row per nest whose Source Material didn't resolve."""
-    wb = Workbook()
-    ws = wb.active or wb.create_sheet()
-    ws.title = "Unresolved"
+    It rides in the SAME workbook rather than a sibling file so the exception
+    list can't get separated from the data it belongs to -- and so it can be
+    deleted once the values are filled in, which a second file can't be.
+    Only created when there is something to report.
+    """
+    ws = wb.create_sheet("Unresolved")
     ws["A1"] = "SOURCE MATERIALS NOT RESOLVED IN THE WORKING FORECAST LIST"
     ws["A1"].font = Font(bold=True)
     ws.append([])
@@ -383,10 +375,27 @@ def write_validation(output_path: Path, unresolved: List[Dict], total: int,
     ws.append([])
     ws.append(["%d of %d nests need MATL / DESC filled in by hand."
                % (len(unresolved), total)])
+    ws.append(["Delete this sheet once they are filled in."])
     for letter, width in (("A", 18), ("B", 20), ("C", 52)):
         ws.column_dimensions[letter].width = width
+
+
+def write_output(output_path: Path, po_rows: List[Dict], part_rows: List[Dict],
+                 unresolved: List[Dict], total: int, log) -> None:
+    """The scripting workbook: PO Data, Part Data, and an Unresolved sheet
+    when anything needs hand entry."""
+    wb = Workbook()
+    ws_po = wb.active or wb.create_sheet()
+    ws_po.title = "PO Data"
+    _write_sheet(ws_po, PO_COLUMNS, po_rows)
+
+    ws_part = wb.create_sheet("Part Data")
+    _write_sheet(ws_part, PART_COLUMNS, part_rows)
+
+    if unresolved:
+        _write_unresolved_sheet(wb, unresolved, total)
+
     sdk.save_workbook(wb, output_path, log)
-    log("   Validation report: %s" % output_path.name)
 
 
 # ===== MAIN PLUGIN FUNCTION =====
@@ -472,7 +481,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     output_path = output_folder / output_name
 
     log("Writing the scripting workbook...")
-    write_output(output_path, po_rows, part_rows, log)
+    write_output(output_path, po_rows, part_rows, unresolved, len(award_rows), log)
     log("   %s" % output_path.name)
     progress_callback(90)
 
@@ -480,8 +489,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
         log("")
         log("WARNING: %d nest(s) had no MATL / DESC in the forecast"
             % len(unresolved))
-        validation_path = output_folder / ("%s - unresolved.xlsx" % output_path.stem)
-        write_validation(validation_path, unresolved, len(award_rows), log)
+        log("   Listed on the 'Unresolved' sheet - delete it once they're filled in.")
 
     console = params.get("console")
     if console is not None and hasattr(console, "append_link"):
@@ -503,6 +511,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Needs hand entry: %d" % len(unresolved))
     log("Output folder   : %s" % output_folder)
     log("   - %s" % output_path.name)
+    log("Sheets          : PO Data, Part Data%s"
+        % (", Unresolved" if unresolved else ""))
     log("")
     log("Blank by design (manual entry): PO NO, LINE, PROMISE DATE, and every")
     log("other column whose row 1 tag is empty.")
