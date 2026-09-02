@@ -11,38 +11,51 @@ the `.exe`.
 
 ## What's New in v0.8.7.3 - Scripting Prep
 
-**911 Scripting Prep is a new app.** It builds the outgoing SSPO scripting sheet from an
-award review someone has already checked, so the sheet is filled in from data that has
-been through review rather than typed again. It writes one workbook with a PO Data sheet
-and a Part Data sheet, headers on the first row and data from the second - the working
-notes that used to sit above the headers are gone. The columns the app fills in are
-still marked in red so they're easy to pick out from the ones you supply.
+### New app: 911 Scripting Prep
 
-**911 PO PDF Extractor is back.** It was replaced by Scripting Prep, which was a mistake -
-the two do opposite jobs. The extractor reads an incoming PO packet from Electric Boat;
-Scripting Prep builds the outgoing scripting sheet. Both ship now, side by side, and an
-update no longer removes the extractor. **One thing to do once:** the earlier change took
-the PO PDF Extractor tile off your Home screen. Add it back from the Library and it will
-stay.
+**What it does:** it builds the SSPO scripting sheet for you, out of an award review
+somebody has already checked, instead of it being typed out line by line.
 
-**Nests Scripting Prep couldn't resolve stay in the same file.** They used to be written
-to a second workbook sitting beside the first, which is easy to lose track of. They are
-now an "Unresolved" sheet in the same workbook, listed with the reason each one couldn't
-be resolved. Once you've filled the values in you can delete the sheet - something a
-separate file can't do. If everything resolves, the sheet isn't created at all.
+- It reads the **Working Forecast Input** sheet on the award review - one line per nest,
+  already checked - and looks each source material up in the **Working Forecast List** to
+  get its designation and its size.
+- It works off a read-only copy of the forecast. The live file is never opened, so it
+  doesn't matter who has it up.
+- Columns that need a person - PO NO, LINE, PROMISE DATE, part rev, clauses, ship-to -
+  get their heading and stay blank. PART REV, STANDARD CLAUSES, SHIP, QTY and UNIT PRICE
+  can be set once in the app's settings when they're the same across a whole award, so
+  you're not retyping them on every line.
+- It never guesses a material. Anything it can't find in the forecast is left blank and
+  listed for you, not filled in with something close.
 
-**The PO line's QTY and UNIT PRICE are settings.** They were fixed at 1 and 0 in the code,
-which is right for the awards we've seen but not something to rebuild the app over. They
-are now ordinary settings, so a different award is a change you can make yourself.
+**What you get at the end:** one workbook saved next to the award review, with a
+**PO Data** sheet and a **Part Data** sheet. Everything the app worked out is in red, so
+at a glance you can see what came from it and what's still yours to fill in. If anything
+didn't resolve there's a third sheet called **Unresolved** naming the nests that need
+their material and size typed in - delete that sheet once they're in. It isn't created at
+all when everything resolves.
 
-**A leftover tile clears itself.** Renaming the app mid-development left some machines
-with a tile pointing at a name that no longer exists. It is now removed on launch, with
-no duplicate left behind.
+**How to run it:** run **911 SSPO Award Review** on the award package first - this app
+runs off the workbook that one writes. Then run Scripting Prep and pick that
+`911 SSPO AWARD REVIEW ...` workbook when it asks. Your Forecast and Inventory Reports
+folder needs to be synced, not cloud only.
 
-**911 Inspection Dimensions starts with no nests ticked.** It used to arrive with every
-nest in the order ticked, so reading one nest meant unticking the rest. It now matches
-911 Setup - you tick the ones you want. Reading a whole order is the exception, not the
-normal case.
+### Fixes
+
+- **911 PO PDF Extractor is back, and you need to add it to your Home screen once.** It
+  got replaced by Scripting Prep in the last round, which was wrong - the two do opposite
+  jobs. The extractor reads an incoming PO packet from EB; Scripting Prep builds the
+  outgoing scripting sheet. Both ship now and an update won't remove it again. That
+  earlier change took its tile off Home, so add it back from the Library once and it will
+  stay.
+- **A dead tile left behind by that same renaming clears itself** the next time you start
+  TechDeck. If you had a tile that did nothing, that was it.
+- **911 Inspection Dimensions starts with no nests ticked**, the same as 911 Setup. You
+  tick the ones you want instead of unticking the ones you don't - reading a whole order
+  is the exception, so it's no longer the default.
+
+*Developer note: Java Tutor moved out of `plugins/` into `tools/devkit/`, which the build
+excludes wholesale - it is dev-only and structurally cannot ship.*
 
 ---
 
