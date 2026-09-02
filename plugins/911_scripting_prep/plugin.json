@@ -1,6 +1,6 @@
 {
-  "id": "911_sspo_scripting_prep",
-  "name": "911 SSPO Scripting Prep",
+  "id": "911_scripting_prep",
+  "name": "911 Scripting Prep",
   "description": "Turns a finished 911 SSPO Award Review into the two-sheet ERP scripting workbook. Reads the review's 'Working Forecast Input' sheet for the award data (DYPN = Order + Nest, pieces, orders, source material, division) and resolves each source code's material designation and size out of a staged read-only COPY of the Working Forecast List's 'Inventory Listing'. Writes ONE workbook with a 'PO Data' sheet (17 columns) and a 'Part Data' sheet (18 columns), each with the source tag for every column on row 1 and the app-filled values in red, so the sheet documents itself. Columns that need a human (PO NO, LINE, PROMISE DATE, part rev, clauses, ship-to) get the header and stay blank. Anything whose source material isn't in the forecast lands in a separate unresolved report rather than being guessed at. Prompts for the award review workbook at runtime.",
   "version": "3.0.0",
   "author": "Anthony Sieben",

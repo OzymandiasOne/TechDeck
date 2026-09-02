@@ -38,7 +38,7 @@ PLUGIN_ICON_KEYS = {
     "911_teams_cards":      "sym_speech_bubble",
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
-    "911_sspo_scripting_prep": "claw",
+    "911_scripting_prep": "claw",
     "911_sketch_extractor": "sym_picture",
     "911_sspo_award_review": "stopwatch",
     "922_pallet_stamper":   "stamp",

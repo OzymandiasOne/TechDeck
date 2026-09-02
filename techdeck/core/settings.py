@@ -38,7 +38,7 @@ _PLUGIN_ID_RENAMES = {
     # Chain entries point at the FINAL id: tile/unlock migration is a single
     # dict lookup (no chaining), so an old->intermediate entry would leave a
     # stale tile for one launch.
-    "911_po_pdf_extractor": "911_sspo_scripting_prep",  # renamed 2026-09-02
+    "911_po_pdf_extractor": "911_scripting_prep",  # renamed 2026-09-02
     "911_linear_inch_calc": "911_sspo_award_review",   # renamed 2026-06-04
     "911_runtime_estimator": "911_sspo_award_review",  # renamed 2026-07-13
     "linear_inch_calculator": "customer_dxf_analysis",  # renamed 2026-06-10 (via customer_dxf_quoting)

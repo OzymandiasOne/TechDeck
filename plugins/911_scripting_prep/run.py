@@ -1,5 +1,5 @@
 """
-911 SSPO Scripting Prep Plugin for TechDeck v3.0.0
+911 Scripting Prep Plugin for TechDeck v3.0.0
 Builds the SSPO ERP scripting workbook (PO Data + Part Data) from an award
 package's SSPO AWARD REVIEW output and the Working Forecast List.
 
@@ -395,7 +395,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log = params.get('log', print)
     settings = params.get('settings', {}) or {}
 
-    log("Starting 911 SSPO Scripting Prep v%s..." % VERSION)
+    log("Starting 911 Scripting Prep v%s..." % VERSION)
     progress_callback(0)
 
     # === PROMPT: THE AWARD REVIEW WORKBOOK ===
@@ -507,7 +507,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Blank by design (manual entry): PO NO, LINE, PROMISE DATE, and every")
     log("other column whose row 1 tag is empty.")
     log("=" * 50)
-    log("911 SSPO Scripting Prep completed successfully!")
+    log("911 Scripting Prep completed successfully!")
 
     progress_callback(100)
 

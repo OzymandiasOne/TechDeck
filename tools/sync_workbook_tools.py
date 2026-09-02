@@ -48,7 +48,7 @@ TOOL_SECTIONS = [
    "the cover with the batch and nest plus the material type recovered from "
    "the removed pages.",
    "Active", "0.8.3"),
-  ("911 SSPO Scripting Prep",
+  ("911 Scripting Prep",
    "Builds the two-sheet SSPO ERP scripting workbook from a finished award "
    "review and the Working Forecast List.",
    "Reuses the award data a reviewer has already checked instead of "
