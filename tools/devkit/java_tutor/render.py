@@ -244,7 +244,7 @@ def to_html(markdown: str, pal: dict | None = None) -> tuple[str, list[str]]:
                     or re.match(r"^(#{1,4})\s+", nxt)
                     or re.match(r"^\s*([-*+]|\d+[.)])\s+", nxt)
                     or nxt.strip().startswith("|")
-                    or re.match(r"^\s*([-*_])\s*(\s*){2,}$", nxt)):
+                    or re.match(r"^\s*([-*_])\s*(\1\s*){2,}$", nxt)):
                 break
             buf.append(nxt.strip())
             i += 1
