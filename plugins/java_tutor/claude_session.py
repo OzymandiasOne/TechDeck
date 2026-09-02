@@ -60,8 +60,14 @@ TUTOR_CWD = Path(r"C:\Dev\Code Tutor")
 # java-tutor fires.
 _ALLOWED_TOOLS = {"Read", "Glob", "Grep", "Skill"}
 
-# Everything else observed in a default session, denied explicitly. Order is
-# irrelevant; unknown names are harmless, so err on the side of listing more.
+# Everything else, denied explicitly. Unknown names are harmless, so err on the
+# side of listing more.
+#
+# This list cannot be built by watching one session: Claude Code DEFERS some
+# tools, so they are absent from the init event until something loads them.
+# `Monitor` was missed exactly that way and turned up in the first real session
+# (2026-09-02). Hence the self-healing below - the static list is the fast path,
+# not the guarantee.
 _DENIED_TOOLS = [
     "Write", "Edit", "NotebookEdit",
     "Bash", "PowerShell", "BashOutput", "KillShell",
@@ -69,7 +75,9 @@ _DENIED_TOOLS = [
     "WebFetch", "WebSearch",
     "CronCreate", "CronDelete", "CronList",
     "DesignSync", "EnterWorktree", "ExitWorktree",
-    "ListAgents", "SendMessage", "RemoteTrigger", "PushNotification",
+    "EnterPlanMode", "ExitPlanMode",
+    "ListAgents", "SendMessage", "SendUserFile", "RemoteTrigger",
+    "PushNotification", "Monitor",
     "ScheduleWakeup", "ReportFindings", "ToolSearch", "LSP",
     "Artifact", "AskUserQuestion", "SendFeedback", "EndConversation",
 ]
@@ -142,6 +150,9 @@ class ClaudeSession(QObject):
         self._stderr = ""
         self._session_id: str | None = None
         self._interrupted = False
+        # Tools seen in a session that _DENIED_TOOLS did not know about.
+        # Added to the deny list for every later turn (see _check_sandbox).
+        self._extra_denied: list[str] = []
 
     # -- state -------------------------------------------------------------
 
@@ -190,7 +201,7 @@ class ClaudeSession(QObject):
         # read tools are denied outright, because -p has nobody to ask.
         args += ["--allowedTools"] + sorted(_ALLOWED_TOOLS)
         # --disallowedTools is what actually removes a tool from the session.
-        args += ["--disallowedTools"] + _DENIED_TOOLS
+        args += ["--disallowedTools"] + _DENIED_TOOLS + self._extra_denied
 
         self._buf = ""
         self._decoder.reset()
@@ -298,12 +309,20 @@ class ClaudeSession(QObject):
                     self._text_parts = [final]
 
     def _check_sandbox(self, tools: list) -> None:
-        """Warn if the session has tools it should not - the deny list is a
-        blocklist, so a newly-added CLI tool would arrive un-denied."""
-        unexpected = sorted(set(tools) - _ALLOWED_TOOLS)
-        if unexpected:
-            logger.warning("java_tutor: unexpected tools in session: %s", unexpected)
-            self.sandbox_warning.emit(unexpected)
+        """Deny anything the allowlist does not name, from the next turn on.
+
+        The deny list is a blocklist, so a tool the CLI defers or newly ships
+        arrives un-denied. Rather than just warn and hope someone reads it,
+        add it to `_extra_denied` - the allowlist is the real policy, so
+        anything outside it is unwanted by definition. An unknown tool can
+        therefore be present for at most one turn.
+        """
+        unexpected = sorted(set(tools) - _ALLOWED_TOOLS - set(self._extra_denied))
+        if not unexpected:
+            return
+        self._extra_denied.extend(unexpected)
+        logger.warning("java_tutor: denying unexpected tools from next turn: %s", unexpected)
+        self.sandbox_warning.emit(unexpected)
 
     # -- teardown ----------------------------------------------------------
 

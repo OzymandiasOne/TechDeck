@@ -29,6 +29,9 @@ DEFAULTS = {
     "num": "#d19a66",       # numbers
     "ann": "#e5c07b",       # annotations
     "typ": "#61afef",       # class-ish names
+    # Prose font. Overridden by the active TechDeck theme - some set a
+    # monospace family deliberately (cyberpunk, matrix).
+    "font_family": '"Segoe UI", Arial, sans-serif',
 }
 
 _JAVA_KEYWORDS = {

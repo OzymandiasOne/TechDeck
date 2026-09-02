@@ -106,7 +106,7 @@ def _palette() -> dict:
         return pal
     for key, attr in (("text", "text"), ("muted", "text_secondary"),
                       ("code_bg", "console_bg"), ("code_border", "border"),
-                      ("accent", "accent")):
+                      ("accent", "accent"), ("font_family", "font_family")):
         value = getattr(p, attr, None)
         if value:
             pal[key] = value
@@ -124,8 +124,15 @@ class ChatView(QTextBrowser):
         self.setOpenExternalLinks(False)
         self.setOpenLinks(False)
         self.anchorClicked.connect(self._on_anchor)
-        self.setFont(QFont("Segoe UI", 10))
         self.document().setDocumentMargin(14)
+        # Follow the ACTIVE THEME's font. Some themes (cyberpunk, matrix) set a
+        # monospace family on purpose, and the chat view should not fight that -
+        # it is a deliberate look, not a bug. `setFont()` is useless here: the
+        # app-level stylesheet's font-family beats it, so the family has to be
+        # set in the widget's OWN stylesheet. Code blocks are always monospace
+        # regardless, via their inline family in render.py.
+        self.setStyleSheet(
+            "QTextBrowser { font-family: %s; font-size: 14px; }" % pal["font_family"])
 
     def _on_anchor(self, url):
         text = url.toString()
@@ -451,10 +458,9 @@ class JavaTutorWindow(PluginWindow):
 
     def _on_sandbox_warning(self, tools: list):
         self._show_banner(
-            "Heads up: this session has tools it should not - "
-            + ", ".join(tools)
-            + ". The tutor is supposed to be read-only. Tell Claude Code so the "
-              "block list in claude_session.py can be updated.")
+            "Blocked " + ", ".join(tools) + " - the tutor is read-only and these "
+            "were not on the block list. They are denied from your next message "
+            "onward. Nothing was written; only file reading is ever allowed.")
 
     # -- rendering ---------------------------------------------------------
 
