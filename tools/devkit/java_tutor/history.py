@@ -63,6 +63,7 @@ class Conversation:
     started: str = ""
     last_active: float = 0.0
     turns: int = 0
+    custom: bool = False      # True when the name came from titles.py, not Claude
 
     @property
     def when(self) -> str:
@@ -133,8 +134,13 @@ def read_messages(path: Path) -> list[Message]:
     return messages
 
 
-def _summarise(path: Path) -> Conversation | None:
-    """Build the sidebar entry for one transcript."""
+def _summarise(path: Path, custom_titles: dict | None = None) -> Conversation | None:
+    """Build the sidebar entry for one transcript.
+
+    `custom_titles` maps session id -> a name the user typed or a lesson plan
+    set. It is passed IN rather than read here on purpose: this module reads
+    Claude Code's transcripts and owns no storage of its own (see titles.py).
+    """
     session_id = path.stem
     title = ""
     first_user = ""
@@ -171,26 +177,32 @@ def _summarise(path: Path) -> Conversation | None:
     if len(preview) > 110:
         preview = preview[:107] + "..."
 
+    # A chosen name always wins - that is what makes a rename stick. Only if
+    # there is none do we fall back to Claude's ai-title, then the first message.
+    chosen = (custom_titles or {}).get(session_id, "")
+
     return Conversation(
         session_id=session_id,
         path=path,
-        title=title or (preview[:48] or "Untitled lesson"),
+        title=chosen or title or (preview[:48] or "Untitled lesson"),
         preview=preview,
         started=started,
         last_active=mtime,
         turns=turns,
+        custom=bool(chosen),
     )
 
 
-def list_conversations(cwd: Path) -> list[Conversation]:
-    """Past lessons, newest first."""
+def list_conversations(cwd: Path,
+                       custom_titles: dict | None = None) -> list[Conversation]:
+    """Past lessons, newest first. `custom_titles` is session id -> chosen name."""
     folder = transcript_dir(cwd)
     if not sdk.is_dir(folder):
         return []
 
     out = []
     for path in folder.glob("*.jsonl"):
-        convo = _summarise(path)
+        convo = _summarise(path, custom_titles)
         if convo is not None:
             out.append(convo)
     out.sort(key=lambda c: c.last_active, reverse=True)

@@ -16,9 +16,9 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QSplitter, QTextBrowser, QTextEdit,
-    QVBoxLayout, QWidget,
+    QApplication, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMenu, QPushButton, QSplitter, QTextBrowser,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 try:
@@ -54,6 +54,7 @@ def _sibling(module_name: str, filename: str):
 claude_session = _sibling("techdeck_java_tutor_session", "claude_session.py")
 history = _sibling("techdeck_java_tutor_history", "history.py")
 render = _sibling("techdeck_java_tutor_render", "render.py")
+titles = _sibling("techdeck_java_tutor_titles", "titles.py")
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,8 @@ class JavaTutorWindow(PluginWindow):
         self._streaming = ""
         self._code_blocks: list[str] = []
         self._conversations: list[history.Conversation] = []
+        # Lesson names live in a sidecar, never in Claude's transcripts.
+        self._titles = titles.TitleStore()
         self._read_only = False      # viewing an old lesson, not in it
 
         self._session = claude_session.ClaudeSession(self)
@@ -236,6 +239,11 @@ class JavaTutorWindow(PluginWindow):
         self._list = QListWidget()
         self._list.itemActivated.connect(self._open_conversation)
         self._list.itemClicked.connect(self._open_conversation)
+        # Rename: right-click, or F2 on the selected lesson.
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._lesson_menu)
+        self._rename_sc = QShortcut(QKeySequence("F2"), self._list)
+        self._rename_sc.activated.connect(self._rename_selected)
         col.addWidget(self._list, 1)
 
         self._list_note = QLabel("")
@@ -309,7 +317,7 @@ class JavaTutorWindow(PluginWindow):
     # -- history sidebar ---------------------------------------------------
 
     def _refresh_history(self):
-        self._conversations = history.list_conversations(self._cwd)
+        self._conversations = history.list_conversations(self._cwd, self._titles.titles)
         self._apply_search()
 
     def _apply_search(self):
@@ -331,6 +339,51 @@ class JavaTutorWindow(PluginWindow):
             self._list_note.setText("No lesson matches that search.")
         else:
             self._list_note.setText(f"{len(shown)} of {len(self._conversations)} lessons")
+
+    # -- renaming ----------------------------------------------------------
+
+    def _lesson_menu(self, point):
+        """Right-click menu for one lesson in the sidebar."""
+        item = self._list.itemAt(point)
+        if item is None:
+            return
+        self._list.setCurrentItem(item)
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        convo = self._find_conversation(session_id)
+
+        menu = QMenu(self._list)
+        menu.addAction("Rename lesson...", self._rename_selected)
+        if convo is not None and convo.custom:
+            # Only offered when there IS a chosen name to drop back from.
+            menu.addAction("Reset to automatic name",
+                           lambda: self._apply_rename(session_id, ""))
+        menu.exec(self._list.mapToGlobal(point))
+
+    def _rename_selected(self):
+        item = self._list.currentItem()
+        if item is None:
+            return
+        session_id = item.data(Qt.ItemDataRole.UserRole)
+        convo = self._find_conversation(session_id)
+        if convo is None:
+            return
+        name, ok = QInputDialog.getText(
+            self, "Rename lesson", "Lesson name:", text=convo.title)
+        if ok:
+            self._apply_rename(session_id, name)
+
+    def _apply_rename(self, session_id: str, name: str):
+        """Store the name (empty clears it) and redraw, keeping the selection."""
+        self._titles.rename(session_id, name)
+        self._refresh_history()
+        for i in range(self._list.count()):
+            item = self._list.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == session_id:
+                self._list.setCurrentItem(item)
+                break
+        convo = self._find_conversation(session_id)
+        if convo is not None:
+            self._set_status(f"Renamed to \"{convo.title}\".")
 
     def _find_conversation(self, session_id: str):
         for convo in self._conversations:
@@ -454,6 +507,13 @@ class JavaTutorWindow(PluginWindow):
 
     def _on_session_ready(self, session_id: str):
         logger.info("java_tutor: session %s", session_id)
+        # A lesson planned in Claude Code left its name in `pending` before this
+        # session existed. Now that it has an id, bind the two together.
+        claimed = self._titles.claim_pending(session_id)
+        if claimed:
+            logger.info("java_tutor: lesson named %r from the plan", claimed)
+            self._set_status(f"Lesson: {claimed}")
+        self._refresh_history()
 
     def _on_rate_limit(self, info: dict):
         windows = info.get("unifiedWindows") or {}
