@@ -124,6 +124,13 @@ PART_COLUMNS: List[Tuple[str, str]] = [
 # Values for every FIXED column. Identical on every row of every award, so
 # writing them saves 30-odd rows of fill-down; anything award-SPECIFIC stays
 # MANUAL above.
+#
+# QTY = 1 is the PO LINE's quantity, NOT a piece count -- the reference sheet
+# carries 1 on every row while PCS ranges 1-26 and ORDERS 1-20, and those two
+# already have their own columns (BATCH, SOURCE). Nothing in the award review
+# or the forecast is all-1s, so there is no column to source it from; it is a
+# constant of the line format. Exposed as a setting anyway (`po_qty`) so an
+# award that needs a different value is a settings change, not a code edit.
 PO_FIXED = {
     "QTY": 1,
     "UNIT PRICE": 0,
@@ -279,9 +286,24 @@ def read_inventory(forecast_copy: Path, cancel_event, log) -> Dict[str, Tuple[st
         wb.close()
 
 
+def _number(raw, default):
+    """A numeric setting, falling back to `default` on blank/garbage. Written
+    as an int when it is one, so QTY lands as 1 rather than 1.0."""
+    text = str(raw if raw is not None else "").strip()
+    if not text:
+        return default
+    try:
+        value = float(text)
+    except ValueError:
+        return default
+    return int(value) if value.is_integer() else value
+
+
 def build_records(award_rows: List[Dict[str, str]],
                   inventory: Dict[str, Tuple[str, str]],
-                  fills: Dict[str, str]) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+                  fills: Dict[str, str],
+                  qty=PO_FIXED["QTY"],
+                  unit_price=PO_FIXED["UNIT PRICE"]) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """(PO Data rows, Part Data rows, unresolved-source rows).
 
     A source code the inventory doesn't carry leaves MATL/DESC blank and lands
@@ -305,6 +327,8 @@ def build_records(award_rows: List[Dict[str, str]],
 
         po = dict(PO_FIXED)
         po.update({
+            "QTY":        qty,
+            "UNIT PRICE": unit_price,
             "DYPN":   dypn,
             "BATCH":  "%s PCS" % row["pcs"] if row["pcs"] else "",
             "SOURCE": "%s ORDERS" % row["orders"] if row["orders"] else "",
@@ -467,7 +491,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Building the scripting rows...")
     fills = {key: str(settings.get(key, "") or "").strip()
              for key, _sheet, _header in _SETTING_FILLS}
-    po_rows, part_rows, unresolved = build_records(award_rows, inventory, fills)
+    po_rows, part_rows, unresolved = build_records(
+        award_rows, inventory, fills,
+        qty=_number(settings.get("po_qty"), PO_FIXED["QTY"]),
+        unit_price=_number(settings.get("po_unit_price"), PO_FIXED["UNIT PRICE"]))
     progress_callback(75)
 
     # === WRITE ===
