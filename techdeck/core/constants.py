@@ -47,7 +47,7 @@ def puppet_master_enabled() -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.2.1"  # Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
+APP_VERSION = "0.8.7.3"  # Scripting Prep - 911 Scripting Prep ships as its own app and the 911 PO PDF Extractor is back beside it
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

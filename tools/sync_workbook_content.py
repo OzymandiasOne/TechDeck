@@ -281,6 +281,33 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.3", "Sep 2, 2026", "Feature",
+     "Adds a scripting-preparation tool for the SSPO order line. The ERP "
+     "scripting workbook was previously typed out line by line; it is now "
+     "built from the award review a reviewer has already checked, with each "
+     "material's designation and size looked up in the Working Forecast "
+     "List, so the sheet arrives filled in rather than transcribed. Both "
+     "sheets are produced in a single file, and any line the tool cannot "
+     "resolve is listed inside that same file with the reason it could not - "
+     "so the exceptions travel with the data they belong to instead of in a "
+     "second document that can be mislaid, and the operator removes the list "
+     "once the values are entered. "
+     "The purchase-order extraction tool has been reinstated. It was "
+     "withdrawn on the assumption that the new scripting tool superseded it; "
+     "the two in fact serve opposite directions - one reads the customer's "
+     "incoming order paperwork, the other produces the outgoing scripting "
+     "sheet - and both are maintained going forward. Operators who lost the "
+     "tool from their home screen restore it from the library once. "
+     "The order line's quantity and unit price are now operator-configurable "
+     "rather than fixed in the build, so an award structured differently is "
+     "a setting rather than a development request. A stale home-screen entry "
+     "left by the tool's renaming is cleared automatically at next start. "
+     "Nest selection in the inspection-data capture tool now starts empty "
+     "and is opted into, matching the setup tool. Reading a whole order is "
+     "the exception; the previous default obliged the operator to deselect "
+     "most of the list on every ordinary run.",
+     "911 Scripting Prep (new), 911 PO PDF Extractor (reinstated), "
+     "911 Inspection Dimensions"),
     ("Beta 0.8.7.2.1", "Sep 1, 2026", "Patch",
      "Corrective release for the inspection-data capture tool. The image "
      "recognition component it depends on was omitted from the previous "

@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.2.1 - Bevel Angles Patch 1.0 - the drawing reader was dead in the 0.8.7.2 build; angle tolerances, a misread dimension, and a rewritten inspection report
+; Version 0.8.7.3 - Scripting Prep - 911 Scripting Prep ships as its own app and the 911 PO PDF Extractor is back beside it
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.2.1"
+#define MyAppVersion "0.8.7.3"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

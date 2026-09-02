@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.2.1 - Bevel Angles Patch 1.0
+# TechDeck v0.8.7.3 - Scripting Prep
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,43 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.3 - Scripting Prep
+
+**911 Scripting Prep is a new app.** It builds the outgoing SSPO scripting sheet from an
+award review someone has already checked, so the sheet is filled in from data that has
+been through review rather than typed again. It writes one workbook with a PO Data sheet
+and a Part Data sheet, headers on the first row and data from the second - the working
+notes that used to sit above the headers are gone. The columns the app fills in are
+still marked in red so they're easy to pick out from the ones you supply.
+
+**911 PO PDF Extractor is back.** It was replaced by Scripting Prep, which was a mistake -
+the two do opposite jobs. The extractor reads an incoming PO packet from Electric Boat;
+Scripting Prep builds the outgoing scripting sheet. Both ship now, side by side, and an
+update no longer removes the extractor. **One thing to do once:** the earlier change took
+the PO PDF Extractor tile off your Home screen. Add it back from the Library and it will
+stay.
+
+**Nests Scripting Prep couldn't resolve stay in the same file.** They used to be written
+to a second workbook sitting beside the first, which is easy to lose track of. They are
+now an "Unresolved" sheet in the same workbook, listed with the reason each one couldn't
+be resolved. Once you've filled the values in you can delete the sheet - something a
+separate file can't do. If everything resolves, the sheet isn't created at all.
+
+**The PO line's QTY and UNIT PRICE are settings.** They were fixed at 1 and 0 in the code,
+which is right for the awards we've seen but not something to rebuild the app over. They
+are now ordinary settings, so a different award is a change you can make yourself.
+
+**A leftover tile clears itself.** Renaming the app mid-development left some machines
+with a tile pointing at a name that no longer exists. It is now removed on launch, with
+no duplicate left behind.
+
+**911 Inspection Dimensions starts with no nests ticked.** It used to arrive with every
+nest in the order ticked, so reading one nest meant unticking the rest. It now matches
+911 Setup - you tick the ones you want. Reading a whole order is the exception, not the
+normal case.
 
 ---
 

@@ -60,7 +60,7 @@ TOOL_SECTIONS = [
    "re-reading the PO PDFs, and looks each source material's designation and "
    "size up in the forecast, so the scripting sheet is filled in rather than "
    "typed out line by line.",
-   "Active", "0.8.7"),
+   "Active", "0.8.7.3"),
   ("911 Sketch Extractor",
    "Extracts part-sketch data from 911 batch nests into a 17-column sheet.",
    "Scans the nest files, extracts the sketch data, and consolidates part "
