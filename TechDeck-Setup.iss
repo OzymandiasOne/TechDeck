@@ -82,6 +82,8 @@ Type: filesandordirs; Name: "{app}\plugins\qa_rework"
 Type: filesandordirs; Name: "{app}\plugins\steeltube_game"
 ; 2026-07-13: 911_runtime_estimator renamed to 911_sspo_award_review
 Type: filesandordirs; Name: "{app}\plugins\911_runtime_estimator"
+; 2026-09-02: 911_po_pdf_extractor renamed to 911_sspo_scripting_prep
+Type: filesandordirs; Name: "{app}\plugins\911_po_pdf_extractor"
 ; 2026-07-29: customer_dxf_quoting renamed to customer_dxf_analysis (absorbed
 ; the DXF Offset Tool; dxf_offset_tool never shipped in a release but purge
 ; any dev/zip drop of it too)

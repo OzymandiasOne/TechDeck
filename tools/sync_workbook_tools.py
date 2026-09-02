@@ -48,11 +48,14 @@ TOOL_SECTIONS = [
    "the cover with the batch and nest plus the material type recovered from "
    "the removed pages.",
    "Active", "0.8.3"),
-  ("911 PO PDF Extractor",
-   "Extracts purchase-order data from 911 PDFs into a structured spreadsheet.",
-   "Scans PDF text for the PO fields and builds a spreadsheet rather than "
-   "requiring them to be read off and typed in.",
-   "Active", "0.7.4"),
+  ("911 SSPO Scripting Prep",
+   "Builds the two-sheet SSPO ERP scripting workbook from a finished award "
+   "review and the Working Forecast List.",
+   "Reuses the award data a reviewer has already checked instead of "
+   "re-reading the PO PDFs, and looks each source material's designation and "
+   "size up in the forecast, so the scripting sheet is filled in rather than "
+   "typed out line by line.",
+   "Active", "0.8.7"),
   ("911 Sketch Extractor",
    "Extracts part-sketch data from 911 batch nests into a 17-column sheet.",
    "Scans the nest files, extracts the sketch data, and consolidates part "
