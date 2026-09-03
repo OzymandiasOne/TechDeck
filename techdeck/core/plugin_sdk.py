@@ -872,10 +872,18 @@ def apply_toggle_memory(groups: list, remembered: dict) -> list:
 
     A child marked ``disabled`` stays unchecked no matter what is remembered —
     disabled means unavailable, not merely off.
+
+    A group declaring ``"remember": False`` is NON-STICKY: it always opens at
+    its declared default, no matter what was submitted last time (and
+    request_grouped_toggles never saves it). For mode switches that are a
+    property of THIS run, not a preference — 911 Setup's PLATE batch toggle is
+    the canonical case: a leftover PLATE tick silently applied to the next
+    shape batch would fill real paperwork with the wrong template.
     """
     out = []
     for g in groups:
-        saved = remembered.get(g.get("key")) or {}
+        saved = {} if g.get("remember") is False else \
+            (remembered.get(g.get("key")) or {})
         merged = dict(g)
         if "enabled" in saved:
             merged["checked"] = bool(saved["enabled"])
@@ -941,9 +949,15 @@ def request_grouped_toggles(params: dict, groups: list, remember_as: str = "",
         return _user_cancelled(params)
 
     # Only a real submit is remembered -- a cancel means "not this time",
-    # never "make that my default".
+    # never "make that my default". Groups declaring remember: False are
+    # per-run mode switches and are stripped before saving, so their state
+    # can never leak into a later run even through a stale settings.json.
     if remember_as:
-        save_toggle_memory(remember_as, result)
+        no_memory = {g.get("key") for g in groups
+                     if g.get("remember") is False}
+        save_toggle_memory(remember_as,
+                           {k: v for k, v in result.items()
+                            if k not in no_memory})
     return result
 
 
