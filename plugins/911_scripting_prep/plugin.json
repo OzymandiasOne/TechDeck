@@ -1,8 +1,8 @@
 {
   "id": "911_scripting_prep",
   "name": "911 Scripting Prep",
-  "description": "Builds the SSPO ERP scripting workbook from a finished 911 SSPO Award Review. A separate app from the 911 PO PDF Extractor - that one reads an INCOMING PO packet from EB; this one builds an OUTGOING scripting sheet from data a reviewer already checked. Reads the review's 'Working Forecast Input' sheet for the award data (DYPN = Order + Nest, pieces, orders, source material, division) and resolves each source code's material designation and size out of a staged read-only COPY of the Working Forecast List's 'Inventory Listing'. Writes ONE workbook with a 'PO Data' sheet (17 columns) and a 'Part Data' sheet (18 columns), headers on row 1 and data from row 2, with the app-filled values in red so the sheet shows at a glance what it produced. Columns that need a human (PO NO, LINE, PROMISE DATE, part rev, clauses, ship-to) get the header and stay blank. Anything whose source material isn't in the forecast is left blank and listed on a third 'Unresolved' sheet rather than being guessed at - delete that sheet once the values are in. Prompts for the award review workbook at runtime.",
-  "version": "1.0.0",
+  "description": "Builds the SSPO ERP scripting workbook from a finished 911 SSPO Award Review. A separate app from the 911 PO PDF Extractor - that one reads an INCOMING PO packet from EB; this one builds an OUTGOING scripting sheet from data a reviewer already checked. Reads the review's 'Working Forecast Input' sheet for the award data (DYPN = Order + Nest, pieces, orders, source material, division) and resolves each source code's material designation and size out of a staged read-only COPY of the Working Forecast List's 'Inventory Listing'. Writes ONE workbook with a 'PO Data' sheet (17 columns) and a 'Part Data' sheet (18 columns), headers on row 1 and data from row 2, with the app-filled values in red so the sheet shows at a glance what it produced. The global values (PO number, line, part rev, clauses, ship-to, promise date) are typed ONCE into the input box in columns T/U on PO Data - formulas carry them to every row, and typing over a row's formula overrides that one row. Part Data's DIVISION 2 converts the SOPO shorthand to SOUTH PORTLAND, exactly as Mie Trak expects it. Anything whose source material isn't in the forecast is left blank and listed on a third 'Unresolved' sheet rather than being guessed at - delete that sheet once the values are in. Prompts for the award review workbook at runtime.",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -14,7 +14,10 @@
     "how_it_works": [
       "Pick the award review workbook. The app reads its 'Working Forecast Input' sheet - one line per nest, already reviewed.",
       "It takes a read-only copy of the live Working Forecast List and looks each source material code up in the 'Inventory Listing' for the material designation and size. The live file is never opened.",
-      "It builds the PO Data and Part Data sheets in the scripting format, fills every column it can source, and leaves the manual-entry columns blank with just their header."
+      "It builds the PO Data and Part Data sheets in the scripting format, fills every column it can source, and leaves the manual-entry columns blank with just their header.",
+      "PO Data gets a small input box in columns T and U. Type the PO number, line, part rev, standard clauses, ship-to, and promise date once in column U - formulas fill those columns on every row. Type over any row's formula to override just that row.",
+      "The PO number is pre-filled from the award review's name (shown in red - double-check it), and the part rev, clauses, and ship-to boxes are pre-filled from this app's settings when those are set.",
+      "On Part Data, a division of SOPO is written as SOUTH PORTLAND, matching Mie Trak exactly - no Find & Replace needed."
     ],
     "output": [
       "One workbook - 'PO Data' and 'Part Data' sheets - saved next to the award review, with row 1 tagging where each column came from and the generated values in red.",
@@ -75,7 +78,7 @@
         "key": "part_rev",
         "type": "string",
         "label": "PART REV (optional)",
-        "description": "Fills the PART REV column on every PO Data row. Leave blank to type it yourself - it names a revision that changes award to award.",
+        "description": "Pre-fills the PART REV box in the PO Data input column (U3); a formula carries it to every row. Leave blank to type it into the box yourself - it names a revision that changes award to award.",
         "placeholder": "OFLD-PLTFORM-REV 108",
         "required": false,
         "default": ""
@@ -84,7 +87,7 @@
         "key": "standard_clauses",
         "type": "string",
         "label": "STANDARD CLAUSES (optional)",
-        "description": "Fills the STANDARD CLAUSES column on every PO Data row. Leave blank to type it yourself - it cites this award's VIR numbers.",
+        "description": "Pre-fills the STD CLAUSES box in the PO Data input column (U4); a formula carries it to every row. Leave blank to type it into the box yourself - it cites this award's VIR numbers.",
         "placeholder": "All work to be performed against line 2 standard clauses. Standard Clauses: ...",
         "required": false,
         "default": ""
@@ -93,7 +96,7 @@
         "key": "ship_to",
         "type": "string",
         "label": "SHIP (optional)",
-        "description": "Fills the SHIP column on every PO Data row.",
+        "description": "Pre-fills the SHIP TO box in the PO Data input column (U5); a formula carries it to the SHIP column on every row.",
         "placeholder": "911 QTDR OFFLOAD",
         "required": false,
         "default": ""

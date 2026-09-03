@@ -1,5 +1,5 @@
 """
-911 Scripting Prep Plugin for TechDeck v1.0.0
+911 Scripting Prep Plugin for TechDeck v1.1.0
 Builds the SSPO ERP scripting workbook (PO Data + Part Data) from an award
 package's SSPO AWARD REVIEW output and the Working Forecast List.
 
@@ -27,6 +27,12 @@ What it does:
   the sheet shows at a glance which values it produced. (The hand-built
   reference had a source-tag row above the headers; those were the author's
   notes and are not written -- the tags still drive the code.)
+- PO Data carries a type-it-once INPUT block in columns T/U (A.T.,
+  2026-09-03): the global values -- PO number, line, part rev, clauses,
+  ship-to, promise date -- are entered ONCE in column U, and columns
+  A/B/C/G/L/M hold formulas pointing at those cells, overridable per row.
+- Part Data's DIVISION 2 maps the planner's 'SOPO' shorthand to Mie Trak's
+  exact 'SOUTH PORTLAND' (A.T., 2026-09-03).
 
 Prompts at runtime for:
 - The 911 SSPO AWARD REVIEW workbook (the award package's review output)
@@ -52,7 +58,7 @@ except ModuleNotFoundError:
 
 
 # ===== CONSTANTS =====
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 
@@ -84,28 +90,32 @@ INV_DESC_HEADER = "Thickness"
 #   FORECAST - looked up in the Working Forecast List
 #   FIXED    - the same value on every award, written from the tables below
 #   MANUAL   - typed by the user afterwards; header only, cells left blank
+#   INPUT    - a formula on every row pointing at the T/U input block, so a
+#              value typed once in column U carries through (and any row can
+#              still be overridden by typing over its formula)
 #
 # These tags are internal. The hand-built reference printed them on a row above
 # the headers, but those were the author's working notes, so the app does not
 # write them (user, 2026-09-02). AWARD/FORECAST columns ARE written in red,
-# matching the reference's colour coding.
+# matching the reference's colour coding; INPUT formulas stay black, matching
+# A.T.'s reference workbook (2026-09-03).
 # ---------------------------------------------------------------------------
 RED = Font(color="FFFF0000")
 
 PO_COLUMNS: List[Tuple[str, str]] = [
-    ("PO NO",            "MANUAL"),
-    ("LINE",             "MANUAL"),
-    ("PROMISE DATE",     "MANUAL"),
+    ("PO NO",            "INPUT"),
+    ("LINE",             "INPUT"),
+    ("PROMISE DATE",     "INPUT"),
     ("DYPN",             "AWARD"),
     ("QTY",              "FIXED"),
     ("UNIT PRICE",       "FIXED"),
-    ("PART REV",         "MANUAL"),
+    ("PART REV",         "INPUT"),
     ("BATCH",            "AWARD"),
     ("NEST",             "FIXED"),
     ("ORDER",            "FIXED"),
     ("SOURCE",           "AWARD"),
-    ("STANDARD CLAUSES", "MANUAL"),
-    ("SHIP",             "MANUAL"),
+    ("STANDARD CLAUSES", "INPUT"),
+    ("SHIP",             "INPUT"),
     ("CUSTOMER",         "FIXED"),
     ("INTERCOMPANY",     "MANUAL"),
     ("SUPPLIER",         "MANUAL"),
@@ -160,14 +170,36 @@ PART_FIXED = {
     "DIVISION 1": "AUBURN",
 }
 
-# Optional settings that FILL an otherwise-MANUAL column when set. Blank by
-# default, because each cites something award-specific (a part revision, the
-# award's VIR numbers, the ship-to for this line of work).
-_SETTING_FILLS = [
-    ("part_rev",         "PO", "PART REV"),
-    ("standard_clauses", "PO", "STANDARD CLAUSES"),
-    ("ship_to",          "PO", "SHIP"),
+# DIVISION 2: the planner's shorthand on the award review -> the division name
+# Mie Trak expects, spelled and cased EXACTLY (Mie Trak matches
+# case-sensitively). Anything not in the map passes through unchanged
+# (A.T., 2026-09-03 -- this replaces her manual Find & Replace).
+DIVISION_MAP = {"SOPO": "SOUTH PORTLAND"}
+
+# ---------------------------------------------------------------------------
+# PO Data input block (A.T., 2026-09-03): the global values -- PO number,
+# line, part rev, clauses, ship-to, promise date -- are typed ONCE into
+# column U beside their labels in column T, and every data row of an INPUT
+# column carries a formula pointing at its U cell. Which U row holds what is
+# a CONTRACT with those formulas; the layout (row 6 gap included) matches
+# A.T.'s reference workbook exactly, so don't compact it.
+#
+# (U row, label written in T, PO Data column the formula feeds, setting that
+#  pre-fills the U cell -- None = always typed by hand)
+# ---------------------------------------------------------------------------
+PO_INPUT_LABEL_COL = 20   # column T
+PO_INPUT_VALUE_COL = 21   # column U
+PO_INPUTS: List[Tuple[int, str, str, Any]] = [
+    (1, "PO",           "PO NO",            None),
+    (2, "LINE",         "LINE",             None),
+    (3, "PART REV",     "PART REV",         "part_rev"),
+    (4, "STD CLAUSES",  "STANDARD CLAUSES", "standard_clauses"),
+    (5, "SHIP TO",      "SHIP",             "ship_to"),
+    (7, "PROMISE DATE", "PROMISE DATE",     None),
 ]
+PO_INPUT_FORMULAS = {header: "=$U$%d" % row
+                     for row, _label, header, _key in PO_INPUTS}
+DATE_FORMAT = "mm-dd-yy"
 
 # '911 SSPO AWARD REVIEW - 1000129724 SSPO Award 13 - 2026-08-28' -> the middle
 _AWARD_NAME_RE = re.compile(
@@ -313,7 +345,6 @@ def _number(raw, default):
 
 def build_records(award_rows: List[Dict[str, str]],
                   inventory: Dict[str, Tuple[str, str]],
-                  fills: Dict[str, str],
                   qty=PO_FIXED["QTY"],
                   unit_price=PO_FIXED["UNIT PRICE"]) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """(PO Data rows, Part Data rows, unresolved-source rows).
@@ -353,16 +384,10 @@ def build_records(award_rows: List[Dict[str, str]],
             "SOURCE":     row["source"],
             "MATL":       matl,
             "DESC":       desc,
-            "DIVISION 2": row["division"],
+            "DIVISION 2": DIVISION_MAP.get(row["division"].upper(),
+                                           row["division"]),
         })
         part_rows.append(part)
-
-    for key, sheet, header in _SETTING_FILLS:
-        value = fills.get(key, "")
-        if not value:
-            continue
-        for record in (po_rows if sheet == "PO" else part_rows):
-            record[header] = value
 
     return po_rows, part_rows, unresolved
 
@@ -376,6 +401,10 @@ def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> Non
     drive the code -- which columns get filled and which are left for a human --
     they just don't ship in the sheet. AWARD/FORECAST cells stay red so a
     reviewer can still see at a glance which values the app produced.
+
+    INPUT columns get their input-block formula on every data row, in black
+    like the reference -- the value shown is whatever the user types in
+    column U, not something the app produced.
     """
     for idx, (header, tag) in enumerate(columns, start=1):
         head_cell = ws.cell(row=1, column=idx, value=header)
@@ -384,6 +413,12 @@ def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> Non
 
     for offset, record in enumerate(records):
         for idx, (header, tag) in enumerate(columns, start=1):
+            if tag == "INPUT":
+                cell = ws.cell(row=2 + offset, column=idx,
+                               value=PO_INPUT_FORMULAS[header])
+                if header == "PROMISE DATE":
+                    cell.number_format = DATE_FORMAT
+                continue
             if header not in record:
                 continue
             cell = ws.cell(row=2 + offset, column=idx, value=record[header])
@@ -393,6 +428,29 @@ def _write_sheet(ws, columns: List[Tuple[str, str]], records: List[Dict]) -> Non
     for idx, (header, _tag) in enumerate(columns, start=1):
         letter = ws.cell(row=1, column=idx).column_letter
         ws.column_dimensions[letter].width = max(12, min(len(header) + 4, 40))
+
+
+def _write_po_input_block(ws, fills: Dict[str, str], po_no: str) -> None:
+    """The T/U input block the INPUT-column formulas point at.
+
+    Labels in T, values in U. The app seeds what it can: the PO number parsed
+    off the award review's filename (written RED -- app-derived, verify it),
+    and the part rev / clauses / ship-to Settings values when they are set
+    (black -- the user's own text). Everything else is typed once in U and the
+    formulas carry it to every row.
+    """
+    for row, label, header, key in PO_INPUTS:
+        ws.cell(row=row, column=PO_INPUT_LABEL_COL, value=label)
+        value_cell = ws.cell(row=row, column=PO_INPUT_VALUE_COL)
+        if header == "PROMISE DATE":
+            value_cell.number_format = DATE_FORMAT
+        if key and fills.get(key):
+            value_cell.value = fills[key]
+        elif header == "PO NO" and po_no:
+            value_cell.value = int(po_no) if po_no.isdigit() else po_no
+            value_cell.font = RED
+    ws.column_dimensions["T"].width = 14
+    ws.column_dimensions["U"].width = 60
 
 
 def _write_unresolved_sheet(wb, unresolved: List[Dict], total: int) -> None:
@@ -421,13 +479,15 @@ def _write_unresolved_sheet(wb, unresolved: List[Dict], total: int) -> None:
 
 
 def write_output(output_path: Path, po_rows: List[Dict], part_rows: List[Dict],
-                 unresolved: List[Dict], total: int, log) -> None:
+                 unresolved: List[Dict], total: int, fills: Dict[str, str],
+                 po_no: str, log) -> None:
     """The scripting workbook: PO Data, Part Data, and an Unresolved sheet
     when anything needs hand entry."""
     wb = Workbook()
     ws_po = wb.active or wb.create_sheet()
     ws_po.title = "PO Data"
     _write_sheet(ws_po, PO_COLUMNS, po_rows)
+    _write_po_input_block(ws_po, fills, po_no)
 
     ws_part = wb.create_sheet("Part Data")
     _write_sheet(ws_part, PART_COLUMNS, part_rows)
@@ -505,10 +565,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
 
     # === BUILD THE ROWS ===
     log("Building the scripting rows...")
-    fills = {key: str(settings.get(key, "") or "").strip()
-             for key, _sheet, _header in _SETTING_FILLS}
     po_rows, part_rows, unresolved = build_records(
-        award_rows, inventory, fills,
+        award_rows, inventory,
         qty=_number(settings.get("po_qty"), PO_FIXED["QTY"]),
         unit_price=_number(settings.get("po_unit_price"), PO_FIXED["UNIT PRICE"]))
     progress_callback(75)
@@ -518,14 +576,24 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     stamp = datetime.now().strftime("%Y-%m-%d")
     output_name = "SSPO SCRIPTING - %s - %s.xlsx" % (identity, stamp)
 
+    # Input-block seeds: the Settings values, plus the PO number when the
+    # award identity leads with one ('1000129724 SSPO Award 14' -> 1000129724).
+    fills = {key: str(settings.get(key, "") or "").strip()
+             for _row, _label, _header, key in PO_INPUTS if key}
+    po_match = re.match(r"(\d{6,})\b", identity)
+    po_no = po_match.group(1) if po_match else ""
+
     output_dir = str(settings.get("output_dir", "") or "").strip()
     output_folder = Path(output_dir) if output_dir else award_path.parent
     sdk.ensure_dir(output_folder)
     output_path = output_folder / output_name
 
     log("Writing the scripting workbook...")
-    write_output(output_path, po_rows, part_rows, unresolved, len(award_rows), log)
+    write_output(output_path, po_rows, part_rows, unresolved, len(award_rows),
+                 fills, po_no, log)
     log("   %s" % output_path.name)
+    if po_no:
+        log("   PO NO seeded from the award name: %s (in red - verify it)" % po_no)
     progress_callback(90)
 
     if unresolved:
@@ -557,8 +625,11 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Sheets          : PO Data, Part Data%s"
         % (", Unresolved" if unresolved else ""))
     log("")
-    log("Blank by design (manual entry): PO NO, LINE, PROMISE DATE, PART REV,")
-    log("STANDARD CLAUSES, SHIP, and the other columns shown in black.")
+    log("Type the global values ONCE into column U on 'PO Data' (PO, LINE,")
+    log("PART REV, STD CLAUSES, SHIP TO, PROMISE DATE) - formulas carry them")
+    log("to every row; type over a row's formula to override an outlier.")
+    log("Still manual per row: INTERCOMPANY, SUPPLIER, SINGLE, and the")
+    log("black Part Data columns.")
     log("=" * 50)
     log("911 Scripting Prep completed successfully!")
 
