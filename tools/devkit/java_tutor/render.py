@@ -102,8 +102,62 @@ def highlight_java(code: str, pal: dict) -> str:
     return "".join(out)
 
 
+# LaTeX commands worth spelling out. Anything not listed just loses its
+# backslash, which is nearly always the readable thing to do.
+_TEX_WORDS = {
+    "log": "log", "ln": "ln", "times": "\u00d7", "cdot": "\u00b7",
+    "div": "\u00f7", "le": "\u2264", "ge": "\u2265", "ne": "\u2260",
+    "approx": "\u2248", "in": "\u2208", "infty": "\u221e",
+    "sum": "\u03a3", "sqrt": "\u221a", "Theta": "\u0398", "Omega": "\u03a9",
+    "alpha": "\u03b1", "beta": "\u03b2", "lfloor": "\u230a", "rfloor": "\u230b",
+    "lceil": "\u2308", "rceil": "\u2309",
+}
+_SUBSCRIPT = str.maketrans("0123456789", "\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089")
+
+
+def _detex(text: str) -> str:
+    """Turn LaTeX math into readable plain text.
+
+    The tutor is told not to emit LaTeX (there is no math renderer here), but a
+    slip used to reach the screen as literal `$$\\frac{n}{2^k} = 1$$` - reported
+    2026-09-03 as "it gave me a broken text response". This is the safety net, so
+    a slip degrades to something readable instead of to noise.
+
+    Deliberately small: this is a Java tutor, and the math it needs is
+    logarithms, fractions and exponents. Anything fancier just loses its
+    backslashes and braces rather than being faked.
+    """
+    if "$" not in text and "\\" not in text:
+        return text                      # the overwhelmingly common case
+
+    def body(m):
+        s = m.group(1)
+        # \frac{a}{b} -> a/b, innermost first so nesting unwinds
+        for _ in range(3):
+            new = re.sub(r"\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", s)
+            if new == s:
+                break
+            s = new
+        # (?![A-Za-z]) not \b: in `\log_2` the boundary between "g" and "_" does
+        # not exist (both are word characters), so \b silently failed to match
+        # and the command was stripped as unknown, leaving a bare subscript.
+        s = re.sub(r"\\(" + "|".join(_TEX_WORDS) + r")(?![A-Za-z])",
+                   lambda w: _TEX_WORDS[w.group(1)], s)
+        s = re.sub(r"_\{?(\d+)\}?", lambda d: d.group(1).translate(_SUBSCRIPT), s)
+        s = re.sub(r"\\[,;:!> ]", " ", s)          # spacing commands
+        s = re.sub(r"\\left|\\right", "", s)
+        s = re.sub(r"\\[A-Za-z]+", "", s)          # anything still unknown
+        s = s.replace("{", "").replace("}", "")
+        return " ".join(s.split())
+
+    text = re.sub(r"\$\$(.+?)\$\$", body, text, flags=re.S)   # display math
+    text = re.sub(r"\$([^$\n]+)\$", body, text)               # inline math
+    return text
+
+
 def _inline(text: str, pal: dict) -> str:
     """Inline markdown: `code`, **bold**, *italic*, [links]."""
+    text = _detex(text)
     # Inline code first, and stash it, so bold/italic markers inside a code
     # span are left alone.
     stash: list[str] = []
@@ -173,11 +227,19 @@ def _table(rows: list[str], pal: dict) -> str:
     return "".join(out)
 
 
-def to_html(markdown: str, pal: dict | None = None) -> tuple[str, list[str]]:
+def to_html(markdown: str, pal: dict | None = None,
+            code_offset: int = 0) -> tuple[str, list[str]]:
     """Render markdown to HTML.
 
     Returns (html, code_blocks) - the second item is the raw text of each
     fenced block, in order, so the window's Copy links can find them.
+
+    `code_offset` is where this message's blocks start in the WINDOW's global
+    code list. It has to be passed in: the window renders one message at a time
+    and keeps a single list across all of them, but this function only ever sees
+    one message. Without the offset every message numbered its blocks from 0
+    again, so the second snippet in a lesson rendered as `copy:0` and clicking
+    Copy on it handed back the FIRST snippet's code (found 2026-09-03).
     """
     pal = {**DEFAULTS, **(pal or {})}
     lines = markdown.replace("\r\n", "\n").split("\n")
@@ -199,7 +261,7 @@ def to_html(markdown: str, pal: dict | None = None) -> tuple[str, list[str]]:
                 i += 1
             i += 1  # closing fence (or end of text - an unclosed block still renders)
             code = "\n".join(buf)
-            out.append(_code_block(code, lang, len(codes), pal))
+            out.append(_code_block(code, lang, code_offset + len(codes), pal))
             codes.append(code)
             continue
 

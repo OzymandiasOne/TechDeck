@@ -83,21 +83,21 @@ def test_the_widget_itself_is_painted_black(win):
 # --- telling the two speakers apart -----------------------------------------
 
 def test_both_speakers_are_named(win):
-    assert ">You<" in win._bubble("user", "q", win._pal)
-    assert ">Java Tutor<" in win._bubble("assistant", "a", win._pal)
+    assert ">You<" in win._bubble("user", "q", win._pal)[0]
+    assert ">Java Tutor<" in win._bubble("assistant", "a", win._pal)[0]
 
 
 def test_the_two_speakers_use_different_colours(win):
     pal = win._pal
     assert pal["user"] != pal["tutor"]
-    assert pal["user"] in win._bubble("user", "q", pal)
-    assert pal["tutor"] in win._bubble("assistant", "a", pal)
+    assert pal["user"] in win._bubble("user", "q", pal)[0]
+    assert pal["tutor"] in win._bubble("assistant", "a", pal)[0]
     # and neither borrows the other's colour
-    assert pal["tutor"] not in win._bubble("user", "q", pal)
+    assert pal["tutor"] not in win._bubble("user", "q", pal)[0]
 
 
 def test_errors_stay_visually_separate(win):
-    html = win._bubble("error", "it broke", win._pal)
+    html, _ = win._bubble("error", "it broke", win._pal)
     assert "#ff8b8b" in html
     assert ">You<" not in html and ">Java Tutor<" not in html
 
@@ -207,5 +207,5 @@ def test_a_code_block_inside_your_message_still_reads_as_a_block(qapp, win):
 
 
 def test_the_tutor_bubble_carries_no_panel_colour(win):
-    assert win._pal["user_bg"] not in win._bubble("assistant", "a", win._pal)
-    assert win._pal["user_bg"] in win._bubble("user", "q", win._pal)
+    assert win._pal["user_bg"] not in win._bubble("assistant", "a", win._pal)[0]
+    assert win._pal["user_bg"] in win._bubble("user", "q", win._pal)[0]
