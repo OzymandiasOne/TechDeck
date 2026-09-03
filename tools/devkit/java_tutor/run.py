@@ -706,8 +706,20 @@ class JavaTutorWindow(PluginWindow):
                     f'<div style="color:#ff8b8b;">{text}</div>'
                     f"</td></tr></table>")
 
-        speaker = "You" if role == "user" else "Java Tutor"
-        colour = pal["user"] if role == "user" else pal["tutor"]
+        is_user = role == "user"
+        speaker = "You" if is_user else "Java Tutor"
+        colour = pal["user"] if is_user else pal["tutor"]
+
+        # His messages sit on a filled panel; the tutor's stay on the bare black.
+        # Only ONE side is filled on purpose - the eye finds the boundary from the
+        # alternation, and filling both would just be two blocks in a row. Qt rich
+        # text has no border-radius, so this is a plain rectangle either way.
+        if is_user:
+            cell = (f"background-color:{pal['user_bg']};"
+                    f"border-left:3px solid {colour};"
+                    f"padding:8px 12px 10px 12px;")
+        else:
+            cell = f"border-left:3px solid {colour};padding-left:12px;"
 
         body, codes = render.to_html(text, pal)
         self._code_blocks.extend(codes)
@@ -715,8 +727,7 @@ class JavaTutorWindow(PluginWindow):
 
         return (
             f'<table width="100%" cellspacing="0" cellpadding="0" '
-            f'style="margin:14px 0;"><tr><td '
-            f'style="border-left:3px solid {colour};padding-left:12px;">'
+            f'style="margin:14px 0;"><tr><td style="{cell}">'
             f'<div style="color:{colour};font-size:11px;font-weight:bold;">'
             f'{speaker}</div>'
             f"{body}{caret}</td></tr></table>")

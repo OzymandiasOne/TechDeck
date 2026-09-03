@@ -147,3 +147,65 @@ def test_still_follows_the_answer_when_parked_at_the_bottom(qapp, win):
     win._rerender()
 
     assert win._is_at_bottom(), "reading at the bottom should keep following along"
+
+
+# --- his messages sit on a filled panel ------------------------------------
+
+def _painted(qapp, win, messages, size=(600, 400)):
+    """What colours the transcript ACTUALLY paints.
+
+    Asserting the colour is in the HTML proves nothing - Qt rich text supports
+    only a subset of CSS and silently drops the rest. So render to an image and
+    count pixels.
+    """
+    from collections import Counter
+    from PySide6.QtGui import QImage
+
+    win._messages = list(messages)
+    win._view.setFixedSize(*size)
+    win.show()
+    qapp.processEvents()
+    win._rerender()
+    qapp.processEvents()
+
+    img = QImage(size[0], size[1], QImage.Format.Format_RGB32)
+    win._view.render(img)
+    return Counter(QImage.pixelColor(img, x, y).name()
+                   for y in range(0, size[1], 2) for x in range(0, size[0], 4))
+
+
+def test_your_messages_get_a_panel_and_the_tutor_does_not(qapp, win):
+    pal = win._pal
+    counts = _painted(qapp, win, [("user", "my question here"),
+                                  ("assistant", "my answer here " * 6)])
+    assert counts.get(pal["user_bg"], 0) > 0, (
+        "your message has no panel behind it - Qt dropped the background-color")
+    assert counts.get(pal["chat_bg"], 0) > counts.get(pal["user_bg"], 0), (
+        "the tutor's side should stay on the bare black; the alternation is the "
+        "whole point")
+
+
+def test_a_code_block_inside_your_message_still_reads_as_a_block(qapp, win):
+    """Three steps, darkest to lightest: chat < your panel < code. If code_bg sits
+    too close to user_bg, pasted Java disappears into the panel."""
+    pal = win._pal
+    message = "\n".join([
+        "here is my code",
+        "",
+        "```java",
+        "public int sum(int n) {",
+        "    return n;",
+        "}",
+        "```",
+        "",
+        "is it right?",
+    ])
+    counts = _painted(qapp, win, [("user", message)])
+    for key in ("chat_bg", "user_bg", "code_bg"):
+        assert counts.get(pal[key], 0) > 0, f"{key} ({pal[key]}) never painted"
+    assert len({pal["chat_bg"], pal["user_bg"], pal["code_bg"]}) == 3
+
+
+def test_the_tutor_bubble_carries_no_panel_colour(win):
+    assert win._pal["user_bg"] not in win._bubble("assistant", "a", win._pal)
+    assert win._pal["user_bg"] in win._bubble("user", "q", win._pal)

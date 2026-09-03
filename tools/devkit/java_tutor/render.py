@@ -23,13 +23,21 @@ DEFAULTS = {
     "chat_bg": "#000000",
     "text": "#e6e6e6",
     "muted": "#9aa0a6",
-    "code_bg": "#1b1f24",     # lifted off the black so code blocks read as blocks
+    "code_bg": "#1f242c",     # lifted off the black so code blocks read as blocks
     "code_border": "#2d333b",
     "accent": "#7aa2f7",
     # Who is speaking. Two clearly different hues, because the complaint that
     # produced them was "hard to tell where your text and my text begin".
     "user": "#61afef",        # you - blue
     "tutor": "#98c379",       # the tutor - green
+    # HIS messages get a filled panel; the tutor's stay on the black. One filled
+    # and one not is what makes the transcript scannable at a glance - two filled
+    # blocks would just be two blocks. Three distinct steps, darkest to lightest:
+    #   chat_bg #000000  <  user_bg #16191f  <  code_bg #1f242c
+    # so a code block pasted INSIDE one of his messages still reads as a block.
+    # (code_bg moved up from #1b1f24 for exactly that: it was too close to
+    # user_bg to separate.)
+    "user_bg": "#16191f",
     "kw": "#c678dd",        # keywords
     "str": "#98c379",       # strings and chars
     "com": "#7f848e",       # comments
