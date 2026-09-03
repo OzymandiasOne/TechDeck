@@ -198,38 +198,44 @@ class PluginCard(QFrame, ThemeAware):
         # On the card itself (old behavior): the tile has a SOLID background, so
         # the shadow casts off the opaque card silhouette, not the text — no fuzz.
         self._shadow = QGraphicsDropShadowEffect(self)
-        self._shadow.setBlurRadius(8)
+        # FIXED blur radius — never animated. Animating a shadow's SIZE makes
+        # Qt re-rasterize the card into a differently-sized rect every frame;
+        # on fractional Windows display scaling the rounding lands on
+        # different pixels frame to frame and the tile visibly shivers
+        # (reported 2026-09-03, alongside the Run button). Hover lift and the
+        # running pulse now animate the shadow's COLOR at constant geometry.
+        # (The drag code's one-shot setBlurRadius in tile_grid.py is fine —
+        # it's a single change, not a per-frame animation.)
+        # Gate: tests/ui/test_no_blur_animations.py.
+        self._shadow.setBlurRadius(20)
         self._shadow.setOffset(0, 3)
         self._shadow_base_color = self._parse_shadow_color(theme.shadow)
         self._shadow.setColor(self._shadow_base_color)
 
-        # Hover lift animations
-        self._hover_in = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        # Hover lift: deepen the shadow colour at constant size.
+        self._hover_in = QPropertyAnimation(self._shadow, b"color", self)
         self._hover_in.setDuration(150)
         self._hover_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._hover_in.setEndValue(20.0)
+        self._hover_in.setEndValue(self._hover_shadow_color())
 
-        self._hover_out = QPropertyAnimation(self._shadow, b"blurRadius", self)
+        self._hover_out = QPropertyAnimation(self._shadow, b"color", self)
         self._hover_out.setDuration(200)
         self._hover_out.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._hover_out.setEndValue(8.0)
+        self._hover_out.setEndValue(self._shadow_base_color)
 
-        # Running pulse (shadow breathes)
-        pulse_up = QPropertyAnimation(self._shadow, b"blurRadius", self)
-        pulse_up.setDuration(700)
-        pulse_up.setStartValue(10.0)
-        pulse_up.setEndValue(22.0)
-        pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
+        # Running pulse (accent glow breathes by alpha; values are set fresh
+        # from the active theme each time _start_pulse runs).
+        self._pulse_up = QPropertyAnimation(self._shadow, b"color", self)
+        self._pulse_up.setDuration(700)
+        self._pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
 
-        pulse_dn = QPropertyAnimation(self._shadow, b"blurRadius", self)
-        pulse_dn.setDuration(700)
-        pulse_dn.setStartValue(22.0)
-        pulse_dn.setEndValue(10.0)
-        pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._pulse_dn = QPropertyAnimation(self._shadow, b"color", self)
+        self._pulse_dn.setDuration(700)
+        self._pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         self._pulse_group = QSequentialAnimationGroup(self)
-        self._pulse_group.addAnimation(pulse_up)
-        self._pulse_group.addAnimation(pulse_dn)
+        self._pulse_group.addAnimation(self._pulse_up)
+        self._pulse_group.addAnimation(self._pulse_dn)
         self._pulse_group.setLoopCount(-1)
 
         # Entrance fade uses a temporary opacity effect on the whole card; it's
@@ -248,6 +254,13 @@ class PluginCard(QFrame, ThemeAware):
             a = int(float(m.group(4)) * 255)
             return QColor(int(m.group(1)), int(m.group(2)), int(m.group(3)), a)
         return QColor(0, 0, 0, 60)
+
+    def _hover_shadow_color(self) -> QColor:
+        """The hover-lift shadow: the base shadow at double strength (the old
+        blur-8→20 'lift', expressed as colour so the geometry never changes)."""
+        c = QColor(self._shadow_base_color)
+        c.setAlpha(min(255, c.alpha() * 2))
+        return c
 
     def start_entrance(self, delay_ms: int):
         """Trigger staggered fade-in entrance."""
@@ -271,6 +284,10 @@ class PluginCard(QFrame, ThemeAware):
         self.theme = self.get_current_palette()
         self._update_card_style()
         self._shadow_base_color = self._parse_shadow_color(self.theme.shadow)
+        # The hover animations bake colours in as end values — refresh them so
+        # a theme change doesn't leave the tile lifting to the old theme's shadow.
+        self._hover_in.setEndValue(self._hover_shadow_color())
+        self._hover_out.setEndValue(self._shadow_base_color)
         if self._status != self.STATUS_RUNNING:
             self._shadow.setColor(self._shadow_base_color)
         self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
@@ -307,15 +324,20 @@ class PluginCard(QFrame, ThemeAware):
 
     def _start_pulse(self):
         if self.graphicsEffect() is self._shadow:
-            c = QColor(self.theme.accent)
-            c.setAlpha(160)
-            self._shadow.setColor(c)
+            hi = QColor(self.theme.accent)
+            hi.setAlpha(160)
+            lo = QColor(self.theme.accent)
+            lo.setAlpha(50)
+            self._pulse_up.setStartValue(lo)
+            self._pulse_up.setEndValue(hi)
+            self._pulse_dn.setStartValue(hi)
+            self._pulse_dn.setEndValue(lo)
+            self._shadow.setColor(hi)
             self._pulse_group.start()
 
     def _stop_pulse(self):
         self._pulse_group.stop()
         if self.graphicsEffect() is self._shadow:
-            self._shadow.setBlurRadius(8)
             self._shadow.setColor(self._shadow_base_color)
 
     def _flash_success(self):
@@ -384,7 +406,7 @@ class PluginCard(QFrame, ThemeAware):
                 and self._status != self.STATUS_RUNNING
                 and not self._dragging):
             self._hover_out.stop()
-            self._hover_in.setStartValue(self._shadow.blurRadius())
+            self._hover_in.setStartValue(self._shadow.color())
             self._hover_in.start()
         super().enterEvent(event)
 
@@ -393,7 +415,7 @@ class PluginCard(QFrame, ThemeAware):
                 and self._status != self.STATUS_RUNNING
                 and not self._dragging):
             self._hover_in.stop()
-            self._hover_out.setStartValue(self._shadow.blurRadius())
+            self._hover_out.setStartValue(self._shadow.color())
             self._hover_out.start()
         super().leaveEvent(event)
 

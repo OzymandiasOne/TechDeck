@@ -63,3 +63,25 @@ def test_home_page_still_builds_after_extraction(qapp, tmp_path):
     from techdeck.ui.pages.home_page import HomePage
     hp = HomePage(SettingsManager(settings_dir=tmp_path))
     assert type(hp._tile_ctrl).__name__ == "TileGridController"
+
+
+def test_card_shadow_animates_color_never_size(qapp):
+    """The vibrating-tile fix (2026-09-03): hover lift and the running pulse
+    breathe the shadow's COLOR at constant blur. An animated blurRadius makes
+    the tile shiver on fractional display scaling — the source-scan gate is
+    tests/ui/test_no_blur_animations.py; this pins the runtime behavior."""
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QEnterEvent
+    from techdeck.ui.widgets.plugin_card import PluginCard
+    card = PluginCard(_Plugin(), "d", "batch_auditor", _palette())
+    card._on_entrance_done()             # swap entrance fade for the shadow
+    blur = card._shadow.blurRadius()
+
+    p = QPointF(1.0, 1.0)
+    card.enterEvent(QEnterEvent(p, p, p))
+    card.leaveEvent(QEvent(QEvent.Type.Leave))
+    card.set_status(PluginCard.STATUS_RUNNING)
+    assert card._shadow.blurRadius() == blur       # pulse left size alone
+    card.set_status(PluginCard.STATUS_IDLE)
+    assert card._shadow.blurRadius() == blur
+    assert card._shadow.color() == card._shadow_base_color  # restored
