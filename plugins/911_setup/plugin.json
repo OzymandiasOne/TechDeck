@@ -1,8 +1,8 @@
 {
   "id": "911_setup",
   "name": "911 Setup",
-  "description": "Automates the full 911 QTDR batch setup behind a checklist of actions to run - which it remembers between sessions: creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, generates inspection sheets, and stamps the Move Ticket Omit PDFs (with a toggleable difficulty label). Teams cards are their own app now (911 Teams Cards) and are OFF here by default - tick them if you want cards and setup in one pass. Nest numbers are sourced from the Quote File NEST column.",
-  "version": "2.0.0",
+  "description": "Automates the full 911 QTDR batch setup behind a checklist of actions to run - which it remembers between sessions: creates nest folders, copies and fills 911 Batch templates with forecast, PDF, and quote data, generates inspection sheets, and stamps the Move Ticket Omit PDFs (with a toggleable difficulty label). Handles SHAPE and PLATE batches - tick 'PLATE batch' in the checklist for plate work (plate template and scribe doc, MIL SPEC N/A on carbon, trace pulled from the forecast); it resets to SHAPE every run on purpose. Teams cards are their own app now (911 Teams Cards) and are OFF here by default - tick them if you want cards and setup in one pass. Nest numbers are sourced from the Quote File NEST column.",
+  "version": "2.1.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -13,6 +13,7 @@
     ],
     "how_it_works": [
       "Tick the actions to run - your selection is remembered, so a step you always skip stays unticked next time. Generate Teams Cards is off by default and needs no batch number.",
+      "Setting up plate work? Tick 'PLATE batch' - the run then uses the plate workbook template and plate scribe form, writes MIL SPEC as N/A for carbon (ferrous) stock, and fills the scribe sheet's UNIQUE - TRACE column from the forecast's TRACE/MIC column. This one toggle is never remembered: every run starts back at SHAPE so a plate run can't silently bleed into the next shape batch.",
       "Enter the batch number, then check which nests to set up (nests already built are flagged).",
       "For each nest it creates the nest folder, copies and fills the 911 Batch template with forecast, material, and quote data, and builds the per-piece inspection sheets.",
       "It also pulls the nest's drawings PDF, removing the MOVE TICKET pages and stamping the cover with the batch and nest."
