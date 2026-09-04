@@ -281,6 +281,32 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.4", "Sep 4, 2026", "Feature",
+     "The 911 batch setup tool now prepares plate work as well as structural "
+     "shapes. Until now its output was tailored to shapes, and plate batches "
+     "were prepared by hand around it: the operator selects plate for the run "
+     "and the tool produces the plate workbook and the plate verification "
+     "form, records the material specification as not applicable on carbon "
+     "plate - decided by the ferrous designation the shop paperwork itself "
+     "carries, never inferred from the material name - and carries each "
+     "nest's traceability number from the forecast onto the verification "
+     "sheet, a field that previously had to be remembered and typed by hand "
+     "on every plate order. The plate selection deliberately does not "
+     "persist between runs, so a prior plate run can never silently apply "
+     "plate paperwork to a shape batch. "
+     "The scripting-preparation tool now takes the values shared across an "
+     "order line - purchase order, line, revision, clauses, ship-to and "
+     "promise date - once, and propagates them to every line, with any "
+     "differing line still editable individually; division naming was "
+     "aligned to the exact form the ERP expects, removing a manual "
+     "correction. "
+     "The difficulty marking applied by the design system is now preserved "
+     "on part drawings rather than removed during paperwork preparation - "
+     "the shop floor relies on the visible marker - while orders processed "
+     "under the previous behaviour continue to be recognised as difficult. "
+     "A display fault that made the run control appear to vibrate on scaled "
+     "monitors was corrected.",
+     "911 Setup, 911 Scripting Prep, 922 Difficulty Stamper"),
     ("Beta 0.8.7.3", "Sep 2, 2026", "Feature",
      "Adds a scripting-preparation tool for the SSPO order line. The ERP "
      "scripting workbook was previously typed out line by line; it is now "

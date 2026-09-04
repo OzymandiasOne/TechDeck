@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.3 - Scripting Prep - 911 Scripting Prep ships as its own app and the 911 PO PDF Extractor is back beside it
+; Version 0.8.7.4 - Plate Work - 911 Setup handles PLATE batches; Scripting Prep type-once PO block
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.3"
+#define MyAppVersion "0.8.7.4"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

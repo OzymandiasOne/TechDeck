@@ -17,13 +17,17 @@ until this file matches.
 TOOL_SECTIONS = [
  ("911 QTDR PRODUCTION PACKAGE WORKFLOW", [
   ("911 Setup",
-   "Performs the full 911 QTDR batch setup: nest folders, templates, forecast "
-   "data and production PDFs.",
+   "Performs the full 911 QTDR batch setup, for shape and plate work: nest "
+   "folders, templates, forecast data and production PDFs.",
    "Reads nest numbers from the batch list, builds each nest folder from the "
    "template set, files the production PDFs, and populates forecast data. "
    "Which steps run is chosen from a checklist that remembers each operator's "
    "selection between sessions, so a site that skips a step configures it "
-   "once rather than every run.",
+   "once rather than every run. A per-run plate selection produces the plate "
+   "workbook and verification form, applies the material-specification rule "
+   "for carbon plate, and carries traceability numbers from the forecast; it "
+   "deliberately resets each run so plate settings cannot carry into shape "
+   "work unnoticed.",
    "Active", "0.8.0"),
   ("911 Teams Cards",
    "Creates the coordination cards for every 911 order waiting to be modelled, "

@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.3 - Scripting Prep
+# TechDeck v0.8.7.4 - Plate Work
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,54 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.4 - Plate Work
+
+### 911 Setup now handles PLATE batches
+
+**What it does:** tick **PLATE batch** in the checklist window and the whole run is set
+up for plate instead of shape.
+
+- It copies the **911 PLATE BATCH** workbook into each nest folder and drops the
+  **PLATES** scribe-verification form into PRODUCTION PAPERWORK, instead of the shapes
+  versions. Until now every batch got the shapes paperwork, plate or not.
+- **MIL SPEC comes out as N/A on carbon plate.** The MOVE TICKET in the nest packet
+  carries its own FERROUS flag, and that flag decides - stainless, nickel alloys and
+  aluminum keep their real spec. The app never guesses off the material name.
+- **The scribe sheet's UNIQUE - TRACE column is filled from the TRACE/MIC column of the
+  working forecast.** On shape batches that column is correctly N/A; on plate it is real
+  data someone had to remember to type. If the forecast has no trace for a nest, the
+  cell is left blank for you - it never writes N/A on a plate run.
+
+**What you still have to do:** tick the box each plate run. It resets to SHAPE every
+time on purpose, so a leftover tick from last week's plate work can never quietly put
+plate paperwork on a shape batch.
+
+### 911 Scripting Prep: type the shared PO values once
+
+- The **PO Data** sheet now has an input block on the side: PO NO, LINE, PART REV,
+  STANDARD CLAUSES, SHIP TO and PROMISE DATE are typed once there and every line fills
+  itself. A line that differs can still be typed over directly.
+- The PO number is pre-filled from the award review's filename and shown in red -
+  check it, don't trust it.
+- **SOPO becomes SOUTH PORTLAND** in the division column, spelled exactly the way
+  Mie Trak wants it.
+
+### 922 Difficulty Stamper: the blue label stays on the drawing
+
+The packet cover still gets its difficulty stamp, but the blue DriveWorks DIFFICULT
+label is no longer removed from the part drawing - the floor kept losing that marker.
+Drawings that earlier versions already stripped still read as difficult, so their
+packet stamps keep working.
+
+### Fixes
+
+- **The Run Selected button shivered on some screens** - a vibrating shimmer whenever
+  tiles were ticked, and a small shake clicking a tile. That was the glow animation
+  fighting Windows display scaling. The glow now breathes without moving a pixel; same
+  fix applied to the tiles' hover and running effects.
 
 ---
 
