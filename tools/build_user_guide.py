@@ -65,6 +65,7 @@ blockquote { color: #444444; margin: 5pt 12pt; }
 BANNED = [
     (re.compile(r"\bplugins?\b", re.IGNORECASE), 'the word "plugin" (say "app")'),
     (re.compile(r"\bsdk\.", re.IGNORECASE), '"sdk." (dev vocabulary)'),
+    (re.compile(r"[–—]"), "an em/en dash (rewrite with plain punctuation)"),
 ]
 
 
