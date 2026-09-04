@@ -53,3 +53,4 @@ tools/pixel_playground/beyblade/out/
 # tools/preview_console_cat.py and session render scripts
 console_cat_*.png
 console_cat_*.gif
+docs/user_guide/.build/
