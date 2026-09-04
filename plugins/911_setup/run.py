@@ -137,6 +137,28 @@ v1.8.0 changes
     The "Program" checklist item is dropped on non-tube stock. Card layout,
     checklist, label slots and the machine rules all live in the sibling
     card_template.json; the flow recipe is docs/TEAMS_CARDS.md (flow #3).
+
+v2.1.0 changes (coworker feedback 2026-09-03 -- PLATE batches)
+  - New "PLATE batch" toggle in the master window, default OFF (= SHAPE) and
+    deliberately NOT remembered between runs (remember: False): plate-vs-
+    shape belongs to the batch in front of you, not to the user. Everything
+    the plugin produced before was tailored to SHAPE; ticked, the run now:
+      * copies '911 PLATE BATCH _.xlsx' instead of '911 BATCH _.xlsx'
+        (both live in the SACO template dir; the output workbook keeps the
+        '911 BATCH {batch} {nest}.xlsx' name both ways -- sibling apps
+        locate it by that name);
+      * drops the PLATES scribe-verification form (QF-QU-15 ... PLATES.docx)
+        instead of the SHAPES one;
+      * writes MIL SPEC (NEST D4) as the literal 'N/A' when the packet's own
+        MOVE TICKET 'FERROUS:' flag is 'F' (carbon steel -- the bulk of
+        plate work); 'N' (stainless/nickel alloys) and 'A' (aluminum) keep
+        the real spec, as does a packet with no flag at all;
+      * fills the SCRIBE sheet's 'UNIQUE - TRACE' column from the forecast's
+        TRACE/MIC column (blank stays blank for manual entry). The SHAPE
+        template hardcodes that column to "N/A" by formula -- correct for
+        shapes, and exactly the reported hazard for plate, where the trace
+        is real data someone must enter. The plate template ships the
+        column empty, so writing real values is additive.
 """
 
 import ctypes
@@ -222,8 +244,16 @@ _DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 # Scribe-verification form dropped into a PRODUCTION PAPERWORK subfolder of
 # every generated nest folder (subfolder per user feedback 2026-07-21). Lives
 # in the same SACO template directory as the 911 BATCH template (template_dir).
-_SCRIBE_DOC_FILENAME = "QF-QU-15 REV B - SCRIBE VERIFICATION - SHAPES.docx"
+# SHAPE and PLATE runs get different forms (same QMS number, different field
+# layout — the PLATE one carries the trace fields); both ship in SACO.
+_SCRIBE_DOC_FILENAME_SHAPES = "QF-QU-15 REV B - SCRIBE VERIFICATION - SHAPES.docx"
+_SCRIBE_DOC_FILENAME_PLATES = "QF-QU-15 REV B - SCRIBE VERIFICATION - PLATES.docx"
 _SCRIBE_SUBFOLDER = "PRODUCTION PAPERWORK"
+
+
+def _scribe_doc_filename(plate: bool) -> str:
+    """The scribe-verification form for this run's mode."""
+    return _SCRIBE_DOC_FILENAME_PLATES if plate else _SCRIBE_DOC_FILENAME_SHAPES
 
 
 def _base_qtdr(override: str = "") -> Path:
@@ -712,19 +742,26 @@ def _locate_forecast(forecast_wb, log):
     po = _find_header_col(ws, "PO", header_row) or 1
     line = _find_header_col(ws, "Line", header_row) or 2
     batch = _find_header_col_prefix(ws, "Batch", header_row) or 3
+    # TRACE/MIC feeds the plate SCRIBE sheet's UNIQUE - TRACE column. Optional
+    # (None when the column is missing) so a shape run never depends on it.
+    trace = (_find_header_col(ws, "TRACE/MIC", header_row)
+             or _find_header_col_prefix(ws, "TRACE", header_row))
     log(f"  Forecast lookup: sheet '{ws.title}', nest column "
         f"{get_column_letter(nest_col)} (headers in row {header_row}); A/B/C <- "
-        f"{get_column_letter(po)}/{get_column_letter(line)}/{get_column_letter(batch)}.")
-    return ws, header_row, nest_col, (po, line, batch)
+        f"{get_column_letter(po)}/{get_column_letter(line)}/{get_column_letter(batch)}"
+        + (f"; trace <- {get_column_letter(trace)}." if trace else "."))
+    return ws, header_row, nest_col, (po, line, batch, trace)
 
 
 def _copy_forecast_rows(ws, header_row: int, nest_col: int,
                         out_cols: tuple, nest_number: str) -> list:
-    """All (PO, Line, Batch) tuples whose 'Nest' cell matches nest_number, read
-    from the header-located columns (see _locate_forecast). Tolerant of nests
-    stored as int/str/float. These land in NEST cols A/B/C."""
+    """All (PO, Line, Batch, Trace) tuples whose 'Nest' cell matches
+    nest_number, read from the header-located columns (see _locate_forecast).
+    Tolerant of nests stored as int/str/float. PO/Line/Batch land in NEST
+    cols A/B/C; Trace (None when the forecast has no TRACE/MIC column) feeds
+    the plate SCRIBE sheet."""
     target = str(nest_number).strip().upper()
-    po, line, batch = out_cols
+    po, line, batch, trace = out_cols
     rows = []
     for row in range(header_row + 1, ws.max_row + 1):
         if _nest_matches(ws.cell(row, nest_col).value, target):
@@ -732,6 +769,7 @@ def _copy_forecast_rows(ws, header_row: int, nest_col: int,
                 ws.cell(row, po).value,
                 ws.cell(row, line).value,
                 ws.cell(row, batch).value,
+                ws.cell(row, trace).value if trace else None,
             ))
     return rows
 
@@ -739,12 +777,62 @@ def _copy_forecast_rows(ws, header_row: int, nest_col: int,
 def _paste_forecast_into_nest(nest_ws, forecast_rows: list):
     """
     Paste forecast_rows into NEST sheet cols A, B, C starting at row 4.
+    (The trace element rides along for the SCRIBE sheet; it is not a NEST column.)
     """
-    for i, (a, b, c) in enumerate(forecast_rows):
+    for i, (a, b, c, _trace) in enumerate(forecast_rows):
         dest_row = 4 + i
         nest_ws.cell(dest_row, 1).value = a
         nest_ws.cell(dest_row, 2).value = b
         nest_ws.cell(dest_row, 3).value = c
+
+
+def _fill_scribe_trace(wb, forecast_rows: list, num_parts: int, log):
+    """
+    PLATE mode only: write the forecast's TRACE/MIC value into the SCRIBE
+    VERIFICATION sheet's 'UNIQUE - TRACE' column, one value per part row.
+
+    The plate template ships that column EMPTY (the shape template hardcodes
+    it to "N/A" by formula, which is exactly the inaccuracy reported on
+    2026-09-03: plate trace is real data, entered from the forecast). Rows
+    beyond the forecast rows repeat the first row's trace, mirroring how
+    _fill_nest_part_rows replicates row 4 down every part row. A blank
+    forecast trace leaves the cell blank for manual entry -- never "N/A".
+
+    Column is found by header NAME in row 1 (Hard Rule 1): the plate SCRIBE
+    sheet has an extra PART ID column, so the position differs from shape.
+    """
+    ws = wb["SCRIBE VERIFICATION"] if "SCRIBE VERIFICATION" in wb.sheetnames else None
+    if ws is None:
+        log("  WARNING: No SCRIBE VERIFICATION sheet -- trace not written.")
+        return
+    trace_col = _find_header_col(ws, "UNIQUE - TRACE", header_row=1)
+    if trace_col is None:
+        log("  WARNING: No 'UNIQUE - TRACE' column on the SCRIBE VERIFICATION "
+            "sheet -- trace not written.")
+        return
+
+    traces = [t for (_a, _b, _c, t) in forecast_rows]
+    first = next((t for t in traces
+                  if t is not None and str(t).strip() != ""), None)
+    n_rows = max(num_parts, len(traces))
+    if n_rows == 0 or (first is None and not traces):
+        return
+
+    written = 0
+    for i in range(n_rows):
+        val = traces[i] if i < len(traces) else first
+        if val is None or str(val).strip() == "":
+            val = first
+        if val is None or str(val).strip() == "":
+            continue
+        ws.cell(2 + i, trace_col).value = val  # SCRIBE row 2 mirrors NEST row 4
+        written += 1
+    if written:
+        log(f"  Trace -> SCRIBE '{get_column_letter(trace_col)}': "
+            f"{written} row(s) from the forecast TRACE/MIC column.")
+    else:
+        log("  Forecast TRACE/MIC is blank for this nest -- UNIQUE - TRACE "
+            "left blank for manual entry.")
 
 
 # ---------------------------------------------------------------------------
@@ -812,12 +900,15 @@ def _find_nest_pdf(nest_packages_folder: Path, nest_number: str):
 
 def _extract_pdf_data(pdf_path: Path) -> tuple:
     """
-    Parse a single nest packet PDF and return (mil_spec, matl_type).
+    Parse a single nest packet PDF and return (mil_spec, matl_type, ferrous).
 
     MIL spec is read from the labeled 'MIL SPEC:' field, falling back to a
     bare 'MIL-S-...' token if the label is absent. Material is read from the
     labeled 'MATERIAL:' field only (no fallback -- a blank field stays blank).
-    Returns (None, None) if neither is found.
+    Ferrous is the MOVE TICKET's own 'FERROUS:' flag -- observed values on
+    real packets: 'F' (ferrous steel: HSS, OSS, HY-80/100, STL), 'N'
+    (non-ferrous: CRES, IN625, K-MONEL, CUNI, BRASS), 'A' (aluminum).
+    Returns (None, None, None) if nothing is found.
     """
     if not PYMUPDF_AVAILABLE:
         raise ImportError(
@@ -836,31 +927,51 @@ def _extract_pdf_data(pdf_path: Path) -> tuple:
         mil_spec = m.group(0) if m else None
 
     matl_type = _labeled_value(full_text, "MATERIAL")
+    ferrous = _labeled_value(full_text, "FERROUS")
 
-    return mil_spec, matl_type
+    return mil_spec, matl_type, ferrous
+
+
+def _effective_mil_spec(mil_spec, ferrous, plate: bool):
+    """
+    The MIL spec value that goes to NEST D4.
+
+    PLATE mode: ferrous (carbon) plate does not use a MIL spec on the nest
+    sheet -- the packet's own MOVE TICKET 'FERROUS: F' flag decides, so 'F'
+    yields the literal 'N/A' (coworker feedback 2026-09-03). Non-ferrous plate
+    ('N' -- stainless/alloys -- and 'A' -- aluminum) keeps the real spec.
+    A missing FERROUS flag keeps the real spec too: better to show a spec a
+    human can strike out than to silently hide one that was required.
+
+    SHAPE mode: always the real spec, exactly as before.
+    """
+    if plate and ferrous and str(ferrous).strip().upper() == "F":
+        return "N/A"
+    return mil_spec
 
 
 def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
     """
-    Read (mil_spec, matl_type) from THIS nest's own packet PDF in NEST PACKAGES
-    (the one whose filename contains the nest number). Scoping to the nest's
-    own packet prevents one nest from inheriting another nest's MIL spec.
+    Read (mil_spec, matl_type, ferrous) from THIS nest's own packet PDF in
+    NEST PACKAGES (the one whose filename contains the nest number). Scoping
+    to the nest's own packet prevents one nest from inheriting another
+    nest's MIL spec.
     """
     if not sdk.exists(nest_packages_folder):
         log(f"  WARNING: NEST PACKAGES folder not found: {nest_packages_folder}")
-        return None, None
+        return None, None, None
 
     nest_pdf = _find_nest_pdf(nest_packages_folder, nest_number)
     if nest_pdf is None:
         log(f"  WARNING: No packet PDF containing '{nest_number}' found in NEST PACKAGES.")
-        return None, None
+        return None, None, None
 
     log(f"  Parsing packet PDF: {nest_pdf.name}")
     try:
         return _extract_pdf_data(nest_pdf)
     except Exception as e:
         log(f"  WARNING: Could not parse {nest_pdf.name}: {e}")
-        return None, None
+        return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -1319,20 +1430,25 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
 # Template finder
 # ---------------------------------------------------------------------------
 
-def _find_template_911(template_dir: Path) -> Path:
+def _find_template_911(template_dir: Path, plate: bool = False) -> Path:
     """
-    Find '911 BATCH _.xlsx' in the template directory.
-    Matches any .xlsx whose name starts with '911 BATCH' (case-insensitive).
+    Find the batch workbook template in the template directory.
+
+    SHAPE runs match any .xlsx whose name starts with '911 BATCH'; PLATE runs
+    match '911 PLATE BATCH' (case-insensitive). Both live in the same SACO
+    dir, and the prefixes cannot cross-match: '911 BATCH' never prefixes
+    '911 PLATE BATCH _.xlsx', so a shape run can't grab the plate template.
     """
+    prefix = "911 PLATE BATCH" if plate else "911 BATCH"
     for f in template_dir.iterdir():
         if (sdk.is_file(f)
                 and f.suffix.lower() == ".xlsx"
-                and f.stem.upper().startswith("911 BATCH")
+                and f.stem.upper().startswith(prefix)
                 and not f.name.startswith("~")):
             return f
 
     raise FileNotFoundError(
-        f"Could not find a '911 BATCH _.xlsx' template in {template_dir}"
+        f"Could not find a '{prefix} _.xlsx' template in {template_dir}"
     )
 
 
@@ -1393,11 +1509,27 @@ def _dialog_groups() -> list:
     Whatever the defaults here say, the FIRST thing run() does is overlay the
     user's last submission. These values are only what a brand-new user — or a
     toggle added by a later update — starts at.
+
+    The ONE exception is "PLATE batch" (v2.1.0, coworker feedback
+    2026-09-03): it
+    declares ``remember: False``, so every run opens at SHAPE regardless of
+    the last submission. Plate-vs-shape is a property of the batch in front
+    of you, not a user preference — a remembered PLATE tick silently applied
+    to next week's shape batch would fill real paperwork from the wrong
+    template. Ticked, it switches the workbook template ('911 PLATE BATCH
+    _.xlsx'), the scribe doc (PLATES form), writes MIL SPEC as N/A for
+    ferrous (carbon) stock, and fills UNIQUE - TRACE from the forecast's
+    TRACE/MIC column.
     """
     return [
         {"key": "teams_cards",
          "label": "Generate Teams Cards (also available as its own app)",
          "checked": False,
+         "children": []},
+        {"key": "plate_batch",
+         "label": "PLATE batch (unticked = SHAPE; asks again every run)",
+         "checked": False,
+         "remember": False,
          "children": []},
         {"key": "folder_setup",
          "label": "Nest Folder Setup",
@@ -1473,6 +1605,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         return bool((g.get("options") or {}).get(child, default))
 
     do_cards = _on("teams_cards")
+    plate = _on("plate_batch")
     do_folders = _on("folder_setup")
     do_nest_data = _on("nest_data")
     do_inspection = _on("inspection_sheets")
@@ -1488,6 +1621,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log("No actions selected - nothing to do.")
         return
     log("Actions: " + " -> ".join(enabled))
+    log(f"  Mode: {'PLATE' if plate else 'SHAPE'} batch"
+        + (" (plate template, plate scribe doc, MIL SPEC N/A for ferrous, "
+           "trace from forecast)" if plate else ""))
     if do_stamping:
         log(f"  Difficulty label: {'ON' if stamp_difficulty else 'OFF'}")
 
@@ -1691,7 +1827,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             log(f"  WARNING: no existing nest workbook for {len(absent)} nest(s): "
                 f"{', '.join(absent[:10])}" + (" ..." if len(absent) > 10 else ""))
     else:
-        log("Copying 911 BATCH template...")
+        log(f"Copying 911 {'PLATE ' if plate else ''}BATCH template...")
         template_dir = _template_dir(qtdr_override, template_subdir)
 
         if not sdk.exists(template_dir):
@@ -1700,17 +1836,23 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 f"Check the 'Template Subfolder' setting for this plugin."
             )
 
-        template_path = _find_template_911(template_dir)
+        template_path = _find_template_911(template_dir, plate=plate)
         log(f"Template      : {template_path.name}")
 
         # Scribe-verification doc copied into each nest folder (one copy per
         # nest). Same SACO template dir; a missing source is non-fatal.
-        scribe_src = template_dir / _SCRIBE_DOC_FILENAME
+        # PLATE runs get the PLATES form (different field layout, carries the
+        # trace fields); SHAPE runs keep the SHAPES form.
+        scribe_name = _scribe_doc_filename(plate)
+        scribe_src = template_dir / scribe_name
         scribe_available = sdk.exists(scribe_src)
         if not scribe_available:
             log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
 
         for nest in nest_numbers:
+            # The workbook keeps the same name in both modes: sibling apps
+            # (911 Inspection Dimensions, Batch Auditor) locate the nest
+            # workbook as '911 BATCH {batch} {nest}.xlsx'.
             dest_name = f"911 BATCH {batch_number} {nest}.xlsx"
             dest_path = batch_folder / nest / dest_name
             shutil.copy2(sdk.long_path(template_path), sdk.long_path(dest_path))
@@ -1719,10 +1861,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
             if scribe_available:
                 scribe_dir = batch_folder / nest / _SCRIBE_SUBFOLDER
-                scribe_dest = scribe_dir / _SCRIBE_DOC_FILENAME
+                scribe_dest = scribe_dir / scribe_name
                 # Earlier versions dropped the doc loose in the nest root;
                 # relocate such a copy instead of duplicating it.
-                legacy_dest = batch_folder / nest / _SCRIBE_DOC_FILENAME
+                legacy_dest = batch_folder / nest / scribe_name
                 if sdk.exists(scribe_dest):
                     log(f"  Scribe doc already in {nest} -- skipped")
                 else:
@@ -1812,7 +1954,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         if not do_nest_data:
             log("  [skipped] Nest Workbook Data unchecked.")
             if do_stamping:
-                _, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
+                _, matl_type, _ = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
         else:
             # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------
             log(f"  [Step 5] Extracting forecast rows for {nest}...")
@@ -1829,11 +1971,27 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
             # -- Step 6: PDF -> MIL-S spec (D4) + MATL (E4) ------------------
             log(f"  [Step 6] Reading MIL SPEC / MATERIAL from nest packet...")
-            mil_spec, matl_type = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
+            mil_spec, matl_type, ferrous = _get_pdf_data_for_nest(
+                nest_packages_folder, nest, log)
 
-            if mil_spec:
-                nest_ws.cell(4, 4).value = mil_spec   # D4
-                log(f"  MIL Spec -> D4: {mil_spec}")
+            # PLATE mode: the packet's own FERROUS flag decides -- 'F'
+            # (carbon steel) plate takes the literal 'N/A' instead of the
+            # packet's MIL spec; non-ferrous ('N'/'A') keeps the real one.
+            effective_mil = _effective_mil_spec(mil_spec, ferrous, plate)
+            if effective_mil == "N/A" and mil_spec != "N/A":
+                log(f"  FERROUS: {ferrous} (carbon plate) -> MIL Spec D4 set "
+                    f"to N/A (packet said {mil_spec or 'nothing'}).")
+            elif plate and ferrous:
+                log(f"  FERROUS: {ferrous} (non-ferrous plate) -> real MIL "
+                    f"spec kept.")
+            elif plate:
+                log("  WARNING: No FERROUS flag in the nest packet -- keeping "
+                    "the packet's MIL spec; strike it out by hand if this is "
+                    "carbon plate.")
+
+            if effective_mil:
+                nest_ws.cell(4, 4).value = effective_mil   # D4
+                log(f"  MIL Spec -> D4: {effective_mil}")
             else:
                 log(f"  WARNING: MIL spec not found in nest packet.")
 
@@ -1871,6 +2029,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             if num_parts > 1:
                 _fill_nest_part_rows(nest_ws, num_parts)
                 log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
+
+            # -- PLATE only: forecast TRACE/MIC -> SCRIBE 'UNIQUE - TRACE' ----
+            # The plate template ships the column empty (never the shape
+            # template's hardcoded "N/A"); fill it from the forecast so it is
+            # not overlooked, and leave it blank when the forecast is blank.
+            if plate:
+                _fill_scribe_trace(wb, forecast_rows, num_parts, log)
 
         # -- Step 8a: Collect part rows (WO / DYPN / qty) from NEST ------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")

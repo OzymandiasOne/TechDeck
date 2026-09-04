@@ -122,37 +122,44 @@ def test_stamp_is_applied_then_idempotent_then_removed(ds, tmp_path):
     assert packet.stat().st_mtime_ns == before
 
 
-# --- stripping the label off the drawing -------------------------------------
+# --- the drawing is read, never rewritten ------------------------------------
 
-def _make_drawing(path: Path, with_label: bool = True) -> None:
+def _make_drawing(path: Path, with_label: bool = True,
+                  keywords: str = "") -> None:
     """A part drawing; the DriveWorks label is blue, unlike our red stamp."""
     doc = fitz.open()
     page = doc.new_page(width=792, height=612)
     if with_label:
         page.insert_text(fitz.Point(400, 300), "DIFFICULT",
                          fontsize=18, fontname="helv", fill=(0, 0, 1))
+    if keywords:
+        doc.set_metadata({"keywords": keywords})
     doc.save(str(path))
     doc.close()
 
 
-def test_strip_label_round_trip(ds, tmp_path):
+def test_label_stays_on_the_drawing(ds, tmp_path):
+    # v1.4.0: the label is no longer stripped off the drawing once the packet
+    # is stamped - inspection is read-only and strip_label is gone.
     drawing = tmp_path / "262028652-175 BAR F.pdf"
     _make_drawing(drawing)
-    log = lambda *_: None
-
-    assert ds.inspect_drawing(drawing, log) == (True, False)
-    assert ds.strip_label(drawing, log) == 1
-
-    # The label is gone from the page...
-    assert _stamp_count(drawing) == 0
-    # ...but the drawing still reads as difficult, via the metadata marker -
-    # without it a re-run would see a clean drawing and un-stamp the packet.
-    assert ds.inspect_drawing(drawing, log) == (False, True)
-
-    # Stripping an already-stripped drawing never rewrites the file.
     before = drawing.stat().st_mtime_ns
-    assert ds.strip_label(drawing, log) == 0
+
+    assert ds.inspect_drawing(drawing, lambda *_: None) == (True, False)
+    assert _stamp_count(drawing) == 1
     assert drawing.stat().st_mtime_ns == before
+    assert not hasattr(ds, "strip_label")
+
+
+def test_legacy_stripped_drawing_still_reads_difficult(ds, tmp_path):
+    # Versions <= 1.3.0 redacted the label off and left a metadata marker in
+    # its place. Those drawings are still out in the live batches: the marker
+    # must keep the order difficult, or a re-run would un-stamp its packet.
+    drawing = tmp_path / "262028652-175 BAR F.pdf"
+    _make_drawing(drawing, with_label=False,
+                  keywords="TechDeck-DIFFICULT-stripped")
+
+    assert ds.inspect_drawing(drawing, lambda *_: None) == (False, True)
 
 
 def test_fresh_clean_drawing_reads_clean(ds, tmp_path):

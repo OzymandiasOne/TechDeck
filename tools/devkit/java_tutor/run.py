@@ -11,6 +11,7 @@ engine strips every write tool (see claude_session.py). It can read them.
 """
 
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -61,9 +62,23 @@ logger = logging.getLogger(__name__)
 # Module-level: a window in a local goes straight to the garbage collector.
 _window = None
 
-# How often the view repaints while text is streaming. Repainting on every
-# delta rebuilds the whole document and stutters; 80ms still reads as live.
-_STREAM_REPAINT_MS = 80
+# How often the transcript repaints while an answer streams.
+#
+# _rerender() rebuilds the ENTIRE document with setHtml(), so its cost grows with
+# the lesson. Measured on a real 29-message lesson it was 110-210ms - well past
+# the 80ms this used to fire at, so the repaint never finished before the next
+# one began, the UI thread never reached the queued wheel events, and scrolling
+# locked solid until the answer ended. (Reported 2026-09-03: "it locked up my
+# scroll wheel halfway up the window... it eventually allows me to go back down".)
+#
+# So the interval is no longer fixed: after each repaint the next one is booked
+# for _STREAM_DUTY x however long that repaint actually took. The repaint can
+# therefore never occupy more than 1/_STREAM_DUTY of wall time, whatever the
+# lesson costs - short lessons stay at the 80ms floor, long ones back off on
+# their own and the input stays responsive.
+_STREAM_REPAINT_MS = 80          # floor
+_STREAM_REPAINT_MAX_MS = 1000    # ceiling; slower than this stops reading as live
+_STREAM_DUTY = 3                 # leave at least 2/3 of the time for input events
 
 
 def run(params: dict, progress_callback, cancel_event):  # noqa: ARG001 - fixed signature
@@ -219,6 +234,11 @@ class JavaTutorWindow(PluginWindow):
         self._messages: list[tuple[str, str]] = []   # (role, markdown)
         self._streaming = ""
         self._code_blocks: list[str] = []
+        # Rendered settled messages, keyed by (position, role, text, code offset).
+        # A message that moves, changes or is popped simply misses the cache, so
+        # there is nothing to invalidate by hand - only whole-lesson switches
+        # clear it, to stop it growing across lessons.
+        self._bubble_cache: dict[tuple, tuple[str, list[str]]] = {}
         self._conversations: list[history.Conversation] = []
         # Lesson names live in a sidecar, never in Claude's transcripts.
         self._titles = titles.TitleStore()
@@ -240,9 +260,12 @@ class JavaTutorWindow(PluginWindow):
         self._session.sandbox_warning.connect(self._on_sandbox_warning)
         self._session.session_lost.connect(self._on_session_lost)
 
+        # Single-shot and self-rearming: each repaint books the next one based on
+        # what it just cost. See _stream_tick and the _STREAM_* constants.
         self._repaint_timer = QTimer(self)
-        self._repaint_timer.setInterval(_STREAM_REPAINT_MS)
-        self._repaint_timer.timeout.connect(self._rerender)
+        self._repaint_timer.setSingleShot(True)
+        self._repaint_timer.timeout.connect(self._stream_tick)
+        self._streaming_live = False
 
         self._build_ui()
         self._refresh_history()
@@ -476,6 +499,7 @@ class JavaTutorWindow(PluginWindow):
             return
 
         self._messages = [(m.role, m.text) for m in history.read_messages(convo.path)]
+        self._bubble_cache.clear()      # different lesson, different content
         self._streaming = ""
         self._read_only = True
         self._pending_session = session_id
@@ -502,6 +526,7 @@ class JavaTutorWindow(PluginWindow):
             return
         self._session.reset()
         self._messages = []
+        self._bubble_cache.clear()
         self._streaming = ""
         self._read_only = False
         self._resume_bar.setVisible(False)
@@ -532,6 +557,31 @@ class JavaTutorWindow(PluginWindow):
         except RuntimeError as exc:
             self._set_status(str(exc))
 
+    def _stream_tick(self):
+        """Repaint the live answer, then book the next repaint by what it cost.
+
+        Timing the real work rather than assuming a fixed interval is the whole
+        point: the cost of a repaint depends on how long the lesson has grown,
+        and a fixed 80ms was fine on message 5 and starved the event loop by
+        message 29. Whatever it costs, input gets the majority of the time.
+        """
+        started = time.perf_counter()
+        self._rerender()
+        cost_ms = (time.perf_counter() - started) * 1000.0
+
+        if not self._streaming_live:
+            return          # the turn ended while we were painting
+        delay = max(_STREAM_REPAINT_MS, cost_ms * _STREAM_DUTY)
+        self._repaint_timer.start(int(min(delay, _STREAM_REPAINT_MAX_MS)))
+
+    def _start_streaming_repaint(self):
+        self._streaming_live = True
+        self._repaint_timer.start(_STREAM_REPAINT_MS)
+
+    def _stop_streaming_repaint(self):
+        self._streaming_live = False
+        self._repaint_timer.stop()
+
     def _cancel_send(self):
         """Esc: take back the message being answered.
 
@@ -559,7 +609,7 @@ class JavaTutorWindow(PluginWindow):
         self._sent_text = ""
         self._send_btn.setEnabled(not self._read_only)
         self._stop_btn.setVisible(False)
-        self._repaint_timer.stop()
+        self._stop_streaming_repaint()
         self._set_status("Cancelled - your message is back in the box.")
         self._rerender()
         self._input.setFocus()
@@ -570,7 +620,7 @@ class JavaTutorWindow(PluginWindow):
         self._send_btn.setEnabled(False)
         self._stop_btn.setVisible(True)
         self._set_status("Thinking...")
-        self._repaint_timer.start()
+        self._start_streaming_repaint()
 
     def _on_delta(self, text: str):
         self._streaming += text
@@ -582,7 +632,7 @@ class JavaTutorWindow(PluginWindow):
             self._set_status(f"Using {name}...")
 
     def _on_turn_finished(self, full_text: str):
-        self._repaint_timer.stop()
+        self._stop_streaming_repaint()
         if self._cancelling:
             # An interrupted turn still arrives here, carrying whatever partial
             # answer streamed in. A cancel wants none of it.
@@ -600,7 +650,7 @@ class JavaTutorWindow(PluginWindow):
         self._input.setFocus()
 
     def _on_turn_failed(self, message: str):
-        self._repaint_timer.stop()
+        self._stop_streaming_repaint()
         if self._cancelling:
             self._undo_send()
             return
@@ -666,11 +716,27 @@ class JavaTutorWindow(PluginWindow):
                 "I cannot edit your files. You type the code; that is the point."
                 "</div>")
 
-        for role, text in self._messages:
-            parts.append(self._bubble(role, text, pal))
+        # Settled messages are rendered ONCE and remembered. Re-parsing every
+        # message's markdown on every stream tick is what made a repaint cost
+        # 110-210ms on a 29-message lesson; only the live tail actually changes.
+        # Keyed by position AND content, so an edited or popped message misses.
+        for i, (role, text) in enumerate(self._messages):
+            offset = len(self._code_blocks)
+            key = (i, role, text, offset)
+            hit = self._bubble_cache.get(key)
+            if hit is None:
+                hit = self._bubble(role, text, pal, code_offset=offset)
+                self._bubble_cache[key] = hit
+            html, codes = hit
+            parts.append(html)
+            self._code_blocks.extend(codes)
 
         if self._streaming:
-            parts.append(self._bubble("assistant", self._streaming, pal, live=True))
+            # Never cached - it is different every tick, by definition.
+            html, codes = self._bubble("assistant", self._streaming, pal,
+                                       live=True, code_offset=len(self._code_blocks))
+            parts.append(html)
+            self._code_blocks.extend(codes)
 
         # setHtml() rebuilds the document and resets the scrollbar to 0. While a
         # answer streams this runs every _STREAM_REPAINT_MS, so without saving
@@ -691,8 +757,15 @@ class JavaTutorWindow(PluginWindow):
             # so the old value still points at roughly the same content.
             bar.setValue(min(previous, bar.maximum()))
 
-    def _bubble(self, role: str, text: str, pal: dict, live: bool = False) -> str:
-        """One message. BOTH speakers get a coloured rule and a name.
+    def _bubble(self, role: str, text: str, pal: dict, live: bool = False,
+                code_offset: int = 0) -> tuple[str, list[str]]:
+        """One message, as (html, code_blocks).
+
+        Returns the code blocks instead of appending them to `self._code_blocks`
+        itself: the caller owns the running order, and a cached bubble must not
+        re-append its blocks every time it is reused.
+
+        BOTH speakers get a coloured rule and a name.
 
         The tutor's replies used to be a bare `<div>` with no label at all, so a
         long answer followed by a short question ran together as one wall of
@@ -700,26 +773,37 @@ class JavaTutorWindow(PluginWindow):
         colour and the name change.
         """
         if role == "error":
-            return (f'<table width="100%" cellspacing="0" cellpadding="0" '
-                    f'style="margin:10px 0;"><tr><td '
-                    f'style="border-left:3px solid #ff8b8b;padding-left:12px;">'
-                    f'<div style="color:#ff8b8b;">{text}</div>'
-                    f"</td></tr></table>")
+            return ((f'<table width="100%" cellspacing="0" cellpadding="0" '
+                     f'style="margin:10px 0;"><tr><td '
+                     f'style="border-left:3px solid #ff8b8b;padding-left:12px;">'
+                     f'<div style="color:#ff8b8b;">{text}</div>'
+                     f"</td></tr></table>"), [])
 
-        speaker = "You" if role == "user" else "Java Tutor"
-        colour = pal["user"] if role == "user" else pal["tutor"]
+        is_user = role == "user"
+        speaker = "You" if is_user else "Java Tutor"
+        colour = pal["user"] if is_user else pal["tutor"]
 
-        body, codes = render.to_html(text, pal)
-        self._code_blocks.extend(codes)
+        # His messages sit on a filled panel; the tutor's stay on the bare black.
+        # Only ONE side is filled on purpose - the eye finds the boundary from the
+        # alternation, and filling both would just be two blocks in a row. Qt rich
+        # text has no border-radius, so this is a plain rectangle either way.
+        if is_user:
+            cell = (f"background-color:{pal['user_bg']};"
+                    f"border-left:3px solid {colour};"
+                    f"padding:8px 12px 10px 12px;")
+        else:
+            cell = f"border-left:3px solid {colour};padding-left:12px;"
+
+        body, codes = render.to_html(text, pal, code_offset=code_offset)
         caret = f' <span style="color:{colour};">|</span>' if live else ""
 
-        return (
+        html = (
             f'<table width="100%" cellspacing="0" cellpadding="0" '
-            f'style="margin:14px 0;"><tr><td '
-            f'style="border-left:3px solid {colour};padding-left:12px;">'
+            f'style="margin:14px 0;"><tr><td style="{cell}">'
             f'<div style="color:{colour};font-size:11px;font-weight:bold;">'
             f'{speaker}</div>'
             f"{body}{caret}</td></tr></table>")
+        return html, codes
 
     def _copy_code(self, index: int):
         if 0 <= index < len(self._code_blocks):
@@ -747,5 +831,5 @@ class JavaTutorWindow(PluginWindow):
     def closeEvent(self, event):
         if self._session.busy:
             self._session.interrupt()
-        self._repaint_timer.stop()
+        self._stop_streaming_repaint()
         super().closeEvent(event)
