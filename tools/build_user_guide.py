@@ -60,7 +60,28 @@ th, td { border: 0.7pt solid #99aabb; padding: 3pt 6pt; font-size: 9.5pt; text-a
 code { font-family: monospace; font-size: 9pt; background-color: #f0f0f0; }
 pre { font-family: monospace; font-size: 9pt; background-color: #f0f0f0; margin: 5pt 0; }
 blockquote { color: #444444; margin: 5pt 12pt; }
+img { margin: 6pt 0 2pt 0; }
+p.caption { color: #667788; font-size: 8.5pt; margin: 0 0 8pt 0; }
 """
+
+IMG_MD_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+IMG_TAG_RE = re.compile(r'<img alt="([^"]*)" src="([^"]+)"\s*/?>')
+MAX_IMG_PT = 470  # body width is ~504pt
+
+
+def size_images(html: str) -> str:
+    """Give every <img> an explicit width (half its pixel size, capped to the
+    page) and turn its alt text into a small caption paragraph below it."""
+
+    def _sub(m: re.Match) -> str:
+        alt, src = m.group(1), m.group(2)
+        path = GUIDE_DIR / src
+        pix = fitz.Pixmap(str(path))
+        w = min(round(pix.width * 0.5), MAX_IMG_PT)
+        cap = f'<p class="caption">{alt}</p>' if alt else ""
+        return f'<img src="{src}" width="{w}"/>{cap}'
+
+    return IMG_TAG_RE.sub(_sub, html)
 
 BANNED = [
     (re.compile(r"\bplugins?\b", re.IGNORECASE), 'the word "plugin" (say "app")'),
@@ -100,19 +121,29 @@ def lint_chapter(path: Path, text: str) -> list[str]:
         hits = rx.findall(body)
         if hits:
             problems.append(f"{path.name}: contains {why} x{len(hits)}")
+    for src in IMG_MD_RE.findall(body):
+        if not (GUIDE_DIR / src).is_file():
+            problems.append(f"{path.name}: missing image {src}")
+    # A split numbered list restarts at 1 in the PDF (the renderer ignores
+    # <ol start>). Cause: content under a list item indented <4 spaces.
+    html = markdown.markdown(body, extensions=["tables", "sane_lists"])
+    splits = html.count("<ol start=")
+    if splits:
+        problems.append(f"{path.name}: a numbered list is split x{splits} "
+                        "(indent content under list items by 4 spaces)")
     for todo in re.findall(r"<!--\s*TODO[^>]*-->", text):
         print(f"  [todo] {path.name}: {todo.strip()[:100]}")
     return problems
 
 
 def md_to_html(text: str) -> str:
-    return markdown.markdown(text, extensions=["tables", "sane_lists"])
+    return size_images(markdown.markdown(text, extensions=["tables", "sane_lists"]))
 
 
 def render_flow(writer: fitz.DocumentWriter, html: str, page_no: list[int],
                 headings: list, rect: fitz.Rect = BODY_RECT) -> None:
     """Render one HTML flow (a chapter or a part page); records h1/h2 positions."""
-    story = fitz.Story(html=html, user_css=CSS)
+    story = fitz.Story(html=html, user_css=CSS, archive=fitz.Archive(str(GUIDE_DIR)))
     more = 1
     while more:
         dev = writer.begin_page(PAGE)
@@ -127,6 +158,171 @@ def render_flow(writer: fitz.DocumentWriter, html: str, page_no: list[int],
         story.draw(dev)
         writer.end_page()
         page_no[0] += 1
+
+
+TABLE_RE = re.compile(r"<table>.*?</table>", re.DOTALL)
+ROW_RE = re.compile(r"<tr>(.*?)</tr>", re.DOTALL)
+CELL_RE = re.compile(r"<t[hd][^>]*>(.*?)</t[hd]>", re.DOTALL)
+SEG_GAP = 8.0          # vertical gap between segments
+MIN_TAIL = 60.0        # don't start a segment in a sliver shorter than this
+
+
+def _li_depth_at(html: str, pos: int) -> int:
+    """How many <li> elements are open at `pos`."""
+    return html.count("<li>", 0, pos) - html.count("</li>", 0, pos)
+
+
+def _table_height(table_html: str) -> float:
+    probe = fitz.Story(html=table_html, user_css=CSS)
+    _, filled = probe.place(fitz.Rect(0, 0, BODY_RECT.width, 100000))
+    return filled[3]
+
+
+def flatten_unsafe_tables(html: str) -> str:
+    """Rewrite tables the renderer cannot handle as bold-label paragraphs,
+    which flow across pages like any text. Two kinds are unsafe: a <table>
+    inside a list item (splitting the list around it restarts numbering, and
+    straddling a page drops rows), and any table taller than one page (it
+    drops rows wherever it is placed)."""
+
+    def rewrite(m: re.Match) -> str:
+        rows = ROW_RE.findall(m.group(0))
+        out = []
+        for i, row in enumerate(rows):
+            cells = [c.strip() for c in CELL_RE.findall(row)]
+            if not cells:
+                continue
+            if i == 0 and len(rows) > 1 and "<th" in row:
+                out.append("<p><i>" + ". ".join(c for c in cells if c) + ".</i></p>")
+                continue
+            first, rest = cells[0], ". ".join(c for c in cells[1:] if c)
+            out.append(f"<p><b>{first}.</b> {rest}</p>")
+        return "".join(out)
+
+    result = []
+    last = 0
+    for m in TABLE_RE.finditer(html):
+        result.append(html[last:m.start()])
+        unsafe = (_li_depth_at(html, m.start()) > 0
+                  or _table_height(m.group(0)) > BODY_RECT.height)
+        result.append(rewrite(m) if unsafe else m.group(0))
+        last = m.end()
+    result.append(html[last:])
+    return "".join(result)
+
+
+def split_segments(html: str) -> list[str]:
+    """Split at TOP-LEVEL tables only (nested ones were flattened already)."""
+    segs, last = [], 0
+    for m in TABLE_RE.finditer(html):
+        if _li_depth_at(html, m.start()) > 0:
+            continue
+        if html[last:m.start()].strip():
+            segs.append(html[last:m.start()])
+        segs.append(m.group(0))
+        last = m.end()
+    if html[last:].strip():
+        segs.append(html[last:])
+    return segs
+
+
+def render_chapter(writer: fitz.DocumentWriter, html: str, page_no: list[int],
+                   headings: list) -> None:
+    """Table-safe chapter renderer.
+
+    fitz.Story SILENTLY DROPS table rows (and everything after them in the
+    flow) when a <table> straddles a page boundary. So a chapter is rendered
+    as segments split at tables, sharing a page cursor; each table is measured
+    first and moved to a fresh page when it will not fit in the space left.
+    A table taller than a full page still cannot render whole — the integrity
+    gate catches that; keep tables short.
+    """
+    archive = fitz.Archive(str(GUIDE_DIR))
+    segments = split_segments(flatten_unsafe_tables(html))
+
+    dev = writer.begin_page(PAGE)
+    y = BODY_RECT.y0
+
+    def new_page():
+        nonlocal dev, y
+        writer.end_page()
+        page_no[0] += 1
+        dev = writer.begin_page(PAGE)
+        y = BODY_RECT.y0
+
+    for seg in segments:
+        story = fitz.Story(html=seg, user_css=CSS, archive=archive)
+        if seg.lstrip().startswith("<table"):
+            probe = fitz.Story(html=seg, user_css=CSS, archive=archive)
+            _, probe_filled = probe.place(fitz.Rect(0, 0, BODY_RECT.width, 100000))
+            need = probe_filled[3]
+            if need > (BODY_RECT.y1 - y) and need <= BODY_RECT.height:
+                new_page()
+        elif y > BODY_RECT.y1 - MIN_TAIL:
+            new_page()
+        while True:
+            more, filled = story.place(fitz.Rect(BODY_RECT.x0, y, BODY_RECT.x1, BODY_RECT.y1))
+            current_page = page_no[0]
+
+            def _record(el):
+                if el.open_close == 1 and el.heading in (1, 2):
+                    headings.append((el.heading, el.text, current_page))
+
+            story.element_positions(_record)
+            story.draw(dev)
+            if more:
+                new_page()
+            else:
+                y = filled[3] + SEG_GAP
+                break
+    writer.end_page()
+    page_no[0] += 1
+
+
+def normalize_probe(text: str) -> str:
+    # NFKC folds the renderer's ligatures (fi, fl, ff) back to plain letters,
+    # or the integrity check would flag every word the font ligates.
+    import unicodedata
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKC", text).lower())
+
+
+def chapter_probes(md_text: str) -> list[str]:
+    """Strings that MUST appear in the rendered chapter: every plain table
+    cell, and the chapter's closing words."""
+    body = re.sub(r"<!--.*?-->", "", md_text, flags=re.DOTALL)
+    body = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", body)
+    probes = []
+    for line in body.splitlines():
+        if line.lstrip().startswith("|") and not set(line.strip()) <= {"|", "-", " ", ":"}:
+            for cell in line.strip().strip("|").split("|"):
+                p = normalize_probe(re.sub(r"[`*_]", "", cell))
+                if len(p) >= 6:
+                    probes.append(p)
+    plain = normalize_probe(re.sub(r"[#`*_|>\[\]()!-]", "", body))
+    if len(plain) > 60:
+        probes.append(plain[-60:])
+    return probes
+
+
+def check_integrity(final: fitz.Document, entries, chapters, offset: int,
+                    body_pages: int) -> list[str]:
+    """Verify no chapter content was silently dropped by the renderer."""
+    chap_pages = [(title, pg) for lvl, title, pg in entries if lvl == 2]
+    bounds = []
+    for i, (title, pg) in enumerate(chap_pages):
+        end = chap_pages[i + 1][1] - 1 if i + 1 < len(chap_pages) else body_pages
+        bounds.append((title, pg, max(pg, end)))
+    problems = []
+    clip = fitz.Rect(PAGE.x0, PAGE.y0, PAGE.x1, BODY_RECT.y1 + 2)  # body only:
+    # footer text would otherwise splice into probes that span a page break
+    for (title, first, last), (_, chap) in zip(bounds, chapters):
+        text = "".join(final[offset + p - 1].get_text(clip=clip)
+                       for p in range(first, last + 1))
+        rendered = normalize_probe(text)
+        for probe in chapter_probes(chap.read_text(encoding="utf-8")):
+            if probe not in rendered:
+                problems.append(f"{chap.name}: rendered PDF is missing text: ...{probe[-40:]}")
+    return problems
 
 
 def stamp_footers(doc: fitz.Document, version: str) -> None:
@@ -244,6 +440,13 @@ def main() -> None:
     final.set_metadata({"title": f"TechDeck User Guide v{version}", "author": "TechDeck",
                         "subject": "User guide for TechDeck and all of its apps"})
 
+    integrity = check_integrity(final, entries, chapters, offset, body.page_count)
+    if integrity:
+        for p in integrity:
+            print(f"  [integrity] {p}")
+        if not args.lax:
+            sys.exit("Integrity gate failed: the renderer dropped chapter content.")
+
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     final.save(str(out), garbage=3, deflate=True)
@@ -271,7 +474,7 @@ def _build(chapters, scratch):
         title = text.lstrip().splitlines()[0].lstrip("# ").strip()
         entries.append((2, title, page_no[0] + 1))
         headings: list = []
-        render_flow(writer, md_to_html(text), page_no, headings)
+        render_chapter(writer, md_to_html(text), page_no, headings)
         entries.extend((3, t, pg + 1) for lvl, t, pg in headings if lvl == 2)
     writer.close()
     return body_path, entries
