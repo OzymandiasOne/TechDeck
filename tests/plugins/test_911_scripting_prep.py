@@ -62,7 +62,7 @@ def test_input_formulas_on_every_data_row(workbook):
     assert po["A5"].value is None
 
 
-def test_input_block_layout_is_A.T.s(workbook):
+def test_input_block_layout_matches_the_reference_workbook(workbook):
     po = workbook["PO Data"]
     assert po["T1"].value == "PO"
     assert po["T2"].value == "LINE"
