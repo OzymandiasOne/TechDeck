@@ -206,6 +206,18 @@ if (-not $SkipInstaller) {
         }
         $installerSize = [math]::Round((Get-Item $installerPath).Length / 1MB, 2)
         Write-Host "  [OK] Installer created: $installerSize MB" -ForegroundColor Green
+
+        # Prune superseded installers - keep the 2 newest by write time. Every
+        # shipped installer lives forever on its GitHub Release, so local
+        # copies of old versions are pure disk cost (they had grown to 2.5 GB
+        # by 2026-09-04). Two are kept, not one, so the previous release is
+        # still on hand for a quick A/B check without a download.
+        $old = Get-ChildItem "installer_output\TechDeck-*-Setup.exe" |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip 2
+        foreach ($f in $old) {
+            Remove-Item $f.FullName -Force
+            Write-Host "  [OK] Pruned old installer: $($f.Name)" -ForegroundColor Gray
+        }
     } else {
         Write-Host "  [FAIL] Inno Setup (ISCC.exe) not found - install it, or build with -SkipInstaller if you only need the exe" -ForegroundColor Red
         exit 1
