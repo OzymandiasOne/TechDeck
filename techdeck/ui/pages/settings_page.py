@@ -207,6 +207,23 @@ class SettingsPage(QWidget, ThemeAware):
         fb_section.addWidget(self.fb_btn)
         layout.addLayout(fb_section)
 
+        # ── User Guide ──
+        guide_section = self._create_section("User Guide")
+        guide_desc = QLabel(
+            "The full TechDeck manual: every screen and every app, with "
+            "pictures, step by step. Also opens from the console with /guide."
+        )
+        self._style_secondary(guide_desc, "font-size: 12px;")
+        guide_desc.setWordWrap(True)
+        guide_section.addWidget(guide_desc)
+
+        guide_btn = QPushButton("Open User Guide")
+        guide_btn.setMinimumHeight(36)
+        guide_btn.setMaximumWidth(220)
+        guide_btn.clicked.connect(self._open_user_guide)
+        guide_section.addWidget(guide_btn)
+        layout.addLayout(guide_section)
+
         # ── Diagnostics ──
         diag_section = self._create_section("Diagnostics")
         diag_desc = QLabel(
@@ -253,6 +270,13 @@ class SettingsPage(QWidget, ThemeAware):
         dlg = FeedbackDialog(parent=self.window(), settings=self.settings,
                              plugin_loader=self.plugin_loader)
         dlg.exec()
+
+    def _open_user_guide(self):
+        """Open the bundled User Guide PDF in the default viewer."""
+        from techdeck.core.user_guide import open_guide
+        ok, message = open_guide()
+        if not ok:
+            QMessageBox.warning(self, "User Guide", message)
 
     def _generate_debug_report(self):
         """Run every diagnostic collector and write the report file, then show

@@ -7,7 +7,8 @@ Chapters are docs/user_guide/NN_*.md, ordered by filename. The leading number
 groups them into parts (0x shell, 1x 902, 2x-3x 911, 4x 922, 5x General, 6x QA,
 7x Games). Files starting with "_" are never part of the book.
 
-Output defaults to C:\\Dev\\Samples\\TechDeck User Guide.pdf so it can be reviewed.
+Output defaults to assets/docs/TechDeck User Guide.pdf (the copy that ships
+inside the app); a review copy is also placed in C:\\Dev\\Samples.
 
 Voice gates: a chapter containing "plugin" or "sdk." fails the build (the guide
 is for colleagues; those words are dev vocabulary). --lax downgrades to warnings.
@@ -27,7 +28,10 @@ import markdown
 
 REPO = Path(__file__).resolve().parents[1]
 GUIDE_DIR = REPO / "docs" / "user_guide"
-DEFAULT_OUT = REPO.parent / "Samples" / "TechDeck User Guide.pdf"
+# The shipped location: bundled via TechDeck.spec's assets datas, opened by
+# /guide and Settings > Help & Feedback. A review copy also lands in Samples.
+DEFAULT_OUT = REPO / "assets" / "docs" / "TechDeck User Guide.pdf"
+REVIEW_COPY = REPO.parent / "Samples" / "TechDeck User Guide.pdf"
 
 PAGE = fitz.paper_rect("letter")
 MARGIN = 54.0
@@ -521,6 +525,10 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     final.save(str(out), garbage=3, deflate=True)
     print(f"Wrote {out} ({final.page_count} pages)")
+    if out == DEFAULT_OUT and REVIEW_COPY.parent.is_dir():
+        import shutil
+        shutil.copy2(out, REVIEW_COPY)
+        print(f"Review copy: {REVIEW_COPY}")
 
 
 def _build(chapters, scratch):

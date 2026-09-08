@@ -54,3 +54,4 @@ tools/pixel_playground/beyblade/out/
 console_cat_*.png
 console_cat_*.gif
 docs/user_guide/.build/
+assets/docs/
