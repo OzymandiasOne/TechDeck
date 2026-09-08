@@ -37,7 +37,7 @@ TOOL_SECTIONS = [
    "and the scheduled due date attached, then advances each order's status on "
    "the schedule as its card goes out. Needs no batch number and skips orders "
    "already carded, so it can be run at any time.",
-   "Active", "0.8.7"),
+   "Active", "0.8.6.13"),
   ("911 Batch Repeater",
    "Finds every repeat part in a 911 batch and copies its existing CAD work "
    "forward instead of remodelling it.",
@@ -84,7 +84,7 @@ TOOL_SECTIONS = [
    "types each part's dimensions into its inspection sheet, leaving out "
    "reference-only figures and stock notes, never overwriting a sheet already "
    "filled in by hand, and flagging any drawing it could not read.",
-   "Pilot", "0.8.8"),
+   "Active", "0.8.7.1"),
   ("911 Baked Beans Wild Ride",
    "Consolidates a folder of completed per-part pricing calculations into one "
    "review list.",
