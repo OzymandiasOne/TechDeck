@@ -282,6 +282,14 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "TBD", "Feature",
+     "The invoicing preparation tool now takes a copy of the entire pricing "
+     "master and a close-out date range, instead of a sheet trimmed down to "
+     "the week by hand. Rows whose promise date falls inside the range become "
+     "the week's invoicing packages, and both weekly reports - the work order "
+     "close out sheet and the material status listing - are produced "
+     "automatically in the same invoicing folder, replacing two documents "
+     "previously rebuilt by hand every week."),
     ("Beta 0.8.7.4", "Sep 4, 2026", "Feature",
      "The 911 batch setup tool now prepares plate work as well as structural "
      "shapes. Until now its output was tailored to shapes, and plate batches "
@@ -596,6 +604,14 @@ PI_RENAMES = {
 
 # ---- Process Improvement log :: NEW entries (task, state, description) ------
 PI_NEW = [
+    ("WEEKLY INVOICING REPORTS AUTOMATION", "COMPLETE",
+     "THE INVOICING PREPARATION TOOL NOW TAKES A COPY OF THE ENTIRE PRICING "
+     "MASTER PLUS A CLOSE-OUT DATE RANGE INSTEAD OF A SHEET TRIMMED TO THE "
+     "WEEK BY HAND; THE WEEK'S ROWS ARE SELECTED BY THEIR PROMISE DATE, AND "
+     "BOTH WEEKLY REPORTS - THE WORK ORDER CLOSE OUTS AND THE MATERIAL STATUS "
+     "LISTING - ARE PRODUCED ALONGSIDE THE PER-NEST INVOICING PACKAGES IN THE "
+     "SAME FOLDER, REPLACING TWO SHEETS PREVIOUSLY REBUILT BY HAND EVERY "
+     "WEEK; OUTPUT VERIFIED CELL-IDENTICAL AGAINST THE HAND-MADE ORIGINALS"),
     ("WELD PREP ANGLE REFERENCE", "COMPLETE",
      "THE CUSTOMER'S COMPLETE BEVEL REFERENCE SET (947 SHEETS) TRANSCRIBED AND "
      "CARRIED WITH THE DRAWING DIMENSION READER, SO A WELD PREP CALLOUT ON A "
@@ -871,7 +887,7 @@ GANTT_ROWS = [
     ("911 LST Organizer", GANTT_DONE, 1, "2026-06", "2026-09"),
     ("911 Baked Beans Wild Ride (NC Pricing Consolidation)",
      GANTT_DONE, 1, "2026-07", "2026-07"),
-    ("911 SSPO Invoicing Prep", GANTT_DONE, 1, "2026-06", "2026-07"),
+    ("911 SSPO Invoicing Prep", GANTT_DONE, 1, "2026-06", "2026-09"),
     ("911 SSPO Award Review", GANTT_DONE, 1, "2026-06", "2026-07"),
     ("911 Data Extraction", GANTT_DONE, 1, "2026-02", "2026-04"),
     ("911 Data Organizer", GANTT_DONE, 1, "2026-02", "2026-07"),

@@ -15,6 +15,7 @@ Shots produced (docs/user_guide/images/):
   911_inspection_dimensions_report.png       - the fill-in report window
   911_inspection_dimensions_console.png      - console after the run
   911_baked_beans_wild_ride_board.png        - the "Board the Ride" picker
+  911_sspo_invoicing_prep_dates.png          - the close-out date range window
   911_sspo_invoicing_prep_done.png           - the end-of-run summary popup
   911_sspo_award_review_done.png             - console DONE block
   911_lst_organizer_summary.png              - console pull summary
@@ -137,21 +138,26 @@ def build_invoicing_fixtures():
     wb = Workbook()
     ws = wb.active
     headers = ["Batch", "Work Order", "DYPN", "Material", "DYPN QTY",
-               "Nest Pkg Nbr", "Scheduling Group", "Machine",
+               "Nest Pkg Nbr", "Scheduling Group", "Firm VPD", "Machine",
                "Total price per WO"]
     for c, h in enumerate(headers, 1):
         ws.cell(1, c, h)
+    # Firm VPD = yesterday, inside the date dialog's default last-7-days range,
+    # so the capture run flows straight through with every real row kept.
+    from datetime import date, timedelta
+    vpd = date.today() - timedelta(days=1)
     rows = [
-        ("V060", "AB123456", "BK1144-3", "EB218099999A", 4, "503991", "Open", "NON", 1480.00),
-        ("V060", "AB123457", "BK1144-7", "EB218099999A", 2, "503991", "Open", "NON", 926.50),
-        ("V060", "AB123458", "BK1152-12", "EB218099998A", 6, "503992", "Open", "XX5", 2210.75),
-        ("TOTALS", "", "", "", "", "", "", "", 4617.25),   # footer row - skipped
+        ("V060", "AB123456", "BK1144-3", "EB218099999A", 4, "503991", "Open", vpd, "NON", 1480.00),
+        ("V060", "AB123457", "BK1144-7", "EB218099999A", 2, "503991", "Open", vpd, "NON", 926.50),
+        ("V060", "AB123458", "BK1152-12", "EB218099998A", 6, "503992", "Open", vpd, "XX5", 2210.75),
+        ("TOTALS", "", "", "", "", "", "", "", "", 4617.25),   # footer row - skipped
     ]
     for r, row in enumerate(rows, 2):
         for c, v in enumerate(row, 1):
             ws.cell(r, c, v if v != "" else None)
     for r in range(2, 5):
-        ws.cell(r, 9).number_format = '"$"#,##0.00'
+        ws.cell(r, 8).number_format = "mm-dd-yy"
+        ws.cell(r, 10).number_format = '"$"#,##0.00'
     wb.save(pricing)
 
     fdir = FIX_ROOT / "Forecast and Inventory Reports"
@@ -454,6 +460,11 @@ def flow_invoicing():
     os.startfile = lambda *a, **k: None
 
     _start("911_sspo_invoicing_prep")
+    dlg = yield (_find_window("QDialog", "Close-out date range"),
+                 40, "date range window")
+    yield (_ticks(3), 10, "date dialog settle")
+    cam.save(dlg, "911_sspo_invoicing_prep_dates")
+    dlg.accept()
     box = yield (_find_window("QMessageBox", "911 SSPO Invoicing Prep"),
                  40, "invoicing summary popup")
     yield (_ticks(3), 10, "popup settle")
