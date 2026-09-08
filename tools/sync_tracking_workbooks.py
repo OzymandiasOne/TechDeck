@@ -584,6 +584,30 @@ def sync_gantt(write):
             grid[a.strip()] = (row[0].row, [c.value for c in row])
     label_ok = isinstance(ws["H2"].value, str) and \
         ws["H2"].value.strip().rstrip(":").lower() == "last updated"
+
+    # Progress Notes drift: rows appended by hand arrive without the sheet's
+    # own look (even rows banded F2F2F2, everything wrapped and top-aligned,
+    # dates as 'mmm d, yyyy') -- 12 such rows had accumulated by 2026-09-08.
+    # Flag any data row missing it; the writer restyles just those.
+    ws_n = wb["Progress Notes"]
+    restyle_rows = []
+    for row in ws_n.iter_rows(min_row=3, min_col=1, max_col=5):
+        r = row[0].row
+        if r is None or row[0].value in (None, ""):
+            continue
+        fill = row[0].fill
+        got = fill.start_color.rgb if fill is not None and \
+            fill.fill_type == "solid" else None
+        fill_ok = got == "FFF2F2F2" if r % 2 == 0 else \
+            got in (None, "00000000")
+        wrap_ok = all(getattr(c, "alignment", None) is not None
+                      and c.alignment.wrap_text for c in row)
+        fmt_ok = row[0].number_format == "mmm\\ d\\,\\ yyyy"
+        if not (fill_ok and wrap_ok and fmt_ok):
+            restyle_rows.append(r)
+    if restyle_rows:
+        notes.append(f"  GANTT CHART                Progress Notes: "
+                     f"{len(restyle_rows)} row(s) to restyle")
     wb.close()
 
     renames = []                                # (sheet row, new name)
@@ -646,7 +670,7 @@ def sync_gantt(write):
                 notes.append(f"  GANTT CHART                {name}: bar "
                              f"repainted {start}..{end}")
 
-    if not (renames or updates or inserts):
+    if not (renames or updates or inserts or restyle_rows):
         notes.append("  GANTT CHART                up to date")
         return notes
     if not write:
@@ -704,6 +728,20 @@ def sync_gantt(write):
                 com_set(r, col, v)
             if bar:                             # else it inherits stale fills
                 paint(r, bar)
+        if restyle_rows:
+            shn = wbx.Worksheets("Progress Notes")
+            for r in restyle_rows:
+                rng = shn.Range(shn.Cells(r, 1), shn.Cells(r, 5))
+                if r % 2 == 0:
+                    rng.Interior.Color = com_color("F2F2F2")
+                else:
+                    rng.Interior.ColorIndex = -4142     # xlNone -- white rows
+                rng.WrapText = True
+                rng.VerticalAlignment = -4160           # xlVAlignTop
+                shn.Cells(r, 1).NumberFormat = "mmm d, yyyy"
+                shn.Rows(r).AutoFit()
+            notes.append(f"  GANTT CHART                Progress Notes: "
+                         f"{len(restyle_rows)} row(s) restyled")
         if label_ok:
             sh.Range("I2").Value = datetime.now()
             notes.append(f"  GANTT CHART                last updated -> {TODAY}")
