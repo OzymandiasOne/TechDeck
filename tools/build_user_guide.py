@@ -165,6 +165,8 @@ ROW_RE = re.compile(r"<tr>(.*?)</tr>", re.DOTALL)
 CELL_RE = re.compile(r"<t[hd][^>]*>(.*?)</t[hd]>", re.DOTALL)
 SEG_GAP = 8.0          # vertical gap between segments
 MIN_TAIL = 60.0        # don't start a segment in a sliver shorter than this
+HEAD_KEEP = 110.0      # a heading keeps this much room under it, or moves on
+H_OPEN_RE = re.compile(r"<h[23]>")
 
 
 def _li_depth_at(html: str, pos: int) -> int:
@@ -172,10 +174,31 @@ def _li_depth_at(html: str, pos: int) -> int:
     return html.count("<li>", 0, pos) - html.count("</li>", 0, pos)
 
 
-def _table_height(table_html: str) -> float:
-    probe = fitz.Story(html=table_html, user_css=CSS)
+def _flow_height(seg_html: str) -> float:
+    probe = fitz.Story(html=seg_html, user_css=CSS, archive=fitz.Archive(str(GUIDE_DIR)))
     _, filled = probe.place(fitz.Rect(0, 0, BODY_RECT.width, 100000))
     return filled[3]
+
+
+def number_headings(html: str, chap_no: int) -> str:
+    """Official-manual numbering, applied at build time so the sources never
+    go stale: the chapter number on the h1, N.M on each h2, N.M.P on h3."""
+    html = re.sub(r"<h1>(.*?)</h1>",
+                  lambda m: f"<h1>{chap_no}&#160;&#160;{m.group(1)}</h1>", html, count=1)
+    state = {"sec": 0, "sub": 0}
+
+    def hr(m: re.Match) -> str:
+        tag, txt = m.group(1), m.group(2)
+        if tag == "h2":
+            state["sec"] += 1
+            state["sub"] = 0
+            num = f"{chap_no}.{state['sec']}"
+        else:
+            state["sub"] += 1
+            num = f"{chap_no}.{state['sec']}.{state['sub']}"
+        return f"<{tag}>{num}&#160;&#160;{txt}</{tag}>"
+
+    return re.sub(r"<(h[23])>(.*?)</\1>", hr, html, flags=re.DOTALL)
 
 
 def flatten_unsafe_tables(html: str) -> str:
@@ -204,7 +227,7 @@ def flatten_unsafe_tables(html: str) -> str:
     for m in TABLE_RE.finditer(html):
         result.append(html[last:m.start()])
         unsafe = (_li_depth_at(html, m.start()) > 0
-                  or _table_height(m.group(0)) > BODY_RECT.height)
+                  or _flow_height(m.group(0)) > BODY_RECT.height)
         result.append(rewrite(m) if unsafe else m.group(0))
         last = m.end()
     result.append(html[last:])
@@ -212,17 +235,24 @@ def flatten_unsafe_tables(html: str) -> str:
 
 
 def split_segments(html: str) -> list[str]:
-    """Split at TOP-LEVEL tables only (nested ones were flattened already)."""
-    segs, last = [], 0
-    for m in TABLE_RE.finditer(html):
-        if _li_depth_at(html, m.start()) > 0:
+    """Cut the chapter at top-level tables (atomic, measured, moved whole)
+    and at every h2/h3 (so a heading can be kept with its content)."""
+    cuts = [(m.start(), m.end(), True) for m in TABLE_RE.finditer(html)
+            if _li_depth_at(html, m.start()) == 0]
+    cuts += [(m.start(), m.start(), False) for m in H_OPEN_RE.finditer(html)]
+    segs, pos = [], 0
+    for start, end, is_table in sorted(cuts):
+        if start < pos:  # a heading inside an already-consumed table span
             continue
-        if html[last:m.start()].strip():
-            segs.append(html[last:m.start()])
-        segs.append(m.group(0))
-        last = m.end()
-    if html[last:].strip():
-        segs.append(html[last:])
+        if html[pos:start].strip():
+            segs.append(html[pos:start])
+        if is_table:
+            segs.append(html[start:end])
+            pos = end
+        else:
+            pos = start  # the heading opens the next segment
+    if html[pos:].strip():
+        segs.append(html[pos:])
     return segs
 
 
@@ -250,15 +280,24 @@ def render_chapter(writer: fitz.DocumentWriter, html: str, page_no: list[int],
         dev = writer.begin_page(PAGE)
         y = BODY_RECT.y0
 
-    for seg in segments:
+    for i, seg in enumerate(segments):
         story = fitz.Story(html=seg, user_css=CSS, archive=archive)
-        if seg.lstrip().startswith("<table"):
-            probe = fitz.Story(html=seg, user_css=CSS, archive=archive)
-            _, probe_filled = probe.place(fitz.Rect(0, 0, BODY_RECT.width, 100000))
-            need = probe_filled[3]
-            if need > (BODY_RECT.y1 - y) and need <= BODY_RECT.height:
+        lead = seg.lstrip()
+        remaining = BODY_RECT.y1 - y
+        if lead.startswith("<table"):
+            need = _flow_height(seg)
+            if need > remaining and need <= BODY_RECT.height:
                 new_page()
-        elif y > BODY_RECT.y1 - MIN_TAIL:
+        elif lead.startswith(("<h2", "<h3")):
+            h = _flow_height(seg)
+            need = min(h, HEAD_KEEP)
+            # A bare heading whose content is the NEXT segment (a table):
+            # keep them together, or the heading strands at the page bottom.
+            if h < 70 and i + 1 < len(segments) and segments[i + 1].lstrip().startswith("<table"):
+                need = h + SEG_GAP + min(_flow_height(segments[i + 1]), 200.0)
+            if need > remaining:
+                new_page()
+        elif remaining < MIN_TAIL:
             new_page()
         while True:
             more, filled = story.place(fitz.Rect(BODY_RECT.x0, y, BODY_RECT.x1, BODY_RECT.y1))
@@ -322,6 +361,36 @@ def check_integrity(final: fitz.Document, entries, chapters, offset: int,
         for probe in chapter_probes(chap.read_text(encoding="utf-8")):
             if probe not in rendered:
                 problems.append(f"{chap.name}: rendered PDF is missing text: ...{probe[-40:]}")
+    return problems
+
+
+def find_orphan_headings(final: fitz.Document, offset: int, body_pages: int) -> list[str]:
+    """Flag any page whose LAST content is a heading (h1/h2 render at >=13pt):
+    an official manual never strands a header at the bottom of a page."""
+    problems = []
+    clip = fitz.Rect(PAGE.x0, PAGE.y0, PAGE.x1, BODY_RECT.y1 + 2)
+    for p in range(body_pages):
+        page = final[offset + p]
+        d = page.get_text("dict", clip=clip)
+        text_blocks = []
+        img_bottom = 0.0
+        for b in d["blocks"]:
+            if b.get("type") == 1:
+                img_bottom = max(img_bottom, b["bbox"][3])
+            elif any(s["text"].strip() for l in b.get("lines", []) for s in l.get("spans", [])):
+                text_blocks.append(b)
+        if not text_blocks:
+            continue
+        page_text = "".join(s["text"] for b in text_blocks for l in b["lines"] for s in l["spans"])
+        if page_text.strip().startswith("Part ") and len(text_blocks) <= 2:
+            continue  # part divider pages are a lone big title on purpose
+        last = text_blocks[-1]
+        if img_bottom > last["bbox"][3]:
+            continue  # an image sits below the last text, so no heading strands
+        size = max(s["size"] for l in last["lines"] for s in l["spans"])
+        if size >= 13:
+            text = "".join(s["text"] for l in last["lines"] for s in l["spans"]).strip()
+            problems.append(f"page {offset + p + 1}: heading stranded at the page bottom: {text[:60]!r}")
     return problems
 
 
@@ -441,11 +510,12 @@ def main() -> None:
                         "subject": "User guide for TechDeck and all of its apps"})
 
     integrity = check_integrity(final, entries, chapters, offset, body.page_count)
+    integrity += find_orphan_headings(final, offset, body.page_count)
     if integrity:
         for p in integrity:
             print(f"  [integrity] {p}")
         if not args.lax:
-            sys.exit("Integrity gate failed: the renderer dropped chapter content.")
+            sys.exit("Integrity gate failed: dropped content or a stranded heading.")
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -459,11 +529,11 @@ def _build(chapters, scratch):
     page_no = [0]
     entries: list = []
     seen_parts: set = set()
-    for part_title, chap in chapters:
+    for chap_no, (part_title, chap) in enumerate(chapters, start=1):
         if part_title not in seen_parts:
             seen_parts.add(part_title)
-            entries.append((1, part_title, page_no[0] + 1))
             n = len(seen_parts)
+            entries.append((1, f"Part {n}: {part_title}", page_no[0] + 1))
             html = (
                 f'<div style="margin-top: 260pt; text-align: center;">'
                 f'<p style="font-size: 12pt; color: #888888;">Part {n}</p>'
@@ -472,10 +542,14 @@ def _build(chapters, scratch):
             render_flow(writer, html, page_no, [])
         text = chap.read_text(encoding="utf-8")
         title = text.lstrip().splitlines()[0].lstrip("# ").strip()
-        entries.append((2, title, page_no[0] + 1))
+        entries.append((2, f"{chap_no}  {title}", page_no[0] + 1))
         headings: list = []
-        render_chapter(writer, md_to_html(text), page_no, headings)
-        entries.extend((3, t, pg + 1) for lvl, t, pg in headings if lvl == 2)
+        html = number_headings(md_to_html(text), chap_no)
+        render_chapter(writer, html, page_no, headings)
+        # Story reports the numbered heading text with the &#160; as \xa0;
+        # bookmarks want a plain space.
+        entries.extend((3, t.replace("\xa0", " "), pg + 1)
+                       for lvl, t, pg in headings if lvl == 2)
     writer.close()
     return body_path, entries
 
