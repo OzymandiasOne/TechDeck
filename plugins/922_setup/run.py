@@ -83,6 +83,18 @@ not succeeded), so every 0.8.6.11 card run silently created nothing (bit
 Batch 488, 2026-08-05). The payload is now built by _build_payload - one
 place, contract-tested (tests/core/test_922_setup_cards.py) so a flow
 contract key can't silently vanish again.
+
+v2.6.0: the MPL is filled out UP FRONT and repeats are known at
+card-creation time. New stage "Fill Out MPL + Find Repeats" (between Batch
+Folder Setup and Generate Teams Cards) runs the Batch Repeater's own MPL
+maintenance + repeat detection (sdk.load_sibling - one home for the logic),
+detecting off the batch's FOLDER PPNs so a locked MPL can't hide repeats.
+Repeat cards are then CREATED with the REPEAT label directly in the batch's
+MODEL CHECK bucket (card_template.json's repeat_bucket_format; flow #1 was
+edited to honor the per-task bucket field). The Repeater's flow-#2 tag pass
+is now the SECOND pass (master-window child toggle default OFF), and the
+Repeater stage skips its duplicate MPL update when this run's MPL stage
+completed. Detection failures warn LOUDLY and never block the other stages.
 """
 from __future__ import annotations
 
@@ -98,7 +110,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -295,23 +307,41 @@ def _is_order_folder(entry: Path) -> bool:
 
 
 def _build_cards(template: dict, batch: str, folders: list[str],
-                 folder_labels: dict[str, list[str]]) -> list[dict]:
+                 folder_labels: dict[str, list[str]],
+                 repeat_folders: frozenset[str] | set[str] = frozenset(),
+                 repeat_slot: str | None = None) -> list[dict]:
     title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
     bucket_fmt = template.get("bucket_format", "BATCH {batch}")
+    repeat_bucket_fmt = (template.get("repeat_bucket_format")
+                         or "BATCH {batch}: MODEL CHECK")
     priority = template.get("priority", "Medium")
     status = template.get("status", "Not started")
     checklist = list(template.get("checklist", []))
     cards = []
     for folder in folders:
+        is_repeat = folder in repeat_folders
+        labels = list(folder_labels.get(folder, []))
+        if is_repeat and repeat_slot and repeat_slot not in labels:
+            labels.append(repeat_slot)
         cards.append({
             "title": title_fmt.format(batch=batch, folder=folder),
-            "bucket": bucket_fmt.format(batch=batch),
+            "bucket": (repeat_bucket_fmt if is_repeat else bucket_fmt)
+                      .format(batch=batch),
             "priority": priority,
             "status": status,
             "checklist": checklist,
-            "labels": list(folder_labels.get(folder, [])),
+            "labels": labels,
         })
     return cards
+
+
+def _repeat_folder_names(folder_names, repeat_orders, order_matches_folder):
+    """The root order folders that ARE repeats: folder PPN (name after the
+    first dash) or whole name exactly equals a detected repeat order. The
+    matcher is the Batch Repeater's _order_matches_folder — exact, never a
+    substring, so a '-H1' order can't claim a '-H11' folder."""
+    return {name for name in folder_names
+            if any(order_matches_folder(order, name) for order in repeat_orders)}
 
 
 def _order_for_planner(cards: list[dict]) -> list[dict]:
@@ -538,18 +568,20 @@ def _write_label_preview(payload: dict, log) -> None:
     sdk.write_payload_preview(payload, "last_922_pallet_label_payload.json", log)
 
 
-def _label_stage_problem(params: dict, message: str, popup: bool = True) -> None:
-    """Surface a pallet-label problem without killing the rest of the run.
+def _label_stage_problem(params: dict, message: str, popup: bool = True,
+                         title: str = "922 Setup - pallet labels") -> None:
+    """Surface a stage problem without killing the rest of the run.
 
     A blocking popup for the causes the user can fix right now (no organizer,
-    nothing assigned), and a warning run outcome always - so the run never
-    ends on a bare green tick when no card was actually labelled.
+    nothing assigned, MPL unreadable), and a warning run outcome always - so
+    the run never ends on a bare green tick when something was silently
+    skipped. Shared by the pallet-label, MPL, and card stages.
     """
     log = params.get("log", print)
     log("")
     log(f"WARNING: {message}")
     if popup:
-        sdk.show_warning(params, "922 Setup - pallet labels", message)
+        sdk.show_warning(params, title, message)
     if hasattr(sdk, "set_run_outcome"):
         sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING, message)
 
@@ -596,13 +628,23 @@ def _pick_batch_folder(params: dict, cancel_event):
 
 def _run_teams_setup(params: dict, progress_callback, cancel_event,
                      batch_path: Path, batch: str,
-                     apply_materials_opt: bool = False):
+                     apply_materials_opt: bool = False,
+                     repeat_folders: set[str] | None = None):
     """The original 922 Setup stage: build the cards for the already-picked
     batch folder, POST (or dry-run) the webhook payload. Pallet labels
     (PALLET 1/2/3) ALWAYS apply; ``apply_materials_opt`` (the master window's
     "Apply source material labels" toggle, default off) turns the
-    source-material labels on for this run. Returns the batch number string
-    on success, or None when cancelled / errored (the log says which)."""
+    source-material labels on for this run.
+
+    ``repeat_folders`` (v2.6.0) is the set of order-folder names the MPL stage
+    detected as repeats: their cards are created directly in the batch's
+    MODEL CHECK bucket with the REPEAT label. None means detection never ran
+    (stage unchecked or failed) - the cards still go up, untagged, behind a
+    LOUD warning, and the Batch Repeater's "Label REPEAT cards" pass is the
+    fixer. An empty set means detection ran and found no repeats.
+
+    Returns the batch number string on success, or None when cancelled /
+    errored (the log says which)."""
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
     progress_callback(15)
@@ -666,16 +708,39 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
                         + " - skipped (cards still created; add/rename the "
                         "label in Teams AND card_template.json to cover it).")
 
-    cards = _build_cards(template, batch, folders, folder_labels)
+    # --- Repeats (v2.6.0): known up front, carded straight into MODEL CHECK -
+    if repeat_folders is None:
+        _label_stage_problem(
+            params,
+            "Repeat detection didn't run (the 'Fill Out MPL + Find Repeats' "
+            "stage was unchecked or failed), so these cards are going up "
+            "WITHOUT repeat tags. Run the Batch Repeater's 'Label REPEAT "
+            "cards in Teams' pass later to tag and move any repeats.",
+            title="922 Setup - repeat cards")
+        repeat_folders = set()
+    repeat_slot = label_map.get(_norm_label("REPEAT"))
+    if not repeat_slot:
+        repeat_slot = "category19"
+        if repeat_folders:
+            log("WARNING: no REPEAT entry in card_template.json's label_map - "
+                "assuming category19 (Teal).")
+
+    cards = _build_cards(template, batch, folders, folder_labels,
+                         repeat_folders=repeat_folders, repeat_slot=repeat_slot)
     payload, buckets = _build_payload(template, batch, cards)
 
+    repeat_count = sum(1 for f in folders if f in repeat_folders)
+    repeat_bucket = (template.get("repeat_bucket_format")
+                     or "BATCH {batch}: MODEL CHECK").format(batch=batch)
     log(f"\nBuckets (left to right): {', '.join(buckets)}")
-    log(f"\nWill create {len(cards)} card(s) in plan '{payload['plan']}', "
-        f"bucket 'BATCH {batch}':")
+    log(f"\nWill create {len(cards)} card(s) in plan '{payload['plan']}': "
+        f"{len(cards) - repeat_count} in 'BATCH {batch}', "
+        f"{repeat_count} repeat(s) in '{repeat_bucket}':")
     for folder, card in zip(folders, cards):
         names = folder_label_names.get(folder, [])
         suffix = f"   [{', '.join(names)}]" if names else ""
-        log(f"  - {card['title']}{suffix}")
+        rep = "   [REPEAT]" if folder in repeat_folders else ""
+        log(f"  - {card['title']}{suffix}{rep}")
 
     if warnings:
         log("\nLabel warnings:")
@@ -922,19 +987,145 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
 # ─────────────────────────────────────────────────────────────────────────────
 # Orchestration — the consolidated 922 Setup
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage: Fill Out MPL + Find Repeats (v2.6.0)
+# ─────────────────────────────────────────────────────────────────────────────
+# The Batch Repeater's MPL maintenance moved UP FRONT, plus repeat detection
+# BEFORE the cards are generated — so repeat cards are created directly in
+# MODEL CHECK with the REPEAT label instead of being moved later by the
+# Repeater's flow-#2 tag pass (now the second pass / fixer). All the heavy
+# lifting is the Repeater's own code (sdk.load_sibling): the MPL and
+# detection logic keep exactly one home.
+
+
+def _run_mpl_update(params: dict, progress_callback, cancel_event,
+                    batch_path: Path, batch: str, shared_state: dict) -> bool:
+    """Update the 922 MPL (PO matrix column + MASTER PARTS catalog) and
+    detect this batch's repeat orders. Results land in shared_state['922']:
+
+      repeat_folders   sorted list of root order-folder names that ARE
+                       repeats (key present <=> detection completed; an
+                       EMPTY list means "detection ran, no repeats")
+      mpl_update_done  True when the MPL write genuinely happened and saved
+                       (the Repeater stage then skips its duplicate MPL pass)
+
+    Detection deliberately runs off the batch's own FOLDER PPNs, not the
+    MPL's new PO column — a locked MPL that couldn't take the new column
+    still yields correct repeat tags for the card stage. Every failure path
+    warns LOUDLY (popup + warning outcome) and returns False — never raises,
+    so the remaining stages still run.
+    """
+    log = params.get("log", print)
+    title = "922 Setup - MPL + repeats"
+    state = shared_state.setdefault("922", {})
+    state["mpl_update_done"] = False
+
+    log("")
+    log("=" * 60)
+    log("Stage: Fill Out MPL + Find Repeats")
+    log("=" * 60)
+
+    rep = _load_sibling("922_batch_repeater", log)
+    if rep is None:
+        _label_stage_problem(
+            params,
+            "The 922 Batch Repeater plugin could not be loaded, so the MPL "
+            "was not updated and repeats were not detected. Cards will go up "
+            "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
+            "later.", title=title)
+        return False
+
+    # The MPL lives where the Repeater says it does — its settings, its
+    # resolution rules (same defaults as a standalone Repeater run).
+    rep_settings = sdk.plugin_settings("922_batch_repeater") or {}
+    base_path = sdk.resolve_922_root(rep_settings.get("base_directory", ""))
+    if base_path is None or not sdk.exists(base_path):
+        base_path = batch_path.parent
+    filename = ((rep_settings.get("spreadsheet_filename", "") or "").strip()
+                or "922 MPL.xlsx")
+    spreadsheet_path = base_path / filename
+    if not sdk.exists(spreadsheet_path):
+        _label_stage_problem(
+            params,
+            f"The MPL workbook was not found at '{spreadsheet_path}', so it "
+            "was not updated and repeats were not detected. Cards will go up "
+            "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
+            "later.", title=title)
+        return False
+    progress_callback(10)
+
+    # --- Half 1: fill out the MPL (PO matrix column + MASTER PARTS) --------
+    do_matrix = bool(rep_settings.get("update_mpl_matrix", True))
+    do_master = bool(rep_settings.get("update_master_parts", True))
+    dry_run = bool(rep_settings.get("dry_run", False))
+    mpl_errors = 0
+    if do_matrix or do_master:
+        log("Updating the MPL from the batch's folders + PO workbook...")
+        mpl_errors = rep._update_mpl_sheets(
+            spreadsheet_path, base_path / rep.QUOTE_RELPATH, int(batch),
+            batch_path, do_matrix, do_master, dry_run, log)
+        state["mpl_update_done"] = (mpl_errors == 0 and not dry_run)
+    else:
+        log("MPL updates switched OFF in the Batch Repeater's Settings.")
+    progress_callback(55)
+    if cancel_event.is_set():
+        return False
+
+    # --- Half 2: detect repeats (MPL errors do NOT abort this half) --------
+    ppns = rep._batch_folder_ppns(batch_path, log)
+    if not ppns:
+        _label_stage_problem(
+            params,
+            "No order folders were found in the batch, so repeats could not "
+            "be detected (did Batch Folder Setup run?). Cards will go up "
+            "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
+            "later.", title=title)
+        return False
+    try:
+        df, po_columns = rep._read_mpl_po_columns(
+            spreadsheet_path, rep.SHEET_NAME, log)
+    except Exception as exc:
+        _label_stage_problem(
+            params,
+            f"Could not read the MPL's PO sheet ({exc}), so repeats were not "
+            "detected. Cards will go up untagged - run the Batch Repeater's "
+            "'Label REPEAT cards' pass later.", title=title)
+        return False
+    repeat_orders = rep.find_repeat_orders(df, po_columns, int(batch), ppns)
+    progress_callback(85)
+
+    # --- Map repeat orders onto the root order folders ---------------------
+    folder_names = [e.name for e in sorted(batch_path.iterdir())
+                    if _is_order_folder(e)]
+    repeats = _repeat_folder_names(folder_names, repeat_orders,
+                                   rep._order_matches_folder)
+    state["repeat_folders"] = sorted(repeats)
+
+    log(f"Repeat detection: {len(repeat_orders)} repeat order(s) -> "
+        f"{len(repeats)} of {len(folder_names)} order folder(s) are repeats.")
+    for name in state["repeat_folders"]:
+        log(f"  - {name}  (repeat, card will go to MODEL CHECK)")
+    if mpl_errors:
+        log("NOTE: the MPL update itself had problems (see above) - the "
+            "Batch Repeater stage will retry it.")
+    progress_callback(100)
+    return True
+
+
 # One tile runs the whole 922 batch-prep sequence behind a master toggle
-# window: Batch Folder Setup -> Generate Teams Cards -> 922 Pallet Stamper ->
-# 922 Batch Repeater. Stamping runs BEFORE the Repeater so repeat orders (and
-# the repeat binders the Repeater distributes into the root order folders) are
-# never stamped. The sibling plugins' code is NOT duplicated — their
-# installed run.py files are imported at run time from the plugins dir this
-# file lives in, and each runs with its OWN saved settings
-# (sdk.plugin_settings). The standalone Repeater/Stamper tiles keep working
-# unchanged; if one is missing (partial install) its stage errors cleanly.
+# window: Batch Folder Setup -> Fill Out MPL + Find Repeats -> Generate Teams
+# Cards -> 922 Pallet Stamper -> 922 Batch Repeater. Stamping runs BEFORE the
+# Repeater so repeat orders (and the repeat binders the Repeater distributes
+# into the root order folders) are never stamped. The sibling plugins' code
+# is NOT duplicated — their installed run.py files are imported at run time
+# from the plugins dir this file lives in, and each runs with its OWN saved
+# settings (sdk.plugin_settings). The standalone Repeater/Stamper tiles keep
+# working unchanged; if one is missing (partial install) its stage errors
+# cleanly.
 
 # Progress-bar slice per stage (proportionally re-normalized over the enabled
 # stages, so any combination still sweeps 0..100).
-_STAGE_WEIGHTS = {"folder_setup": 15, "teams_setup": 30,
+_STAGE_WEIGHTS = {"folder_setup": 15, "mpl_update": 15, "teams_setup": 30,
                   "pallet_labels": 10, "batch_repeater": 40,
                   "pallet_stamper": 15}
 
@@ -950,6 +1141,10 @@ def _dialog_groups() -> list:
     return [
         {"key": "folder_setup",
          "label": "Batch Folder Setup",
+         "checked": True,
+         "children": []},
+        {"key": "mpl_update",
+         "label": "Fill Out MPL + Find Repeats",
          "checked": True,
          "children": []},
         {"key": "teams_setup",
@@ -973,8 +1168,14 @@ def _dialog_groups() -> list:
          "children": [
              {"key": "distribute", "label": "Distribute CAD prints + binders",
               "checked": True},
-             {"key": "tag", "label": "Label REPEAT cards in Teams",
-              "checked": True},
+             # Since v2.6.0 repeat cards are tagged + bucketed at CREATION
+             # time (the MPL stage feeds Generate Teams Cards), so this
+             # flow-#2 pass is the SECOND pass — the fixer for a batch carded
+             # before the MPL was filled in. Default OFF. NOTE: the dialog
+             # passes no remember_as; if toggle memory is ever added,
+             # apply_toggle_memory would resurrect old True submissions.
+             {"key": "tag", "label": "Label REPEAT cards in Teams (second pass)",
+              "checked": False},
          ]},
     ]
 
@@ -1048,7 +1249,7 @@ def run(params: dict, progress_callback, cancel_event):
         cancel_event.set()  # user cancel: not a successful (ticket-earning) run
         return
 
-    order = ["folder_setup", "teams_setup", "pallet_labels",
+    order = ["folder_setup", "mpl_update", "teams_setup", "pallet_labels",
              "pallet_stamper", "batch_repeater"]
     enabled = [k for k in order if choices.get(k, {}).get("enabled")]
     if not enabled:
@@ -1074,13 +1275,13 @@ def run(params: dict, progress_callback, cancel_event):
         shared_state = {"911": {}, "922": {}, "General": {}}
 
     # Each completed stage counts as a full system run for the ticket award
-    # (5 per system: all four stages = 20).
+    # (5 per system; the executor clamps the total at 20).
     stages_done = 0
 
     # --- One batch-folder pick feeds every stage that needs it -------------
     batch_path = batch = None
-    if ("folder_setup" in enabled or "teams_setup" in enabled
-            or "pallet_labels" in enabled):
+    if ("folder_setup" in enabled or "mpl_update" in enabled
+            or "teams_setup" in enabled or "pallet_labels" in enabled):
         batch_path, batch = _pick_batch_folder(params, cancel_event)
         if cancel_event.is_set():
             return
@@ -1104,14 +1305,32 @@ def run(params: dict, progress_callback, cancel_event):
             return
         progress_callback(hi)
 
+    # --- Stage 0b: Fill Out MPL + Find Repeats ------------------------------
+    # Runs after Folder Setup (the MPL matrix column fills from the order
+    # FOLDER names) and before the cards, so Generate Teams Cards knows which
+    # orders are repeats. Failures warn loudly and never block later stages.
+    if "mpl_update" in enabled and not cancel_event.is_set():
+        assert batch_path is not None and batch is not None
+        lo, hi = slices["mpl_update"]
+        if _run_mpl_update(params, _scaled(progress_callback, lo, hi),
+                           cancel_event, batch_path, batch, shared_state):
+            stages_done += 1
+        if cancel_event.is_set():
+            return
+        progress_callback(hi)
+
     # --- Stage 1: Generate Teams Cards (this plugin's original job) ---------
     if "teams_setup" in enabled and not cancel_event.is_set():
         assert batch_path is not None and batch is not None
         lo, hi = slices["teams_setup"]
         apply_materials = choices["teams_setup"]["options"].get("materials", False)
+        # repeat_folders: None = detection never ran (loud warning inside);
+        # [] = detection ran, zero repeats. Set by the MPL stage above.
+        rf = shared_state.get("922", {}).get("repeat_folders")
         done = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
                                 cancel_event, batch_path, batch,
-                                apply_materials_opt=apply_materials)
+                                apply_materials_opt=apply_materials,
+                                repeat_folders=set(rf) if rf is not None else None)
         if cancel_event.is_set():
             return
         if done:
@@ -1162,11 +1381,18 @@ def run(params: dict, progress_callback, cancel_event):
     if "batch_repeater" in enabled and not cancel_event.is_set():
         lo, hi = slices["batch_repeater"]
         opts = choices["batch_repeater"]["options"]
+        # tag defaults OFF since v2.6.0 (repeats are tagged at card-creation
+        # time by the stages above; the flow-#2 pass is the second pass).
+        # mpl_matrix/master_parts are skipped only when this run's MPL stage
+        # genuinely completed AND saved — otherwise the Repeater self-heals.
+        mpl_done = bool(shared_state.get("922", {}).get("mpl_update_done"))
         _run_sibling_stage(
             "922_batch_repeater", "Batch Repeater", params, shared_state,
             _scaled(progress_callback, lo, hi), cancel_event,
             stage_options={"distribute": opts.get("distribute", True),
-                           "tag": opts.get("tag", True)},
+                           "tag": opts.get("tag", False),
+                           "mpl_matrix": not mpl_done,
+                           "master_parts": not mpl_done},
         )
         if cancel_event.is_set():
             return

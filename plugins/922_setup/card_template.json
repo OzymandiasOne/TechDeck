@@ -1,8 +1,9 @@
 {
-  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time. 'buckets' is the ORDERED left-to-right bucket list created per batch (cards only land in the plain 'BATCH {batch}' bucket). 'label_map' mirrors the D922 PIPELINE plan's 25 label slots top-to-bottom (category1 = top of Planner's label list); if a label is renamed/reordered IN PLANNER, update it here too - this file is the source of truth the plugin matches against.",
+  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time. 'buckets' is the ORDERED left-to-right bucket list created per batch (regular cards land in the plain 'BATCH {batch}' bucket; repeat cards land in 'repeat_bucket_format', which must stay a member of 'buckets' so the flow creates it before any card needs it). 'label_map' mirrors the D922 PIPELINE plan's 25 label slots top-to-bottom (category1 = top of Planner's label list); if a label is renamed/reordered IN PLANNER, update it here too - this file is the source of truth the plugin matches against.",
   "plan": "D922 PIPELINE",
   "title_format": "BATCH {batch}: {folder}",
   "bucket_format": "BATCH {batch}",
+  "repeat_bucket_format": "BATCH {batch}: MODEL CHECK",
   "buckets": [
     "BATCH {batch}: HOLD",
     "BATCH {batch}",
