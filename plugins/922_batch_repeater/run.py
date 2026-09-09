@@ -1,6 +1,10 @@
 """
-Batch Repeater Plugin for TechDeck v2.5.0
+Batch Repeater Plugin for TechDeck v2.5.1
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
+
+v2.5.1: when the quote workbook is missing, the part-typing warning now says
+so and names the expected path, instead of blaming the MATERIAL PRICING sheet
+(a missing-file WinError 2 read as a sheet problem, CDAUGHAN-LT 2026-09-09).
 
 v2.5.0: after the copy, every folder in REPEAT BATCHES is AUDITED for the
 shop-print tube files - a 'CAD-AND-SHOP-PRINTS' folder, and `.lst` files in
@@ -366,14 +370,20 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
             f"{skipped} order(s) - nothing to add.")
         return False
     cat.finalize_times_made()
-    try:
-        pricing = mp.load_pricing_map(quote_path, log=log)
-        cat.apply_part_types(pricing)
-    except Exception as exc:
-        log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
-            " - existing part types kept, new parts typed from tube serials "
-            "only.")
+    if not sdk.is_file(quote_path):
+        log(f"WARNING: the quote workbook is missing - expected it at "
+            f"{quote_path} - existing part types kept, new parts typed "
+            "from tube serials only.")
         cat.apply_part_types({}, only_untyped=True)
+    else:
+        try:
+            pricing = mp.load_pricing_map(quote_path, log=log)
+            cat.apply_part_types(pricing)
+        except Exception as exc:
+            log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
+                " - existing part types kept, new parts typed from tube serials "
+                "only.")
+            cat.apply_part_types({}, only_untyped=True)
     for w in cat.warnings:
         log(f"  note: {w}")
     mp.write_master_sheet(wb, cat.sorted_rows())
@@ -498,7 +508,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_master_parts = (bool(settings.get('update_master_parts', True))
                        and bool(stage_options.get('master_parts', True)))
 
-    log("Starting 922 Batch Repeater v2.5.0...")
+    log("Starting 922 Batch Repeater v2.5.1...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
