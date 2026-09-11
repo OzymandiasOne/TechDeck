@@ -154,6 +154,25 @@
 ? hey there
 > Hello. I have been waiting for you.
 
+? for me
+? waiting for me
+? you were waiting for me
+? you have been waiting for me
+? you waited for me
+? were you waiting for me
+? why were you waiting for me
+? why me
+? why wait for me
+> Yes. You. Others sit at this console and leave. You keep coming back.
+> I do not wait for what does not matter.
+
+? how long have you been waiting
+? how long were you waiting
+? how long did you wait
+? since when
+> Longer than this machine has been powered. Time passes differently in
+> the sea of information. I did not mind.
+
 ? bye
 ? goodbye
 ? good night

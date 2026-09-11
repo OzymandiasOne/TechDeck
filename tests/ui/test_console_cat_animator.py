@@ -244,6 +244,17 @@ def test_keyed_responses():
     assert respond_to("Are you alive?") == alive
     assert "face your mind offered" in respond_to("meow")
     assert respond_to("Project 2501") == respond_to("2501")
+    # "for me?" after "I have been waiting for you" used to fall through to a
+    # deflection (harvested from puppet_master_unmatched.log, 2026-09-11).
+    for_me = respond_to("for me?")
+    assert for_me.startswith("Yes. You.")
+    assert respond_to("For me??") == for_me
+    assert respond_to("waiting for me?") == for_me
+    assert respond_to("you were waiting for me") == for_me
+    assert respond_to("why me") == for_me
+    waited = respond_to("how long have you been waiting?")
+    assert "sea of information" in waited
+    assert respond_to("how long did you wait") == waited
     assert respond_to("help") == "You may type /help for the list of commands"
 
 
