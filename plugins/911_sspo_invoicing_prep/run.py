@@ -1,15 +1,27 @@
 """
 911 SSPO Invoicing Prep  (plugin id: 911_sspo_invoicing_prep, family: 911)
 ==========================================================================
-Takes a big SSPO pricing sheet (like "SSPO Pricing Back Up") and splits it into one
-workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back Up.xlsx", each saved in
-its own "{BATCH} {NEST} Invoicing Docs" subfolder of a new folder next to the file
-the user picks.
+Takes an SSPO pricing sheet — including a full copy of the ENTIRE pricing master —
+asks for the close-out date range (two calendar pickers, defaulting to the last
+7 days), keeps only the rows whose "Firm VPD" date falls inside it, and splits
+those into one workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back
+Up.xlsx", each saved in its own "{BATCH} {NEST} Invoicing Docs" subfolder of a
+new folder next to the file the user picks. (v2.2.0: the date range replaces
+hand-trimming the master before the run; a source without a Firm VPD column
+falls back to every valid row, like before.)
 
-The top level of that output folder also gets a "D911 Workorder Close Outs
-{m-d-yyyy}.xlsx" reconstruction of the sheet previously ripped by hand from the
-pricing master: the source's columns from A through "Machine", values AND cell
-styles copied verbatim, with every row's Scheduling Group set to "Closed".
+The top level of that output folder also gets two weekly reports, both named for
+the range's END date:
+
+  "D911 Workorder Close Outs {m-d-yyyy}.xlsx" — reconstruction of the sheet
+  previously ripped by hand from the pricing master: the source's columns from A
+  through "Machine", the IN-RANGE rows only, values AND cell styles copied
+  verbatim, with every row's Scheduling Group set to "Closed".
+
+  "D911 Workorder Material Status {m-d-yyyy}.xlsx" — the weekly material status
+  listing invoicing used to build by hand: a fixed 14-column rip of the source
+  (Program..Material Status, looked up by header name), EVERY data row, no date
+  or nest filter, plain values with source number formats.
 
 Each output workbook is built ENTIRELY from scratch (no template file) and gets:
 
@@ -44,7 +56,7 @@ import os
 import re
 import shutil
 from copy import copy
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 # --- SDK bootstrap (works under the app and for headless CLI testing) -------------
@@ -61,7 +73,9 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import (QDateEdit, QDialog, QDialogButtonBox, QFormLayout,
+                               QLabel, QMessageBox, QVBoxLayout)
 
 # Hard Rule 3 nest-number regex: accept legacy numeric IDs (503633, P08229) AND
 # alphanumeric IDs that contain a digit (5CDAWK); reject footer/total/junk text.
@@ -80,6 +94,23 @@ LOGO_NAME = "asa_logo.png"
 CLOSEOUT_LAST_HEADER = "MACHINE"
 CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
 CLOSEOUT_STATUS_VALUE = "Closed"
+
+# The close-out date column: a row is in the run only when its Firm VPD falls in
+# the picked date range. A source without the column (a hand-trimmed sheet from
+# the pre-2.2.0 flow) skips the filter with a warning.
+VPD_HEADER = "FIRM VPD"
+
+# Workorder Material Status listing: the weekly report invoicing used to rip by
+# hand — these 14 source columns (by header name), EVERY data row, values only.
+# Widths reproduce the hand-made original.
+MATSTATUS_TITLE = "D911 Workorder Material Status"
+MATSTATUS_COLUMNS = [  # (source header, column width)
+    ("Program", 8.6), ("Batch", 11.3), ("Work Order", 11.0), ("DYPN", 21.9),
+    ("Material", 15.6), ("DYPN QTY", 9.7), ("Nest Pkg Nbr", 12.3),
+    ("SCOPE OF WORK", 27.9), ("SubGroup", 9.7), ("Division", 8.1),
+    ("Scheduling Group", 23.4), ("Firm VPD", 10.4), ("Notes", 74.4),
+    ("Material Status", 14.4),
+]
 
 # Forecast sheets searched for the PO / PO Line, in priority order (active
 # forecast first; finished batches roll off to the Complete sheet).
@@ -128,14 +159,52 @@ def _safe_filename(name):
 
 def _pick_sheet(wb, log):
     """Find the sheet + header row that has both Batch and Nest Pkg Nbr (Hard Rules
-    1-2: locate by name, scan for the header row). Returns (ws, header_row, header_map)."""
-    for ws in wb.worksheets:
+    1-2: locate by name, scan for the header row; visible sheets only, so a hidden
+    staging tab or the old hand-made Material Status tab can't win). Returns
+    (ws, header_row, header_map)."""
+    for name in sdk.visible_sheetnames(wb):
+        ws = wb[name]
         hdr_row, hmap = sdk.find_header_row(ws, REQUIRED_HEADERS, max_scan=12)
         if hdr_row:
             log(f"Using sheet '{ws.title}' (header on row {hdr_row}).")
             return ws, hdr_row, hmap
     raise ValueError(
         "Could not find a sheet with 'Batch' and 'Nest Pkg Nbr' columns.")
+
+
+def _ask_date_range(parent=None):
+    """Modal close-out date-range dialog: two calendar pickers, defaulting to the
+    last 7 days (a week back through today — one whole close-out week when run on
+    the usual Friday). Returns (start_date, end_date) as datetime.date with
+    start <= end, or None on cancel. Main-thread only (this is a GUI plugin)."""
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Close-out date range")
+    layout = QVBoxLayout(dlg)
+    layout.addWidget(QLabel(
+        "Rows whose Firm VPD falls in this range are split and closed out.\n"
+        "For a single date, set both pickers to the same day."))
+    form = QFormLayout()
+    today = QDate.currentDate()
+    start_edit = QDateEdit(today.addDays(-6))
+    end_edit = QDateEdit(today)
+    for edit in (start_edit, end_edit):
+        edit.setCalendarPopup(True)
+        edit.setDisplayFormat("M/d/yyyy")
+    form.addRow("From (Firm VPD):", start_edit)
+    form.addRow("Through:", end_edit)
+    layout.addLayout(form)
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    layout.addWidget(buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    start = start_edit.date().toPython()
+    end = end_edit.date().toPython()
+    if start > end:
+        start, end = end, start
+    return start, end
 
 
 # ---------------------------------------------------------------------------------
@@ -297,11 +366,13 @@ def _copy_cell(src_c, dst_c, value=None):
     dst_c.number_format = src_c.number_format
 
 
-def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
+def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date, log):
     """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
     out_dir: the source sheet's columns A through "Machine" (values and cell styles
     verbatim, so the hand-ripped original is reproduced exactly) with every row's
-    Scheduling Group set to "Closed". Returns the filename written."""
+    Scheduling Group set to "Closed". Named for `report_date` (the range's end date,
+    so a Monday catch-up run still stamps the close-out Friday). Returns the
+    filename written."""
     last_col = hmap.get(CLOSEOUT_LAST_HEADER)
     if not last_col:
         last_col = max(hmap.values())
@@ -326,9 +397,58 @@ def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
             _copy_cell(src_row[j - 1], ws.cell(row=r_i, column=j),
                        value=CLOSEOUT_STATUS_VALUE if j == status_col else None)
 
-    today = date.today()
+    d = report_date
     fname = _safe_filename(
-        f"D911 Workorder Close Outs {today.month}-{today.day}-{today.year}.xlsx")
+        f"D911 Workorder Close Outs {d.month}-{d.day}-{d.year}.xlsx")
+    sdk.save_workbook(wb, out_dir / fname)
+    return fname
+
+
+def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date,
+                           log, cancel_event):
+    """Write the 'D911 Workorder Material Status {m-d-yyyy}.xlsx' listing at the top
+    of out_dir: the MATSTATUS_COLUMNS source columns (by header name), EVERY data
+    row — deliberately NOT filtered by the close-out date range or the nest regex,
+    because the weekly listing covers the whole master. Values only, source number
+    formats kept (so Firm VPD still shows as a date). Returns the filename, or None
+    if cancelled."""
+    cols = []                                    # (source col or None, header text)
+    for name, _ in MATSTATUS_COLUMNS:
+        c = hmap.get(name.upper())
+        if c is None:
+            log(f"  WARNING: no '{name}' column in the source - that Material "
+                "Status column will be blank.")
+            cols.append((None, name))
+        else:
+            cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for j, ((_, header), (_, width)) in enumerate(zip(cols, MATSTATUS_COLUMNS),
+                                                  start=1):
+        ws.cell(row=1, column=j, value=header)
+        ws.column_dimensions[get_column_letter(j)].width = width
+    error_cells = 0                # '#VALUE!'-style formula errors in the source
+    for r_i, src_row in enumerate(all_rows, start=2):
+        if cancel_event is not None and r_i % 256 == 0 and cancel_event.is_set():
+            return None
+        for j, (c, _) in enumerate(cols, start=1):
+            if c is None:
+                continue
+            src_c = src_row[c - 1]
+            if isinstance(src_c.value, str) and src_c.value.startswith("#"):
+                error_cells += 1
+            dst = ws.cell(row=r_i, column=j, value=src_c.value)
+            if src_c.number_format and src_c.number_format != "General":
+                dst.number_format = src_c.number_format
+    if error_cells:
+        log(f"  WARNING: {error_cells} cell(s) in the source carry an Excel "
+            "formula error (#VALUE! etc.) - they're copied as-is; fix them in "
+            "the pricing master.")
+
+    d = report_date
+    fname = _safe_filename(
+        f"{MATSTATUS_TITLE} {d.month}-{d.day}-{d.year}.xlsx")
     sdk.save_workbook(wb, out_dir / fname)
     return fname
 
@@ -369,13 +489,21 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
 
 
 def split_workbook(src_path, out_dir, settings, log,
-                   progress_callback=None, cancel_event=None):
+                   progress_callback=None, cancel_event=None, date_range=None):
     """Split src_path into one from-scratch workbook per (Batch, Nest), each in its
     own "{BATCH} {NEST} Invoicing Docs" subfolder, plus the Workorder Close Outs
-    workbook at the top of out_dir. Returns (written, missing_po, closeout_name)
-    where written = [(relative path, row_count)], missing_po = [display names of
-    groups whose PO wasn't in the forecast], and closeout_name is the Close Outs
-    filename (None if cancelled before it was written)."""
+    and Workorder Material Status workbooks at the top of out_dir.
+
+    `date_range` = (start_date, end_date) inclusive: only rows whose Firm VPD date
+    falls inside it are split / closed out, so the user can feed the ENTIRE pricing
+    master instead of hand-trimming it first. None (or a source without a Firm VPD
+    column) keeps every valid row. The Material Status listing always covers every
+    data row regardless of the range.
+
+    Returns (written, missing_po, closeout_name, matstatus_name) where written =
+    [(relative path, row_count)], missing_po = [display names of groups whose PO
+    wasn't in the forecast], and the last two are the report filenames (None if
+    cancelled before they were written)."""
     src_path = Path(src_path)
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
@@ -389,7 +517,7 @@ def split_workbook(src_path, out_dir, settings, log,
         po_map = _read_po_map(forecast_copy, log, cancel_event) if forecast_copy else {}
         if cancel_event is not None and cancel_event.is_set():
             log("Cancelled.")
-            return [], [], None
+            return [], [], None, None
         if progress_callback:
             progress_callback(12)
 
@@ -403,20 +531,41 @@ def split_workbook(src_path, out_dir, settings, log,
         i_batch = hmap["BATCH"]                    # 1-based
         i_nest = hmap["NEST PKG NBR"]
 
-        # Group data rows by (batch, nest), preserving first-seen order; keep the
-        # flat source-order row list too for the Close Outs sheet.
-        groups, order, valid_rows, skipped = {}, [], [], 0
+        i_vpd = hmap.get(VPD_HEADER)
+        if date_range is not None and not i_vpd:
+            log(f"WARNING: no '{VPD_HEADER}' column in the source - the date range "
+                "can't be applied, so every valid row is included (the pre-2.2.0 "
+                "hand-trimmed flow).")
+            date_range = None
+        if date_range is not None:
+            log(f"Close-out range: {date_range[0]:%m/%d/%Y} through "
+                f"{date_range[1]:%m/%d/%Y} (on Firm VPD).")
+
+        # Group IN-RANGE data rows by (batch, nest), preserving first-seen order;
+        # keep the flat source-order row list too for the Close Outs sheet, and
+        # EVERY data row (range or not) for the Material Status listing.
+        groups, order, valid_rows, all_rows = {}, [], [], []
+        skipped, out_of_range, vpd_seen = 0, 0, []
         for i, row in enumerate(ws.iter_rows(min_row=hdr_row + 1, max_col=last_col)):
             if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                 log("Cancelled.")
-                return [], [], None
+                return [], [], None, None
             if all(c.value in (None, "") for c in row):
                 continue
+            all_rows.append(row)
             nest = _as_str(row[i_nest - 1].value)
             batch = _as_str(row[i_batch - 1].value)
             if not NEST_RE.match(nest):
                 skipped += 1
                 continue
+            if date_range is not None:
+                v = row[i_vpd - 1].value
+                d = v.date() if isinstance(v, datetime) else v if isinstance(v, date) else None
+                if d is not None:
+                    vpd_seen.append(d)
+                if d is None or not (date_range[0] <= d <= date_range[1]):
+                    out_of_range += 1
+                    continue
             key = (batch, nest)
             if key not in groups:
                 groups[key] = []
@@ -425,11 +574,32 @@ def split_workbook(src_path, out_dir, settings, log,
             valid_rows.append(row)
 
         if not order:
+            if date_range is not None and out_of_range:
+                span = (f"the dates run {min(vpd_seen):%m/%d/%Y} to "
+                        f"{max(vpd_seen):%m/%d/%Y}" if vpd_seen
+                        else "no row has a Firm VPD date at all")
+                raise sdk.UserFacingError(
+                    f"No rows have a Firm VPD between {date_range[0]:%m/%d/%Y} and "
+                    f"{date_range[1]:%m/%d/%Y} ({out_of_range} valid rows fall "
+                    f"outside it - {span}).",
+                    "Run it again and pick the week you are closing out.")
             raise ValueError("No rows with a valid nest number were found.")
 
-        closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir, log)
-        log(f"  wrote {closeout_name}  ({len(valid_rows)} rows, "
+        report_date = date_range[1] if date_range is not None else date.today()
+        closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir,
+                                         report_date, log)
+        in_range = f" in range (of {out_of_range + len(valid_rows)} valid)" \
+            if date_range is not None else ""
+        log(f"  wrote {closeout_name}  ({len(valid_rows)} rows{in_range}, "
             f"Scheduling Group -> '{CLOSEOUT_STATUS_VALUE}')")
+
+        matstatus_name = _write_material_status(ws, hdr_row, hmap, all_rows,
+                                                out_dir, report_date, log,
+                                                cancel_event)
+        if matstatus_name is None:
+            log("Cancelled.")
+            return [], [], None, None
+        log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
 
         written, missing_po = [], []
         for gi, (batch, nest) in enumerate(order):
@@ -455,7 +625,10 @@ def split_workbook(src_path, out_dir, settings, log,
 
         if skipped:
             log(f"Skipped {skipped} row(s) without a valid nest number (footers/blanks).")
-        return written, missing_po, closeout_name
+        if out_of_range:
+            log(f"Left out {out_of_range} valid row(s) whose Firm VPD is outside "
+                "the range (they stay in the Material Status listing).")
+        return written, missing_po, closeout_name, matstatus_name
     finally:
         # The forecast copy is working scratch only - always remove it, even on
         # error/cancel, so it never lingers next to the real output files.
@@ -487,12 +660,17 @@ def run(params, progress_callback, cancel_event):
         return
 
     src = Path(src)
+    date_range = _ask_date_range()
+    if date_range is None:
+        log("No date range chosen - nothing to do.")
+        return
     out_dir = src.parent / f"{src.stem} - Back Ups"
     progress_callback(5)
 
     try:
-        written, missing_po, closeout_name = split_workbook(
-            src, out_dir, settings, log, progress_callback, cancel_event)
+        written, missing_po, closeout_name, matstatus_name = split_workbook(
+            src, out_dir, settings, log, progress_callback, cancel_event,
+            date_range)
     except Exception as e:
         log(f"ERROR: {e}")
         QMessageBox.critical(None, "911 SSPO Invoicing Prep",
@@ -516,6 +694,8 @@ def run(params, progress_callback, cancel_event):
            f"\n\n{out_dir}")
     if closeout_name:
         msg += f"\n\nWorkorder Close Outs sheet (top level): {closeout_name}"
+    if matstatus_name:
+        msg += f"\nWorkorder Material Status listing (top level): {matstatus_name}"
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)

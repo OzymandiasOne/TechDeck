@@ -46,7 +46,7 @@ if ($issVersion -ne $version) {
 Write-Host "Installer script version matches: $issVersion" -ForegroundColor Green
 
 # Step 1: Clean previous builds
-Write-Host "`n[1/8] Cleaning previous builds..." -ForegroundColor Yellow
+Write-Host "`n[1/9] Cleaning previous builds..." -ForegroundColor Yellow
 if (Test-Path "build") { 
     Remove-Item -Recurse -Force "build" 
     Write-Host "  [OK] Cleaned build directory" -ForegroundColor Green
@@ -57,7 +57,7 @@ if (Test-Path "dist") {
 }
 
 # Step 2: Verify source files exist
-Write-Host "`n[2/8] Verifying source files..." -ForegroundColor Yellow
+Write-Host "`n[2/9] Verifying source files..." -ForegroundColor Yellow
 $requiredFiles = @(
     "TechDeck.spec",
     "techdeck\__main__.py",
@@ -86,7 +86,7 @@ Write-Host "  [OK] All required source files present" -ForegroundColor Green
 # with no way to hotfix, so a failing suite must never build. -SkipTests exists
 # for emergency local iteration only; CI runs the same suite on every push.
 if (-not $SkipTests) {
-    Write-Host "`n[3/8] Running test suite..." -ForegroundColor Yellow
+    Write-Host "`n[3/9] Running test suite..." -ForegroundColor Yellow
     python -m pytest -q
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [FAIL] Test suite failed - fix the failing tests before building (or -SkipTests to bypass)" -ForegroundColor Red
@@ -94,14 +94,14 @@ if (-not $SkipTests) {
     }
     Write-Host "  [OK] Test suite passed" -ForegroundColor Green
 } else {
-    Write-Host "`n[3/8] Skipping test suite" -ForegroundColor Gray
+    Write-Host "`n[3/9] Skipping test suite" -ForegroundColor Gray
 }
 
 # Step 4: Ship-readiness gate - every plugin import must exist in the frozen
 # bundle (hiddenimports / app import graph), manifests must be valid, and every
 # plugin must load through PluginLoader. Catches works-in-dev-only failures
 # BEFORE they ship (e.g. the v0.8.6 plugin_window miss).
-Write-Host "`n[4/8] Running ship-readiness check..." -ForegroundColor Yellow
+Write-Host "`n[4/9] Running ship-readiness check..." -ForegroundColor Yellow
 python tools\check_ship_readiness.py --load
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [FAIL] Ship-readiness check failed - fix the errors above before building" -ForegroundColor Red
@@ -109,8 +109,19 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] Ship-readiness check passed" -ForegroundColor Green
 
-# Step 5: Run PyInstaller
-Write-Host "`n[5/8] Running PyInstaller..." -ForegroundColor Yellow
+# Step 5: Build the User Guide PDF - regenerated for every build so the
+# shipped manual (assets\docs, opened by /guide and Settings > Help & Feedback)
+# can never be stale. Its own gates (voice, images, integrity) fail the build.
+Write-Host "`n[5/9] Building the User Guide PDF..." -ForegroundColor Yellow
+python tools\build_user_guide.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [FAIL] User Guide build failed - fix the errors above before building" -ForegroundColor Red
+    exit 1
+}
+Write-Host "  [OK] User Guide PDF built" -ForegroundColor Green
+
+# Step 6: Run PyInstaller
+Write-Host "`n[6/9] Running PyInstaller..." -ForegroundColor Yellow
 Write-Host "  This may take 2-5 minutes..." -ForegroundColor Gray
 
 # Full output goes to build\pyinstaller.log (build\ is gitignored) so a
@@ -126,8 +137,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  [OK] PyInstaller completed successfully (full output: $pyiLog)" -ForegroundColor Green
 
-# Step 6: Verify build output
-Write-Host "`n[6/8] Verifying build output..." -ForegroundColor Yellow
+# Step 7: Verify build output
+Write-Host "`n[7/9] Verifying build output..." -ForegroundColor Yellow
 
 $exePath = "dist\TechDeck\TechDeck.exe"
 if (-not (Test-Path $exePath)) {
@@ -172,7 +183,7 @@ Write-Host "  [OK] Total assets bundled: $assetCount files" -ForegroundColor Gre
 
 # Step 7: Build Inno Setup installer
 if (-not $SkipInstaller) {
-    Write-Host "`n[7/8] Building Inno Setup installer..." -ForegroundColor Yellow
+    Write-Host "`n[8/9] Building Inno Setup installer..." -ForegroundColor Yellow
 
     $isccPaths = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -206,16 +217,28 @@ if (-not $SkipInstaller) {
         }
         $installerSize = [math]::Round((Get-Item $installerPath).Length / 1MB, 2)
         Write-Host "  [OK] Installer created: $installerSize MB" -ForegroundColor Green
+
+        # Prune superseded installers - keep the 2 newest by write time. Every
+        # shipped installer lives forever on its GitHub Release, so local
+        # copies of old versions are pure disk cost (they had grown to 2.5 GB
+        # by 2026-09-04). Two are kept, not one, so the previous release is
+        # still on hand for a quick A/B check without a download.
+        $old = Get-ChildItem "installer_output\TechDeck-*-Setup.exe" |
+            Sort-Object LastWriteTime -Descending | Select-Object -Skip 2
+        foreach ($f in $old) {
+            Remove-Item $f.FullName -Force
+            Write-Host "  [OK] Pruned old installer: $($f.Name)" -ForegroundColor Gray
+        }
     } else {
         Write-Host "  [FAIL] Inno Setup (ISCC.exe) not found - install it, or build with -SkipInstaller if you only need the exe" -ForegroundColor Red
         exit 1
     }
 } else {
-    Write-Host "`n[7/8] Skipping installer build" -ForegroundColor Gray
+    Write-Host "`n[8/9] Skipping installer build" -ForegroundColor Gray
 }
 
 # Step 8: Summary
-Write-Host "`n[8/8] Build Summary" -ForegroundColor Yellow
+Write-Host "`n[9/9] Build Summary" -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Version: v$version" -ForegroundColor Green
 Write-Host "  Executable: $exePath ($exeSize MB)" -ForegroundColor Green

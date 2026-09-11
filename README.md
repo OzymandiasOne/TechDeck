@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.4 - Plate Work
+# TechDeck v0.8.7.5 - The Manual
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,43 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.5 - The Manual
+
+### TechDeck now has a User Guide
+
+Type **/guide** in the console, or open **Settings** and click **Open User Guide** under
+Help & Feedback. It is an illustrated manual with a chapter for every app: when to use
+it, what to have ready, what you click, what you get at the end, and what to do when it
+complains. It is rebuilt with every update, so it always matches the version you are
+running.
+
+### 922 Setup finds repeats before it makes cards
+
+A new stage, **Fill Out MPL + Find Repeats**, runs right after Batch Folder Setup:
+
+- The 922 MPL is filled out up front instead of at the end of the run.
+- A repeat order's Teams card is created in **MODEL CHECK** with the **REPEAT** label
+  already on it. Nothing to tag or drag afterwards.
+- The Batch Repeater's **Label REPEAT cards in Teams** option is now a second pass, off
+  by default. Select it only for a batch that was carded before this update.
+
+922 Setup also makes the **BATCH PROGRESS** card for you: same title, same 14 checklist
+items in the same order, sitting at the top of the batch bucket.
+
+### 911 SSPO Invoicing Prep takes the whole pricing master
+
+Feed it a copy of the entire pricing master and a close-out date range. Rows whose
+**Firm VPD** falls inside the range are closed out, and the **Workorder Close Outs** and
+**Workorder Material Status** reports are written into the invoicing folder for you.
+
+### Fixes
+
+- **922 Batch Repeater said it couldn't read the Quote MATERIAL PRICING sheet** when the
+  whole `EB 922 H# Quote.xlsx` workbook was missing. It now says the file is missing and
+  where it looked.
 
 ---
 
@@ -1063,7 +1100,7 @@ Explorer and on pinned shortcuts.
 | 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
 | 911 Inspection Dimensions | Reads every PART SKETCH drawing in a batch and fills each part's dimensions straight onto its inspection sheet, so the numbers don't have to be typed off the paper. Only the coloured nominal boxes get written - the sheet still works out its own min and max - and a tab you have already filled in is never touched, so it is safe to run again. Logs lengths, radii (R .40), chamfers, snipes, and the weld preps (the KB codes, with the side each one applies to); leaves out anything marked REF and anything that is part of a note on the drawing (both listed separately so you can see them). Also pulls the part number, work order, size and FAB DIM off the title block, and flags any drawing it could not read so nothing goes missing quietly |
 | 911 SSPO Award Review | (Formerly 911 Runtime Estimator.) Runs off an award package (folder of order folders); estimates plate cutting time from actual D911 throughput (a pieces-per-hour table by thickness band derived from 18.5 months of closed actuals - includes setup/handling) plus stock/material from each nest's packet PDF - the old exact-linear-inch times (each work order's DXF geometry / a thickness-driven feed rate) still computed as far-right reference columns - and writes one workbook with Plates and Non-Plates sheets (data table + real Excel PivotTable each), a Shape Ft Req sheet totalling each shape nest's stock feet (Summary-of-Batches lengths / 12, rounded up per length) for receiving, and a Working Forecast Input sheet (per-nest Source Material / Pieces / Orders from the nest packet, shape Total Ft Req, blank REM columns) that copy-pastes straight into the Working Forecast List |
-| 911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus a top-level "D911 Workorder Close Outs" sheet (Scheduling Group set to Closed) |
+| 911 SSPO Invoicing Prep | Takes a copy of the whole SSPO pricing master plus a close-out date range (on Firm VPD) and splits the range's rows into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus the two top-level weekly reports: "D911 Workorder Close Outs" (Scheduling Group set to Closed) and the full "D911 Workorder Material Status" listing |
 | 911 Baked Beans Wild Ride | Consolidates a folder of filled NC-calc pricing sheets into one review list (DYPN, Batch, Nest, Total Bevels, Total Complex Bevels, Total Cut Lin per part + totals row, sorted by batch/nest/part), saved into that same folder and named from the batch + nest the sheets themselves declare |
 | 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically |
 | 922 Setup | Full 922 batch prep behind a master toggle window: builds the batch's order folders from the PO REV C workbook (one per ORDER-PPN, with a per-order copy of the PO workbook and each order's work packet PDF filed in from the Work Packets folder), creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number. A separate off-by-default stage applies each order's pallet label to the cards already on the board - for when the cards were made before the pallets were assigned - without creating any new ones |

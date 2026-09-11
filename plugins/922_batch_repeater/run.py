@@ -1,6 +1,19 @@
 """
-Batch Repeater Plugin for TechDeck v2.5.0
+Batch Repeater Plugin for TechDeck v2.6.0
 Copies repeat orders from previous batches into new batch REPEAT BATCHES folder.
+
+v2.6.0: the repeat-detection loop is now the named function find_repeat_orders,
+shared with 922 Setup - Setup's new "Fill Out MPL + Find Repeats" stage feeds it
+the batch's own folder PPNs so repeats are known at card-creation time and the
+cards go straight into MODEL CHECK with the REPEAT label. Detection matching is
+now case/whitespace-insensitive (can only find MORE repeats, never fewer). The
+tag block's bucket comes from card_template.json's repeat_bucket_format. This
+plugin's own tag pass (flow #2) is now the SECOND pass: the fixer for batches
+carded before the MPL was filled in - standalone runs are unchanged.
+
+v2.5.1: when the quote workbook is missing, the part-typing warning now says
+so and names the expected path, instead of blaming the MATERIAL PRICING sheet
+(a missing-file WinError 2 read as a sheet problem, CDAUGHAN-LT 2026-09-09).
 
 v2.5.0: after the copy, every folder in REPEAT BATCHES is AUDITED for the
 shop-print tube files - a 'CAD-AND-SHOP-PRINTS' folder, and `.lst` files in
@@ -75,9 +88,14 @@ assert _MP_SPEC is not None and _MP_SPEC.loader is not None
 mp = _ilu.module_from_spec(_MP_SPEC)
 _MP_SPEC.loader.exec_module(mp)
 
+VERSION = "2.6.0"
+
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
 COMPLETED_FOLDER_NAME = "1 - Completed"
+# One home for the quote-workbook location - 922 Setup's MPL stage reads this
+# constant too, so the two plugins can never disagree on where the quote lives.
+QUOTE_RELPATH = Path("2 - Planning") / "EB 922 H# Quote.xlsx"
 
 # The 'TechDeck 922 Repeat Tagger' Power Automate flow. Baked in so a fresh
 # install labels cards out of the box (v0.8.6.8 shipped with a blank default
@@ -271,6 +289,42 @@ def _read_mpl_po_columns(path: Path, preferred_sheet: str, log) -> Tuple[Any, Di
     return df, po_columns
 
 
+def find_repeat_orders(df, po_columns: Dict[int, str], new_po_num: int,
+                       orders) -> Dict[str, int]:
+    """For each order (a PPN string), the HIGHEST prior 'PO n' column
+    (po_num < new_po_num) whose values contain it -> {order: source_po_num}.
+
+    Pure spreadsheet read, shared with 922 Setup: this plugin passes the MPL's
+    new-PO-column values; Setup's MPL stage passes the batch's own folder PPNs,
+    so a locked/unwritten matrix column can't hide repeats from the card stage.
+    Matching is strip+casefold-insensitive on both sides (folder-name PPNs may
+    differ in case from MPL cells); keys are the caller's orders, stripped.
+    """
+    prior_values: Dict[int, set] = {}
+    for po_num, col in po_columns.items():
+        if po_num >= new_po_num:
+            continue
+        prior_values[po_num] = {
+            str(v).strip().casefold()
+            for v in df[col].dropna().astype(str)
+            if str(v).strip()
+        }
+    repeats: Dict[str, int] = {}
+    for order in orders:
+        key = str(order).strip()
+        if not key:
+            continue
+        needle = key.casefold()
+        source_po_num = None
+        for po_num, values in prior_values.items():
+            if needle in values:
+                if source_po_num is None or po_num > source_po_num:
+                    source_po_num = po_num
+        if source_po_num is not None:
+            repeats[key] = source_po_num
+    return repeats
+
+
 def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log) -> bool:
     """Write the batch's 'PO {n}' column into the PO 321+ matrix sheet of an
     open MPL workbook. The sheet + header row are found by scanning for
@@ -366,14 +420,20 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
             f"{skipped} order(s) - nothing to add.")
         return False
     cat.finalize_times_made()
-    try:
-        pricing = mp.load_pricing_map(quote_path, log=log)
-        cat.apply_part_types(pricing)
-    except Exception as exc:
-        log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
-            " - existing part types kept, new parts typed from tube serials "
-            "only.")
+    if not sdk.is_file(quote_path):
+        log(f"WARNING: the quote workbook is missing - expected it at "
+            f"{quote_path} - existing part types kept, new parts typed "
+            "from tube serials only.")
         cat.apply_part_types({}, only_untyped=True)
+    else:
+        try:
+            pricing = mp.load_pricing_map(quote_path, log=log)
+            cat.apply_part_types(pricing)
+        except Exception as exc:
+            log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
+                " - existing part types kept, new parts typed from tube serials "
+                "only.")
+            cat.apply_part_types({}, only_untyped=True)
     for w in cat.warnings:
         log(f"  note: {w}")
     mp.write_master_sheet(wb, cat.sorted_rows())
@@ -498,7 +558,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     do_master_parts = (bool(settings.get('update_master_parts', True))
                        and bool(stage_options.get('master_parts', True)))
 
-    log("Starting 922 Batch Repeater v2.5.0...")
+    log(f"Starting 922 Batch Repeater v{VERSION}...")
     progress_callback(0)
     
     # Base directory is an optional override; auto-discover by default so the
@@ -604,7 +664,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     if do_mpl_matrix or do_master_parts:
         log("")
         log("Updating the MPL from the batch's PO workbook...")
-        quote_path = base_path / "2 - Planning" / "EB 922 H# Quote.xlsx"
+        quote_path = base_path / QUOTE_RELPATH
         mpl_errors = _update_mpl_sheets(
             spreadsheet_path, quote_path, new_po_num, new_po_folder,
             do_mpl_matrix, do_master_parts,
@@ -667,24 +727,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     
     progress_callback(30)
     
-    # Find source PO for each order
+    # Find source PO for each order (shared with 922 Setup's MPL stage)
     log("Searching for repeat orders...")
-    orders_to_copy: Dict[str, int] = {}
-    
-    for order in new_po_orders:
-        source_po_num = None
-        for po_num, col in po_columns.items():
-            if po_num >= new_po_num:
-                continue
-            
-            column_values = df[col].dropna().astype(str).str.strip()
-            if order in column_values.values:
-                if source_po_num is None or po_num > source_po_num:
-                    source_po_num = po_num
-        
-        if source_po_num is not None:
-            orders_to_copy[order] = source_po_num
-    
+    orders_to_copy = find_repeat_orders(df, po_columns, new_po_num, new_po_orders)
+
     log(f"Found {len(orders_to_copy)} repeat orders")
     progress_callback(35)
     
@@ -921,10 +967,12 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             log("WARNING: no REPEAT entry in 922 Setup's label_map - "
                 "assuming category19 (Teal).")
         title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
+        repeat_bucket = (template.get("repeat_bucket_format")
+                         or "BATCH {batch}: MODEL CHECK")
         payload = {
             "plan": template.get("plan", "D922 PIPELINE"),
             "batch": str(new_po_num),
-            "bucket": f"BATCH {new_po_num}: MODEL CHECK",
+            "bucket": repeat_bucket.format(batch=new_po_num),
             "label": repeat_slot,
             "titles": [title_fmt.format(batch=new_po_num, folder=name)
                        for name in sorted(repeat_roots, key=str.lower)],
