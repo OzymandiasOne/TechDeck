@@ -1,5 +1,5 @@
 {
-  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time. 'buckets' is the ORDERED left-to-right bucket list created per batch (regular cards land in the plain 'BATCH {batch}' bucket; repeat cards land in 'repeat_bucket_format', which must stay a member of 'buckets' so the flow creates it before any card needs it). 'label_map' mirrors the D922 PIPELINE plan's 25 label slots top-to-bottom (category1 = top of Planner's label list); if a label is renamed/reordered IN PLANNER, update it here too - this file is the source of truth the plugin matches against.",
+  "_comment": "Template for the Planner cards created by 922 Setup. Edit this file to change what each card looks like. {batch} and {folder} are filled in per order folder at run time. 'buckets' is the ORDERED left-to-right bucket list created per batch (regular cards land in the plain 'BATCH {batch}' bucket; repeat cards land in 'repeat_bucket_format', which must stay a member of 'buckets' so the flow creates it before any card needs it). 'label_map' mirrors the D922 PIPELINE plan's 25 label slots top-to-bottom (category1 = top of Planner's label list); if a label is renamed/reordered IN PLANNER, update it here too - this file is the source of truth the plugin matches against. 'progress_card' is the ONE extra card per batch (title 'BATCH {batch} PROGRESS', posted LAST so it sits on top of the plain 'BATCH {batch}' bucket, no labels) whose checklist is the batch-prep to-do list in the exact order the office works it.",
   "plan": "D922 PIPELINE",
   "title_format": "BATCH {batch}: {folder}",
   "bucket_format": "BATCH {batch}",
@@ -20,6 +20,25 @@
     "Program",
     "Processing Completed"
   ],
+  "progress_card": {
+    "title_format": "BATCH {batch} PROGRESS",
+    "checklist": [
+      "PO Download",
+      "PO Setup",
+      "Quote",
+      "TechDeck - Pallet stamper",
+      "TechDeck- Repeats",
+      "Teams Cards",
+      "Move Files over (M: Drive -> 922)",
+      "Repeats",
+      "Send Issues",
+      "Rod Tags",
+      "Forming Paperwork",
+      "Kitting Paperwork",
+      "Saw & TL Production Packets",
+      "TechDeck LST Grabber"
+    ]
+  },
   "label_map": {
     "2.0 X 2.0 X 0.188": "category1",
     "PALLET 1": "category2",

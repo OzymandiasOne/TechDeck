@@ -95,6 +95,14 @@ edited to honor the per-task bucket field). The Repeater's flow-#2 tag pass
 is now the SECOND pass (master-window child toggle default OFF), and the
 Repeater stage skips its duplicate MPL update when this run's MPL stage
 completed. Detection failures warn LOUDLY and never block the other stages.
+
+v2.7.0: one extra "BATCH {n} PROGRESS" card per batch. The office was
+hand-making the same batch-prep to-do card (14 checklist items, same
+order every time) on every batch; it now rides in the same flow #1 payload
+as the order cards. Layout lives in card_template.json's `progress_card`;
+it is appended LAST in `tasks` so Planner's top-insert puts it at the top
+of the plain 'BATCH {n}' bucket, above the A-Z order cards. Flow #1's
+title dedupe makes a re-run skip it like any other card.
 """
 from __future__ import annotations
 
@@ -110,7 +118,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -357,6 +365,28 @@ def _order_for_planner(cards: list[dict]) -> list[dict]:
     return list(reversed(cards))
 
 
+def _build_progress_card(template: dict, batch: str) -> dict | None:
+    """The ONE per-batch 'BATCH {n} PROGRESS' card (v2.7.0) - the office's
+    batch-prep to-do list, same 14 checklist items in the same order every
+    batch. Lives in card_template.json's `progress_card`; None when the
+    template has no such block (older/edited templates just skip it). Same
+    per-task keys as an order card so flow #1 parses it unchanged; no labels;
+    plain 'BATCH {n}' bucket."""
+    spec = template.get("progress_card")
+    if not spec:
+        return None
+    title_fmt = spec.get("title_format") or "BATCH {batch} PROGRESS"
+    bucket_fmt = template.get("bucket_format", "BATCH {batch}")
+    return {
+        "title": title_fmt.format(batch=batch),
+        "bucket": bucket_fmt.format(batch=batch),
+        "priority": spec.get("priority", template.get("priority", "Medium")),
+        "status": spec.get("status", template.get("status", "Not started")),
+        "checklist": list(spec.get("checklist", [])),
+        "labels": [],
+    }
+
+
 def _build_payload(template: dict, batch: str, cards: list[dict]
                    ) -> tuple[dict, list[str]]:
     """The flow #1 webhook payload — the REMOTE CONTRACT with the 'TechDeck 922
@@ -373,13 +403,18 @@ def _build_payload(template: dict, batch: str, cards: list[dict]
     """
     buckets = [b.format(batch=batch) for b in template.get("buckets", [])] \
         or [template.get("bucket_format", "BATCH {batch}").format(batch=batch)]
+    # Posted in reverse so Planner (which top-inserts each new card) shows
+    # the bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
+    tasks = _order_for_planner(cards)
+    # The PROGRESS card goes LAST so it lands on TOP of the bucket (v2.7.0).
+    progress = _build_progress_card(template, batch)
+    if progress is not None:
+        tasks.append(progress)
     payload = {
         "plan": template.get("plan", "D922 PIPELINE"),
         "batch": batch,
         "buckets": buckets,
-        # Posted in reverse so Planner (which top-inserts each new card) shows
-        # the bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
-        "tasks": _order_for_planner(cards),
+        "tasks": tasks,
     }
     return payload, buckets
 
@@ -741,6 +776,14 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         suffix = f"   [{', '.join(names)}]" if names else ""
         rep = "   [REPEAT]" if folder in repeat_folders else ""
         log(f"  - {card['title']}{suffix}{rep}")
+    progress = payload["tasks"][-1] if len(payload["tasks"]) > len(cards) else None
+    if progress is not None:
+        log(f"  - {progress['title']}   "
+            f"[batch to-do card, {len(progress['checklist'])} checklist items, "
+            f"top of '{progress['bucket']}']")
+    else:
+        log("  (no progress_card block in card_template.json - "
+            "no BATCH PROGRESS card this run)")
 
     if warnings:
         log("\nLabel warnings:")

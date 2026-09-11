@@ -1,8 +1,8 @@
 {
   "id": "922_setup",
   "name": "922 Setup",
-  "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Batch Folder Setup (order folders from the REV C PO sheet, per-order PO workbook copy, work-packet PDFs filed in), Fill Out MPL + Find Repeats (updates the 922 MPL up front and detects which orders are repeats), Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order via a Power Automate webhook - repeat orders get the REPEAT label and go straight into the MODEL CHECK bucket), Batch Repeater (pull repeats, distribute CAD/binders), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
-  "version": "2.6.0",
+  "description": "Runs the full 922 batch-prep sequence behind a master toggle window: Batch Folder Setup (order folders from the REV C PO sheet, per-order PO workbook copy, work-packet PDFs filed in), Fill Out MPL + Find Repeats (updates the 922 MPL up front and detects which orders are repeats), Generate Teams Cards (pipeline buckets + one pallet-labelled Teams card per order plus the batch's 'BATCH {n} PROGRESS' to-do card via a Power Automate webhook - repeat orders get the REPEAT label and go straight into the MODEL CHECK bucket), Batch Repeater (pull repeats, distribute CAD/binders), and Pallet Stamper - each stage toggleable, batch number shared across stages.",
+  "version": "2.7.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -13,12 +13,12 @@
     ],
     "how_it_works": [
       "Pick the batch folder, then choose which stages to run in the toggle window (they run top to bottom).",
-      "Batch Folder Setup builds an order folder per order and files the work-packet PDFs in; Fill Out MPL + Find Repeats writes the batch into the 922 MPL and works out which orders are repeats; Generate Teams Cards posts the D922 pipeline buckets and one card per order - repeats get the REPEAT label and land straight in MODEL CHECK.",
+      "Batch Folder Setup builds an order folder per order and files the work-packet PDFs in; Fill Out MPL + Find Repeats writes the batch into the 922 MPL and works out which orders are repeats; Generate Teams Cards posts the D922 pipeline buckets, one card per order, and the batch's 'BATCH {n} PROGRESS' to-do card (the 14-step batch-prep checklist) at the top of the batch bucket - repeats get the REPEAT label and land straight in MODEL CHECK.",
       "Pallet Stamper stamps each order's work packet with its batch and pallet, then Batch Repeater pulls repeats from prior batches. Stamping runs before the repeater on purpose, so repeats never get stamped.",
       "Apply pallet labels to existing cards (off by default): puts each order's PALLET 1/2/3 label on the card that is already on the board. Use it when the cards were made before the Pallet & Rod Organizer was filled in - it never creates a card, so you never get duplicates, it leaves REPEAT and material labels alone, and it is safe to run twice."
     ],
     "output": [
-      "Order folders built and filled, the 922 MPL updated, Teams cards posted to the D922 PIPELINE plan (repeats already in MODEL CHECK with the REPEAT label), work packets stamped, and repeat orders pulled into a REPEAT BATCHES folder.",
+      "Order folders built and filled, the 922 MPL updated, Teams cards posted to the D922 PIPELINE plan (repeats already in MODEL CHECK with the REPEAT label, plus the BATCH PROGRESS to-do card), work packets stamped, and repeat orders pulled into a REPEAT BATCHES folder.",
       "Each stage you run earns tickets."
     ]
   },

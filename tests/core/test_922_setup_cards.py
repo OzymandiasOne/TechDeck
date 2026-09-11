@@ -234,3 +234,66 @@ def test_911_teams_cards_payload_contract_keys_exist_in_source():
     window = _payload_window("911_teams_cards")
     for key in ('"plan"', '"bucket"', '"tasks"'):
         assert key in window, f"flow #3 payload lost its {key} key"
+
+
+# ── BATCH PROGRESS card (v2.7.0): one per batch, top of the batch bucket ────
+# The office hand-made the same batch-prep to-do card on every batch. It now
+# rides in the flow #1 payload as the LAST task so Planner's top-insert puts
+# it above the A-Z order cards in the plain 'BATCH {n}' bucket.
+
+_PROGRESS_CHECKLIST = [
+    "PO Download", "PO Setup", "Quote", "TechDeck - Pallet stamper",
+    "TechDeck- Repeats", "Teams Cards", "Move Files over (M: Drive -> 922)",
+    "Repeats", "Send Issues", "Rod Tags", "Forming Paperwork",
+    "Kitting Paperwork", "Saw & TL Production Packets", "TechDeck LST Grabber",
+]
+
+
+def test_progress_card_is_posted_last_in_batch_bucket():
+    mod = _load()
+    tpl = dict(_BUCKET_TEMPLATE, progress_card={
+        "title_format": "BATCH {batch} PROGRESS",
+        "checklist": ["PO Download", "PO Setup"]})
+    cards = mod._build_cards(tpl, "494", ["AAA-1", "BBB-2"], {},
+                             repeat_folders={"BBB-2"}, repeat_slot="category19")
+    payload, _ = mod._build_payload(tpl, "494", cards)
+    assert [t["title"] for t in payload["tasks"]] == [
+        "BATCH 494: BBB-2", "BATCH 494: AAA-1", "BATCH 494 PROGRESS"]
+    progress = payload["tasks"][-1]
+    # Same per-task keys as an order card: flow #1 parses it unchanged.
+    assert set(progress) == {"title", "bucket", "priority", "status",
+                             "checklist", "labels"}
+    assert progress["bucket"] == "BATCH 494"          # never MODEL CHECK
+    assert progress["labels"] == []
+    assert progress["checklist"] == ["PO Download", "PO Setup"]
+    assert progress["priority"] == "Medium"
+    assert progress["status"] == "Not started"
+    # The order cards are untouched by the extra task.
+    assert len(cards) == 2
+
+
+def test_no_progress_card_when_template_lacks_the_block():
+    mod = _load()
+    cards = mod._build_cards(_BUCKET_TEMPLATE, "494", ["AAA-1"], {})
+    payload, _ = mod._build_payload(_BUCKET_TEMPLATE, "494", cards)
+    assert [t["title"] for t in payload["tasks"]] == ["BATCH 494: AAA-1"]
+    assert mod._build_progress_card(_BUCKET_TEMPLATE, "494") is None
+
+
+def test_real_template_progress_card_matches_the_office_card():
+    # The shipped checklist must be the office's 14 items in the exact order
+    # they work them (screenshot of the hand-made Batch 494 card, 2026-09-11).
+    mod = _load()
+    with open(_PLUGINS / "922_setup" / "card_template.json",
+              encoding="utf-8") as fh:
+        template = json.load(fh)
+    progress = mod._build_progress_card(template, "494")
+    assert progress is not None, "card_template.json lost its progress_card"
+    assert progress["title"] == "BATCH 494 PROGRESS"
+    assert progress["bucket"] == "BATCH 494"
+    assert progress["checklist"] == _PROGRESS_CHECKLIST
+    assert len(progress["checklist"]) <= 20, "Planner caps a checklist at 20"
+    # Wired into the real payload, last so it lands on top.
+    cards = mod._build_cards(template, "494", ["AAA-1"], {})
+    payload, _ = mod._build_payload(template, "494", cards)
+    assert payload["tasks"][-1]["title"] == "BATCH 494 PROGRESS"
