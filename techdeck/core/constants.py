@@ -47,7 +47,7 @@ def puppet_master_enabled() -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.4"  # Plate Work - 911 Setup handles PLATE batches; Scripting Prep type-once PO block
+APP_VERSION = "0.8.7.5"  # The Manual - User Guide ships in-app; 922 Setup repeats up front + BATCH PROGRESS card
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

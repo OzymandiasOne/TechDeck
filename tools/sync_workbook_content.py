@@ -285,14 +285,22 @@ ENGINEERING = [
 # so the row is updated in place rather than duplicated.
 VERSION_RENAMES = {
     # Past re-keys (a dict can hold each old key once, so superseded targets
-    # move to this comment): "In Development" -> "Beta 0.8.6.11".
-    "In Development": "Beta 0.8.7.1",
+    # move to this comment): "In Development" -> "Beta 0.8.6.11",
+    # "In Development" -> "Beta 0.8.7.1".
+    "In Development": "Beta 0.8.7.5",
     "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("In Development", "TBD", "Feature",
+    ("Beta 0.8.7.5", "Sep 11, 2026", "Feature",
+     "The 922 batch setup tool now records the batch in the master parts "
+     "list and identifies repeat orders at the start of the run, so each "
+     "repeat's tracking card is created already labelled and already in the "
+     "model-check stage of the pipeline board; previously the cards were "
+     "created plain and re-tagged in a later pass. The tool also creates the "
+     "batch's fourteen-step progress checklist card, which was made by hand "
+     "on every batch until now. "
      "The invoicing preparation tool now takes a copy of the entire pricing "
      "master and a close-out date range, instead of a sheet trimmed down to "
      "the week by hand. Rows whose promise date falls inside the range become "

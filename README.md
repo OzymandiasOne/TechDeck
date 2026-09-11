@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.4 - Plate Work
+# TechDeck v0.8.7.5 - The Manual
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,43 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.5 - The Manual
+
+### TechDeck now has a User Guide
+
+Type **/guide** in the console, or open **Settings** and click **Open User Guide** under
+Help & Feedback. It is an illustrated manual with a chapter for every app: when to use
+it, what to have ready, what you click, what you get at the end, and what to do when it
+complains. It is rebuilt with every update, so it always matches the version you are
+running.
+
+### 922 Setup finds repeats before it makes cards
+
+A new stage, **Fill Out MPL + Find Repeats**, runs right after Batch Folder Setup:
+
+- The 922 MPL is filled out up front instead of at the end of the run.
+- A repeat order's Teams card is created in **MODEL CHECK** with the **REPEAT** label
+  already on it. Nothing to tag or drag afterwards.
+- The Batch Repeater's **Label REPEAT cards in Teams** option is now a second pass, off
+  by default. Select it only for a batch that was carded before this update.
+
+922 Setup also makes the **BATCH PROGRESS** card for you: same title, same 14 checklist
+items in the same order, sitting at the top of the batch bucket.
+
+### 911 SSPO Invoicing Prep takes the whole pricing master
+
+Feed it a copy of the entire pricing master and a close-out date range. Rows whose
+**Firm VPD** falls inside the range are closed out, and the **Workorder Close Outs** and
+**Workorder Material Status** reports are written into the invoicing folder for you.
+
+### Fixes
+
+- **922 Batch Repeater said it couldn't read the Quote MATERIAL PRICING sheet** when the
+  whole `EB 922 H# Quote.xlsx` workbook was missing. It now says the file is missing and
+  where it looked.
 
 ---
 
