@@ -40,8 +40,20 @@ Each output workbook is built ENTIRELY from scratch (no template file) and gets:
                                  I Price/Ea        <- formula =J{r}/G{r}
                                  J Ext. Price      <- live formula into tab 1's
                                    "Total price per WO" cell
-                               plus a Grand Total =SUM over column J. Invoice # and
-                               Invoice Date are left blank for manual fill.
+                               plus a Grand Total =SUM over column J.
+                                 G2 Invoice #      <- the forecast row's "PS/Inv"
+                                   (v2.3.0, invoicing's ask 2026-09-04 / answers
+                                   2026-09-16); blank when the forecast has none
+                                 G3 Invoice Date   <- the forecast row's "Ship Date"
+
+  "ASA Invoice No. {inv} Supplement.pdf" (v2.3.0) - the Invoice Supplement sheet
+  alone, printed to PDF through Excel (COM) into the same Invoicing Docs folder,
+  named to sort right after the Mie Trak invoice ("ASA Invoice No. {inv}") in the
+  finished-docs folder. A nest with NO PS/Inv on the forecast gets NO PDF and is
+  named in the run summary - nothing ships without an invoice number, so a
+  missing one means "fill the forecast in and re-run" (or print that one by
+  hand). If Excel can't be driven (no pywin32 / Excel), the workbooks are still
+  written and the summary says the PDFs were skipped.
 
 The live Working Forecast List is NEVER opened directly: it's copied into the
 output folder first, the copy is read, and the copy is deleted once every workbook
@@ -58,6 +70,7 @@ import shutil
 from copy import copy
 from datetime import date, datetime
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 # --- SDK bootstrap (works under the app and for headless CLI testing) -------------
 try:
@@ -117,6 +130,25 @@ MATSTATUS_COLUMNS = [  # (source header, column width)
 FORECAST_SHEETS = ["911 Forecast", "Complete 911 QTDR"]
 DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 FORECAST_COPY_NAME = "~ Working Forecast List (temp copy).xlsx"
+
+# Forecast columns (by header NAME, Hard Rule 1) copied onto the supplement's
+# title block: the packing slip / invoice number invoicing keys in (column BD
+# on both sheets as of 2026-09-16) and the nest's ship date (column AT).
+INV_HEADER = "PS/INV"
+SHIP_DATE_HEADER = "SHIP DATE"
+FORECAST_SCAN_COLS = 90        # header scan width: BD is column 56, keep headroom
+INV_NUMBER_CELL = "G2"
+INV_DATE_CELL = "G3"
+SUPPLEMENT_PDF_NAME = "ASA Invoice No. {inv} Supplement.pdf"
+_XL_TYPE_PDF = 0
+
+
+class ForecastRow(NamedTuple):
+    """What one Batch+Nest row of the Working Forecast List gives the supplement."""
+    po: object = None
+    line: object = None
+    invoice: str = ""          # PS/Inv, as typed (blank = not invoiced yet)
+    ship_date: object = None   # date / datetime / None
 
 # ---- Invoice Supplement look (reproduced from the hand-made ASA sheet) ------------
 INV_HEADERS = ["PO ", "PO Line", "Batch", "Workorder", "DYPN",
@@ -233,11 +265,13 @@ def _copy_forecast(settings, out_dir, log):
 
 
 def _read_po_map(copy_path, log, cancel_event):
-    """{(BATCH, NEST): (po, po_line)} from the local forecast copy.
+    """{(BATCH, NEST): ForecastRow} from the local forecast copy.
 
     Reads the '911 Forecast' sheet first, then 'Complete 911 QTDR' (older batches
     roll off to it) — first sheet wins on duplicate keys. PO and Line are copied
-    verbatim (Line is sometimes the text 'SSPO', not a number).
+    verbatim (Line is sometimes the text 'SSPO', not a number); PS/Inv and Ship
+    Date ride along for the supplement's title block (v2.3.0) — either column
+    missing on a sheet just leaves those fields blank, with one warning.
     """
     # Resilient even on the local copy: it can be open in Excel, and the
     # resilient loader is a cheap no-op on a healthy local file (Hard Rule 13).
@@ -250,8 +284,8 @@ def _read_po_map(copy_path, log, cancel_event):
                 log(f"WARNING: sheet '{sheet_name}' not found in the forecast.")
                 continue
             ws = wb[sheet_name]
-            cols = None  # (po, line, batch, nest) 0-based indices, set at header row
-            for i, row in enumerate(ws.iter_rows(max_col=60)):
+            cols = None  # (po, line, batch, nest, inv, ship) 0-based; set at header row
+            for i, row in enumerate(ws.iter_rows(max_col=FORECAST_SCAN_COLS)):
                 if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                     return {}
                 vals = [c.value for c in row]
@@ -264,20 +298,31 @@ def _read_po_map(copy_path, log, cancel_event):
                                       if h.startswith("BATCH")), None)
                     if "PO" in hmap and "LINE" in hmap and "NEST" in hmap \
                             and batch_col is not None:
-                        cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"])
+                        cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"],
+                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER))
+                        for label, idx in ((INV_HEADER, cols[4]),
+                                           (SHIP_DATE_HEADER, cols[5])):
+                            if idx is None:
+                                log(f"WARNING: no '{label}' column on '{sheet_name}' "
+                                    "- that field stays blank on the supplement.")
                     if i >= 8 and cols is None:
                         log(f"WARNING: no PO/Line/Batch/Nest header row found in "
                             f"'{sheet_name}' (looked in the first 8 rows).")
                         break
                     continue
-                i_po, i_line, i_batch, i_nest = cols
-                batch = _as_str(vals[i_batch] if i_batch < len(vals) else None).upper()
-                nest = _as_str(vals[i_nest] if i_nest < len(vals) else None).upper()
-                po = vals[i_po] if i_po < len(vals) else None
+                i_po, i_line, i_batch, i_nest, i_inv, i_ship = cols
+
+                def at(idx):
+                    return vals[idx] if idx is not None and idx < len(vals) else None
+
+                batch = _as_str(at(i_batch)).upper()
+                nest = _as_str(at(i_nest)).upper()
+                po = at(i_po)
                 if not batch or not NEST_RE.match(nest) or po in (None, ""):
                     continue
-                line = vals[i_line] if i_line < len(vals) else None
-                po_map.setdefault((batch, nest), (po, line))
+                po_map.setdefault((batch, nest), ForecastRow(
+                    po=po, line=at(i_line), invoice=_as_str(at(i_inv)),
+                    ship_date=at(i_ship)))
     finally:
         wb.close()
     log(f"  found PO numbers for {len(po_map)} batch+nest combinations.")
@@ -294,6 +339,13 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
     ws = wb.create_sheet(INV_SHEET)
     for letter, width in INV_COL_WIDTHS.items():
         ws.column_dimensions[letter].width = width
+    # Print setup (v2.3.0): the sheet is printed to PDF through Excel, and its
+    # ten columns spill onto a second page at default settings. One page wide,
+    # landscape, as many pages tall as the rows need.
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     # Title block: ASA logo over merged A1:D5, manual-fill invoice fields at F2/F3.
     ws.merge_cells("A1:D5")
@@ -305,8 +357,15 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
     ws["F2"].font = LABEL_FONT
     ws["F3"] = "Invoice Date:"
     ws["F3"].font = LABEL_FONT
-    ws["G3"].font = DATA_FONT
-    ws["G3"].number_format = "mm-dd-yy"
+    ws[INV_NUMBER_CELL].font = DATA_FONT
+    ws[INV_DATE_CELL].font = DATA_FONT
+    ws[INV_DATE_CELL].number_format = "mm-dd-yy"
+    # v2.3.0: filled from the forecast row (PS/Inv + Ship Date). Blank stays
+    # blank — never a guess — so a hand-filled value is still the fallback.
+    if po_info is not None and po_info.invoice:
+        ws[INV_NUMBER_CELL] = po_info.invoice
+    if po_info is not None and po_info.ship_date not in (None, ""):
+        ws[INV_DATE_CELL] = po_info.ship_date
 
     # Header band.
     for j, title in enumerate(INV_HEADERS, start=1):
@@ -321,7 +380,7 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
                 ("BATCH", "WORK ORDER", "DYPN", "MATERIAL", "DYPN QTY", "NEST PKG NBR")]
     total_col = hmap.get(TOTAL_HEADER)
     total_letter = get_column_letter(total_col) if total_col else None
-    po, po_line = po_info if po_info else (None, None)
+    po, po_line = (po_info.po, po_info.line) if po_info else (None, None)
 
     for idx, src_row in enumerate(rows):
         r = INV_DATA_START + idx
@@ -453,6 +512,90 @@ def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date
     return fname
 
 
+def _supplement_pdf_name(invoice: str) -> str:
+    """'ASA Invoice No. {inv} Supplement.pdf' - invoicing's own naming, chosen so
+    the supplement sorts right behind the Mie Trak invoice PDF ('ASA Invoice No.
+    {inv}') in the finished-docs folder."""
+    return _safe_filename(SUPPLEMENT_PDF_NAME.format(inv=str(invoice).strip()))
+
+
+class _SupplementPdfExporter:
+    """Prints the Invoice Supplement sheet of a saved workbook to PDF through
+    Excel (COM). ONE hidden Excel instance for the whole run, started on the
+    first export and quit on close(); a machine that can't drive Excel (no
+    pywin32, no Excel) records `error` once and every export returns False, so
+    the workbooks still get written and the summary can say the PDFs were
+    skipped. GUI plugin => main thread; CoInitialize is a harmless no-op there."""
+
+    def __init__(self, log):
+        self._log = log
+        self._excel = None
+        self._started = False
+        self.error: Optional[str] = None
+
+    def _start(self) -> bool:
+        if self._started:
+            return self._excel is not None
+        self._started = True
+        try:
+            import pythoncom
+            import win32com.client as win32
+        except ImportError:
+            self.error = "Excel automation (pywin32) is not available"
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
+            return False
+        try:
+            pythoncom.CoInitialize()
+            excel = win32.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            self._excel = excel
+            return True
+        except Exception as exc:
+            self.error = f"Excel could not be started ({exc})"
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
+            return False
+
+    def export(self, xlsx_path: Path, pdf_path: Path) -> bool:
+        if not self._start():
+            return False
+        wb = None
+        try:
+            # Plain paths on purpose: Excel COM does not accept the \\?\ prefix.
+            wb = self._excel.Workbooks.Open(str(xlsx_path), ReadOnly=True)
+            wb.Worksheets(INV_SHEET).ExportAsFixedFormat(_XL_TYPE_PDF, str(pdf_path))
+            if not sdk.exists(pdf_path):
+                raise RuntimeError("Excel reported success but no PDF appeared")
+            return True
+        except Exception as exc:
+            self._log(f"  WARNING: could not print {xlsx_path.name} to PDF: {exc}")
+            return False
+        finally:
+            if wb is not None:
+                try:
+                    wb.Close(SaveChanges=False)
+                except Exception:
+                    pass
+
+    def close(self):
+        if self._excel is not None:
+            try:
+                self._excel.Quit()
+            except Exception:
+                pass
+            self._excel = None
+
+
+class SplitResult(NamedTuple):
+    written: list                     # [(relative path, row_count)]
+    missing_po: list                  # display names with no forecast row at all
+    closeout_name: Optional[str]
+    matstatus_name: Optional[str]
+    missing_invoice: list = []        # forecast row found, PS/Inv blank -> no PDF
+    pdfs: list = []                   # relative paths of supplement PDFs written
+    pdf_error: Optional[str] = None   # Excel unavailable: PDFs skipped wholesale
+
+
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
     """Build one output workbook from scratch for a single Batch+Nest group."""
     wb = openpyxl.Workbook()
@@ -489,7 +632,8 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
 
 
 def split_workbook(src_path, out_dir, settings, log,
-                   progress_callback=None, cancel_event=None, date_range=None):
+                   progress_callback=None, cancel_event=None, date_range=None,
+                   pdf_exporter=None):
     """Split src_path into one from-scratch workbook per (Batch, Nest), each in its
     own "{BATCH} {NEST} Invoicing Docs" subfolder, plus the Workorder Close Outs
     and Workorder Material Status workbooks at the top of out_dir.
@@ -500,16 +644,21 @@ def split_workbook(src_path, out_dir, settings, log,
     column) keeps every valid row. The Material Status listing always covers every
     data row regardless of the range.
 
-    Returns (written, missing_po, closeout_name, matstatus_name) where written =
-    [(relative path, row_count)], missing_po = [display names of groups whose PO
-    wasn't in the forecast], and the last two are the report filenames (None if
-    cancelled before they were written)."""
+    Returns a SplitResult: written = [(relative path, row_count)], missing_po =
+    display names of groups with no forecast row at all, the two report filenames
+    (None if cancelled before they were written), missing_invoice = groups whose
+    forecast row has no PS/Inv yet (supplement left blank, no PDF), pdfs = the
+    supplement PDFs written, pdf_error = why NO PDFs could be made (Excel
+    unavailable), else None.
+
+    `pdf_exporter` is injectable for tests; default drives Excel through COM."""
     src_path = Path(src_path)
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
 
     sdk.ensure_dir(out_dir)
     forecast_copy = None
+    exporter = pdf_exporter if pdf_exporter is not None else _SupplementPdfExporter(log)
     try:
         forecast_copy = _copy_forecast(settings, out_dir, log)
         if progress_callback:
@@ -517,7 +666,7 @@ def split_workbook(src_path, out_dir, settings, log,
         po_map = _read_po_map(forecast_copy, log, cancel_event) if forecast_copy else {}
         if cancel_event is not None and cancel_event.is_set():
             log("Cancelled.")
-            return [], [], None, None
+            return SplitResult([], [], None, None)
         if progress_callback:
             progress_callback(12)
 
@@ -549,7 +698,7 @@ def split_workbook(src_path, out_dir, settings, log,
         for i, row in enumerate(ws.iter_rows(min_row=hdr_row + 1, max_col=last_col)):
             if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                 log("Cancelled.")
-                return [], [], None, None
+                return SplitResult([], [], None, None)
             if all(c.value in (None, "") for c in row):
                 continue
             all_rows.append(row)
@@ -598,10 +747,10 @@ def split_workbook(src_path, out_dir, settings, log,
                                                 cancel_event)
         if matstatus_name is None:
             log("Cancelled.")
-            return [], [], None, None
+            return SplitResult([], [], None, None)
         log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
 
-        written, missing_po = [], []
+        written, missing_po, missing_invoice, pdfs = [], [], [], []
         for gi, (batch, nest) in enumerate(order):
             if cancel_event is not None and cancel_event.is_set():
                 log("Cancelled.")
@@ -620,6 +769,19 @@ def split_workbook(src_path, out_dir, settings, log,
             rel = f"{sub_dir.name}\\{fname}"
             written.append((rel, len(rows)))
             log(f"  wrote {rel}  ({len(rows)} row{'s' if len(rows) != 1 else ''})")
+
+            # v2.3.0: the supplement goes to PDF only once the nest has its
+            # invoice number - a blank PS/Inv means "not invoiced yet", and a
+            # PDF with an empty Invoice # would just get filed by mistake.
+            if po_info is not None and po_info.invoice:
+                pdf_name = _supplement_pdf_name(po_info.invoice)
+                if exporter.export(sub_dir / fname, sub_dir / pdf_name):
+                    pdfs.append(f"{sub_dir.name}\\{pdf_name}")
+                    log(f"  wrote {sub_dir.name}\\{pdf_name}")
+            elif po_info is not None:
+                missing_invoice.append(f"{batch} {nest}")
+                log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
+                    "- Invoice # left blank, no PDF.")
             if progress_callback:
                 progress_callback(15 + int(80 * (gi + 1) / len(order)))
 
@@ -628,8 +790,10 @@ def split_workbook(src_path, out_dir, settings, log,
         if out_of_range:
             log(f"Left out {out_of_range} valid row(s) whose Firm VPD is outside "
                 "the range (they stay in the Material Status listing).")
-        return written, missing_po, closeout_name, matstatus_name
+        return SplitResult(written, missing_po, closeout_name, matstatus_name,
+                           missing_invoice, pdfs, exporter.error)
     finally:
+        exporter.close()
         # The forecast copy is working scratch only - always remove it, even on
         # error/cancel, so it never lingers next to the real output files.
         if forecast_copy is not None and sdk.exists(forecast_copy):
@@ -668,21 +832,23 @@ def run(params, progress_callback, cancel_event):
     progress_callback(5)
 
     try:
-        written, missing_po, closeout_name, matstatus_name = split_workbook(
-            src, out_dir, settings, log, progress_callback, cancel_event,
-            date_range)
+        result = split_workbook(src, out_dir, settings, log, progress_callback,
+                                cancel_event, date_range)
     except Exception as e:
         log(f"ERROR: {e}")
         QMessageBox.critical(None, "911 SSPO Invoicing Prep",
                              f"Could not split the file:\n\n{e}")
         return
 
+    written, missing_po = result.written, result.missing_po
+    closeout_name, matstatus_name = result.closeout_name, result.matstatus_name
     if not written:                                # cancelled
         return
 
     total = sum(n for _, n in written)
     progress_callback(100)
-    log(f"Done. Wrote {len(written)} file(s), {total} data row(s) total.")
+    log(f"Done. Wrote {len(written)} file(s), {total} data row(s) total, "
+        f"{len(result.pdfs)} supplement PDF(s).")
     log(f"Folder: {out_dir}")
     # GUI plugins suppress the shell's auto success chime; fire it ourselves now
     # that the files are actually written (the meaningful moment).
@@ -692,10 +858,22 @@ def run(params, progress_callback, cancel_event):
     msg = (f"Done! Wrote {len(written)} back-up file(s) "
            f"({total} rows total), each in its own Invoicing Docs folder, to:"
            f"\n\n{out_dir}")
+    if result.pdfs:
+        msg += (f"\n\nInvoice Supplement PDFs: {len(result.pdfs)} printed, one per "
+                "nest with an invoice number, next to its back-up workbook.")
     if closeout_name:
         msg += f"\n\nWorkorder Close Outs sheet (top level): {closeout_name}"
     if matstatus_name:
         msg += f"\nWorkorder Material Status listing (top level): {matstatus_name}"
+    if result.pdf_error:
+        msg += (f"\n\nNo supplement PDFs were made: {result.pdf_error}. The "
+                "workbooks are all there - print the Invoice Supplement sheets "
+                "by hand, or run again on a machine with Excel.")
+    if result.missing_invoice:
+        msg += ("\n\nNo invoice number (PS/Inv) in the Working Forecast List yet for:"
+                "\n  " + "\n  ".join(result.missing_invoice)
+                + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
+                  "PS/Inv in on the forecast and re-run, or print that one by hand.")
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)

@@ -1,24 +1,26 @@
 {
   "id": "911_sspo_invoicing_prep",
   "name": "911 SSPO Invoicing Prep",
-  "description": "Feed it the whole SSPO pricing master and pick a close-out date range: rows whose Firm VPD falls in the range are split into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx', each in its own 'BATCH NEST Invoicing Docs' folder) with an Invoice Supplement tab (PO/Line from the Working Forecast List), plus two top-level weekly reports - 'D911 Workorder Close Outs' (cols A-Machine, Scheduling Group set to Closed) and the full 'D911 Workorder Material Status' listing.",
-  "version": "2.2.0",
+  "description": "Feed it the whole SSPO pricing master and pick a close-out date range: rows whose Firm VPD falls in the range are split into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx', each in its own 'BATCH NEST Invoicing Docs' folder) with an Invoice Supplement tab (PO/Line, invoice number and ship date from the Working Forecast List) printed to PDF as 'ASA Invoice No. XXXXX Supplement.pdf' once the nest has its PS/Inv number, plus two top-level weekly reports - 'D911 Workorder Close Outs' (cols A-Machine, Scheduling Group set to Closed) and the full 'D911 Workorder Material Status' listing.",
+  "version": "2.3.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
     "setup": [
       "Make a copy of the SSPO pricing master (the whole thing - no need to trim it to the week) - you pick the file when the app opens.",
-      "Keep the Working Forecast List synced; the app pulls each nest's PO and PO Line from it."
+      "Keep the Working Forecast List synced; the app pulls each nest's PO, PO Line, PS/Inv (invoice number) and Ship Date from it."
     ],
     "how_it_works": [
       "Pick the pricing workbook, then pick the close-out date range (it starts on the last 7 days; set both dates the same for a single day).",
       "Rows whose Firm VPD falls in the range are the week's close-outs: the app splits them into one workbook per Batch + Nest.",
       "Each split gets a Pricing Back Up tab (with a total-per-work-order sum) and an ASA Invoice Supplement tab.",
-      "It reads the PO / PO Line from a temp copy of the forecast (never the live file) and links prices through, so a corrected price flows to the grand total.",
+      "It reads the PO / PO Line, PS/Inv and Ship Date from a temp copy of the forecast (never the live file) and links prices through, so a corrected price flows to the grand total.",
+      "A nest with a PS/Inv number gets its Invoice Supplement sheet printed to PDF (through Excel). A nest with none gets a blank Invoice # and no PDF, and the run summary names it - fill the forecast in and re-run, or print that one by hand.",
       "The Material Status listing covers every row in the file, not just the range."
     ],
     "output": [
       "One 'BATCH NEST Pricing Back Up.xlsx' per nest in the range, each in its own 'BATCH NEST Invoicing Docs' subfolder.",
+      "'ASA Invoice No. XXXXX Supplement.pdf' in that same folder for every nest that has an invoice number - it sorts right behind the Mie Trak invoice in the finished-docs folder.",
       "A top-level 'D911 Workorder Close Outs {date}.xlsx' (the range's rows, Scheduling Group set to Closed).",
       "A top-level 'D911 Workorder Material Status {date}.xlsx' (the 14-column listing, every row).",
       "Both reports are named for the range's end date. The output folder opens in Explorer when it's done."
