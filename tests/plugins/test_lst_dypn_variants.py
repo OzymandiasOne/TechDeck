@@ -37,6 +37,17 @@ def lst922():
     ("H5222069-H88-4A-P-Tube", "H5222069-H88-4A"),
     ("H5222069-H88-4A_4A", "H5222069-H88-4A"),
     ("  h6521267-h4-3  ", "H6521267-H4-3"),
+    # Batch 491 (2026-09-16): the PO dropped the hyphen before the sheet
+    # segment on 9 of 38 tubes - 'R8652362H11G-4A' vs the file's
+    # 'R8652362-H11G-4A' - so every one came back BOTH missing and needing
+    # review. Any separator run between segments is one hyphen.
+    ("R8652362H11G-4A", "R8652362-H11G-4A"),
+    ("R8672861H28F-6A", "R8672861-H28F-6A"),
+    ("R8653362-H16L-4B.lst"[:-4], "R8653362-H16L-4B"),
+    ("R8652362 H11G_4A", "R8652362-H11G-4A"),
+    ("R8652362--H11G-4A", "R8652362-H11G-4A"),
+    ("H4130401-22M", "H4130401-22M"),          # 911 form untouched
+    ("BK585042-R7921761-H47", "BK585042-R7921761-H47"),  # order folder untouched
     ("", ""),
     (None, ""),
 ])
@@ -238,3 +249,42 @@ def test_a_foreign_part_still_reads_as_foreign(lst922, tmp_path):
 
     assert not pulled[0].resolved
     assert "foreign" in pulled[0].reason
+
+
+# ── 922 LST Organizer: Batch 491, the PO dropped the sheet hyphen ───────────
+
+def test_batch_491_po_without_the_sheet_hyphen_matches_the_file(lst922, tmp_path):
+    """Batch 491 (2026-09-16): the PO spelled 9 tubes 'R8652362H11G-4A' while
+    the files on disk were 'R8652362-H11G-4A-STEP.lst'. Read through the
+    plugin's own PO reader, the row must land as an EXACT hit - not missing,
+    not needing review."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PO"
+    ws.append(["ORDER", "DYPN", "SOURCE MATERIAL"])
+    ws.append(["BM353599", "R8652362H11G-4A", TUBE])
+    ws.append(["BM341493", "R8672861H28F-6A", TUBE2])
+    ws.append(["FK405036", "H5222069-H84-4", TUBE])      # a normal row
+    po = tmp_path / "PO H491 QF-QU-09.xlsx"
+    wb.save(po)
+
+    seen = []
+    master, _desc = lst922._read_po(po, log=seen.append)
+    assert set(master) == {"R8652362-H11G-4A", "R8672861-H28F-6A",
+                           "H5222069-H84-4"}
+    assert any("2 PO DYPN(s) respelled" in m and "R8652362H11G-4A" in m
+               for m in seen)
+
+    pulled, expected, _ = _resolve(
+        lst922,
+        [("BM353599-R8652362-H11G", "R8652362-H11G-4A-STEP.lst"),
+         ("BM341493-R8672861-H28F", "R8672861-H28F-6A-STEP.lst")],
+        master, tmp_path)
+
+    assert [p.how for p in pulled] == ["exact", "exact"]
+    assert {p.part for p in pulled} == {"R8652362-H11G-4A", "R8672861-H28F-6A"}
+    covered = {p.part for p in pulled if p.resolved}
+    missing = [d for d, v in expected.items()
+               if v[2] == "standard" and d not in covered]
+    assert missing == ["H5222069-H84-4"]      # the one with no file, and only it
