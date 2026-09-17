@@ -1202,7 +1202,7 @@ def _dialog_groups() -> list:
          ]},
         {"key": "pallet_labels",
          "label": "Apply pallet labels to existing cards",
-         "checked": False,
+         "checked": True,          # default ON since v2.7.1 (2026-09-17)
          "children": []},
         {"key": "pallet_stamper",
          "label": "Pallet Stamper",
