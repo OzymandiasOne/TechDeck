@@ -44,6 +44,7 @@ BRAND_RED_DEEP = "#9E1F25"
 BRAND_NAVY = "#12284B"
 BRAND_ORANGE = "#F08F06"
 BRAND_WHITE = "#FFFFFF"
+BRAND_EGGSHELL = "#FAF6F0"     # warm off-white for the tool card; fields stay pure white
 BRAND_PINK = "#FFD7D9"
 
 
@@ -70,11 +71,11 @@ QListWidget#toolPicker {{ background-color: {BRAND_RED_DARK}; color: {BRAND_WHIT
                           border-radius: 8px; padding: 8px; outline: none; }}
 QListWidget#toolPicker::item {{ padding: 8px 10px; border-radius: 4px; }}
 QListWidget#toolPicker::item:hover {{ background-color: {BRAND_RED_DEEP}; }}
-QListWidget#toolPicker::item:selected {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; font-weight: bold; }}
+QListWidget#toolPicker::item:selected {{ background-color: {BRAND_EGGSHELL}; color: {BRAND_RED}; font-weight: bold; }}
 
 /* right: the tool card (white) - everything inside inherits white + dark text */
-QFrame#toolCard {{ background-color: {BRAND_WHITE}; border-radius: 8px; }}
-QFrame#toolCard QWidget {{ background-color: {BRAND_WHITE}; color: {BRAND_TEXT}; }}
+QFrame#toolCard {{ background-color: {BRAND_EGGSHELL}; border-radius: 8px; }}
+QFrame#toolCard QWidget {{ background-color: {BRAND_EGGSHELL}; color: {BRAND_TEXT}; }}
 QFrame#toolCard QScrollArea {{ border: none; }}
 QFrame#toolCard QComboBox {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY}; border: 1px solid {BRAND_LINE};
                              border-radius: 4px; padding: 6px 10px; min-height: 22px; }}
@@ -89,7 +90,7 @@ QFrame#toolCard QPushButton {{ background-color: {BRAND_RED}; color: {BRAND_WHIT
 QFrame#toolCard QPushButton:hover {{ background-color: {BRAND_RED_DARK}; }}
 QFrame#toolCard QPushButton:pressed {{ background-color: {BRAND_NAVY}; }}
 QFrame#toolCard QPushButton:disabled {{ background-color: {BRAND_LINE}; color: {BRAND_WHITE}; }}
-QFrame#toolCard QScrollBar:vertical {{ background: {BRAND_WHITE}; width: 10px; border: none; }}
+QFrame#toolCard QScrollBar:vertical {{ background: {BRAND_EGGSHELL}; width: 10px; border: none; }}
 QFrame#toolCard QScrollBar::handle:vertical {{ background: {BRAND_LINE}; border-radius: 5px; min-height: 24px; }}
 QFrame#toolCard QScrollBar::add-line:vertical, QFrame#toolCard QScrollBar::sub-line:vertical {{ height: 0; }}
 """
