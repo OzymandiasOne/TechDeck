@@ -130,6 +130,10 @@ HARDWARE_OPTIONS = [
     ("NUT, ACORN", "ANUT"),
     ("NUT, HEAVY HEX", "HHNUT"),
     ("NUT, HEX", "HNUT"),
+    # Added 2026-09-17 at the user's request; no code existed in the original
+    # program, so "SETSCR" follows the house abbreviation style. Confirm with
+    # the hardware buyer. Takes thread + length like a cap screw.
+    ("SET SCREW", "SETSCR"),
     ("STUD", "STUD"),
     ("WASHER, FLAT", "FWSH"),
     ("WASHER, LOCK", "LWSH"),

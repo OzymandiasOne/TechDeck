@@ -27,6 +27,11 @@ def test_cap_screw_takes_thread_and_length(mt):
                                   length_code="2") == "HWZP5-HHCS-H13-2"
 
 
+def test_set_screw_takes_thread_and_length(mt):
+    assert mt.build_hardware_code("B", "SETSCR", thread_code="1032",
+                                  length_code="D") == "HWB-SETSCR-1032-D"
+
+
 def test_stud_takes_thread_and_length(mt):
     assert mt.build_hardware_code("304", "STUD", thread_code="M10150",
                                   length_code="40") == "HW304-STUD-M10150-40"
@@ -60,7 +65,7 @@ def test_fields_needed_by_type(mt):
     assert mt.hardware_fields_needed("LWSH") == ("screw",)
     for nut in ("ANUT", "HHNUT", "HNUT"):
         assert mt.hardware_fields_needed(nut) == ("thread",)
-    for other in ("BHCS", "FHCS", "HHCS", "SHCS", "STUD"):
+    for other in ("BHCS", "FHCS", "HHCS", "SHCS", "SETSCR", "STUD"):
         assert mt.hardware_fields_needed(other) == ("thread", "length")
 
 
