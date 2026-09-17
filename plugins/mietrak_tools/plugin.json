@@ -2,7 +2,7 @@
   "id": "mietrak_tools",
   "name": "MieTrak Tools",
   "description": "A library of small MieTrak helpers behind a picker. Starts with the Hardware Code Generator.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Anthony Sieben",
   "family": "General",
   "details": {
