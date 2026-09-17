@@ -214,8 +214,11 @@ def test_logo_stays_above_the_header_band(mod, run_split):
     assert ws.page_setup.orientation == "landscape" and ws.page_setup.fitToWidth == 1
     # A reloaded image reports its natural pixel size; the placed size is the
     # anchor extent, in EMU (9525 per px).
-    ext = ws._images[0].anchor.ext
-    assert (ext.width, ext.height) == tuple(px * 9525 for px in mod.LOGO_PRINT_SIZE)
+    anchor = ws._images[0].anchor
+    assert (anchor.ext.width, anchor.ext.height) == tuple(px * 9525 for px in mod.LOGO_PRINT_SIZE)
+    # Nudged 1 pt right and 1 pt down from A1 (Anthony's pick, 2026-09-17).
+    assert (anchor._from.col, anchor._from.row) == (0, 0)
+    assert (anchor._from.colOff, anchor._from.rowOff) == (12700, 12700)
 
 
 def test_pdf_name_is_invoicings_own_and_filename_safe(mod):

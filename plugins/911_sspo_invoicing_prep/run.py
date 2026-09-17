@@ -83,6 +83,8 @@ except ModuleNotFoundError:
 
 import openpyxl
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -175,6 +177,9 @@ _title_px = int(6 * TITLE_ROW_HEIGHT_PT * 96 / 72)          # 126
 LOGO_SEAM_PX = 6
 LOGO_PRINT_SIZE = (round(LOGO_SIZE[0] * (_title_px - LOGO_SEAM_PX) / LOGO_SIZE[1]),
                    _title_px - LOGO_SEAM_PX)
+LOGO_OFFSET_PT = (1, 1)        # (right, down) from A1's top-left corner
+EMU_PER_PT = 12700
+EMU_PER_PX = 9525
 
 ACCT_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'
 _THIN = Side(style="thin")
@@ -368,6 +373,14 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
         img = XLImage(str(logo_path))
         img.width, img.height = LOGO_PRINT_SIZE
         ws.add_image(img, "A1")
+        # Nudged LOGO_OFFSET_PT right/down from A1's corner (Anthony's pick from
+        # printed variants, 2026-09-17): the box's left edge then sits just inside
+        # the header band's left edge instead of half a point past it.
+        img.anchor = OneCellAnchor(
+            _from=AnchorMarker(col=0, row=0, colOff=LOGO_OFFSET_PT[0] * EMU_PER_PT,
+                               rowOff=LOGO_OFFSET_PT[1] * EMU_PER_PT),
+            ext=XDRPositiveSize2D(cx=LOGO_PRINT_SIZE[0] * EMU_PER_PX,
+                                  cy=LOGO_PRINT_SIZE[1] * EMU_PER_PX))
     ws["F2"] = "Invoice #"
     ws["F2"].font = LABEL_FONT
     ws["F3"] = "Invoice Date:"
