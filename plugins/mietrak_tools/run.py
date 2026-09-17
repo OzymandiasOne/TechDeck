@@ -30,10 +30,57 @@ except ModuleNotFoundError:  # standalone / headless testing
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core.plugin_window import PluginWindow
 
-try:
-    from techdeck.ui.theme_manager import get_theme_manager
-except Exception:  # pragma: no cover - theme is a nicety, never load-critical
-    get_theme_manager = None
+# ============================================================================
+# Brand look - fixed MieTrak colors, deliberately NOT the user's theme
+# ============================================================================
+# Sampled from the MieTrak Solutions logo: ribbon red, wordmark navy, and the
+# orange "i" dot. The window paints itself in these on every theme (user's
+# call, 2026-09-17); PluginWindow applies the theme sheet first and this
+# overrides it.
+
+BRAND_RED = "#D33339"
+BRAND_RED_DARK = "#B8262C"
+BRAND_RED_DEEP = "#9E1F25"
+BRAND_NAVY = "#12284B"
+BRAND_ORANGE = "#F08F06"
+BRAND_WHITE = "#FFFFFF"
+BRAND_PINK = "#FFD7D9"
+
+
+class _Brand:
+    """Duck-types the theme palette attributes the tool panels read."""
+    text_secondary = BRAND_PINK
+    success = BRAND_ORANGE
+    surface = BRAND_NAVY
+
+
+BRAND_QSS = f"""
+QWidget {{ background-color: {BRAND_RED}; color: {BRAND_WHITE};
+           font-family: 'Segoe UI'; font-size: 10pt; }}
+QLabel {{ background: transparent; color: {BRAND_WHITE}; }}
+QScrollArea, QScrollArea > QWidget > QWidget {{ background-color: {BRAND_RED}; border: none; }}
+QListWidget {{ background-color: {BRAND_RED_DARK}; color: {BRAND_WHITE}; border: none;
+               border-radius: 6px; padding: 6px; outline: none; }}
+QListWidget::item {{ padding: 8px 10px; border-radius: 4px; }}
+QListWidget::item:hover {{ background-color: {BRAND_RED_DEEP}; }}
+QListWidget::item:selected {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; font-weight: bold; }}
+QComboBox {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY}; border: 1px solid {BRAND_RED_DEEP};
+             border-radius: 4px; padding: 6px 10px; min-height: 22px; }}
+QComboBox:hover {{ border-color: {BRAND_NAVY}; }}
+QComboBox:disabled {{ color: #8892A6; }}
+QComboBox::drop-down {{ border: none; width: 26px; }}
+QComboBox QAbstractItemView {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY};
+                               selection-background-color: {BRAND_RED}; selection-color: {BRAND_WHITE};
+                               border: 1px solid {BRAND_RED_DEEP}; outline: none; }}
+QPushButton {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; border: none; border-radius: 4px;
+               padding: 8px 18px; font-weight: bold; }}
+QPushButton:hover {{ background-color: {BRAND_PINK}; }}
+QPushButton:pressed {{ background-color: {BRAND_NAVY}; color: {BRAND_WHITE}; }}
+QPushButton:disabled {{ background-color: {BRAND_RED_DARK}; color: {BRAND_PINK}; }}
+QScrollBar:vertical {{ background: {BRAND_RED_DARK}; width: 10px; border: none; }}
+QScrollBar::handle:vertical {{ background: {BRAND_WHITE}; border-radius: 5px; min-height: 24px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+"""
 
 # Module-level reference prevents the window from being garbage collected when
 # run() returns (Hard Rule: GUI windows must live in module scope).
@@ -205,23 +252,14 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"MieTrak Tools window opened ({len(TOOLS)} tool(s)).")
 
 
-def _palette():
-    """Return the current theme palette, or None if the manager is unavailable."""
-    if get_theme_manager is None:
-        return None
-    try:
-        return get_theme_manager().get_current_palette()
-    except Exception:
-        return None
-
-
 class MieTrakTools(PluginWindow):
     """Left: a picker list of tools. Right: the selected tool's panel."""
 
     def __init__(self, on_success=None):
         super().__init__("mietrak_tools", "MieTrak Tools")
         self._on_success = on_success
-        self._pal = _palette()
+        self._pal = _Brand          # brand colors, not the theme palette
+        self.setStyleSheet(BRAND_QSS)
         self.setMinimumSize(760, 560)
         self._active = None
         self._build_ui()
@@ -268,7 +306,7 @@ class MieTrakTools(PluginWindow):
         tool = TOOLS[index]
 
         title = QLabel(tool["name"])
-        title.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        title.setStyleSheet(f"font-size: 16pt; font-weight: bold; color: {BRAND_WHITE};")
         self._panel_layout.addWidget(title)
         if tool.get("description"):
             desc = QLabel(tool["description"])
@@ -365,7 +403,8 @@ class HardwareCodeGenerator(QWidget):
         accent = self._pal.success if self._pal else "#10B981"
         surface = self._pal.surface if self._pal else "#2A2A2A"
         self._result.setStyleSheet(
-            f"background-color: {surface}; border-left: 5px solid {accent};"
+            f"background-color: {surface}; color: {BRAND_WHITE};"
+            f" border-left: 5px solid {accent};"
             " border-radius: 4px; padding: 14px; font-size: 18pt;"
             " font-weight: bold; font-family: Consolas, monospace;"
         )
