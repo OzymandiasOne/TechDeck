@@ -1808,6 +1808,52 @@ def blueprint(d):           # customer dxf quoting
     _draw_grid(d, _BLUEPRINT_GRID, _BLUEPRINT_TONES)
 
 
+_MIETRAK_GRID = [
+    "................................",
+    ".........dd.....................",
+    "........dddd....................",
+    ".......dddddd...................",
+    "........dddd....................",
+    ".........dd.....................",
+    "................................",
+    "................................",
+    "........aaa.....................",
+    ".....aaaaaaaa...................",
+    "....aaaaaaaaaaa.......aaaaa.....",
+    "...aaaaa..aaaaaa....aaaaaaaa....",
+    "...aaaa....aaaaa...aaaaaaaaaa...",
+    "..aaaaa.....aaaaa..aaaa..aaaa...",
+    "..aaaa.......aaaaaaaaaa..aaaaa..",
+    "..aaaa........aaaaaaaa....aaaa..",
+    "..aaaa........aaaaaaa.....aaaa..",
+    "..aaaa.........aaaaaa.....aaaa..",
+    "..aaaa.........aaaaa......aaaa..",
+    "..aaaa.........aaaaa......aaaa..",
+    "..aaaa.........aaaaaa.....aaaa..",
+    "..aaaa........aaaaaaa.....aaaa..",
+    "..aaaa........aaaaaaaa....aaaa..",
+    "..aaaa.......aaaaaaaaaa..aaaaa..",
+    "..aaaaa.....aaaaa..aaaa..aaaa...",
+    "...aaaa....aaaaa...aaaaaaaaaa...",
+    "...aaaaa..aaaaaa....aaaaaaaa....",
+    "....aaaaaaaaaaa.......aaaaa.....",
+    ".....aaaaaaaa...................",
+    "........aaa.....................",
+    "................................",
+    "................................",
+]
+# MieTrak Tools: the red infinity ribbon from the MieTrak Solutions logo with
+# the orange diamond "i" dot, letters dropped. Lopsided on purpose (big left
+# "C", small right lobe) with the ribbon thin across the tops/bottoms and fat on
+# the sides and at the crossing. Brand colors, so it lives in the pack set (NOT
+# theme-recolored). Tournament winner v48 (user's pick, 2026-09-17); the
+# user's cleanup baseline is tools/pixel_playground/current/mietrak.tdart.
+_MIETRAK_TONES = {"a": "#E41E2F", "d": "#F08F06"}
+
+def mietrak(d):             # mietrak_tools
+    _draw_grid(d, _MIETRAK_GRID, _MIETRAK_TONES)
+
+
 # Output set -> {key: (grid, tones)}. Each grid is painted in its own colors.
 _MR_BEANS_GRID = [
     ".........kggkkkkkkkkkkk.........",
@@ -1874,6 +1920,7 @@ SETS = {
     "TechDeck pack pixel": {
         "mr_beans": (_MR_BEANS_GRID, _MR_BEANS_TONES),
         "blueprint": (_BLUEPRINT_GRID, _BLUEPRINT_TONES),
+        "mietrak": (_MIETRAK_GRID, _MIETRAK_TONES),
     },
     "Icons socialmedia pixel": {
         "adobe_illustrator": (_ADOBE_ILLUSTRATOR_GRID, _ADOBE_ILLUSTRATOR_TONES),
