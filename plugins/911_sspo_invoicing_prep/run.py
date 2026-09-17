@@ -55,6 +55,13 @@ Each output workbook is built ENTIRELY from scratch (no template file) and gets:
   hand). If Excel can't be driven (no pywin32 / Excel), the workbooks are still
   written and the summary says the PDFs were skipped.
 
+  The nest's PRICING CALCS (v2.4.0, answers 2026-09-17) ride along in the same
+  Invoicing Docs folder, read from the nest's own 911 QTDR\<batch>\<nest>\ folder:
+  a SHAPE nest's folder of per-part calc sheets (found by contents, any name) is
+  zipped as "{BATCH} {NEST} Linear Inch Calcs.zip"; a PLATE nest's
+  "... LINEAR INCH CALC.xlsx" workbook is copied as-is. A nest with neither is
+  flagged in the summary and everything else still runs.
+
 The live Working Forecast List is NEVER opened directly: it's copied into the
 output folder first, the copy is read, and the copy is deleted once every workbook
 has been written (even on error/cancel).
@@ -614,6 +621,119 @@ class _SupplementPdfExporter:
             self._excel = None
 
 
+# ---------------------------------------------------------------------------------
+# Pricing calcs into the Invoicing Docs folder (v2.4.0, invoicing's ask 2026-09-04,
+# answers 2026-09-17)
+# ---------------------------------------------------------------------------------
+# Every nest's own folder under 911 QTDR\<batch>\<nest>\ holds the pricing math:
+#   SHAPE nests - a subfolder of per-part "NC style baked beans" calc sheets (.xlsm,
+#                 one per part, plus the Baked Beans app's "{batch} {nest} NC Baked
+#                 Beans.xlsx" review list). Surveyed 2026-09-17 over the last 60
+#                 batches: named "Linear Inch Calcs" 32x, "PRICING" 11x,
+#                 "CALCULATIONS" 9x, two other spellings - so it is found by what it
+#                 HOLDS (calc .xlsm sheets / the NC Baked Beans file), never by name.
+#                 The whole folder is zipped: "{BATCH} {NEST} Linear Inch Calcs.zip".
+#   PLATE nests - one workbook in the nest folder itself named like
+#                 "5CDBBC KINETIC LINEAR INCH CALC.xlsx" (new as of 2026-09-14; the
+#                 match is "LINEAR INCH CALC" anywhere in an .xlsx/.xlsm name). Copied
+#                 as-is.
+# A nest with neither is FLAGGED in the summary and the run carries on (her rule:
+# those are usually manual calcs she verifies and notes by hand).
+CALC_ZIP_NAME = "{batch} {nest} Linear Inch Calcs.zip"
+PLATE_CALC_RE = re.compile(r"linear\s*inch\s*calc", re.I)
+SHAPE_CALC_FILE_RE = re.compile(r"\.xlsm$|nc baked beans", re.I)
+_EXCEL_FILE_RE = re.compile(r"\.xls[xm]$", re.I)
+
+
+def _find_nest_folder(qtdr_root: Path, batch: str, nest: str) -> Optional[Path]:
+    """911 QTDR\\<batch>\\<nest>\\ - both segments matched case-insensitively;
+    None when either level is missing."""
+    batch_dir = sdk.find_911_batch_folder(qtdr_root, batch)
+    if batch_dir is None:
+        return None
+    exact = batch_dir / nest
+    if sdk.is_dir(exact):
+        return exact
+    try:
+        for entry in os.scandir(sdk.long_path(batch_dir)):
+            if sdk.is_dir(entry.path) and entry.name.upper() == nest.upper():
+                return batch_dir / entry.name
+    except OSError:
+        pass
+    return None
+
+
+def _find_shape_calc_folder(nest_dir: Path) -> Optional[Path]:
+    """The subfolder holding the per-part calc sheets - whichever direct child
+    has the MOST calc files (.xlsm / the NC Baked Beans list); None if no child
+    has any. Name is ignored on purpose (see the survey above)."""
+    best, best_n = None, 0
+    try:
+        children = [e for e in os.scandir(sdk.long_path(nest_dir)) if sdk.is_dir(e.path)]
+    except OSError:
+        return None
+    for child in children:
+        try:
+            n = sum(1 for f in os.scandir(child.path)
+                    if sdk.is_file(f.path) and SHAPE_CALC_FILE_RE.search(f.name))
+        except OSError:
+            continue
+        if n > best_n:
+            best, best_n = nest_dir / child.name, n
+    return best
+
+
+def _find_plate_calc_files(nest_dir: Path) -> list:
+    """The plate 'LINEAR INCH CALC' workbook(s) sitting directly in the nest
+    folder (Excel lock files skipped)."""
+    try:
+        return sorted(nest_dir / e.name for e in os.scandir(sdk.long_path(nest_dir))
+                      if sdk.is_file(e.path) and _EXCEL_FILE_RE.search(e.name)
+                      and PLATE_CALC_RE.search(e.name) and not e.name.startswith("~$"))
+    except OSError:
+        return []
+
+
+def _zip_folder(folder: Path, dest_zip: Path, log, cancel_event=None) -> int:
+    """Zip `folder` (recursively, paths relative to it) into dest_zip. Every file
+    is hydrated first (OneDrive placeholders, Rule 13) and opened long-path safe
+    (Rule 14). Returns the file count."""
+    import zipfile
+    count = 0
+    sdk.ensure_dir(dest_zip.parent)
+    with zipfile.ZipFile(sdk.long_path(dest_zip), "w", zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirs, files in os.walk(sdk.long_path(folder)):
+            for name in sorted(files):
+                if name.startswith("~$"):            # Excel lock files
+                    continue
+                sdk.raise_if_cancelled(cancel_event)
+                src = Path(dirpath) / name
+                sdk.ensure_local(src, log=log)
+                rel = os.path.relpath(str(src), sdk.long_path(folder))
+                zf.write(sdk.long_path(src), rel)
+                count += 1
+    return count
+
+
+def _collect_pricing_calcs(nest_dir: Path, sub_dir: Path, batch: str, nest: str,
+                           log, cancel_event=None) -> list:
+    """Drop the nest's pricing calcs into its Invoicing Docs folder: the shape
+    calc folder as a ZIP and/or the plate LINEAR INCH CALC workbook as a copy.
+    Returns the relative paths written (empty = nothing found)."""
+    out = []
+    shape_dir = _find_shape_calc_folder(nest_dir)
+    if shape_dir is not None:
+        zname = _safe_filename(CALC_ZIP_NAME.format(batch=batch, nest=nest))
+        n = _zip_folder(shape_dir, sub_dir / zname, log, cancel_event)
+        out.append(f"{sub_dir.name}\\{zname}")
+        log(f"  wrote {sub_dir.name}\\{zname}  ({n} file(s) from '{shape_dir.name}')")
+    for src in _find_plate_calc_files(nest_dir):
+        sdk.copy_resilient(src, sub_dir / src.name, log=log)
+        out.append(f"{sub_dir.name}\\{src.name}")
+        log(f"  copied {src.name}")
+    return out
+
+
 class SplitResult(NamedTuple):
     written: list                     # [(relative path, row_count)]
     missing_po: list                  # display names with no forecast row at all
@@ -622,6 +742,9 @@ class SplitResult(NamedTuple):
     missing_invoice: list = []        # forecast row found, PS/Inv blank -> no PDF
     pdfs: list = []                   # relative paths of supplement PDFs written
     pdf_error: Optional[str] = None   # Excel unavailable: PDFs skipped wholesale
+    calcs: list = []                  # relative paths of pricing-calc zips/copies
+    missing_calcs: list = []          # "BATCH NEST (why)" - flagged, run carried on
+    calc_error: Optional[str] = None  # 911 QTDR root not found: calcs skipped wholesale
 
 
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
@@ -779,6 +902,12 @@ def split_workbook(src_path, out_dir, settings, log,
         log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
 
         written, missing_po, missing_invoice, pdfs = [], [], [], []
+        calcs, missing_calcs, calc_error = [], [], None
+        qtdr_root = sdk.resolve_911_qtdr_root(str(settings.get("qtdr_root", "") or ""))
+        if qtdr_root is None or not sdk.is_dir(qtdr_root):
+            calc_error = ("the 911 QTDR folder was not found"
+                          + (f" at {qtdr_root}" if qtdr_root else ""))
+            log(f"WARNING: {calc_error} - no pricing calcs will be collected.")
         for gi, (batch, nest) in enumerate(order):
             if cancel_event is not None and cancel_event.is_set():
                 log("Cancelled.")
@@ -810,6 +939,31 @@ def split_workbook(src_path, out_dir, settings, log,
                 missing_invoice.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
                     "- Invoice # left blank, no PDF.")
+
+            # v2.4.0: the nest's pricing calcs (shape folder zipped / plate
+            # workbook copied) ride along; a nest with none is flagged, not fatal.
+            if calc_error is None:
+                nest_dir = _find_nest_folder(qtdr_root, batch, nest)
+                if nest_dir is None:
+                    missing_calcs.append(f"{batch} {nest} (no {batch}\\{nest} folder "
+                                         "under 911 QTDR)")
+                    log(f"  WARNING: {batch} {nest}: nest folder not found under "
+                        f"{qtdr_root.name} - no pricing calcs collected.")
+                else:
+                    try:
+                        found = _collect_pricing_calcs(nest_dir, sub_dir, batch, nest,
+                                                       log, cancel_event)
+                    except (OSError, RuntimeError) as exc:
+                        found = []
+                        log(f"  WARNING: {batch} {nest}: could not collect pricing "
+                            f"calcs: {exc}")
+                    if found:
+                        calcs.extend(found)
+                    else:
+                        missing_calcs.append(f"{batch} {nest} (no calc folder or "
+                                             "LINEAR INCH CALC workbook in the nest folder)")
+                        log(f"  WARNING: {batch} {nest}: no pricing calcs in "
+                            f"{nest_dir.name} - flagged.")
             if progress_callback:
                 progress_callback(15 + int(80 * (gi + 1) / len(order)))
 
@@ -819,7 +973,8 @@ def split_workbook(src_path, out_dir, settings, log,
             log(f"Left out {out_of_range} valid row(s) whose Firm VPD is outside "
                 "the range (they stay in the Material Status listing).")
         return SplitResult(written, missing_po, closeout_name, matstatus_name,
-                           missing_invoice, pdfs, exporter.error)
+                           missing_invoice, pdfs, exporter.error,
+                           calcs, missing_calcs, calc_error)
     finally:
         exporter.close()
         # The forecast copy is working scratch only - always remove it, even on
@@ -893,6 +1048,18 @@ def run(params, progress_callback, cancel_event):
         msg += f"\n\nWorkorder Close Outs sheet (top level): {closeout_name}"
     if matstatus_name:
         msg += f"\nWorkorder Material Status listing (top level): {matstatus_name}"
+    if result.calcs:
+        msg += (f"\n\nPricing calcs: {len(result.calcs)} dropped into the Invoicing "
+                "Docs folders (shape calc folders zipped, plate LINEAR INCH CALC "
+                "workbooks copied).")
+    if result.calc_error:
+        msg += (f"\n\nNo pricing calcs were collected: {result.calc_error}. Set the "
+                "911 QTDR folder in this app's settings if it lives somewhere unusual.")
+    if result.missing_calcs:
+        msg += ("\n\nNo pricing calcs found for:\n  "
+                + "\n  ".join(result.missing_calcs)
+                + "\n\nEverything else for those nests was written - verify their "
+                  "calcs by hand and add your note.")
     if result.pdf_error:
         msg += (f"\n\nNo supplement PDFs were made: {result.pdf_error}. The "
                 "workbooks are all there - print the Invoice Supplement sheets "

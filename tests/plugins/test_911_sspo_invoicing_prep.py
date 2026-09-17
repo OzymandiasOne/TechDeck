@@ -96,10 +96,20 @@ class FakeExporter:
 
 
 @pytest.fixture
-def run_split(mod, tmp_path):
-    def _run(active_rows, complete_rows, pricing_rows, exporter=None, with_inv=True):
+def qtdr(tmp_path):
+    """A stand-in 911 QTDR tree. ALWAYS passed to the plugin so a test never
+    walks the real OneDrive tree looking for S038\\P08348."""
+    root = tmp_path / "911 QTDR"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def run_split(mod, tmp_path, qtdr):
+    def _run(active_rows, complete_rows, pricing_rows, exporter=None, with_inv=True,
+             qtdr_root=None):
         fdir = tmp_path / "forecast"
-        fdir.mkdir()
+        fdir.mkdir(exist_ok=True)
         _forecast_workbook(fdir / "Working Forecast List.xlsx",
                            active_rows, complete_rows, with_inv=with_inv)
         src = tmp_path / "SSPO PRICING.xlsx"
@@ -108,11 +118,17 @@ def run_split(mod, tmp_path):
         exporter = exporter if exporter is not None else FakeExporter()
         logs = []
         result = mod.split_workbook(
-            src, out, {"forecast_dir": str(fdir)}, logs.append,
+            src, out,
+            {"forecast_dir": str(fdir),
+             "qtdr_root": str(qtdr if qtdr_root is None else qtdr_root)},
+            logs.append,
             date_range=(date(2026, 9, 1), date(2026, 9, 7)),
             pdf_exporter=exporter)
         return result, out, exporter, logs
     return _run
+
+
+ROW = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 3), "55501")
 
 
 def _supplement(out: Path, batch, nest, mod):
@@ -219,6 +235,90 @@ def test_logo_stays_above_the_header_band(mod, run_split):
     # Nudged 1 pt right and 1 pt down from A1 (Anthony's pick, 2026-09-17).
     assert (anchor._from.col, anchor._from.row) == (0, 0)
     assert (anchor._from.colOff, anchor._from.rowOff) == (12700, 12700)
+
+
+# ---------------------------------------------------------------------------------
+# Pricing calcs (v2.4.0)
+# ---------------------------------------------------------------------------------
+def _shape_nest(qtdr, batch, nest, folder="Linear Inch Calcs"):
+    d = qtdr / batch / nest / folder
+    d.mkdir(parents=True)
+    (d / "H4533328-22.xlsm").write_bytes(b"calc")
+    (d / "H4533328-23.xlsm").write_bytes(b"calc")
+    (d / "H4533328-22.NC").write_bytes(b"nc")
+    (d / f"{batch} {nest} NC Baked Beans.xlsx").write_bytes(b"beans")
+    (d / "~$H4533328-22.xlsm").write_bytes(b"lock")          # Excel lock: skipped
+    (d / "DSTVs").mkdir()
+    (d / "DSTVs" / "part.nc1").write_bytes(b"dstv")
+    # Siblings that must NOT be mistaken for the calc folder.
+    (qtdr / batch / nest / "PRODUCTION PAPERWORK").mkdir()
+    (qtdr / batch / nest / "PRODUCTION PAPERWORK" / "scribe.docx").write_bytes(b"x")
+    return d
+
+
+def test_shape_nest_calc_folder_is_zipped_whatever_its_name(mod, run_split, qtdr):
+    import zipfile
+    _shape_nest(qtdr, "S038", "P08348", folder="PRICING")     # one of the odd spellings
+    result, out, _, logs = run_split([ROW], [], [("S038", "P08348", 1, 5)])
+    z = out / "S038 P08348 Invoicing Docs" / "S038 P08348 Linear Inch Calcs.zip"
+    assert z.exists()
+    names = sorted(zipfile.ZipFile(z).namelist())
+    assert names == ["DSTVs/part.nc1", "H4533328-22.NC", "H4533328-22.xlsm",
+                     "H4533328-23.xlsm", "S038 P08348 NC Baked Beans.xlsx"]
+    assert result.calcs == ["S038 P08348 Invoicing Docs\\S038 P08348 Linear Inch Calcs.zip"]
+    assert result.missing_calcs == [] and result.calc_error is None
+    assert any("from 'PRICING'" in l for l in logs)
+
+
+def test_plate_nest_linear_inch_workbook_is_copied(mod, run_split, qtdr):
+    nest = qtdr / "L019" / "5CDBBC"
+    nest.mkdir(parents=True)
+    (nest / "5CDBBC KINETIC LINEAR INCH CALC.xlsx").write_bytes(b"plate")
+    (nest / "5CDBBC ASA Calc and Datasheet - 6.5.26 AT Mod.xlsx").write_bytes(b"no")
+    (nest / "~$5CDBBC KINETIC LINEAR INCH CALC.xlsx").write_bytes(b"lock")
+    (nest / "Machine Files").mkdir()
+    (nest / "Machine Files" / "a.nc").write_bytes(b"nc")       # no calc sheets: ignored
+    row = ("1000129724", 3, "L019", "5CDBBC", datetime(2026, 9, 3), "55510")
+    result, out, _, _ = run_split([row], [], [("L019", "5CDBBC", 1, 5)])
+    docs = out / "L019 5CDBBC Invoicing Docs"
+    assert (docs / "5CDBBC KINETIC LINEAR INCH CALC.xlsx").read_bytes() == b"plate"
+    assert not (docs / "5CDBBC ASA Calc and Datasheet - 6.5.26 AT Mod.xlsx").exists()
+    assert not (docs / "L019 5CDBBC Linear Inch Calcs.zip").exists()
+    assert result.calcs == ["L019 5CDBBC Invoicing Docs\\5CDBBC KINETIC LINEAR INCH CALC.xlsx"]
+    assert result.missing_calcs == []
+
+
+def test_nest_without_calcs_is_flagged_and_run_carries_on(mod, run_split, qtdr):
+    (qtdr / "S038" / "P08348" / "PRODUCTION PAPERWORK").mkdir(parents=True)  # nest, no calcs
+    # V999 504999: no nest folder at all
+    rows = [ROW, ("1000129724", 9, "V999", "504999", datetime(2026, 9, 3), "55520")]
+    result, out, _, _ = run_split(rows, [], [("S038", "P08348", 1, 5), ("V999", "504999", 2, 6)])
+    assert len(result.written) == 2 and len(result.pdfs) == 2      # everything else done
+    assert result.calcs == []
+    assert result.missing_calcs == [
+        "S038 P08348 (no calc folder or LINEAR INCH CALC workbook in the nest folder)",
+        "V999 504999 (no V999\\504999 folder under 911 QTDR)"]
+
+
+def test_missing_qtdr_root_skips_calcs_with_one_warning(mod, run_split, tmp_path):
+    result, _, _, logs = run_split([ROW], [], [("S038", "P08348", 1, 5)],
+                                   qtdr_root=tmp_path / "nowhere")
+    assert result.written and result.pdfs
+    assert "911 QTDR folder was not found" in result.calc_error
+    assert result.missing_calcs == [] and result.calcs == []
+    assert sum("no pricing calcs will be collected" in l for l in logs) == 1
+
+
+def test_calc_folder_is_picked_by_contents_not_name(mod, tmp_path):
+    nest = tmp_path / "S001" / "503001"
+    (nest / "CAD-AND-SHOP-PRINTS").mkdir(parents=True)
+    (nest / "CAD-AND-SHOP-PRINTS" / "print.pdf").write_bytes(b"x")
+    (nest / "Linear Inch Calcs").mkdir()
+    (nest / "Linear Inch Calcs" / "readme.txt").write_bytes(b"x")   # right name, no calcs
+    (nest / "CALCULATIONS").mkdir()
+    (nest / "CALCULATIONS" / "H1.xlsm").write_bytes(b"x")
+    assert mod._find_shape_calc_folder(nest) == nest / "CALCULATIONS"
+    assert mod._find_shape_calc_folder(nest / "CAD-AND-SHOP-PRINTS") is None
 
 
 def test_pdf_name_is_invoicings_own_and_filename_safe(mod):
