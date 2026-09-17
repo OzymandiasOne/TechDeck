@@ -1,8 +1,8 @@
 {
   "id": "911_remove_ticket",
   "name": "911 Remove Ticket",
-  "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Stamps the first page with BATCH: / NEST: (red Century Gothic, under Quality Requirements), a colour-coded SIMPLE / MEDIUM / DIFFICULT difficulty label read from the EB 922 Schedule, and fills the blank Material Type cell from the removed move tickets. Originals are untouched.",
-  "version": "1.2.1",
+  "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Stamps the first page with BATCH: / NEST: (red Century Gothic, under Quality Requirements), a colour-coded SIMPLE / MEDIUM / DIFFICULT difficulty label read from the EB 922 Schedule, and fills the blank Material Type cell from the removed move tickets. Originals are untouched. A PART SKETCH page whose drawing didn't render ('resource not reachable') is filled from the batch's own WPDD SKETCHES folder - every view - and those .jpgs are copied into the nest folder's Sketches subfolder.",
+  "version": "1.3.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -13,10 +13,12 @@
     "how_it_works": [
       "Pick the PDF folder and choose which PDFs to process (or all of them).",
       "Each PDF loses its MOVE TICKET pages - MIL-SPEC and HULL pages are always kept.",
-      "The first page is stamped 'BATCH {batch} - NEST {nest}', and the blank Material Type cell is filled from the move tickets before they're removed."
+      "The first page is stamped 'BATCH {batch} - NEST {nest}', and the blank Material Type cell is filled from the move tickets before they're removed.",
+      "If a PART SKETCH page shows 'The resource of this report item is not reachable' instead of the drawing, the app finds that part's .jpg views in THIS batch's WPDD SKETCHES folder (never another batch's), draws view 1 onto the page and adds a page per extra view right after it. A page with no sketch on file is left as-is and named in the summary."
     ],
     "output": [
-      "A '{name} Move Ticket Omit.pdf' for each PDF, saved in a 'Move Ticket Omit' subfolder. Your originals are never changed."
+      "A '{name} Move Ticket Omit.pdf' for each PDF, saved in a 'Move Ticket Omit' subfolder. Your originals are never changed.",
+      "Those sketch .jpgs are also copied into a 'Sketches' folder inside the nest's folder, so they are at hand without digging."
     ]
   },
   "requires_admin": false,

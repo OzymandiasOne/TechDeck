@@ -56,7 +56,7 @@ Each output workbook is built ENTIRELY from scratch (no template file) and gets:
   written and the summary says the PDFs were skipped.
 
   The nest's PRICING CALCS (v2.4.0, answers 2026-09-17) ride along in the same
-  Invoicing Docs folder, read from the nest's own 911 QTDR\<batch>\<nest>\ folder:
+  Invoicing Docs folder, read from the nest's own 911 QTDR\\<batch>\\<nest>\\ folder:
   a SHAPE nest's folder of per-part calc sheets (found by contents, any name) is
   zipped as "{BATCH} {NEST} Linear Inch Calcs.zip"; a PLATE nest's
   "... LINEAR INCH CALC.xlsx" workbook is copied as-is. A nest with neither is
