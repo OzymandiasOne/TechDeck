@@ -162,6 +162,19 @@ INV_DATA_START = 8
 # invoicing's corrected sheet (434x121 = 4133850x1152525 EMU) so it stays
 # inside its A1:D5 home.
 LOGO_SIZE = (434, 121)
+# v2.3.0 (print fix, 2026-09-17): the title block's six rows are pinned to TITLE_ROW_HEIGHT_PT each so
+# the logo's bottom edge lands on the top of the blue header band instead of
+# over it (121 px vs six default 15-pt rows = 120 px, and Excel rounds on
+# top of that — the printed PDF showed the logo box overlapping the band).
+# Height = rows 1..6 in px (pt * 96/72) minus a 6 px seam (Excel prints the
+# picture ~3% larger than the px asked for, so 2 px still overlapped by ~1 pt;
+# measured in the PDF 2026-09-17); width scaled with it so the box keeps its
+# shape.
+TITLE_ROW_HEIGHT_PT = 15.75
+_title_px = int(6 * TITLE_ROW_HEIGHT_PT * 96 / 72)          # 126
+LOGO_SEAM_PX = 6
+LOGO_PRINT_SIZE = (round(LOGO_SIZE[0] * (_title_px - LOGO_SEAM_PX) / LOGO_SIZE[1]),
+                   _title_px - LOGO_SEAM_PX)
 
 ACCT_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'
 _THIN = Side(style="thin")
@@ -349,9 +362,11 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
 
     # Title block: ASA logo over merged A1:D5, manual-fill invoice fields at F2/F3.
     ws.merge_cells("A1:D5")
+    for r in range(1, INV_HEADER_ROW):
+        ws.row_dimensions[r].height = TITLE_ROW_HEIGHT_PT
     if sdk.exists(logo_path):
         img = XLImage(str(logo_path))
-        img.width, img.height = LOGO_SIZE
+        img.width, img.height = LOGO_PRINT_SIZE
         ws.add_image(img, "A1")
     ws["F2"] = "Invoice #"
     ws["F2"].font = LABEL_FONT

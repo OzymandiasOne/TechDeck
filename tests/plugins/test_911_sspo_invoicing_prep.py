@@ -201,6 +201,21 @@ def test_excel_unavailable_still_writes_workbooks(mod, run_split):
     assert _supplement(out, "S038", "P08348", mod)["G2"].value == "55501"
 
 
+def test_logo_stays_above_the_header_band(mod, run_split):
+    """2026-09-17: the printed PDF had the logo box overlapping the blue header
+    band. The six title rows are pinned and the picture sized inside them."""
+    _, out, _, _ = run_split(
+        active_rows=[("1000129724", 14, "S038", "P08348", datetime(2026, 9, 3), "55501")],
+        complete_rows=[], pricing_rows=[("S038", "P08348", 1, 5)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    title_pt = sum(ws.row_dimensions[r].height for r in range(1, mod.INV_HEADER_ROW))
+    assert title_pt == 6 * mod.TITLE_ROW_HEIGHT_PT
+    assert mod.LOGO_PRINT_SIZE[1] <= title_pt * 96 / 72 - mod.LOGO_SEAM_PX
+    assert ws.page_setup.orientation == "landscape" and ws.page_setup.fitToWidth == 1
+    img = ws._images[0]
+    assert (img.width, img.height) == mod.LOGO_PRINT_SIZE
+
+
 def test_pdf_name_is_invoicings_own_and_filename_safe(mod):
     assert mod._supplement_pdf_name(" 55501 ") == "ASA Invoice No. 55501 Supplement.pdf"
     assert "/" not in mod._supplement_pdf_name("PS/55501")
