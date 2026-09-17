@@ -47,9 +47,15 @@ BRAND_WHITE = "#FFFFFF"
 BRAND_PINK = "#FFD7D9"
 
 
+BRAND_TEXT = "#1A1A1A"
+BRAND_GRAY = "#5A6474"
+BRAND_LINE = "#C9CED8"
+
+
 class _Brand:
-    """Duck-types the theme palette attributes the tool panels read."""
-    text_secondary = BRAND_PINK
+    """Duck-types the theme palette attributes the tool panels read.
+    The tool panels sit on the WHITE card, so secondary text is gray."""
+    text_secondary = BRAND_GRAY
     success = BRAND_ORANGE
     surface = BRAND_NAVY
 
@@ -57,29 +63,35 @@ class _Brand:
 BRAND_QSS = f"""
 QWidget {{ background-color: {BRAND_RED}; color: {BRAND_WHITE};
            font-family: 'Segoe UI'; font-size: 10pt; }}
-QLabel {{ background: transparent; color: {BRAND_WHITE}; }}
-QScrollArea, QScrollArea > QWidget > QWidget {{ background-color: {BRAND_RED}; border: none; }}
-QListWidget {{ background-color: {BRAND_RED_DARK}; color: {BRAND_WHITE}; border: none;
-               border-radius: 6px; padding: 6px; outline: none; }}
-QListWidget::item {{ padding: 8px 10px; border-radius: 4px; }}
-QListWidget::item:hover {{ background-color: {BRAND_RED_DEEP}; }}
-QListWidget::item:selected {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; font-weight: bold; }}
-QComboBox {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY}; border: 1px solid {BRAND_RED_DEEP};
-             border-radius: 4px; padding: 6px 10px; min-height: 22px; }}
-QComboBox:hover {{ border-color: {BRAND_NAVY}; }}
-QComboBox:disabled {{ color: #8892A6; }}
-QComboBox::drop-down {{ border: none; width: 26px; }}
-QComboBox QAbstractItemView {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY};
+QLabel {{ background: transparent; }}
+
+/* left: the tool picker card (dark red) */
+QListWidget#toolPicker {{ background-color: {BRAND_RED_DARK}; color: {BRAND_WHITE}; border: none;
+                          border-radius: 8px; padding: 8px; outline: none; }}
+QListWidget#toolPicker::item {{ padding: 8px 10px; border-radius: 4px; }}
+QListWidget#toolPicker::item:hover {{ background-color: {BRAND_RED_DEEP}; }}
+QListWidget#toolPicker::item:selected {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; font-weight: bold; }}
+
+/* right: the tool card (white) - everything inside inherits white + dark text */
+QFrame#toolCard {{ background-color: {BRAND_WHITE}; border-radius: 8px; }}
+QFrame#toolCard QWidget {{ background-color: {BRAND_WHITE}; color: {BRAND_TEXT}; }}
+QFrame#toolCard QScrollArea {{ border: none; }}
+QFrame#toolCard QComboBox {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY}; border: 1px solid {BRAND_LINE};
+                             border-radius: 4px; padding: 6px 10px; min-height: 22px; }}
+QFrame#toolCard QComboBox:hover {{ border-color: {BRAND_NAVY}; }}
+QFrame#toolCard QComboBox:disabled {{ color: #8892A6; }}
+QFrame#toolCard QComboBox::drop-down {{ border: none; width: 26px; }}
+QFrame#toolCard QComboBox QAbstractItemView {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY};
                                selection-background-color: {BRAND_RED}; selection-color: {BRAND_WHITE};
-                               border: 1px solid {BRAND_RED_DEEP}; outline: none; }}
-QPushButton {{ background-color: {BRAND_WHITE}; color: {BRAND_RED}; border: none; border-radius: 4px;
-               padding: 8px 18px; font-weight: bold; }}
-QPushButton:hover {{ background-color: {BRAND_PINK}; }}
-QPushButton:pressed {{ background-color: {BRAND_NAVY}; color: {BRAND_WHITE}; }}
-QPushButton:disabled {{ background-color: {BRAND_RED_DARK}; color: {BRAND_PINK}; }}
-QScrollBar:vertical {{ background: {BRAND_RED_DARK}; width: 10px; border: none; }}
-QScrollBar::handle:vertical {{ background: {BRAND_WHITE}; border-radius: 5px; min-height: 24px; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+                               border: 1px solid {BRAND_LINE}; outline: none; }}
+QFrame#toolCard QPushButton {{ background-color: {BRAND_RED}; color: {BRAND_WHITE}; border: none; border-radius: 4px;
+                               padding: 8px 18px; font-weight: bold; }}
+QFrame#toolCard QPushButton:hover {{ background-color: {BRAND_RED_DARK}; }}
+QFrame#toolCard QPushButton:pressed {{ background-color: {BRAND_NAVY}; }}
+QFrame#toolCard QPushButton:disabled {{ background-color: {BRAND_LINE}; color: {BRAND_WHITE}; }}
+QFrame#toolCard QScrollBar:vertical {{ background: {BRAND_WHITE}; width: 10px; border: none; }}
+QFrame#toolCard QScrollBar::handle:vertical {{ background: {BRAND_LINE}; border-radius: 5px; min-height: 24px; }}
+QFrame#toolCard QScrollBar::add-line:vertical, QFrame#toolCard QScrollBar::sub-line:vertical {{ height: 0; }}
 """
 
 # Module-level reference prevents the window from being garbage collected when
@@ -271,6 +283,7 @@ class MieTrakTools(PluginWindow):
         row.setSpacing(16)
 
         self._list = QListWidget()
+        self._list.setObjectName("toolPicker")
         self._list.setFixedWidth(230)
         for tool in TOOLS:
             item = QListWidgetItem(tool["name"])
@@ -288,7 +301,14 @@ class MieTrakTools(PluginWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setWidget(self._panel)
-        row.addWidget(scroll, 1)
+
+        # The white card the tool sits on; the red behind it reads as a frame.
+        card = QFrame()
+        card.setObjectName("toolCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.addWidget(scroll)
+        row.addWidget(card, 1)
 
         self._main_layout.addWidget(root)
 
@@ -306,7 +326,7 @@ class MieTrakTools(PluginWindow):
         tool = TOOLS[index]
 
         title = QLabel(tool["name"])
-        title.setStyleSheet(f"font-size: 16pt; font-weight: bold; color: {BRAND_WHITE};")
+        title.setStyleSheet(f"font-size: 16pt; font-weight: bold; color: {BRAND_NAVY};")
         self._panel_layout.addWidget(title)
         if tool.get("description"):
             desc = QLabel(tool["description"])
