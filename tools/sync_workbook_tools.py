@@ -199,6 +199,14 @@ TOOL_SECTIONS = [
    "formula, so adding one is a single data entry with no interface work. "
    "Native forms with per-input validation.",
    "Active", "0.8.6.9"),
+  ("MieTrak Tools",
+   "A picker window of small MieTrak helpers. First tool: the Hardware Code "
+   "Generator, which builds a hardware part number from dropdown picks.",
+   "Assembles the code (material, type, thread, length or screw size) by the "
+   "shop's standard spelling and copies it to the clipboard, so every entry "
+   "matches. Ported from a colleague's standalone program so existing codes "
+   "keep matching.",
+   "Active", "0.8.7.6"),
   ("QR Code Generator",
    "Generates QR codes that embed links or images for shop-floor labelling.",
    "Dual-tab interface -- a saved code library alongside the generator.",

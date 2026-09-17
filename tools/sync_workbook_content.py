@@ -293,6 +293,18 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "", "Feature",
+     "A new MieTrak Tools window collects small MieTrak helpers behind one "
+     "picker. Its first tool, the Hardware Code Generator, builds a hardware "
+     "part number from dropdown picks (material, type, thread, length or "
+     "screw size) and copies it to the clipboard, replacing a standalone "
+     "program left behind by a departed colleague; its code tables were kept "
+     "verbatim and are now covered by automated tests so the numbers keep "
+     "matching. Invoicing preparation now stamps the invoice number and ship "
+     "date on the supplement and prints it to PDF. The tube file organizer "
+     "now matches purchase-order part numbers written without the sheet "
+     "hyphen.",
+     "MieTrak Tools (new), 911 SSPO Invoicing Prep, 922 LST Organizer"),
     ("Beta 0.8.7.5", "Sep 11, 2026", "Feature",
      "The 922 batch setup tool now records the batch in the master parts "
      "list and identifies repeat orders at the start of the run, so each "
@@ -727,6 +739,10 @@ PI_NEW = [
     ("SHEET METAL CALCULATORS", "COMPLETE",
      "GUI PLUGIN HOSTING A LIBRARY OF SHOP CALCULATORS BEHIND ONE PICKER, "
      "DRIVEN BY A DECLARATIVE REGISTRY"),
+    ("MIETRAK TOOLS", "COMPLETE",
+     "GUI PLUGIN HOSTING SMALL MIETRAK HELPERS BEHIND ONE PICKER; FIRST TOOL "
+     "IS THE HARDWARE CODE GENERATOR, A NATIVE PORT OF A DEPARTED COLLEAGUE'S "
+     "STANDALONE EXE (TABLES AND ASSEMBLY RULE KEPT VERBATIM, PYTEST-PINNED)"),
     # {tests} is filled from a live pytest collection, not remembered -- see
     # test_count() in the writer. Any row here may use it.
     ("CONTINUOUS INTEGRATION", "COMPLETE",
@@ -950,6 +966,7 @@ GANTT_ROWS = [
     ("Customer DXF Analysis (Quoting + Automated Offsets)",
      GANTT_DEV, 0.7, "2026-02", "2026-09"),
     ("Sheet Metal Calculators", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("MieTrak Tools (Hardware Code Generator)", GANTT_DONE, 1, "2026-09", "2026-09"),
     ("Batch Auditor", GANTT_DONE, 1, "2026-05", "2026-06"),
     ("QA Gemba Analyzer", GANTT_DONE, 1, "2026-06", "2026-07"),
     ("QR Code Generator (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
