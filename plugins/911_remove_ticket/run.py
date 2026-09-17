@@ -58,7 +58,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # Century Gothic bold, under the Quality Requirements section. v1.2.0 made it
@@ -580,6 +580,79 @@ def restore_missing_sketches(doc, batch_folder, nest: str, log,
     return res
 
 
+# ---------------------------------------------------------------------------
+# MATL: on every PART SKETCH (v1.4.0 - invoicing's ask 2026-09-14, answer via
+# Anthony 2026-09-17: "use the empty MATL box; whatever the designator is -
+# HSS, OSS, CRES316..."). Saco scribes from the part print, so the material the
+# cover already carries has to be on each sketch too. SINGLE HOME; 911 Setup
+# calls fill_sketch_material through the sibling loader.
+# ---------------------------------------------------------------------------
+SKETCH_MATL_LABEL = "MATL:"
+SKETCH_MATL_FONT = "tibo"        # Times-Bold, the form's own value look
+SKETCH_MATL_FONTSIZE = 10
+
+
+class SketchMaterialFill:
+    def __init__(self):
+        self.filled = 0        # sketches that got the designator written in
+        self.already = 0       # sketches whose MATL: already had a value - left alone
+        self.no_label = 0      # PART SKETCH pages with no MATL: label found
+        self.did_not_fit = 0   # value too long for the cell even at the fallback size
+
+
+def fill_sketch_material(doc, material: str, log, cancel_event=None) -> SketchMaterialFill:
+    """Write `material` (the cover's Material Type value - HSS, OSS, CRES316...)
+    into the empty MATL: cell of every PART SKETCH page. A cell that already
+    holds a value is never touched; no material -> nothing happens."""
+    res = SketchMaterialFill()
+    material = (material or "").strip()
+    if not material:
+        return res
+    for i, page in enumerate(doc):
+        if cancel_event is not None and i % 16 == 0 and cancel_event.is_set():
+            break
+        text = page.get_text("text") or ""
+        if "PART SKETCH" not in text.upper():
+            continue
+        words = page.get_text("words")
+        li = next((k for k, w in enumerate(words) if w[4] == SKETCH_MATL_LABEL), None)
+        if li is None:
+            res.no_label += 1
+            continue
+        if _same_line_value(words, li):
+            res.already += 1
+            continue
+        label = words[li]
+        cy = (label[1] + label[3]) / 2
+        # The cell ends where the next 'LABEL:' on the same line starts.
+        nxt = min((w[0] for w in words
+                   if w[0] > label[2] and w[1] < cy < w[3] and w[4].endswith(":")),
+                  default=label[2] + 90)
+        # +0.5 pt down so the value shares the baseline of the form's own
+        # values (VF / N / A on the same row) - measured on S038 P08356.
+        rect = fitz.Rect(label[2] + 4, label[1] + 0.5, nxt - 4, label[3] + 6)
+        placed = False
+        for size in (SKETCH_MATL_FONTSIZE, 8, 7):
+            if page.insert_textbox(rect, material, fontsize=size, fontname=SKETCH_MATL_FONT,
+                                   color=MATERIAL_COLOR, align=0) >= 0:
+                placed = True
+                break
+        if placed:
+            res.filled += 1
+        else:
+            res.did_not_fit += 1
+    parts = []
+    if res.filled:
+        parts.append(f"wrote '{material}' into MATL: on {res.filled} sketch page(s)")
+    if res.already:
+        parts.append(f"{res.already} already had a MATL: value - left as-is")
+    if res.did_not_fit:
+        parts.append(f"{res.did_not_fit} cell(s) too small for '{material}'")
+    if parts:
+        log("  " + "; ".join(parts))
+    return res
+
+
 def sketch_batch_folder_for(pdf_dir) -> Path | None:
     """The batch folder a picked PDF folder belongs to, for the sketch lookup:
     the folder itself or its parent - whichever directly holds the sketch
@@ -720,6 +793,11 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         doc.delete_pages(sorted(remove_pages))
         warnings.extend(_stamp_first_page(doc[0], batch, pdf_path.stem, material,
                                           log, difficulty))
+        # v1.4.0: the same designator goes into every sketch's empty MATL: cell.
+        matl = fill_sketch_material(doc, material, log, cancel_event)
+        if matl.did_not_fit:
+            warnings.append(f"material {material!r} did not fit the MATL: cell on "
+                            f"{matl.did_not_fit} sketch page(s)")
         sketches = None
         if sketch_batch_folder is not None:
             sketches = restore_missing_sketches(doc, sketch_batch_folder, pdf_path.stem,

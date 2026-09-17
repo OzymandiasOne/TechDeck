@@ -1059,6 +1059,13 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
             for w in stamps._stamp_first_page(doc[0], batch, nest_number, material,
                                               log, difficulty):
                 log(f"  WARNING: {w}")
+            # v2.2.0: the same designator into every sketch's empty MATL: cell
+            # (single home: 911_remove_ticket v1.4.0).
+            if hasattr(stamps, "fill_sketch_material"):
+                matl = stamps.fill_sketch_material(doc, material, log)
+                if matl.did_not_fit:
+                    log(f"  WARNING: material {material!r} did not fit the MATL: cell "
+                        f"on {matl.did_not_fit} sketch page(s)")
 
         # v2.2.0: PART SKETCH pages whose graphic did not render are filled from
         # THIS batch's WPDD SKETCHES folder (single home: 911_remove_ticket), and

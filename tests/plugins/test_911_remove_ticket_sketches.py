@@ -160,6 +160,55 @@ def test_work_order_label_on_the_page_picks_the_right_file(mod, tmp_path):
     assert right.name in doc[0].get_text() and "FK111111" not in doc[0].get_text()
 
 
+# ---------------------------------------------------------------------------------
+# MATL: fill on every PART SKETCH (v1.4.0)
+# ---------------------------------------------------------------------------------
+def _matl_page(doc, value=""):
+    """A sketch header row like the real form: MATL: then LVL: on one line."""
+    page = doc.new_page(width=792, height=612)
+    page.insert_text((40, 60), "PART SKETCH", fontsize=10)
+    page.insert_text((147, 90), "PART: H4533328-21", fontsize=10)
+    page.insert_text((387, 90), "MATL:", fontsize=10)
+    if value:
+        page.insert_text((425, 90), value, fontsize=10)
+    page.insert_text((504, 90), "LVL: N", fontsize=10)
+    return page
+
+
+def _matl_value(mod, page):
+    words = page.get_text("words")
+    i = next(k for k, w in enumerate(words) if w[4] == "MATL:")
+    return mod._same_line_value(words, i)
+
+
+@pytest.mark.parametrize("material", ["HSS", "OSS", "CRES316"])
+def test_matl_cell_is_filled_on_every_sketch(mod, material):
+    doc = fitz.open()
+    _matl_page(doc); _matl_page(doc)
+    cover = doc.new_page(pno=0, width=612, height=792); cover.insert_text((40, 40), "COVER")
+    logs = []
+    res = mod.fill_sketch_material(doc, material, logs.append)
+    assert (res.filled, res.already, res.no_label, res.did_not_fit) == (2, 0, 0, 0)
+    for pg in (doc[1], doc[2]):
+        assert _matl_value(mod, pg) == material
+        words = pg.get_text("words")
+        m = next(w for w in words if w[4] == material)
+        lab = next(w for w in words if w[4] == "MATL:"); lvl = next(w for w in words if w[4] == "LVL:")
+        assert lab[2] < m[0] and m[2] < lvl[0]            # inside the cell, before LVL:
+    assert "COVER" in doc[0].get_text() and "HSS" not in doc[0].get_text()
+    assert any(f"wrote '{material}' into MATL: on 2 sketch page(s)" in l for l in logs)
+
+
+def test_matl_already_filled_is_left_alone_and_blank_material_is_a_no_op(mod):
+    doc = fitz.open(); _matl_page(doc, "OSS"); _matl_page(doc)
+    res = mod.fill_sketch_material(doc, "HSS", lambda *_: None)
+    assert (res.filled, res.already) == (1, 1)
+    assert _matl_value(mod, doc[0]) == "OSS" and _matl_value(mod, doc[1]) == "HSS"
+    doc2 = fitz.open(); _matl_page(doc2)
+    res2 = mod.fill_sketch_material(doc2, "", lambda *_: None)
+    assert res2.filled == 0 and _matl_value(mod, doc2[0]) == ""
+
+
 def test_process_pdf_restores_sketches_and_reports_unmatched(mod, tmp_path):
     b = _batch(tmp_path)
     (b / "504050").mkdir()
