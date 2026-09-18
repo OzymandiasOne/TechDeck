@@ -245,6 +245,17 @@ class MainWindow(QMainWindow):
         # Start update checker after UI is ready (delayed by 3 seconds)
         QTimer.singleShot(3000, self.update_checker.start)
 
+        # Halloween dressing: corner cobwebs + one scurrying crawly at a time
+        # (widgets/halloween_decor.py). Gated inside on season + theme, and
+        # never allowed to break startup.
+        self.halloween_decor = None
+        try:
+            from techdeck.ui.widgets.halloween_decor import HalloweenDecor
+            self.halloween_decor = HalloweenDecor(self, settings=self.settings)
+            self.halloween_decor.refresh()
+        except Exception:
+            logger.exception("halloween decor failed to start")
+
         # After a crash/freeze, offer a debug report once on the next start
         # (well after the fade-in so startup feel is untouched).
         QTimer.singleShot(4000, self._maybe_offer_debug_report)
@@ -863,6 +874,13 @@ class MainWindow(QMainWindow):
         self._restyle_home_splitter()
         self._restyle_console_controls()
         self.btn_run.setStyleSheet(self._run_button_style(theme_manager.get_current_palette()))
+        # Leaving the halloween theme is the off switch for the cobwebs and
+        # crawlies; coming back to it turns them on again.
+        if getattr(self, "halloween_decor", None) is not None:
+            try:
+                self.halloween_decor.refresh()
+            except Exception:
+                logger.exception("halloween decor refresh failed")
 
     @staticmethod
     def _run_button_style(theme) -> str:

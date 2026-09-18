@@ -1,0 +1,27 @@
+{
+  "format": "tdart",
+  "version": 1,
+  "palette": {"B": "#4B4560", "H": "#7D7598", "L": "#8C84A6", "M": "#E41E2F", "E": "#F3ECFF"},
+  "rows": [
+    "..LL................",
+    "...LL..........LL...",
+    "....LL.......LLL....",
+    ".....LL.....LL......",
+    "......L.....L......L",
+    "......LL...LL....LLL",
+    "LLLLL..LEBBE..LLLL..",
+    "....LLLBBBBBBLL.....",
+    "....LLLLBBBBLLL.....",
+    ".LLLL..BBBBBB.LLLL..",
+    "LL....LBHBBBB....L..",
+    "L.....BHBBBBBB...LL.",
+    ".....LBHBMMBBB....LL",
+    "....LLBHBMMBBBL....L",
+    "....L.BHBBBBBBLL....",
+    "...LL..BHBBBB..LL...",
+    "...L...BHBBBB...L...",
+    "..LL................",
+    "..L.................",
+    "...................."
+  ]
+}

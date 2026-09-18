@@ -98,6 +98,7 @@ class CommandHandler:
             '/friend': self._cmd_moth,
             '/puppetmaster': self._cmd_puppetmaster,
             '/seance': self._cmd_seance,
+            '/crawl': self._cmd_crawl,
             '/admin': self._cmd_admin,
             '/tickets': self._cmd_tickets,
             '/reset': self._cmd_reset,
@@ -119,7 +120,7 @@ class CommandHandler:
     # halloween_active — which also folds in the professional-theme
     # suppression). Out of season they behave exactly like a typo, so the
     # app has no seasonal residue in the other eleven months.
-    _SEASONAL_COMMANDS = {'/seance'}
+    _SEASONAL_COMMANDS = {'/seance', '/crawl'}
     _ADMIN_HELP = (
         "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
         "  /reset store     - Clear all Emporium purchases"
@@ -740,6 +741,28 @@ class CommandHandler:
     #  Session teardown — invoked by /clear and the Clear button
     # ------------------------------------------------------------------ #
 
+    def _cmd_crawl(self, args: str):
+        """Send a creepy crawly across the window NOW instead of waiting for
+        the clock (widgets/halloween_decor.py). `/crawl` picks one;
+        `/crawl spider|roach|centipede` names it; `/crawl dangle` lowers a
+        spider on a thread. One at a time - a second call while one is out
+        does nothing. Halloween only and absent from /help."""
+        decor = getattr(self.main_window, "halloween_decor", None)
+        if decor is None or not decor.is_active():
+            self.console.append_system(
+                "Nothing stirs. (Crawlies only come out in the Halloween theme.)")
+            return
+        want = args.strip().lower()
+        if want == "dangle":
+            decor.spawn("spider", dangle=True)
+        elif want:
+            if decor.spawn(want, dangle=False) is None and decor.current() is None:
+                self.console.append_system(
+                    "Try: /crawl spider, /crawl roach, /crawl centipede, "
+                    "/crawl dangle")
+        else:
+            decor.spawn()
+
     def stop_session_effects(self):
         """End easter-egg sessions on /clear or the Clear button: fold blackjack,
         end /rave, dismiss /friend, and put the fidget spinner away. The Steel
@@ -749,6 +772,9 @@ class CommandHandler:
         self._stop_moth()
         self._stop_spinner()
         self._stop_seance()
+        decor = getattr(self.main_window, "halloween_decor", None)
+        if decor is not None:
+            decor.clear()       # the crawly leaves; the cobwebs stay
         if self._cat is not None:
             # The document is being wiped with the /clear — reset, don't
             # try to excise a range from a vanishing document.
