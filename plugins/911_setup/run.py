@@ -1001,7 +1001,8 @@ def _load_omit_stamp_helpers(log):
 
 def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
                             dest_path: Path, log, batch: str = "",
-                            material_hint: str = "", difficulty=None) -> bool:
+                            material_hint: str = "", difficulty=None,
+                            batch_folder: Path | None = None) -> bool:
     """
     Build the MOVE TICKET OMIT PDF for a nest.
 
@@ -1058,12 +1059,30 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
             for w in stamps._stamp_first_page(doc[0], batch, nest_number, material,
                                               log, difficulty):
                 log(f"  WARNING: {w}")
+            # v2.2.0: the same designator into every sketch's empty MATL: cell
+            # (single home: 911_remove_ticket v1.4.0).
+            if hasattr(stamps, "fill_sketch_material"):
+                matl = stamps.fill_sketch_material(doc, material, log)
+                if matl.did_not_fit:
+                    log(f"  WARNING: material {material!r} did not fit the MATL: cell "
+                        f"on {matl.did_not_fit} sketch page(s)")
+
+        # v2.2.0: PART SKETCH pages whose graphic did not render are filled from
+        # THIS batch's WPDD SKETCHES folder (single home: 911_remove_ticket), and
+        # the .jpgs used land in {batch}\{nest}\Sketches\. Always on.
+        added = 0
+        if stamps and batch_folder is not None and hasattr(stamps, "restore_missing_sketches"):
+            sk = stamps.restore_missing_sketches(doc, batch_folder, nest_number, log)
+            added = sk.pages_added
+            if sk.unmatched:
+                log("  WARNING: PART SKETCH graphic missing and no sketch on file for: "
+                    + ", ".join(sk.unmatched))
 
         # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
         # from the source PDF, not dest_path, and the finally below closes it.
         sdk.save_pdf_atomic(doc, dest_path, close=False)
 
-        kept = total_pages - len(remove_pages)
+        kept = total_pages - len(remove_pages) + added
         log(f"  Drawings PDF: {dest_path.name} ({kept} page(s), removed {len(remove_pages)} MOVE TICKET page(s))")
         return True
 
@@ -2079,7 +2098,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                     unrated_nests.append(str(nest))
             _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log,
                                    batch=batch_number, material_hint=matl_type or "",
-                                   difficulty=difficulty)
+                                   difficulty=difficulty, batch_folder=batch_folder)
         else:
             log("  [skipped] PDF Stamping unchecked.")
 

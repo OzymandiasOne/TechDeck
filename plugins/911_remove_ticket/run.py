@@ -39,6 +39,7 @@ packet):
     printed on the packet.
 """
 
+import os
 import re
 import threading
 from pathlib import Path
@@ -57,7 +58,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.2.1"
+VERSION = "1.4.0"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # Century Gothic bold, under the Quality Requirements section. v1.2.0 made it
@@ -361,6 +362,308 @@ def _scan_document(doc, cancel_event=None):
     return indices, materials
 
 
+# ---------------------------------------------------------------------------
+# Missing sketch graphics (v1.3.0 - invoicing's asks 2026-09-04 + 09-14, her
+# answers 2026-09-17). SINGLE HOME for both this plugin and 911 Setup (which
+# loads this module as a sibling and calls restore_missing_sketches).
+#
+# EB's report server sometimes emits a PART SKETCH page whose drawing did not
+# render: the header block is intact (PART:, NOUN:, the work-order barcode
+# label, the nest barcode label) and where the picture should be it prints
+# "The resource of this report item is not reachable." CAD has been fixing
+# those by hand - snipping the .jpg out of the batch's WPDD SKETCHES folder and
+# pasting it onto the page. This does the same:
+#
+#   1. The batch's OWN sketch folder only - the direct child of the batch
+#      folder whose name has SKETCH or WPDD in it (the 2026-09-17 survey of 40
+#      batches: always exactly one, always "WPDD SKETCHES" plus a suffix). Never
+#      another batch's, even if the DYPN exists there - EB has no rev control,
+#      so a same-named drawing from another batch may be a different rev.
+#   2. Files are "{ORDER}_{DYPN}_{view}.jpg" (130 of 132 in the survey; the two
+#      others were stray PDFs) - ORDER is the work-order label on the page
+#      (FK394334), DYPN the "PART:" value, and a part can have several views.
+#      Match on DYPN; when the page also shows the ORDER label, only files with
+#      that ORDER count. EVERY view comes in.
+#   3. View 1 is drawn INTO the blank area of the broken page (what CAD does);
+#      views 2+ each get a page inserted right after it, with the same PART
+#      header line. A small grey caption names the source file, so anyone can
+#      trace where the picture came from.
+#   4. The matched .jpgs are also copied into "{batch}\\{nest}\\Sketches\\" so
+#      they are at hand without digging (her 4a/4b) - always on (4c).
+# A broken page with no matching sketch is left as-is and reported.
+# ---------------------------------------------------------------------------
+MISSING_GRAPHIC_TEXT = "not reachable"   # "The resource of this report item is not reachable."
+SKETCH_DIR_RE = re.compile(r"sketch|wpdd", re.I)
+SKETCH_FILE_RE = re.compile(r"^([A-Za-z0-9]+)_(.+)_(\d+)\.jpe?g$", re.I)
+SKETCHES_SUBDIR = "Sketches"
+_PART_RE = re.compile(r"PART:\s*(\S+)")
+_SKETCH_MARGIN = 36.0
+_CAPTION_COLOR = (0.45, 0.45, 0.45)
+
+
+class SketchRestore:
+    """What restore_missing_sketches did to one document."""
+
+    def __init__(self):
+        self.restored = []      # "DYPN (n view(s))" per fixed page
+        self.unmatched = []     # DYPNs of broken pages with no sketch on file
+        self.copied = 0         # .jpgs copied into the nest's Sketches folder
+        self.sketch_folder = None
+        self.pages_added = 0
+
+    @property
+    def broken(self):
+        return len(self.restored) + len(self.unmatched)
+
+
+def find_sketch_folder(batch_folder) -> Path | None:
+    """The batch's own sketch folder: a DIRECT child with SKETCH/WPDD in its name
+    (the one holding the most .jpgs if there are several). None if absent.
+    Deliberately never looks above or beside the batch folder."""
+    batch_folder = Path(batch_folder)
+    if not sdk.is_dir(batch_folder):
+        return None
+    best, best_n = None, -1
+    try:
+        for entry in os.scandir(sdk.long_path(batch_folder)):
+            if not sdk.is_dir(entry.path) or not SKETCH_DIR_RE.search(entry.name):
+                continue
+            try:
+                n = sum(1 for f in os.scandir(entry.path)
+                        if sdk.is_file(f.path) and SKETCH_FILE_RE.match(f.name))
+            except OSError:
+                n = 0
+            if n > best_n:
+                best, best_n = batch_folder / entry.name, n
+    except OSError:
+        return None
+    return best
+
+
+def index_sketch_files(sketch_folder) -> dict:
+    """{DYPN upper: [(order, view_no, path), ...] sorted by view}."""
+    idx = {}
+    try:
+        entries = list(os.scandir(sdk.long_path(sketch_folder)))
+    except OSError:
+        return idx
+    for f in entries:
+        m = SKETCH_FILE_RE.match(f.name)
+        if not m or not sdk.is_file(f.path):
+            continue
+        order, dypn, view = m.group(1), m.group(2), int(m.group(3))
+        idx.setdefault(dypn.upper(), []).append((order, view, Path(sketch_folder) / f.name))
+    for views in idx.values():
+        views.sort(key=lambda t: (t[1], t[0]))
+    return idx
+
+
+def _broken_sketch_pages(doc, cancel_event=None) -> list:
+    """[(page index, DYPN, page text upper)] for PART SKETCH pages whose graphic
+    did not render."""
+    out = []
+    for i, page in enumerate(doc):
+        if cancel_event is not None and i % 16 == 0 and cancel_event.is_set():
+            break
+        text = page.get_text("text") or ""
+        up = text.upper()
+        if "PART SKETCH" not in up or MISSING_GRAPHIC_TEXT not in text.lower():
+            continue
+        m = _PART_RE.search(text)
+        if m:
+            out.append((i, m.group(1).strip(), up))
+    return out
+
+
+def _sketch_views_for(page_text_upper, dypn, index) -> list:
+    """The sketch files for this page: DYPN match, narrowed to the page's own
+    work-order label when any file carries it."""
+    views = index.get(dypn.upper(), [])
+    with_order = [v for v in views if v[0].upper() in page_text_upper]
+    return with_order or views
+
+
+def _blank_area_bottom(page, top: float) -> float:
+    """Where the blank area under `top` ends: the first text below it (the
+    sketch page's footer row - NC PROG / MIL-SPEC / the barcodes) less a gap,
+    or the page margin when nothing sits below."""
+    below = [b[1] for b in page.get_text("blocks") if b[1] > top + 1 and b[4].strip()]
+    if below:
+        return min(below) - 8
+    return page.rect.height - _SKETCH_MARGIN
+
+
+def _draw_view(page, jpg: Path, caption: str, top: float, bottom: float):
+    """Fit the .jpg into the band between `top` and `bottom`, with a small grey
+    caption on the band's last line naming the source file."""
+    rect = page.rect
+    area = fitz.Rect(_SKETCH_MARGIN, top, rect.width - _SKETCH_MARGIN, bottom - 12)
+    sdk.ensure_local(jpg)                        # OneDrive placeholder (Rule 13)
+    page.insert_image(area, filename=sdk.long_path(jpg), keep_proportion=True)
+    page.insert_text((_SKETCH_MARGIN, bottom - 3), caption,
+                     fontsize=7, fontname="helv", color=_CAPTION_COLOR)
+
+
+def restore_missing_sketches(doc, batch_folder, nest: str, log,
+                             cancel_event=None) -> SketchRestore:
+    """Fill every PART SKETCH page whose graphic did not render from the batch's
+    own WPDD SKETCHES folder (see the block comment above), and copy the .jpgs
+    used into {batch}\\{nest}\\Sketches\\. Mutates `doc` in place (pages may be
+    inserted); the caller saves it. Never raises for a missing folder or file -
+    the result says what was and wasn't fixed."""
+    res = SketchRestore()
+    broken = _broken_sketch_pages(doc, cancel_event)
+    if not broken:
+        return res
+    batch_folder = Path(batch_folder)
+    res.sketch_folder = find_sketch_folder(batch_folder)
+    if res.sketch_folder is None:
+        res.unmatched = [dypn for _, dypn, _ in broken]
+        log(f"  WARNING: {len(broken)} PART SKETCH page(s) have no graphic and "
+            f"{batch_folder.name} has no WPDD SKETCHES folder to fill them from.")
+        return res
+    index = index_sketch_files(res.sketch_folder)
+    used = []
+
+    # Highest page first, so inserting pages never shifts a page still to do.
+    for idx, dypn, up in sorted(broken, key=lambda t: -t[0]):
+        sdk.raise_if_cancelled(cancel_event)
+        views = _sketch_views_for(up, dypn, index)
+        if not views:
+            res.unmatched.append(dypn)
+            log(f"  WARNING: page {idx + 1} PART SKETCH {dypn}: graphic missing and "
+                f"no {dypn} sketch in {res.sketch_folder.name}.")
+            continue
+        page = doc[idx]
+        n = len(views)
+        hits = page.search_for(MISSING_GRAPHIC_TEXT)
+        top = (hits[0].y1 + 10) if hits else page.rect.height / 3
+        bottom = _blank_area_bottom(page, top)
+        # Page objects go stale once the document gains a page (PyMuPDF), so
+        # take the size now and never touch `page` after the first new_page.
+        pw, ph = page.rect.width, page.rect.height
+        header = f"PART SKETCH - PART: {dypn}"
+        for k, (_order, _view, jpg) in enumerate(views, start=1):
+            caption = (f"Sketch view {k} of {n} added by TechDeck from "
+                       f"{res.sketch_folder.name}\\{jpg.name}")
+            if k == 1:
+                _draw_view(page, jpg, caption, top, bottom)
+            else:
+                extra = doc.new_page(pno=idx + k - 1, width=pw, height=ph)
+                extra.insert_text((_SKETCH_MARGIN, _SKETCH_MARGIN + 6),
+                                  f"{header} - view {k} of {n}", fontsize=11,
+                                  fontname="hebo")
+                _draw_view(extra, jpg, caption, _SKETCH_MARGIN + 24, ph - _SKETCH_MARGIN)
+                res.pages_added += 1
+            used.append(jpg)
+        res.restored.append(f"{dypn} ({n} view{'s' if n != 1 else ''})")
+        log(f"  page {idx + 1} PART SKETCH {dypn}: graphic restored from "
+            f"{res.sketch_folder.name} ({n} view{'s' if n != 1 else ''}).")
+
+    # Copies for quick reference, only where the nest has its own folder.
+    nest_dir = batch_folder / str(nest)
+    if used and sdk.is_dir(nest_dir):
+        dest_dir = nest_dir / SKETCHES_SUBDIR
+        for jpg in used:
+            dest = dest_dir / jpg.name
+            if sdk.exists(dest):
+                continue
+            try:
+                sdk.copy_resilient(jpg, dest, log=log)
+                res.copied += 1
+            except (OSError, RuntimeError) as exc:
+                log(f"  WARNING: could not copy {jpg.name} into {SKETCHES_SUBDIR}: {exc}")
+        if res.copied:
+            log(f"  copied {res.copied} sketch .jpg(s) into {nest_dir.name}\\{SKETCHES_SUBDIR}")
+    elif used:
+        log(f"  (no {nest_dir.name} folder under {batch_folder.name} - sketch .jpgs not copied)")
+    return res
+
+
+# ---------------------------------------------------------------------------
+# MATL: on every PART SKETCH (v1.4.0 - invoicing's ask 2026-09-14, answer via
+# Anthony 2026-09-17: "use the empty MATL box; whatever the designator is -
+# HSS, OSS, CRES316..."). Saco scribes from the part print, so the material the
+# cover already carries has to be on each sketch too. SINGLE HOME; 911 Setup
+# calls fill_sketch_material through the sibling loader.
+# ---------------------------------------------------------------------------
+SKETCH_MATL_LABEL = "MATL:"
+SKETCH_MATL_FONT = "tibo"        # Times-Bold, the form's own value look
+SKETCH_MATL_FONTSIZE = 10
+
+
+class SketchMaterialFill:
+    def __init__(self):
+        self.filled = 0        # sketches that got the designator written in
+        self.already = 0       # sketches whose MATL: already had a value - left alone
+        self.no_label = 0      # PART SKETCH pages with no MATL: label found
+        self.did_not_fit = 0   # value too long for the cell even at the fallback size
+
+
+def fill_sketch_material(doc, material: str, log, cancel_event=None) -> SketchMaterialFill:
+    """Write `material` (the cover's Material Type value - HSS, OSS, CRES316...)
+    into the empty MATL: cell of every PART SKETCH page. A cell that already
+    holds a value is never touched; no material -> nothing happens."""
+    res = SketchMaterialFill()
+    material = (material or "").strip()
+    if not material:
+        return res
+    for i, page in enumerate(doc):
+        if cancel_event is not None and i % 16 == 0 and cancel_event.is_set():
+            break
+        text = page.get_text("text") or ""
+        if "PART SKETCH" not in text.upper():
+            continue
+        words = page.get_text("words")
+        li = next((k for k, w in enumerate(words) if w[4] == SKETCH_MATL_LABEL), None)
+        if li is None:
+            res.no_label += 1
+            continue
+        if _same_line_value(words, li):
+            res.already += 1
+            continue
+        label = words[li]
+        cy = (label[1] + label[3]) / 2
+        # The cell ends where the next 'LABEL:' on the same line starts.
+        nxt = min((w[0] for w in words
+                   if w[0] > label[2] and w[1] < cy < w[3] and w[4].endswith(":")),
+                  default=label[2] + 90)
+        # +0.5 pt down so the value shares the baseline of the form's own
+        # values (VF / N / A on the same row) - measured on S038 P08356.
+        rect = fitz.Rect(label[2] + 4, label[1] + 0.5, nxt - 4, label[3] + 6)
+        placed = False
+        for size in (SKETCH_MATL_FONTSIZE, 8, 7):
+            if page.insert_textbox(rect, material, fontsize=size, fontname=SKETCH_MATL_FONT,
+                                   color=MATERIAL_COLOR, align=0) >= 0:
+                placed = True
+                break
+        if placed:
+            res.filled += 1
+        else:
+            res.did_not_fit += 1
+    parts = []
+    if res.filled:
+        parts.append(f"wrote '{material}' into MATL: on {res.filled} sketch page(s)")
+    if res.already:
+        parts.append(f"{res.already} already had a MATL: value - left as-is")
+    if res.did_not_fit:
+        parts.append(f"{res.did_not_fit} cell(s) too small for '{material}'")
+    if parts:
+        log("  " + "; ".join(parts))
+    return res
+
+
+def sketch_batch_folder_for(pdf_dir) -> Path | None:
+    """The batch folder a picked PDF folder belongs to, for the sketch lookup:
+    the folder itself or its parent - whichever directly holds the sketch
+    folder. None = don't look anywhere (never widen the search)."""
+    pdf_dir = Path(pdf_dir)
+    for candidate in (pdf_dir, pdf_dir.parent):
+        if find_sketch_folder(candidate) is not None:
+            return candidate
+    return None
+
+
 def _find_header(words, first, second):
     """Bounding box of the two-word header 'first second', or None."""
     for i, w in enumerate(words):
@@ -453,13 +756,15 @@ def _stamp_first_page(page, batch, nest, material, log, difficulty=None) -> list
 
 
 def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
-                 cancel_event=None, difficulty=None) -> tuple:
+                 cancel_event=None, difficulty=None, sketch_batch_folder=None) -> tuple:
     """
     Remove MOVE TICKET pages from pdf_path, stamp the first page, write to
     output_path. Returns (ok, warnings). Originals are never modified.
 
     ``difficulty`` is the SIMPLE/MEDIUM/DIFFICULT label for this nest, or None
-    to stamp no difficulty label at all.
+    to stamp no difficulty label at all. ``sketch_batch_folder`` (v1.3.0) is the
+    batch folder whose WPDD SKETCHES fills any PART SKETCH page that lost its
+    graphic; None skips that step.
     """
     warnings = []
     try:
@@ -488,6 +793,18 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         doc.delete_pages(sorted(remove_pages))
         warnings.extend(_stamp_first_page(doc[0], batch, pdf_path.stem, material,
                                           log, difficulty))
+        # v1.4.0: the same designator goes into every sketch's empty MATL: cell.
+        matl = fill_sketch_material(doc, material, log, cancel_event)
+        if matl.did_not_fit:
+            warnings.append(f"material {material!r} did not fit the MATL: cell on "
+                            f"{matl.did_not_fit} sketch page(s)")
+        sketches = None
+        if sketch_batch_folder is not None:
+            sketches = restore_missing_sketches(doc, sketch_batch_folder, pdf_path.stem,
+                                                log, cancel_event)
+            if sketches.unmatched:
+                warnings.append("PART SKETCH graphic missing and no sketch on file for: "
+                                + ", ".join(sketches.unmatched))
         # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
         # from pdf_path, not output_path, and the finally below closes it.
         sdk.save_pdf_atomic(doc, output_path, close=False)
@@ -495,6 +812,9 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         removed = len(remove_pages)
         kept = total - removed
         suffix = f", material '{material}'" if material else ""
+        if sketches is not None and sketches.restored:
+            suffix += (f", {len(sketches.restored)} sketch graphic(s) restored"
+                       + (f" (+{sketches.pages_added} page(s))" if sketches.pages_added else ""))
         log(f"  {pdf_path.name}: removed {removed} MOVE TICKET page(s), kept {kept}{suffix} -> {output_path.name}")
         return True, warnings
     except Exception as e:
@@ -623,6 +943,16 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
     output_dir = pdf_dir / "Move Ticket Omit"
     sdk.ensure_dir(output_dir)
 
+    # v1.3.0: PART SKETCH pages that lost their graphic are filled from THIS
+    # batch's WPDD SKETCHES folder only (the picked folder or its parent).
+    sketch_batch_folder = sketch_batch_folder_for(pdf_dir)
+    if sketch_batch_folder is None:
+        log("  No WPDD SKETCHES folder beside these PDFs - missing sketch graphics "
+            "will be reported, not filled.")
+    else:
+        log(f"  Sketch source for missing graphics: "
+            f"{find_sketch_folder(sketch_batch_folder).name} (in {sketch_batch_folder.name})")
+
     processed = 0
     skipped = 0
     errors = 0
@@ -660,7 +990,8 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
 
         try:
             ok, warnings = _process_pdf(pdf_path, output_path, batch, log,
-                                        cancel_event, difficulty)
+                                        cancel_event, difficulty,
+                                        sketch_batch_folder=sketch_batch_folder)
             if ok:
                 processed += 1
             else:

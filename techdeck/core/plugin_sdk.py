@@ -1262,17 +1262,28 @@ _DYPN_TUBE_TAG_RE = re.compile(r"[-_]+P[-_]+Tube\d*$", re.IGNORECASE)  # SigmaNe
 _DYPN_STEP_RE = re.compile(r"[-_]STEP$", re.IGNORECASE)
 _DYPN_DUP_SUFFIX_RE = re.compile(r"([-_])([A-Za-z0-9]+)[-_]\2$", re.IGNORECASE)  # -4A_4A -> -4A
 _DYPN_SEG_RE = re.compile(r"^(\d+)([A-Za-z]*)$")
+# The PO sometimes drops the hyphen between the drawing number and the sheet
+# segment - 'R8652362H11G-4A' for the file's 'R8652362-H11G-4A' (Batch 491:
+# 9 of 38 standard tubes reported missing AND needing review). Any run of
+# '-', '_' or spaces between segments is the same hyphen spelled differently.
+_DYPN_SHEET_HYPHEN_RE = re.compile(r"^([A-Z]{1,2}\d{4,})[-_ ]*(?=H\d)")
+_DYPN_SEP_RE = re.compile(r"[-_ ]+")
 
 
 def normalize_dypn(value) -> str:
     """A filename stem (or a raw PO DYPN) reduced to its canonical DYPN,
     upper-cased: the export tags ('-P-Tube2', '-STEP') and a duplicated suffix
-    ('-4A_4A') are peeled off. 'R6455461-H51-4A-STEP' -> 'R6455461-H51-4A'."""
+    ('-4A_4A') are peeled off, separators become single hyphens, and a hyphen
+    the PO dropped between the drawing number and the sheet segment is put
+    back. 'R6455461-H51-4A-STEP' -> 'R6455461-H51-4A';
+    'R8652362H11G-4A' -> 'R8652362-H11G-4A'."""
     s = str(value or "")
     s = _DYPN_TUBE_TAG_RE.sub("", s)
     s = _DYPN_STEP_RE.sub("", s)
     s = _DYPN_DUP_SUFFIX_RE.sub(r"\1\2", s)
-    return s.strip("-_ ").upper()
+    s = s.strip("-_ ").upper()
+    s = _DYPN_SEP_RE.sub("-", s)
+    return _DYPN_SHEET_HYPHEN_RE.sub(r"\1-", s)
 
 
 def split_dypn(part) -> tuple:

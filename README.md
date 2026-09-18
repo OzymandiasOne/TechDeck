@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.5 - The Manual
+# TechDeck v0.8.7.6 - Paperwork Complete
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,45 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.6 - Paperwork Complete
+
+### 911 SSPO Invoicing Prep fills in the invoice and prints it
+
+Once a nest has its packing slip / invoice number in the Working Forecast List
+(the PS/Inv column), the Invoice Supplement comes out with the invoice number and
+the ship date already filled in, and a PDF of the supplement lands in that nest's
+Invoicing Docs folder as `ASA Invoice No. XXXXX Supplement.pdf`, right next to
+where the Mie Trak invoice goes.
+
+- A nest with no PS/Inv yet gets a blank Invoice # and no PDF, and the popup at
+  the end names it. Fill the forecast in and run again, or print that one by hand.
+- The nest's pricing calcs come along too. For shapes, the Linear Inch Calcs
+  folder is zipped into Invoicing Docs. For plate, the LINEAR INCH CALC workbook is
+  copied in. A nest with neither is named in the popup and everything else still
+  runs.
+
+### Part sketches come out complete
+
+- **A PART SKETCH page that lost its drawing gets it back.** Sometimes the report
+  server prints a sketch page with "The resource of this report item is not
+  reachable" where the picture should be. 911 Setup and Remove Ticket now find that
+  part's sketch pictures in the batch's own WPDD SKETCHES folder and put them on the
+  page (extra views get their own page right after). The pictures are also copied
+  into a `Sketches` folder inside the nest folder. It only ever looks in the batch
+  you are working on, never in another batch.
+- **The material is on every sketch.** The same material that goes in the cover's
+  Material Type cell (HSS, OSS, CRES316 and so on) is now written into each PART
+  SKETCH's MATL: box, so the shop can scribe from the print.
+
+### 922 Setup
+
+- **Source material labels and Apply pallet labels to existing cards now start
+  checked.** Clear them on a run that should skip them.
+- **The BATCH PROGRESS card goes in the batch's HOLD bucket**, on its own, instead
+  of sitting among the order cards.
 
 ---
 
@@ -1115,6 +1154,7 @@ Explorer and on pinned shortcuts.
 | Batch Auditor | Read-only readiness check for a 911/922 batch: verifies orders/prints, LST files, run time, forming, pallets, and kitting, then renders a dashboard (KPI cards + charts) and a text summary - nothing is modified |
 | Customer DXF Analysis | Interactive DXF viewer for quoting - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut - plus automated customer-guideline offsets: enter the plate thickness (one "apply to all" box covers a whole batch) and every hole/cutout is increased per the customer's thickness band table (features already twice the plate thickness are left alone; below-minimum features get flagged) - holes and slots drawn as polylines included - review the result, then Save over the original or Export a copy. Batch mode queues a whole folder and steps through it one file at a time; manual amounts stay available via Adjust Dimensions, whose plate-thickness box fills in the guideline amount for you |
 | Sheet Metal Calculators | GUI plugin - a library of shop calculators behind a picker, each defined by a simple field-list + formula so new ones drop in easily. Calculators: Flat Length (bend-allowance flat length from K-factor, thickness, inside radius/ID/OD, and bend angle), Bend Deduction (OSSB / bend allowance / bend deduction), and Material Weight (by sheet size or area) |
+| MieTrak Tools | GUI plugin - a picker window of small MieTrak helpers. First tool: Hardware Code Generator, which builds the MieTrak hardware part number (HW + material + type + thread/length or screw size) from dropdowns and copies it to the clipboard. Ported from a colleague's standalone hardware-code exe so the numbers keep matching |
 | QR Code Generator | GUI plugin - dual-tab QR library and generator |
 
 ---

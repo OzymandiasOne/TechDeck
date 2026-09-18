@@ -22,6 +22,7 @@
   ],
   "progress_card": {
     "title_format": "BATCH {batch} PROGRESS",
+    "bucket_format": "BATCH {batch}: HOLD",
     "checklist": [
       "PO Download",
       "PO Setup",

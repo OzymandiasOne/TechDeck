@@ -49,8 +49,10 @@ picked folder seeds the family-shared cache so later stages never re-prompt
 for it.
 
 v2.1.1: pallet labels (PALLET 1/2/3) always apply - the Generate Teams Cards
-child toggle is "Apply source material labels" (default OFF), which is now
-the live enablement path for the previously deferred material-label branch.
+child toggle is "Apply source material labels", which is now the live
+enablement path for the previously deferred material-label branch.
+v2.7.1 (2026-09-17): that toggle now defaults ON - the floor is comfortable
+with the part-size labels, so a plain run applies them.
 
 v2.2.0: tickets scale with the stages run - each completed stage counts as a
 full system run (sdk.set_ticket_units), so Setup alone pays 5 tickets,
@@ -101,7 +103,9 @@ hand-making the same batch-prep to-do card (14 checklist items, same
 order every time) on every batch; it now rides in the same flow #1 payload
 as the order cards. Layout lives in card_template.json's `progress_card`;
 it is appended LAST in `tasks` so Planner's top-insert puts it at the top
-of the plain 'BATCH {n}' bucket, above the A-Z order cards. Flow #1's
+of the plain 'BATCH {n}' bucket, above the A-Z order cards. v2.7.2
+(C.D.'s ask 2026-09-16): it now lives on its own in the batch's HOLD
+bucket ('BATCH {n}: HOLD', `progress_card.bucket_format`). Flow #1's
 title dedupe makes a re-run skip it like any other card.
 """
 from __future__ import annotations
@@ -118,7 +122,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.7.0"
+VERSION = "2.7.2"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -376,7 +380,12 @@ def _build_progress_card(template: dict, batch: str) -> dict | None:
     if not spec:
         return None
     title_fmt = spec.get("title_format") or "BATCH {batch} PROGRESS"
-    bucket_fmt = template.get("bucket_format", "BATCH {batch}")
+    # v2.7.2 (C.D. 2026-09-16, via Anthony 2026-09-17): the card lives in
+    # the batch's HOLD bucket, on its own - `progress_card.bucket_format` in
+    # card_template.json ("BATCH {batch}: HOLD"). A template without it falls
+    # back to the plain batch bucket like before. Flow #1 has honored each
+    # task's own `bucket` since the 2026-09-09 edit, so no flow change.
+    bucket_fmt = spec.get("bucket_format") or template.get("bucket_format", "BATCH {batch}")
     return {
         "title": title_fmt.format(batch=batch),
         "bucket": bucket_fmt.format(batch=batch),
@@ -406,7 +415,8 @@ def _build_payload(template: dict, batch: str, cards: list[dict]
     # Posted in reverse so Planner (which top-inserts each new card) shows
     # the bucket A-Z top-to-bottom instead of Z-A. See _order_for_planner.
     tasks = _order_for_planner(cards)
-    # The PROGRESS card goes LAST so it lands on TOP of the bucket (v2.7.0).
+    # The PROGRESS card goes LAST (v2.7.0) - it is the only card in its HOLD
+    # bucket since v2.7.2, so order no longer matters, but last is harmless.
     progress = _build_progress_card(template, batch)
     if progress is not None:
         tasks.append(progress)
@@ -668,7 +678,7 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
     """The original 922 Setup stage: build the cards for the already-picked
     batch folder, POST (or dry-run) the webhook payload. Pallet labels
     (PALLET 1/2/3) ALWAYS apply; ``apply_materials_opt`` (the master window's
-    "Apply source material labels" toggle, default off) turns the
+    "Apply source material labels" toggle, default ON since v2.7.1) turns the
     source-material labels on for this run.
 
     ``repeat_folders`` (v2.6.0) is the set of order-folder names the MPL stage
@@ -1177,9 +1187,10 @@ def _dialog_groups() -> list:
     """The master window's plain-data spec (sdk.request_grouped_toggles).
 
     Pallet labels (PALLET 1/2/3) always apply — the only label toggle is the
-    source-MATERIAL labels, default OFF (the deferred-by-teammate-input
-    feature; the flow already handles the slots, so checking it is the whole
-    enablement for a run).
+    source-MATERIAL labels (part sizes like "4.0 X 4.0 X 0.50"), default ON
+    since v2.7.1 (2026-09-17, the floor is comfortable using them); it shipped
+    default OFF while the feature was new. The flow already handles the slots,
+    so the checkbox is the whole enablement for a run.
     """
     return [
         {"key": "folder_setup",
@@ -1195,11 +1206,11 @@ def _dialog_groups() -> list:
          "checked": True,
          "children": [
              {"key": "materials", "label": "Apply source material labels",
-              "checked": False},
+              "checked": True},
          ]},
         {"key": "pallet_labels",
          "label": "Apply pallet labels to existing cards",
-         "checked": False,
+         "checked": True,          # default ON since v2.7.1 (2026-09-17)
          "children": []},
         {"key": "pallet_stamper",
          "label": "Pallet Stamper",

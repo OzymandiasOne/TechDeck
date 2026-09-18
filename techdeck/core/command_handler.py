@@ -1048,7 +1048,7 @@ class CommandHandler:
         self._rogue_player = RogueModePlayer.get_or_create(self.settings, parent=parent)
         if is_first_open:
             self.console.append_game("Rogue Mode activated. Lock in.")
-            self.console.append_system("Tech Tip: Add music and build playlists in the settings tab!")
+            self.console.append_system("Tech Tip: Add music and build playlists in Settings > Personalization > Rogue Mode.")
         else:
             self.console.append_system("Rogue Mode player open.")
 

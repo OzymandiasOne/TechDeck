@@ -593,6 +593,30 @@ def run_sheet_metal(app, window, settings):
     steps.start()
 
 
+def run_mietrak(app, window, settings):
+    ensure_in_kit(settings, "mietrak_tools")
+    steps = Steps(app, window)
+    steps.add("start app", lambda: True,
+              lambda _: cam.start_app(app, window, "mietrak_tools"))
+
+    def hardware_code(win):
+        win._list.setCurrentRow(0)   # Hardware Code Generator
+        cam.pump(app, 300)
+        tool = win._active
+
+        def pick(combo, label):
+            combo.setCurrentIndex(combo.findText(label))
+        pick(tool.material, "ZINC PLATED, GRADE 5")
+        pick(tool.hardware, "CAP SCREW, HEX HEAD")
+        pick(tool.thread_size, "1/2-13")
+        pick(tool.length, "2")
+        cam.pump(app, 300)
+        shot(app, win, "mietrak_tools_hardware_code", settle_ms=500)
+        hard_exit(0, "mietrak done")
+    steps.add("window", lambda: toplevel(cls_name="MieTrakTools"), hardware_code)
+    steps.start()
+
+
 def run_qa_gemba(app, window, settings):
     ensure_in_kit(settings, "qa_gemba_analyzer")
     folder = fx_qa_gemba()
@@ -648,6 +672,7 @@ FLOWS = {
     "batch_auditor": run_batch_auditor,
     "qr": run_qr,
     "sheet_metal": run_sheet_metal,
+    "mietrak": run_mietrak,
     "qa_gemba": run_qa_gemba,
     "game": run_game,
 }

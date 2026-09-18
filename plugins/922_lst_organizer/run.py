@@ -52,7 +52,7 @@ except ModuleNotFoundError:
 
 import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-VERSION = "3.3.0"
+VERSION = "3.3.1"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -126,12 +126,20 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
         po_ws = wb[smap["po"]]
         hdr, cols = _scan_headers(po_ws, ["ORDER", "DYPN", "SOURCE MATERIAL"])
         dypn_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        respelled: List[Tuple[str, str]] = []
         for row in po_ws.iter_rows(min_row=hdr + 1, values_only=True):
             dypn = _cell(row, cols["DYPN"])
             if not dypn:
                 continue
-            dypn_map[_normalize_part(dypn)] = (
+            key = _normalize_part(dypn)
+            if key != dypn.upper():
+                respelled.append((dypn, key))
+            dypn_map[key] = (
                 _cell(row, cols["ORDER"]), _cell(row, cols["SOURCE MATERIAL"]))
+        if respelled and log:
+            raw, key = respelled[0]
+            log(f"  {len(respelled)} PO DYPN(s) respelled to the standard form "
+                f"before matching (e.g. {raw} -> {key}).")
 
         serial_desc: Dict[str, str] = {}
         if "source material" in smap:

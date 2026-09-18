@@ -290,7 +290,11 @@ def test_real_template_progress_card_matches_the_office_card():
     progress = mod._build_progress_card(template, "494")
     assert progress is not None, "card_template.json lost its progress_card"
     assert progress["title"] == "BATCH 494 PROGRESS"
-    assert progress["bucket"] == "BATCH 494"
+    # v2.7.2 (C.D. 2026-09-16): the card lives on its own in the HOLD bucket.
+    # It must be one of the buckets the flow find-or-creates, or the flow's
+    # fallback would quietly drop it back into the plain batch bucket.
+    assert progress["bucket"] == "BATCH 494: HOLD"
+    assert progress["bucket"] in [b.format(batch="494") for b in template["buckets"]]
     assert progress["checklist"] == _PROGRESS_CHECKLIST
     assert len(progress["checklist"]) <= 20, "Planner caps a checklist at 20"
     # Wired into the real payload, last so it lands on top.

@@ -165,20 +165,35 @@ def build_invoicing_fixtures():
     wb = Workbook()
     ws = wb.active
     ws.title = "911 Forecast"
-    for c, h in enumerate(["PO", "Line", "Batch /DR", "Nest"], 1):
+    # v2.3.0+: the app also reads Ship Date + PS/Inv (the invoice number), so
+    # the popup shows the clean path (invoice filled, PDF printed).
+    for c, h in enumerate(["PO", "Line", "Batch /DR", "Nest", "Ship Date", "PS/Inv"], 1):
         ws.cell(1, c, h)
-    for r, (po, line, batch, nest) in enumerate(
-            [(4500123456, "SSPO", "V060", "503991"),
-             (4500123456, "SSPO", "V060", "503992")], 2):
+    for r, (po, line, batch, nest, ship, inv) in enumerate(
+            [(4500123456, "SSPO", "V060", "503991", vpd, "55501"),
+             (4500123456, "SSPO", "V060", "503992", vpd, "55502")], 2):
         ws.cell(r, 1, po)
         ws.cell(r, 2, line)
         ws.cell(r, 3, batch)
         ws.cell(r, 4, nest)
+        ws.cell(r, 5, ship).number_format = "mm-dd-yy"
+        ws.cell(r, 6, inv)
     ws2 = wb.create_sheet("Complete 911 QTDR")
-    for c, h in enumerate(["PO", "Line", "Batch /DR", "Nest"], 1):
+    for c, h in enumerate(["PO", "Line", "Batch /DR", "Nest", "Ship Date", "PS/Inv"], 1):
         ws2.cell(1, c, h)
     wb.save(fdir / "Working Forecast List.xlsx")
-    return pricing, fdir
+
+    # v2.4.0: a practice 911 QTDR tree so the pricing calcs are found - one
+    # shape nest (calc-sheet folder) and one plate nest (LINEAR INCH CALC book).
+    qtdr = FIX_ROOT / "911 QTDR"
+    shape = qtdr / "V060" / "503991" / "Linear Inch Calcs"
+    shape.mkdir(parents=True)
+    for name in ("BK1144-3.xlsm", "BK1144-7.xlsm", "V060 503991 NC Baked Beans.xlsx"):
+        (shape / name).write_bytes(b"practice")
+    plate = qtdr / "V060" / "503992"
+    plate.mkdir(parents=True)
+    (plate / "503992 KINETIC LINEAR INCH CALC.xlsx").write_bytes(b"practice")
+    return pricing, fdir, qtdr
 
 
 def _award_packet_pdf(path: Path, orders: int, pieces: int, thickness: float,
@@ -449,9 +464,11 @@ def flow_bakedbeans():
 def flow_invoicing():
     from techdeck.core import plugin_sdk as sdk
 
-    pricing, fdir = build_invoicing_fixtures()
+    pricing, fdir, qtdr = build_invoicing_fixtures()
     _settings.set_plugin_setting("911_sspo_invoicing_prep", "forecast_dir",
                                  str(fdir))
+    _settings.set_plugin_setting("911_sspo_invoicing_prep", "qtdr_root",
+                                 str(qtdr))
     # The file pick is a native Explorer dialog (unphotographable); skip just
     # that pick. Explorer must not really open over the capture run either.
     sdk.pick_file_gui = (
