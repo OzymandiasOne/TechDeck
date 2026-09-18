@@ -1,5 +1,6 @@
 """Tests for ConsoleCat — the document animator behind both summons."""
 
+import pytest
 from PySide6.QtCore import QPoint
 
 from techdeck.ui.widgets.console import ConsoleWidget
@@ -606,8 +607,7 @@ def test_summon_link_retires_the_invitation(qapp, tmp_path, monkeypatch):
     if needle not in console.output.toPlainText():   # professional startup
         console.append_markup(
             "Your effort to remain what you are is what limits you. "
-            "I can help [[redefine|techdeck://cat/summon]] those limits. "
-            "Type /help for commands.")
+            "I can help [[redefine|techdeck://cat/summon]] those limits.")
     handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
     handler.handle_internal_link("techdeck://cat/summon")
     assert needle not in console.output.toPlainText()
@@ -623,3 +623,54 @@ def test_double_summon_is_ignored(qapp):
     cat.summon("matrix")     # already present — must be a no-op
     assert console.output.document().characterCount() == count
 
+
+
+# ── the arrival greeting ─────────────────────────────────────────────────
+
+def _arrived_cat(mode="materialize"):
+    console, cat = _cat()
+    cat.summon(mode)
+    cat._timer.stop()
+    cat._raise_timer.stop()
+    cat.render_at(1.0)
+    cat._go_live()
+    return console, cat
+
+
+@pytest.mark.parametrize("mode", ["materialize", "matrix"])
+def test_he_says_greetings_once_the_summon_lands(qapp, mode):
+    console, cat = _arrived_cat(mode)
+    assert cat._arrival_timer.isActive()        # a held beat first
+    assert cat._speech_lines is None
+    cat._arrival_timer.stop()
+    cat._greet_on_arrival()
+    assert cat._speech_lines == ["Greetings."]
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    assert "Greetings." in console.output.toPlainText()
+
+
+def test_arrival_greeting_never_stomps_a_reply_in_progress(qapp):
+    _console, cat = _arrived_cat()
+    cat.speak("You cannot silence")
+    cat._greet_on_arrival()
+    assert cat._speech_lines == ["You cannot silence"]
+
+
+def test_arrival_greeting_dies_with_him(qapp):
+    _console, cat = _arrived_cat()
+    cat.dismiss()
+    assert not cat._arrival_timer.isActive()
+    cat._greet_on_arrival()                     # a stray late fire
+    assert cat._speech_lines is None
+
+
+def test_startup_line_no_longer_repeats_the_input_bars_help_hint(
+        qapp, monkeypatch):
+    monkeypatch.setattr(ConsoleWidget, "_professional_mode",
+                        staticmethod(lambda: False))
+    monkeypatch.setattr(ConsoleWidget, "_puppet_master_live",
+                        staticmethod(lambda: True))
+    console = ConsoleWidget()
+    assert "/help" not in console.output.toPlainText()
+    assert "/help" in console.input_field.placeholderText()

@@ -294,8 +294,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         else:
             self._greeting_markup = (
                 "Your effort to remain what you are is what limits you. "
-                "I can help [[redefine|techdeck://cat/summon]] those limits. "
-                "Type /help for commands.")
+                "I can help [[redefine|techdeck://cat/summon]] those limits.")
             self.append_markup(self._greeting_markup,
                                link_color=self.GREETING_LINK_COLOR)
 

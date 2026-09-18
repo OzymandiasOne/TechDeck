@@ -912,6 +912,8 @@ _SPEECH_TICK_MS = 24        # per-character typing cadence
 _SPEECH_WRAP = 53           # speech wraps a touch inside the face width
 _SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
 _SPEECH_PAGE_HOLD_MS = 3200  # reading beat between pages of a long reply
+_ARRIVAL_LINE = "Greetings."    # his first word, once the summon has landed
+_ARRIVAL_BEAT_MS = 600      # a held stare before he speaks
 _CURSOR = "█"
 
 # The cat's font is PINNED — family and size — via QTextCharFormat on every
@@ -997,6 +999,9 @@ class ConsoleCat(QObject):
         self._page_timer = QTimer(self)
         self._page_timer.setSingleShot(True)
         self._page_timer.timeout.connect(self._next_page)
+        self._arrival_timer = QTimer(self)
+        self._arrival_timer.setSingleShot(True)
+        self._arrival_timer.timeout.connect(self._greet_on_arrival)
         self._speech_lines = None
         self._speech_pages = []
         self._speech_page = 0
@@ -1129,6 +1134,7 @@ class ConsoleCat(QObject):
         self.console.pinned_reserve = 0
         self._speech_timer.stop()
         self._page_timer.stop()
+        self._arrival_timer.stop()
         self._speech_pages = []
         self._speech_page = 0
         self._start_cur = None
@@ -1307,6 +1313,13 @@ class ConsoleCat(QObject):
         self._state = "live"
         self._install_filter()
         self._schedule_blink()
+        self._arrival_timer.start(_ARRIVAL_BEAT_MS)
+
+    def _greet_on_arrival(self):
+        """His first word, a beat after either summon finishes. Skipped if he
+        is already answering something the user typed during that beat."""
+        if self._state == "live" and self._speech_lines is None:
+            self.speak(_ARRIVAL_LINE)
 
     # ── live behaviour ───────────────────────────────────────────────────
 
