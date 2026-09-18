@@ -1,85 +1,89 @@
-"""Halloween dressing on top of the app: corner cobwebs + one scurrying crawly.
+"""Halloween dressing on top of the app: corner cobwebs + one darting crawly.
 
 Two cobwebs sit in the top-right (small) and bottom-left (large) corners of the
-main window, and every few minutes ONE creepy crawly crosses the window - a
-spider, a roach or a centipede, never two at once. A spider sometimes lowers
-itself from the top on a thread instead.
+main window, and at unpredictable moments ONE creepy crawly bolts across it,
+never two at once. A spider sometimes drops from the top on a thread instead.
 
-Everything here is a click-through child overlay of the main window (the
-seance Disturbance contract): no stylesheet swap, no layout participation, so
-removing it leaves the app exactly as it was and nothing can ever eat a click.
+REALISTIC, not pixel art (his call, 2026-09-18; the pixel first draft is commit
+20c0b4e1).
+  * The bugs are real 3D, rendered in Blender by tools/blender_art/critters.py
+    into assets/critters/ as top-down RGBA frame loops (fur, jointed legs, a
+    baked contact shadow). This module only plays them: a flipbook advanced by
+    DISTANCE travelled - one loop is exactly `loop_travel_px` of ground, so no
+    foot skates - turned smoothly to face any heading.
+  * The webs are hairline silk drawn once with an antialiased QPainter -
+    sagging rings, snapped strands, dust at the joints.
+
+FAST AND SPORADIC (also his call): it is meant to catch you off guard. A bug
+moves in short violent darts at varying speed, snaps to a new heading for each
+one, freezes for anything from a blink to a couple of seconds, and now and then
+darts the wrong way. The visits themselves come at irregular gaps, sometimes
+with an encore seconds after the last one left.
+
+Everything is a click-through child overlay of the main window (the seance
+Disturbance contract): no stylesheet swap, no layout participation, so removing
+it leaves the app exactly as it was and nothing can ever eat a click.
 
 Gate: the season (constants.halloween_active) AND the halloween theme being the
 active theme. Switching to any other theme is the off switch - someone who has
 opted out of the look has opted out of bugs on their screen too. Re-checked at
 USE time (every spawn, every theme change), never cached, so a session left
 open across Nov 2 quietly goes back to normal.
-
-The art is .tdart in assets/sprites/critters/ and opens in Pixel Studio like any
-other sprite. Bugs are drawn HEAD-UP, seen from above; this module turns them in
-quarter turns to face the way they run (a quarter turn keeps pixels crisp).
 """
 from __future__ import annotations
 
+import json
 import logging
 import math
 import random
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QElapsedTimer, QEvent, QObject, QPointF, QTimer, Qt, Signal)
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap, QTransform
+    QElapsedTimer, QEvent, QObject, QPointF, QRectF, QTimer, Qt, Signal)
+from PySide6.QtGui import (
+    QColor, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
-
-from techdeck.ui import pixel_art
 
 log = logging.getLogger(__name__)
 
-CELL = 3                        # px per art cell, bugs
-# Finer than the bugs, and a touch see-through: the big web sits over the
-# sidebar's "My Account" / "Submit Feedback", which must stay readable.
-WEB_CELL = 2                    # px per art cell, cobwebs
-WEB_OPACITY = 0.8
-OUTLINE = "#0A0610"             # bugs only: carries them over the orange cards
-THREAD = QColor("#E6DEF5")      # the dangling spider's silk (the web's white)
-
-# ── when ─────────────────────────────────────────────────────────────────
-FIRST_MS = (45_000, 120_000)    # first visitor after launch
-EVERY_MS = (180_000, 480_000)   # then one every 3-8 minutes
+# ── knobs ────────────────────────────────────────────────────────────────
+SCALE = 1.0                     # size of every bug (1.0 = 128 px sprite box)
+WEB_SMALL_PX = 150              # top-right
+WEB_LARGE_PX = 250              # bottom-left
+WEB_SEED = 13                   # same webs every launch
+FIRST_MS = (20_000, 90_000)     # first visitor after launch
+SOON_MS = (90_000, 240_000)     # most gaps between visits...
+LATER_MS = (240_000, 540_000)   # ...and the long quiet ones
+LATER_CHANCE = 0.40
+ENCORE_MS = (3_000, 9_000)      # "it's back": right after one leaves
+ENCORE_CHANCE = 0.20
 DANGLE_CHANCE = 0.35            # a spider's odds of coming down on a thread
+BORED_S = 14.0                  # after this it stops fooling around and leaves
+MAX_TRIP_S = 30.0               # nothing stays forever, whatever happens
+# The legs cannot usefully cycle faster than this at 60 fps: past it a walk
+# loop strobes instead of blurring. Feet skate a little at full sprint, which
+# nobody can see at that speed; below it they are planted exactly.
+MAX_GAIT_FRAMES_PER_S = 120.0
 
-# ── who: frames, speed px/s, scurry burst s, freeze s, ms per leg frame ──
+_SILK = QColor(233, 230, 242)
+
+
+@dataclass(frozen=True)
+class Kind:
+    speed: float                    # px/s at SCALE 1, before per-dart variety
+    dart: tuple[float, float]       # seconds per dart
+    swerve: tuple[float, float]     # radians off its line, per dart
+    wild: float                     # chance a dart goes badly the wrong way
+
+
+# A kind only ever appears if its frames exist in assets/critters/.
 KINDS = {
-    "spider":    dict(frames=2, speed=240, burst=(0.5, 1.3), rest=(0.15, 0.5),
-                      step_ms=70),
-    "roach":     dict(frames=2, speed=340, burst=(0.3, 0.9), rest=(0.25, 0.8),
-                      step_ms=55),
-    # a centipede never freezes: it pours along
-    "centipede": dict(frames=4, speed=150, burst=(9.0, 9.0), rest=(0.0, 0.0),
-                      step_ms=85),
+    "spider": Kind(560.0, (0.12, 0.55), (0.25, 1.10), 0.18),
+    "roach": Kind(680.0, (0.10, 0.45), (0.30, 1.25), 0.22),
+    "centipede": Kind(300.0, (0.40, 1.10), (0.20, 0.70), 0.08),
 }
-WEBS = {"web_small": "tr", "web_large": "bl"}
-
-
-def _critter_dir() -> Path:
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        base = Path(sys._MEIPASS) / "assets"
-    else:
-        base = Path(__file__).resolve().parents[3] / "assets"
-    return base / "sprites" / "critters"
-
-
-def _load(name: str, scale: int, outline: bool) -> QPixmap | None:
-    """One sprite, or None (logged) if it is missing from the build - decor
-    that cannot load simply does not appear; it must never break the app."""
-    try:
-        data = pixel_art.load(_critter_dir() / f"{name}.tdart")
-        return pixel_art.render(data, scale=scale, outline=outline,
-                                outline_color=OUTLINE)
-    except Exception as exc:
-        log.warning("halloween decor: could not load %s (%s)", name, exc)
-        return None
 
 
 def decor_active(settings=None) -> bool:
@@ -96,6 +100,53 @@ def decor_active(settings=None) -> bool:
         return False
 
 
+# ── the rendered clips ───────────────────────────────────────────────────
+def _critter_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(getattr(sys, "_MEIPASS")) / "assets"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets"
+    return base / "critters"
+
+
+@dataclass
+class Clip:
+    frames: list
+    size: int                       # px the frames were rendered at
+    loop_travel_px: float           # ground covered by one loop, at `size`
+
+
+_CLIPS: dict[tuple[str, str], Clip | None] = {}
+
+
+def load_clip(kind: str, name: str) -> Clip | None:
+    """Frames for one clip, or None (logged once) if it is not in the build.
+    Loaded on first use, never at startup - startup feel is protected."""
+    key = (kind, name)
+    if key not in _CLIPS:
+        clip = None
+        try:
+            folder = _critter_dir()
+            meta = json.loads((folder / f"{kind}_{name}.json").read_text(
+                encoding="utf-8"))
+            frames = []
+            for i in range(int(meta["frames"])):
+                pix = QPixmap(str(folder / f"{kind}_{name}_{i:02d}.png"))
+                if pix.isNull():
+                    raise OSError(f"frame {i} missing")
+                frames.append(pix)
+            clip = Clip(frames, int(meta["size"]), float(meta["loop_travel_px"]))
+        except Exception as exc:
+            log.warning("halloween decor: no %s/%s clip (%s)", kind, name, exc)
+        _CLIPS[key] = clip
+    return _CLIPS[key]
+
+
+def available_kinds() -> list[str]:
+    return [k for k in KINDS if load_clip(k, "walk") is not None]
+
+
+# ── overlays ─────────────────────────────────────────────────────────────
 class _Overlay(QWidget):
     """Click-through, background-less child of the host window."""
 
@@ -106,7 +157,118 @@ class _Overlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
-# ── cobwebs ──────────────────────────────────────────────────────────────
+def render_web(size: int, corner: str, seed: int = WEB_SEED) -> QPixmap:
+    """One corner cobweb, drawn once. Built in 'web space' (u, v measured out
+    of the corner along the two walls) and mapped into the pixmap per corner,
+    so that GRAVITY - the droop of a snapped strand, the hang of a stray
+    thread - always points down the screen whichever corner it is in."""
+    rng = random.Random(seed * 7919 + size)
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    flip_x, flip_y = corner in ("tr", "br"), corner in ("bl", "br")
+
+    def px(u, v):
+        return QPointF(size - u if flip_x else u, size - v if flip_y else v)
+
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    # dusty haze packed into the corner
+    haze = QRadialGradient(px(0, 0), size * 0.55)
+    haze.setColorAt(0.0, QColor(233, 230, 242, 30))
+    haze.setColorAt(1.0, QColor(233, 230, 242, 0))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(haze)
+    p.drawRect(0, 0, size, size)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+    def strand(path: QPainterPath, alpha: float, width: float = 1.0):
+        glow = QColor(_SILK)
+        glow.setAlphaF(min(1.0, alpha * 0.16))
+        p.setPen(QPen(glow, width + 2.4))
+        p.drawPath(path)
+        core = QColor(_SILK)
+        core.setAlphaF(min(1.0, alpha))
+        p.setPen(QPen(core, width))
+        p.drawPath(path)
+
+    n = 8 if size < 200 else 10
+    angles = [math.radians(3 + 84 * i / (n - 1) + rng.uniform(-2.5, 2.5))
+              for i in range(n)]
+    reach = []
+    for i in range(n):
+        mid = 1 - abs(i - (n - 1) / 2) / ((n - 1) / 2)       # 0 at the walls
+        reach.append(size * (0.97 - 0.20 * mid) * rng.uniform(0.9, 1.0))
+
+    def at(i, r):
+        r = min(r, reach[i])
+        return (r * math.cos(angles[i]), r * math.sin(angles[i]))
+
+    # spokes: taut, but never ruler-straight
+    for i in range(n):
+        u, v = at(i, reach[i])
+        bow = rng.uniform(-0.03, 0.03) * reach[i]
+        path = QPainterPath(px(0, 0))
+        path.quadTo(px(u * 0.5 - math.sin(angles[i]) * bow,
+                       v * 0.5 + math.cos(angles[i]) * bow), px(u, v))
+        strand(path, rng.uniform(0.55, 0.85))
+
+    rings = 7 if size < 200 else 10
+    joints = []
+    for kk in range(1, rings + 1):
+        r = size * (0.10 + 0.84 * (kk / rings) ** 1.12) * rng.uniform(0.96, 1.04)
+        for i in range(n - 1):
+            roll = rng.random()
+            if roll < 0.09:
+                continue                                     # a gap
+            (u0, v0), (u1, v1) = at(i, r), at(i + 1, r)
+            am = (angles[i] + angles[i + 1]) / 2
+            sag = rng.uniform(0.80, 0.91)
+            a, b = px(u0, v0), px(u1, v1)
+            if roll < 0.16:
+                # snapped at one end: it hangs from the other, straight down
+                end = QPointF(a.x() + rng.uniform(-3, 3),
+                              a.y() + r * rng.uniform(0.10, 0.22))
+                path = QPainterPath(a)
+                path.quadTo(QPointF((a.x() + end.x()) / 2 + rng.uniform(-4, 4),
+                                    (a.y() + end.y()) / 2), end)
+                strand(path, rng.uniform(0.30, 0.5), 0.9)
+                continue
+            path = QPainterPath(a)
+            path.quadTo(px(r * sag * math.cos(am), r * sag * math.sin(am)), b)
+            strand(path, rng.uniform(0.35, 0.8))
+            joints.append(a)
+    # the messy tangle right in the corner
+    for _ in range(16):
+        r0, r1 = rng.uniform(0.02, 0.2) * size, rng.uniform(0.02, 0.2) * size
+        a0, a1 = rng.uniform(0, math.pi / 2), rng.uniform(0, math.pi / 2)
+        path = QPainterPath(px(r0 * math.cos(a0), r0 * math.sin(a0)))
+        path.lineTo(px(r1 * math.cos(a1), r1 * math.sin(a1)))
+        strand(path, rng.uniform(0.18, 0.4), 0.8)
+    # stray threads hanging off the outer edge
+    for _ in range(5 if size < 200 else 8):
+        i = rng.randrange(1, n - 1)
+        u, v = at(i, reach[i] * rng.uniform(0.7, 1.0))
+        a = px(u, v)
+        end = QPointF(a.x() + rng.uniform(-8, 8),
+                      a.y() + size * rng.uniform(0.08, 0.2))
+        path = QPainterPath(a)
+        path.quadTo(QPointF(a.x() + rng.uniform(-10, 10),
+                            (a.y() + end.y()) / 2), end)
+        strand(path, rng.uniform(0.2, 0.38), 0.8)
+    # dust caught where threads cross
+    p.setPen(Qt.PenStyle.NoPen)
+    for j in joints:
+        if rng.random() < 0.22:
+            c = QColor(_SILK)
+            c.setAlphaF(rng.uniform(0.45, 0.8))
+            p.setBrush(c)
+            r = rng.uniform(0.7, 1.5)
+            p.drawEllipse(j, r, r)
+    p.end()
+    return pix
+
+
 class CornerWeb(_Overlay):
     def __init__(self, host, pixmap: QPixmap, corner: str):
         super().__init__(host)
@@ -132,17 +294,19 @@ class CornerWeb(_Overlay):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setOpacity(WEB_OPACITY)
         painter.drawPixmap(0, 0, self._pix)
         painter.end()
 
 
-# ── one crawly ───────────────────────────────────────────────────────────
+def _turn_toward(current: float, target: float, max_step: float) -> float:
+    delta = (target - current + math.pi) % math.tau - math.pi
+    if abs(delta) <= max_step:
+        return target
+    return current + math.copysign(max_step, delta)
+
+
 class Critter(_Overlay):
     """One bug making one trip. Deletes itself when it leaves the window."""
-
-    # heading -> quarter turns clockwise from the HEAD-UP art
-    _TURNS = {"up": 0, "right": 1, "down": 2, "left": 3}
 
     # A SIGNAL, not a stored callback: a bound method of the decor kept here
     # made decor <-> critter a reference cycle, which only the garbage
@@ -150,74 +314,77 @@ class Critter(_Overlay):
     # the QApplication was gone (heap corruption, exit 127, every test green).
     gone = Signal(object)
 
-    def __init__(self, host, kind: str, frames: list[QPixmap],
-                 rng: random.Random, dangle: bool = False):
+    TURN_RATE = 22.0                # rad/s: it snaps round, it does not steer
+
+    def __init__(self, host, kind: str, walk: Clip, rng: random.Random,
+                 hang: Clip | None = None):
         super().__init__(host)
         self._host = host
         self.kind = kind
         self._spec = KINDS[kind]
         self._rng = rng
         self._gone = False
-        self.dangle = dangle
-        self._frame = 0
-        self._frame_ms = 0.0
+        self.dangle = hang is not None
+        self._clip = hang if hang is not None else walk
+        self._px = 128.0 * SCALE                         # sprite box on screen
+        self._loop_px = self._clip.loop_travel_px * self._px / self._clip.size
+        self._gait = 0.0                                 # fractional frame
+        self._age = 0.0
+        self._speed = 0.0
         self._clock = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._tick)
-        if dangle:
-            self._plan_dangle(frames)
+        if self.dangle:
+            self._plan_dangle()
         else:
-            self._plan_run(frames)
+            self._plan_run()
+        self._apply()
 
     # -- planning ----------------------------------------------------------
-    def _turned(self, frames, heading):
-        turn = QTransform().rotate(90 * self._TURNS[heading])
-        return [f.transformed(turn) for f in frames]
-
-    def _plan_run(self, frames):
-        host, rng = self._host, self._rng
-        self.heading = rng.choice(("right", "left", "right", "left",
-                                   "down", "up"))
-        self._frames = self._turned(frames, self.heading)
-        w, h = self._frames[0].width(), self._frames[0].height()
-        self.setFixedSize(w, h)
-        if self.heading in ("right", "left"):
-            lane = rng.uniform(0.08, 0.92) * (host.height() - h)
-            start = -w if self.heading == "right" else host.width()
-            self._pos = QPointF(start, lane)
-            self._span = host.width() + w
+    def _plan_run(self):
+        host, rng, m = self._host, self._rng, self._px * 0.75
+        w, h = host.width(), host.height()
+        edge = rng.choice(("left", "right", "left", "right", "top", "bottom"))
+        if edge in ("left", "right"):
+            self._x = -m if edge == "left" else w + m
+            self._y = rng.uniform(0.1, 0.9) * h
+            self._exit = ((w + m if edge == "left" else -m),
+                          rng.uniform(0.1, 0.9) * h)
         else:
-            lane = rng.uniform(0.08, 0.92) * (host.width() - w)
-            start = -h if self.heading == "down" else host.height()
-            self._pos = QPointF(lane, start)
-            self._span = host.height() + h
-        self._lane = lane
+            self._y = -m if edge == "top" else h + m
+            self._x = rng.uniform(0.1, 0.9) * w
+            self._exit = (rng.uniform(0.1, 0.9) * w,
+                          (h + m if edge == "top" else -m))
+        self.heading = self._line()
+        self._aim = self.heading
         self._travelled = 0.0
-        self._wander_amp = rng.uniform(6.0, 22.0)
-        self._wander_len = rng.uniform(260.0, 520.0)
-        self._wander_phase = rng.uniform(0.0, math.tau)
+        self._entered = False
+        # the first dart is a long straight one: it has to get on screen
         self._moving = True
-        self._phase_left = rng.uniform(*self._spec["burst"])
+        self._want = self._spec.speed * SCALE
+        self._phase_left = rng.uniform(0.35, 0.6)
 
-    def _plan_dangle(self, frames):
+    def _line(self) -> float:
+        return math.atan2(self._exit[1] - self._y, self._exit[0] - self._x)
+
+    def _plan_dangle(self):
         host, rng = self._host, self._rng
-        self.heading = "down"
-        self._down = self._turned(frames, "down")
-        self._up = self._turned(frames, "up")
-        self._frames = self._down
-        self._bw, self._bh = self._down[0].width(), self._down[0].height()
-        x = rng.uniform(0.12, 0.88) * (host.width() - self._bw)
-        self._pos = QPointF(x, -self._bh)
+        self._anchor_x = rng.uniform(0.15, 0.85) * host.width()
+        self._x, self._y = self._anchor_x, -self._px
+        self.heading = math.pi / 2                       # head down
         self._drop_to = rng.uniform(0.30, 0.62) * host.height()
+        # it comes down in jerks: fall, snatch, fall
+        self._halts = sorted(rng.uniform(0.2, 0.85) * self._drop_to
+                             for _ in range(rng.choice((1, 2, 2, 3))))
         self._stage = "drop"
-        self._hang_left = rng.uniform(1.2, 2.4)
+        self._hold = 0.0
+        self._hang_left = rng.uniform(0.9, 2.4)
         self._moving = True
 
     # -- life --------------------------------------------------------------
     def start(self):
-        self._apply()
         self.show()
         self.raise_()
         self._clock.start()
@@ -241,84 +408,130 @@ class Critter(_Overlay):
         """One step of `dt` seconds (also the test seam)."""
         if self._gone:
             return
+        self._age += dt
+        if self._age > MAX_TRIP_S:
+            self.leave()
+            return
         if self.dangle:
             self._advance_dangle(dt)
         else:
             self._advance_run(dt)
-        if self._moving:
-            self._frame_ms += dt * 1000.0
-            if self._frame_ms >= self._spec["step_ms"]:
-                self._frame_ms = 0.0
-                self._frame = (self._frame + 1) % len(self._frames)
-                self.update()
         if not self._gone:
             self._apply()
+            self.update()
+
+    def _next_phase(self):
+        spec, rng = self._spec, self._rng
+        bored = self._age > BORED_S
+        if self._moving and not bored:
+            # freeze: mostly a blink, sometimes long enough to make them look
+            self._moving = False
+            roll = rng.random()
+            self._phase_left = (rng.uniform(0.08, 0.40) if roll < 0.70 else
+                                rng.uniform(0.50, 1.20) if roll < 0.95 else
+                                rng.uniform(1.50, 2.60))
+            return
+        self._moving = True
+        self._want = spec.speed * SCALE * (1.5 if bored
+                                           else rng.uniform(0.75, 1.5))
+        line = self._line()
+        if bored:
+            self._aim, self._phase_left = line, 5.0
+        elif self._travelled > 250.0 and rng.random() < spec.wild:
+            # the wrong way, hard, and not for long
+            self._aim = line + rng.choice((-1, 1)) * rng.uniform(1.6, 2.6)
+            self._phase_left = rng.uniform(0.10, 0.22)
+        else:
+            self._aim = line + rng.choice((-1, 1)) * rng.uniform(*spec.swerve)
+            self._phase_left = rng.uniform(*spec.dart)
 
     def _advance_run(self, dt):
-        spec, rng = self._spec, self._rng
         self._phase_left -= dt
         if self._phase_left <= 0.0:
-            # scurry, freeze, scurry: what makes it read as alive
-            self._moving = not self._moving or spec["rest"][1] <= 0.0
-            self._phase_left = rng.uniform(
-                *(spec["burst"] if self._moving else spec["rest"]))
-        if not self._moving:
-            return
-        self._travelled += spec["speed"] * dt
-        if self._travelled >= self._span:
+            self._next_phase()
+        want = self._want if self._moving else 0.0
+        self._speed += (want - self._speed) * min(1.0, dt * 30.0)   # it BOLTS
+        self.heading = _turn_toward(self.heading, self._aim, self.TURN_RATE * dt)
+        dist = self._speed * dt
+        self._travelled += dist
+        self._x += math.cos(self.heading) * dist
+        self._y += math.sin(self.heading) * dist
+        self._step_gait(dist, dt)
+        inside = self._box().intersects(QRectF(self._host.rect()))
+        if inside:
+            self._entered = True
+        elif self._entered:
             self.leave()
-            return
-        drift = self._wander_amp * math.sin(
-            self._wander_phase + math.tau * self._travelled / self._wander_len)
-        sign = 1 if self.heading in ("right", "down") else -1
-        if self.heading in ("right", "left"):
-            start = -self.width() if sign > 0 else self._host.width()
-            self._pos = QPointF(start + sign * self._travelled,
-                                self._lane + drift)
-        else:
-            start = -self.height() if sign > 0 else self._host.height()
-            self._pos = QPointF(self._lane + drift,
-                                start + sign * self._travelled)
+
+    def _step_gait(self, dist, dt):
+        n = len(self._clip.frames)
+        frames = dist / self._loop_px * n
+        self._gait = (self._gait + min(frames, MAX_GAIT_FRAMES_PER_S * dt)) % n
 
     def _advance_dangle(self, dt):
-        speed = self._spec["speed"] * 0.55
+        fall = self._spec.speed * SCALE * 0.8
+        depth = max(0.0, self._y)
+        self._x = self._anchor_x + math.sin(self._age * 1.5) * 7.0 * min(
+            1.0, depth / 300.0)
+        n = len(self._clip.frames)
+        self._gait = (self._gait + dt * 14.0) % n        # the legs never rest
         if self._stage == "drop":
-            self._moving = True
-            self._pos.setY(self._pos.y() + speed * dt)
-            if self._pos.y() >= self._drop_to:
+            if self._hold > 0.0:
+                self._hold -= dt
+                return
+            self._y += fall * dt
+            if self._halts and self._y >= self._halts[0]:
+                self._halts.pop(0)
+                self._hold = self._rng.uniform(0.12, 0.5)
+            if self._y >= self._drop_to:
                 self._stage = "hang"
         elif self._stage == "hang":
-            self._moving = False
             self._hang_left -= dt
             if self._hang_left <= 0.0:
+                self._stage, self._turn = "turn", 0.0
+        elif self._stage == "turn":
+            self._turn = min(1.0, self._turn + dt / 0.22)
+            self.heading = math.pi / 2 + math.pi * self._turn
+            if self._turn >= 1.0:
                 self._stage = "climb"
-                self._frames = self._up
-                self.update()
         else:
-            self._moving = True
-            self._pos.setY(self._pos.y() - speed * 1.5 * dt)
-            if self._pos.y() <= -self._bh:
+            self._y -= fall * 1.5 * dt                   # and it is GONE
+            if self._y <= -self._px:
                 self.leave()
 
-    def _apply(self):
+    # -- geometry + paint --------------------------------------------------
+    def _box(self) -> QRectF:
+        r = self._px * 0.75                              # room to turn in
+        box = QRectF(self._x - r, self._y - r, 2 * r, 2 * r)
         if self.dangle:
-            # the widget runs from the top edge down to the spider, so the
-            # thread it hangs from can be painted in the same widget
-            bottom = max(1, int(self._pos.y()) + self._bh)
-            self.setGeometry(int(self._pos.x()), 0, self._bw, bottom)
-        else:
-            self.move(int(self._pos.x()), int(self._pos.y()))
+            box.setTop(0.0)
+            box = box.united(QRectF(self._anchor_x - 2, 0, 4, 1))
+        return box
+
+    def _apply(self):
+        self.setGeometry(self._box().toAlignedRect())
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        pix = self._frames[self._frame % len(self._frames)]
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.translate(-self.x(), -self.y())          # window coordinates
         if self.dangle:
-            painter.setPen(QPen(THREAD, 1))
-            mid = self.width() // 2
-            painter.drawLine(mid, 0, mid, max(0, self.height() - self._bh))
-            painter.drawPixmap(0, self.height() - self._bh, pix)
-        else:
-            painter.drawPixmap(0, 0, pix)
+            back = self._px * 0.30                       # the spinnerets
+            silk = QColor(_SILK)
+            silk.setAlpha(175)
+            painter.setPen(QPen(silk, 1.0))
+            painter.drawLine(
+                QPointF(self._anchor_x, 0),
+                QPointF(self._x - math.cos(self.heading) * back,
+                        self._y - math.sin(self.heading) * back))
+        frames = self._clip.frames
+        pix = frames[int(self._gait) % len(frames)]
+        painter.translate(self._x, self._y)
+        painter.rotate(math.degrees(self.heading))       # the art faces +x
+        half = self._px / 2
+        painter.drawPixmap(QRectF(-half, -half, self._px, self._px), pix,
+                           QRectF(pix.rect()))
         painter.end()
 
 
@@ -334,7 +547,6 @@ class HalloweenDecor(QObject):
         self._webs: list[CornerWeb] = []
         self._critter: Critter | None = None
         self._last_kind = None
-        self._frames: dict[str, list[QPixmap]] = {}
         self._clock = QTimer(self)
         self._clock.setSingleShot(True)
         self._clock.timeout.connect(self._on_clock)
@@ -367,53 +579,59 @@ class HalloweenDecor(QObject):
         return self._critter
 
     def spawn(self, kind: str | None = None, dangle: bool | None = None):
-        """Send one out NOW. Returns it, or None if one is already out, the
-        kind is unknown, or its art is missing. `/crawl` and the clock both
-        come through here, so 'one at a time' lives in exactly one place."""
+        """Send one out NOW. Returns it, or None if one is already out, or the
+        kind is unknown / not rendered yet. `/crawl` and the clock both come
+        through here, so 'one at a time' lives in exactly one place."""
         if self._critter is not None:
             return None
+        ready = available_kinds()
         if kind is None:
-            choices = [k for k in KINDS if k != self._last_kind] or list(KINDS)
+            choices = [k for k in ready if k != self._last_kind] or ready
+            if not choices:
+                return None
             kind = self._rng.choice(choices)
-        if kind not in KINDS:
+        if kind not in ready:
             return None
-        frames = self._frames_for(kind)
-        if not frames:
-            return None
+        walk = load_clip(kind, "walk")
+        hang = load_clip(kind, "hang") if kind == "spider" else None
         if dangle is None:
-            dangle = kind == "spider" and self._rng.random() < DANGLE_CHANCE
+            dangle = hang is not None and self._rng.random() < DANGLE_CHANCE
         self._last_kind = kind
-        self._critter = Critter(self._host, kind, frames, self._rng,
-                                dangle=bool(dangle) and kind == "spider")
+        self._critter = Critter(self._host, kind, walk, self._rng,
+                                hang=hang if dangle else None)
         self._critter.gone.connect(self._on_gone)
         self._critter.start()
         return self._critter
 
     # -- internals ---------------------------------------------------------
-    def _frames_for(self, kind):
-        if kind not in self._frames:
-            loaded = [_load(f"{kind}_{i}", CELL, True)
-                      for i in range(KINDS[kind]["frames"])]
-            self._frames[kind] = [p for p in loaded if p is not None]
-        return self._frames[kind]
-
     def _ensure_webs(self):
         if self._webs:
             for web in self._webs:
                 web.place()
             return
-        for name, corner in WEBS.items():
-            pix = _load(name, WEB_CELL, False)
-            if pix is None:
+        for size, corner in ((WEB_SMALL_PX, "tr"), (WEB_LARGE_PX, "bl")):
+            try:
+                pix = render_web(size, corner)
+            except Exception:
+                # decor that cannot draw simply does not appear
+                log.exception("halloween decor: could not draw the %s web", corner)
                 continue
             web = CornerWeb(self._host, pix, corner)
             web.show()
             self._webs.append(web)
 
-    def _arm(self):
-        lo, hi = FIRST_MS if self._first else EVERY_MS
+    def _arm(self, encore_ok: bool = False):
+        rng = self._rng
+        if self._first:
+            lo, hi = FIRST_MS
+        elif encore_ok and rng.random() < ENCORE_CHANCE:
+            lo, hi = ENCORE_MS
+        elif rng.random() < LATER_CHANCE:
+            lo, hi = LATER_MS
+        else:
+            lo, hi = SOON_MS
         self._first = False
-        self._clock.start(self._rng.randint(lo, hi))
+        self._clock.start(rng.randint(lo, hi))
 
     def _on_clock(self):
         if not self.is_active():
@@ -430,4 +648,4 @@ class HalloweenDecor(QObject):
         if critter is self._critter:
             self._critter = None
             if self.is_active():
-                self._arm()
+                self._arm(encore_ok=True)

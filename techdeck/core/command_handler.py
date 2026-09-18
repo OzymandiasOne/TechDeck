@@ -744,9 +744,10 @@ class CommandHandler:
     def _cmd_crawl(self, args: str):
         """Send a creepy crawly across the window NOW instead of waiting for
         the clock (widgets/halloween_decor.py). `/crawl` picks one;
-        `/crawl spider|roach|centipede` names it; `/crawl dangle` lowers a
-        spider on a thread. One at a time - a second call while one is out
-        does nothing. Halloween only and absent from /help."""
+        `/crawl <kind>` names it (only kinds whose Blender frames exist in
+        assets/critters/); `/crawl dangle` drops a spider on a thread. One at
+        a time - a second call while one is out does nothing. Halloween only
+        and absent from /help."""
         decor = getattr(self.main_window, "halloween_decor", None)
         if decor is None or not decor.is_active():
             self.console.append_system(
@@ -757,9 +758,9 @@ class CommandHandler:
             decor.spawn("spider", dangle=True)
         elif want:
             if decor.spawn(want, dangle=False) is None and decor.current() is None:
-                self.console.append_system(
-                    "Try: /crawl spider, /crawl roach, /crawl centipede, "
-                    "/crawl dangle")
+                from techdeck.ui.widgets.halloween_decor import available_kinds
+                kinds = ", ".join(f"/crawl {k}" for k in available_kinds())
+                self.console.append_system(f"Try: {kinds}, /crawl dangle")
         else:
             decor.spawn()
 
