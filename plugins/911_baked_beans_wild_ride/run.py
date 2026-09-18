@@ -289,7 +289,7 @@ def _write_output(rows: list, out_path: Path, log) -> Path:
         ws.column_dimensions[letter].width = w
 
     try:
-        wb.save(out_path)
+        wb.save(sdk.long_path(out_path))
         return out_path
     except PermissionError:
         # Most likely the previous list is open in Excel — save alongside it.
@@ -297,7 +297,7 @@ def _write_output(rows: list, out_path: Path, log) -> Path:
         alt = out_path.with_name(f"{out_path.stem} ({stamp}){out_path.suffix}")
         log(f"[WARN] {out_path.name} is locked (open in Excel?) - saving as "
             f"{alt.name} instead.")
-        wb.save(alt)
+        wb.save(sdk.long_path(alt))
         return alt
 
 
@@ -431,7 +431,7 @@ def run(params: dict, progress_callback, cancel_event):
     console = params.get("console")
     ride_img = Path(__file__).resolve().parent / _RIDE_IMAGE
     if (console is not None and hasattr(console, "append_link")
-            and ride_img.exists()):
+            and sdk.exists(ride_img)):
         # Newest-first fallbacks: an older/still-running TechDeck's console
         # may predate at_run_end (or prefix) - the finale must never fail
         # the run.

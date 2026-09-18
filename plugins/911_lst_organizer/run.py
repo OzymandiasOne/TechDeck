@@ -127,7 +127,7 @@ def parse_1d_parts(pdf_path: Path, current_nest: str, log
     deduplicated. Falls back to a whole-page part-token scan if no table
     region is found (layout drift)."""
     sdk.ensure_local(pdf_path, log=log)
-    doc = fitz.open(str(pdf_path))
+    doc = fitz.open(sdk.long_path(pdf_path))
     try:
         lines: List[str] = []
         for page in doc:
@@ -192,20 +192,20 @@ def resolve_nest_folder(root: Path, current_batch: str, nest: str,
 
     result: Optional[Tuple[str, Path]] = None
     probe = root / current_batch / nest
-    if probe.is_dir():
+    if sdk.is_dir(probe):
         result = (current_batch, probe)
     else:
         for scan_root, batch_depth in ((root, 1), (root / ARCHIVE_DIR_NAME, 1)):
-            if result or not scan_root.is_dir():
+            if result or not sdk.is_dir(scan_root):
                 continue
             for i, d in enumerate(sorted(scan_root.iterdir(),
                                          key=lambda p: p.name.upper())):
                 if i % 32 == 0 and cancel_event.is_set():
                     break
-                if not d.is_dir():
+                if not sdk.is_dir(d):
                     continue
                 cand = d / nest
-                if cand.is_dir():
+                if sdk.is_dir(cand):
                     result = (d.name, cand)
                     break
 
@@ -242,7 +242,7 @@ def index_nest_lsts(nest_folder: Path, dest_dir: Path, cancel_event
     for i, p in enumerate(nest_folder.rglob("*")):
         if i % 64 == 0 and cancel_event.is_set():
             break
-        if not (p.is_file() and p.suffix.lower() == ".lst"):
+        if not (sdk.is_file(p) and p.suffix.lower() == ".lst"):
             continue
         if _is_excluded(p, dest_dir):
             continue
@@ -272,7 +272,7 @@ def _write_report(txt_path: Path, info: dict, rows: list,
                   unresolved: Dict[str, List[str]], copied: int,
                   issues: List[str]) -> None:
     """rows: (part, nest, batch, [copied names] or None, variant part or None)."""
-    with open(txt_path, "w", encoding="utf-8", newline="") as f:
+    with open(sdk.long_path(txt_path), "w", encoding="utf-8", newline="") as f:
         f.write("# 911 LST pull report (generated)\n")
         f.write("# " + "=" * 76 + "\n")
         for k, v in info.items():
@@ -339,7 +339,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         cancel_event.set()
         return
     picked = Path(raw.strip().strip('"'))
-    if not picked.is_dir():
+    if not sdk.is_dir(picked):
         raise ValueError(f"Folder not found: {picked}")
 
     root, batch, nest = derive_context(picked)
@@ -374,7 +374,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
 
     dest = picked / DEST_FOLDER_NAME
     if not dry_run:
-        dest.mkdir(parents=True, exist_ok=True)
+        sdk.ensure_dir(dest)
     ts = time.strftime("%Y%m%d_%H%M%S")
     debug_path = dest / f"debug_pull_lsts_{ts}.jsonl"
     txt_path = dest / f"LST_Pull_{batch}_{nest}.txt"
@@ -394,7 +394,8 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     seen_lower: Set[str] = set()
     copied_count = 0
 
-    debug_fp = open(debug_path, "a", encoding="utf-8") if not dry_run else None
+    debug_fp = (open(sdk.long_path(debug_path), "a", encoding="utf-8")
+                if not dry_run else None)
     try:
         if debug_fp:
             debug_fp.write(json.dumps({
@@ -446,9 +447,9 @@ def run(params: dict, progress_callback, cancel_event) -> None:
                     target = dest / f.name
                     try:
                         if not dry_run:
-                            if not target.exists():
+                            if not sdk.exists(target):
                                 sdk.ensure_local(f)  # Hard Rule 13
-                                _retry_fileop(shutil.copy2, f, target)
+                                _retry_fileop(shutil.copy2, sdk.long_path(f), sdk.long_path(target))
                             if debug_fp:
                                 debug_fp.write(json.dumps({"event": "copied",
                                                            "src": str(f)}) + "\n")

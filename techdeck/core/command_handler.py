@@ -83,6 +83,7 @@ class CommandHandler:
             '/help': self._cmd_help,
             '/clear': self._cmd_clear,
             '/version': self._cmd_version,
+            '/guide': self._cmd_guide,
             '/info': self._cmd_info,
             '/moredetails': self._cmd_moredetails,
             '/dash': self._cmd_dash,
@@ -224,6 +225,7 @@ class CommandHandler:
             "  /help            - Show this help message\n"
             "  /clear           - Clear console output\n"
             "  /version         - Show TechDeck version\n"
+            "  /guide           - Open the TechDeck User Guide (PDF)\n"
             "  /info            - Describe the selected tile(s)\n"
             "  /moredetails     - Full details for the selected tile(s); /moredetails all for every app\n"
             "  /dash            - Reopen the Dashboard tab\n"
@@ -283,6 +285,14 @@ class CommandHandler:
 
     def _cmd_version(self, args: str):
         self.console.append_system(f"TechDeck v{APP_VERSION}")
+
+    def _cmd_guide(self, args: str):
+        from techdeck.core.user_guide import open_guide
+        ok, message = open_guide()
+        if ok:
+            self.console.append_system("Opening the TechDeck User Guide...")
+        else:
+            self.console.append_error(message)
 
     def _cmd_dash(self, args: str):
         if hasattr(self.console, "reopen_dashboard"):
@@ -1079,7 +1089,7 @@ class CommandHandler:
         self._rogue_player = RogueModePlayer.get_or_create(self.settings, parent=parent)
         if is_first_open:
             self.console.append_game("Rogue Mode activated. Lock in.")
-            self.console.append_system("Tech Tip: Add music and build playlists in the settings tab!")
+            self.console.append_system("Tech Tip: Add music and build playlists in Settings > Personalization > Rogue Mode.")
         else:
             self.console.append_system("Rogue Mode player open.")
 

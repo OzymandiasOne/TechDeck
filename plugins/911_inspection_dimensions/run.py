@@ -25,6 +25,7 @@ import os
 import re
 import glob
 import datetime
+import textwrap
 
 try:
     from techdeck.core import plugin_sdk as sdk
@@ -36,7 +37,7 @@ except ModuleNotFoundError:  # standalone CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "0.3.0"
+VERSION = "0.7.0"
 
 # The detector is run twice at different working resolutions and the two results are
 # merged: the small pass reliably picks up crowded dimension stacks, the large pass
@@ -56,27 +57,42 @@ def _engines(log):
     global _ENGINES
     if _ENGINES is not None:
         return _ENGINES
+    # BOTH the import AND the construction have to be guarded. RapidOCR loads its
+    # three engine classes by NAME out of its own config.yaml, so a frozen build
+    # that did not bundle them raises HERE, not at import - and it used to surface
+    # as "could not read this PDF", which made a broken reader look like a packet
+    # with no sketches in it (FTOURIGNY-LT, 2026-09-01).
     try:
         from rapidocr_onnxruntime import RapidOCR
     except Exception as exc:  # pragma: no cover - dependency guard
-        raise sdk.UserFacingError(
-            "The drawing reader could not start up (%s)." % exc,
-            "This app needs the built-in drawing reader. Update TechDeck to the latest "
-            "version, and if it still fails send a Debug Report to a TechDeck admin.",
-        )
+        raise _reader_dead(exc)
     log("Starting the drawing reader...")
-    _ENGINES = [
-        RapidOCR(
-            det_model_path=None,
-            det_limit_side_len=side,
-            det_box_thresh=0.3,
-            cls_model_path=None,
-            rec_model_path=None,
-            text_score=0.3,
-        )
-        for side in _DET_SIDES
-    ]
+    try:
+        _ENGINES = [
+            RapidOCR(
+                det_model_path=None,
+                det_limit_side_len=side,
+                det_box_thresh=0.3,
+                cls_model_path=None,
+                rec_model_path=None,
+                text_score=0.3,
+            )
+            for side in _DET_SIDES
+        ]
+    except Exception as exc:  # pragma: no cover - dependency guard
+        _ENGINES = None
+        raise _reader_dead(exc)
     return _ENGINES
+
+
+def _reader_dead(exc):
+    """The one message for a drawing reader that will not start at all."""
+    return sdk.UserFacingError(
+        "The drawing reader could not start up (%s)." % exc,
+        "Nothing was read and no workbook was changed. This app needs the built-in "
+        "drawing reader, which ships inside TechDeck. Update TechDeck to the latest "
+        "version, and if it still fails send a Debug Report to a TechDeck admin.",
+    )
 
 
 # --------------------------------------------------------------- text normalisation
@@ -113,12 +129,16 @@ MODIFIER_WORDS = {
 }
 
 # --- weld preps -------------------------------------------------------------
-# A weld prep is called out as a code starting "KB" on a leader line, usually with
-# the side it applies to on the line underneath ("KB114" / "NS & FS" = near side and
-# far side). Codes come back from OCR with the leader dash glued on ("-KB114") and
+# A weld prep is called out as a bevel code on a leader line, usually with the side
+# it applies to on the line underneath ("KB114" / "NS & FS" = near side and far
+# side). Codes come back from OCR with the leader dash glued on ("-KB114") and
 # sometimes with the digits spaced out ("KB 1 1 4"), so match on the space-stripped
 # text after trimming leading punctuation.
-WELD_PREP_RE = re.compile(r"^KB[A-Z0-9]{1,6}$")
+#
+# The bevel book uses four prefixes, not just KB: KB (standard), SB (shell), FB
+# (flange) and WB (web). Matching only KB silently dropped every shell and flange
+# prep on the drawing - and SB alone is 198 of the 947 sheets.
+WELD_PREP_RE = re.compile(r"^(?:KB|SB|FB|WB)[A-Z0-9]{1,6}$")
 SIDE_RE = re.compile(r"^(?:[NFB]S(?:&[NFB]S)?|BOTHSIDES?|NEARSIDE|FARSIDE)$")
 # Modifiers that ride along on the dimension itself.
 TRAILING_MODS = ("TYP", "REF", "THK", "MIN", "MAX", "NOM", "SNIPE")
@@ -135,6 +155,50 @@ CHAMFER_RE = re.compile(r"^(%s)X(\d+(?:\.\d+)?)(?:°|DEG)$" % _NUM)
 CHAMFER_REV_RE = re.compile(r"^(\d+(?:\.\d+)?)(?:°|DEG)X(%s)$" % _NUM)
 
 
+# Every real LENGTH on these drawings is printed to two places, so a length with no
+# decimal point is a misread. Applied to a lone token since v0.1, but a compound
+# ("78 X 68.7") returned before ever reaching that test, so a ".78" read as "78"
+# landed on tab '-451' as a 78in dimension on a 13.66in part (V094 503891,
+# 2026-09-01). It must be applied to the LENGTH halves ONLY: a chamfer's DEGREES
+# half is legitimately a bare integer - across the sample corpus every real chamfer
+# was "<len> X 45 deg", so testing the whole token would have deleted all of them.
+_STRICT_COMPOUNDS = True
+
+
+def _bad_length(t):
+    """True when this component is a LENGTH that no real dimension would print."""
+    return _STRICT_COMPOUNDS and "." not in t
+
+
+def misread_compound(raw):
+    """The compound this token WOULD have been, if a bad length binned it. Else None.
+
+    Reporting only - classify's contract stays "a dimension or None". An inspector
+    should be told that ".78 X 68.7" came back as "78 X 68.7" and was thrown out,
+    not have it silently vanish; that is the whole safety net on the strict rule.
+    """
+    if not _STRICT_COMPOUNDS:
+        return None
+    t = _norm(raw).replace(" ", "")
+
+    def spelled(bad):
+        """"78X68.7deg" -> ("78 X 68.7 deg", ".78 X 68.7 deg") - what it read, and
+        the one repair that is ever right here: the OCR dropped a leading dot."""
+        readable = " X ".join(t.replace("°", " deg").replace("DEG", " deg").split("X"))
+        readable = " ".join(readable.split())
+        return readable, readable.replace(bad, "." + bad, 1)
+
+    for rx, length_group in ((CHAMFER_RE, 1), (CHAMFER_REV_RE, 2)):
+        m = rx.match(t)
+        if m:
+            return spelled(m.group(length_group)) if _bad_length(m.group(length_group)) else None
+    if COMPOUND_RE.match(t):
+        bad = [c for c in t.split("X") if _bad_length(c)]
+        if bad:
+            return spelled(bad[0])
+    return None
+
+
 def classify(raw):
     """Turn one OCR token into (kind, value, mods), or None if it isn't a dimension."""
     t = _norm(raw).replace(" ", "")
@@ -145,9 +209,13 @@ def classify(raw):
 
     cham = CHAMFER_RE.match(t)
     if cham:
+        if _bad_length(cham.group(1)):      # "<len> X <angle>deg" - group 1 is the land
+            return None
         return "chamfer", "%s X %s deg" % (cham.group(1), cham.group(2)), mods
     cham = CHAMFER_REV_RE.match(t)
     if cham:
+        if _bad_length(cham.group(2)):      # "<angle>deg X <len>" - group 2 is the land
+            return None
         return "chamfer", "%s deg X %s" % (cham.group(1), cham.group(2)), mods
 
     ang = ANGLE_RE.match(t)
@@ -179,7 +247,11 @@ def classify(raw):
     t = _EDGE_JUNK.sub("", t)
 
     if COMPOUND_RE.match(t):
-        return kind, " X ".join(t.split("X")), mods
+        # A snipe / compound is lengths all the way across - no degrees half here.
+        comps = t.split("X")
+        if any(_bad_length(c) for c in comps):
+            return None
+        return kind, " X ".join(comps), mods
     if FRACTION_RE.match(t):
         return kind, t, mods
     if not NUM_RE.match(t):
@@ -220,19 +292,53 @@ def _near_label(item, items, label):
     return False
 
 
+_PREFIXES = ("KB", "SB", "FB", "WB")
+
+# Every code in the bevel book is a two-letter prefix followed by 3 or 4 DIGITS -
+# checked against all 942, none has a letter in the tail. So a letter that comes
+# back there is always an OCR slip, and in this stroke font it is always one of
+# these: the digit 1 read as a capital I or lower-case l, and 0 read as O.
+# Worth fixing rather than rejecting: on the 30-packet real sweep, KB114 came back
+# as "KBI14" or "KBII4" three times out of 184 preps, and each one was dropped.
+_TAIL_FIX = {"I": "1", "L": "1", "O": "0"}
+
+
 def _weld_code(word):
     """Normalise one OCR token to a weld-prep code, or None."""
     t = re.sub(r"^[^A-Z0-9]+", "", word).replace(" ", "")
-    if not t.startswith("KB"):
+    if not t.startswith(_PREFIXES):
         return None
     # trim a side note that OCR glued onto the code ("KB114NS&FS")
-    m = re.match(r"^(KB[A-Z0-9]{1,6}?)((?:[NFB]S(?:&[NFB]S)?)?)$", t)
+    m = re.match(r"^((?:KB|SB|FB|WB)[A-Z0-9]{1,6}?)((?:[NFB]S(?:&[NFB]S)?)?)$", t)
     if not m:
         return None
     code = m.group(1)
-    if not WELD_PREP_RE.match(code) or not any(c.isdigit() for c in code):
+    code = code[:2] + "".join(_TAIL_FIX.get(c, c) for c in code[2:])
+    if not WELD_PREP_RE.match(code) or not code[2:].isdigit():
         return None
     return code, _fmt_side(m.group(2))
+
+
+def nearest_bevel_code(code, log=None):
+    """An in-book code one edit away from a misread one, or "" if it is ambiguous.
+
+    Only ever SUGGESTED in the report, never substituted - a bevel is a cut on a
+    real part and a plausible-looking guess is worse than saying "look this up".
+    The sweep turned up "KB1141" and "KB1147" (a leader line read as an extra
+    digit) where dropping one character gives KB114 and nothing else.
+    """
+    table = bevel_table(log)
+    if not code or code in table:
+        return ""
+    # A leader line touching the end of the code reads as an extra digit, so try
+    # the trailing character first - that is the shape actually seen ("KB1141",
+    # "KB1147" for KB114). Deleting an INNER character is a much weaker guess and
+    # only offered when exactly one candidate survives.
+    if len(code) > 5 and code[:-1] in table:
+        return code[:-1]
+    cands = {code[:i] + code[i + 1:] for i in range(2, len(code))}
+    hits = sorted(c for c in cands if c in table)
+    return hits[0] if len(hits) == 1 else ""
 
 
 def _fmt_side(side):
@@ -456,18 +562,21 @@ def _join_split_chamfers(items):
 
 
 def read_drawing(page, clip, log):
-    """Return (dimensions, notes, weld preps) for one drawing page."""
+    """Return (dimensions, notes, weld preps, binned misreads) for one drawing page."""
     items = _join_split_chamfers(_read_boxes(page, clip, log))
     welds = weld_preps(items)
     notes = _note_lines(items)
     in_note = {id(m) for n in notes for m in n["members"]}
 
-    dims = []
+    dims, misreads = [], []
     for it in items:
         if id(it) in in_note:
             continue
         parsed = classify(it["raw"])
         if not parsed:
+            binned = misread_compound(it["raw"])
+            if binned and binned not in misreads:
+                misreads.append(binned)
             continue
         kind, value, mods = parsed
         ref = "REF" in mods or _near_label(it, items, "REF")
@@ -485,7 +594,7 @@ def read_drawing(page, clip, log):
             "bb": it["bb"],
         })
     dims.sort(key=lambda d: (round(d["bb"][1] / 60.0), d["bb"][0]))
-    return dims, [n["text"] for n in notes], welds
+    return dims, [n["text"] for n in notes], welds, misreads
 
 
 _FIELD_RE = {
@@ -543,24 +652,160 @@ _NEST_WORKBOOK_GLOBS = ("911 BATCH*.xlsx", "911 PLATE BATCH*.xlsx")
 _NON_PART_SHEETS = {"NEST", "SCRIBE VERIFICATION", "COVER SHEET",
                     "SOURCE MATERIAL INFO", "INSPECTION SHEET"}
 
+# What a usable angle nominal looks like once folded: a bare number, nothing else.
+# Shared by _as_nominal (a standalone angle off the drawing) and weld_prep_angles
+# (an angle out of the bevel book) - both write the same "NN°" the sheet expects.
+ANGLE_VALUE_RE = re.compile(r"^\d+(?:\.\d+)?$")
 
-def _as_nominal(text):
-    """A dimension value as the sheet wants it: a number, or 'NN°' for an angle."""
+
+def _as_nominal(text, kind="linear"):
+    """A dimension value as the sheet wants it: a number, or 'NN°' for an angle.
+
+    KIND is not optional information. A chamfer carries "deg" inside its own value
+    string ("1.75 X 45 deg"), but a STANDALONE angle's value is the bare number -
+    the " deg" only ever existed in the printed report, added from the kind. So
+    reading the text alone wrote a standalone angle as a plain number, and the
+    sheet's MIN/MAX array formula branches on `ISNUMBER(SEARCH("°", <cell>))`:
+    without the sign it fell through to the LINEAR tolerance bands and quietly put
+    a +/-.1 tolerance on a 45 degree angle instead of the +/-1 the form intends
+    (V094 503891 tabs '67-199' and '-451', 2026-09-01).
+    """
     t = str(text).strip()
     if t.lower().endswith("deg"):
         return t[:-3].strip() + "°"
+    if kind == "angle" and ANGLE_VALUE_RE.match(t):
+        return t + "°"
     try:
         return float(t)
     except ValueError:
         return t
 
 
-def nominals_for(dims):
+# ------------------------------------------------------------- bevel reference
+# bevel_table.csv is the Electric Boat bevel book (Dept 470/459/415 "BEVEL
+# TEMPLATE" sheets) transcribed to one row per code: the near/far side angles, the
+# max land, and whether the sheet has been VOIDed in favour of another code.
+# It ships next to run.py, so it resolves the same way in dev and in the frozen
+# build (both load the plugin from its own folder).
+_BEVEL_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bevel_table.csv")
+_BEVEL_CACHE = None
+
+
+def bevel_table(log=None):
+    """The bevel book as {code: row}, loaded once. Empty dict if it is missing."""
+    global _BEVEL_CACHE
+    if _BEVEL_CACHE is not None:
+        return _BEVEL_CACHE
+    import csv
+
+    table = {}
+    try:
+        with open(_BEVEL_CSV, newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                table[row["code"].upper()] = row
+                # Two sheets are filed under a KB name but printed as WB (KB066 /
+                # KB076 read WB066 / WB076). A drawing calls the PRINTED number, so
+                # index both spellings at the same row.
+                printed = (row.get("printed_no") or "").upper()
+                if printed and printed not in table:
+                    table[printed] = row
+    except OSError as exc:
+        if log:
+            log("   ! bevel table not readable (%s) - weld preps will be reported "
+                "but not looked up" % exc)
+    _BEVEL_CACHE = table
+    return table
+
+
+def bevel_lookup(code, log=None):
+    """One weld-prep code's bevel data, or None when it is not in the book."""
+    return bevel_table(log).get(str(code).upper())
+
+
+def _weld_faces(side):
+    """The faces a side note names, as ('NS',), ('FS',), ('NS', 'FS') or ().
+
+    "BS" is the drawings' shorthand for both sides and has to land on two faces
+    like "NS & FS" does - reading it as a single unknown face wrote one angle
+    where the sheet wants two.
+    """
+    flat = (side or "").upper().replace(" ", "").replace("&", "").replace("/", "")
+    if "BOTH" in flat or "BS" in flat:
+        return ("NS", "FS")
+    return tuple(f for f in ("NS", "FS") if f in flat)
+
+
+def weld_prep_angles(weld, log=None):
+    """The angle nominals a weld prep contributes, as ('45°', ...).
+
+    ONE ENTRY PER FACE THE DRAWING NAMES - so "KB114  NS & FS" is two 45 deg
+    entries, not one. Verified against the hand-filled sheet for H4136024-41 on
+    S026, which reads 35.41 / 45 deg / 45 deg: the part is one tube with the same
+    bevel cut on the near and far side, and each one is a separate thing to
+    inspect. Emitting a single angle there under-filled the sheet by one row.
+
+    KB114 is a SINGLE N/S BEVEL, so the book only carries a near-side angle - when
+    the drawing applies it to both faces, that same angle stands for both. A true
+    double bevel (KB200, 22.5/22.5) carries an angle per face and each is used.
+
+    Only the ANGLE is written. The land on these sheets is a MAX ("0-1/16 MAX
+    LAND"), not a target, and the QF-QU-09 group derives a +/-0.1 band around
+    whatever nominal is typed in - so writing 0.06 there would assert a 0.06 +/- 0.1
+    land the print never called for. The land is carried into the report instead.
+    """
+    row = bevel_lookup(weld["code"], log)
+    if not row or row.get("status"):
+        return ()                                # unknown or VOID - caller reports it
+    ns, fs = row["ns_angle"].strip(), row["fs_angle"].strip()
+    faces = _weld_faces(weld.get("side"))
+    if faces:
+        # one per named face, falling back to whichever angle the sheet does carry
+        picked = [{"NS": ns, "FS": fs}[f] or ns or fs for f in faces]
+    else:
+        # no side note - take the sheet at face value: every angle it specifies
+        picked = [a for a in (ns, fs) if a]
+    out = []
+    for angle in picked:
+        if not angle:
+            continue
+        # the table carries the print's own wording ("22 1/2", "45 TYP", "52.0")
+        value = _angle_decimal(re.sub(r"\s*TYP$", "", angle).strip())
+        # Anything that is not a bare number is a transcription that needs a human,
+        # not a nominal. Two sheets used to carry a compound cell ("30 / 30" on
+        # FB064, "50 / 25" on SB716 where 50 was the INCLUDED angle) which would
+        # have typed the literal string "30 / 30 deg" into a QA form. Drop it here
+        # so a bad cell can never reach a sheet, whatever the table says.
+        if value and ANGLE_VALUE_RE.match(value):
+            out.append("%s°" % value)
+    return tuple(out)
+
+
+def _angle_decimal(angle):
+    """'22 1/2' -> '22.5'. A handful of older sheets print the angle as a mixed
+    fraction; the inspection form and every other angle on it are decimal, so fold
+    them rather than leaving one odd '22 1/2°' among the '22.5°'s."""
+    m = re.match(r"^(\d+)\s+(\d+)/(\d+)$", angle)
+    if not m:
+        return angle
+    whole, num, den = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    if not den:
+        return angle
+    value = whole + num / den
+    return ("%.10f" % value).rstrip("0").rstrip(".")
+
+
+def nominals_for(dims, welds=(), log=None):
     """Flatten one part's dimensions into the ordered values to type into the form.
 
     Compound callouts become separate entries because that is how they are
     inspected and how the sheets are filled by hand: a chamfer "45 deg X .5" is an
     angle plus a land, and a snipe ".50 X .50" is two lengths.
+
+    Weld-prep angles go in after the printed dimensions and BEFORE the TYP block.
+    The completed sheets carry them (the 45 deg entries on 503577 '24-41' come from
+    the weld prep, not the drawing) - the drawing only names the bevel code, and
+    the angle lives in the bevel book. They must not land after the TYP block or
+    they break up the run of repeats the reviewer copies out.
 
     TYP dimensions go LAST (the user's call). A TYP callout is printed once but the
     feature repeats, and the drawing never says how many times - so the reader
@@ -572,10 +817,22 @@ def nominals_for(dims):
     for d in dims:
         if d["ref"]:
             continue
-        parts = [_as_nominal(p) for p in str(d["value"]).split(" X ")]
+        parts = [_as_nominal(p, d["kind"]) for p in str(d["value"]).split(" X ")]
         (typ if "TYP" in d["mods"] else plain).append(parts)
+
+    # Not de-duplicated: a repeated angle is a repeated FEATURE. "KB114 NS & FS" is
+    # two 45 deg bevels on one part and the hand-filled sheets carry both.
+    # process_pdf already collapses the same (code, side) seen on more than one view
+    # page, so nothing double-counts here.
+    bevel = []
+    for weld in welds or ():
+        bevel.extend(weld_prep_angles(weld, log))
+
     out = []
-    for group in plain + typ:
+    for group in plain:
+        out.extend(group)
+    out.extend(bevel)
+    for group in typ:
         out.extend(group)
     return out
 
@@ -714,7 +971,7 @@ def fill_nest_workbook(workbook_path, parts, log, dry_run=False):
                                  % len(existing))
                 results.append(row)
                 continue
-            values = nominals_for(rec["dims"])
+            values = nominals_for(rec["dims"], rec.get("welds"), log)
             if not values:
                 row["status"] = "no dimensions found on the drawing"
                 results.append(row)
@@ -751,19 +1008,19 @@ def _save_workbook(wb, dest, log):
     import tempfile
 
     handle, tmp = tempfile.mkstemp(suffix=".xlsx", prefix="techdeck_insp_",
-                                   dir=os.path.dirname(dest))
+                                   dir=sdk.long_path(os.path.dirname(dest)))
     os.close(handle)
     try:
-        wb.save(tmp)
+        wb.save(sdk.long_path(tmp))
         wb.close()
-        os.replace(tmp, dest)
+        os.replace(sdk.long_path(tmp), sdk.long_path(dest))
         log("   saved %s" % os.path.basename(dest))
     except PermissionError as exc:
         raise sdk.locked_file_error(dest, exc)
     finally:
-        if os.path.exists(tmp):
+        if os.path.exists(sdk.long_path(tmp)):
             try:
-                os.remove(tmp)
+                os.remove(sdk.long_path(tmp))
             except Exception:
                 pass
 
@@ -778,63 +1035,102 @@ def _packet_pdf(folder):
     return omit[0] if omit else None
 
 
-def discover_jobs(folder):
-    """Work out what the user picked and pair each packet PDF with its workbook.
+def is_nest_folder(folder):
+    """A nest folder we can actually read: one holding a stamped packet PDF."""
+    return _packet_pdf(folder) is not None
 
-    Three shapes are all valid and are told apart by what is on disk, so the user
+
+def _subfolders(folder):
+    try:
+        entries = sorted(os.listdir(folder))
+    except OSError:
+        return []
+    return [os.path.join(folder, e) for e in entries
+            if sdk.is_dir(os.path.join(folder, e))]
+
+
+# The tree is  911 QTDR \ <order> \ <nest> \ <nest> MOVE TICKET OMIT.pdf , so the
+# roots below sit TWO levels above the work. Named only to make the refusal say why.
+_PROGRAM_ROOT_NAMES = {"911 qtdr", "922 qtdr production packages",
+                       "902 qtdr production packages", "pilot program"}
+
+
+def classify_pick(folder):
+    """What did the user actually pick? "nest", "order", "loose" or "too_high".
+
+    Discovery used to scan one level down and, failing that, sweep up every loose
+    PDF in the picked folder. Point that at the 911 QTDR ROOT and the last branch
+    fired: the order folders one level down hold no packet of their own, so the
+    ten stray QC PDFs sitting beside them became ten jobs and the run started
+    across the whole program (reported 2026-09-01). The shape is now decided
+    STRUCTURALLY, and a folder that is neither a nest nor a holder of nests is
+    refused outright instead of guessed at.
+    """
+    if is_nest_folder(folder):
+        return "nest"
+    subs = _subfolders(folder)
+    if any(is_nest_folder(sub) for sub in subs):
+        return "order"
+    if os.path.basename(os.path.normpath(folder)).strip().lower() in _PROGRAM_ROOT_NAMES:
+        return "too_high"
+    # A plain folder of packet PDFs is only ever a LEAF. If a subfolder holds PDFs
+    # of its own we are standing above the work, not in it - so refuse.
+    loose = [p for p in glob.glob(os.path.join(folder, "*.pdf"))
+             if not os.path.basename(p).startswith("~$")]
+    if loose and not any(glob.glob(os.path.join(sub, "*.pdf")) for sub in subs):
+        return "loose"
+    return "too_high"
+
+
+def discover_jobs(folder, shape=None):
+    """Pair each packet PDF with its workbook, for the shape the user picked.
+
+    Three shapes are valid and are told apart by what is on disk, so the user
     never has to say which one they meant:
-      * a BATCH folder  - nest folders one level down, each with a workbook,
+      * an ORDER folder - nest folders one level down, each with a workbook,
       * a single NEST folder,
       * a plain folder of packet PDFs with no workbooks (read-only report).
     """
     jobs = []
     seen = set()
 
-    def add(pdf, workbook):
+    def add(pdf, workbook, label):
         key = os.path.normcase(os.path.abspath(pdf))
         if key not in seen:
             seen.add(key)
-            jobs.append({"pdf": pdf, "workbook": workbook,
+            jobs.append({"pdf": pdf, "workbook": workbook, "label": label,
                          "nest": os.path.basename(os.path.dirname(pdf))})
 
-    # the picked folder itself as a nest folder
-    own = _packet_pdf(folder)
-    if own:
-        add(own, find_nest_workbook(folder))
+    if shape is None:
+        shape = classify_pick(folder)
 
-    # nest folders one level down
-    for entry in sorted(os.listdir(folder)):
-        sub = os.path.join(folder, entry)
-        if not os.path.isdir(sub):
-            continue
-        pdf = _packet_pdf(sub)
-        if pdf:
-            add(pdf, find_nest_workbook(sub))
+    if shape == "nest":
+        own = _packet_pdf(folder)
+        if own:
+            add(own, find_nest_workbook(folder),
+                os.path.basename(os.path.normpath(folder)))
 
-    # a plain folder of PDFs (no MOVE TICKET OMIT naming, no workbooks)
-    if not jobs:
+    elif shape == "order":
+        for sub in _subfolders(folder):
+            pdf = _packet_pdf(sub)
+            if pdf:
+                add(pdf, find_nest_workbook(sub),
+                    os.path.basename(os.path.normpath(sub)))
+
+    elif shape == "loose":
         for pdf in sorted(glob.glob(os.path.join(folder, "*.pdf"))):
             if not os.path.basename(pdf).startswith("~$"):
-                add(pdf, None)
+                add(pdf, None, os.path.splitext(os.path.basename(pdf))[0])
     return jobs
 
 
 # ------------------------------------------------------------------------- report
-def _fmt_dim(d):
-    label = {"linear": "", "radius": "R ", "diameter": "DIA ",
-             "angle": "", "chamfer": ""}.get(d["kind"], "")
-    suffix = " deg" if d["kind"] == "angle" else ""
-    mods = (" " + " ".join(dict.fromkeys(d["mods"]))) if d["mods"] else ""
-    flag = "   <-- CHECK (low confidence)" if d["score"] < 0.55 else ""
-    return "%s%s%s%s%s" % (label, d["value"], suffix, mods, flag)
-
-
 def process_pdf(pdf_path, log, cancel_event, progress=None):
     """Read one nest package. Returns a list of part records."""
     import fitz
 
     sdk.ensure_local(pdf_path, log=log)
-    doc = fitz.open(pdf_path)
+    doc = fitz.open(sdk.long_path(pdf_path))
     parts = []
     try:
         for index, page in enumerate(doc):
@@ -847,7 +1143,7 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
                 info = title_block(page)
                 record = dict(info)
                 record.update({"page": index + 1, "dims": [], "notes": [],
-                               "welds": [], "views": 0, "problem": ""})
+                               "welds": [], "misreads": [], "views": 0, "problem": ""})
                 parts.append(record)
                 if clip is None:
                     record["problem"] = (
@@ -863,8 +1159,11 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
             else:
                 continue
 
-            dims, notes, welds = read_drawing(page, clip, log)
+            dims, notes, welds, misreads = read_drawing(page, clip, log)
             record["dims"].extend(dims)
+            for bad in misreads:
+                if bad not in record["misreads"]:
+                    record["misreads"].append(bad)
             for note in notes:
                 if note not in record["notes"]:
                     record["notes"].append(note)
@@ -884,147 +1183,278 @@ def process_pdf(pdf_path, log, cancel_event, progress=None):
     return parts
 
 
-def build_report(folder, results, fills, elapsed):
-    """Render the whole run as the text file the user gets."""
+def _plain(d):
+    """One dimension as an inspector reads it - no confidence flag, no jargon."""
+    label = {"radius": "R ", "diameter": "DIA "}.get(d["kind"], "")
+    suffix = " deg" if d["kind"] == "angle" else ""
+    mods = [m for m in dict.fromkeys(d["mods"]) if m in ("TYP", "SNIPE")]
+    return "%s%s%s%s" % (label, d["value"], suffix,
+                         (" " + " ".join(mods)) if mods else "")
+
+
+def _where(rec):
+    """Which sheet tab a part's numbers went on, for the CHECK list."""
+    filled = rec.get("filled") or {}
+    return filled.get("tab") or (rec.get("part") or "?")
+
+
+def _weld_note(weld, log=None):
+    """One line of plain English for a weld prep: what it is, what it wrote.
+
+    Returns (text, needs_a_decision). The bevel book's own wording (type, land,
+    per-side angles) is deliberately NOT repeated here - an inspector wants the
+    number that went on the sheet, and the code to look up if they disagree.
+    """
+    code = weld["code"]
+    row = bevel_lookup(code, log)
+    if row is None:
+        near = nearest_bevel_code(code, log)
+        return ("%s is not in the bevel book%s - nothing written, look it up by hand"
+                % (code, " (closest is %s)" % near if near else ""), True)
+    if row["status"] == "VOID":
+        return ("%s is VOID%s - nothing written"
+                % (code, ", use %s" % row["replacement"] if row["replacement"] else ""), True)
+    if row["status"] == "NO SKETCH":
+        return ("%s has no sketch in the book - nothing written" % code, True)
+    angles = weld_prep_angles(weld, log)
+    if not angles:
+        return ("%s prints no bevel angle (taper only / cut square) - nothing written"
+                % code, True)
+    return ("%s -> %s" % (code, ", ".join(angles)), False)
+
+
+def build_report(folder, results, fills, elapsed, failures=None):
+    """Render the run the way an inspector reads it: what to check, then what was written.
+
+    Action first. The old report led with a per-part dump - title-block fields the
+    sheet already carries, the bevel book's own wording, the OCR's reading of the
+    drawing's notes - and buried the two or three things a human actually had to
+    look at under all of it. Everything here answers one of: what needs my eyes,
+    what went on my sheet, what was left off and why.
+    """
     now = datetime.datetime.now()
     out = []
     add = out.append
-    add("911 INSPECTION DIMENSIONS")
-    add("=" * 78)
-    add("Folder : %s" % folder)
-    add("Run    : %s" % now.strftime("%Y-%m-%d %H:%M"))
-    add("Reader : TechDeck 911 Inspection Dimensions v%s" % VERSION)
-    add("")
-    add("Dimensions and weld preps are read off the drawing picture, so CHECK them")
-    add("against the paperwork before they go on an inspection sheet. Anything the")
-    add("reader was unsure about is marked CHECK. Dimensions marked REF on the")
-    add("drawing are listed under 'Reference only' and are NOT inspection")
-    add("dimensions. Weld preps are the KB codes called out on the drawing, with")
-    add("the side each one applies to (NS = near side, FS = far side).")
-    add("")
 
-    total_parts = total_dims = total_ref = total_welds = 0
-    problems = []
-    low_conf = []
+    # ---------------------------------------------------------------- gather
+    checks = []          # (tab, what, why) - the only section that needs action
+    filled_rows = []     # (tab, part, values, weld_notes)
+    skipped_rows = []    # (tab, part, why)
+    ref_rows = []        # (tab, "2.00, 2.00")
+    parts_read = dims_written = 0
+    any_typ = False
 
     for pdf_name, parts in results:
-        add("=" * 78)
-        add("PDF: %s" % pdf_name)
-        add("=" * 78)
         if not parts:
-            add("  (no PART SKETCH pages found)")
-            add("")
+            reason = (failures or {}).get(pdf_name)
+            checks.append((pdf_name, "could not be read",
+                           reason or "no PART SKETCH pages found in it"))
             continue
         for rec in parts:
-            total_parts += 1
-            add("")
-            add("  PART %s" % (rec.get("part") or "(part number not readable)"))
-            meta = []
-            if rec.get("work_order"):
-                meta.append("Work order %s" % rec["work_order"])
-            if rec.get("rev"):
-                meta.append("Rev/Seq %s" % rec["rev"])
-            if rec.get("qty"):
-                meta.append("Qty %s" % rec["qty"])
-            if rec.get("noun"):
-                meta.append(rec["noun"].title())
-            add("    %s" % ("  |  ".join(meta) if meta else "-"))
-            if rec.get("size"):
-                add("    Size     : %s" % rec["size"])
-            if rec.get("fab_dim"):
-                add("    FAB DIM  : %s" % rec["fab_dim"])
-            add("    Sketch page %d%s"
-                % (rec["page"], " (+%d extra view page(s))" % rec["views"] if rec["views"] else ""))
+            parts_read += 1
+            part = rec.get("part") or "(part number unreadable)"
+            tab = _where(rec)
 
             if rec["problem"]:
-                add("    ** %s" % rec["problem"])
-                problems.append("%s - %s: %s" % (pdf_name, rec.get("part", "?"), rec["problem"]))
+                checks.append((tab, part, rec["problem"]))
                 continue
 
             keep = [d for d in rec["dims"] if not d["ref"]]
             refs = [d for d in rec["dims"] if d["ref"]]
-            total_dims += len(keep)
-            total_ref += len(refs)
-            add("")
-            if keep:
-                add("    DIMENSIONS (%d)" % len(keep))
-                for d in keep:
-                    add("      - %s" % _fmt_dim(d))
-                    if d["score"] < 0.55:
-                        low_conf.append("%s - %s: %s" % (pdf_name, rec.get("part", "?"), d["value"]))
-            else:
-                add("    DIMENSIONS (0)   ** nothing readable - check this drawing by hand **")
-                problems.append("%s - %s: no dimensions read" % (pdf_name, rec.get("part", "?")))
-            if rec["welds"]:
-                total_welds += len(rec["welds"])
-                add("    WELD PREPS (%d)" % len(rec["welds"]))
-                for weld in rec["welds"]:
-                    side = ("  %s" % weld["side"]) if weld["side"] else "  (no side marked)"
-                    flag = "   <-- CHECK (low confidence)" if weld["score"] < 0.55 else ""
-                    add("      - %s%s%s" % (weld["code"], side, flag))
-                    if weld["score"] < 0.55:
-                        low_conf.append("%s - %s: weld prep %s"
-                                        % (pdf_name, rec.get("part", "?"), weld["code"]))
-            if rec.get("filled"):
-                add("    -> written to inspection tab %s: %s"
-                    % (rec["filled"]["tab"], ", ".join(str(v) for v in rec["filled"]["values"])))
+            if not keep:
+                checks.append((tab, part, "nothing readable on this drawing - "
+                                          "fill this sheet in by hand"))
+
+            for d in keep:
+                if d["score"] < 0.55:
+                    checks.append((tab, _plain(d),
+                                   "the reader was unsure - verify it on the drawing"))
+                if "TYP" in d["mods"]:
+                    any_typ = True
+
+            for read_as, probably in rec.get("misreads") or ():
+                checks.append((tab, read_as,
+                               "a length with no decimal point, so this is a misread - "
+                               "probably \"%s\". Nothing was written for it; if the "
+                               "drawing really says this, add it by hand." % probably))
+
+            weld_notes = []
+            for weld in rec["welds"]:
+                text, needs_decision = _weld_note(weld, None)
+                if weld["score"] < 0.55:
+                    checks.append((tab, "weld prep %s" % weld["code"],
+                                   "the reader was unsure of this code"))
+                if needs_decision:
+                    checks.append((tab, "weld prep", text))
+                else:
+                    weld_notes.append(text)
+
             if refs:
-                add("    Reference only (not inspected): %s"
-                    % ", ".join(_fmt_dim(d).replace("   <-- CHECK (low confidence)", "") for d in refs))
-            if rec["notes"]:
-                add("    Drawing notes:")
-                for note in rec["notes"]:
-                    add("      %s" % note)
-        add("")
+                ref_rows.append((tab, ", ".join(_plain(d) for d in refs)))
 
-    if fills:
-        add("=" * 78)
-        add("INSPECTION SHEETS FILLED IN")
-        add("=" * 78)
-        add("Nominals are written into the colour-filled TARGET cells only. Excel works")
-        add("out MIN and MAX from each one by itself, so those are left alone.")
-        add("A tab that already had numbers typed into it was NOT touched.")
+            if rec.get("filled"):
+                values = rec["filled"]["values"]
+                dims_written += len(values)
+                filled_rows.append((rec["filled"]["tab"], part, values, weld_notes))
+
+    for _book, _path, rows in fills:
+        for row in rows:
+            if row.get("written"):
+                for cell in row.get("stale") or ():
+                    checks.append((row["tab"], "cell %s" % cell,
+                                   "its min/max was typed in by hand, so it will NOT "
+                                   "follow the new number"))
+                continue
+            status = row.get("status") or "not filled"
+            if "already filled" in status:
+                skipped_rows.append((row["tab"], row["part"], "already filled in - left alone"))
+            else:
+                skipped_rows.append((row["tab"], row["part"], status))
+
+    # ----------------------------------------------------------------- head
+    where = os.path.basename(os.path.normpath(folder)) or folder
+    add("911 INSPECTION SHEET FILL-IN")
+    add("=" * 78)
+    add("%s   -   %s   -   %d part(s) read, %d sheet(s) filled in"
+        % (where, now.strftime("%d %b %Y %H:%M"), parts_read, len(filled_rows)))
+    add("")
+    add("The computer read these numbers off the PICTURE on the drawing.")
+    add("Check them against the drawing before you sign the sheet.")
+    add("")
+
+    # ------------------------------------------------------------- 1. action
+    add("-" * 78)
+    if checks:
+        add("CHECK THESE FIRST   (%d)" % len(checks))
+        add("-" * 78)
+        for tab, what, why in checks:
+            add("  %-10s %s" % (tab, what))
+            for line in textwrap.wrap(why, 68):
+                add("             %s" % line)
+    else:
+        add("CHECK THESE FIRST   (none)")
+        add("-" * 78)
+        add("  Nothing needed a second look on this run.")
+    add("")
+
+    # -------------------------------------------------------- 2. the numbers
+    add("-" * 78)
+    add("WHAT WENT ON EACH SHEET   (%d tab(s))" % len(filled_rows))
+    add("-" * 78)
+    if filled_rows:
+        add("  Numbers are in the order they sit on the form, left to right.")
         add("")
-        add("TYP dimensions are written LAST in each part's run. The drawing prints them")
-        add("once but the feature repeats, and it never says how many times - so copy the")
-        add("last entries across as many times as the part actually needs.")
-        add("")
-        for book, path, rows in fills:
-            add("  %s" % book)
-            for row in rows:
-                add("    %-16s %-18s %s" % (row["tab"], row["part"], row["status"]))
+        for tab, part, values, weld_notes in filled_rows:
+            add("  %-10s %s" % (tab, part))
+            add("      %s" % "   ".join(str(v) for v in values))
+            for note in weld_notes:
+                add("      from the weld prep: %s" % note)
+        if any_typ:
             add("")
+            add("  TYP values sit LAST in each row. The drawing prints one but the")
+            add("  feature repeats and never says how many times - copy the last ones")
+            add("  across as many times as the part actually needs.")
+    else:
+        add("  No sheets were filled in.")
+    add("")
 
-    add("=" * 78)
-    add("SUMMARY")
-    add("=" * 78)
-    add("PDFs read           : %d" % len(results))
-    add("Parts found         : %d" % total_parts)
-    add("Dimensions logged   : %d" % total_dims)
-    add("Reference (skipped) : %d" % total_ref)
-    add("Weld preps logged   : %d" % total_welds)
-    add("Sheet tabs filled   : %d" % sum(1 for _, _, rows in fills for r in rows if r.get("written")))
-    add("Time                : %.0f seconds" % elapsed)
-    if problems:
+    # ------------------------------------------------------- 3. not filled
+    if skipped_rows:
+        add("-" * 78)
+        add("SHEETS LEFT ALONE   (%d)" % len(skipped_rows))
+        add("-" * 78)
+        for tab, part, why in skipped_rows:
+            add("  %-10s %-18s %s" % (tab, part, why))
         add("")
-        add("NEEDS A HUMAN LOOK (%d)" % len(problems))
-        for p in problems:
-            add("  - %s" % p)
-    if low_conf:
+
+    # -------------------------------------------------------------- 4. REF
+    if ref_rows:
+        add("-" * 78)
+        add("NOT INSPECTED   (%d part(s))" % len(ref_rows))
+        add("-" * 78)
+        add("  Marked REF on the drawing - reference sizes, not inspection")
+        add("  dimensions, so nothing was written for them.")
         add("")
-        add("LOW CONFIDENCE READINGS (%d) - verify these against the drawing" % len(low_conf))
-        for p in low_conf:
-            add("  - %s" % p)
+        for tab, values in ref_rows:
+            add("  %-10s %s" % (tab, values))
+        add("")
+
+    add("-" * 78)
+    add("%d number(s) written in %.0f seconds   -   TechDeck v%s" % (dims_written, elapsed, VERSION))
     return "\n".join(out) + "\n"
+
+
+_PICK_TOO_HIGH = (
+    "There are no readable nests in that folder, and nothing one level down "
+    "either - so it is above the work, or its nests have no MOVE TICKET OMIT "
+    "PDF yet.",
+    "Pick ONE of:\n"
+    "  * an order folder (the one holding the nest folders) - you then tick "
+    "which nests to read, or\n"
+    "  * a single nest folder (the one with the MOVE TICKET OMIT PDF in it).\n\n"
+    "The 911 QTDR root is never accepted: every order under it would be read "
+    "in one go.",
+)
+
+
+def choose_nests(params, folder, jobs, log):
+    """Tick which nests to read. Returns the kept jobs, or None if cancelled.
+
+    Shown for every multi-nest pick. Picking a single NEST folder is the one
+    case that skips it - there is nothing to choose between.
+    """
+    labels, seen = [], {}
+    for job in jobs:
+        label = job["label"]
+        if not job["workbook"]:
+            label += "   (no inspection workbook - report only)"
+        # SelectionDialog hands back the chosen STRINGS, so duplicates would be
+        # indistinguishable coming back. Number them instead (as 911 Teams Cards does).
+        if label in seen:
+            seen[label] += 1
+            label = "%s  (#%d)" % (label, seen[label])
+        else:
+            seen[label] = 1
+        job["_pick"] = label
+        labels.append(label)
+
+    picked = sdk.request_selection(
+        params, labels, None,
+        window_title="911 Inspection Dimensions",
+        header="Select Nests to Read",
+        root_label="All nests in %s" % (os.path.basename(os.path.normpath(folder)) or folder),
+        noun="nest",
+        default_checked=False,   # start empty, like 911 Setup - tick only what you want
+        prompt_note=("Nothing is ticked to start. Tick the nests you want read - "
+                     "nothing in the rest is opened or changed."),
+        run_button_text="Read Selected",
+    )
+    if picked is None:
+        return None            # sdk.request_selection already flagged the cancel
+
+    keep = set(picked)
+    chosen = [j for j in jobs if j["_pick"] in keep]
+    dropped = len(jobs) - len(chosen)
+    if dropped:
+        log("Skipping %d nest(s) you did not tick - nothing in them was touched." % dropped)
+    return chosen
 
 
 # ---------------------------------------------------------------------------- run
 def run(params, progress_callback, cancel_event):
     import time
 
+    global _STRICT_COMPOUNDS
+
     log = params.get("log", print)
     settings = params.get("settings", {})
-    console = params.get("console")
+
+    # The escape hatch for the compound-length rule: a module flag rather than an
+    # argument, because classify() sits at the bottom of the OCR pipeline and every
+    # caller in between would otherwise have to carry it. Set once per run.
+    _STRICT_COMPOUNDS = settings.get("strict_compounds", True) is not False
+    if not _STRICT_COMPOUNDS:
+        log("Compound-length check is OFF - a misread like \"78 X 68.7\" will be kept.")
 
     folder = sdk.request_directory(
         params,
@@ -1039,13 +1469,29 @@ def run(params, progress_callback, cancel_event):
     if dry_run:
         log("DRY RUN - the report is written but no workbook is changed.")
 
-    jobs = discover_jobs(folder)
+    shape = classify_pick(folder)
+    if shape == "too_high":
+        raise sdk.UserFacingError(*_PICK_TOO_HIGH)
+
+    jobs = discover_jobs(folder, shape)
     if not jobs:
         raise sdk.UserFacingError(
             "There are no nest package PDFs in that folder.",
-            "Pick a batch folder (the one holding the nest folders), a single nest "
+            "Pick an order folder (the one holding the nest folders), a single nest "
             "folder, or a folder of nest package PDFs, then run it again.",
         )
+
+    # A single nest folder is unambiguous; anything wider gets the tick-list first.
+    if shape != "nest":
+        jobs = choose_nests(params, folder, jobs, log)
+        if jobs is None:
+            cancel_event.set()
+            return
+        if not jobs:
+            log("No nests were ticked - nothing to read.")
+            cancel_event.set()
+            return
+
     pdfs = [j["pdf"] for j in jobs]
     fillable = [j for j in jobs if j["workbook"]]
 
@@ -1065,7 +1511,7 @@ def run(params, progress_callback, cancel_event):
         sdk.raise_if_cancelled(cancel_event)
         try:
             sdk.ensure_local(path, log=log)
-            with fitz.open(path) as doc:
+            with fitz.open(sdk.long_path(path)) as doc:
                 total_pages += sum(1 for pg in doc if drawing_clip(pg) is not None)
         except Exception:
             total_pages += 1
@@ -1078,6 +1524,7 @@ def run(params, progress_callback, cancel_event):
     started = time.time()
     results = []
     failed = []
+    failures = {}
     fills = []
     for job in jobs:
         sdk.raise_if_cancelled(cancel_event)
@@ -1093,6 +1540,7 @@ def run(params, progress_callback, cancel_event):
         except Exception as exc:
             log("   ! could not read this PDF: %s" % exc)
             failed.append("%s (%s)" % (name, exc))
+            failures[name] = str(exc)
             results.append((name, []))
             continue
         results.append((name, parts))
@@ -1119,10 +1567,12 @@ def run(params, progress_callback, cancel_event):
     elapsed = time.time() - started
 
     stamp = datetime.datetime.now().strftime("%Y-%m-%d")
-    out_name = "911 Inspection Dimensions - %s - %s.txt" % (os.path.basename(folder.rstrip("\\/")), stamp)
+    where = os.path.basename(folder.rstrip("\\/"))
+    out_name = "911 Inspection Sheet Fill-In - %s - %s.txt" % (where, stamp)
+    # The Save button writes into the folder the run was pointed at - the order or
+    # nest folder the user picked - so the report lands beside the work it describes.
     out_path = os.path.join(folder, out_name)
-    with open(out_path, "w", encoding="utf-8") as handle:
-        handle.write(build_report(folder, results, fills, elapsed))
+    report = build_report(folder, results, fills, elapsed, failures)
 
     parts = sum(len(p) for _, p in results)
     dims = sum(len([d for d in rec["dims"] if not d["ref"]]) for _, p in results for rec in p)
@@ -1131,13 +1581,18 @@ def run(params, progress_callback, cancel_event):
     log("Read %d part(s), logged %d dimension(s) in %.0f seconds." % (parts, dims, elapsed))
     if fills:
         log("Filled %d inspection sheet tab(s) across %d workbook(s)." % (filled_tabs, len(fills)))
-    log("Saved: %s" % out_path)
 
-    if console is not None and hasattr(console, "append_link"):
-        try:
-            console.append_link(out_name, out_path, prefix="REPORT", at_run_end=True)
-        except TypeError:
-            console.append_link(out_name, out_path)
+    # The report IS this app's output, so it goes on SCREEN rather than into a file
+    # the reader has to dig out of the Pilot Program tree. Keeping a copy is their
+    # choice; headless, sdk.show_report writes it for us so nothing is ever lost.
+    log(sdk.show_report(
+        params,
+        "911 Inspection Sheet Fill-In - %s" % where,
+        "Read off the drawing pictures. Check them against the drawing "
+        "before you sign the sheet.",
+        report,
+        out_path,
+    ))
 
     if failed and hasattr(sdk, "set_run_outcome"):
         sdk.set_run_outcome(

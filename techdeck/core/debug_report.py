@@ -27,6 +27,12 @@ blind at least once:
   Plugin validation   - does every installed plugin load ON THIS MACHINE?
                         (the v0.8.6 plugin_window missing-hiddenimport class)
   Import probe        - is every critical module present in this frozen bundle?
+  Drawing reader      - can the 911 Inspection Dimensions OCR engines actually
+                        be REACHED? RapidOCR loads them by name from its own
+                        config, so a build that missed them still imports OK as
+                        an empty namespace package and only fails on the getattr
+                        (the 2026-09-01 "read 0 parts" class) - a plain import
+                        probe reports [OK] on a completely dead reader.
   Connectivity        - can THIS machine reach a cloud MQTT broker? Seeds the
                         "who's online + nudge" firewall question per-machine,
                         since colleagues can't run a probe script themselves —
@@ -88,6 +94,9 @@ _IMPORT_PROBES = [
     "PIL.Image",
     "win32com.client",
     "pythoncom",
+    # The 911 Inspection Dimensions drawing reader. Importing the top package is
+    # NOT enough to prove it works - see _collect_drawing_reader below.
+    "rapidocr_onnxruntime",
 ]
 
 _REDACT_MARKERS = ("api_key", "token", "password", "secret")
@@ -185,7 +194,32 @@ def _collect_environment() -> list[str]:
             continue
         seen.add(kl)
         lines.append(f"{k:<18} = {os.environ.get(k, '<unset>')}")
+    lines.extend(_collect_long_path_support())
     return lines
+
+
+def _collect_long_path_support() -> list[str]:
+    """Whether this machine lifts Windows' 260-char path cap process-wide.
+
+    TechDeck does not rely on it (sdk.long_path prefixes paths itself, which
+    works either way), but when a report shows a MAX_PATH failure this line
+    says whether the machine had the OS-level escape hatch on - which is the
+    difference between "we missed a call site" and "the OS never allowed it".
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            value = winreg.QueryValueEx(key, "LongPathsEnabled")[0]
+        state = "ON" if value else "OFF (260-char cap enforced)"
+    except OSError:
+        state = "not set (260-char cap enforced)"
+    except Exception as exc:                      # noqa: BLE001 - diagnostics
+        state = f"<unreadable: {exc}>"
+    return [f"{'LongPathsEnabled':<18} = {state}"]
 
 
 def _collect_onedrive_discovery() -> list[str]:
@@ -272,6 +306,63 @@ def _collect_import_probe() -> list[str]:
     return lines
 
 
+def _collect_drawing_reader() -> list[str]:
+    """Prove the OCR engine classes are really in the build, not just their folders.
+
+    RapidOCR never imports its three engines - it reads their module/class names out
+    of its own config.yaml and calls importlib.import_module. PyInstaller cannot see
+    that, and a build that missed them still SHIPS each folder (collect_data_files
+    copies the config.yaml), so Python imports the folder as an empty NAMESPACE
+    package: the import says OK and the getattr is what fails. A plain import probe
+    reports [OK] on a completely dead reader, which is how "911 Inspection Dimensions
+    read 0 parts" reached a user as "(no PART SKETCH pages found)" (FTOURIGNY-LT,
+    2026-09-01). So probe the getattr, and say where the module actually came from.
+    """
+    import importlib
+
+    lines: list[str] = []
+    try:
+        import yaml
+        import rapidocr_onnxruntime
+    except Exception as exc:
+        return [f"  [FAIL] rapidocr_onnxruntime: {type(exc).__name__}: {exc}",
+                "  The 911 Inspection Dimensions drawing reader cannot run at all."]
+
+    pkg_dir = os.path.dirname(os.path.abspath(rapidocr_onnxruntime.__file__))
+    lines.append(f"Package dir : {pkg_dir}")
+    try:
+        with open(os.path.join(pkg_dir, "config.yaml"), encoding="utf-8") as fh:
+            cfg = yaml.safe_load(fh) or {}
+    except Exception as exc:
+        return lines + [f"  [FAIL] config.yaml: {type(exc).__name__}: {exc}"]
+
+    wanted = [(sec["module_name"], sec["class_name"])
+              for sec in cfg.values()
+              if isinstance(sec, dict) and sec.get("module_name") and sec.get("class_name")]
+    if not wanted:
+        return lines + ["  [FAIL] config.yaml names no engine modules - its shape changed"]
+
+    for module_name, class_name in wanted:
+        try:
+            mod = importlib.import_module(module_name)
+        except Exception as exc:
+            lines.append(f"  [FAIL] {module_name}: {type(exc).__name__}: {exc}")
+            continue
+        origin = getattr(mod, "__file__", None) or "<namespace package - NO CODE>"
+        if hasattr(mod, class_name):
+            lines.append(f"  [OK  ] {module_name}.{class_name}")
+        else:
+            lines.append(f"  [FAIL] {module_name} has no attribute '{class_name}' - "
+                         f"it froze as an empty namespace package. Add "
+                         f"'{module_name}' to TechDeck.spec hiddenimports.")
+        lines.append(f"         from {origin}")
+
+    if all(ln.startswith("  [OK") or ln.startswith("         ") or ln.startswith("Package")
+           for ln in lines):
+        lines.append("Reader is complete - 911 Inspection Dimensions can read drawings.")
+    return lines
+
+
 def _collect_settings() -> list[str]:
     from techdeck.core.settings import SettingsManager
     data = _redact(SettingsManager().data)
@@ -338,7 +429,7 @@ def _collect_logs() -> list[str]:
     run_log = log_dir / "plugin_runs.log"
     if run_log.is_file():
         try:
-            tail = run_log.read_text(encoding="utf-8", errors="replace").splitlines()[-250:]
+            tail = run_log.read_text(encoding="utf-8", errors="replace").splitlines()[-600:]
             lines.append("")
             lines.append(f"--- plugin_runs.log (last {len(tail)} lines) ---")
             lines.extend(tail)
@@ -350,7 +441,9 @@ def _collect_logs() -> list[str]:
     detail_log = log_dir / "plugin_detail.log"
     if detail_log.is_file():
         try:
-            tail = detail_log.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
+            # 1500 lines ≈ a few dozen runs — enough history that a colleague's
+            # report can be mined for step-level timing, not just the last run.
+            tail = detail_log.read_text(encoding="utf-8", errors="replace").splitlines()[-1500:]
             lines.append("")
             lines.append(f"--- plugin_detail.log (last {len(tail)} lines) ---")
             lines.extend(tail)
@@ -624,6 +717,7 @@ def generate_debug_report(main_window=None) -> Path:
     section("ONEDRIVE / LIBRARY DISCOVERY", _collect_onedrive_discovery)
     section("PLUGINS (validated on this machine)", _collect_plugins)
     section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
+    section("DRAWING READER (911 Inspection Dimensions OCR)", _collect_drawing_reader)
     section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
     section("USAGE TELEMETRY (successful-run history)", _collect_usage)
     section("SETTINGS SNAPSHOT", _collect_settings)

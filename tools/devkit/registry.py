@@ -56,6 +56,13 @@ def _build_frame_extractor() -> QWidget:
     return FrameExtractorPanel()
 
 
+def _build_java_tutor() -> QWidget:
+    # A launcher, not an embed - the tutor is a full application window. See
+    # tools/devkit/java_tutor/panel.py.
+    from tools.devkit.java_tutor.panel import JavaTutorLauncher
+    return JavaTutorLauncher()
+
+
 DEV_TOOLS = [
     ToolSpec("todo_board", "Dev Board", _build_todo_board),
     ToolSpec("pixel_studio", "Pixel Studio", _build_pixel_studio),
@@ -64,4 +71,5 @@ DEV_TOOLS = [
     ToolSpec("ship_readiness", "Ship Readiness", _build_ship_readiness),
     ToolSpec("pixel_lint", "Pixel Style Lint", _build_pixel_lint),
     ToolSpec("frame_extractor", "Frame Extractor", _build_frame_extractor),
+    ToolSpec("java_tutor", "Java Tutor", _build_java_tutor),
 ]

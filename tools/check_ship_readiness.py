@@ -76,9 +76,43 @@ Checks (E = error, fails the build; W = warning):
       must have sdk.ensure_local in the SAME function (hydrate at the read
       site - the resilient calls are cheap no-ops on local files, so there is
       no legitimate raw-read case).
+  E14 no file operation on a raw path that Windows fails past MAX_PATH
+      (Hard Rule 14): the Pilot Program tree burns ~190 of the 260 characters
+      Win32 allows, so a descriptive output name tips a write over and it
+      dies with "FileNotFoundError [Errno 2] No such file or directory" -
+      pointing at a folder that plainly exists (911 SSPO Award Review at 277
+      chars, DESKTOP-DD35L5F, 2026-08-21; the user "fixed" it by renaming the
+      award folder). .mkdir()/os.makedirs -> sdk.ensure_dir; Workbook.save ->
+      sdk.save_workbook; shutil copy/move/rmtree -> wrap each path in
+      sdk.long_path (or sdk.copy_resilient for a copy). Paths built from
+      __file__ are exempt (plugin-bundled files sit under a short path).
+      .exists()/.is_file()/.is_dir() are the same class but FAIL SILENTLY -
+      they answer False for a file that is right there, so a "create it if
+      missing" guard fires and overwrites real work; use sdk.exists /
+      sdk.is_file / sdk.is_dir.
   W1  hardcoded user-specific path (C:\\Users\\<name>) in plugin source
   W2  installed copy in %LOCALAPPDATA% differs from the repo copy (the repo is
       what ships - if you tested the installed copy, the fix may not be here)
+  E15 a third-party package that resolves its own submodules by RUNTIME STRING
+      must have every one of those names in TechDeck.spec hiddenimports, and
+      its package dir on pathex. PyInstaller's static analysis only follows
+      import STATEMENTS, so a name that only ever appears as data - RapidOCR
+      reads ch_ppocr_v3_det / _rec / _cls out of its own config.yaml and calls
+      importlib.import_module on them - is silently left out. The build still
+      succeeds: collect_data_files copies each subpackage's config.yaml, so the
+      FOLDER ships without its __init__.py and Python imports it as an empty
+      NAMESPACE package. The failure lands on the user as an AttributeError
+      ("module 'ch_ppocr_v3_det' has no attribute 'TextDetector'"), which is
+      Hard Rule 8 with the import hidden in a config file (911 Inspection
+      Dimensions read 0 parts on FTOURIGNY-LT, 2026-09-01). This gate re-reads
+      the package's own config at build time, so a version bump that renames an
+      engine module fails here instead of on a colleague's machine.
+  E16 a run.py that carries its own VERSION constant must match plugin.json's
+      "version". The manifest is what the loader, the Library and the updater
+      report; the constant is what the plugin STAMPS on the output it hands the
+      user. When they drift, a user's report names a build that never existed
+      and a bug lands against the wrong version (911 Inspection Dimensions
+      shipped plugin.json 0.5.0 with VERSION = "0.4.0", 2026-09-01).
 
 Output is ASCII only (this runs from build.ps1).
 """
@@ -97,6 +131,9 @@ REPO = Path(__file__).resolve().parents[1]
 PLUGINS_DIR = REPO / "plugins"
 APP_PKG_DIR = REPO / "techdeck"
 SPEC_FILE = REPO / "TechDeck.spec"
+
+# E16: a plugin's own VERSION constant, which must match plugin.json's "version"
+VERSION_CONST_RE = r"""^VERSION\s*=\s*['"]([^'"]+)['"]"""
 ENTRY_MODULE = "techdeck.__main__"
 
 # "General" is the current family-less bucket; "other" stays accepted as its
@@ -299,6 +336,99 @@ def find_unhydrated_pdf_opens(tree: ast.AST) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
+# E14: file operations that break past Windows' 260-char MAX_PATH cap
+# (Hard Rule 14). The Pilot Program tree burns ~190 characters before a plugin
+# adds anything, so a descriptive output name tips the write over and Win32
+# fails it with "FileNotFoundError [Errno 2] No such file or directory" -
+# naming a folder that plainly exists (911 SSPO Award Review at 277 chars,
+# DESKTOP-DD35L5F, 2026-08-21). Every operation below must route through an
+# SDK helper or wrap its path in sdk.long_path().
+# These answer False instead of raising, so an over-length path silently
+# reads as "not there" - the guard fires and the plugin overwrites real work.
+SILENT_PATH_PREDICATES = {"exists", "is_file", "is_dir"}
+
+SHUTIL_PATH_OPS = {
+    "copy", "copy2", "copyfile", "copytree", "move", "rmtree", "make_archive",
+}
+
+
+def _is_long_path_wrapped(node: ast.AST) -> bool:
+    """True for sdk.long_path(...) / long_path(...) — the escape hatch that
+    makes a path survive MAX_PATH."""
+    return isinstance(node, ast.Call) and _call_name(node) == "long_path"
+
+
+def _is_short_by_construction(node: ast.AST) -> bool:
+    """True for a path that cannot be long: one built from __file__ (a
+    plugin-bundled template, which lives under a short install path)."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id == "__file__":
+            return True
+    return False
+
+
+def find_max_path_risks(tree: ast.AST) -> list[tuple[int, str, str]]:
+    """(lineno, what, fix) for plugin file operations that die past 260 chars.
+
+    Three mechanically-checkable classes:
+      * .mkdir() / os.makedirs()   -> sdk.ensure_dir (makedirs walks up to the
+        drive root and chokes on the extended-length prefix, so the prefix
+        cannot simply be applied at the call site)
+      * openpyxl Workbook .save()  -> sdk.save_workbook
+      * shutil path ops            -> wrap each path in sdk.long_path
+
+    Anything already routed through an SDK helper, or already wrapped, passes.
+    """
+    workbooks: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
+                and _call_name(node.value) in ("Workbook", "load_workbook",
+                                               "load_workbook_resilient"):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    workbooks.add(target.id)
+
+    hits: list[tuple[int, str, str]] = []
+    for node in _iter_calls_skipping_main(tree):
+        name = _call_name(node)
+
+        if name in SILENT_PATH_PREDICATES and isinstance(node.func, ast.Attribute)                 and not node.args:
+            hits.append((node.lineno, f".{name}()",
+                         f"sdk.{name}(path) - the raw "
+                         f"call answers False for a file that exists, so "
+                         f"every 'create it if missing' guard misfires"))
+            continue
+
+        if name in ("mkdir", "makedirs"):
+            hits.append((node.lineno, f"{name}()",
+                         "sdk.ensure_dir(path) - it creates each level with "
+                         "the long-path prefix (os.makedirs cannot)"))
+            continue
+
+        if name == "save" and isinstance(node.func, ast.Attribute) \
+                and isinstance(node.func.value, ast.Name) \
+                and node.func.value.id in workbooks:
+            if not (node.args and _is_long_path_wrapped(node.args[0])):
+                hits.append((node.lineno, "Workbook.save()",
+                             "sdk.save_workbook(wb, path) - long-path safe, "
+                             "creates the parent folder, and reports a "
+                             "locked destination in plain English"))
+            continue
+
+        if isinstance(node.func, ast.Attribute) and name in SHUTIL_PATH_OPS \
+                and isinstance(node.func.value, ast.Name) \
+                and node.func.value.id == "shutil":
+            for arg in node.args:
+                if _is_long_path_wrapped(arg) or _is_short_by_construction(arg):
+                    continue
+                hits.append((node.lineno, f"shutil.{name}()",
+                             "wrap each path in sdk.long_path(...), or use "
+                             "sdk.copy_resilient(src, dest, log) for a copy"))
+                break
+
+    return sorted(hits)
+
+
 def find_bypassed_batch_prompts(tree: ast.AST) -> list[str]:
     """Return prompt strings for batch-number prompts that bypass the SDK.
 
@@ -331,6 +461,74 @@ def stdlib_names() -> set[str]:
 
 
 STDLIB = stdlib_names()
+
+
+# E15: packages that import their own submodules by runtime string (Hard Rule 8)
+#
+# One entry per package that names modules in DATA rather than in an import
+# statement. `config` is read relative to the installed package; every
+# `module_name` found under `key` must be in the spec's hiddenimports.
+_RUNTIME_STRING_IMPORTS = (
+    {
+        "package": "rapidocr_onnxruntime",
+        "config": "config.yaml",
+        "key": "module_name",
+        "why": "RapidOCR calls importlib.import_module on these (rapid_ocr_api.py)",
+    },
+)
+
+
+def check_runtime_string_imports(hidden: list[str], errors: list[str],
+                                 warnings: list[str]) -> None:
+    """E15 - submodules named only in a package's own config must be forced in."""
+    import importlib
+
+    for entry in _RUNTIME_STRING_IMPORTS:
+        pkg = entry["package"]
+        try:
+            mod = importlib.import_module(pkg)
+        except Exception as exc:
+            warnings.append(f"E15 skipped for {pkg}: not importable here ({exc}) - "
+                            f"install it (pip install -r requirements.txt) so the "
+                            f"gate can read its config")
+            continue
+
+        pkg_dir = Path(mod.__file__).resolve().parent
+        cfg_path = pkg_dir / entry["config"]
+        try:
+            import yaml
+            cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            errors.append(f"E15 could not read {cfg_path} ({exc}) - TechDeck.spec "
+                          f"cannot be checked against it")
+            continue
+
+        key = entry["key"]
+        names = sorted({sec[key] for sec in (cfg or {}).values()
+                        if isinstance(sec, dict) and sec.get(key)})
+        if not names:
+            errors.append(f"E15 found no '{key}' entries in {cfg_path} - the shape "
+                          f"of {pkg}'s config changed; re-check TechDeck.spec by hand")
+            continue
+
+        missing = [n for n in names if n not in hidden]
+        if missing:
+            errors.append(
+                f"E15 TechDeck.spec hiddenimports is missing {', '.join(missing)} - "
+                f"{entry['why']}, so PyInstaller never sees them and the frozen exe "
+                f"ships each one as an empty namespace package (Hard Rule 8). Add "
+                f"them to hiddenimports and keep {pkg_dir} on pathex."
+            )
+
+        # The subpackage must be a REAL package on disk - a namespace dir here would
+        # freeze as nothing at all, which is the exact failure this gate exists for.
+        for name in names:
+            if not (pkg_dir / name / "__init__.py").is_file():
+                errors.append(
+                    f"E15 {pkg}/{name}/__init__.py is missing - '{name}' is not an "
+                    f"importable package in the installed {pkg}, so hiddenimports "
+                    f"cannot freeze it. Check the pinned version in requirements.txt."
+                )
 
 
 # ---------------------------------------------------------------- spec parsing
@@ -535,6 +733,23 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                     f"{pid}: folder/id must match the Library name per the naming "
                     f"convention - expected '{expected}' for name '{name}'")
 
+        # --- version drift (E16): the manifest version is what the app reports;
+        # a VERSION constant is what the plugin stamps on ITS OWN output. If they
+        # disagree, the user's report names a build that never existed.
+        declared = manifest.get("version")
+        run_src = plugin_dir / "run.py"
+        if isinstance(declared, str) and run_src.is_file():
+            try:
+                text = run_src.read_text(encoding="utf-8")
+            except OSError:
+                text = ""
+            found = re.search(VERSION_CONST_RE, text, re.MULTILINE)
+            if found and found.group(1) != declared:
+                errors.append(
+                    f"{pid}: run.py VERSION = '{found.group(1)}' but plugin.json "
+                    f"version is '{declared}' - the plugin stamps one version on "
+                    f"its output while the app reports another")
+
     run_file = plugin_dir / "run.py"
     if not run_file.is_file():
         errors.append(f"{pid}: missing run.py")
@@ -607,6 +822,15 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
                 f"sdk.ensure_local in the same function - a cloud-only file "
                 f"crashes the read (Hard Rule 13); hydrate at the read site "
                 f"(ensure_local is a cheap no-op on a local file)"
+            )
+
+        # --- file ops that break past MAX_PATH (E14, Hard Rule 14)
+        for line_no, what, fix in find_max_path_risks(tree):
+            errors.append(
+                f"{pid}: {rel}:{line_no} calls {what} on a raw path - "
+                f"Windows fails it past 260 characters with a baffling "
+                f"'No such file or directory' on a folder that exists "
+                f"(Hard Rule 14); use {fix}"
             )
 
         fp, tp, rel_count = extract_imports(py_file, "", module_map)
@@ -752,6 +976,9 @@ def main() -> int:
         if required not in datas:
             errors.append(f"TechDeck.spec datas is missing {required!r} - that "
                           f"directory will be absent from the build (Hard Rule 7)")
+
+    # E15 - submodules a package imports by runtime string
+    check_runtime_string_imports(hidden, errors, warnings)
 
     module_map = build_module_map()
     reachable_fp, available_tp = compute_frozen_surface(module_map, hidden)

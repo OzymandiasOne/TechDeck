@@ -89,12 +89,14 @@ class TalkbackState:
 # ---------------------------------------------------------------------------
 
 TECH_TIPS = [
-    "Tech Tip: Configure app folder paths in Settings > App Settings.",
+    "Tech Tip: Set up each app's folders and options in Settings > Apps.",
     "Tech Tip: Build a custom color theme in Settings > Personalization.",
     "Tech Tip: Type /roguemode to launch the focus music player.",
-    "Tech Tip: Try /theme cyberpunk or /theme matrix for a different vibe.",
+    "Tech Tip: Try the Cyberpunk or Matrix theme in Settings > Personalization > Theme.",
     "Tech Tip: Type /help to see all available console commands.",
     "Tech Tip: Double-click a track in the Rogue Mode playlist to jump to it.",
+    "Tech Tip: Type /guide to open the TechDeck User Guide.",
+    "Tech Tip: Type /pause at an input prompt to hold a run; /shelve saves the rest for later.",
 ]
 
 

@@ -106,7 +106,7 @@ def _order_has_7000_prints(order_dir: Path, cancel_event=None) -> bool:
     for i, p in enumerate(order_dir.rglob("7000")):
         if i % 64 == 0:
             sdk.raise_if_cancelled(cancel_event)
-        if not p.is_dir():
+        if not sdk.is_dir(p):
             continue
         if "cad-and-shop-prints" in [s.lower() for s in p.parts]:
             if any(f.suffix.lower() == ".pdf" for f in p.glob("*.pdf")):
@@ -138,7 +138,7 @@ def _audit_922(batch_no: str, batch_path: Path, log, cancel_event=None):
     else:
         order_to_serials, _ = sdk.read_qf_qu_09(po_path)
         total_orders = len(order_to_serials)
-        children = [c for c in batch_path.iterdir() if c.is_dir()]
+        children = [c for c in batch_path.iterdir() if sdk.is_dir(c)]
 
         def _folder_for(order):
             for c in children:
@@ -172,8 +172,8 @@ def _audit_922(batch_no: str, batch_path: Path, log, cancel_event=None):
 
     # --- LST & run time ---
     lst_dir = doc_folder / "LST"
-    lst_ok = lst_dir.exists() and any(lst_dir.rglob("*.lst"))
-    runtime_ok = (lst_dir / f"Run Time Estimate - Batch {batch_no}.txt").exists()
+    lst_ok = sdk.exists(lst_dir) and any(lst_dir.rglob("*.lst"))
+    runtime_ok = sdk.exists(lst_dir / f"Run Time Estimate - Batch {batch_no}.txt")
     cards.append({"label": "LST organized", "value": "Done" if lst_ok else "Missing",
                   "status": _bool_status(lst_ok)})
     cards.append({"label": "Run time est.", "value": "Done" if runtime_ok else "Missing",
@@ -207,7 +207,7 @@ def _audit_922(batch_no: str, batch_path: Path, log, cancel_event=None):
     # --- Pallets & kitting ---
     pallets = _pallet_assignment_count(organizer_path) if organizer_path else 0
     pallets_ok = pallets > 0
-    kitting_ok = (doc_folder / "Kitting" / f"Kitting {batch_no}.pdf").exists()
+    kitting_ok = sdk.exists(doc_folder / "Kitting" / f"Kitting {batch_no}.pdf")
     cards.append({"label": "Pallets", "value": "Assigned" if pallets_ok else "Not set",
                   "status": "ok" if pallets_ok else "warning"})
     cards.append({"label": "Kitting PDF", "value": "Done" if kitting_ok else "Missing",
@@ -245,14 +245,14 @@ def _audit_911(batch: str, batch_folder: Path, log, cancel_event=None):
     summary: list[str] = []
 
     batch_list = batch_folder / f"{batch} BATCH LIST.xlsx"
-    if not batch_list.exists():
+    if not sdk.exists(batch_list):
         for f in batch_folder.glob("*.xlsx"):
             if "BATCH LIST" in f.name.upper() and not f.name.startswith("~"):
                 batch_list = f
                 break
 
     nests: list[str] = []
-    if batch_list.exists():
+    if sdk.exists(batch_list):
         wb = sdk.load_workbook_resilient(batch_list, data_only=True)
         try:
             ws = wb["BATCH"] if "BATCH" in wb.sheetnames else wb.active
@@ -274,13 +274,13 @@ def _audit_911(batch: str, batch_folder: Path, log, cancel_event=None):
     for nest in nests:
         sdk.raise_if_cancelled(cancel_event)
         nest_dir = batch_folder / nest
-        if not nest_dir.is_dir():
+        if not sdk.is_dir(nest_dir):
             continue
         folders += 1
-        if (nest_dir / f"911 BATCH {batch} {nest}.xlsx").exists() or \
+        if sdk.exists(nest_dir / f"911 BATCH {batch} {nest}.xlsx") or \
            any(p.name.lower().startswith("911 batch") for p in nest_dir.glob("*.xlsx")):
             workbooks += 1
-        if (nest_dir / f"{nest} MOVE TICKET OMIT.pdf").exists() or \
+        if sdk.exists(nest_dir / f"{nest} MOVE TICKET OMIT.pdf") or \
            any("move ticket omit" in p.name.lower() for p in nest_dir.glob("*.pdf")):
             tickets += 1
 

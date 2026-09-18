@@ -52,7 +52,7 @@ except ModuleNotFoundError:
 
 import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
 
-VERSION = "3.3.0"
+VERSION = "3.3.1"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -69,7 +69,7 @@ def _order_dirs(batch_path: Path, batch_no: str) -> List[Path]:
     """Top-level order folders, excluding the batch's own system dirs."""
     doc = f"batch {batch_no} - documentation"
     out = []
-    for d in sorted(p for p in batch_path.iterdir() if p.is_dir()):
+    for d in sorted(p for p in batch_path.iterdir() if sdk.is_dir(p)):
         low = d.name.strip().lower()
         if low == doc or low == "repeat batches":
             continue
@@ -126,12 +126,20 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
         po_ws = wb[smap["po"]]
         hdr, cols = _scan_headers(po_ws, ["ORDER", "DYPN", "SOURCE MATERIAL"])
         dypn_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        respelled: List[Tuple[str, str]] = []
         for row in po_ws.iter_rows(min_row=hdr + 1, values_only=True):
             dypn = _cell(row, cols["DYPN"])
             if not dypn:
                 continue
-            dypn_map[_normalize_part(dypn)] = (
+            key = _normalize_part(dypn)
+            if key != dypn.upper():
+                respelled.append((dypn, key))
+            dypn_map[key] = (
                 _cell(row, cols["ORDER"]), _cell(row, cols["SOURCE MATERIAL"]))
+        if respelled and log:
+            raw, key = respelled[0]
+            log(f"  {len(respelled)} PO DYPN(s) respelled to the standard form "
+                f"before matching (e.g. {raw} -> {key}).")
 
         serial_desc: Dict[str, str] = {}
         if "source material" in smap:
@@ -168,7 +176,7 @@ def _find_master_po(batch_path: Path, batch_no: str) -> Optional[Path]:
     has no PO sheet), and validates the PO sheet before returning."""
     doc = batch_path / f"Batch {batch_no} - Documentation"
     searches = []
-    if doc.exists():
+    if sdk.exists(doc):
         searches += [doc.glob(f"*H{batch_no}*QF*QU*.xlsx"), doc.glob("*QF*QU*.xlsx"),
                      doc.glob(f"PO H{batch_no}*.xlsx"), doc.glob("*.xlsx")]
     searches.append(batch_path.rglob("*QF*QU*.xlsx"))
@@ -401,7 +409,7 @@ class _Pdf:
         self.y += h
 
     def save(self, path):
-        self.doc.save(str(path), garbage=3, deflate=True)
+        self.doc.save(sdk.long_path(path), garbage=3, deflate=True)
         self.doc.close()
 
 
@@ -533,12 +541,12 @@ def _retry(fn, *a, tries=5, delay=0.2, **kw):
 
 
 def _unique(dest: Path) -> Path:
-    if not dest.exists():
+    if not sdk.exists(dest):
         return dest
     k = 2
     while True:
         cand = dest.with_name(f"{dest.stem}({k}){dest.suffix}")
-        if not cand.exists():
+        if not sdk.exists(cand):
             return cand
         k += 1
 
@@ -568,7 +576,16 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         log("DRY RUN - no files will be copied or moved.")
 
     lst_dir = batch_path / f"Batch {batch_no} - Documentation" / "LST"
-    lst_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(lst_dir)
+
+    # Run ahead of the serial per-folder scan below: background workers walk
+    # the batch tree and hydrate every .lst (plus the Documentation workbooks,
+    # for the PO reconcile later) so cloud-only folders stop stalling the scan
+    # loop one folder at a time.
+    def _read_set():
+        yield from (batch_path / f"Batch {batch_no} - Documentation").glob("*.xlsx")
+        yield from batch_path.rglob("*.lst")
+    sdk.prefetch_paths(_read_set(), cancel_event=cancel_event)
 
     # ── Phase 1: gather ──
     log("Scanning order folders for .lst files...")
@@ -589,7 +606,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             else:
                 sdk.ensure_local(f)
                 dest = _unique(lst_dir / f.name)
-                _retry(shutil.copy2, f, dest)
+                _retry(shutil.copy2, sdk.long_path(f), sdk.long_path(dest))
                 gathered.append((od.name, dest))
     log(f"Gathered {len(gathered)} .lst file(s) from {len(order_dirs)} order folder(s).")
     progress_callback(35)
@@ -622,9 +639,10 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         for p in pulled:
             sdk.raise_if_cancelled(cancel_event)
             target_dir = lst_dir / p.folder
-            target_dir.mkdir(parents=True, exist_ok=True)
+            sdk.ensure_dir(target_dir)
             try:
-                _retry(shutil.move, str(p.src), str(_unique(target_dir / p.src.name)))
+                _retry(shutil.move, sdk.long_path(p.src),
+                       sdk.long_path(_unique(target_dir / p.src.name)))
             except Exception as e:
                 log(f"  WARNING: could not file {p.src.name}: {e}")
     progress_callback(88)

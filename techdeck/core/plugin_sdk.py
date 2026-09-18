@@ -807,6 +807,36 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
+def show_report(params: dict, title: str, subtitle: str, body: str,
+                save_path: str = "") -> str:
+    """Put a finished report on screen with a Save-as-.txt button. Returns a note
+    for the log.
+
+    For a run whose OUTPUT is something a person reads. Writing a .txt into a
+    Pilot Program folder and printing the path means the reader has to go and dig
+    for it; this puts it in front of them and makes saving their choice.
+
+    Does not block -- the window stays up after the run ends (contrast
+    show_warning, which blocks until acknowledged). ``save_path`` is the full file
+    path the Save button writes, so pass one INSIDE the folder the run was pointed
+    at. Headless, or on an older TechDeck with no console.show_report, it falls
+    back to writing the file itself so nothing is ever lost.
+    """
+    console = params.get("console")
+    if console is not None and hasattr(console, "show_report"):
+        try:
+            console.show_report(title, subtitle, body, save_path)
+            return "Report is on screen - press Save as .txt to keep a copy."
+        except Exception:
+            pass
+    if not save_path:
+        params.get("log", print)(body)
+        return "Report printed above."
+    with open(long_path(save_path), "w", encoding="utf-8") as fh:
+        fh.write(body)
+    return "Saved: %s" % save_path
+
+
 def load_toggle_memory(memory_key: str) -> dict:
     """The selections last submitted under ``memory_key`` ({} if none/unreadable)."""
     try:
@@ -842,10 +872,18 @@ def apply_toggle_memory(groups: list, remembered: dict) -> list:
 
     A child marked ``disabled`` stays unchecked no matter what is remembered —
     disabled means unavailable, not merely off.
+
+    A group declaring ``"remember": False`` is NON-STICKY: it always opens at
+    its declared default, no matter what was submitted last time (and
+    request_grouped_toggles never saves it). For mode switches that are a
+    property of THIS run, not a preference — 911 Setup's PLATE batch toggle is
+    the canonical case: a leftover PLATE tick silently applied to the next
+    shape batch would fill real paperwork with the wrong template.
     """
     out = []
     for g in groups:
-        saved = remembered.get(g.get("key")) or {}
+        saved = {} if g.get("remember") is False else \
+            (remembered.get(g.get("key")) or {})
         merged = dict(g)
         if "enabled" in saved:
             merged["checked"] = bool(saved["enabled"])
@@ -911,9 +949,15 @@ def request_grouped_toggles(params: dict, groups: list, remember_as: str = "",
         return _user_cancelled(params)
 
     # Only a real submit is remembered -- a cancel means "not this time",
-    # never "make that my default".
+    # never "make that my default". Groups declaring remember: False are
+    # per-run mode switches and are stripped before saving, so their state
+    # can never leak into a later run even through a stale settings.json.
     if remember_as:
-        save_toggle_memory(remember_as, result)
+        no_memory = {g.get("key") for g in groups
+                     if g.get("remember") is False}
+        save_toggle_memory(remember_as,
+                           {k: v for k, v in result.items()
+                            if k not in no_memory})
     return result
 
 
@@ -1218,17 +1262,28 @@ _DYPN_TUBE_TAG_RE = re.compile(r"[-_]+P[-_]+Tube\d*$", re.IGNORECASE)  # SigmaNe
 _DYPN_STEP_RE = re.compile(r"[-_]STEP$", re.IGNORECASE)
 _DYPN_DUP_SUFFIX_RE = re.compile(r"([-_])([A-Za-z0-9]+)[-_]\2$", re.IGNORECASE)  # -4A_4A -> -4A
 _DYPN_SEG_RE = re.compile(r"^(\d+)([A-Za-z]*)$")
+# The PO sometimes drops the hyphen between the drawing number and the sheet
+# segment - 'R8652362H11G-4A' for the file's 'R8652362-H11G-4A' (Batch 491:
+# 9 of 38 standard tubes reported missing AND needing review). Any run of
+# '-', '_' or spaces between segments is the same hyphen spelled differently.
+_DYPN_SHEET_HYPHEN_RE = re.compile(r"^([A-Z]{1,2}\d{4,})[-_ ]*(?=H\d)")
+_DYPN_SEP_RE = re.compile(r"[-_ ]+")
 
 
 def normalize_dypn(value) -> str:
     """A filename stem (or a raw PO DYPN) reduced to its canonical DYPN,
     upper-cased: the export tags ('-P-Tube2', '-STEP') and a duplicated suffix
-    ('-4A_4A') are peeled off. 'R6455461-H51-4A-STEP' -> 'R6455461-H51-4A'."""
+    ('-4A_4A') are peeled off, separators become single hyphens, and a hyphen
+    the PO dropped between the drawing number and the sheet segment is put
+    back. 'R6455461-H51-4A-STEP' -> 'R6455461-H51-4A';
+    'R8652362H11G-4A' -> 'R8652362-H11G-4A'."""
     s = str(value or "")
     s = _DYPN_TUBE_TAG_RE.sub("", s)
     s = _DYPN_STEP_RE.sub("", s)
     s = _DYPN_DUP_SUFFIX_RE.sub(r"\1\2", s)
-    return s.strip("-_ ").upper()
+    s = s.strip("-_ ").upper()
+    s = _DYPN_SEP_RE.sub("-", s)
+    return _DYPN_SHEET_HYPHEN_RE.sub(r"\1-", s)
 
 
 def split_dypn(part) -> tuple:
@@ -1360,6 +1415,117 @@ def read_qf_qu_09(po_path: Path):
 # PDF helpers (PyMuPDF / fitz)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# A part DRAWING carries the standard title-block boilerplate (the tolerance
+# block ASA's and Electric Boat's prints share); a 922 work packet never does.
+# Measured over EVERY PDF in the live 922 batch folders 2026-08-27: all four
+# markers appear on 224 of 224 drawing binders and on 0 of 257 work packets.
+# The packets answer instead to their own "Lead Trade" / "Work Instruction"
+# text, but the absence of a title block is the cleaner test - it needs no
+# guess about which packet layout a batch happens to use.
+_TITLE_BLOCK_MARKERS = (
+    "DO NOT SCALE DRAWING",
+    "UNLESS OTHERWISE SPECIFIED",
+    "ENG APPR",
+    "MFG APPR",
+)
+# Two of four. One marker alone could plausibly appear in a packet's notes; all
+# four is stricter than a scanned or oddly-encoded print can be relied on to be.
+_TITLE_BLOCK_MIN_HITS = 2
+
+# Office lock files (~$...) and stray Python temp files (tmpab12cd34.pdf) are
+# not real PDFs of ours. A leftover temp PDF in an order folder would otherwise
+# be picked as that order's work packet by "the first PDF in the folder".
+_NOT_A_REAL_PDF_RE = re.compile(r'^(~\$|tmp[a-z0-9_]{6,}$)', re.IGNORECASE)
+
+# Drawing binders are exported as Binder1.pdf / Binder7.pdf / BinderH9.pdf.
+# This is only a RANKING hint - the title-block read is what actually decides.
+_BINDER_NAME_RE = re.compile(r'^binder', re.IGNORECASE)
+
+
+def is_real_pdf(path) -> bool:
+    """False for Office lock files and leftover temp PDFs, which are never ours."""
+    return not _NOT_A_REAL_PDF_RE.match(Path(path).stem)
+
+
+def is_drawing_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a part DRAWING (a title-block print).
+
+    This is how a drawing binder is told apart from a work packet. Name alone
+    cannot do it: the binders sort BEFORE the packet in an order folder
+    ('Binder1.pdf' before 'BK394153 NOFORN.pdf' in Windows' case-insensitive
+    order), so "the first PDF in the folder" stamps the drawing (reported by a
+    922 Pallet Stamper user, 2026-08-20), and a binder is not always named
+    'Binder'.
+
+    An UNREADABLE PDF answers False on purpose. Treating a read error as "this
+    is a drawing" would silently skip a real work packet and the run would look
+    clean; answering False sends the caller on to its own open, which reports
+    the failure properly.
+    """
+    import fitz
+    path = Path(path)
+    try:
+        ensure_local(path)
+        doc = fitz.open(long_path(path))
+        try:
+            text = doc[0].get_text().upper()
+        finally:
+            doc.close()
+    except Exception as exc:
+        if log:
+            log(f"  NOTE: couldn't read {path.name} to check for a title "
+                f"block ({exc}); treating it as a work packet.")
+        return False
+    return text_has_title_block(text)
+
+
+def text_has_title_block(page_text: str) -> bool:
+    """The title-block test on text you have ALREADY read.
+
+    `is_drawing_pdf` opens the file for you; use this one when you are inside
+    an open document anyway and a second open would cost another OneDrive
+    round-trip.
+    """
+    text = (page_text or "").upper()
+    hits = sum(1 for marker in _TITLE_BLOCK_MARKERS if marker in text)
+    return hits >= _TITLE_BLOCK_MIN_HITS
+
+
+def find_work_packet(order_dir, log=None) -> Optional[Path]:
+    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+
+    Returns None when the folder holds no work packet - INCLUDING the case
+    where every PDF in it is a drawing binder. Callers must treat that as
+    "nothing to do here", never as "stamp the first PDF anyway".
+
+    Candidates are ranked by NAME (a PDF named for the order first, a
+    Binder*.pdf last) and then each is confirmed by READING it: the first one
+    whose page 1 is not a title-block drawing wins. The ranking only decides
+    which file gets read first, so a binder that isn't named 'Binder' is still
+    caught, and the common case costs a single page-1 read.
+    """
+    order_dir = Path(order_dir)
+    pdfs = [p for p in sorted(order_dir.iterdir())
+            if is_file(p) and p.suffix.lower() == ".pdf" and is_real_pdf(p)]
+    if not pdfs:
+        return None
+
+    order_no = order_dir.name.split('-', 1)[0].strip().upper()
+
+    def rank(p: Path) -> tuple:
+        named_for_order = p.stem.strip().upper().startswith(order_no)
+        looks_like_binder = bool(_BINDER_NAME_RE.match(p.stem))
+        return (0 if named_for_order else 1, 1 if looks_like_binder else 0, p.name)
+
+    for pdf in sorted(pdfs, key=rank):
+        if not is_drawing_pdf(pdf, log=log):
+            return pdf
+        if log:
+            log(f"  Skipping {pdf.name} - it's a drawing (ASA title block), "
+                f"not a work packet.")
+    return None
+
+
 def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
     """Merge `pdfs` (in order) into a single PDF at out_path."""
     import fitz
@@ -1367,12 +1533,13 @@ def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
     try:
         for p in pdfs:
             ensure_local(p)
-            src = fitz.open(str(p))
+            src = fitz.open(long_path(p))
             try:
                 out.insert_pdf(src)
             finally:
                 src.close()
-        out.save(str(out_path))
+        ensure_dir(Path(out_path).parent)
+        out.save(long_path(out_path))
     finally:
         out.close()
 
@@ -1403,14 +1570,16 @@ def save_pdf_atomic(doc, dest_path: Path, close: bool = True) -> None:
     """
     import fitz
     dest_path = Path(dest_path)
+    ensure_dir(dest_path.parent)
 
     with tempfile.NamedTemporaryFile(
-        suffix=".pdf", delete=False, dir=str(dest_path.parent)
+        suffix=".pdf", delete=False, dir=long_path(dest_path.parent)
     ) as tmp:
         tmp_path = Path(tmp.name)
 
     try:
-        doc.save(str(tmp_path), incremental=False, encryption=fitz.PDF_ENCRYPT_NONE)
+        doc.save(long_path(tmp_path), incremental=False,
+                 encryption=fitz.PDF_ENCRYPT_NONE)
 
         # Release the source handle before swapping the file underneath it.
         if close or _doc_source_is(doc, dest_path):
@@ -1419,10 +1588,10 @@ def save_pdf_atomic(doc, dest_path: Path, close: bool = True) -> None:
             except Exception:
                 pass
 
-        os.replace(str(tmp_path), str(dest_path))
+        os.replace(long_path(tmp_path), long_path(dest_path))
     except Exception:
         try:
-            tmp_path.unlink()
+            os.remove(long_path(tmp_path))
         except OSError:
             pass
         raise
@@ -1434,9 +1603,176 @@ def _doc_source_is(doc, dest_path: Path) -> bool:
         src = getattr(doc, "name", None)
         if not src:
             return False
-        return Path(src).resolve() == Path(dest_path).resolve()
+        # doc.name carries whatever string opened it - possibly the \?\ form,
+        # which Path.resolve() leaves in place. Strip it so a long-path doc
+        # still matches its own destination.
+        return _strip_long_prefix(src) == _strip_long_prefix(dest_path)
     except Exception:
         return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Windows long paths (MAX_PATH)
+#
+# Win32 caps a path at 260 characters unless it is handed over in the
+# extended-length form ``\\?\C:\...``. The Pilot Program tree eats most of
+# that budget before a plugin adds anything:
+#
+#   C:\Users\<user>\American Steel & Alum\Communication site - Electric Boat
+#   ASA Docs\Pilot Program\1. 1000129724 - Strategic Partnership, Steel
+#   Processing Offload\VTDX Award Records\1000129724 SSPO Award 13\...
+#
+# ...is already ~190 chars, so a descriptive output filename tips it over and
+# the write dies with ``FileNotFoundError [Errno 2] No such file or
+# directory`` — pointing at a folder that plainly exists. Bit 911 SSPO Award
+# Review at 277 chars (DESKTOP-DD35L5F, 2026-08-21); the user "fixed" it by
+# renaming the award folder to something shorter, which is not a fix.
+#
+# Windows 10+ CAN lift the cap process-wide (registry LongPathsEnabled=1 AND a
+# longPathAware manifest), but the registry half belongs to corporate IT and is
+# off on some machines — so we never rely on it. `long_path()` is the fix that
+# works everywhere: prefix the path, and Win32 skips the check entirely.
+#
+# Gotchas the prefix brings with it, all handled below:
+#   * It disables ALL path normalization — the path must be absolute, use
+#     backslashes, and contain no "." / ".." components.
+#   * UNC shares take a different spelling: \\server\share -> \\?\UNC\server\share
+#   * os.makedirs() walks up to the root and chokes on the "\\?" head, so
+#     `ensure_dir()` prefixes only the final mkdir of each level.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Prefix well short of 260: the caller may append a suffix (".tmp", a temp
+# name beside the target), and a directory at 250 still has to hold filenames.
+_LONG_PATH_THRESHOLD = 240
+B_SLASH = chr(92)
+_UNC_PREFIX = "\\\\?\\UNC\\"
+_DOS_PREFIX = "\\\\?\\"
+
+
+def long_path(path) -> str:
+    """Return `path` as a string Windows will accept past the 260-char cap.
+
+    Short paths come back unchanged (the ``\\\\?\\`` form is stricter — no
+    relative segments, no forward slashes — so we only reach for it when the
+    length actually calls for it). Non-Windows returns the path untouched.
+
+    Wrap the path at the moment of the call, not in the variable:
+
+        wb.save(sdk.long_path(out_path))          # openpyxl / zipfile
+        doc.save(sdk.long_path(tmp))              # fitz
+        shutil.copy2(sdk.long_path(src), sdk.long_path(dest))
+
+    The SDK helpers (`save_workbook`, `copy_resilient`, `save_pdf_atomic`,
+    `merge_pdfs`, the resilient loaders, `ensure_dir`) already do this, so
+    prefer them over raw calls — see Hard Rule 14.
+    """
+    text = str(path)
+    if os.name != "nt" or text.startswith(_DOS_PREFIX):
+        return text
+    if len(text) < _LONG_PATH_THRESHOLD:
+        return text
+    # The prefix bypasses normalization, so normalize FIRST: absolute,
+    # backslashes, no "." / ".." left in it.
+    text = os.path.abspath(text)
+    if text.startswith("\\\\"):          # UNC share: \\server\share\...
+        return _UNC_PREFIX + text[2:]
+    return _DOS_PREFIX + text
+
+
+def _strip_long_prefix(path) -> str:
+    """The inverse of `long_path` for comparisons: a resolved, normalized path
+    with any extended-length prefix removed, so a string that went through
+    `long_path` still compares equal to one that did not."""
+    text = str(path)
+    if text.startswith(_UNC_PREFIX):
+        text = B_SLASH * 2 + text[len(_UNC_PREFIX):]
+    elif text.startswith(_DOS_PREFIX):
+        text = text[len(_DOS_PREFIX):]
+    try:
+        text = str(Path(text).resolve())
+    except OSError:
+        text = os.path.abspath(text)
+    text = text.rstrip(B_SLASH + "/")
+    return text.lower() if os.name == "nt" else text
+
+
+def ensure_dir(path) -> Path:
+    """makedirs(exist_ok=True) that survives paths past 260 characters.
+
+    ``os.makedirs`` recurses toward the drive root, so handing it a prefixed
+    path makes it try to create ``\\\\?`` and raise WinError 123. Instead we
+    walk DOWN the missing levels and prefix each individual mkdir. Returns the
+    directory as a Path (unprefixed, for normal use afterwards).
+    """
+    path = Path(path)
+    missing = []
+    probe = path
+    while not os.path.isdir(long_path(probe)):
+        missing.append(probe)
+        parent = probe.parent
+        if parent == probe:              # hit the drive root
+            break
+        probe = parent
+    for level in reversed(missing):
+        try:
+            os.mkdir(long_path(level))
+        except FileExistsError:
+            pass
+    return path
+def exists(path) -> bool:
+    """`Path.exists()` that still tells the truth past 260 characters.
+
+    This one fails SILENTLY, which makes it the nastiest member of the
+    MAX_PATH family: Win32 refuses the over-length path, Python swallows the
+    OSError, and `exists()` answers False for a file that is sitting right
+    there. Every `if not dest.exists(): <create it>` guard then fires on a
+    file it should have skipped — so the deeper the folder, the more likely a
+    plugin quietly overwrites work (922 Setup's "REV C is never overwritten"
+    promise rides on exactly that guard).
+
+    Use `sdk.exists` / `sdk.is_file` / `sdk.is_dir` for anything under the
+    OneDrive tree (Hard Rule 14)."""
+    return os.path.exists(long_path(path))
+
+
+def is_file(path) -> bool:
+    """`Path.is_file()`, long-path safe. See `exists`."""
+    return os.path.isfile(long_path(path))
+
+
+def is_dir(path) -> bool:
+    """`Path.is_dir()`, long-path safe. See `exists`."""
+    return os.path.isdir(long_path(path))
+
+
+
+
+
+def save_workbook(wb, path, log=None) -> Path:
+    """Save an openpyxl Workbook to `path`, long-path safe and lock-aware.
+
+    Three things every plugin workbook write needs and kept forgetting:
+      * the parent folder exists (`ensure_dir`),
+      * the path survives MAX_PATH (`long_path`) — otherwise openpyxl's
+        zipfile write dies with a baffling "No such file or directory" on a
+        folder that is right there,
+      * a destination the user has open in Excel raises the clear
+        `locked_file_error` instruction instead of a raw Errno 13.
+
+    Use this for EVERY `wb.save(...)` that lands under the OneDrive tree
+    (Hard Rule 14). Returns the destination Path.
+    """
+    path = Path(path)
+    ensure_dir(path.parent)
+    try:
+        wb.save(long_path(path))
+    except Exception as exc:
+        if _is_share_lock(exc):
+            raise locked_file_error(path, exc) from exc
+        raise
+    if log:
+        log(f"Saved: {path.name}")
+    return path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1460,25 +1796,32 @@ _CLOUD_ATTRS = (
 def is_cloud_placeholder(path) -> bool:
     """True if `path` is a OneDrive cloud-only / recall-on-access placeholder."""
     try:
-        attrs = os.stat(path).st_file_attributes
+        attrs = os.stat(long_path(path)).st_file_attributes
     except (OSError, AttributeError):
         return False
     return bool(attrs & _CLOUD_ATTRS)
 
 
-def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5) -> None:
+def hydrate_cloud_file(path, log=None, attempts: int = 3, delay: float = 1.5,
+                       should_stop=None) -> None:
     """Force OneDrive to download a cloud-only file by reading it end to end.
 
     Raises RuntimeError with user-actionable instructions if the content
     still can't be pulled (OneDrive client stopped, signed out, or offline).
+
+    `should_stop` (optional zero-arg callable) is polled between 1 MiB chunks;
+    when it returns True the read stops and the function returns quietly —
+    used by the background prefetcher so a cancelled run doesn't keep pulling
+    a half-downloaded file. Foreground callers leave it unset.
     """
     path = Path(path)
     last_err = None
     for attempt in range(1, attempts + 1):
         try:
-            with open(path, "rb") as fh:
+            with open(long_path(path), "rb") as fh:
                 while fh.read(1024 * 1024):
-                    pass
+                    if should_stop is not None and should_stop():
+                        return
             return
         except OSError as exc:
             last_err = exc
@@ -1506,6 +1849,107 @@ def ensure_local(path, log=None) -> None:
         if log:
             log(f"'{Path(path).name}' is cloud-only - asking OneDrive to download it...")
         hydrate_cloud_file(path, log=log)
+
+
+class PrefetchHandle:
+    """Handle returned by prefetch_paths(). stop() ends the background work;
+    the counters are informational (hydrated = files actually downloaded)."""
+
+    def __init__(self):
+        import threading
+        self._stop = threading.Event()
+        self._threads: list = []
+        self.checked = 0
+        self.hydrated = 0
+
+    def stop(self) -> None:
+        """Ask the background workers to finish up. Returns immediately."""
+        self._stop.set()
+
+    def done(self) -> bool:
+        return all(not t.is_alive() for t in self._threads)
+
+
+def prefetch_paths(paths, cancel_event=None, max_workers: int = 3) -> PrefetchHandle:
+    """Hydrate OneDrive cloud-only files in the BACKGROUND, best-effort.
+
+    The streaming trick: start this the moment a folder pick tells you which
+    files the run will read, and the downloads overlap the prompts the user is
+    still answering (and the run's own serial work). By the time the read
+    loops arrive, content is local and ensure_local is a single stat call.
+
+    - `paths` may be any iterable of paths; a lazy generator such as
+      `folder.rglob('*.pdf')` is ideal — the directory walk itself then also
+      happens off-thread.
+    - Never raises and never blocks the caller. A file that fails to hydrate
+      is simply left for the foreground read to handle exactly as today, with
+      the resilient loaders' retries and user-facing messages (Hard Rule 13
+      call sites keep their ensure_local either way).
+    - Stops early when the plugin's `cancel_event` is set or handle.stop() is
+      called — checked between files and between 1 MiB chunks of each file.
+    - `max_workers` stays small on purpose: hydration is a full-content
+      download through the OneDrive client, and flooding the sync engine just
+      moves the queue around.
+    """
+    import queue
+    import threading
+
+    handle = PrefetchHandle()
+
+    def _stopping() -> bool:
+        return handle._stop.is_set() or (cancel_event is not None
+                                         and cancel_event.is_set())
+
+    q: "queue.Queue" = queue.Queue(maxsize=max_workers * 2)
+    _SENTINEL = object()
+
+    def _put(item) -> bool:
+        # Bounded put that can't wedge the producer thread forever if the
+        # workers have already bailed out after a stop/cancel.
+        while True:
+            try:
+                q.put(item, timeout=0.5)
+                return True
+            except queue.Full:
+                if _stopping():
+                    return False
+
+    def _producer():
+        try:
+            for p in paths:
+                if _stopping() or not _put(p):
+                    break
+        except Exception:
+            pass  # a dying generator must not kill the app
+        finally:
+            for _ in range(max_workers):
+                if not _put(_SENTINEL):
+                    break
+
+    def _worker():
+        while True:
+            item = q.get()
+            if item is _SENTINEL or _stopping():
+                break
+            handle.checked += 1
+            try:
+                if is_cloud_placeholder(item):
+                    # Single attempt, no retries: this is opportunistic. The
+                    # foreground read keeps the full retry + error messaging.
+                    hydrate_cloud_file(item, attempts=1, should_stop=_stopping)
+                    handle.hydrated += 1
+            except Exception:
+                pass
+
+    threads = [threading.Thread(target=_producer, daemon=True,
+                                name="techdeck-prefetch-scan")]
+    threads += [threading.Thread(target=_worker, daemon=True,
+                                 name=f"techdeck-prefetch-{i}")
+                for i in range(max_workers)]
+    handle._threads = threads
+    for t in threads:
+        t.start()
+    return handle
 
 
 def locked_file_error(path, cause: Exception | None = None) -> "UserFacingError":
@@ -1582,7 +2026,7 @@ def load_workbook_resilient(path, log=None, **kwargs):
     under the OneDrive tree (Hard Rule 13)."""
     import openpyxl
     return _resilient_read(
-        lambda: openpyxl.load_workbook(path, **kwargs), path, log=log)
+        lambda: openpyxl.load_workbook(long_path(path), **kwargs), path, log=log)
 
 
 def read_excel_resilient(path, log=None, **kwargs):
@@ -1593,7 +2037,7 @@ def read_excel_resilient(path, log=None, **kwargs):
     read via pandas (Hard Rule 13)."""
     import pandas as pd
     return _resilient_read(
-        lambda: pd.read_excel(path, **kwargs), path, log=log)
+        lambda: pd.read_excel(long_path(path), **kwargs), path, log=log)
 
 
 def open_excel_resilient(path, log=None):
@@ -1602,7 +2046,7 @@ def open_excel_resilient(path, log=None):
     pd.read_excel(xls, sheet_name=...) — the file lock bites at open time, so
     the returned handle reads sheets without re-touching the lock."""
     import pandas as pd
-    return _resilient_read(lambda: pd.ExcelFile(path), path, log=log)
+    return _resilient_read(lambda: pd.ExcelFile(long_path(path)), path, log=log)
 
 
 def copy_resilient(src, dest, log=None):
@@ -1617,7 +2061,8 @@ def copy_resilient(src, dest, log=None):
     src, dest = Path(src), Path(dest)
     ensure_local(src, log=log)
     try:
-        shutil.copy2(src, dest)
+        ensure_dir(dest.parent)
+        shutil.copy2(long_path(src), long_path(dest))
         return dest
     except Exception as exc:
         if not _is_share_lock(exc):
@@ -1626,7 +2071,7 @@ def copy_resilient(src, dest, log=None):
         # source; otherwise the open handle is on the destination.
         culprit = dest
         try:
-            with open(src, "rb") as fh:
+            with open(long_path(src), "rb") as fh:
                 fh.read(1)
         except OSError:
             culprit = src

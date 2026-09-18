@@ -52,7 +52,7 @@ def run(params: dict, progress_callback, cancel_event):
     on_success = params.get("on_success")  # called when a QR code is actually generated
 
     try:
-        DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        sdk.ensure_dir(DATA_FILE.parent)
 
         log("Opening QR Code Generator...")
         progress_callback(10)
@@ -396,8 +396,8 @@ class QRGeneratorWindow(QWidget):
             filename = self.filename_edit.text()
 
             # Validate output folder
-            if not output_folder.exists():
-                output_folder.mkdir(parents=True, exist_ok=True)
+            if not sdk.exists(output_folder):
+                sdk.ensure_dir(output_folder)
 
             # Get content based on type
             content = ""
@@ -470,7 +470,7 @@ class QRGeneratorWindow(QWidget):
 
             # Save to file
             output_path = output_folder / f"{filename}.png"
-            img.save(str(output_path))
+            img.save(sdk.long_path(output_path))
 
             # Display preview
             pixmap = QPixmap(str(output_path))
@@ -606,7 +606,7 @@ class QRGeneratorWindow(QWidget):
 
     def load_entrypoints(self) -> List[Dict[str, Any]]:
         """Load entrypoints from JSON file"""
-        if self.data_file.exists():
+        if sdk.exists(self.data_file):
             try:
                 with open(self.data_file, 'r') as f:
                     data = json.load(f)

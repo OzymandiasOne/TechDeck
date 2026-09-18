@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.1 - Inspection Dimensions
+# TechDeck v0.8.7.6 - Paperwork Complete
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,303 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.6 - Paperwork Complete
+
+### 911 SSPO Invoicing Prep fills in the invoice and prints it
+
+Once a nest has its packing slip / invoice number in the Working Forecast List
+(the PS/Inv column), the Invoice Supplement comes out with the invoice number and
+the ship date already filled in, and a PDF of the supplement lands in that nest's
+Invoicing Docs folder as `ASA Invoice No. XXXXX Supplement.pdf`, right next to
+where the Mie Trak invoice goes.
+
+- A nest with no PS/Inv yet gets a blank Invoice # and no PDF, and the popup at
+  the end names it. Fill the forecast in and run again, or print that one by hand.
+- The nest's pricing calcs come along too. For shapes, the Linear Inch Calcs
+  folder is zipped into Invoicing Docs. For plate, the LINEAR INCH CALC workbook is
+  copied in. A nest with neither is named in the popup and everything else still
+  runs.
+
+### Part sketches come out complete
+
+- **A PART SKETCH page that lost its drawing gets it back.** Sometimes the report
+  server prints a sketch page with "The resource of this report item is not
+  reachable" where the picture should be. 911 Setup and Remove Ticket now find that
+  part's sketch pictures in the batch's own WPDD SKETCHES folder and put them on the
+  page (extra views get their own page right after). The pictures are also copied
+  into a `Sketches` folder inside the nest folder. It only ever looks in the batch
+  you are working on, never in another batch.
+- **The material is on every sketch.** The same material that goes in the cover's
+  Material Type cell (HSS, OSS, CRES316 and so on) is now written into each PART
+  SKETCH's MATL: box, so the shop can scribe from the print.
+
+### 922 Setup
+
+- **Source material labels and Apply pallet labels to existing cards now start
+  checked.** Clear them on a run that should skip them.
+- **The BATCH PROGRESS card goes in the batch's HOLD bucket**, on its own, instead
+  of sitting among the order cards.
+
+---
+
+## What's New in v0.8.7.5 - The Manual
+
+### TechDeck now has a User Guide
+
+Type **/guide** in the console, or open **Settings** and click **Open User Guide** under
+Help & Feedback. It is an illustrated manual with a chapter for every app: when to use
+it, what to have ready, what you click, what you get at the end, and what to do when it
+complains. It is rebuilt with every update, so it always matches the version you are
+running.
+
+### 922 Setup finds repeats before it makes cards
+
+A new stage, **Fill Out MPL + Find Repeats**, runs right after Batch Folder Setup:
+
+- The 922 MPL is filled out up front instead of at the end of the run.
+- A repeat order's Teams card is created in **MODEL CHECK** with the **REPEAT** label
+  already on it. Nothing to tag or drag afterwards.
+- The Batch Repeater's **Label REPEAT cards in Teams** option is now a second pass, off
+  by default. Select it only for a batch that was carded before this update.
+
+922 Setup also makes the **BATCH PROGRESS** card for you: same title, same 14 checklist
+items in the same order, sitting at the top of the batch bucket.
+
+### 911 SSPO Invoicing Prep takes the whole pricing master
+
+Feed it a copy of the entire pricing master and a close-out date range. Rows whose
+**Firm VPD** falls inside the range are closed out, and the **Workorder Close Outs** and
+**Workorder Material Status** reports are written into the invoicing folder for you.
+
+### Fixes
+
+- **922 Batch Repeater said it couldn't read the Quote MATERIAL PRICING sheet** when the
+  whole `EB 922 H# Quote.xlsx` workbook was missing. It now says the file is missing and
+  where it looked.
+
+---
+
+## What's New in v0.8.7.4 - Plate Work
+
+### 911 Setup now handles PLATE batches
+
+**What it does:** tick **PLATE batch** in the checklist window and the whole run is set
+up for plate instead of shape.
+
+- It copies the **911 PLATE BATCH** workbook into each nest folder and drops the
+  **PLATES** scribe-verification form into PRODUCTION PAPERWORK, instead of the shapes
+  versions. Until now every batch got the shapes paperwork, plate or not.
+- **MIL SPEC comes out as N/A on carbon plate.** The MOVE TICKET in the nest packet
+  carries its own FERROUS flag, and that flag decides - stainless, nickel alloys and
+  aluminum keep their real spec. The app never guesses off the material name.
+- **The scribe sheet's UNIQUE - TRACE column is filled from the TRACE/MIC column of the
+  working forecast.** On shape batches that column is correctly N/A; on plate it is real
+  data someone had to remember to type. If the forecast has no trace for a nest, the
+  cell is left blank for you - it never writes N/A on a plate run.
+
+**What you still have to do:** tick the box each plate run. It resets to SHAPE every
+time on purpose, so a leftover tick from last week's plate work can never quietly put
+plate paperwork on a shape batch.
+
+### 911 Scripting Prep: type the shared PO values once
+
+- The **PO Data** sheet now has an input block on the side: PO NO, LINE, PART REV,
+  STANDARD CLAUSES, SHIP TO and PROMISE DATE are typed once there and every line fills
+  itself. A line that differs can still be typed over directly.
+- The PO number is pre-filled from the award review's filename and shown in red -
+  check it, don't trust it.
+- **SOPO becomes SOUTH PORTLAND** in the division column, spelled exactly the way
+  Mie Trak wants it.
+
+### 922 Difficulty Stamper: the blue label stays on the drawing
+
+The packet cover still gets its difficulty stamp, but the blue DriveWorks DIFFICULT
+label is no longer removed from the part drawing - the floor kept losing that marker.
+Drawings that earlier versions already stripped still read as difficult, so their
+packet stamps keep working.
+
+### Fixes
+
+- **The Run Selected button shivered on some screens** - a vibrating shimmer whenever
+  tiles were ticked, and a small shake clicking a tile. That was the glow animation
+  fighting Windows display scaling. The glow now breathes without moving a pixel; same
+  fix applied to the tiles' hover and running effects.
+
+---
+
+## What's New in v0.8.7.3 - Scripting Prep
+
+### New app: 911 Scripting Prep
+
+**What it does:** it builds the SSPO scripting sheet for you, out of an award review
+somebody has already checked, instead of it being typed out line by line.
+
+- It reads the **Working Forecast Input** sheet on the award review - one line per nest,
+  already checked - and looks each source material up in the **Working Forecast List** to
+  get its designation and its size.
+- It works off a read-only copy of the forecast. The live file is never opened, so it
+  doesn't matter who has it up.
+- Columns that need a person - PO NO, LINE, PROMISE DATE, part rev, clauses, ship-to -
+  get their heading and stay blank. PART REV, STANDARD CLAUSES, SHIP, QTY and UNIT PRICE
+  can be set once in the app's settings when they're the same across a whole award, so
+  you're not retyping them on every line.
+- It never guesses a material. Anything it can't find in the forecast is left blank and
+  listed for you, not filled in with something close.
+
+**What you get at the end:** one workbook saved next to the award review, with a
+**PO Data** sheet and a **Part Data** sheet. Everything the app worked out is in red, so
+at a glance you can see what came from it and what's still yours to fill in. If anything
+didn't resolve there's a third sheet called **Unresolved** naming the nests that need
+their material and size typed in - delete that sheet once they're in. It isn't created at
+all when everything resolves.
+
+**How to run it:** run **911 SSPO Award Review** on the award package first - this app
+runs off the workbook that one writes. Then run Scripting Prep and pick that
+`911 SSPO AWARD REVIEW ...` workbook when it asks. Your Forecast and Inventory Reports
+folder needs to be synced, not cloud only.
+
+### Fixes
+
+- **911 PO PDF Extractor is back, and you need to add it to your Home screen once.** It
+  got replaced by Scripting Prep in the last round, which was wrong - the two do opposite
+  jobs. The extractor reads an incoming PO packet from EB; Scripting Prep builds the
+  outgoing scripting sheet. Both ship now and an update won't remove it again. That
+  earlier change took its tile off Home, so add it back from the Library once and it will
+  stay.
+- **A dead tile left behind by that same renaming clears itself** the next time you start
+  TechDeck. If you had a tile that did nothing, that was it.
+- **911 Inspection Dimensions starts with no nests ticked**, the same as 911 Setup. You
+  tick the ones you want instead of unticking the ones you don't - reading a whole order
+  is the exception, so it's no longer the default.
+
+*Developer note: Java Tutor moved out of `plugins/` into `tools/devkit/`, which the build
+excludes wholesale - it is dev-only and structurally cannot ship.*
+
+---
+
+## What's New in v0.8.7.2.1 - Bevel Angles Patch 1.0
+
+A patch on top of v0.8.7.2. Everything below in the v0.8.7.2 notes still applies -
+this fixes what that build got wrong.
+
+**The drawing reader never started in the v0.8.7.2 build.** 911 Inspection Dimensions
+came back with "no PART SKETCH pages found" on packets that plainly have them, and read
+zero parts. The reader itself was fine; three of its parts were missing from the
+installer. The library loads them by name out of its own settings file rather than
+importing them normally, so the packaging step never saw them and left them out - and the
+folders still shipped, empty, which is why it failed with a confusing message instead of
+an obvious one. All three now ship, and the build refuses to run if they ever go missing
+again.
+
+**A dead reader now says so.** That failure was reported as "no PART SKETCH pages found",
+which sent people hunting the packet instead of the app. Anything the reader can't start
+or can't open now says exactly that, and the run stops instead of writing a confident,
+empty report.
+
+**Angle tolerances were wrong on the sheet.** An angle read off the drawing was written
+as a plain number, so Excel gave it the same tolerance as a length - roughly a tenth
+either way instead of a degree. Weld-prep angles were always correct; only angles read
+off the drawing were affected. They now carry the degree symbol, so the form picks the
+right tolerance.
+
+**A misread number reached an inspection sheet.** A `.78` whose leading dot the reader
+lost became a 78-inch dimension on a 13-inch part. Every real length on these drawings is
+printed to two decimal places, so one without a decimal point is now thrown out - but only
+the length half of a callout, never the degrees, because a chamfer's `45` is genuinely a
+whole number. Nothing disappears quietly: a thrown-out reading is listed with what it read
+and what it probably should have been. If it ever throws away something real, there's a
+setting to turn it off without waiting for an update.
+
+**Pointing it at the whole 911 QTDR folder started reading everything.** The app looked
+one level down for work and, finding none, swept up every loose PDF sitting beside the
+order folders - so picking the top-level folder kicked off a run across the entire
+program. It now works out what you picked from what is actually on disk, refuses the
+911 QTDR root outright and says why, and for an order folder gives you a tick-list of its
+nests with all of them ticked.
+
+**The report is now written for the person checking the sheets.** It used to be saved into
+the nest folder and you had to go and find it. It now opens in a window when the run
+finishes, with a Save as .txt button that puts a copy in the folder you picked. It leads
+with what needs a second look - unsure readings, thrown-out numbers, weld preps needing a
+decision, tolerances somebody typed in by hand - then what went on each tab, what was left
+alone, and what was skipped as reference only. The drawing's own notes and the title-block
+fields the sheet already carries are gone.
+
+---
+
+## What's New in v0.8.7.2
+
+**911 Inspection Dimensions now fills in the weld prep angles too.** The app already read
+the bevel codes off the drawings (KB114 and friends), but it stopped there, because the
+angle isn't printed on the drawing - it lives in the Electric Boat bevel book. All 947
+bevel sheets have been transcribed and now ship with the app, so a code on a drawing turns
+into a real number on the inspection sheet. Some things worth knowing: the prefix isn't
+always KB - SB, FB and WB preps were being skipped entirely before, and SB alone is 198 of
+the 947 sheets. A callout like `KB114  NS & FS` is two entries, one per side, not one. A
+VOIDed code writes nothing and tells you which code replaced it. And a prep whose sheet
+prints no angle at all now lands in a "needs a decision" list instead of quietly writing
+nothing - a prep that contributed nothing used to look exactly like one that was never
+read.
+
+**And it recovers codes the reader gets slightly wrong.** Checked against 90 real packets
+(684 weld preps), a small share of codes came back mangled - a `1` read as a capital `I`, a
+leader line touching the code and reading as an extra digit. Every code in the book is a
+prefix plus digits, so those are corrected outright. Where a digit is genuinely lost, the
+app names the closest in-book code in the report but never substitutes it - `KB122` is 53
+degrees where `KB112` is 40, and a guess on a QA form isn't worth it. Across those 90
+packets every genuine code resolved.
+
+**Apps that read from OneDrive are faster.** Files that live in the cloud have to be pulled
+down before they can be read, and apps were doing that one file at a time in the middle of
+the run. Now the download starts in the background while you're still answering the
+prompts, so the waiting overlaps with the work instead of stacking on top of it.
+FormingFinder, 911 Setup and the 922 LST Organizer use it.
+
+**FormingFinder - the same part on two orders.** If one batch builds the same part number
+for two different orders, only the first one used to make it into the Forming binder and
+the Bent Plates sheet; the second was dropped silently. Both are tracked now, and both get
+a binder copy.
+
+**Kitting - orders with more than ten parts print in full.** The standard Bin Label &
+Checklist page has room for ten parts, so an eleventh part just fell off the bottom with no
+warning. Those orders now print on the Larger Bin Label sheet instead, which holds fifteen,
+and they keep their place in the kitting PDF.
+
+**911 LST Organizer - the new 1D diagram format.** The nesting software started writing
+part lines as `503887 / H4112842-34` (with a slash) instead of a hyphen, and the app read
+those diagrams as having zero parts, so every run failed with "No part ids found". Both
+formats work now.
+
+### Feedback Fixes
+
+_"Can the Pallet Stamper check for the ASA title block and not stamp batch and pallet info
+onto the drawings?"_ - Fixed, and it turned out to be worse than "sometimes". The stamper
+took the first PDF in the order folder, and Windows sorts `Binder1.pdf` ahead of the work
+packet - so once the Batch Repeater has dropped drawing binders into the folders, the stamp
+went on the drawing and the packet the floor actually reads stayed blank. That's 223 of 252
+live order folders today. The suggested test is exactly the fix: the app now reads page 1
+and identifies the packet by the absence of the ASA title block, which is on every drawing
+and no packet. Stamps an earlier run left on drawings are removed. The Difficulty Stamper
+had the same "first PDF" rule and was fixed with it.
+
+_"When you stop typing in an Assistant quick note for a second, the cursor jumps back to
+the start of the first line. Is that meant to happen?"_ - No, that was a bug, and it's
+fixed. The "second" was the autosave: saving refreshed the notes list, and rebuilding the
+list re-opened the note you were already in, which reset the cursor mid-sentence. It now
+leaves the note alone when nothing actually changed.
+
+_"911 SSPO Award Review kept failing with 'No such file or directory', and renaming the
+award folder to something shorter made it work."_ - That was Windows' 260-character path
+limit, not a missing file. The Pilot Program folder tree is already about 190 characters
+deep before an app writes anything, so one descriptive output name tips it over and Windows
+refuses the write - while the error message points at a folder that's plainly there. Fixed
+everywhere, not just in that one app: around 215 file operations across all 25 apps now go
+through a helper that removes the limit, and a build check stops a new one from slipping
+in. Existence checks were the sneaky ones - they answered "no" for files that were right
+there.
 
 ---
 
@@ -838,10 +1135,11 @@ Explorer and on pinned shortcuts.
 | 911 Batch Repeater | Finds repeat parts for a 911 batch via the 911 Master Parts List (compiled from completed nests) and copies each repeat's CAD files (SolidWorks model, drawing, and PDF) from its completed source nest into a REPEAT folder inside the target nest. If you own the Sentry Drone and have switched it on for this app, the two-phase drone picker locks the batch folder, zooms inside, then lets you lock multiple nests before striking them - those nests run with the default grabs. Otherwise: a folder dialog plus a nest-selection window where any nest expands to toggle exactly what it grabs (models, PDFs, overwrite existing) |
 | 911 Remove Ticket | Removes Move Ticket pages from nest package PDFs (keeps MIL-SPEC and HULL pages); stamps the cover with the batch + nest in red and fills in the Material Type from the removed move tickets |
 | 911 PO PDF Extractor | Extracts PO data from PDFs into Excel |
+| 911 Scripting Prep | Builds the SSPO ERP scripting workbook (PO Data + Part Data) from a finished SSPO Award Review plus the Working Forecast List |
 | 911 Sketch Extractor | Extracts part sketch data with 17-column output and weight consolidation |
 | 911 Inspection Dimensions | Reads every PART SKETCH drawing in a batch and fills each part's dimensions straight onto its inspection sheet, so the numbers don't have to be typed off the paper. Only the coloured nominal boxes get written - the sheet still works out its own min and max - and a tab you have already filled in is never touched, so it is safe to run again. Logs lengths, radii (R .40), chamfers, snipes, and the weld preps (the KB codes, with the side each one applies to); leaves out anything marked REF and anything that is part of a note on the drawing (both listed separately so you can see them). Also pulls the part number, work order, size and FAB DIM off the title block, and flags any drawing it could not read so nothing goes missing quietly |
 | 911 SSPO Award Review | (Formerly 911 Runtime Estimator.) Runs off an award package (folder of order folders); estimates plate cutting time from actual D911 throughput (a pieces-per-hour table by thickness band derived from 18.5 months of closed actuals - includes setup/handling) plus stock/material from each nest's packet PDF - the old exact-linear-inch times (each work order's DXF geometry / a thickness-driven feed rate) still computed as far-right reference columns - and writes one workbook with Plates and Non-Plates sheets (data table + real Excel PivotTable each), a Shape Ft Req sheet totalling each shape nest's stock feet (Summary-of-Batches lengths / 12, rounded up per length) for receiving, and a Working Forecast Input sheet (per-nest Source Material / Pieces / Orders from the nest packet, shape Total Ft Req, blank REM columns) that copy-pastes straight into the Working Forecast List |
-| 911 SSPO Invoicing Prep | Splits an SSPO pricing sheet into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus a top-level "D911 Workorder Close Outs" sheet (Scheduling Group set to Closed) |
+| 911 SSPO Invoicing Prep | Takes a copy of the whole SSPO pricing master plus a close-out date range (on Firm VPD) and splits the range's rows into one workbook per Batch + Nest (each in its own "BATCH NEST Invoicing Docs" folder), each with the split rows + price total on tab 1 and a generated ASA Invoice Supplement on tab 2 (PO / PO Line auto-filled from the Working Forecast List), plus the two top-level weekly reports: "D911 Workorder Close Outs" (Scheduling Group set to Closed) and the full "D911 Workorder Material Status" listing |
 | 911 Baked Beans Wild Ride | Consolidates a folder of filled NC-calc pricing sheets into one review list (DYPN, Batch, Nest, Total Bevels, Total Complex Bevels, Total Cut Lin per part + totals row, sorted by batch/nest/part), saved into that same folder and named from the batch + nest the sheets themselves declare |
 | 911 LST Organizer | Pulls the .lst files for the parts on a nest's 1D cutting diagram into the nest's PRODUCTION PAPERWORK\LST folder - cross-batch parts are resolved to their source batch automatically |
 | 922 Setup | Full 922 batch prep behind a master toggle window: builds the batch's order folders from the PO REV C workbook (one per ORDER-PPN, with a per-order copy of the PO workbook and each order's work packet PDF filed in from the Work Packets folder), creates the batch's ordered pipeline buckets + one pallet-labelled Teams card per order ("BATCH X: folder") via a Power Automate webhook, then optionally runs the Batch Repeater and Pallet Stamper with the same batch number. A separate off-by-default stage applies each order's pallet label to the cards already on the board - for when the cards were made before the pallets were assigned - without creating any new ones |
@@ -856,6 +1154,7 @@ Explorer and on pinned shortcuts.
 | Batch Auditor | Read-only readiness check for a 911/922 batch: verifies orders/prints, LST files, run time, forming, pallets, and kitting, then renders a dashboard (KPI cards + charts) and a text summary - nothing is modified |
 | Customer DXF Analysis | Interactive DXF viewer for quoting - layer-colored flat pattern, per-line measurements, layer reassignment for selected lines, and total linear inches of cut - plus automated customer-guideline offsets: enter the plate thickness (one "apply to all" box covers a whole batch) and every hole/cutout is increased per the customer's thickness band table (features already twice the plate thickness are left alone; below-minimum features get flagged) - holes and slots drawn as polylines included - review the result, then Save over the original or Export a copy. Batch mode queues a whole folder and steps through it one file at a time; manual amounts stay available via Adjust Dimensions, whose plate-thickness box fills in the guideline amount for you |
 | Sheet Metal Calculators | GUI plugin - a library of shop calculators behind a picker, each defined by a simple field-list + formula so new ones drop in easily. Calculators: Flat Length (bend-allowance flat length from K-factor, thickness, inside radius/ID/OD, and bend angle), Bend Deduction (OSSB / bend allowance / bend deduction), and Material Weight (by sheet size or area) |
+| MieTrak Tools | GUI plugin - a picker window of small MieTrak helpers. First tool: Hardware Code Generator, which builds the MieTrak hardware part number (HW + material + type + thread/length or screw size) from dropdowns and copies it to the clipboard. Ported from a colleague's standalone hardware-code exe so the numbers keep matching |
 | QR Code Generator | GUI plugin - dual-tab QR library and generator |
 
 ---

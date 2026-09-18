@@ -17,13 +17,17 @@ until this file matches.
 TOOL_SECTIONS = [
  ("911 QTDR PRODUCTION PACKAGE WORKFLOW", [
   ("911 Setup",
-   "Performs the full 911 QTDR batch setup: nest folders, templates, forecast "
-   "data and production PDFs.",
+   "Performs the full 911 QTDR batch setup, for shape and plate work: nest "
+   "folders, templates, forecast data and production PDFs.",
    "Reads nest numbers from the batch list, builds each nest folder from the "
    "template set, files the production PDFs, and populates forecast data. "
    "Which steps run is chosen from a checklist that remembers each operator's "
    "selection between sessions, so a site that skips a step configures it "
-   "once rather than every run.",
+   "once rather than every run. A per-run plate selection produces the plate "
+   "workbook and verification form, applies the material-specification rule "
+   "for carbon plate, and carries traceability numbers from the forecast; it "
+   "deliberately resets each run so plate settings cannot carry into shape "
+   "work unnoticed.",
    "Active", "0.8.0"),
   ("911 Teams Cards",
    "Creates the coordination cards for every 911 order waiting to be modelled, "
@@ -33,7 +37,7 @@ TOOL_SECTIONS = [
    "and the scheduled due date attached, then advances each order's status on "
    "the schedule as its card goes out. Needs no batch number and skips orders "
    "already carded, so it can be run at any time.",
-   "Active", "0.8.7"),
+   "Active", "0.8.6.13"),
   ("911 Batch Repeater",
    "Finds every repeat part in a 911 batch and copies its existing CAD work "
    "forward instead of remodelling it.",
@@ -53,6 +57,14 @@ TOOL_SECTIONS = [
    "Scans PDF text for the PO fields and builds a spreadsheet rather than "
    "requiring them to be read off and typed in.",
    "Active", "0.7.4"),
+  ("911 Scripting Prep",
+   "Builds the two-sheet SSPO ERP scripting workbook from a finished award "
+   "review and the Working Forecast List.",
+   "Reuses the award data a reviewer has already checked instead of "
+   "re-reading the PO PDFs, and looks each source material's designation and "
+   "size up in the forecast, so the scripting sheet is filled in rather than "
+   "typed out line by line.",
+   "Active", "0.8.7.3"),
   ("911 Sketch Extractor",
    "Extracts part-sketch data from 911 batch nests into a 17-column sheet.",
    "Scans the nest files, extracts the sketch data, and consolidates part "
@@ -72,7 +84,7 @@ TOOL_SECTIONS = [
    "types each part's dimensions into its inspection sheet, leaving out "
    "reference-only figures and stock notes, never overwriting a sheet already "
    "filled in by hand, and flagging any drawing it could not read.",
-   "Pilot", "0.8.8"),
+   "Active", "0.8.7.1"),
   ("911 Baked Beans Wild Ride",
    "Consolidates a folder of completed per-part pricing calculations into one "
    "review list.",
@@ -187,6 +199,14 @@ TOOL_SECTIONS = [
    "formula, so adding one is a single data entry with no interface work. "
    "Native forms with per-input validation.",
    "Active", "0.8.6.9"),
+  ("MieTrak Tools",
+   "A picker window of small MieTrak helpers. First tool: the Hardware Code "
+   "Generator, which builds a hardware part number from dropdown picks.",
+   "Assembles the code (material, type, thread, length or screw size) by the "
+   "shop's standard spelling and copies it to the clipboard, so every entry "
+   "matches. Ported from a colleague's standalone program so existing codes "
+   "keep matching.",
+   "Active", "0.8.7.6"),
   ("QR Code Generator",
    "Generates QR codes that embed links or images for shop-floor labelling.",
    "Dual-tab interface -- a saved code library alongside the generator.",

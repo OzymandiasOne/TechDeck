@@ -197,3 +197,38 @@ def test_a_broken_settings_store_never_sinks_the_run(monkeypatch):
     sdk.save_toggle_memory("911_setup", {"a": {"enabled": True}})   # no raise
     assert sdk.request_grouped_toggles({}, GROUPS, remember_as="911_setup") \
         is not None
+
+
+# ── remember: False — per-run mode switches (911 Setup PLATE batch) ─────────
+NO_MEMORY_GROUPS = GROUPS + [
+    {"key": "plate_batch", "label": "PLATE batch", "checked": False,
+     "remember": False, "children": []},
+]
+
+
+def test_a_remember_false_group_always_opens_at_its_declared_default():
+    """The PLATE toggle is a property of THIS batch, not a preference: a
+    leftover PLATE tick applied to next week's shape batch would fill real
+    paperwork from the wrong template. Memory must never touch it."""
+    merged = sdk.apply_toggle_memory(NO_MEMORY_GROUPS, {
+        "plate_batch": {"enabled": True, "options": {}},   # stale/hand-edited
+        "teams_cards": {"enabled": True, "options": {}},
+    })
+    assert _checked(merged)["plate_batch"] is False        # declared default
+    assert _checked(merged)["teams_cards"] is True         # others still merge
+
+
+def test_a_remember_false_group_is_never_saved(store):
+    """Belt and braces: the state is stripped on save too, so it cannot leak
+    into a later run even through a stale settings.json."""
+
+    class _PlateTickingConsole:
+        def request_grouped_toggles(self, groups, **kw):
+            return {g["key"]: {"enabled": True, "options": {}}
+                    for g in groups}
+
+    sdk.request_grouped_toggles({"console": _PlateTickingConsole()},
+                                NO_MEMORY_GROUPS, remember_as="911_setup")
+    saved = sdk.load_toggle_memory("911_setup")
+    assert "plate_batch" not in saved
+    assert saved["teams_cards"]["enabled"] is True

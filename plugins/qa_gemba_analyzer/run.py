@@ -170,7 +170,7 @@ def resolve_data_path(settings, log=print):
         except Exception:
             roots = []
         folder = next((r.joinpath(*GEMBA_SUBPATH) for r in roots
-                       if r.joinpath(*GEMBA_SUBPATH).is_dir()), None)
+                       if sdk.is_dir(r.joinpath(*GEMBA_SUBPATH))), None)
         if folder is None and roots:
             # Library is synced but the Gemba folder isn't there yet — create it
             # under the first root (mkdir in a synced library syncs to SharePoint).
@@ -179,7 +179,7 @@ def resolve_data_path(settings, log=print):
             folder = Path.home() / "TechDeck QA Rework"
             log("ASA Quality Management System library not found (is it synced "
                 f"in OneDrive?); using local folder {folder}")
-    folder.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(folder)
     return folder / DATA_FILENAME
 
 
@@ -190,7 +190,7 @@ def _norm(s):
 def load_records(path, log=print):
     """Read the log into a list of dicts. Empty list if the file does not exist yet."""
     path = Path(path)
-    if not path.exists():
+    if not sdk.exists(path):
         return []
     wb = sdk.load_workbook_resilient(path, log=log, data_only=True, read_only=True)
     try:
@@ -293,7 +293,7 @@ def append_record(path, record, log=print, attempts=12):
     last_err = None
     for attempt in range(attempts):
         try:
-            if path.exists():
+            if sdk.exists(path):
                 wb = sdk.load_workbook_resilient(path, log=log)
                 ws = wb[SHEET_NAME] if SHEET_NAME in wb.sheetnames else wb.active
             else:
@@ -310,7 +310,7 @@ def append_record(path, record, log=print, attempts=12):
                     ws.cell(row=header_row, column=j, value=header)
                     col[_norm(header)] = j
                 ws.cell(row=row_i, column=j, value=values.get(header, ""))
-            wb.save(path)
+            wb.save(sdk.long_path(path))
             try:
                 wb.close()
             except Exception:
@@ -327,14 +327,14 @@ def ensure_log_exists(path, log=print):
     (headers only) so 'Open Rework Log' always has a file to open. Never touches
     an existing log."""
     path = Path(path)
-    if path.exists():
+    if sdk.exists(path):
         return
     import openpyxl
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = SHEET_NAME
     ws.append(HEADERS)
-    wb.save(path)
+    sdk.save_workbook(wb, path)
     log(f"Created a new empty rework log: {path.name}")
 
 
@@ -1211,7 +1211,7 @@ class QAReworkContent(QWidget):
 
     def _write_pdf(self, path, pages):
         """pages = list of (page_title, [charts]); charts laid out stacked per page."""
-        writer = QPdfWriter(str(path))
+        writer = QPdfWriter(sdk.long_path(path))
         writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         writer.setPageOrientation(QPageLayout.Orientation.Landscape)
         writer.setResolution(150)
@@ -1227,7 +1227,7 @@ class QAReworkContent(QWidget):
     def _write_pdf_grid(self, path, title, charts, cols=2):
         """Write all charts onto ONE landscape page in a `cols`-wide grid (used for
         the 2x2 view export)."""
-        writer = QPdfWriter(str(path))
+        writer = QPdfWriter(sdk.long_path(path))
         writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
         writer.setPageOrientation(QPageLayout.Orientation.Landscape)
         writer.setResolution(150)

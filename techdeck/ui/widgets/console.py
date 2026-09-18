@@ -13,6 +13,7 @@ from PySide6.QtCore import Signal, Qt, Q_ARG, QMetaObject, Slot, QTimer, QEvent,
 from PySide6.QtGui import QTextCursor, QFont, QDesktopServices
 import re
 import threading
+import time
 
 from techdeck.ui.widgets.dashboard import DashboardView
 from techdeck.ui.theme_aware import ThemeAware
@@ -68,7 +69,40 @@ class ConsoleWidget(QWidget, ThemeAware):
     
     MAX_LINES = 1000
     CLEANUP_TO_LINES = 800
-    
+
+    # waiting_for_input is a property so every open/close transition (11 set
+    # sites: request_input, the dialogs, abort_input) lands a timestamped
+    # marker in plugin_detail.log — log mining can then separate "user at a
+    # prompt" from "plugin actually working". The idle watchdog keeps reading
+    # it exactly as before.
+    @property
+    def waiting_for_input(self) -> bool:
+        return getattr(self, "_waiting_for_input", False)
+
+    @waiting_for_input.setter
+    def waiting_for_input(self, value) -> None:
+        value = bool(value)
+        prev = getattr(self, "_waiting_for_input", False)
+        self._waiting_for_input = value
+        if value == prev:
+            return
+        try:
+            # Lazy import: plugin_executor imports this module at top level.
+            from techdeck.core.plugin_executor import get_detail_logger
+            if value:
+                self._prompt_opened_monotonic = time.monotonic()
+                get_detail_logger().info("prompt | open")
+            else:
+                opened = getattr(self, "_prompt_opened_monotonic", None)
+                if opened is None:
+                    get_detail_logger().info("prompt | closed")
+                else:
+                    get_detail_logger().info(
+                        "prompt | closed after %.1fs", time.monotonic() - opened)
+        except Exception:
+            # Prompt-timing markers must never break input handling.
+            pass
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -929,6 +963,42 @@ class ConsoleWidget(QWidget, ThemeAware):
                 pass    # a stale/broken inserter must never lose the line
         self.output.append(html)
         self._scroll_to_bottom()
+
+    def show_report(self, title: str, subtitle: str, body: str,
+                    save_path: str = "") -> None:
+        """Put a plugin's finished report on screen, with a Save-as-.txt button.
+
+        Unlike show_warning this does NOT block: the run is over by the time it
+        opens, and holding the worker thread would leave the app looking busy
+        while somebody reads. The call marshals to the GUI thread, shows the
+        dialog and returns; the window stays up until the user closes it.
+        """
+        from PySide6.QtCore import QThread
+
+        self._report_args = (str(title), str(subtitle), str(body), str(save_path))
+        if QThread.currentThread() == self.thread():
+            self._report_gui()
+            return
+        QMetaObject.invokeMethod(
+            self,
+            "_report_gui",
+            Qt.ConnectionType.BlockingQueuedConnection,
+        )
+
+    @Slot()
+    def _report_gui(self):
+        """GUI-thread half of show_report: build and show the modeless dialog."""
+        from techdeck.ui.dialogs.report_dialog import ReportDialog
+
+        title, subtitle, body, save_path = self._report_args
+        dlg = ReportDialog(title, subtitle, body, save_path, parent=self.window())
+        # Qt collects a dialog whose last Python reference drops, even while it is
+        # on screen (Hard Rule 4). Hold it here and let it clear itself on close.
+        self._open_report = dlg
+        dlg.finished.connect(lambda _=None: setattr(self, "_open_report", None))
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     @Slot(str)
     def append_user(self, text: str):

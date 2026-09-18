@@ -1,9 +1,9 @@
-; TechDeck Installer Script
-; Version 0.8.7.1 - New 911 Inspection Dimensions app (OCR the part sketches, fill the QF-QU-09 tabs); 922 Setup Pallet Labeler stage; 922 batch entry by folder pick; formed flat bars; Customer DXF Analysis v2.2.x feedback fixes
+﻿; TechDeck Installer Script
+; Version 0.8.7.6 - Paperwork Complete - Invoicing Prep invoice number + PDF + pricing calcs; sketch graphics + MATL on part sketches; 922 Setup defaults + PROGRESS card in HOLD
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.1"
+#define MyAppVersion "0.8.7.6"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
@@ -53,6 +53,12 @@ Name: "launchonstartup"; Description: "Launch {#MyAppName} on Windows startup"; 
 ; Main application files from dist\TechDeck\
 Source: "dist\TechDeck\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Bundled plugins (these will be copied to %LOCALAPPDATA% on first run by the app)
+; NOTE: java_tutor used to need an Excludes: pattern on BOTH lines above to keep
+; personal tooling out of colleagues' installs. It now lives in
+; tools/devkit/java_tutor/, and TechDeck.spec excludes the whole `tools` package
+; from every frozen build - so it cannot reach dist\ in the first place. Keep
+; dev-only tooling under tools/devkit/ and no exclusion is needed here; an
+; Excludes: pattern is string matching, and a rename would have shipped it.
 Source: "plugins\*"; DestDir: "{app}\plugins"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Assets (icons, etc.)
 Source: "assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -1,11 +1,13 @@
-"""Bring the two tracking workbooks up to date.
+"""Bring the three tracking workbooks up to date.
 
     python tools/sync_tracking_workbooks.py           # report the gap only
     python tools/sync_tracking_workbooks.py --write   # apply it
 
-Both live in ..\\Other Documents next to the repo:
-    TECH_PROCESS_IMPROVEMENT.xlsm     internal build log (TASK | STATE | DESC)
-    TechDeck Version Controller.xlsx  the presented record (6 sheets)
+All live in ..\\Other Documents next to the repo:
+    TECH_PROCESS_IMPROVEMENT.xlsm         internal build log (TASK | STATE | DESC)
+    TechDeck Version Controller.xlsx      the presented record (6 sheets)
+    Automation Projects Gantt Chart.xlsm  the project timeline (edited via
+                                          Excel COM -- see sync_gantt)
 
 Why this is a script and not a hand edit: the workbooks kept drifting because
 updating them was a manual step at the end of a long session, and manual steps
@@ -38,6 +40,8 @@ import sync_workbook_tools as T  # noqa: E402
 DOCS = Path(__file__).resolve().parents[2] / "Other Documents"
 VC = DOCS / "TechDeck Version Controller.xlsx"
 PI = DOCS / "TECH_PROCESS_IMPROVEMENT.xlsm"
+GANTT = DOCS / "Automation Projects Gantt Chart.xlsm"
+GANTT_SHEET = "Gantt Chart"
 TODAY = date.today().strftime("%b %d, %Y").replace(" 0", " ")
 
 
@@ -501,12 +505,266 @@ def sync_process_improvement(write):
     return notes
 
 
+def _gantt_month(spec):
+    """'YYYY-MM' -> datetime at the first of that month (chart granularity)."""
+    from datetime import datetime
+    y, m = spec.split("-")
+    return datetime(int(y), int(m), 1)
+
+
+def _gantt_span(start, end):
+    """Duration in whole months, endpoints inclusive (Feb..Feb = 1)."""
+    s, e = _gantt_month(start), _gantt_month(end)
+    return (e.year - s.year) * 12 + (e.month - s.month) + 1
+
+
+# The chart's calendar bars are hand-painted cell fills across G:AP (G = Feb
+# 2026, one column per month) -- no formula or conditional rule draws them, so
+# a row whose status or dates change must have its bar repainted or the table
+# half and the picture half of the chart disagree. Colors are the sheet's own
+# legend swatches (C97:C102), and the painted grammar, read off the existing
+# rows: a finished project is GREEN over its working months with RED on the
+# finish month; work in progress is GREEN with YELLOW on the planned finish;
+# a planned project is BLUE with YELLOW on the planned finish. AMBER
+# (continued support) rows never change status, so the painter never touches
+# one. Values are hex RGB as stored in the file.
+GANTT_BAR_FIRST_COL, GANTT_BAR_LAST_COL = 7, 42          # G .. AP
+GANTT_GREEN, GANTT_BLUE = "00B050", "00B0F0"
+GANTT_RED, GANTT_YELLOW, GANTT_WHITE = "FF0000", "FFFF00", "FFFFFF"
+
+
+def _gantt_col(spec):
+    """'YYYY-MM' -> its bar column (G = 2026-02)."""
+    d = _gantt_month(spec)
+    return GANTT_BAR_FIRST_COL + (d.year - 2026) * 12 + (d.month - 2)
+
+
+def _gantt_bar(status, start, end):
+    """{column: hex fill} for one row's repainted bar."""
+    body = {C.GANTT_DONE: GANTT_GREEN, C.GANTT_DEV: GANTT_GREEN,
+            C.GANTT_PLAN: GANTT_BLUE}.get(status)
+    marker = GANTT_RED if status == C.GANTT_DONE else GANTT_YELLOW
+    if body is None:                            # Deferred: no repaint grammar
+        return None
+    s, e = _gantt_col(start), _gantt_col(end)
+    bar = {c: GANTT_WHITE for c in range(GANTT_BAR_FIRST_COL,
+                                         GANTT_BAR_LAST_COL + 1)}
+    for c in range(s, e):
+        bar[c] = body
+    bar[e] = marker
+    return bar
+
+
+def sync_gantt(write):
+    """The Gantt chart is edited cell by cell THROUGH EXCEL, never openpyxl.
+
+    This workbook cannot take the openpyxl round trip the other two survive:
+    it carries VBA plus conditional-formatting extension parts that openpyxl
+    warns it will strip on save -- and the calendar bars ARE that formatting.
+    So the gap is computed from a read-only load (safe: nothing is saved), and
+    --write drives Excel COM with macros disabled, so every part of the file
+    not named in the diff is left exactly as Excel wrote it.
+
+    Content contract (C.GANTT_ROWS): names in column A are the match keys;
+    status/completion/start/end are enforced from version control; duration
+    (column F, a plain number on this sheet, not a formula) is derived from
+    the dates. A content row missing from the sheet is inserted directly under
+    the previous row of its section. Rows the content does not name -- the
+    legend, the critical-requirements block, hidden sheets -- are untouched.
+    """
+    from datetime import datetime
+
+    notes = []
+    wb = open_workbook(GANTT, read_only=True, data_only=True)
+    ws = wb[GANTT_SHEET]
+    grid = {}                                   # column-A text -> (row, values)
+    for row in ws.iter_rows(min_col=1, max_col=6):
+        a = row[0].value
+        if isinstance(a, str) and a.strip():
+            grid[a.strip()] = (row[0].row, [c.value for c in row])
+    label_ok = isinstance(ws["H2"].value, str) and \
+        ws["H2"].value.strip().rstrip(":").lower() == "last updated"
+
+    # Progress Notes drift: rows appended by hand arrive without the sheet's
+    # own look (even rows banded F2F2F2, everything wrapped and top-aligned,
+    # dates as 'mmm d, yyyy') -- 12 such rows had accumulated by 2026-09-08.
+    # Flag any data row missing it; the writer restyles just those.
+    ws_n = wb["Progress Notes"]
+    restyle_rows = []
+    for row in ws_n.iter_rows(min_row=3, min_col=1, max_col=5):
+        r = row[0].row
+        if r is None or row[0].value in (None, ""):
+            continue
+        fill = row[0].fill
+        got = fill.start_color.rgb if fill is not None and \
+            fill.fill_type == "solid" else None
+        fill_ok = got == "FFF2F2F2" if r % 2 == 0 else \
+            got in (None, "00000000")
+        wrap_ok = all(getattr(c, "alignment", None) is not None
+                      and c.alignment.wrap_text for c in row)
+        fmt_ok = row[0].number_format == "mmm\\ d\\,\\ yyyy"
+        if not (fill_ok and wrap_ok and fmt_ok):
+            restyle_rows.append(r)
+    if restyle_rows:
+        notes.append(f"  GANTT CHART                Progress Notes: "
+                     f"{len(restyle_rows)} row(s) to restyle")
+    wb.close()
+
+    renames = []                                # (sheet row, new name)
+    for old, new in C.GANTT_RENAMES.items():
+        # Same guard as VERSION_RENAMES: a rename whose target already exists
+        # was applied on a past run; applying it again would clobber a row.
+        if old in grid and new not in grid:
+            grid[new] = grid.pop(old)
+            renames.append((grid[new][0], new))
+            notes.append(f"  GANTT CHART                ~ {old}  ->  {new}")
+
+    # Update rows are addressed in the sheet's CURRENT numbering and applied
+    # before any insert. Insert rows are addressed in the numbering that holds
+    # once every insert ABOVE them has landed (prev_row tracks that), so the
+    # writer applies them strictly in order.
+    updates = []                                # (sheet row, column, value)
+    inserts = []                                # (row to insert AT, A-F, bar)
+    paints = []                                 # (sheet row, {column: fill})
+    prev_row = None
+    for entry in C.GANTT_ROWS:
+        if entry[0] == "SECTION":
+            if entry[1] in grid:
+                prev_row = grid[entry[1]][0] + len(inserts)
+            continue
+        name, status, pct, start, end = entry
+        want = [status, pct, _gantt_month(start), _gantt_month(end),
+                _gantt_span(start, end)]
+        if name not in grid:
+            if prev_row is None:
+                raise SystemExit(f"  Cannot place {name!r}: no anchor row -- "
+                                 f"has the sheet been restructured?")
+            prev_row += 1
+            inserts.append((prev_row, [name] + want,
+                            _gantt_bar(status, start, end)))
+            notes.append(f"  GANTT CHART                + {name}")
+            continue
+        r, have = grid[name]
+        prev_row = r + len(inserts)
+        changed = []
+        for col, w in enumerate(want, start=2):
+            h = have[col - 1]
+            if isinstance(w, datetime):
+                same = h == w
+            elif isinstance(w, (int, float)) and isinstance(h, (int, float)):
+                same = abs(float(h) - float(w)) < 1e-9
+            else:
+                same = isinstance(h, str) and h.strip() == w
+            if not same:
+                updates.append((r, col, w))
+                changed.append("BCDEF"[col - 2])
+        if changed:
+            notes.append(f"  GANTT CHART                {name}: "
+                         f"col {'/'.join(changed)}")
+        # A status or date change moves the row's calendar bar too. A
+        # duration-only or completion-only fix does not.
+        if any(c in changed for c in "BDE"):
+            bar = _gantt_bar(status, start, end)
+            if bar:
+                paints.append((r, bar))
+                notes.append(f"  GANTT CHART                {name}: bar "
+                             f"repainted {start}..{end}")
+
+    if not (renames or updates or inserts or restyle_rows):
+        notes.append("  GANTT CHART                up to date")
+        return notes
+    if not write:
+        return notes
+
+    shutil.copy2(GANTT, GANTT.with_suffix(".xlsm.bak"))
+    try:
+        import win32com.client as com
+    except ImportError:
+        raise SystemExit("  pywin32 is required to write the Gantt chart "
+                         "(pip install pywin32)")
+    app = com.DispatchEx("Excel.Application")
+    app.DisplayAlerts = False
+    app.EnableEvents = False
+    app.AutomationSecurity = 3                  # msoAutomationSecurityForceDisable
+    wbx = None
+    try:
+        wbx = app.Workbooks.Open(str(GANTT))
+        if wbx.ReadOnly:
+            raise SystemExit(
+                f"\n  {GANTT.name} is open in Excel.\n"
+                f"  Close it and run this again -- Excel handed the writer a\n"
+                f"  read-only copy, so nothing can be saved meanwhile.\n")
+        sh = wbx.Worksheets(GANTT_SHEET)
+
+        def com_color(hex_rgb):                 # "00B050" -> BGR long
+            r_, g_, b_ = (int(hex_rgb[i:i + 2], 16) for i in (0, 2, 4))
+            return r_ + (g_ << 8) + (b_ << 16)
+
+        def com_set(row_, col, v):
+            # A datetime handed to COM crosses a timezone conversion and lands
+            # hours off midnight (2026-09-01 04:00 on this machine). Write the
+            # Excel date serial instead -- exact, and the cell keeps its format.
+            if isinstance(v, datetime):
+                sh.Cells(row_, col).Value2 = (v - datetime(1899, 12, 30)).days
+            else:
+                sh.Cells(row_, col).Value = v
+
+        def paint(row, bar):
+            for col, hex_rgb in bar.items():
+                sh.Cells(row, col).Interior.Color = com_color(hex_rgb)
+
+        for r, new in renames:
+            sh.Cells(r, 1).Value = new
+        # Updates and their repaints first (their row numbers predate the
+        # inserts), then inserts in order -- each one's row already allows for
+        # the inserts above it.
+        for r, col, v in updates:
+            com_set(r, col, v)
+        for r, bar in paints:
+            paint(r, bar)
+        for r, values, bar in inserts:
+            sh.Rows(r).Insert(-4121, 0)         # xlShiftDown, format from above
+            for col, v in enumerate(values, start=1):
+                com_set(r, col, v)
+            if bar:                             # else it inherits stale fills
+                paint(r, bar)
+        if restyle_rows:
+            shn = wbx.Worksheets("Progress Notes")
+            for r in restyle_rows:
+                rng = shn.Range(shn.Cells(r, 1), shn.Cells(r, 5))
+                if r % 2 == 0:
+                    rng.Interior.Color = com_color("F2F2F2")
+                else:
+                    rng.Interior.ColorIndex = -4142     # xlNone -- white rows
+                rng.WrapText = True
+                rng.VerticalAlignment = -4160           # xlVAlignTop
+                shn.Cells(r, 1).NumberFormat = "mmm d, yyyy"
+                shn.Rows(r).AutoFit()
+            notes.append(f"  GANTT CHART                Progress Notes: "
+                         f"{len(restyle_rows)} row(s) restyled")
+        if label_ok:
+            sh.Range("I2").Value = datetime.now()
+            notes.append(f"  GANTT CHART                last updated -> {TODAY}")
+        else:
+            notes.append("  GANTT CHART                ! 'Last Updated' label "
+                         "not at H2 -- date left alone")
+        wbx.Save()
+    finally:
+        if wbx is not None:
+            wbx.Close(SaveChanges=False)
+        app.Quit()
+    return notes
+
+
 def main(write=False):
     print("VERSION CONTROLLER")
     for n in sync_version_controller(write):
         print(n)
     print("\nPROCESS IMPROVEMENT LOG")
     for n in sync_process_improvement(write):
+        print(n)
+    print("\nGANTT CHART")
+    for n in sync_gantt(write):
         print(n)
     print("\n" + ("WRITTEN" if write else "DRY RUN - pass --write to apply"))
 

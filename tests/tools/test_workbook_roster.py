@@ -33,6 +33,13 @@ SECTION_FOR_FAMILY = {
 }
 SHARED_SECTION = "QUALITY, ESTIMATING & SHOP TOOLS"
 
+# Dev-only tooling is no longer an allowlist to maintain here. It lives under
+# tools/devkit/, which TechDeck.spec excludes from every frozen build, so it is
+# not in plugins/ and never reaches this scan. (The comment this replaces
+# pointed at a DEV_ONLY_PLUGINS in TechDeck.spec that did not exist - the kind
+# of rot a hand-maintained second list attracts.) Games are still skipped
+# below: those DO ship, they are just not ASA production automation.
+
 
 def _plugins() -> dict:
     """{display name: family} for every non-Games plugin on disk."""

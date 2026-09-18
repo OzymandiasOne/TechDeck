@@ -16,6 +16,16 @@ feature is simply described by what it DOES:
 
 # ---- Version Controller :: SYSTEM FEATURES  (name, what, value, status) -----
 SYSTEM_FEATURES = [
+    ("Integrated User Manual",
+     "A full illustrated manual - every screen and every tool, step by step "
+     "with real screenshots - ships inside the application and opens from the "
+     "console or the settings page. It is regenerated automatically as part "
+     "of every build, with automated checks on wording, pictures, and layout, "
+     "so the shipped manual can never fall behind the software.",
+     "Operators answer their own how-do-I questions at the desk instead of "
+     "interrupting a colleague, and new hires can work through any tool "
+     "unassisted from day one.",
+     "Active"),
     ("Scheduling Board Status Automation",
      "The shared planning schedule's status column is advanced by the platform "
      "as each job progresses -- off the card queue once its Teams card is "
@@ -191,7 +201,8 @@ ENGINEERING = [
      "manual end-of-session update proved to be the step that got skipped.",
      "The published record of the platform stays current and consistent "
      "without depending on anyone remembering to update it.",
-     "Both tracking workbooks; roster verified against the live tool set."),
+     "All three tracking workbooks, the project Gantt chart included; "
+     "rosters verified against the live tool set."),
     ("Aug 2026", "Composable Asset System", "Tooling",
      "Rebuilt widget artwork so each item is three independent layers composed "
      "at display time rather than one flattened image, with automated checks "
@@ -246,6 +257,21 @@ ENGINEERING = [
      "the wrong batch - and reduces a full multi-tool batch run to a single "
      "pick.",
      "Six 922 tools on the shared routine; the standard for new 922 tools."),
+    ("Aug 2026", "Complete Part Coverage on Kit Paperwork", "Quality",
+     "Two tools preparing the same batch disagreed on how many parts it "
+     "contained, which is how two silent omissions were found. Both are "
+     "corrected: the forming tool now identifies a part by its order as well "
+     "as its part number, so a part built for two different orders is "
+     "recorded and gathered once for each rather than once in total; and the "
+     "kitting tool now recognises an order with more parts than its standard "
+     "checklist can hold and reprints that order on the larger layout instead "
+     "of stopping at ten.",
+     "A part could be left off the shop paperwork with no error raised - the "
+     "only signal was the two tools disagreeing. Neither omission is possible "
+     "now, and an order large enough to outgrow even the larger layout raises "
+     "a warning rather than passing quietly.",
+     "922 forming and kitting; verified end to end against a live production "
+     "batch."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -259,13 +285,172 @@ ENGINEERING = [
 # so the row is updated in place rather than duplicated.
 VERSION_RENAMES = {
     # Past re-keys (a dict can hold each old key once, so superseded targets
-    # move to this comment): "In Development" -> "Beta 0.8.6.11".
-    "In Development": "Beta 0.8.7.1",
+    # move to this comment): "In Development" -> "Beta 0.8.6.11",
+    # "In Development" -> "Beta 0.8.7.1".
+    "In Development": "Beta 0.8.7.6",
     "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.6", "Sep 17, 2026", "Feature",
+     "A new MieTrak Tools window collects small MieTrak helpers behind one "
+     "picker. Its first tool, the Hardware Code Generator, builds a hardware "
+     "part number from dropdown picks (material, type, thread, length or "
+     "screw size) and copies it to the clipboard, replacing a standalone "
+     "program left behind by a departed colleague; its code tables were kept "
+     "verbatim and are now covered by automated tests so the numbers keep "
+     "matching. Invoicing preparation now fills the invoice number and ship "
+     "date on the supplement from the working forecast, prints the supplement "
+     "to PDF beside the invoice, and gathers each nest's pricing calculations "
+     "into its invoicing folder. Part sketch pages that lost their drawing on "
+     "the report server are filled back in from the batch's own sketch "
+     "library, and the material designation is written on every part sketch "
+     "so the shop can scribe from the print. The 922 batch setup tool starts "
+     "with the label options on and files the batch progress checklist card in "
+     "the hold stage. The tube file organizer now matches purchase-order part "
+     "numbers written without the sheet hyphen.",
+     "MieTrak Tools (new), 911 SSPO Invoicing Prep, 911 Setup, 911 Remove Ticket, "
+     "922 Setup, 922 LST Organizer"),
+    ("Beta 0.8.7.5", "Sep 11, 2026", "Feature",
+     "The 922 batch setup tool now records the batch in the master parts "
+     "list and identifies repeat orders at the start of the run, so each "
+     "repeat's tracking card is created already labelled and already in the "
+     "model-check stage of the pipeline board; previously the cards were "
+     "created plain and re-tagged in a later pass. The tool also creates the "
+     "batch's fourteen-step progress checklist card, which was made by hand "
+     "on every batch until now. "
+     "The invoicing preparation tool now takes a copy of the entire pricing "
+     "master and a close-out date range, instead of a sheet trimmed down to "
+     "the week by hand. Rows whose promise date falls inside the range become "
+     "the week's invoicing packages, and both weekly reports - the work order "
+     "close out sheet and the material status listing - are produced "
+     "automatically in the same invoicing folder, replacing two documents "
+     "previously rebuilt by hand every week. A complete illustrated user "
+     "manual now ships inside the application, opened from the console or "
+     "the settings page, and is regenerated by every build so it always "
+     "matches the software it describes."),
+    ("Beta 0.8.7.4", "Sep 4, 2026", "Feature",
+     "The 911 batch setup tool now prepares plate work as well as structural "
+     "shapes. Until now its output was tailored to shapes, and plate batches "
+     "were prepared by hand around it: the operator selects plate for the run "
+     "and the tool produces the plate workbook and the plate verification "
+     "form, records the material specification as not applicable on carbon "
+     "plate - decided by the ferrous designation the shop paperwork itself "
+     "carries, never inferred from the material name - and carries each "
+     "nest's traceability number from the forecast onto the verification "
+     "sheet, a field that previously had to be remembered and typed by hand "
+     "on every plate order. The plate selection deliberately does not "
+     "persist between runs, so a prior plate run can never silently apply "
+     "plate paperwork to a shape batch. "
+     "The scripting-preparation tool now takes the values shared across an "
+     "order line - purchase order, line, revision, clauses, ship-to and "
+     "promise date - once, and propagates them to every line, with any "
+     "differing line still editable individually; division naming was "
+     "aligned to the exact form the ERP expects, removing a manual "
+     "correction. "
+     "The difficulty marking applied by the design system is now preserved "
+     "on part drawings rather than removed during paperwork preparation - "
+     "the shop floor relies on the visible marker - while orders processed "
+     "under the previous behaviour continue to be recognised as difficult. "
+     "A display fault that made the run control appear to vibrate on scaled "
+     "monitors was corrected.",
+     "911 Setup, 911 Scripting Prep, 922 Difficulty Stamper"),
+    ("Beta 0.8.7.3", "Sep 2, 2026", "Feature",
+     "Adds a scripting-preparation tool for the SSPO order line. The ERP "
+     "scripting workbook was previously typed out line by line; it is now "
+     "built from the award review a reviewer has already checked, with each "
+     "material's designation and size looked up in the Working Forecast "
+     "List, so the sheet arrives filled in rather than transcribed. Both "
+     "sheets are produced in a single file, and any line the tool cannot "
+     "resolve is listed inside that same file with the reason it could not - "
+     "so the exceptions travel with the data they belong to instead of in a "
+     "second document that can be mislaid, and the operator removes the list "
+     "once the values are entered. "
+     "The purchase-order extraction tool has been reinstated. It was "
+     "withdrawn on the assumption that the new scripting tool superseded it; "
+     "the two in fact serve opposite directions - one reads the customer's "
+     "incoming order paperwork, the other produces the outgoing scripting "
+     "sheet - and both are maintained going forward. Operators who lost the "
+     "tool from their home screen restore it from the library once. "
+     "The order line's quantity and unit price are now operator-configurable "
+     "rather than fixed in the build, so an award structured differently is "
+     "a setting rather than a development request. A stale home-screen entry "
+     "left by the tool's renaming is cleared automatically at next start. "
+     "Nest selection in the inspection-data capture tool now starts empty "
+     "and is opted into, matching the setup tool. Reading a whole order is "
+     "the exception; the previous default obliged the operator to deselect "
+     "most of the list on every ordinary run.",
+     "911 Scripting Prep (new), 911 PO PDF Extractor (reinstated), "
+     "911 Inspection Dimensions"),
+    ("Beta 0.8.7.2.1", "Sep 1, 2026", "Patch",
+     "Corrective release for the inspection-data capture tool. The image "
+     "recognition component it depends on was omitted from the previous "
+     "build's package, so the tool returned no results and reported the "
+     "drawings as containing no sketch pages - work that had to be entered by "
+     "hand. The component is restored and a build-time check now prevents the "
+     "omission recurring; the tool was re-validated against the production "
+     "packet that reported the fault, recovering 122 dimensions across 24 "
+     "parts and completing 19 inspection sheets. The misleading message was "
+     "treated as a second defect: a component that cannot start is now "
+     "reported as such rather than as an empty drawing set, so the operator "
+     "is directed at the tool instead of the paperwork. "
+     "Two accuracy defects were also closed. Angular dimensions were written "
+     "in a form the inspection sheet read as linear, applying a tolerance an "
+     "order of magnitude tighter than the form intends; they now carry the "
+     "correct tolerance. And a dimension whose leading decimal point was lost "
+     "in recognition was written to a sheet as a value roughly six times the "
+     "part - readings that cannot be valid lengths are now withheld and "
+     "listed for review rather than entered, with an operator-facing switch "
+     "to disable the check if it is ever too strict. "
+     "The tool's run report has been rewritten for the inspector who uses it. "
+     "It now opens on screen at the end of a run, led by the items needing a "
+     "second look, and is saved alongside the work on request rather than "
+     "filed automatically into the folder tree. Selecting the top-level "
+     "customer folder no longer starts a run across every order in the "
+     "programme; the operator is offered the orders and nests to include.",
+     "Inspection Data Capture"),
+    ("Beta 0.8.7.2", "Sep 1, 2026", "Feature",
+     "The inspection-data capture tool now completes the weld-prep entries as "
+     "well as the dimensions. Previously it recorded the weld-prep callout "
+     "codes it found on each drawing but could not supply the bevel angle, "
+     "because that value is not printed on the drawing - it is held in the "
+     "customer's bevel reference set. All 947 reference sheets have been "
+     "transcribed and are now carried with the tool, so a callout on a drawing "
+     "becomes a filled-in nominal on the inspection sheet, one entry per face "
+     "the drawing names. Three classes of silent omission were closed in the "
+     "process: three of the four callout prefix families were being skipped "
+     "entirely (one of them accounts for a fifth of the reference set), a "
+     "two-sided callout is now recorded as the two separate entries it "
+     "represents, and a callout whose reference sheet carries no angle is "
+     "raised for a decision rather than left blank - a prep that produced "
+     "nothing previously looked identical to one that was never read. "
+     "Withdrawn codes name their replacement instead of writing a value, and "
+     "where image recognition returns a damaged code the tool repairs the "
+     "unambiguous cases and, for the rest, names the closest valid code for "
+     "review without ever substituting a guess onto a quality form. Validated "
+     "across 90 production packets covering 684 weld preps. "
+     "Reliability work this release removes three defects that each cost "
+     "rework in the field. Pallet and batch marking was applied to the first "
+     "document found in an order folder, which since the introduction of "
+     "drawing binders was usually a drawing rather than the work packet the "
+     "shop floor reads - 223 of 252 live order folders were affected. Marking "
+     "now identifies the work packet by reading it, and marks left on drawings "
+     "by earlier runs are removed. A Windows path-length limit caused file "
+     "writes to fail with a misleading 'file not found' message anywhere the "
+     "customer folder tree ran deep; the limit has been removed across every "
+     "tool, with a build-time check to prevent reintroduction. And where one "
+     "batch builds the same part for two different orders, the forming search "
+     "recorded only the first - both are now tracked. Kit paperwork prints "
+     "orders of more than ten parts in full instead of dropping the overflow, "
+     "and the nest-file gathering tool accepts the nesting software's revised "
+     "cutting-diagram format, which had been causing repeated run failures. "
+     "Tools that read from cloud-synchronised storage now retrieve files "
+     "while the operator is still answering prompts, shortening the runs that "
+     "spend most of their time waiting on downloads.",
+     "911 Inspection Dimensions, 911 LST Organizer, 911 SSPO Award Review, "
+     "922 Pallet Stamper, 922 Difficulty Stamper, 922 Setup, "
+     "922 FormingFinder, 922 Kitting, plus a platform-wide reliability fix"),
     ("Beta 0.8.7.1", "Aug 20, 2026", "Feature",
      "A new inspection-data capture tool reads every dimension off the part "
      "sketch drawings in a batch's nest packages - the drawings are scanned "
@@ -459,7 +644,61 @@ PI_RENAMES = {
 
 # ---- Process Improvement log :: NEW entries (task, state, description) ------
 PI_NEW = [
-    ("DRAWING DIMENSION READER", "PILOT",
+    ("IN-APP USER MANUAL", "COMPLETE",
+     "A COMPLETE ILLUSTRATED USER MANUAL FOR THE PLATFORM AND ALL 26 "
+     "PRODUCTION TOOLS, WRITTEN IN PLAIN SHOP LANGUAGE WITH NUMBERED "
+     "SECTIONS AND STEP-BY-STEP SCREENSHOTS TAKEN FROM THE REAL "
+     "APPLICATION RUNNING ON PRACTICE DATA; SHIPS INSIDE THE APP (CONSOLE "
+     "COMMAND OR SETTINGS BUTTON) AND IS REGENERATED BY EVERY BUILD WITH "
+     "AUTOMATED CHECKS ON WORDING, PICTURES, PAGE LAYOUT, AND DROPPED "
+     "TEXT, SO IT CANNOT GO STALE"),
+    ("WEEKLY INVOICING REPORTS AUTOMATION", "COMPLETE",
+     "THE INVOICING PREPARATION TOOL NOW TAKES A COPY OF THE ENTIRE PRICING "
+     "MASTER PLUS A CLOSE-OUT DATE RANGE INSTEAD OF A SHEET TRIMMED TO THE "
+     "WEEK BY HAND; THE WEEK'S ROWS ARE SELECTED BY THEIR PROMISE DATE, AND "
+     "BOTH WEEKLY REPORTS - THE WORK ORDER CLOSE OUTS AND THE MATERIAL STATUS "
+     "LISTING - ARE PRODUCED ALONGSIDE THE PER-NEST INVOICING PACKAGES IN THE "
+     "SAME FOLDER, REPLACING TWO SHEETS PREVIOUSLY REBUILT BY HAND EVERY "
+     "WEEK; OUTPUT VERIFIED CELL-IDENTICAL AGAINST THE HAND-MADE ORIGINALS"),
+    ("WELD PREP ANGLE REFERENCE", "COMPLETE",
+     "THE CUSTOMER'S COMPLETE BEVEL REFERENCE SET (947 SHEETS) TRANSCRIBED AND "
+     "CARRIED WITH THE DRAWING DIMENSION READER, SO A WELD PREP CALLOUT ON A "
+     "DRAWING BECOMES A FILLED-IN BEVEL ANGLE ON THE INSPECTION SHEET, ONE "
+     "ENTRY PER FACE THE DRAWING NAMES; THREE OF THE FOUR CALLOUT FAMILIES "
+     "WERE PREVIOUSLY SKIPPED ENTIRELY, WITHDRAWN CODES NOW NAME THEIR "
+     "REPLACEMENT, AND A CALLOUT WITH NO PUBLISHED ANGLE IS RAISED FOR A "
+     "DECISION RATHER THAN LEFT BLANK; VALIDATED ON 90 PRODUCTION PACKETS "
+     "COVERING 684 WELD PREPS"),
+    ("WORK PACKET MARKING CORRECTION", "COMPLETE",
+     "PALLET AND DIFFICULTY MARKING WAS BEING APPLIED TO THE FIRST DOCUMENT "
+     "FOUND IN AN ORDER FOLDER, WHICH SINCE THE INTRODUCTION OF DRAWING "
+     "BINDERS WAS USUALLY A DRAWING RATHER THAN THE WORK PACKET THE SHOP FLOOR "
+     "READS -- 223 OF 252 LIVE ORDER FOLDERS AFFECTED; THE WORK PACKET IS NOW "
+     "IDENTIFIED BY READING IT, AND MARKS LEFT ON DRAWINGS BY EARLIER RUNS "
+     "ARE REMOVED"),
+    ("LONG FILE PATH RELIABILITY FIX", "COMPLETE",
+     "A WINDOWS PATH-LENGTH LIMIT CAUSED FILE WRITES TO FAIL WITH A MISLEADING "
+     "'FILE NOT FOUND' MESSAGE ANYWHERE THE CUSTOMER FOLDER TREE RAN DEEP; "
+     "THE LIMIT IS REMOVED ACROSS ALL 25 TOOLS (AROUND 215 FILE OPERATIONS), "
+     "WITH A BUILD-TIME CHECK PREVENTING REINTRODUCTION"),
+    ("DUPLICATE-ORDER FORMING TRACKING", "COMPLETE",
+     "WHERE ONE BATCH BUILDS THE SAME PART FOR TWO DIFFERENT ORDERS, THE "
+     "FORMING SEARCH RECORDED ONLY THE FIRST AND DROPPED THE SECOND SILENTLY; "
+     "BOTH ORDERS ARE NOW TRACKED AND BOTH REACH THE FORMING BINDER"),
+    ("OVERSIZE KIT PAPERWORK", "COMPLETE",
+     "AN ORDER OF MORE THAN TEN PARTS PRINTED THE FIRST TEN AND DROPPED THE "
+     "REST WITH NO WARNING; SUCH ORDERS NOW PRINT ON THE LARGER CHECKLIST "
+     "SHEET AND KEEP THEIR PLACE IN THE KIT PAPERWORK"),
+    ("CUTTING DIAGRAM FORMAT UPDATE", "COMPLETE",
+     "THE NESTING SOFTWARE CHANGED HOW IT LABELS PARTS ON ITS CUTTING "
+     "DIAGRAMS, WHICH CAUSED REPEATED RUN FAILURES IN THE NEST-FILE GATHERING "
+     "TOOL; BOTH THE OLD AND NEW FORMATS ARE NOW ACCEPTED"),
+    ("CLOUD FILE PREFETCH", "COMPLETE",
+     "TOOLS THAT READ FROM CLOUD-SYNCHRONISED STORAGE NOW RETRIEVE FILES IN "
+     "THE BACKGROUND WHILE THE OPERATOR IS STILL ANSWERING PROMPTS, INSTEAD OF "
+     "ONE AT A TIME MID-RUN; SHORTENS THE RUNS THAT SPEND MOST OF THEIR TIME "
+     "WAITING ON DOWNLOADS"),
+    ("DRAWING DIMENSION READER", "COMPLETE",
      "READS THE DIMENSIONS DIRECTLY OFF THE PART DRAWINGS IN A 911 NEST "
      "PACKAGE -- INCLUDING THE WELD PREP CALLOUTS -- AND FILLS THEM ONTO EACH "
      "PART'S INSPECTION SHEET; RUNS ENTIRELY ON THE MACHINE WITH NO OUTSIDE "
@@ -507,6 +746,10 @@ PI_NEW = [
     ("SHEET METAL CALCULATORS", "COMPLETE",
      "GUI PLUGIN HOSTING A LIBRARY OF SHOP CALCULATORS BEHIND ONE PICKER, "
      "DRIVEN BY A DECLARATIVE REGISTRY"),
+    ("MIETRAK TOOLS", "COMPLETE",
+     "GUI PLUGIN HOSTING SMALL MIETRAK HELPERS BEHIND ONE PICKER; FIRST TOOL "
+     "IS THE HARDWARE CODE GENERATOR, A NATIVE PORT OF A DEPARTED COLLEAGUE'S "
+     "STANDALONE EXE (TABLES AND ASSEMBLY RULE KEPT VERBATIM, PYTEST-PINNED)"),
     # {tests} is filled from a live pytest collection, not remembered -- see
     # test_count() in the writer. Any row here may use it.
     ("CONTINUOUS INTEGRATION", "COMPLETE",
@@ -617,4 +860,163 @@ PI_NEW = [
      "INSTEAD OF TYPING A NUMBER - THE NUMBER IS READ FROM THE FOLDER ITSELF "
      "AND ONE PICK IS SHARED ACROSS A QUEUED RUN; ONE SHARED ROUTINE REPLACES "
      "SIX HAND-COPIED PROMPT BLOCKS AND IS THE STANDARD FOR NEW 922 TOOLS"),
+]
+
+# ---- Automation Projects Gantt Chart :: project rows ------------------------
+# Full mirror of the chart's project rows ('Gantt Chart' sheet, columns A-E).
+# A ("SECTION", title) entry marks one of the chart's section header rows; a
+# project row is (name, status, fraction complete, start "YYYY-MM",
+# end "YYYY-MM"). Duration (column F) is derived from the dates, never stored.
+#
+# This workbook is the one the writer must NOT round-trip through openpyxl:
+# it carries VBA and conditional-formatting extension parts an openpyxl save
+# strips (the calendar bars are that formatting), so the writer diffs against
+# a read-only load and applies cell edits through Excel itself. See
+# sync_gantt() in sync_tracking_workbooks.py.
+GANTT_DONE = "Complete/ Continued Support (100% complete)"
+GANTT_DEV = "Project Development"
+GANTT_PLAN = "Planning (0% complete)"
+GANTT_DEFERRED = "Deferred"
+
+# Chart rows re-keyed in place (old name -> new name), applied before the
+# row match so the row updates instead of duplicating. The test-count rename
+# exists because a number embedded in a row NAME goes stale silently; the
+# count now lives with the claim in the Version Controller, where it is read
+# from a live pytest run.
+GANTT_RENAMES = {
+    "Automated Testing & Continuous Integration (1,312 Tests)":
+        "Automated Testing & Continuous Integration",
+}
+
+GANTT_ROWS = [
+    ("SECTION", "TECHDECK — PLATFORM & INFRASTRUCTURE"),
+    ("TechDeck Platform (Maintenance)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("Platform Core Rebuild (v0.8.0 Modular Architecture)",
+     GANTT_DONE, 1, "2026-02", "2026-02"),
+    ("UI Redesign & Live Theme Engine (v0.8.5)",
+     GANTT_DONE, 1, "2026-02", "2026-05"),
+    ("Theme Engine & Custom Theme Builder", GANTT_DONE, 1, "2026-02", "2026-05"),
+    ("User Feedback System", GANTT_DONE, 1, "2026-03", "2026-04"),
+    ("Audio Feedback System", GANTT_DONE, 1, "2026-02", "2026-05"),
+    ("Plugin Card Status & Stability Program",
+     GANTT_DONE, 1, "2026-03", "2026-05"),
+    ("Auto-Update & Release Distribution Pipeline",
+     GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("Command Console & Diagnostics Suite", GANTT_DONE, 1, "2026-02", "2026-08"),
+    ("Presentation Mode (Client Demo Theme)",
+     GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("Guided File Selection Overlay", GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("Multi-Tool Run Control & Run Engine", GANTT_DONE, 1, "2026-02", "2026-08"),
+    ("Usage Telemetry & Feedback Delivery", GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("Recognition & Rewards System", GANTT_DONE, 1, "2026-06", "2026-08"),
+    ("Desktop Widget Line & Widget Builder",
+     GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("922 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
+    ("911 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
+    ("Personal Planning Workspace (Assistant)",
+     GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("SECTION", "ENGINEERING & RELIABILITY PROGRAMS"),
+    ("Reliability Hardening (OneDrive, Cancellation, Settings, Errors)",
+     GANTT_DONE, 1, "2026-06", "2026-09"),
+    ("Automated Testing & Continuous Integration",
+     GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("Security & Publishing Controls", GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("Build & Ship Quality Gates", GANTT_DONE, 1, "2026-06", "2026-08"),
+    ("Diagnostics & Supportability", GANTT_DONE, 1, "2026-06", "2026-08"),
+    ("Usability Standardization (Shared Prompts, Folder-Pick Entry)",
+     GANTT_DONE, 1, "2026-06", "2026-08"),
+    ("Long-Path (MAX_PATH) Platform-Wide Fix",
+     GANTT_DONE, 1, "2026-08", "2026-09"),
+    ("Performance Profiling & Cloud Prefetch",
+     GANTT_DONE, 1, "2026-08", "2026-09"),
+    ("SECTION", "911 QTDR WORKFLOW AUTOMATION"),
+    ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-08"),
+    ("911 Teams Cards", GANTT_DONE, 1, "2026-07", "2026-08"),
+    ("911 Batch Repeater", GANTT_DONE, 1, "2026-03", "2026-07"),
+    ("911 Remove Ticket", GANTT_DONE, 1, "2026-03", "2026-07"),
+    ("911 PO PDF Extractor (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("911 Sketch Extractor (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("911 LST Organizer", GANTT_DONE, 1, "2026-06", "2026-09"),
+    ("911 Baked Beans Wild Ride (NC Pricing Consolidation)",
+     GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("911 SSPO Invoicing Prep", GANTT_DONE, 1, "2026-06", "2026-09"),
+    ("911 SSPO Award Review", GANTT_DONE, 1, "2026-06", "2026-07"),
+    ("911 Data Extraction", GANTT_DONE, 1, "2026-02", "2026-04"),
+    ("911 Data Organizer", GANTT_DONE, 1, "2026-02", "2026-07"),
+    # Shipped 0.8.7.1, corrected and validated through 0.8.7.2.1; only field
+    # confirmations remain, which is support, not development.
+    ("911 Inspection Dimensions (Drawing Dimension OCR)",
+     GANTT_DONE, 1, "2026-08", "2026-09"),
+    # New app, shipped 0.8.7.3 (Sep 2, 2026).
+    ("911 Scripting Prep", GANTT_DONE, 1, "2026-09", "2026-09"),
+    ("SECTION", "922 QTDR WORKFLOW AUTOMATION"),
+    ("922 Setup (Folder Build, Teams Cards, Stage Orchestration)",
+     GANTT_DONE, 1, "2026-03", "2026-08"),
+    ("922 Batch Repeater (Support + Catalog Rebuild)",
+     GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("922 Pallet Stamper (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("922 LST Organizer (Support + v3 Rebuild)",
+     GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("922 FormingFinder", GANTT_DONE, 1, "2026-04", "2026-09"),
+    ("922 Kitting", GANTT_DONE, 1, "2026-04", "2026-09"),
+    ("922 Difficulty Stamper", GANTT_DONE, 1, "2026-08", "2026-08"),
+    ("922 Runtime Genie", GANTT_DONE, 1, "2026-04", "2026-05"),
+    ("922 Master Parts Catalog", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("Flat Bar Forming Support", GANTT_DONE, 1, "2026-08", "2026-09"),
+    ("SECTION", "902 QTDR WORKFLOW"),
+    ("902 DXF Prep", GANTT_DONE, 1, "2026-06", "2026-07"),
+    ("902 Documentation & Paperwork Rebuild (Automation Prep)",
+     GANTT_DEV, 0.6, "2026-08", "2026-10"),
+    ("902 Setup App Suite (Mirrors 911/922 Toolchains)",
+     GANTT_PLAN, 0, "2026-08", "2026-10"),
+    ("SECTION", "QUALITY, ESTIMATING & SHOP TOOLS"),
+    ("Customer DXF Analysis (Quoting + Automated Offsets)",
+     GANTT_DEV, 0.7, "2026-02", "2026-09"),
+    ("Sheet Metal Calculators", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("MieTrak Tools (Hardware Code Generator)", GANTT_DONE, 1, "2026-09", "2026-09"),
+    ("Batch Auditor", GANTT_DONE, 1, "2026-05", "2026-06"),
+    ("QA Gemba Analyzer", GANTT_DONE, 1, "2026-06", "2026-07"),
+    ("QR Code Generator (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("Crane Inspection Tracker", GANTT_DEV, 0.75, "2026-02", "2026-10"),
+    ("SECTION", "DRIVEWORKS & DESIGN AUTOMATION"),
+    ("DriveWorks Automation (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
+    ("DriveWorks Difficulty Layer (Compound-Cut Flagging, TUBE + CLEVIS)",
+     GANTT_DONE, 1, "2026-08", "2026-08"),
+    ("DriveWorks Flat-Bar Forming Rules (Formed-Part File Naming)",
+     GANTT_DONE, 1, "2026-08", "2026-08"),
+    ("DriveWorks Plate Project Overhaul", GANTT_DONE, 1, "2026-08", "2026-08"),
+    ("DriveWorks Data Export & Inspection Sheet Automation",
+     GANTT_DEV, 0.05, "2026-08", "2026-09"),
+    ("DriveWorks Project Rule Audit & Documentation (11 Projects)",
+     GANTT_DEV, 0.5, "2026-08", "2026-09"),
+    ("SECTION", "CAD / NC / DXF RESEARCH & DATA"),
+    ("NC-1 G Code Automation", GANTT_DEFERRED, 0, "2026-02", "2027-02"),
+    ("NC-to-SolidWorks Conversion Feasibility Study",
+     GANTT_DONE, 1, "2026-02", "2026-03"),
+    ("DXF Linear-Inch Measurement Engine",
+     GANTT_DEV, 0.75, "2026-02", "2026-07"),
+    ("DSTV / NC File Format Study (SolidWorks Integration)",
+     GANTT_DEV, 0.25, "2026-02", "2026-09"),
+    ("911 Master Parts List", GANTT_DONE, 1, "2026-02", "2026-07"),
+    ("Throughput-Based Cut Estimating", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("EB Bevel Book Transcription (947 Reference Prints)",
+     GANTT_DONE, 1, "2026-08", "2026-09"),
+    ("SECTION", "SHIPOS / PALANTIR FOUNDRY"),
+    ("ShipOS Implementation Lead (Navy Maritime Industrial Base)",
+     GANTT_DEV, 0.2, "2026-07", "2027-03"),
+    ("American Tech Fellowship (Palantir Foundry, 12-Week Program)",
+     GANTT_PLAN, 0, "2026-09", "2026-12"),
+    ("SECTION", "PLANNED / UPCOMING"),
+    # The illustrated User Guide (34 chapters, riding release/v0.8.7.5) IS
+    # this project, so it moves from Planning to Project Development.
+    ("922/911 Quick Reference Library (TechDeck)",
+     GANTT_DEV, 0.75, "2026-09", "2027-01"),
+    ("Engineering Change (ECR/ECO/ECN) Generator",
+     GANTT_PLAN, 0, "2027-03", "2027-05"),
+    ("922 PO Builder", GANTT_PLAN, 0, "2026-09", "2026-12"),
+    ("922 Quote Builder", GANTT_PLAN, 0, "2026-10", "2027-01"),
+    ("Automated 922 Rod Tags", GANTT_PLAN, 0, "2026-09", "2026-11"),
+    ("Code Signing Certificate", GANTT_PLAN, 0, "2026-09", "2026-10"),
+    ("EB Quoting Automation", GANTT_PLAN, 0, "2026-12", "2027-08"),
+    ("EB Batch Setup Full Automation", GANTT_PLAN, 0, "2027-02", "2027-11"),
 ]

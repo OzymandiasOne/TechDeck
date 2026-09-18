@@ -97,7 +97,7 @@ def halloween_active(settings=None) -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.1"  # New 911 Inspection Dimensions app (OCR the part sketches, fill the QF-QU-09 tabs); 922 Setup Pallet Labeler stage; 922 batch entry by folder pick; formed flat bars; Customer DXF Analysis v2.2.x feedback fixes
+APP_VERSION = "0.8.7.6"  # Paperwork Complete - invoice number + PDF + pricing calcs in Invoicing Prep; sketch graphics + MATL on every part sketch; 922 Setup defaults + PROGRESS card in HOLD
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

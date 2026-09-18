@@ -39,6 +39,7 @@ PLUGIN_ICON_KEYS = {
     "911_batch_repeater":   "repeat",
     "911_remove_ticket":    "scissors",
     "911_po_pdf_extractor": "claw",
+    "911_scripting_prep":   "clipboard",
     "911_sketch_extractor": "sym_picture",
     "911_sspo_award_review": "stopwatch",
     "922_pallet_stamper":   "stamp",
@@ -57,6 +58,7 @@ PLUGIN_ICON_KEYS = {
     "902_dxf_prep":         "ruler",
     "911_baked_beans_wild_ride": "mr_beans",
     "sheet_metal_calculators": "calculator",
+    "mietrak_tools":        "mietrak",
     # Placeholder at the user's request (2026-08-20) - the drawn `inspection_dims`
     # tile is still in generate_tile_icons_32.py, so swapping back is this one line.
     "911_inspection_dimensions": "steam_circled",

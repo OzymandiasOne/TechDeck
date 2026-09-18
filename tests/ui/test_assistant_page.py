@@ -107,6 +107,69 @@ def test_switching_notes_flushes_the_pending_save(qapp, store):
     assert "typed but not yet autosaved" in store.get_note(first.id).body
 
 
+def test_autosave_refresh_leaves_the_caret_where_you_were_typing(qapp, store):
+    """The 700ms autosave used to yank the caret to the top of the note.
+
+    Chain: autosave -> `changed` -> the page refreshes this panel ->
+    list.clear() + setCurrentRow() re-fires currentItemChanged -> the panel
+    re-showed the SAME note with setPlainText(), which resets the caret to
+    position 0 (C.D., 2026-08-26).
+    """
+    note = store.add_note(Note(title="Gate code", body="- 4417"))
+    panel = NotesPanel(store)
+    panel.select_note(note.id)
+    panel.editor.setPlainText("- 4417\n- second line")
+    panel.editor.moveCursor(panel.editor.textCursor().MoveOperation.End)
+    where = panel.editor.textCursor().position()
+    assert where > 0
+
+    panel._save_current()                    # what the autosave timer calls
+    panel.refresh(keep_selection=True)       # what the page does on `changed`
+
+    assert panel.editor.textCursor().position() == where
+    assert panel.editor.toPlainText() == "- 4417\n- second line"
+
+
+def test_a_refresh_does_not_flush_or_reload_the_open_note(qapp, store):
+    """A list rebuild must not re-read the store over what is being typed."""
+    note = store.add_note(Note(title="Gate code", body="saved body"))
+    panel = NotesPanel(store)
+    panel.select_note(note.id)
+    panel.editor.setPlainText("half-typed, not saved yet")
+
+    panel.refresh(keep_selection=True)
+
+    assert panel.editor.toPlainText() == "half-typed, not saved yet"
+
+
+def test_selecting_a_different_note_still_switches(qapp, store):
+    """The same-note guard must not block a real navigation."""
+    first = store.add_note(Note(title="first", body="first body"))
+    second = store.add_note(Note(title="second", body="second body"))
+    panel = NotesPanel(store)
+    panel.select_note(first.id)
+    assert panel.editor.toPlainText() == "first body"
+
+    panel._select_row(second.id)
+
+    assert panel._current.id == second.id
+    assert panel.editor.toPlainText() == "second body"
+
+
+def test_select_note_reloads_a_note_edited_elsewhere(qapp, store):
+    """The terminal's /note edits the open note, then jumps to it."""
+    note = store.add_note(Note(title="Gate code", body="old body"))
+    panel = NotesPanel(store)
+    panel.select_note(note.id)
+
+    note.body = "edited by the terminal"
+    store.update_note(note)
+    panel.refresh(keep_selection=True)
+    panel.select_note(note.id)
+
+    assert panel.editor.toPlainText() == "edited by the terminal"
+
+
 def test_the_filter_narrows_the_list(qapp, store):
     store.add_note(Note(title="Gate code"))
     store.add_note(Note(title="Shutdown checklist"))

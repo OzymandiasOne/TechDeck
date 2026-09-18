@@ -432,7 +432,7 @@ class HomePage(QWidget, ThemeAware):
             self.run_btn.setEnabled(has_selection)
         if getattr(self, '_btn_pulse', None):
             self._btn_pulse.stop()
-            self._btn_glow.setBlurRadius(0)
+            self._btn_glow.setColor(self._glow_off_color)
             if has_selection:
                 self._btn_pulse.start()
 
@@ -452,7 +452,7 @@ class HomePage(QWidget, ThemeAware):
                 self.run_btn.setEnabled(False)
             if hasattr(self, '_btn_pulse') and self._btn_pulse:
                 self._btn_pulse.stop()
-                self._btn_glow.setBlurRadius(0)
+                self._btn_glow.setColor(self._glow_off_color)
 
         self._refresh_tiles()
         self.profile_changed.emit(profile_name)
@@ -472,23 +472,32 @@ class HomePage(QWidget, ThemeAware):
         theme = get_theme_manager().get_current_palette()
 
         self._btn_glow = QGraphicsDropShadowEffect(self.run_btn)
-        self._btn_glow.setBlurRadius(0)
+        # FIXED blur radius — never animated. Animating a shadow's SIZE makes
+        # Qt re-rasterize the widget into a differently-sized rect every frame,
+        # and on fractional Windows display scaling (125%/150%) the rounding
+        # lands on different pixels frame to frame, so the button visibly
+        # "vibrates" (reported 2026-09-03). The glow breathes by COLOR ALPHA at
+        # constant geometry instead — same look, same pixels every frame.
+        # Gate: tests/ui/test_no_blur_animations.py.
+        self._btn_glow.setBlurRadius(14)
         self._btn_glow.setOffset(0, 0)
-        glow_color = QColor(theme.accent)
-        glow_color.setAlpha(200)
-        self._btn_glow.setColor(glow_color)
+        self._glow_on_color = QColor(theme.accent)
+        self._glow_on_color.setAlpha(200)
+        self._glow_off_color = QColor(theme.accent)
+        self._glow_off_color.setAlpha(0)
+        self._btn_glow.setColor(self._glow_off_color)   # idle = invisible glow
         self.run_btn.setGraphicsEffect(self._btn_glow)
 
-        pulse_up = QPropertyAnimation(self._btn_glow, b"blurRadius", self)
+        pulse_up = QPropertyAnimation(self._btn_glow, b"color", self)
         pulse_up.setDuration(600)
-        pulse_up.setStartValue(0.0)
-        pulse_up.setEndValue(14.0)
+        pulse_up.setStartValue(self._glow_off_color)
+        pulse_up.setEndValue(self._glow_on_color)
         pulse_up.setEasingCurve(QEasingCurve.Type.InOutSine)
 
-        pulse_dn = QPropertyAnimation(self._btn_glow, b"blurRadius", self)
+        pulse_dn = QPropertyAnimation(self._btn_glow, b"color", self)
         pulse_dn.setDuration(600)
-        pulse_dn.setStartValue(14.0)
-        pulse_dn.setEndValue(0.0)
+        pulse_dn.setStartValue(self._glow_on_color)
+        pulse_dn.setEndValue(self._glow_off_color)
         pulse_dn.setEasingCurve(QEasingCurve.Type.InOutSine)
 
         self._btn_pulse = QSequentialAnimationGroup(self)

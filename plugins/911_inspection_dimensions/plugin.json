@@ -1,8 +1,8 @@
 {
   "id": "911_inspection_dimensions",
   "name": "911 Inspection Dimensions",
-  "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions onto its inspection sheet",
-  "version": "0.3.0",
+  "description": "Reads every PART SKETCH drawing in a batch and fills each part's dimensions and weld-prep bevel angles onto its inspection sheet",
+  "version": "0.7.0",
   "author": "Anthony Sieben",
   "family": "911",
   "requires_admin": false,
@@ -14,19 +14,22 @@
       "Nothing else to install - the drawing reader is built into TechDeck."
     ],
     "how_it_works": [
-      "Point it at a batch folder, one nest folder, or just a folder of nest package PDFs.",
+      "Point it at an order folder (the one holding the nest folders), one nest folder, or just a folder of nest package PDFs.",
+      "Pick an order folder and you get a list of its nests - tick the ones you want read. Pick a single nest folder and it just runs.",
+      "The 911 QTDR root is never accepted - it holds order folders, not nests, so reading it would mean reading every order at once.",
       "Finds the PART SKETCH pages and reads the drawing picture on each one.",
       "Picks out every dimension - lengths, radii (R .40), diameters, angles, chamfers and snipes like .50 X .50.",
       "Types those numbers into the matching part's inspection sheet tab, in the colour-filled TARGET boxes. Excel works out MIN and MAX from each one on its own.",
       "TYP dimensions go in LAST. The drawing prints them once but the feature repeats and never says how many times, so copy the last ones across as many times as the part needs.",
       "Anything marked REF is left out, and so are numbers that are part of a note on the drawing. Both are listed in the report so you can see them.",
       "A tab that already has numbers typed in is never touched.",
-      "Weld preps (the KB codes) are read and reported, but not written onto the sheet yet."
+      "Weld preps (the KB/SB/FB/WB bevel codes) are looked up in the Electric Boat bevel book and their bevel angle goes on the sheet too - one entry per side the drawing names, so \"KB114 NS & FS\" writes two.",
+      "A bevel code that has been VOIDed writes nothing and is listed with the code that replaces it, so a retired bevel never lands on an inspection sheet."
     ],
     "output": [
       "The inspection sheet tabs in each nest workbook, filled in and ready to review.",
-      "One text file in the folder you picked listing every part, its dimensions, its weld preps, and exactly what was written to which tab.",
-      "Anything the reader was unsure about is flagged with CHECK so you can eyeball it against the drawing."
+      "A window at the end with the whole run in it, written for the person checking the sheets: what needs a second look FIRST, then what went on each tab, what was left alone, and what was skipped as REF.",
+      "Press Save as .txt in that window to keep a copy - it goes in the folder you picked, next to the work."
     ]
   },
   "settings": {
@@ -39,6 +42,14 @@
         "placeholder": "C:\\Users\\...\\Downloads",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "strict_compounds",
+        "type": "boolean",
+        "label": "Drop compound dimensions whose length has no decimal point",
+        "description": "Every real length on these drawings is printed to two places, so a compound like \"78 X 68.7\" is a misread of \".78 X 68.7\" and is thrown out. The degrees half is never touched - a chamfer's \"45\" is left alone. Untick if you ever see a real dimension go missing, and it goes back to accepting both.",
+        "required": false,
+        "default": true
       },
       {
         "key": "dry_run",

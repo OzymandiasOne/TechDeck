@@ -1,15 +1,27 @@
 """
 911 SSPO Invoicing Prep  (plugin id: 911_sspo_invoicing_prep, family: 911)
 ==========================================================================
-Takes a big SSPO pricing sheet (like "SSPO Pricing Back Up") and splits it into one
-workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back Up.xlsx", each saved in
-its own "{BATCH} {NEST} Invoicing Docs" subfolder of a new folder next to the file
-the user picks.
+Takes an SSPO pricing sheet — including a full copy of the ENTIRE pricing master —
+asks for the close-out date range (two calendar pickers, defaulting to the last
+7 days), keeps only the rows whose "Firm VPD" date falls inside it, and splits
+those into one workbook per Batch + Nest, named "{BATCH} {NEST} Pricing Back
+Up.xlsx", each saved in its own "{BATCH} {NEST} Invoicing Docs" subfolder of a
+new folder next to the file the user picks. (v2.2.0: the date range replaces
+hand-trimming the master before the run; a source without a Firm VPD column
+falls back to every valid row, like before.)
 
-The top level of that output folder also gets a "D911 Workorder Close Outs
-{m-d-yyyy}.xlsx" reconstruction of the sheet previously ripped by hand from the
-pricing master: the source's columns from A through "Machine", values AND cell
-styles copied verbatim, with every row's Scheduling Group set to "Closed".
+The top level of that output folder also gets two weekly reports, both named for
+the range's END date:
+
+  "D911 Workorder Close Outs {m-d-yyyy}.xlsx" — reconstruction of the sheet
+  previously ripped by hand from the pricing master: the source's columns from A
+  through "Machine", the IN-RANGE rows only, values AND cell styles copied
+  verbatim, with every row's Scheduling Group set to "Closed".
+
+  "D911 Workorder Material Status {m-d-yyyy}.xlsx" — the weekly material status
+  listing invoicing used to build by hand: a fixed 14-column rip of the source
+  (Program..Material Status, looked up by header name), EVERY data row, no date
+  or nest filter, plain values with source number formats.
 
 Each output workbook is built ENTIRELY from scratch (no template file) and gets:
 
@@ -28,8 +40,27 @@ Each output workbook is built ENTIRELY from scratch (no template file) and gets:
                                  I Price/Ea        <- formula =J{r}/G{r}
                                  J Ext. Price      <- live formula into tab 1's
                                    "Total price per WO" cell
-                               plus a Grand Total =SUM over column J. Invoice # and
-                               Invoice Date are left blank for manual fill.
+                               plus a Grand Total =SUM over column J.
+                                 G2 Invoice #      <- the forecast row's "PS/Inv"
+                                   (v2.3.0, invoicing's ask 2026-09-04 / answers
+                                   2026-09-16); blank when the forecast has none
+                                 G3 Invoice Date   <- the forecast row's "Ship Date"
+
+  "ASA Invoice No. {inv} Supplement.pdf" (v2.3.0) - the Invoice Supplement sheet
+  alone, printed to PDF through Excel (COM) into the same Invoicing Docs folder,
+  named to sort right after the Mie Trak invoice ("ASA Invoice No. {inv}") in the
+  finished-docs folder. A nest with NO PS/Inv on the forecast gets NO PDF and is
+  named in the run summary - nothing ships without an invoice number, so a
+  missing one means "fill the forecast in and re-run" (or print that one by
+  hand). If Excel can't be driven (no pywin32 / Excel), the workbooks are still
+  written and the summary says the PDFs were skipped.
+
+  The nest's PRICING CALCS (v2.4.0, answers 2026-09-17) ride along in the same
+  Invoicing Docs folder, read from the nest's own 911 QTDR\\<batch>\\<nest>\\ folder:
+  a SHAPE nest's folder of per-part calc sheets (found by contents, any name) is
+  zipped as "{BATCH} {NEST} Linear Inch Calcs.zip"; a PLATE nest's
+  "... LINEAR INCH CALC.xlsx" workbook is copied as-is. A nest with neither is
+  flagged in the summary and everything else still runs.
 
 The live Working Forecast List is NEVER opened directly: it's copied into the
 output folder first, the copy is read, and the copy is deleted once every workbook
@@ -44,8 +75,9 @@ import os
 import re
 import shutil
 from copy import copy
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from typing import NamedTuple, Optional
 
 # --- SDK bootstrap (works under the app and for headless CLI testing) -------------
 try:
@@ -58,10 +90,14 @@ except ModuleNotFoundError:
 
 import openpyxl
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QDate
+from PySide6.QtWidgets import (QDateEdit, QDialog, QDialogButtonBox, QFormLayout,
+                               QLabel, QMessageBox, QVBoxLayout)
 
 # Hard Rule 3 nest-number regex: accept legacy numeric IDs (503633, P08229) AND
 # alphanumeric IDs that contain a digit (5CDAWK); reject footer/total/junk text.
@@ -81,11 +117,47 @@ CLOSEOUT_LAST_HEADER = "MACHINE"
 CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
 CLOSEOUT_STATUS_VALUE = "Closed"
 
+# The close-out date column: a row is in the run only when its Firm VPD falls in
+# the picked date range. A source without the column (a hand-trimmed sheet from
+# the pre-2.2.0 flow) skips the filter with a warning.
+VPD_HEADER = "FIRM VPD"
+
+# Workorder Material Status listing: the weekly report invoicing used to rip by
+# hand — these 14 source columns (by header name), EVERY data row, values only.
+# Widths reproduce the hand-made original.
+MATSTATUS_TITLE = "D911 Workorder Material Status"
+MATSTATUS_COLUMNS = [  # (source header, column width)
+    ("Program", 8.6), ("Batch", 11.3), ("Work Order", 11.0), ("DYPN", 21.9),
+    ("Material", 15.6), ("DYPN QTY", 9.7), ("Nest Pkg Nbr", 12.3),
+    ("SCOPE OF WORK", 27.9), ("SubGroup", 9.7), ("Division", 8.1),
+    ("Scheduling Group", 23.4), ("Firm VPD", 10.4), ("Notes", 74.4),
+    ("Material Status", 14.4),
+]
+
 # Forecast sheets searched for the PO / PO Line, in priority order (active
 # forecast first; finished batches roll off to the Complete sheet).
 FORECAST_SHEETS = ["911 Forecast", "Complete 911 QTDR"]
 DEFAULT_FORECAST_FILENAME = "Working Forecast List.xlsx"
 FORECAST_COPY_NAME = "~ Working Forecast List (temp copy).xlsx"
+
+# Forecast columns (by header NAME, Hard Rule 1) copied onto the supplement's
+# title block: the packing slip / invoice number invoicing keys in (column BD
+# on both sheets as of 2026-09-16) and the nest's ship date (column AT).
+INV_HEADER = "PS/INV"
+SHIP_DATE_HEADER = "SHIP DATE"
+FORECAST_SCAN_COLS = 90        # header scan width: BD is column 56, keep headroom
+INV_NUMBER_CELL = "G2"
+INV_DATE_CELL = "G3"
+SUPPLEMENT_PDF_NAME = "ASA Invoice No. {inv} Supplement.pdf"
+_XL_TYPE_PDF = 0
+
+
+class ForecastRow(NamedTuple):
+    """What one Batch+Nest row of the Working Forecast List gives the supplement."""
+    po: object = None
+    line: object = None
+    invoice: str = ""          # PS/Inv, as typed (blank = not invoiced yet)
+    ship_date: object = None   # date / datetime / None
 
 # ---- Invoice Supplement look (reproduced from the hand-made ASA sheet) ------------
 INV_HEADERS = ["PO ", "PO Line", "Batch", "Workorder", "DYPN",
@@ -99,6 +171,22 @@ INV_DATA_START = 8
 # invoicing's corrected sheet (434x121 = 4133850x1152525 EMU) so it stays
 # inside its A1:D5 home.
 LOGO_SIZE = (434, 121)
+# v2.3.0 (print fix, 2026-09-17): the title block's six rows are pinned to TITLE_ROW_HEIGHT_PT each so
+# the logo's bottom edge lands on the top of the blue header band instead of
+# over it (121 px vs six default 15-pt rows = 120 px, and Excel rounds on
+# top of that — the printed PDF showed the logo box overlapping the band).
+# Height = rows 1..6 in px (pt * 96/72) minus a 6 px seam (Excel prints the
+# picture ~3% larger than the px asked for, so 2 px still overlapped by ~1 pt;
+# measured in the PDF 2026-09-17); width scaled with it so the box keeps its
+# shape.
+TITLE_ROW_HEIGHT_PT = 15.75
+_title_px = int(6 * TITLE_ROW_HEIGHT_PT * 96 / 72)          # 126
+LOGO_SEAM_PX = 6
+LOGO_PRINT_SIZE = (round(LOGO_SIZE[0] * (_title_px - LOGO_SEAM_PX) / LOGO_SIZE[1]),
+                   _title_px - LOGO_SEAM_PX)
+LOGO_OFFSET_PT = (1, 1)        # (right, down) from A1's top-left corner
+EMU_PER_PT = 12700
+EMU_PER_PX = 9525
 
 ACCT_FMT = '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'
 _THIN = Side(style="thin")
@@ -128,14 +216,52 @@ def _safe_filename(name):
 
 def _pick_sheet(wb, log):
     """Find the sheet + header row that has both Batch and Nest Pkg Nbr (Hard Rules
-    1-2: locate by name, scan for the header row). Returns (ws, header_row, header_map)."""
-    for ws in wb.worksheets:
+    1-2: locate by name, scan for the header row; visible sheets only, so a hidden
+    staging tab or the old hand-made Material Status tab can't win). Returns
+    (ws, header_row, header_map)."""
+    for name in sdk.visible_sheetnames(wb):
+        ws = wb[name]
         hdr_row, hmap = sdk.find_header_row(ws, REQUIRED_HEADERS, max_scan=12)
         if hdr_row:
             log(f"Using sheet '{ws.title}' (header on row {hdr_row}).")
             return ws, hdr_row, hmap
     raise ValueError(
         "Could not find a sheet with 'Batch' and 'Nest Pkg Nbr' columns.")
+
+
+def _ask_date_range(parent=None):
+    """Modal close-out date-range dialog: two calendar pickers, defaulting to the
+    last 7 days (a week back through today — one whole close-out week when run on
+    the usual Friday). Returns (start_date, end_date) as datetime.date with
+    start <= end, or None on cancel. Main-thread only (this is a GUI plugin)."""
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Close-out date range")
+    layout = QVBoxLayout(dlg)
+    layout.addWidget(QLabel(
+        "Rows whose Firm VPD falls in this range are split and closed out.\n"
+        "For a single date, set both pickers to the same day."))
+    form = QFormLayout()
+    today = QDate.currentDate()
+    start_edit = QDateEdit(today.addDays(-6))
+    end_edit = QDateEdit(today)
+    for edit in (start_edit, end_edit):
+        edit.setCalendarPopup(True)
+        edit.setDisplayFormat("M/d/yyyy")
+    form.addRow("From (Firm VPD):", start_edit)
+    form.addRow("Through:", end_edit)
+    layout.addLayout(form)
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    layout.addWidget(buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    start = start_edit.date().toPython()
+    end = end_edit.date().toPython()
+    if start > end:
+        start, end = end, start
+    return start, end
 
 
 # ---------------------------------------------------------------------------------
@@ -153,7 +279,7 @@ def _copy_forecast(settings, out_dir, log):
         return None
     fname = str(settings.get("forecast_filename", "") or "").strip() or DEFAULT_FORECAST_FILENAME
     src = Path(fdir) / fname
-    if not src.exists():
+    if not sdk.exists(src):
         log(f"WARNING: forecast workbook not found at {src} - "
             "PO / PO Line will be left blank.")
         return None
@@ -164,11 +290,13 @@ def _copy_forecast(settings, out_dir, log):
 
 
 def _read_po_map(copy_path, log, cancel_event):
-    """{(BATCH, NEST): (po, po_line)} from the local forecast copy.
+    """{(BATCH, NEST): ForecastRow} from the local forecast copy.
 
     Reads the '911 Forecast' sheet first, then 'Complete 911 QTDR' (older batches
     roll off to it) — first sheet wins on duplicate keys. PO and Line are copied
-    verbatim (Line is sometimes the text 'SSPO', not a number).
+    verbatim (Line is sometimes the text 'SSPO', not a number); PS/Inv and Ship
+    Date ride along for the supplement's title block (v2.3.0) — either column
+    missing on a sheet just leaves those fields blank, with one warning.
     """
     # Resilient even on the local copy: it can be open in Excel, and the
     # resilient loader is a cheap no-op on a healthy local file (Hard Rule 13).
@@ -181,8 +309,8 @@ def _read_po_map(copy_path, log, cancel_event):
                 log(f"WARNING: sheet '{sheet_name}' not found in the forecast.")
                 continue
             ws = wb[sheet_name]
-            cols = None  # (po, line, batch, nest) 0-based indices, set at header row
-            for i, row in enumerate(ws.iter_rows(max_col=60)):
+            cols = None  # (po, line, batch, nest, inv, ship) 0-based; set at header row
+            for i, row in enumerate(ws.iter_rows(max_col=FORECAST_SCAN_COLS)):
                 if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                     return {}
                 vals = [c.value for c in row]
@@ -195,20 +323,31 @@ def _read_po_map(copy_path, log, cancel_event):
                                       if h.startswith("BATCH")), None)
                     if "PO" in hmap and "LINE" in hmap and "NEST" in hmap \
                             and batch_col is not None:
-                        cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"])
+                        cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"],
+                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER))
+                        for label, idx in ((INV_HEADER, cols[4]),
+                                           (SHIP_DATE_HEADER, cols[5])):
+                            if idx is None:
+                                log(f"WARNING: no '{label}' column on '{sheet_name}' "
+                                    "- that field stays blank on the supplement.")
                     if i >= 8 and cols is None:
                         log(f"WARNING: no PO/Line/Batch/Nest header row found in "
                             f"'{sheet_name}' (looked in the first 8 rows).")
                         break
                     continue
-                i_po, i_line, i_batch, i_nest = cols
-                batch = _as_str(vals[i_batch] if i_batch < len(vals) else None).upper()
-                nest = _as_str(vals[i_nest] if i_nest < len(vals) else None).upper()
-                po = vals[i_po] if i_po < len(vals) else None
+                i_po, i_line, i_batch, i_nest, i_inv, i_ship = cols
+
+                def at(idx):
+                    return vals[idx] if idx is not None and idx < len(vals) else None
+
+                batch = _as_str(at(i_batch)).upper()
+                nest = _as_str(at(i_nest)).upper()
+                po = at(i_po)
                 if not batch or not NEST_RE.match(nest) or po in (None, ""):
                     continue
-                line = vals[i_line] if i_line < len(vals) else None
-                po_map.setdefault((batch, nest), (po, line))
+                po_map.setdefault((batch, nest), ForecastRow(
+                    po=po, line=at(i_line), invoice=_as_str(at(i_inv)),
+                    ship_date=at(i_ship)))
     finally:
         wb.close()
     log(f"  found PO numbers for {len(po_map)} batch+nest combinations.")
@@ -225,19 +364,43 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
     ws = wb.create_sheet(INV_SHEET)
     for letter, width in INV_COL_WIDTHS.items():
         ws.column_dimensions[letter].width = width
+    # Print setup (v2.3.0): the sheet is printed to PDF through Excel, and its
+    # ten columns spill onto a second page at default settings. One page wide,
+    # landscape, as many pages tall as the rows need.
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
 
     # Title block: ASA logo over merged A1:D5, manual-fill invoice fields at F2/F3.
     ws.merge_cells("A1:D5")
-    if logo_path.exists():
+    for r in range(1, INV_HEADER_ROW):
+        ws.row_dimensions[r].height = TITLE_ROW_HEIGHT_PT
+    if sdk.exists(logo_path):
         img = XLImage(str(logo_path))
-        img.width, img.height = LOGO_SIZE
+        img.width, img.height = LOGO_PRINT_SIZE
         ws.add_image(img, "A1")
+        # Nudged LOGO_OFFSET_PT right/down from A1's corner (Anthony's pick from
+        # printed variants, 2026-09-17): the box's left edge then sits just inside
+        # the header band's left edge instead of half a point past it.
+        img.anchor = OneCellAnchor(
+            _from=AnchorMarker(col=0, row=0, colOff=LOGO_OFFSET_PT[0] * EMU_PER_PT,
+                               rowOff=LOGO_OFFSET_PT[1] * EMU_PER_PT),
+            ext=XDRPositiveSize2D(cx=LOGO_PRINT_SIZE[0] * EMU_PER_PX,
+                                  cy=LOGO_PRINT_SIZE[1] * EMU_PER_PX))
     ws["F2"] = "Invoice #"
     ws["F2"].font = LABEL_FONT
     ws["F3"] = "Invoice Date:"
     ws["F3"].font = LABEL_FONT
-    ws["G3"].font = DATA_FONT
-    ws["G3"].number_format = "mm-dd-yy"
+    ws[INV_NUMBER_CELL].font = DATA_FONT
+    ws[INV_DATE_CELL].font = DATA_FONT
+    ws[INV_DATE_CELL].number_format = "mm-dd-yy"
+    # v2.3.0: filled from the forecast row (PS/Inv + Ship Date). Blank stays
+    # blank — never a guess — so a hand-filled value is still the fallback.
+    if po_info is not None and po_info.invoice:
+        ws[INV_NUMBER_CELL] = po_info.invoice
+    if po_info is not None and po_info.ship_date not in (None, ""):
+        ws[INV_DATE_CELL] = po_info.ship_date
 
     # Header band.
     for j, title in enumerate(INV_HEADERS, start=1):
@@ -252,7 +415,7 @@ def _build_supplement(wb, hmap, rows, po_info, logo_path):
                 ("BATCH", "WORK ORDER", "DYPN", "MATERIAL", "DYPN QTY", "NEST PKG NBR")]
     total_col = hmap.get(TOTAL_HEADER)
     total_letter = get_column_letter(total_col) if total_col else None
-    po, po_line = po_info if po_info else (None, None)
+    po, po_line = (po_info.po, po_info.line) if po_info else (None, None)
 
     for idx, src_row in enumerate(rows):
         r = INV_DATA_START + idx
@@ -297,11 +460,13 @@ def _copy_cell(src_c, dst_c, value=None):
     dst_c.number_format = src_c.number_format
 
 
-def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
+def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date, log):
     """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
     out_dir: the source sheet's columns A through "Machine" (values and cell styles
     verbatim, so the hand-ripped original is reproduced exactly) with every row's
-    Scheduling Group set to "Closed". Returns the filename written."""
+    Scheduling Group set to "Closed". Named for `report_date` (the range's end date,
+    so a Monday catch-up run still stamps the close-out Friday). Returns the
+    filename written."""
     last_col = hmap.get(CLOSEOUT_LAST_HEADER)
     if not last_col:
         last_col = max(hmap.values())
@@ -326,11 +491,260 @@ def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, log):
             _copy_cell(src_row[j - 1], ws.cell(row=r_i, column=j),
                        value=CLOSEOUT_STATUS_VALUE if j == status_col else None)
 
-    today = date.today()
+    d = report_date
     fname = _safe_filename(
-        f"D911 Workorder Close Outs {today.month}-{today.day}-{today.year}.xlsx")
-    wb.save(out_dir / fname)
+        f"D911 Workorder Close Outs {d.month}-{d.day}-{d.year}.xlsx")
+    sdk.save_workbook(wb, out_dir / fname)
     return fname
+
+
+def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date,
+                           log, cancel_event):
+    """Write the 'D911 Workorder Material Status {m-d-yyyy}.xlsx' listing at the top
+    of out_dir: the MATSTATUS_COLUMNS source columns (by header name), EVERY data
+    row — deliberately NOT filtered by the close-out date range or the nest regex,
+    because the weekly listing covers the whole master. Values only, source number
+    formats kept (so Firm VPD still shows as a date). Returns the filename, or None
+    if cancelled."""
+    cols = []                                    # (source col or None, header text)
+    for name, _ in MATSTATUS_COLUMNS:
+        c = hmap.get(name.upper())
+        if c is None:
+            log(f"  WARNING: no '{name}' column in the source - that Material "
+                "Status column will be blank.")
+            cols.append((None, name))
+        else:
+            cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for j, ((_, header), (_, width)) in enumerate(zip(cols, MATSTATUS_COLUMNS),
+                                                  start=1):
+        ws.cell(row=1, column=j, value=header)
+        ws.column_dimensions[get_column_letter(j)].width = width
+    error_cells = 0                # '#VALUE!'-style formula errors in the source
+    for r_i, src_row in enumerate(all_rows, start=2):
+        if cancel_event is not None and r_i % 256 == 0 and cancel_event.is_set():
+            return None
+        for j, (c, _) in enumerate(cols, start=1):
+            if c is None:
+                continue
+            src_c = src_row[c - 1]
+            if isinstance(src_c.value, str) and src_c.value.startswith("#"):
+                error_cells += 1
+            dst = ws.cell(row=r_i, column=j, value=src_c.value)
+            if src_c.number_format and src_c.number_format != "General":
+                dst.number_format = src_c.number_format
+    if error_cells:
+        log(f"  WARNING: {error_cells} cell(s) in the source carry an Excel "
+            "formula error (#VALUE! etc.) - they're copied as-is; fix them in "
+            "the pricing master.")
+
+    d = report_date
+    fname = _safe_filename(
+        f"{MATSTATUS_TITLE} {d.month}-{d.day}-{d.year}.xlsx")
+    sdk.save_workbook(wb, out_dir / fname)
+    return fname
+
+
+def _supplement_pdf_name(invoice: str) -> str:
+    """'ASA Invoice No. {inv} Supplement.pdf' - invoicing's own naming, chosen so
+    the supplement sorts right behind the Mie Trak invoice PDF ('ASA Invoice No.
+    {inv}') in the finished-docs folder."""
+    return _safe_filename(SUPPLEMENT_PDF_NAME.format(inv=str(invoice).strip()))
+
+
+class _SupplementPdfExporter:
+    """Prints the Invoice Supplement sheet of a saved workbook to PDF through
+    Excel (COM). ONE hidden Excel instance for the whole run, started on the
+    first export and quit on close(); a machine that can't drive Excel (no
+    pywin32, no Excel) records `error` once and every export returns False, so
+    the workbooks still get written and the summary can say the PDFs were
+    skipped. GUI plugin => main thread; CoInitialize is a harmless no-op there."""
+
+    def __init__(self, log):
+        self._log = log
+        self._excel = None
+        self._started = False
+        self.error: Optional[str] = None
+
+    def _start(self) -> bool:
+        if self._started:
+            return self._excel is not None
+        self._started = True
+        try:
+            import pythoncom
+            import win32com.client as win32
+        except ImportError:
+            self.error = "Excel automation (pywin32) is not available"
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
+            return False
+        try:
+            pythoncom.CoInitialize()
+            excel = win32.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            self._excel = excel
+            return True
+        except Exception as exc:
+            self.error = f"Excel could not be started ({exc})"
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
+            return False
+
+    def export(self, xlsx_path: Path, pdf_path: Path) -> bool:
+        if not self._start():
+            return False
+        wb = None
+        try:
+            # Plain paths on purpose: Excel COM does not accept the \\?\ prefix.
+            wb = self._excel.Workbooks.Open(str(xlsx_path), ReadOnly=True)
+            wb.Worksheets(INV_SHEET).ExportAsFixedFormat(_XL_TYPE_PDF, str(pdf_path))
+            if not sdk.exists(pdf_path):
+                raise RuntimeError("Excel reported success but no PDF appeared")
+            return True
+        except Exception as exc:
+            self._log(f"  WARNING: could not print {xlsx_path.name} to PDF: {exc}")
+            return False
+        finally:
+            if wb is not None:
+                try:
+                    wb.Close(SaveChanges=False)
+                except Exception:
+                    pass
+
+    def close(self):
+        if self._excel is not None:
+            try:
+                self._excel.Quit()
+            except Exception:
+                pass
+            self._excel = None
+
+
+# ---------------------------------------------------------------------------------
+# Pricing calcs into the Invoicing Docs folder (v2.4.0, invoicing's ask 2026-09-04,
+# answers 2026-09-17)
+# ---------------------------------------------------------------------------------
+# Every nest's own folder under 911 QTDR\<batch>\<nest>\ holds the pricing math:
+#   SHAPE nests - a subfolder of per-part "NC style baked beans" calc sheets (.xlsm,
+#                 one per part, plus the Baked Beans app's "{batch} {nest} NC Baked
+#                 Beans.xlsx" review list). Surveyed 2026-09-17 over the last 60
+#                 batches: named "Linear Inch Calcs" 32x, "PRICING" 11x,
+#                 "CALCULATIONS" 9x, two other spellings - so it is found by what it
+#                 HOLDS (calc .xlsm sheets / the NC Baked Beans file), never by name.
+#                 The whole folder is zipped: "{BATCH} {NEST} Linear Inch Calcs.zip".
+#   PLATE nests - one workbook in the nest folder itself named like
+#                 "5CDBBC KINETIC LINEAR INCH CALC.xlsx" (new as of 2026-09-14; the
+#                 match is "LINEAR INCH CALC" anywhere in an .xlsx/.xlsm name). Copied
+#                 as-is.
+# A nest with neither is FLAGGED in the summary and the run carries on (her rule:
+# those are usually manual calcs she verifies and notes by hand).
+CALC_ZIP_NAME = "{batch} {nest} Linear Inch Calcs.zip"
+PLATE_CALC_RE = re.compile(r"linear\s*inch\s*calc", re.I)
+SHAPE_CALC_FILE_RE = re.compile(r"\.xlsm$|nc baked beans", re.I)
+_EXCEL_FILE_RE = re.compile(r"\.xls[xm]$", re.I)
+
+
+def _find_nest_folder(qtdr_root: Path, batch: str, nest: str) -> Optional[Path]:
+    """911 QTDR\\<batch>\\<nest>\\ - both segments matched case-insensitively;
+    None when either level is missing."""
+    batch_dir = sdk.find_911_batch_folder(qtdr_root, batch)
+    if batch_dir is None:
+        return None
+    exact = batch_dir / nest
+    if sdk.is_dir(exact):
+        return exact
+    try:
+        for entry in os.scandir(sdk.long_path(batch_dir)):
+            if sdk.is_dir(entry.path) and entry.name.upper() == nest.upper():
+                return batch_dir / entry.name
+    except OSError:
+        pass
+    return None
+
+
+def _find_shape_calc_folder(nest_dir: Path) -> Optional[Path]:
+    """The subfolder holding the per-part calc sheets - whichever direct child
+    has the MOST calc files (.xlsm / the NC Baked Beans list); None if no child
+    has any. Name is ignored on purpose (see the survey above)."""
+    best, best_n = None, 0
+    try:
+        children = [e for e in os.scandir(sdk.long_path(nest_dir)) if sdk.is_dir(e.path)]
+    except OSError:
+        return None
+    for child in children:
+        try:
+            n = sum(1 for f in os.scandir(child.path)
+                    if sdk.is_file(f.path) and SHAPE_CALC_FILE_RE.search(f.name))
+        except OSError:
+            continue
+        if n > best_n:
+            best, best_n = nest_dir / child.name, n
+    return best
+
+
+def _find_plate_calc_files(nest_dir: Path) -> list:
+    """The plate 'LINEAR INCH CALC' workbook(s) sitting directly in the nest
+    folder (Excel lock files skipped)."""
+    try:
+        return sorted(nest_dir / e.name for e in os.scandir(sdk.long_path(nest_dir))
+                      if sdk.is_file(e.path) and _EXCEL_FILE_RE.search(e.name)
+                      and PLATE_CALC_RE.search(e.name) and not e.name.startswith("~$"))
+    except OSError:
+        return []
+
+
+def _zip_folder(folder: Path, dest_zip: Path, log, cancel_event=None) -> int:
+    """Zip `folder` (recursively, paths relative to it) into dest_zip. Every file
+    is hydrated first (OneDrive placeholders, Rule 13) and opened long-path safe
+    (Rule 14). Returns the file count."""
+    import zipfile
+    count = 0
+    sdk.ensure_dir(dest_zip.parent)
+    with zipfile.ZipFile(sdk.long_path(dest_zip), "w", zipfile.ZIP_DEFLATED) as zf:
+        for dirpath, _dirs, files in os.walk(sdk.long_path(folder)):
+            for name in sorted(files):
+                if name.startswith("~$"):            # Excel lock files
+                    continue
+                sdk.raise_if_cancelled(cancel_event)
+                src = Path(dirpath) / name
+                sdk.ensure_local(src, log=log)
+                rel = os.path.relpath(str(src), sdk.long_path(folder))
+                zf.write(sdk.long_path(src), rel)
+                count += 1
+    return count
+
+
+def _collect_pricing_calcs(nest_dir: Path, sub_dir: Path, batch: str, nest: str,
+                           log, cancel_event=None) -> list:
+    """Drop the nest's pricing calcs into its Invoicing Docs folder: the shape
+    calc folder as a ZIP and/or the plate LINEAR INCH CALC workbook as a copy.
+    Returns the relative paths written (empty = nothing found)."""
+    out = []
+    shape_dir = _find_shape_calc_folder(nest_dir)
+    if shape_dir is not None:
+        zname = _safe_filename(CALC_ZIP_NAME.format(batch=batch, nest=nest))
+        n = _zip_folder(shape_dir, sub_dir / zname, log, cancel_event)
+        out.append(f"{sub_dir.name}\\{zname}")
+        log(f"  wrote {sub_dir.name}\\{zname}  ({n} file(s) from '{shape_dir.name}')")
+    for src in _find_plate_calc_files(nest_dir):
+        sdk.copy_resilient(src, sub_dir / src.name, log=log)
+        out.append(f"{sub_dir.name}\\{src.name}")
+        log(f"  copied {src.name}")
+    return out
+
+
+class SplitResult(NamedTuple):
+    written: list                     # [(relative path, row_count)]
+    missing_po: list                  # display names with no forecast row at all
+    closeout_name: Optional[str]
+    matstatus_name: Optional[str]
+    missing_invoice: list = []        # forecast row found, PS/Inv blank -> no PDF
+    pdfs: list = []                   # relative paths of supplement PDFs written
+    pdf_error: Optional[str] = None   # Excel unavailable: PDFs skipped wholesale
+    calcs: list = []                  # relative paths of pricing-calc zips/copies
+    missing_calcs: list = []          # "BATCH NEST (why)" - flagged, run carried on
+    calc_error: Optional[str] = None  # 911 QTDR root not found: calcs skipped wholesale
 
 
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
@@ -365,23 +779,37 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
 
     # ---- Tab 2: Invoice Supplement, built from scratch ---------------------------
     _build_supplement(wb, hmap, rows, po_info, logo_path)
-    wb.save(out_path)
+    sdk.save_workbook(wb, out_path)
 
 
 def split_workbook(src_path, out_dir, settings, log,
-                   progress_callback=None, cancel_event=None):
+                   progress_callback=None, cancel_event=None, date_range=None,
+                   pdf_exporter=None):
     """Split src_path into one from-scratch workbook per (Batch, Nest), each in its
     own "{BATCH} {NEST} Invoicing Docs" subfolder, plus the Workorder Close Outs
-    workbook at the top of out_dir. Returns (written, missing_po, closeout_name)
-    where written = [(relative path, row_count)], missing_po = [display names of
-    groups whose PO wasn't in the forecast], and closeout_name is the Close Outs
-    filename (None if cancelled before it was written)."""
+    and Workorder Material Status workbooks at the top of out_dir.
+
+    `date_range` = (start_date, end_date) inclusive: only rows whose Firm VPD date
+    falls inside it are split / closed out, so the user can feed the ENTIRE pricing
+    master instead of hand-trimming it first. None (or a source without a Firm VPD
+    column) keeps every valid row. The Material Status listing always covers every
+    data row regardless of the range.
+
+    Returns a SplitResult: written = [(relative path, row_count)], missing_po =
+    display names of groups with no forecast row at all, the two report filenames
+    (None if cancelled before they were written), missing_invoice = groups whose
+    forecast row has no PS/Inv yet (supplement left blank, no PDF), pdfs = the
+    supplement PDFs written, pdf_error = why NO PDFs could be made (Excel
+    unavailable), else None.
+
+    `pdf_exporter` is injectable for tests; default drives Excel through COM."""
     src_path = Path(src_path)
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    sdk.ensure_dir(out_dir)
     forecast_copy = None
+    exporter = pdf_exporter if pdf_exporter is not None else _SupplementPdfExporter(log)
     try:
         forecast_copy = _copy_forecast(settings, out_dir, log)
         if progress_callback:
@@ -389,7 +817,7 @@ def split_workbook(src_path, out_dir, settings, log,
         po_map = _read_po_map(forecast_copy, log, cancel_event) if forecast_copy else {}
         if cancel_event is not None and cancel_event.is_set():
             log("Cancelled.")
-            return [], [], None
+            return SplitResult([], [], None, None)
         if progress_callback:
             progress_callback(12)
 
@@ -403,20 +831,41 @@ def split_workbook(src_path, out_dir, settings, log,
         i_batch = hmap["BATCH"]                    # 1-based
         i_nest = hmap["NEST PKG NBR"]
 
-        # Group data rows by (batch, nest), preserving first-seen order; keep the
-        # flat source-order row list too for the Close Outs sheet.
-        groups, order, valid_rows, skipped = {}, [], [], 0
+        i_vpd = hmap.get(VPD_HEADER)
+        if date_range is not None and not i_vpd:
+            log(f"WARNING: no '{VPD_HEADER}' column in the source - the date range "
+                "can't be applied, so every valid row is included (the pre-2.2.0 "
+                "hand-trimmed flow).")
+            date_range = None
+        if date_range is not None:
+            log(f"Close-out range: {date_range[0]:%m/%d/%Y} through "
+                f"{date_range[1]:%m/%d/%Y} (on Firm VPD).")
+
+        # Group IN-RANGE data rows by (batch, nest), preserving first-seen order;
+        # keep the flat source-order row list too for the Close Outs sheet, and
+        # EVERY data row (range or not) for the Material Status listing.
+        groups, order, valid_rows, all_rows = {}, [], [], []
+        skipped, out_of_range, vpd_seen = 0, 0, []
         for i, row in enumerate(ws.iter_rows(min_row=hdr_row + 1, max_col=last_col)):
             if cancel_event is not None and i % 256 == 0 and cancel_event.is_set():
                 log("Cancelled.")
-                return [], [], None
+                return SplitResult([], [], None, None)
             if all(c.value in (None, "") for c in row):
                 continue
+            all_rows.append(row)
             nest = _as_str(row[i_nest - 1].value)
             batch = _as_str(row[i_batch - 1].value)
             if not NEST_RE.match(nest):
                 skipped += 1
                 continue
+            if date_range is not None:
+                v = row[i_vpd - 1].value
+                d = v.date() if isinstance(v, datetime) else v if isinstance(v, date) else None
+                if d is not None:
+                    vpd_seen.append(d)
+                if d is None or not (date_range[0] <= d <= date_range[1]):
+                    out_of_range += 1
+                    continue
             key = (batch, nest)
             if key not in groups:
                 groups[key] = []
@@ -425,13 +874,40 @@ def split_workbook(src_path, out_dir, settings, log,
             valid_rows.append(row)
 
         if not order:
+            if date_range is not None and out_of_range:
+                span = (f"the dates run {min(vpd_seen):%m/%d/%Y} to "
+                        f"{max(vpd_seen):%m/%d/%Y}" if vpd_seen
+                        else "no row has a Firm VPD date at all")
+                raise sdk.UserFacingError(
+                    f"No rows have a Firm VPD between {date_range[0]:%m/%d/%Y} and "
+                    f"{date_range[1]:%m/%d/%Y} ({out_of_range} valid rows fall "
+                    f"outside it - {span}).",
+                    "Run it again and pick the week you are closing out.")
             raise ValueError("No rows with a valid nest number were found.")
 
-        closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir, log)
-        log(f"  wrote {closeout_name}  ({len(valid_rows)} rows, "
+        report_date = date_range[1] if date_range is not None else date.today()
+        closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir,
+                                         report_date, log)
+        in_range = f" in range (of {out_of_range + len(valid_rows)} valid)" \
+            if date_range is not None else ""
+        log(f"  wrote {closeout_name}  ({len(valid_rows)} rows{in_range}, "
             f"Scheduling Group -> '{CLOSEOUT_STATUS_VALUE}')")
 
-        written, missing_po = [], []
+        matstatus_name = _write_material_status(ws, hdr_row, hmap, all_rows,
+                                                out_dir, report_date, log,
+                                                cancel_event)
+        if matstatus_name is None:
+            log("Cancelled.")
+            return SplitResult([], [], None, None)
+        log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
+
+        written, missing_po, missing_invoice, pdfs = [], [], [], []
+        calcs, missing_calcs, calc_error = [], [], None
+        qtdr_root = sdk.resolve_911_qtdr_root(str(settings.get("qtdr_root", "") or ""))
+        if qtdr_root is None or not sdk.is_dir(qtdr_root):
+            calc_error = ("the 911 QTDR folder was not found"
+                          + (f" at {qtdr_root}" if qtdr_root else ""))
+            log(f"WARNING: {calc_error} - no pricing calcs will be collected.")
         for gi, (batch, nest) in enumerate(order):
             if cancel_event is not None and cancel_event.is_set():
                 log("Cancelled.")
@@ -443,23 +919,67 @@ def split_workbook(src_path, out_dir, settings, log,
                 log(f"  WARNING: {batch} {nest} not found in the forecast - "
                     "PO / PO Line left blank.")
             sub_dir = out_dir / _safe_filename(f"{batch} {nest} Invoicing Docs")
-            sub_dir.mkdir(exist_ok=True)
+            sdk.ensure_dir(sub_dir)
             fname = _safe_filename(f"{batch} {nest} Pricing Back Up.xlsx")
             _write_output(headers, hmap, rows, po_info, logo_path,
                           sub_dir / fname, log)
             rel = f"{sub_dir.name}\\{fname}"
             written.append((rel, len(rows)))
             log(f"  wrote {rel}  ({len(rows)} row{'s' if len(rows) != 1 else ''})")
+
+            # v2.3.0: the supplement goes to PDF only once the nest has its
+            # invoice number - a blank PS/Inv means "not invoiced yet", and a
+            # PDF with an empty Invoice # would just get filed by mistake.
+            if po_info is not None and po_info.invoice:
+                pdf_name = _supplement_pdf_name(po_info.invoice)
+                if exporter.export(sub_dir / fname, sub_dir / pdf_name):
+                    pdfs.append(f"{sub_dir.name}\\{pdf_name}")
+                    log(f"  wrote {sub_dir.name}\\{pdf_name}")
+            elif po_info is not None:
+                missing_invoice.append(f"{batch} {nest}")
+                log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
+                    "- Invoice # left blank, no PDF.")
+
+            # v2.4.0: the nest's pricing calcs (shape folder zipped / plate
+            # workbook copied) ride along; a nest with none is flagged, not fatal.
+            if calc_error is None:
+                nest_dir = _find_nest_folder(qtdr_root, batch, nest)
+                if nest_dir is None:
+                    missing_calcs.append(f"{batch} {nest} (no {batch}\\{nest} folder "
+                                         "under 911 QTDR)")
+                    log(f"  WARNING: {batch} {nest}: nest folder not found under "
+                        f"{qtdr_root.name} - no pricing calcs collected.")
+                else:
+                    try:
+                        found = _collect_pricing_calcs(nest_dir, sub_dir, batch, nest,
+                                                       log, cancel_event)
+                    except (OSError, RuntimeError) as exc:
+                        found = []
+                        log(f"  WARNING: {batch} {nest}: could not collect pricing "
+                            f"calcs: {exc}")
+                    if found:
+                        calcs.extend(found)
+                    else:
+                        missing_calcs.append(f"{batch} {nest} (no calc folder or "
+                                             "LINEAR INCH CALC workbook in the nest folder)")
+                        log(f"  WARNING: {batch} {nest}: no pricing calcs in "
+                            f"{nest_dir.name} - flagged.")
             if progress_callback:
                 progress_callback(15 + int(80 * (gi + 1) / len(order)))
 
         if skipped:
             log(f"Skipped {skipped} row(s) without a valid nest number (footers/blanks).")
-        return written, missing_po, closeout_name
+        if out_of_range:
+            log(f"Left out {out_of_range} valid row(s) whose Firm VPD is outside "
+                "the range (they stay in the Material Status listing).")
+        return SplitResult(written, missing_po, closeout_name, matstatus_name,
+                           missing_invoice, pdfs, exporter.error,
+                           calcs, missing_calcs, calc_error)
     finally:
+        exporter.close()
         # The forecast copy is working scratch only - always remove it, even on
         # error/cancel, so it never lingers next to the real output files.
-        if forecast_copy is not None and forecast_copy.exists():
+        if forecast_copy is not None and sdk.exists(forecast_copy):
             try:
                 forecast_copy.unlink()
                 log("Removed the temporary forecast copy.")
@@ -487,24 +1007,31 @@ def run(params, progress_callback, cancel_event):
         return
 
     src = Path(src)
+    date_range = _ask_date_range()
+    if date_range is None:
+        log("No date range chosen - nothing to do.")
+        return
     out_dir = src.parent / f"{src.stem} - Back Ups"
     progress_callback(5)
 
     try:
-        written, missing_po, closeout_name = split_workbook(
-            src, out_dir, settings, log, progress_callback, cancel_event)
+        result = split_workbook(src, out_dir, settings, log, progress_callback,
+                                cancel_event, date_range)
     except Exception as e:
         log(f"ERROR: {e}")
         QMessageBox.critical(None, "911 SSPO Invoicing Prep",
                              f"Could not split the file:\n\n{e}")
         return
 
+    written, missing_po = result.written, result.missing_po
+    closeout_name, matstatus_name = result.closeout_name, result.matstatus_name
     if not written:                                # cancelled
         return
 
     total = sum(n for _, n in written)
     progress_callback(100)
-    log(f"Done. Wrote {len(written)} file(s), {total} data row(s) total.")
+    log(f"Done. Wrote {len(written)} file(s), {total} data row(s) total, "
+        f"{len(result.pdfs)} supplement PDF(s).")
     log(f"Folder: {out_dir}")
     # GUI plugins suppress the shell's auto success chime; fire it ourselves now
     # that the files are actually written (the meaningful moment).
@@ -514,8 +1041,34 @@ def run(params, progress_callback, cancel_event):
     msg = (f"Done! Wrote {len(written)} back-up file(s) "
            f"({total} rows total), each in its own Invoicing Docs folder, to:"
            f"\n\n{out_dir}")
+    if result.pdfs:
+        msg += (f"\n\nInvoice Supplement PDFs: {len(result.pdfs)} printed, one per "
+                "nest with an invoice number, next to its back-up workbook.")
     if closeout_name:
         msg += f"\n\nWorkorder Close Outs sheet (top level): {closeout_name}"
+    if matstatus_name:
+        msg += f"\nWorkorder Material Status listing (top level): {matstatus_name}"
+    if result.calcs:
+        msg += (f"\n\nPricing calcs: {len(result.calcs)} dropped into the Invoicing "
+                "Docs folders (shape calc folders zipped, plate LINEAR INCH CALC "
+                "workbooks copied).")
+    if result.calc_error:
+        msg += (f"\n\nNo pricing calcs were collected: {result.calc_error}. Set the "
+                "911 QTDR folder in this app's settings if it lives somewhere unusual.")
+    if result.missing_calcs:
+        msg += ("\n\nNo pricing calcs found for:\n  "
+                + "\n  ".join(result.missing_calcs)
+                + "\n\nEverything else for those nests was written - verify their "
+                  "calcs by hand and add your note.")
+    if result.pdf_error:
+        msg += (f"\n\nNo supplement PDFs were made: {result.pdf_error}. The "
+                "workbooks are all there - print the Invoice Supplement sheets "
+                "by hand, or run again on a machine with Excel.")
+    if result.missing_invoice:
+        msg += ("\n\nNo invoice number (PS/Inv) in the Working Forecast List yet for:"
+                "\n  " + "\n  ".join(result.missing_invoice)
+                + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
+                  "PS/Inv in on the forecast and re-run, or print that one by hand.")
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)

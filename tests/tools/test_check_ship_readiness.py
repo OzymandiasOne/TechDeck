@@ -1,4 +1,4 @@
-"""Tests for the ship-readiness gate's E11/E12/E13 checks.
+"""Tests for the ship-readiness gate's E11/E12/E13/E14 checks.
 
 E11: the drone loadout menu (My Stuff -> SET UP) is discovered from plugin
 manifests (sentry_mode.compatible_plugins) - there is no second list - so a
@@ -14,6 +14,11 @@ E13: raw workbook/PDF content reads die on OneDrive cloud placeholders and
 files open in Excel (Hard Rule 13) - the resilient SDK loaders exist for
 every case and are cheap no-ops on healthy local files, so there is no
 legitimate raw-read call site.
+
+E14: Windows fails a file operation past 260 characters (Hard Rule 14) with a
+"No such file or directory" that names a folder which plainly exists. The
+Pilot Program tree is already ~190 characters deep, so this is one long output
+filename away on every plugin - 911 SSPO Award Review hit it at 277.
 """
 
 from __future__ import annotations
@@ -303,3 +308,181 @@ def test_e13_new_empty_fitz_doc_never_needs_hydration():
             doc = fitz.open()
     """
     assert _pdf_opens(src) == []
+
+
+# ── E14: MAX_PATH ───────────────────────────────────────────────────────────
+
+def _max_path(src: str) -> list[str]:
+    return [what for _ln, what, _fix
+            in C.find_max_path_risks(ast.parse(textwrap.dedent(src)))]
+
+
+def test_e14_flags_raw_mkdir_and_makedirs():
+    src = """
+        def prep(out_dir):
+            out_dir.mkdir(parents=True, exist_ok=True)
+            os.makedirs(out_dir / "sub", exist_ok=True)
+    """
+    assert _max_path(src) == ["mkdir()", "makedirs()"]
+
+
+def test_e14_ensure_dir_is_the_accepted_form():
+    src = """
+        def prep(out_dir):
+            sdk.ensure_dir(out_dir)
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_flags_a_raw_workbook_save():
+    src = """
+        def write(out_path):
+            wb = openpyxl.Workbook()
+            wb.save(out_path)
+    """
+    assert _max_path(src) == ["Workbook.save()"]
+
+
+def test_e14_flags_a_raw_save_on_a_loaded_workbook():
+    src = """
+        def edit(path):
+            wb = sdk.load_workbook_resilient(path)
+            wb.save(path)
+    """
+    assert _max_path(src) == ["Workbook.save()"]
+
+
+def test_e14_sdk_save_workbook_passes():
+    src = """
+        def write(out_path):
+            wb = openpyxl.Workbook()
+            sdk.save_workbook(wb, out_path)
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_explicit_long_path_wrap_passes():
+    """Some callers do their own lock handling around the save and must keep
+    it - wrapping the path themselves is the documented escape hatch."""
+    src = """
+        def write(out_path):
+            wb = openpyxl.Workbook()
+            try:
+                wb.save(sdk.long_path(out_path))
+            except PermissionError:
+                wb.save(sdk.long_path(out_path.with_suffix(".2.xlsx")))
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_flags_raw_shutil_path_ops():
+    src = """
+        def move_things(src, dest):
+            shutil.copy2(src, dest)
+            shutil.move(src, dest)
+            shutil.rmtree(dest)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+    """
+    assert _max_path(src) == ["shutil.copy2()", "shutil.move()",
+                              "shutil.rmtree()", "shutil.copytree()"]
+
+
+def test_e14_wrapped_shutil_passes():
+    src = """
+        def move_things(src, dest):
+            shutil.copy2(sdk.long_path(src), sdk.long_path(dest))
+            shutil.rmtree(sdk.long_path(dest))
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_half_wrapped_shutil_is_still_flagged():
+    src = """
+        def move_things(src, dest):
+            shutil.copy2(sdk.long_path(src), dest)
+    """
+    assert _max_path(src) == ["shutil.copy2()"]
+
+
+def test_e14_copy_resilient_passes():
+    src = """
+        def stage(src, dest, log):
+            sdk.copy_resilient(src, dest, log)
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_bundled_template_paths_are_exempt():
+    """A plugin-bundled file lives under the install path, which is short by
+    construction - wrapping it would be noise."""
+    src = """
+        def seed(dest):
+            shutil.copy2(Path(__file__).with_name("template.xlsx"),
+                         sdk.long_path(dest))
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_non_shutil_save_not_flagged():
+    src = """
+        def draw(path):
+            painter.save()
+            settings.save()
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_main_guard_harness_is_skipped():
+    src = """
+        if __name__ == "__main__":
+            out = Path("x")
+            out.mkdir()
+            shutil.copy2("a", "b")
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_flags_silent_path_predicates():
+    """These answer False instead of raising, so the guard they gate fires and
+    the plugin overwrites work that was already there."""
+    src = """
+        def check(dest):
+            if not dest.exists():
+                make(dest)
+            if dest.is_file() or dest.parent.is_dir():
+                pass
+    """
+    # Two of them share a line, so compare as a set.
+    assert sorted(_max_path(src)) == [".exists()", ".is_dir()", ".is_file()"]
+
+
+def test_e14_sdk_predicates_pass():
+    src = """
+        def check(dest):
+            if not sdk.exists(dest):
+                make(dest)
+            if sdk.is_file(dest) or sdk.is_dir(dest.parent):
+                pass
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_predicate_with_arguments_is_not_a_path_check():
+    """Path.exists() takes no arguments; a same-named call that does is some
+    other object's method and must not be flagged."""
+    src = """
+        def check(store):
+            if store.exists("key"):
+                pass
+    """
+    assert _max_path(src) == []
+
+
+def test_e14_the_whole_plugin_roster_is_clean():
+    """The 2026-08-21 sweep: no plugin may reintroduce a raw long-path op."""
+    offenders = []
+    for run_py in sorted((ROOT / "plugins").rglob("run.py")):
+        tree = ast.parse(run_py.read_text(encoding="utf-8"))
+        for line_no, what, _fix in C.find_max_path_risks(tree):
+            offenders.append(f"{run_py.parent.name}:{line_no} {what}")
+    assert offenders == []
