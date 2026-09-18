@@ -49,7 +49,7 @@ from PySide6.QtWidgets import QWidget
 log = logging.getLogger(__name__)
 
 # ── knobs ────────────────────────────────────────────────────────────────
-SCALE = 1.0                     # size of every bug (1.0 = 128 px sprite box)
+SCALE = 1.0                     # size of EVERY bug at once (each kind has its own `px`)
 WEB_SMALL_PX = 150              # top-right
 WEB_LARGE_PX = 250              # bottom-left
 WEB_SEED = 13                   # same webs every launch
@@ -71,7 +71,9 @@ _SILK = QColor(233, 230, 242)
 
 @dataclass(frozen=True)
 class Kind:
-    speed: float                    # px/s at SCALE 1, before per-dart variety
+    px: float                       # sprite box on screen. Size only: shrinking
+                                    # a bug must never slow it down.
+    speed: float                    # px/s, before per-dart variety
     dart: tuple[float, float]       # seconds per dart
     swerve: tuple[float, float]     # radians off its line, per dart
     wild: float                     # chance a dart goes badly the wrong way
@@ -79,9 +81,9 @@ class Kind:
 
 # A kind only ever appears if its frames exist in assets/critters/.
 KINDS = {
-    "spider": Kind(560.0, (0.12, 0.55), (0.25, 1.10), 0.18),
-    "roach": Kind(680.0, (0.10, 0.45), (0.30, 1.25), 0.22),
-    "centipede": Kind(300.0, (0.40, 1.10), (0.20, 0.70), 0.08),
+    "spider": Kind(96.0, 560.0, (0.12, 0.55), (0.25, 1.10), 0.18),   # 128 -25%
+    "roach": Kind(96.0, 680.0, (0.10, 0.45), (0.30, 1.25), 0.22),
+    "centipede": Kind(128.0, 300.0, (0.40, 1.10), (0.20, 0.70), 0.08),
 }
 
 
@@ -325,7 +327,7 @@ class Critter(_Overlay):
         self._gone = False
         self.dangle = hang is not None
         self._clip = hang if hang is not None else walk
-        self._px = 128.0 * SCALE                         # sprite box on screen
+        self._px = self._spec.px * SCALE                 # sprite box on screen
         self._loop_px = self._clip.loop_travel_px * self._px / self._clip.size
         self._gait = 0.0                                 # fractional frame
         self._age = 0.0
@@ -362,7 +364,7 @@ class Critter(_Overlay):
         self._entered = False
         # the first dart is a long straight one: it has to get on screen
         self._moving = True
-        self._want = self._spec.speed * SCALE
+        self._want = self._spec.speed
         self._phase_left = rng.uniform(0.35, 0.6)
 
     def _line(self) -> float:
@@ -431,8 +433,7 @@ class Critter(_Overlay):
                                 rng.uniform(1.50, 2.60))
             return
         self._moving = True
-        self._want = spec.speed * SCALE * (1.5 if bored
-                                           else rng.uniform(0.75, 1.5))
+        self._want = spec.speed * (1.5 if bored else rng.uniform(0.75, 1.5))
         line = self._line()
         if bored:
             self._aim, self._phase_left = line, 5.0
@@ -468,7 +469,7 @@ class Critter(_Overlay):
         self._gait = (self._gait + min(frames, MAX_GAIT_FRAMES_PER_S * dt)) % n
 
     def _advance_dangle(self, dt):
-        fall = self._spec.speed * SCALE * 0.8
+        fall = self._spec.speed * 0.8
         depth = max(0.0, self._y)
         self._x = self._anchor_x + math.sin(self._age * 1.5) * 7.0 * min(
             1.0, depth / 300.0)

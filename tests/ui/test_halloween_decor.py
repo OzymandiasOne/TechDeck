@@ -201,6 +201,19 @@ def test_every_seed_still_gets_out_of_the_window(host, season):
         assert critter._age <= hd.MAX_TRIP_S + 0.1
 
 
+def test_the_spider_is_three_quarters_size_and_no_slower(host, season):
+    spec = hd.KINDS["spider"]
+    assert spec.px == 96.0                  # 128 px, scaled down 25%
+    assert spec.speed == 560.0              # size is NOT a speed knob
+    critter = _decor(host).spawn("spider", dangle=False)
+    critter._timer.stop()
+    assert critter._px == 96.0
+    assert critter._want == 560.0
+    # a smaller sprite covers less ground per gait loop, so feet stay planted
+    walk = hd.load_clip("spider", "walk")
+    assert critter._loop_px == pytest.approx(walk.loop_travel_px * 96 / walk.size)
+
+
 def test_legs_follow_the_ground_but_never_strobe(host, season):
     decor = _decor(host)
     critter = decor.spawn("spider", dangle=False)
