@@ -229,17 +229,40 @@ def test_the_clock_rearms_only_after_the_crawly_has_left(host, season):
     assert decor._clock.isActive()
 
 
-def test_visits_come_at_irregular_gaps_with_the_odd_encore(host, season):
+def test_visits_are_never_less_than_ten_minutes_apart(host, season):
+    assert hd.EVERY_MS[0] >= 10 * 60 * 1000
     decor = _decor(host, seed=5)
     decor._first = False
-    gaps = []
+    gaps = set()
     for _ in range(200):
-        decor._arm(encore_ok=True)
-        gaps.append(decor._clock.interval())
+        decor._arm()
+        gaps.add(decor._clock.interval())
     decor._clock.stop()
-    assert any(hd.ENCORE_MS[0] <= g <= hd.ENCORE_MS[1] for g in gaps)
-    assert any(g >= hd.LATER_MS[0] for g in gaps)
-    assert any(hd.SOON_MS[0] <= g < hd.SOON_MS[1] for g in gaps)
+    assert min(gaps) >= 10 * 60 * 1000
+    assert len(gaps) > 50                   # but never on a learnable beat
+
+
+def test_the_gap_is_measured_from_when_the_last_one_left(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    decor._clock.stop()
+    critter = decor.spawn("spider", dangle=False)
+    critter._timer.stop()
+    _run_out(critter)
+    assert decor._clock.isActive()
+    assert decor._clock.interval() >= 10 * 60 * 1000
+
+
+def test_never_two_at_once_whatever_asks(host, season):
+    """The clock, a second clock tick, and /crawl all go through spawn()."""
+    decor = _decor(host)
+    decor.refresh()
+    first = decor.spawn("spider", dangle=True)
+    decor._on_clock()
+    decor._on_clock()
+    assert decor.spawn("spider", dangle=False) is None
+    assert decor.current() is first
+    assert len(host.findChildren(hd.Critter)) == 1
 
 
 def test_no_visit_while_the_window_is_minimized(host, season):

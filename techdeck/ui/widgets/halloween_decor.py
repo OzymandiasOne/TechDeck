@@ -17,8 +17,8 @@ REALISTIC, not pixel art (his call, 2026-09-18; the pixel first draft is commit
 FAST AND SPORADIC (also his call): it is meant to catch you off guard. A bug
 moves in short violent darts at varying speed, snaps to a new heading for each
 one, freezes for anything from a blink to a couple of seconds, and now and then
-darts the wrong way. The visits themselves come at irregular gaps, sometimes
-with an encore seconds after the last one left.
+darts the wrong way. Visits are RARE - at least ten minutes apart, never two
+bugs at once - so nobody is ever expecting one.
 
 Everything is a click-through child overlay of the main window (the seance
 Disturbance contract): no stylesheet swap, no layout participation, so removing
@@ -53,12 +53,11 @@ SCALE = 1.0                     # size of every bug (1.0 = 128 px sprite box)
 WEB_SMALL_PX = 150              # top-right
 WEB_LARGE_PX = 250              # bottom-left
 WEB_SEED = 13                   # same webs every launch
-FIRST_MS = (20_000, 90_000)     # first visitor after launch
-SOON_MS = (90_000, 240_000)     # most gaps between visits...
-LATER_MS = (240_000, 540_000)   # ...and the long quiet ones
-LATER_CHANCE = 0.40
-ENCORE_MS = (3_000, 9_000)      # "it's back": right after one leaves
-ENCORE_CHANCE = 0.20
+# RARE on purpose (his call): a long quiet gap is what makes it a shock. Never
+# less than ten minutes between two visits; the spread on top keeps anyone
+# from learning the rhythm.
+FIRST_MS = (240_000, 480_000)   # first visitor: 4-8 minutes after launch
+EVERY_MS = (600_000, 840_000)   # then 10-14 minutes after the last one LEFT
 DANGLE_CHANCE = 0.35            # a spider's odds of coming down on a thread
 BORED_S = 14.0                  # after this it stops fooling around and leaves
 MAX_TRIP_S = 30.0               # nothing stays forever, whatever happens
@@ -620,18 +619,10 @@ class HalloweenDecor(QObject):
             web.show()
             self._webs.append(web)
 
-    def _arm(self, encore_ok: bool = False):
-        rng = self._rng
-        if self._first:
-            lo, hi = FIRST_MS
-        elif encore_ok and rng.random() < ENCORE_CHANCE:
-            lo, hi = ENCORE_MS
-        elif rng.random() < LATER_CHANCE:
-            lo, hi = LATER_MS
-        else:
-            lo, hi = SOON_MS
+    def _arm(self):
+        lo, hi = FIRST_MS if self._first else EVERY_MS
         self._first = False
-        self._clock.start(rng.randint(lo, hi))
+        self._clock.start(self._rng.randint(lo, hi))
 
     def _on_clock(self):
         if not self.is_active():
@@ -648,4 +639,4 @@ class HalloweenDecor(QObject):
         if critter is self._critter:
             self._critter = None
             if self.is_active():
-                self._arm(encore_ok=True)
+                self._arm()

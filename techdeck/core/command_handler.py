@@ -121,6 +121,16 @@ class CommandHandler:
     # suppression). Out of season they behave exactly like a typo, so the
     # app has no seasonal residue in the other eleven months.
     _SEASONAL_COMMANDS = {'/seance', '/crawl'}
+
+    # Commands that exist ONLY when running from source (python -m techdeck).
+    # In the installed exe they behave exactly like a typo. /crawl is a test
+    # lever for the Halloween crawlies: colleagues must never be able to
+    # summon one - the whole point is that it catches them off guard.
+    _DEV_ONLY_COMMANDS = {'/crawl'}
+
+    @staticmethod
+    def _is_dev_run() -> bool:
+        return not getattr(sys, "frozen", False)
     _ADMIN_HELP = (
         "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
         "  /reset store     - Clear all Emporium purchases"
@@ -135,7 +145,8 @@ class CommandHandler:
                 cmd in self._ADMIN_COMMANDS and not self._admin_mode) and not (
                 cmd in self._HELD_COMMANDS and not puppet_master_enabled()) \
                 and not (cmd in self._SEASONAL_COMMANDS
-                         and not halloween_active(settings=self.settings)):
+                         and not halloween_active(settings=self.settings))                 and not (cmd in self._DEV_ONLY_COMMANDS
+                         and not self._is_dev_run()):
             self.commands[cmd](args)
         else:
             self.console.append_error(f"Unknown command: {cmd}")
@@ -746,8 +757,9 @@ class CommandHandler:
         the clock (widgets/halloween_decor.py). `/crawl` picks one;
         `/crawl <kind>` names it (only kinds whose Blender frames exist in
         assets/critters/); `/crawl dangle` drops a spider on a thread. One at
-        a time - a second call while one is out does nothing. Halloween only
-        and absent from /help."""
+        a time - a second call while one is out does nothing. DEV RUNS ONLY
+        (_DEV_ONLY_COMMANDS): in the installed app it is an unknown command.
+        Halloween only and absent from /help."""
         decor = getattr(self.main_window, "halloween_decor", None)
         if decor is None or not decor.is_active():
             self.console.append_system(
