@@ -528,7 +528,7 @@ class MothWidget(QWidget):
         host.installEventFilter(self)
 
     def eventFilter(self, obj, event):
-        if obj is self._host:
+        if obj is getattr(self, '_host', None):
             et = event.type()
             if et == QEvent.Type.Move:
                 new = self._host.frameGeometry().topLeft()

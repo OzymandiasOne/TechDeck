@@ -255,7 +255,7 @@ class Apparition(QWidget):
 
     # -- follow the window it haunts (same contract as the moth) ----------
     def eventFilter(self, obj, event):
-        if obj is self._host:
+        if obj is getattr(self, '_host', None):
             et = event.type()
             if et == QEvent.Type.Move and self._host_pos is not None:
                 new = self._host.frameGeometry().topLeft()

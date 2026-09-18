@@ -446,7 +446,7 @@ class CommandLine(QWidget, ThemeAware):
         self.submitted.emit(text)
 
     def eventFilter(self, obj, event):
-        if obj is self.field and event.type() == QEvent.Type.KeyPress:
+        if obj is getattr(self, 'field', None) and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Up:
                 self._recall(-1)

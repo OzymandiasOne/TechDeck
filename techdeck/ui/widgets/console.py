@@ -1153,7 +1153,10 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     def eventFilter(self, obj, event):
         """Hover/click handling for anchors in the output view."""
-        if obj is self.output.viewport():
+        # getattr: Qt can still deliver events while Python is tearing the
+        # widget down, after its attributes are gone.
+        output = getattr(self, 'output', None)
+        if output is not None and obj is output.viewport():
             et = event.type()
             if et == QEvent.Type.MouseMove:
                 anchor = self.output.anchorAt(event.position().toPoint())
