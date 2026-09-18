@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.5 - The Manual - User Guide ships in-app; 922 Setup repeats up front + BATCH PROGRESS card
+; Version 0.8.7.6 - Paperwork Complete - Invoicing Prep invoice number + PDF + pricing calcs; sketch graphics + MATL on part sketches; 922 Setup defaults + PROGRESS card in HOLD
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.5"
+#define MyAppVersion "0.8.7.6"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
