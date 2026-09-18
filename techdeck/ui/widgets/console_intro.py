@@ -99,8 +99,11 @@ class ConsoleIntro(QObject):
     """Drives the replay: blank -> dim -> type -> undim."""
 
     LEAD_IN_MS = 450        # let the window's 400ms fade-in land first
-    CHAR_MS = 34
-    PAUSE_MS = 260          # extra beat after . , ? ! so it reads as speech
+    CHAR_MS = 42
+    # Extra beat after . , ? ! - OFF. At 260ms it was the only uneven thing in
+    # the cadence (every other gap measured within a frame of CHAR_MS on a real
+    # launch) and it read as the app lagging, not as speech.
+    PAUSE_MS = 0
     FADE_MS = 520
     FADE_STEP_MS = 16
 
@@ -117,6 +120,9 @@ class ConsoleIntro(QObject):
         self._running = False
         self._typer = QTimer(self)
         self._typer.setSingleShot(True)
+        # Coarse timers drift +-5% and snap to other timers' ticks; at one
+        # character per tick that shows up as an uneven rhythm.
+        self._typer.setTimerType(Qt.TimerType.PreciseTimer)
         self._typer.timeout.connect(self._type_next)
         self._fader = QTimer(self)
         self._fader.setInterval(self.FADE_STEP_MS)
