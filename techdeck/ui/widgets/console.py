@@ -103,6 +103,12 @@ class ConsoleWidget(QWidget, ThemeAware):
             # Prompt-timing markers must never break input handling.
             pass
 
+    HEADER_TOP_GAP = 6      # px of air above the Run/Clear buttons
+
+    # While the Puppet Master is present the user's echoes live in the pinned
+    # area under his face; more than this many pushed the face off screen.
+    ECHO_LINES_MAX = 2
+
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -128,7 +134,9 @@ class ConsoleWidget(QWidget, ThemeAware):
         # the content panel, and the selected tab merges into the panel's top
         # edge — so the active tab flows into the console like a Chrome tab.
         header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
+        # Top margin: the header band is its own (darker) surface, so the
+        # top-aligned Run/Clear buttons need air or they touch its edge.
+        header.setContentsMargins(0, self.HEADER_TOP_GAP, 0, 0)
         header.setSpacing(8)
 
         self.tab_bar = QTabBar()
@@ -152,7 +160,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         # bottom-aligned tabs (which stay pinned to the panel top).
         self._header_widget = QWidget()
         self._header_widget.setLayout(header)
-        self._header_widget.setFixedHeight(42)
+        self._header_widget.setFixedHeight(42 + self.HEADER_TOP_GAP)
 
         # ===== Content pages =====
         self.output = QTextEdit()
@@ -1242,6 +1250,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         make room for both. Otherwise the cap is half the page, or nearly
         the whole page with ``full=True`` (a few history lines stay peeking
         above so the `You:` echo reads like part of one terminal)."""
+        self._pinned_is_feed = False
         self.pinned.setHtml(html)
         doc_h = self.pinned.document().size().height()
         if self.pinned_reserve:
@@ -1282,12 +1291,28 @@ class ConsoleWidget(QWidget, ThemeAware):
         """APPEND one line to the pinned current-output area (present_current
         replaces; this grows). The running "current" feed: while the Puppet
         Master is present your typed lines land here — his reply plays on
-        the face above — so nothing piles up on top of the face."""
-        if self.pinned.isHidden():
+        the face above — so nothing piles up on top of the face.
+
+        The feed keeps only the newest ECHO_LINES_MAX lines: it sits UNDER the
+        face, so every extra line pushes him up and off the screen. A readout
+        (present_current) still on show is replaced, not appended to."""
+        if self.pinned.isHidden() or not getattr(self, "_pinned_is_feed", False):
             self.pinned.clear()
+        self._pinned_is_feed = True
         self.pinned.append(html)
+        doc = self.pinned.document()
+        while doc.blockCount() > self.ECHO_LINES_MAX:
+            cur = QTextCursor(doc.firstBlock())
+            cur.movePosition(QTextCursor.MoveOperation.NextBlock,
+                             QTextCursor.MoveMode.KeepAnchor)
+            cur.removeSelectedText()
         self.pinned.setFixedHeight(
             self._pinned_fit_height(self._pinned_cap(False)))
+        if self.pinned_reserve:
+            # Same contract as present_current: make room for face + feed.
+            chrome = self.height() - self._console_page.height()
+            self.raise_requested.emit(int(
+                chrome + self.pinned_reserve + self.pinned.height()))
         self.pinned.show()
         sb = self.pinned.verticalScrollBar()
         sb.setValue(sb.maximum())
@@ -1295,6 +1320,7 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     def clear_current(self):
         """Empty and collapse the pinned current-output area."""
+        self._pinned_is_feed = False
         self.pinned.clear()
         self.pinned.setFixedHeight(0)
         self.pinned.hide()

@@ -674,3 +674,39 @@ def test_startup_line_no_longer_repeats_the_input_bars_help_hint(
     console = ConsoleWidget()
     assert "/help" not in console.output.toPlainText()
     assert "/help" in console.input_field.placeholderText()
+
+
+# ── the echo feed under the face ─────────────────────────────────────────
+
+def test_echo_feed_keeps_only_the_newest_two_lines(qapp):
+    console, _cat_ = _live_cat()
+    for line in ["Hello?", "Who are you?", "Where are you?",
+                 "What is your name?"]:
+        console.append_user(line)
+    text = console.pinned.toPlainText()
+    assert text.splitlines() == ["You: Where are you?",
+                                 "You: What is your name?"]
+    assert console.pinned.document().blockCount() == ConsoleWidget.ECHO_LINES_MAX
+
+
+def test_echo_feed_stops_growing_after_two_lines(qapp):
+    console, _cat_ = _live_cat()
+    console.append_user("one")
+    console.append_user("two")
+    h = console.pinned.height()
+    for i in range(6):
+        console.append_user(f"more {i}")
+    assert console.pinned.height() == h
+
+
+def test_an_echo_replaces_a_readout_instead_of_piling_under_it(qapp):
+    console, _cat_ = _live_cat()
+    console.present_current("Available commands:<br>/help<br>/clear")
+    console.append_user("hello")
+    assert console.pinned.toPlainText() == "You: hello"
+
+
+def test_header_gives_the_buttons_air(qapp):
+    console = ConsoleWidget()
+    assert console.header.contentsMargins().top() == ConsoleWidget.HEADER_TOP_GAP > 0
+    assert console._header_widget.height() == 42 + ConsoleWidget.HEADER_TOP_GAP
