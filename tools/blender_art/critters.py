@@ -4,6 +4,7 @@ Runs INSIDE Blender, headless:
 
     blender.exe -b --factory-startup -P tools/blender_art/critters.py -- \
         spider walk OUT_DIR [--size 256] [--frames 16] [--only 3] [--fur]
+        roach  walk OUT_DIR
 
 Every bug is built from code, seen from straight above by an orthographic
 camera, on a transparent film with a shadow-catcher floor - so each frame is
@@ -190,13 +191,13 @@ def leg_points(hip, foot, total, sweep, knee_bias=0.44):
     return hip, knee, ankle, foot
 
 
-def foot_at(rest, phase, lift=0.55):
+def foot_at(rest, phase, stride=STRIDE, lift=0.55):
     """Body-frame foot position at `phase` of the gait cycle (0..1)."""
     if phase < 0.5:                                   # planted, sliding back
-        return (rest[0] + STRIDE * (0.5 - 2 * phase), rest[1], 0.0)
+        return (rest[0] + stride * (0.5 - 2 * phase), rest[1], 0.0)
     u = (phase - 0.5) * 2                             # in the air, reaching
     e = u * u * (3 - 2 * u)
-    return (rest[0] - STRIDE * 0.5 + STRIDE * e, rest[1],
+    return (rest[0] - stride * 0.5 + stride * e, rest[1],
             lift * math.sin(math.pi * u))
 
 
@@ -262,7 +263,100 @@ def build_spider(phase: float, hang: bool, use_fur: bool):
                  [0.118, 0.112, 0.095], kneem)
 
 
-BUGS = {"spider": (build_spider, SPIDER_VIEW)}
+# -- roach -----------------------------------------------------------------
+# An American cockroach: long flat greasy-mahogany wings that overlap down the
+# back, a pale amber shield with a dark blotch behind a small head, six spiny
+# legs swept backwards in a tripod gait, and antennae longer than the body that
+# never hold still. It sits LOW: the knees go out sideways, not up.
+ROACH_STRIDE = 1.45
+ROACH_VIEW = 10.6
+ROACH_SHIFT = -0.75          # centre the whole silhouette (antennae) in frame
+ROACH_LEGS = [((1.30, 0.55), (2.75, 1.75), 0),      # front: short, reaching
+              ((0.45, 0.72), (0.20, 2.55), 1),      # middle: out to the side
+              ((-0.35, 0.70), (-3.05, 2.05), 0)]    # hind: long, trailing
+ROACH_SWEEP = (1.15, -1.05, -1.25)
+
+
+def build_roach(phase: float, hang: bool, use_fur: bool):
+    # Dark and greasy. A strong clear-coat over a mid brown went milky pink
+    # under the overhead lamp, so the colour is deep and the coat is modest.
+    wing = material("wing", (0.070, 0.017, 0.005), rough=0.30, coat=0.45,
+                    bump=0.12, mottle=(0.150, 0.042, 0.010), scale=2.4)
+    shield = material("shield", (0.30, 0.135, 0.030), rough=0.34, coat=0.35,
+                      bump=0.08)
+    blotch = material("blotch", (0.040, 0.012, 0.005), rough=0.55)
+    dark = material("dark", (0.030, 0.010, 0.005), rough=0.4, coat=0.3)
+    legm = material("rleg", (0.115, 0.032, 0.009), rough=0.4, coat=0.25,
+                    bump=0.2)
+    spine = material("spine", (0.045, 0.014, 0.006), rough=0.4)
+    feel = material("feeler", (0.105, 0.034, 0.012), rough=0.4)
+
+    sx = ROACH_SHIFT
+    wag = 0.030 * math.sin(phase * 4 * math.pi)       # the body yaws as it runs
+    # belly first, low and dark, so the wings read as lying ON something
+    ellipsoid("belly", (-0.55 + sx, 0, 0.30), (2.30, 0.92, 0.26), dark)
+    # two wings, each its own flat shell, the left lapped over the right: that
+    # overlap IS the seam down a roach's back, no texture needed
+    for side, z, lap in ((-1, 0.40, 0.0), (1, 0.45, 0.05)):
+        w = ellipsoid("wing", (-0.78 + sx, (0.30 - lap) * side + wag, z),
+                      (2.30, 0.72, 0.20), wing)
+        w.rotation_euler = (0.10 * side, 0, 0.035 * side)
+    # pronotum: the amber shield, dark in the middle
+    ellipsoid("shield", (1.22 + sx, wag * 0.5, 0.42), (0.80, 1.00, 0.24), shield)
+    # TWO flat matte blotches, as on the real animal. One round glossy one in
+    # the middle of a pale disc rendered as a giant cartoon EYEBALL - a gestalt
+    # that only shows up in the assembled image, never in the numbers.
+    for side in (1, -1):
+        b = ellipsoid("blotch", (1.12 + sx, 0.34 * side + wag * 0.5, 0.585),
+                      (0.46, 0.27, 0.06), blotch, 32)
+        b.rotation_euler = (0, 0, 0.35 * side)
+    # the head just shows under the front of the shield
+    ellipsoid("head", (2.02 + sx, 0, 0.30), (0.34, 0.44, 0.24), dark, 32)
+    for side in (1, -1):
+        ellipsoid("eye", (2.10 + sx, 0.30 * side, 0.36), (0.13, 0.11, 0.10),
+                  blotch, 16)
+        # cerci: the two little tails
+        tube("cercus", [(-2.95 + sx, 0.22 * side, 0.30),
+                        (-3.45 + sx, 0.42 * side, 0.24)], [0.07, 0.02], legm)
+        # antennae: a long whip, swaying out of step with its twin
+        sway = math.sin(2 * math.pi * (phase + 0.23 * side)) * 0.55
+        flick = math.sin(2 * math.pi * (2 * phase + 0.1 * side)) * 0.22
+        pts, n = [], 9
+        for j in range(n):
+            t = j / (n - 1)
+            pts.append((2.25 + sx + 3.35 * t,
+                        side * (0.20 + 2.35 * t ** 1.5) + sway * t * t
+                        + flick * t ** 3,
+                        0.42 + 0.55 * math.sin(math.pi * t) * 0.6))
+        tube("antenna", pts, [0.050 - 0.042 * (j / (n - 1)) for j in range(n)],
+             feel)
+
+    for i, (hip, rest, group) in enumerate(ROACH_LEGS):
+        total = math.hypot(rest[0] - hip[0], rest[1] - hip[1]) * 1.22
+        for side in (1, -1):
+            g = group if side > 0 else 1 - group
+            ph = (phase + 0.5 * g) % 1.0
+            h = (hip[0] + sx, hip[1] * side, 0.36)
+            fx, fy, fz = foot_at(rest, ph, ROACH_STRIDE, lift=0.32)
+            f = (fx + sx, fy * side, fz)
+            pts = leg_points(h, f, total, ROACH_SWEEP[i], knee_bias=0.42)
+            tube("leg", [tuple(p) for p in pts], [0.165, 0.105, 0.070, 0.028],
+                 legm)
+            # tibial spines: what makes a roach leg a roach leg
+            knee, ankle = pts[1], pts[2]
+            along = (ankle - knee).normalized()
+            out = Vector((-along.y, along.x, 0)) * side
+            for t in (0.25, 0.5, 0.75):
+                base = knee.lerp(ankle, t)
+                tube("spine", [tuple(base),
+                               tuple(base + out * 0.20 + along * 0.10
+                                     + Vector((0, 0, 0.04)))],
+                     [0.030, 0.006], spine)
+
+
+# kind -> (builder, view units, stride units)
+BUGS = {"spider": (build_spider, SPIDER_VIEW, STRIDE),
+        "roach": (build_roach, ROACH_VIEW, ROACH_STRIDE)}
 
 
 def main():
@@ -275,7 +369,7 @@ def main():
 
     size, frames = val("--size", 256), val("--frames", 16)
     samples, only = val("--samples", 48), val("--only", -1)
-    build, view = BUGS[kind]
+    build, view, stride = BUGS[kind]
     out.mkdir(parents=True, exist_ok=True)
     for f in range(frames):
         if only >= 0 and f != only:
@@ -288,9 +382,9 @@ def main():
         bpy.ops.render.render(write_still=True)
     (out / f"{kind}_{clip}.json").write_text(json.dumps({
         "kind": kind, "clip": clip, "frames": frames, "size": size,
-        "view_units": view, "stride_units": STRIDE,
+        "view_units": view, "stride_units": stride,
         "px_per_unit": size / view,
-        "loop_travel_px": 2 * STRIDE * size / view,
+        "loop_travel_px": 2 * stride * size / view,
     }, indent=2))
     print("CRITTERS_OK", kind, clip)
 

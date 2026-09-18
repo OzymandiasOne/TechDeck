@@ -1,0 +1,10 @@
+{
+  "kind": "roach",
+  "clip": "walk",
+  "frames": 16,
+  "size": 256,
+  "view_units": 10.6,
+  "stride_units": 1.45,
+  "px_per_unit": 24.150943396226417,
+  "loop_travel_px": 70.0377358490566
+}

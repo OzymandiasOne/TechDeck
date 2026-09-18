@@ -136,6 +136,41 @@ def test_the_spider_ships_with_its_walk_and_hang_clips(qapp):
     assert walk.loop_travel_px > 0
 
 
+def test_the_roach_ships_with_its_walk_clip(qapp):
+    assert "roach" in hd.available_kinds()
+    walk = hd.load_clip("roach", "walk")
+    assert walk is not None and len(walk.frames) == 16
+    assert walk.frames[0].width() == walk.size == 256
+    # a longer stride than the spider's: it covers more ground per loop
+    assert walk.loop_travel_px > hd.load_clip("spider", "walk").loop_travel_px
+
+
+def test_the_roach_runs_and_is_the_fastest_thing_in_the_app(host, season):
+    assert hd.KINDS["roach"].speed > hd.KINDS["spider"].speed
+    critter = _decor(host).spawn("roach")
+    assert critter is not None and critter.kind == "roach"
+    critter._timer.stop()
+    _run_out(critter)
+    assert critter._entered
+
+
+def test_only_a_spider_ever_dangles(host, season):
+    roach = _decor(host).spawn("roach", dangle=True)
+    assert roach is not None and roach.dangle is False
+
+
+def test_never_the_same_kind_twice_running(host, season):
+    decor = _decor(host, seed=3)
+    seen = []
+    for _ in range(10):
+        critter = decor.spawn()
+        seen.append(critter.kind)
+        critter._timer.stop()
+        critter.leave()
+    assert all(a != b for a, b in zip(seen, seen[1:]))
+    assert set(seen) == set(hd.available_kinds())
+
+
 def test_a_kind_with_no_frames_never_appears(host, season, monkeypatch, tmp_path):
     monkeypatch.setattr(hd, "_critter_dir", lambda: tmp_path)
     monkeypatch.setattr(hd, "_CLIPS", {})
