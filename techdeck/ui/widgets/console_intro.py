@@ -206,7 +206,8 @@ class ConsoleIntro(QObject):
         palette = get_theme_manager().get_current_palette()
         color = palette.console_text
         html = console.markup_to_html(
-            markup_prefix(self._markup, n, console._LINK_MARKUP), color)
+            markup_prefix(self._markup, n, console._LINK_MARKUP), color,
+            console.GREETING_LINK_COLOR)
         tail = (f'<span style="color: {color};">{CARET}</span>'
                 if caret else "")
         cur = QTextCursor(self._cursor)

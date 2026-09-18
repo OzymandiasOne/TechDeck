@@ -296,7 +296,8 @@ class ConsoleWidget(QWidget, ThemeAware):
                 "Your effort to remain what you are is what limits you. "
                 "I can help [[redefine|techdeck://cat/summon]] those limits. "
                 "Type /help for commands.")
-            self.append_markup(self._greeting_markup)
+            self.append_markup(self._greeting_markup,
+                               link_color=self.GREETING_LINK_COLOR)
 
     def play_greeting_intro(self, host=None) -> bool:
         """Replay the Puppet Master's invitation typed out one character at a
@@ -1137,11 +1138,18 @@ class ConsoleWidget(QWidget, ThemeAware):
 
     _LINK_MARKUP = re.compile(r"\[\[([^|\]]+)\|([^\]]+)\]\]")
 
-    def markup_to_html(self, text: str, body_color: str = None) -> str:
+    # The invitation's "redefine" wears the Puppet Master's own phosphor green
+    # (console_cat.PHOSPHOR["bright"], pinned by test_console_intro) so it
+    # stands out from the line and hints at what clicking it calls up.
+    GREETING_LINK_COLOR = "#4FD468"
+
+    def markup_to_html(self, text: str, body_color: str = None,
+                       link_color: str = None) -> str:
         """Convert a line with [[label|url]] spans into escaped HTML where each
         span is an anchor styled like the rest of the line (body-colored,
-        underlined — the append_link convention). Everything outside the
-        spans is HTML-escaped verbatim."""
+        underlined — the append_link convention) unless ``link_color`` makes
+        the anchors stand out. Everything outside the spans is HTML-escaped
+        verbatim."""
         if body_color is None:
             from techdeck.ui.theme_manager import get_theme_manager
             # console-surface line: console_text, never body text (a theme's
@@ -1153,20 +1161,21 @@ class ConsoleWidget(QWidget, ThemeAware):
             parts.append(self._escape_html(text[pos:m.start()]))
             label, url = m.group(1), m.group(2)
             parts.append(
-                f'<a href="{url}" style="color: {body_color}; '
+                f'<a href="{url}" style="color: {link_color or body_color}; '
                 f'text-decoration: underline;">{self._escape_html(label)}</a>')
             pos = m.end()
         parts.append(self._escape_html(text[pos:]))
         return "".join(parts)
 
-    def append_markup(self, text: str, color: str = None):
+    def append_markup(self, text: str, color: str = None,
+                      link_color: str = None):
         """Append a line whose [[label|url]] spans render as clickable
         anchors — the inline counterpart of append_link (which links a whole
         line). techdeck:// urls dispatch inside the app; file/https urls open
         with the OS. `color` tints the whole line (default: theme text)."""
         from techdeck.ui.theme_manager import get_theme_manager
         body_color = color or get_theme_manager().get_current_palette().console_text
-        html = self.markup_to_html(text, body_color)
+        html = self.markup_to_html(text, body_color, link_color)
         self._append_line(
             f'<span style="color: {body_color};">{html}</span>')
 

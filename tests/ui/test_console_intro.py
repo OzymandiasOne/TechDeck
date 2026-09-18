@@ -82,6 +82,31 @@ def test_intro_blanks_the_line_then_types_it_back(live_console):
     assert console.remove_history_line("I can help redefine those limits")
 
 
+def test_redefine_is_phosphor_green_before_during_and_after(live_console):
+    from techdeck.ui.widgets.console_cat import PHOSPHOR
+    assert ConsoleWidget.GREETING_LINK_COLOR == PHOSPHOR["bright"]
+    green = ConsoleWidget.GREETING_LINK_COLOR.lower()
+    host, console = live_console
+    assert green in console.output.toHtml().lower()      # authored whole
+    console.play_greeting_intro(host)
+    intro = console._greeting_intro
+    assert green not in console.output.toHtml().lower()  # blanked
+    intro._typer.stop()
+    while intro._shown < len("Your effort to remain what you are is what "
+                             "limits you. I can help red"):
+        intro._type_next()
+        intro._typer.stop()
+    assert green in console.output.toHtml().lower()      # mid-word
+    _drain(intro)
+    assert green in console.output.toHtml().lower()
+
+
+def test_other_markup_links_keep_the_body_colour(qapp):
+    c = ConsoleWidget()
+    assert "#4fd468" not in c.markup_to_html(
+        "a [[b|techdeck://x]]", "#FFFFFF").lower()
+
+
 def test_intro_only_plays_once(live_console):
     host, console = live_console
     assert console.play_greeting_intro(host) is True
