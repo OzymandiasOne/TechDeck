@@ -43,7 +43,7 @@ def test_claude_md_is_within_budget(private_doc):
         f"Do NOT raise BUDGET and do NOT trim words. Extract the heaviest "
         f"section into the doc that owns it and leave a one-line pointer - the "
         f"routing table is in CLAUDE.md's 'Doc Governance' section. Detail about "
-        f"one plugin goes to docs/PLUGINS.md; the story behind a rule goes to "
+        f"one plugin goes to docs/plugins/<id>.md; the story behind a rule goes to "
         f"LESSONS_LEARNED.md; a procedure goes to the matching skill.")
 
 
@@ -69,13 +69,14 @@ def test_roster_rows_stay_one_liners(private_doc):
     It must also name exactly the plugins that exist."""
     text = private_doc("docs/PLUGINS.md").read_text(encoding="utf-8")
     start = text.index("## Roster at a glance")
-    end = text.index("\n## ", start + 5)
+    nxt = text.find("\n## ", start + 5)          # the roster may be the last section
+    end = nxt if nxt != -1 else len(text)
     rows = [l for l in text[start:end].splitlines() if l.startswith("| `")]
     fat = [l for l in rows if len(l) > 160]
     assert not fat, (
         "roster rows have grown into documentation again:\n  "
         + "\n  ".join(f"{len(l)} chars: {l[:70]}..." for l in fat)
-        + "\nPut the detail in that plugin's own section; the roster row is one "
+        + "\nPut the detail in docs/plugins/<id>.md; the roster row is one "
           "short line saying what the plugin does.")
     in_roster = {l.split("`")[1] for l in rows}
     real = _real_plugin_ids()
