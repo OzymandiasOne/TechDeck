@@ -292,10 +292,29 @@ class ConsoleWidget(QWidget, ThemeAware):
             self.append_system(
                 "TechDeck online. Type /help for available commands.")
         else:
-            self.append_markup(
+            self._greeting_markup = (
                 "Your effort to remain what you are is what limits you. "
                 "I can help [[redefine|techdeck://cat/summon]] those limits. "
                 "Type /help for commands.")
+            self.append_markup(self._greeting_markup)
+
+    def play_greeting_intro(self, host=None) -> bool:
+        """Replay the Puppet Master's invitation typed out one character at a
+        time, with everything but the console dimmed until it finishes
+        (widgets/console_intro.py). __init__ authors the line whole, so it and
+        its link exist even if this never runs. No-op - returns False - for the plain
+        greeting, or on a second call. Must never block startup: any failure
+        leaves the full line that __init__ already wrote."""
+        markup = getattr(self, "_greeting_markup", None)
+        if not markup:
+            return False
+        self._greeting_markup = None
+        try:
+            from techdeck.ui.widgets.console_intro import ConsoleIntro
+            self._greeting_intro = ConsoleIntro(self, host, markup)
+            return self._greeting_intro.start()
+        except Exception:
+            return False
 
     @staticmethod
     def _professional_mode() -> bool:

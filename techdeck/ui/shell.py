@@ -265,6 +265,12 @@ class MainWindow(QMainWindow):
         the splash has closed, so the fade is the FIRST thing the user sees
         in place of the splash (rather than competing with it)."""
         self._fadein.start()
+        # The Puppet Master's invitation types itself out under a dimmed app.
+        # A no-op for the plain greeting; never allowed to break startup.
+        try:
+            self.console.play_greeting_intro(self)
+        except Exception:
+            pass
     
     def _setup_ui(self):
         """Set up the main UI layout."""
