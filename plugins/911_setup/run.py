@@ -170,6 +170,9 @@ import threading
 from functools import cmp_to_key
 from pathlib import Path
 
+from copy import copy
+
+from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -649,6 +652,44 @@ def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
             log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: BATCH LIST says "
                 f"{qty}, nest packet says {pdf_qty} -- qty cell highlighted "
                 f"yellow in {workbook_name}.")
+
+
+def _center_nest_sheet(nest_ws, num_parts: int = 0) -> int:
+    """Center the whole NEST tab (v2.2.1, floor feedback 2026-09-18: "the top
+    portion is centered and then further down it's left aligned").
+
+    Both SACO templates (shape AND plate) only carry center alignment on a
+    patch of the sheet: A-E down to row 25, and the batch-list columns F-K on
+    the first few rows only. Everything the app pastes below that patch lands
+    on unformatted cells, so a short nest looks right and a long one turns
+    left-aligned partway down. Rather than depend on how far someone dragged
+    the formatting in the template, the app centers the sheet itself:
+
+      - every cell that holds a value, anywhere on the tab, and
+      - the full data table (A..K) for every part row, blank cells included,
+        so a value typed in by hand later is centered too.
+
+    Only `horizontal` changes - wrap, vertical and the rest are kept. Merged
+    follower cells carry no style of their own and are skipped. Returns the
+    number of cells changed."""
+    last_row = max(nest_ws.max_row, 3 + max(num_parts, 0))
+    last_col = max(nest_ws.max_column, 11)
+    table_last_row = 3 + max(num_parts, 0)
+    changed = 0
+    for row in nest_ws.iter_rows(min_row=1, max_row=last_row, max_col=last_col):
+        for cell in row:
+            if isinstance(cell, MergedCell):
+                continue
+            in_table = 4 <= cell.row <= table_last_row and cell.column <= 11
+            if cell.value in (None, "") and not in_table:
+                continue
+            if cell.alignment.horizontal == "center":
+                continue
+            al = copy(cell.alignment)
+            al.horizontal = "center"
+            cell.alignment = al
+            changed += 1
+    return changed
 
 
 def _fill_nest_part_rows(nest_ws, num_parts: int):
@@ -2055,6 +2096,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             # not overlooked, and leave it blank when the forecast is blank.
             if plate:
                 _fill_scribe_trace(wb, forecast_rows, num_parts, log)
+
+            # -- Center the whole NEST tab (the templates only center a patch) --
+            _center_nest_sheet(nest_ws, num_parts)
 
         # -- Step 8a: Collect part rows (WO / DYPN / qty) from NEST ------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
