@@ -55,7 +55,7 @@ class Spotlight(QWidget):
     """Dim wash over the whole window with a hole where the console is."""
 
     WASH = QColor(4, 2, 8)      # the seance's failing-lights colour
-    DEPTH = 0.62                # wash alpha at full strength
+    DEPTH = 0.82                # wash alpha at full strength
 
     def __init__(self, host, console):
         super().__init__(host)
