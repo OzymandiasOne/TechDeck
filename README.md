@@ -11,6 +11,26 @@ the `.exe`.
 
 ## What's New in v0.8.7.6 - Paperwork Complete
 
+### New app: MieTrak Tools
+
+**What it does:** you pick a small MieTrak helper from a list, make your choices from
+dropdowns, and get the code you need, ready to paste into MieTrak.
+
+- The first tool is the **Hardware Code Generator**. Pick the material, the hardware
+  type, the thread and the length (or the screw size, for a washer), and it builds the
+  hardware part number. A 1/2-13 by 2 inch zinc plated grade 5 hex head cap screw comes
+  out as `HWZP5-HHCS-H13-2`.
+- It covers cap screws, nuts, washers, studs and set screws, imperial and metric.
+- The codes are spelled exactly the way the standalone hardware code program spelled
+  them, so they match what is already in MieTrak.
+- It writes no files and touches no batch. **Copy Code** puts the code on the clipboard.
+
+**How to run it:** it is under General in the Library. More MieTrak helpers will be
+added to the same window over time.
+
+*(MieTrak Tools shipped in 0.8.7.6 but was left out of that release's announcements.
+This entry was added afterwards.)*
+
 ### 911 SSPO Invoicing Prep fills in the invoice and prints it
 
 Once a nest has its packing slip / invoice number in the Working Forecast List
@@ -45,6 +65,13 @@ where the Mie Trak invoice goes.
   checked.** Clear them on a run that should skip them.
 - **The BATCH PROGRESS card goes in the batch's HOLD bucket**, on its own, instead
   of sitting among the order cards.
+
+### Fixes
+
+- **922 LST Organizer: tubes reported missing that were right there.** On Batch 491
+  the PO spelled 9 of the 38 standard tubes without the hyphen before the sheet
+  (`R8652362H11G-4A`) while the files on disk had it (`R8652362-H11G-4A`), so each one
+  was listed as missing and as needing review. Both spellings now match.
 
 ---
 
