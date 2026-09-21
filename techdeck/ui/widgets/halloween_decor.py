@@ -53,6 +53,7 @@ SCALE = 1.0                     # size of EVERY bug at once (each kind has its o
 WEB_SMALL_PX = 150              # top-right
 WEB_LARGE_PX = 250              # bottom-left
 WEB_SEED = 13                   # same webs every launch
+WEB_OPACITY = 0.70              # whole-web see-through (1.0 = as drawn)
 # RARE on purpose (his call): a long quiet gap is what makes it a shock. Never
 # less than ten minutes between two visits; the spread on top keeps anyone
 # from learning the rhythm.
@@ -295,6 +296,7 @@ class CornerWeb(_Overlay):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setOpacity(WEB_OPACITY)
         painter.drawPixmap(0, 0, self._pix)
         painter.end()
 

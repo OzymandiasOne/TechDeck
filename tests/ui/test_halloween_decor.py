@@ -111,6 +111,19 @@ def test_the_web_is_silk_in_its_own_corner_not_a_filled_box(qapp, corner):
     assert closer > 0.8 * len(inked)
 
 
+def test_the_webs_are_drawn_see_through(host, season):
+    assert 0.4 <= hd.WEB_OPACITY < 1.0
+    decor = _decor(host)
+    decor.refresh()
+    web = next(w for w in decor._webs if w.corner == "bl")
+    drawn, shown = web._pix.toImage(), web.grab().toImage()
+    peak = lambda img: max(img.pixelColor(x, y).alpha()
+                           for y in range(0, img.height(), 3)
+                           for x in range(0, img.width(), 3))
+    assert peak(shown) < peak(drawn)
+    assert peak(shown) == pytest.approx(peak(drawn) * hd.WEB_OPACITY, abs=6)
+
+
 def test_leaving_the_halloween_theme_takes_it_all_down(host, season):
     settings = _Settings()
     decor = _decor(host, settings)
