@@ -33,7 +33,16 @@ from mathutils import Vector
 
 
 # -- scene -----------------------------------------------------------------
-def reset_scene(size: int, view: float, samples: int):
+def bundled_hdri(name: str) -> Path:
+    """One of the lighting environments Blender ships for its viewport
+    (city, courtyard, forest, interior, night, studio, sunrise, sunset)."""
+    root = Path(bpy.app.binary_path).parent
+    ver = "%d.%d" % bpy.app.version[:2]
+    return root / ver / "datafiles" / "studiolights" / "world" / f"{name}.exr"
+
+
+def reset_scene(size: int, view: float, samples: int, hdri: str = "",
+                env_tilt: float = 100.0, env_turn: float = 20.0):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     sc = bpy.context.scene
     sc.render.engine = "CYCLES"
@@ -51,6 +60,24 @@ def reset_scene(size: int, view: float, samples: int):
     bg = world.node_tree.nodes["Background"]
     bg.inputs[0].default_value = (0.75, 0.78, 0.9, 1)
     bg.inputs[1].default_value = 0.30
+    if hdri:
+        # A glossy shell lit by one lamp shows one flat blob and reads as
+        # plastic. Real chitin reflects a ROOM: windows, ceiling, dark corners.
+        env = world.node_tree.nodes.new("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(str(bundled_hdri(hdri)))
+        # TILT THE ROOM. The camera looks straight down at a nearly flat back,
+        # so an upright room reflects only its ceiling: one even bright sheet
+        # that turns a glossy shell milky grey. Tipped over, the back reflects
+        # a sweep from window to floor instead - a streak of shine with a dark
+        # side, which is how a wet shell actually looks.
+        tc = world.node_tree.nodes.new("ShaderNodeTexCoord")
+        mp = world.node_tree.nodes.new("ShaderNodeMapping")
+        mp.inputs["Rotation"].default_value = (math.radians(env_tilt), 0.0,
+                                               math.radians(env_turn))
+        world.node_tree.links.new(tc.outputs["Generated"], mp.inputs["Vector"])
+        world.node_tree.links.new(mp.outputs["Vector"], env.inputs["Vector"])
+        world.node_tree.links.new(env.outputs["Color"], bg.inputs[0])
+        bg.inputs[1].default_value = 0.55
     sc.world = world
 
     cam_d = bpy.data.cameras.new("cam")
@@ -63,12 +90,16 @@ def reset_scene(size: int, view: float, samples: int):
 
     key_d = bpy.data.lights.new("key", "AREA")
     key_d.shape = "DISK"                   # a square lamp leaves square glints
-    key_d.energy = 1500
+    key_d.energy = 550 if hdri else 1500   # with a room lit, it only adds shadow
     key_d.size = 9
     key = bpy.data.objects.new("key", key_d)
     key.location = (1.6, 1.8, 10)          # a touch ahead-left of the bug
     key.rotation_euler = (-0.17, 0.15, 0)
     sc.collection.objects.link(key)
+    if hdri:
+        # the lamp is there for the contact shadow; its own reflection is a
+        # big round disc that flattens everything glossy
+        key.visible_glossy = False
     return sc
 
 
@@ -109,6 +140,205 @@ def material(name, color, rough=0.45, sheen=0.0, coat=0.0, bump=0.0,
             b.inputs["Strength"].default_value = bump
             nt.links.new(noise.outputs["Fac"], b.inputs["Height"])
             nt.links.new(b.outputs["Normal"], bsdf.inputs["Normal"])
+    return mat
+
+
+# -- node-graph helpers (for the materials that need more than `material`) --
+def _sock(nt, v):
+    """A socket as-is; a number or colour becomes a constant node output."""
+    if hasattr(v, "is_output"):
+        return v
+    if isinstance(v, (int, float)):
+        n = nt.nodes.new("ShaderNodeValue")
+        n.outputs[0].default_value = v
+        return n.outputs[0]
+    n = nt.nodes.new("ShaderNodeRGB")
+    n.outputs[0].default_value = (*v, 1)
+    return n.outputs[0]
+
+
+def _math(nt, op, a, b=None, c=None, clamp=False):
+    n = nt.nodes.new("ShaderNodeMath")
+    n.operation, n.use_clamp = op, clamp
+    for i, v in enumerate((a, b, c)):
+        if v is None:
+            continue
+        if hasattr(v, "is_output"):
+            nt.links.new(v, n.inputs[i])
+        else:
+            n.inputs[i].default_value = v
+    return n.outputs[0]
+
+
+def _mix(nt, fac, a, b):
+    n = nt.nodes.new("ShaderNodeMix")
+    n.data_type = "RGBA"
+    nt.links.new(_sock(nt, fac), n.inputs[0])
+    nt.links.new(_sock(nt, a), n.inputs[6])
+    nt.links.new(_sock(nt, b), n.inputs[7])
+    return n.outputs[2]
+
+
+def _ramp(nt, fac, stops):
+    n = nt.nodes.new("ShaderNodeValToRGB")
+    els = n.color_ramp.elements
+    while len(els) < len(stops):
+        els.new(0.5)
+    for el, (pos, val) in zip(els, stops):
+        el.position = pos
+        el.color = (val, val, val, 1)
+    nt.links.new(fac, n.inputs["Fac"])
+    return n.outputs["Color"]
+
+
+def _coords(nt, scale=(1, 1, 1)):
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    mp = nt.nodes.new("ShaderNodeMapping")
+    mp.inputs["Scale"].default_value = scale
+    nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+    return tc.outputs["Object"], mp.outputs["Vector"]
+
+
+def _noise(nt, vec, scale, detail=5.0):
+    n = nt.nodes.new("ShaderNodeTexNoise")
+    n.inputs["Scale"].default_value = scale
+    n.inputs["Detail"].default_value = detail
+    nt.links.new(vec, n.inputs["Vector"])
+    return n.outputs["Fac"]
+
+
+def _finish(nt, bsdf, color, rough, height, bump, sss=0.0, coat=0.0,
+            sss_radius=(0.7, 0.18, 0.05), coat_rough=0.12):
+    nt.links.new(_sock(nt, color), bsdf.inputs["Base Color"])
+    nt.links.new(_sock(nt, rough), bsdf.inputs["Roughness"])
+    b = nt.nodes.new("ShaderNodeBump")
+    b.inputs["Strength"].default_value = bump
+    b.inputs["Distance"].default_value = 0.03
+    nt.links.new(_sock(nt, height), b.inputs["Height"])
+    nt.links.new(b.outputs["Normal"], bsdf.inputs["Normal"])
+    bsdf.inputs["Subsurface Weight"].default_value = sss
+    bsdf.inputs["Subsurface Radius"].default_value = sss_radius
+    bsdf.inputs["Subsurface Scale"].default_value = 0.25
+    # The coat keeps the GEOMETRY normal (Coat Normal is left unlinked), so it
+    # stays a smooth wet film over the bumpy base - which is what a real wing
+    # is: a glassy surface with structure showing through it.
+    bsdf.inputs["Coat Weight"].default_value = coat
+    bsdf.inputs["Coat Roughness"].default_value = coat_rough
+
+
+def wing_material():
+    """A cockroach forewing: translucent red-brown chitin, darker and thicker
+    at the shoulder, thinning to amber at the tip, carrying a fan of raised
+    longitudinal veins with a net of cross-veins between them - and a shine
+    that is never even, because a real wing is smudged and scuffed."""
+    mat = bpy.data.materials.new("wing")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    obj, vec = _coords(nt)
+    # object X runs shoulder (+1) to tip (-1); the wing's own scale stretches
+    # every pattern lengthwise, which is exactly how the veins should run
+    wave = nt.nodes.new("ShaderNodeTexWave")
+    wave.wave_type, wave.bands_direction = "BANDS", "Y"
+    wave.inputs["Scale"].default_value = 4.2
+    wave.inputs["Distortion"].default_value = 2.2
+    wave.inputs["Detail"].default_value = 2.0
+    nt.links.new(vec, wave.inputs["Vector"])
+    long_veins = _ramp(nt, wave.outputs["Fac"],
+                       [(0.40, 0.0), (0.50, 1.0), (0.60, 0.0)])
+    vor = nt.nodes.new("ShaderNodeTexVoronoi")
+    vor.feature = "DISTANCE_TO_EDGE"
+    vor.inputs["Scale"].default_value = 7.0
+    _, vec2 = _coords(nt, (1.0, 2.4, 1.0))
+    nt.links.new(vec2, vor.inputs["Vector"])
+    cross_veins = _ramp(nt, vor.outputs["Distance"], [(0.0, 1.0), (0.07, 0.0)])
+    veins = _math(nt, "MAXIMUM", long_veins,
+                  _math(nt, "MULTIPLY", cross_veins, 0.6))
+
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(obj, sep.inputs[0])
+    along = _math(nt, "MULTIPLY_ADD", sep.outputs["X"], -0.5, 0.5, clamp=True)
+    mottle = _noise(nt, vec, 2.2)                           # 0 shoulder .. 1 tip
+    chitin = _mix(nt, along, (0.016, 0.0035, 0.0012), (0.062, 0.016, 0.004))
+    chitin = _mix(nt, _math(nt, "MULTIPLY", mottle, 0.55), chitin,
+                  (0.008, 0.002, 0.001))
+    # veins darken the colour only a little - painted dark they read as WOOD
+    # GRAIN; they belong mostly in the bump, where the light finds them
+    color = _mix(nt, _math(nt, "MULTIPLY", veins, 0.35), chitin,
+                 (0.006, 0.0015, 0.0006))
+
+    smudge = _noise(nt, vec, 3.5, 8.0)
+    rough = _math(nt, "ADD", _math(nt, "MULTIPLY", smudge, 0.26), 0.16)
+    rough = _math(nt, "ADD", rough, _math(nt, "MULTIPLY", veins, 0.12))
+    height = _math(nt, "ADD", veins,
+                   _math(nt, "MULTIPLY", _noise(nt, vec, 38.0, 2.0), 0.12))
+    _finish(nt, bsdf, color, rough, height, bump=0.30, sss=0.08, coat=0.55,
+            coat_rough=0.07)
+    return mat
+
+
+def shield_material():
+    """The pronotum: translucent amber, darkening toward the rim where the
+    shell is seen edge-on, finely pitted, with the two dark blotches IN the
+    pigment. (As separate glossy shapes they read as stickers - and one round
+    one read as a cartoon eyeball.)"""
+    mat = bpy.data.materials.new("shield")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    obj, vec = _coords(nt)
+    sep = nt.nodes.new("ShaderNodeSeparateXYZ")
+    nt.links.new(obj, sep.inputs[0])
+    # Two fat lobes that OVERLAP on the midline: together one bilobed dark
+    # mass filling the middle of the shield, leaving a pale band round the rim
+    # (the American cockroach's "yellow margin"). Two separate round spots on
+    # a pale disc read as a pair of EYES - the same trap as the single one.
+    xa = _math(nt, "DIVIDE", _math(nt, "ADD", sep.outputs["X"], 0.10), 0.66)
+    ya = _math(nt, "DIVIDE", _math(nt, "SUBTRACT",
+                                   _math(nt, "ABSOLUTE", sep.outputs["Y"]),
+                                   0.24), 0.46)
+    dist = _math(nt, "SQRT", _math(nt, "ADD", _math(nt, "POWER", xa, 2.0),
+                                   _math(nt, "POWER", ya, 2.0)))
+    edge = _noise(nt, vec, 9.0, 3.0)                       # a ragged outline
+    dist = _math(nt, "ADD", dist, _math(nt, "MULTIPLY", edge, 0.30))
+    mr = nt.nodes.new("ShaderNodeMapRange")
+    mr.interpolation_type = "SMOOTHSTEP"
+    mr.inputs["From Min"].default_value = 0.85
+    mr.inputs["From Max"].default_value = 1.15
+    mr.inputs["To Min"].default_value = 1.0
+    mr.inputs["To Max"].default_value = 0.0
+    nt.links.new(dist, mr.inputs["Value"])
+    blotch = mr.outputs["Result"]
+
+    lw = nt.nodes.new("ShaderNodeLayerWeight")
+    lw.inputs["Blend"].default_value = 0.42
+    amber = _mix(nt, lw.outputs["Facing"], (0.200, 0.095, 0.022),
+                 (0.045, 0.013, 0.004))
+    amber = _mix(nt, _math(nt, "MULTIPLY", _noise(nt, vec, 5.0), 0.35), amber,
+                 (0.085, 0.030, 0.007))
+    color = _mix(nt, blotch, amber, (0.014, 0.0035, 0.0015))
+    rough = _math(nt, "ADD", _math(nt, "MULTIPLY", _noise(nt, vec, 4.0, 8.0),
+                                   0.30), 0.16)
+    pits = nt.nodes.new("ShaderNodeTexVoronoi")
+    pits.inputs["Scale"].default_value = 46.0
+    nt.links.new(vec, pits.inputs["Vector"])
+    _finish(nt, bsdf, color, rough, pits.outputs["Distance"], bump=0.22,
+            sss=0.07, coat=0.50, sss_radius=(0.9, 0.35, 0.08), coat_rough=0.08)
+    return mat
+
+
+def limb_material(name, dark, light, sss=0.10):
+    """Leg chitin: mottled, scuffed, slightly translucent."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    _, vec = _coords(nt)
+    color = _mix(nt, _noise(nt, vec, 6.0), dark, light)
+    rough = _math(nt, "ADD", _math(nt, "MULTIPLY", _noise(nt, vec, 9.0, 8.0),
+                                   0.30), 0.20)
+    _finish(nt, bsdf, color, rough, _noise(nt, vec, 30.0, 2.0), bump=0.30,
+            sss=sss, coat=0.45, coat_rough=0.10)
     return mat
 
 
@@ -280,14 +510,14 @@ ROACH_SWEEP = (1.15, -1.05, -1.25)
 def build_roach(phase: float, hang: bool, use_fur: bool):
     # Dark and greasy. A strong clear-coat over a mid brown went milky pink
     # under the overhead lamp, so the colour is deep and the coat is modest.
-    wing = material("wing", (0.070, 0.017, 0.005), rough=0.30, coat=0.45,
-                    bump=0.12, mottle=(0.150, 0.042, 0.010), scale=2.4)
-    shield = material("shield", (0.30, 0.135, 0.030), rough=0.34, coat=0.35,
-                      bump=0.08)
-    blotch = material("blotch", (0.040, 0.012, 0.005), rough=0.55)
-    dark = material("dark", (0.030, 0.010, 0.005), rough=0.4, coat=0.3)
-    legm = material("rleg", (0.115, 0.032, 0.009), rough=0.4, coat=0.25,
-                    bump=0.2)
+    # The realism is in the SURFACE: veined translucent wings, pigment blotches
+    # in a pitted amber shield, scuffed uneven shine - see the *_material docs.
+    wing = wing_material()
+    shield = shield_material()
+    blotch = material("eyeglass", (0.010, 0.006, 0.006), rough=0.08, coat=1.0)
+    dark = limb_material("dark", (0.018, 0.006, 0.003), (0.050, 0.016, 0.006))
+    legm = limb_material("rleg", (0.030, 0.0075, 0.0025), (0.105, 0.030, 0.008),
+                         sss=0.06)
     spine = material("spine", (0.045, 0.014, 0.006), rough=0.4)
     feel = material("feeler", (0.105, 0.034, 0.012), rough=0.4)
 
@@ -302,14 +532,15 @@ def build_roach(phase: float, hang: bool, use_fur: bool):
                       (2.30, 0.72, 0.20), wing)
         w.rotation_euler = (0.10 * side, 0, 0.035 * side)
     # pronotum: the amber shield, dark in the middle
-    ellipsoid("shield", (1.22 + sx, wag * 0.5, 0.42), (0.80, 1.00, 0.24), shield)
-    # TWO flat matte blotches, as on the real animal. One round glossy one in
-    # the middle of a pale disc rendered as a giant cartoon EYEBALL - a gestalt
-    # that only shows up in the assembled image, never in the numbers.
-    for side in (1, -1):
-        b = ellipsoid("blotch", (1.12 + sx, 0.34 * side + wag * 0.5, 0.585),
-                      (0.46, 0.27, 0.06), blotch, 32)
-        b.rotation_euler = (0, 0, 0.35 * side)
+    # The two blotches live in shield_material's pigment. (One round glossy
+    # blob in the middle of a pale disc rendered as a giant cartoon EYEBALL - a
+    # gestalt that only shows up in the assembled image, never in the numbers.)
+    ellipsoid("shield", (1.22 + sx, wag * 0.5, 0.42), (0.80, 1.00, 0.24),
+              shield, 64)
+    # the last plates of the abdomen just show between the wing tips
+    for j in range(3):
+        ellipsoid("tergite", (-2.62 - 0.17 * j + sx, wag, 0.31),
+                  (0.26, 0.62 - 0.13 * j, 0.17), dark, 32)
     # the head just shows under the front of the shield
     ellipsoid("head", (2.02 + sx, 0, 0.30), (0.34, 0.44, 0.24), dark, 32)
     for side in (1, -1):
@@ -340,23 +571,39 @@ def build_roach(phase: float, hang: bool, use_fur: bool):
             fx, fy, fz = foot_at(rest, ph, ROACH_STRIDE, lift=0.32)
             f = (fx + sx, fy * side, fz)
             pts = leg_points(h, f, total, ROACH_SWEEP[i], knee_bias=0.42)
-            tube("leg", [tuple(p) for p in pts], [0.165, 0.105, 0.070, 0.028],
+            tube("leg", [tuple(p) for p in pts], [0.185, 0.115, 0.066, 0.026],
                  legm)
-            # tibial spines: what makes a roach leg a roach leg
+            # tibial spines, both edges, uneven: what makes a roach leg a
+            # roach leg (the hind pair carries the longest)
             knee, ankle = pts[1], pts[2]
             along = (ankle - knee).normalized()
             out = Vector((-along.y, along.x, 0)) * side
-            for t in (0.25, 0.5, 0.75):
+            reach = 0.17 + 0.05 * i
+            for k, t in enumerate((0.15, 0.32, 0.50, 0.68, 0.86)):
                 base = knee.lerp(ankle, t)
-                tube("spine", [tuple(base),
-                               tuple(base + out * 0.20 + along * 0.10
-                                     + Vector((0, 0, 0.04)))],
-                     [0.030, 0.006], spine)
+                for edge in (1, -1):
+                    ln = reach * (0.75 + 0.35 * ((k * 7 + i * 3) % 5) / 4)
+                    if edge < 0:
+                        ln *= 0.7
+                    tube("spine", [tuple(base),
+                                   tuple(base + out * (ln * edge)
+                                         + along * (ln * 0.55)
+                                         + Vector((0, 0, 0.03)))],
+                         [0.026, 0.004], spine)
+            # the foot: a pair of claws
+            foot = pts[3]
+            toe = (foot - ankle).normalized()
+            for edge in (1, -1):
+                tube("claw", [tuple(foot),
+                              tuple(foot + toe * 0.10 + out * (0.07 * edge))],
+                     [0.020, 0.004], spine)
 
 
-# kind -> (builder, view units, stride units)
-BUGS = {"spider": (build_spider, SPIDER_VIEW, STRIDE),
-        "roach": (build_roach, ROACH_VIEW, ROACH_STRIDE)}
+# kind -> (builder, view units, stride units, lighting environment)
+# The spider's look is APPROVED as rendered under the plain lamp - it is matte
+# fur, so a room to reflect adds nothing; leave it alone.
+BUGS = {"spider": (build_spider, SPIDER_VIEW, STRIDE, ""),
+        "roach": (build_roach, ROACH_VIEW, ROACH_STRIDE, "interior")}
 
 
 def main():
@@ -369,12 +616,14 @@ def main():
 
     size, frames = val("--size", 256), val("--frames", 16)
     samples, only = val("--samples", 48), val("--only", -1)
-    build, view, stride = BUGS[kind]
+    build, view, stride, hdri = BUGS[kind]
+    hdri = val("--hdri", hdri)
+    tilt, turn = val("--tilt", 100.0), val("--turn", 20.0)
     out.mkdir(parents=True, exist_ok=True)
     for f in range(frames):
         if only >= 0 and f != only:
             continue
-        sc = reset_scene(size, view, samples)
+        sc = reset_scene(size, view, samples, hdri, tilt, turn)
         if clip != "hang":
             shadow_floor()
         build(f / frames, clip == "hang", "--fur" in opt)
