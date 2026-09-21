@@ -140,8 +140,15 @@ def test_the_whole_haunt_in_order(scene):
     s = scene({"deco_books", "deco_ghost"})
     _open(s)
     s._ghost["t"] = 0.0
-    assert _run(s, 14) == ["out", "emerge", "linger", "retreat", "back", "idle"]
-    assert s._ghost["slide"] == 0.0 and s._ghost["fade"] == 0 and s._ghost["seen"]
+    seen, steps = [], 0
+    while not s._ghost["seen"]:                     # stop the MOMENT he is done:
+        s._update_ghost(0.06)                       # the idle clock keeps ticking,
+        if not seen or seen[-1] != s._ghost["state"]:   # so checking his next wait
+            seen.append(s._ghost["state"])          # any later is a coin toss
+        steps += 1
+        assert steps < 1000
+    assert seen == ["out", "emerge", "linger", "retreat", "back", "idle"]
+    assert s._ghost["slide"] == 0.0 and s._ghost["fade"] == 0
     assert gs.GHOST_DELAY_S[0] <= s._ghost["t"] <= gs.GHOST_DELAY_S[1]
 
 
