@@ -189,3 +189,73 @@ def test_plate_toggle_declares_no_memory_and_defaults_off(su):
     g = next(x for x in su._dialog_groups() if x["key"] == "plate_batch")
     assert g["checked"] is False          # SHAPE is the default, every run
     assert g["remember"] is False         # and memory may never change that
+
+
+# ── non-ferrous plate: each part's MIL spec comes off its PART SKETCH page ──
+# (v2.3.0, maintainer 2026-09-21). Every sketch page ends in a 'FOR LABELING
+# INFORMATION ONLY' block: NC PROG / HULL / PART / MIL-SPEC headers, then the
+# four values. The line sequences below are REAL text-layer reads.
+
+def _sketch_pdf(tmp_path, pages):
+    fitz = pytest.importorskip("fitz")
+    pdf = tmp_path / "503856.pdf"
+    doc = fitz.open()
+    for lines in pages:
+        page = doc.new_page()
+        for k, ln in enumerate(lines):
+            page.insert_text((60, 50 + 13 * k), ln, fontsize=8)
+    doc.save(pdf)
+    doc.close()
+    return pdf
+
+
+def _sketch(part, fer, values):
+    return (["3 / 16", "FK370129", "PART SKETCH", "X503856S", f"PART: {part}",
+             "REV/SEQ: A/01", "QTY: 3", "NOUN: CHANNEL", "MATL:", f"FER: {fer}",
+             "130 CUT AND STAMP PART PER SCD AND PART SKETCH", "1", "NOT TO SCALE",
+             "FOR LABELING INFORMATION ONLY", "FINAL-INSP:",
+             "NC PROG", "HULL", "PART", "MIL-SPEC"] + values)
+
+
+def test_sketch_label_block_gives_each_part_its_own_spec(su, tmp_path):
+    pdf = _sketch_pdf(tmp_path, [
+        ["MOVE TICKET", "MIL SPEC: ASTM-B221", "FERROUS: A"],            # not a sketch page
+        _sketch("H4146707-1", "A", ["H4146707-1.A.01", "FJ", "H4146707-1", "ASTM-B221"]),
+        _sketch("H5532004-15-4", "N", ["H5532004-15-4.A.01", "X5", "H5532004-15-4", "QQ-N-281"]),
+        # a note-only sketch page: no PART:, no block (99 of 1,735 real pages)
+        ["13 / 16", "X8386369", "PART SKETCH", "X504197S", "8001 THE ER ON THIS OPERATION ..."],
+    ])
+    assert su._parse_sketch_mil_specs(pdf) == {
+        "H4146707-1": ("ASTM-B221", "A"),
+        "H5532004-15-4": ("QQ-N-281", "N"),
+    }
+
+
+def test_a_missing_value_never_shifts_another_field_into_the_spec(su, tmp_path):
+    pdf = _sketch_pdf(tmp_path, [
+        # no HULL printed: the spec is still the line after the PART value
+        _sketch("H1000000-1", "N", ["H1000000-1.A.01", "H1000000-1", "QQ-S-763"]),
+        # no MIL-SPEC printed: blank - NOT the hull, NOT the next page's counter
+        _sketch("H1000000-2", "N", ["H1000000-2.A.01", "FK", "H1000000-2"]),
+        _sketch("H1000000-3", "N", ["H1000000-3.A.01", "FK", "H1000000-3", "10 / 37"]),
+    ])
+    got = su._parse_sketch_mil_specs(pdf)
+    assert got["H1000000-1"] == ("QQ-S-763", "N")
+    assert got["H1000000-2"] == ("", "N")
+    assert got["H1000000-3"] == ("", "N")
+
+
+def test_part_rows_get_their_own_spec_and_unknown_parts_stay_blank(su):
+    ws = openpyxl.Workbook().active
+    for r in (4, 5, 6):
+        ws.cell(r, 4).value = "STALE-SPEC"          # what an older run wrote down every row
+    rows = [("X1", "H4146707-1", "AL", 3, "503856", "CUT"),
+            ("X2", "h5532004-15-4", "NICU", 1, "503856", "CUT"),   # case-tolerant
+            ("X3", "H9999999-9", "AL", 1, "503856", "CUT")]        # no sketch page
+    logged = []
+    filled, blank = su._fill_part_mil_specs(
+        ws, rows, {"H4146707-1": ("ASTM-B221", "A"), "H5532004-15-4": ("QQ-N-281", "N")},
+        logged.append)
+    assert (filled, blank) == (2, ["H9999999-9"])
+    assert [ws.cell(r, 4).value for r in (4, 5, 6)] == ["ASTM-B221", "QQ-N-281", None]
+    assert any("H9999999-9" in ln and "BLANK" in ln for ln in logged)

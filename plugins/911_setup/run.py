@@ -154,9 +154,11 @@ v2.3.0 changes (floor feedback 2026-09-18 -- the SCRIBE VERIFICATION sheet)
     rows (L022 5CDBBM: 4 of 34). With the plate shape added, 682 of 682 rows
     across 14 batches verify - and all 682 agree with the packet.
   - PLATE: MIL SPEC follows the packet's FERROUS flag - carbon ('F') is N/A,
-    non-ferrous ('N' / 'A') is BLANK to be filled in by hand (it kept the
-    packet's spec, which was not reliably the right one), and a packet with no
-    flag at all is BLANK too: when the app cannot tell, it does not guess.
+    non-ferrous ('N' / 'A') gets each part's OWN spec, read off the 'FOR
+    LABELING INFORMATION ONLY' block at the foot of that part's PART SKETCH page
+    (it used to get the move ticket's single spec on every row); a part with no
+    spec printed is left blank, and so is a packet with no flag at all - when
+    the app cannot tell, it does not guess.
 
 v2.1.0 changes (coworker feedback 2026-09-03 -- PLATE batches)
   - New "PLATE batch" toggle in the master window, default OFF (= SHAPE) and
@@ -1101,11 +1103,12 @@ def _effective_mil_spec(mil_spec, ferrous, plate: bool):
 
     PLATE mode: the packet's own MOVE TICKET 'FERROUS:' flag decides.
       'F' (carbon)            -> the literal 'N/A' (coworker feedback 2026-09-03)
-      'N' / 'A' (non-ferrous) -> BLANK (v2.3.0, floor feedback 2026-09-18):
-          stainless, aluminum, copper nickel etc. DO need a MIL spec, and the
-          one read off the packet was not reliably the right one - a blank cell
-          says "fill me in", a wrong value has to be noticed before it can be
-          overridden. v2.1.0-v2.2.1 kept the packet's spec here.
+      'N' / 'A' (non-ferrous) -> None HERE, because the value is not one per
+          nest: stainless, aluminum, copper nickel etc. DO need a MIL spec, and
+          `_fill_part_mil_specs` writes each part row's own, read off that
+          part's PART SKETCH labeling block (maintainer 2026-09-21). A part
+          with no spec printed stays blank. v2.1.0-v2.2.1 wrote the MOVE
+          TICKET's single spec down every row.
       flag missing            -> BLANK too (maintainer's rule, 2026-09-21: "can
           we tell ferrous from non-ferrous? if not, have the column blank").
           It is the rare case - 212 of 212 recent packets carry the flag
@@ -1118,6 +1121,94 @@ def _effective_mil_spec(mil_spec, ferrous, plate: bool):
         return mil_spec
     flag = str(ferrous).strip().upper() if ferrous else ""
     return "N/A" if flag == "F" else None
+
+
+# Lines that can follow the labeling block's PART value without being a MIL spec.
+_LABEL_NOT_A_SPEC = {"NC PROG", "HULL", "PART", "MIL-SPEC", "FINAL-INSP:",
+                     "NOT TO SCALE", "FOR LABELING INFORMATION ONLY", "PART SKETCH"}
+_PAGE_COUNTER_RE = re.compile(r"^\d+\s*/\s*\d+$")
+
+
+def _parse_sketch_mil_specs(pdf_path: Path) -> dict:
+    """
+    {PART NUMBER (upper): (mil_spec, fer)} read off every PART SKETCH page of a
+    nest packet (v2.3.0, maintainer 2026-09-21).
+
+    Each part's sketch page ends in a 'FOR LABELING INFORMATION ONLY' block -
+    four barcodes headed NC PROG / HULL / PART / MIL-SPEC with the value
+    printed under each. It is the spec that goes on THAT part's label, so it is
+    the per-part source for the MIL SPEC column; the MOVE TICKET field the app
+    used until now is one value for the whole nest. The text layer gives the
+    four headers, then the values in the same order:
+        NC PROG, HULL, PART, MIL-SPEC, H4146707-1.A.01, FJ, H4146707-1, ASTM-B221
+    The spec is taken as the line right AFTER the one equal to the page's own
+    PART: value - not "the fourth value" - so a part with no HULL or no spec
+    printed can never shift another field into the spec.
+
+    `fer` is the page's own FER: flag (F / N / A). Measured on 212 recent
+    packets: all 1,253 real parts carry the block (the 99 sketch pages without
+    one are note-only pages with no PART: on them), and no packet's parts
+    disagreed with each other or with the move ticket.
+    """
+    out = {}
+    if not PYMUPDF_AVAILABLE:
+        return out
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 6)
+    doc = fitz.open(sdk.long_path(pdf_path))
+    try:
+        for page in doc:
+            lines = [ln.strip() for ln in page.get_text().splitlines() if ln.strip()]
+            if "PART SKETCH" not in lines or "MIL-SPEC" not in lines:
+                continue
+            part = next((ln.split(":", 1)[1].strip() for ln in lines
+                         if ln.upper().startswith("PART:")), "")
+            if not part:
+                continue
+            fer = next((ln.split(":", 1)[1].strip().upper() for ln in lines
+                        if ln.upper().startswith("FER:")), "")
+            after = lines[lines.index("MIL-SPEC") + 1:]
+            spec = ""
+            if part in after:
+                at = after.index(part)
+                nxt = after[at + 1: at + 2]
+                if (nxt and nxt[0].upper() not in _LABEL_NOT_A_SPEC
+                        and not _PAGE_COUNTER_RE.match(nxt[0])
+                        and not nxt[0].upper().startswith("PART:")):
+                    spec = nxt[0]
+            key = part.upper()
+            if key not in out or (spec and not out[key][0]):
+                out[key] = (spec, fer)
+    finally:
+        doc.close()
+    return out
+
+
+def _fill_part_mil_specs(nest_ws, batch_rows: list, sketch_specs: dict, log) -> tuple:
+    """
+    PLATE + non-ferrous: write each part row's MIL SPEC (NEST col D) from that
+    part's own PART SKETCH labeling block. Returns (filled, blank_parts).
+
+    A part whose sketch page gave no spec is left BLANK - named in the log so
+    it is filled in by hand, never given a neighbour's value. Every row is
+    written, so a re-run over an older workbook cannot keep a stale spec.
+    """
+    filled, blank = 0, []
+    for i, (_wo, dypn, *_rest) in enumerate(batch_rows):
+        key = str(dypn).strip().upper()
+        spec = (sketch_specs.get(key) or ("", ""))[0]
+        nest_ws.cell(4 + i, 4).value = spec or None
+        if spec:
+            filled += 1
+        else:
+            blank.append(str(dypn))
+    if filled:
+        log(f"  MIL Spec -> col D: {filled} part row(s) filled from their PART "
+            f"SKETCH labeling block.")
+    if blank:
+        log(f"  WARNING: No MIL-SPEC on the PART SKETCH page for {len(blank)} part(s) "
+            f"-- left BLANK to fill in by hand: {', '.join(blank[:8])}"
+            + (" ..." if len(blank) > 8 else ""))
+    return filled, blank
 
 
 def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
@@ -2171,8 +2262,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 log(f"  FERROUS: {ferrous} (carbon plate) -> MIL Spec D4 set "
                     f"to N/A (packet said {mil_spec or 'nothing'}).")
             elif plate and ferrous:
-                log(f"  FERROUS: {ferrous} (non-ferrous plate) -> MIL Spec left "
-                    f"BLANK to be filled in by hand (packet said "
+                log(f"  FERROUS: {ferrous} (non-ferrous plate) -> MIL Spec comes "
+                    f"from each part's PART SKETCH page (move ticket said "
                     f"{mil_spec or 'nothing'}).")
             elif plate:
                 log("  WARNING: No FERROUS flag in the nest packet -- cannot tell "
@@ -2231,6 +2322,16 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 # older workbook the part rows would keep the spec it wrote then.
                 for r in range(4, 4 + max(num_parts, 1)):
                     nest_ws.cell(r, 4).value = None
+            if mil_left_blank and ferrous and batch_rows:
+                # Non-ferrous plate: each part's own spec, off its sketch page.
+                nest_pdf = _find_nest_pdf(nest_packages_folder, nest)
+                try:
+                    sketch_specs = _parse_sketch_mil_specs(nest_pdf) if nest_pdf else {}
+                except Exception as e:
+                    log(f"  WARNING: Could not read the PART SKETCH pages of "
+                        f"{nest} for MIL specs: {e}")
+                    sketch_specs = {}
+                _fill_part_mil_specs(nest_ws, batch_rows, sketch_specs, log)
 
             # -- SCRIBE VERIFICATION table: exactly one row per part ----------
             _fit_scribe_table(wb, num_parts, log)
