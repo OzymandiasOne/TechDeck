@@ -31,7 +31,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QWidget, QSizePolicy
 from PySide6.QtCore import Qt, QRect, QTimer, QPoint
-from PySide6.QtGui import QPainter, QPixmap, QColor, QPolygon
+from PySide6.QtGui import QImage, QPainter, QPixmap, QColor, QPolygon
 
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.core.audio_manager import (
@@ -263,6 +263,28 @@ ITEM_ANIM_FRAME_MS = 150       # ms per frame while a Buddy-triggered item clip 
 FROG_HOP_START = 1             # first hop frame (frog leaps from its sitting pose)
 FROG_HOP_MS = 120              # ms/frame for the leap + ripples (snappy)
 FROG_HOP_DELAY_S = (20.0, 60.0)  # random idle wait before the single hop
+
+# The Ghost (deco_ghost): he has no spot of his own - he HAUNTS THE BOOKSHELF.
+# While the house is open, every so often the shelf slides to the left and he
+# drifts out into the gap it leaves, hangs there a beat, and slips back; then the
+# shelf slides home. His 24-frame clip is a 32px-wide canvas in which he emerges
+# from the RIGHT edge (a hard cut at x=32), travels 10px left, holds, and returns
+# - so the canvas sits with that cut on the shelf's resting RIGHT edge, and he
+# comes out of the wall into the space the shelf has just vacated. He is drawn
+# BEHIND the shelf, so at full stretch he tucks in behind its new position.
+GHOST_ITEM = "deco_ghost"
+GHOST_HOST = "deco_books"
+GHOST_FRAMES = [f"sPet_ItemGhostAppear_{i}.png" for i in range(24)]
+GHOST_OFFSET = (-16, 0)         # clip origin relative to the bookshelf placement
+GHOST_SHELF_SLIDE = -16         # px the bookshelf travels (negative = left)
+GHOST_SLIDE_S = 0.8             # seconds for the shelf to slide, each way
+GHOST_FRAME_MS = 105            # ms per ghost frame
+GHOST_PEAK_FRAME = 12           # fully out...
+GHOST_PEAK_HOLD_S = 1.3         # ...and he lingers there, looking at you
+GHOST_FIRST_DELAY_S = (8.0, 20.0)    # soon after the house opens: see what you bought
+GHOST_DELAY_S = (45.0, 120.0)        # then a rare surprise
+GHOST_OPACITY = 0.88
+GHOST_EDGE_FADE_PX = 4          # he MATERIALISES out of the cut, not a hard line
 
 # Items handled as moving "agents" (their own behaviour, not static placement).
 AGENTS = {"deco_bird", "deco_butterfly"}
@@ -526,6 +548,7 @@ class GardenScene(QWidget):
     def showEvent(self, e):
         super().showEvent(e)
         self._reset_frog()          # navigated back -> frog returns to its pad
+        self._reset_ghost()         # ...and the bookshelf is back in its place
         self._anim_timer.start()
         self._agent_timer.start()
         self.update()
@@ -673,7 +696,11 @@ class GardenScene(QWidget):
             p.drawPixmap(tx, ty, self._tree[st])
         hidden = self._hidden_item()           # item Buddy is currently 'wearing'
         for rec in self._furniture:            # interior — behind the facade
-            if rec["id"] != hidden:
+            if rec["id"] == hidden:
+                continue
+            if rec["id"] == GHOST_HOST and self._ghost is not None:
+                self._draw_haunted_shelf(p, rec)
+            else:
                 p.drawPixmap(*self._item_draw(rec))
         if self._buddy is not None and self._buddy["inside"]:
             self._draw_buddy(p)                # indoors — drawn among the interior
@@ -872,6 +899,118 @@ class GardenScene(QWidget):
             (exterior if item_id in EXTERIOR else interior).append(rec)
         self._furniture = interior
         self._furniture_ext = exterior
+        self._init_ghost()
+
+    # ---- the Ghost: he haunts the bookshelf ----------------------------------
+    @staticmethod
+    def _fade_right_edge(pm, width):
+        """Ramp the alpha down across the last `width` columns, so the ghost
+        materialises out of the clip's hard right-hand cut instead of being
+        sliced by an invisible line."""
+        img = pm.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        w = img.width()
+        for i in range(width):
+            x = w - 1 - i
+            keep = (i + 1) / (width + 1)
+            for y in range(img.height()):
+                c = img.pixelColor(x, y)
+                if c.alpha():
+                    c.setAlpha(int(c.alpha() * keep))
+                    img.setPixelColor(x, y, c)
+        return QPixmap.fromImage(img)
+
+    def _init_ghost(self):
+        """Arm the haunt if the player owns the Ghost AND the shelf he hides
+        behind is placed; otherwise there is simply no ghost."""
+        self._ghost = None
+        if not self._owned(GHOST_ITEM) or self._rec_by_id(GHOST_HOST) is None:
+            return
+        frames = [f for f in self._load_clip(GHOST_FRAMES) if f is not None]
+        if len(frames) != len(GHOST_FRAMES):
+            return                  # a build without the clip: no ghost, no crash
+        frames = [self._fade_right_edge(f, GHOST_EDGE_FADE_PX) for f in frames]
+        self._ghost = {"frames": frames, "state": "idle", "t": 0.0, "slide": 0.0,
+                       "idx": 0, "wt": 0.0, "hold": 0.0, "seen": False}
+        self._reset_ghost()
+
+    def _reset_ghost(self):
+        """Shelf home, ghost gone, a fresh wait. Called when the scene is shown."""
+        g = getattr(self, "_ghost", None)
+        if g is None:
+            return
+        g.update(state="idle", slide=0.0, idx=0, seen=False,
+                 t=random.uniform(*GHOST_FIRST_DELAY_S))
+
+    def _ghost_busy(self):
+        g = getattr(self, "_ghost", None)
+        return g is not None and g["state"] != "idle"
+
+    def _buddy_wants(self, item_id):
+        """Is Buddy on his way to, or busy at, this item?"""
+        bu = self._buddy
+        if bu is None:
+            return False
+        for key in ("goal", "act_rec"):
+            rec = bu.get(key)
+            if isinstance(rec, dict) and rec.get("id") == item_id:
+                return True
+        return False
+
+    def _update_ghost(self, dt):
+        """Advance the haunt. Returns True if anything moved (needs a repaint).
+        idle -> out (shelf slides left) -> show (the clip) -> back -> idle."""
+        g = getattr(self, "_ghost", None)
+        if g is None:
+            return False
+        st = g["state"]
+        if st == "idle":
+            # the clock only runs while the interior can actually be SEEN
+            if self._open_progress < 0.999:
+                return False
+            g["t"] -= dt
+            if g["t"] > 0 or self._buddy_wants(GHOST_HOST):
+                return False        # never slide the shelf out from under Buddy
+            g.update(state="out", slide=0.0)
+            return True
+        if st in ("out", "back"):
+            step = dt / GHOST_SLIDE_S
+            if st == "out":
+                g["slide"] = min(1.0, g["slide"] + step)
+                if g["slide"] >= 1.0:
+                    g.update(state="show", idx=0, wt=GHOST_FRAME_MS / 1000.0,
+                             hold=GHOST_PEAK_HOLD_S)
+            else:
+                g["slide"] = max(0.0, g["slide"] - step)
+                if g["slide"] <= 0.0:
+                    g.update(state="idle", seen=True,
+                             t=random.uniform(*GHOST_DELAY_S))
+            return True
+        # show: play the clip once, lingering on the fully-out frame
+        if g["idx"] == GHOST_PEAK_FRAME and g["hold"] > 0:
+            g["hold"] -= dt
+            return False
+        g["wt"] -= dt
+        if g["wt"] > 0:
+            return False
+        g["wt"] = GHOST_FRAME_MS / 1000.0
+        if g["idx"] < len(g["frames"]) - 1:
+            g["idx"] += 1
+        else:
+            g["state"] = "back"
+        return True
+
+    def _draw_haunted_shelf(self, p, rec):
+        """The bookshelf at its slid position, with the ghost BEHIND it."""
+        g = self._ghost
+        x, y, pm = self._item_draw(rec)
+        if g["state"] == "show":
+            p.setOpacity(GHOST_OPACITY)
+            p.drawPixmap(rec["x"] + GHOST_OFFSET[0], rec["y"] + GHOST_OFFSET[1],
+                         g["frames"][g["idx"]])
+            p.setOpacity(1.0)
+        s = g["slide"]
+        eased = s * s * (3 - 2 * s)
+        p.drawPixmap(x + int(round(GHOST_SHELF_SLIDE * eased)), y, pm)
 
     def _init_frog(self, rec):
         """Take the lily pad off the generic ambient loop and onto its own rare-hop
@@ -974,6 +1113,8 @@ class GardenScene(QWidget):
             moved = True
         if self._update_frog(AGENT_MS / 1000.0):
             moved = True
+        if self._update_ghost(AGENT_MS / 1000.0):
+            moved = True
         if moved:
             self.update()
 
@@ -1048,6 +1189,8 @@ class GardenScene(QWidget):
         """Buddy can use a placed item if it's an interaction with either a Buddy
         pose OR an item clip (a clip-only item, e.g. the chest, plays its own
         animation while Buddy stands idle by it)."""
+        if r["id"] == GHOST_HOST and self._ghost_busy():
+            return False            # the shelf is mid-haunt: not now, Buddy
         return r["id"] in BUDDY_INTERACTIONS and (r["id"] in self._buddy_acts
                                                   or r.get("clip"))
 

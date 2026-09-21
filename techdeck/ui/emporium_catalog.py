@@ -107,6 +107,15 @@ CATALOG = [
      "sprite": "sPet_ItemSpider_0.png", "cost": 15, "kind": "furniture"},
     {"id": "deco_trapdoor", "name": "Trap Door", "category": "decorations",
      "sprite": "sPet_ItemTrapDoor_0.png", "cost": 30, "kind": "furniture"},
+    # The Ghost haunts the BOOKSHELF: now and then the shelf slides aside and he
+    # drifts out from behind it (garden_scene, "The Ghost"). So he is only sold
+    # to someone who owns the shelf ("requires" an item id), and only during
+    # the Halloween season ("seasonal") - once bought he stays, all year. His
+    # own still (sPet_ItemGhost_0) is EMPTY on purpose - he is invisible at
+    # rest - so the store shows the fully-out frame of his clip instead.
+    {"id": "deco_ghost", "name": "Ghost", "category": "decorations",
+     "sprite": "sPet_ItemGhostAppear_12.png", "cost": 90, "kind": "furniture",
+     "requires": "deco_books", "seasonal": "halloween"},
     # --- more furniture (yard) ---
     {"id": "deco_picnic", "name": "Picnic Blanket", "category": "decorations",
      "sprite": "sPet_ItemPicnicBlanket_0.png", "cost": 35, "kind": "furniture"},

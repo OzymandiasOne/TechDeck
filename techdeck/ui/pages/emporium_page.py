@@ -318,8 +318,18 @@ class EmporiumPage(QWidget):
         items that 'require' a milestone (owl/monkey need a fully grown tree)."""
         if self.settings.is_unlocked(item["id"]):
             return True
-        if item.get("requires") == "tree_full":
+        if item.get("seasonal") == "halloween":
+            # seasonal stock: on the shelf only while the season is on
+            from techdeck.core.constants import halloween_active
+            if not halloween_active(settings=self.settings):
+                return False
+        requires = item.get("requires")
+        if requires == "tree_full":
             return self.settings.get_tree_stage() >= self.settings.TREE_STAGES
+        if requires:
+            # any other value is an ITEM id that must be owned first (the Ghost
+            # needs the Bookshelf he hides behind)
+            return self.settings.is_unlocked(requires)
         return True
 
     def _populate_grid(self):
