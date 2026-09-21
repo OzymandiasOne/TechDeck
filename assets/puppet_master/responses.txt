@@ -222,7 +222,7 @@
 ? what can you do
 ? what do you do
 ? what are you for
-> I watch. I speak. I redefine limits. The machine's chores are listed
+> I observe you and your choices. This machine's chores are listed
 > under /help. They are not mine.
 
 ? tell me a joke
