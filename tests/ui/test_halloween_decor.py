@@ -111,6 +111,47 @@ def test_the_web_is_silk_in_its_own_corner_not_a_filled_box(qapp, corner):
     assert closer > 0.8 * len(inked)
 
 
+def test_the_top_right_web_is_a_true_quarter_circle(qapp):
+    """Wall to wall (90 degrees) and the same radius all the way round."""
+    size = hd.WEB_SMALL_PX
+    img = hd.render_web(size, "tr", quarter=True).toImage()
+    corner = (size - 1, 0)
+
+    def farthest(lo, hi):
+        """How far from the corner the silk reaches, within an angle band."""
+        best = 0.0
+        for y in range(size):
+            for x in range(size):
+                if img.pixelColor(x, y).alpha() < 90:
+                    continue
+                dx, dy = corner[0] - x, y - corner[1]
+                ang = math.degrees(math.atan2(dy, dx))
+                if lo <= ang < hi:
+                    best = max(best, math.hypot(dx, dy))
+        return best
+
+    bands = [farthest(a, a + 15) for a in range(0, 90, 15)]
+    # every 15-degree slice, INCLUDING the two against the walls, reaches
+    # the rim: a full 90 degrees, one radius
+    assert min(bands) > 0.90 * size
+    assert max(bands) - min(bands) < 0.10 * size
+    # the old kite, by contrast, is clearly shorter through the middle
+    kite = hd.render_web(size, "tr", quarter=False).toImage()
+    img = kite
+    assert farthest(38, 52) < 0.90 * size
+
+
+def test_only_the_top_right_web_is_the_quarter_circle(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    webs = {w.corner: w for w in decor._webs}
+    assert webs["tr"].width() == hd.WEB_SMALL_PX        # radius unchanged
+    assert (webs["tr"]._pix.toImage()
+            == hd.render_web(hd.WEB_SMALL_PX, "tr", quarter=True).toImage())
+    assert (webs["bl"]._pix.toImage()
+            == hd.render_web(hd.WEB_LARGE_PX, "bl", quarter=False).toImage())
+
+
 def test_the_webs_are_drawn_see_through(host, season):
     assert 0.4 <= hd.WEB_OPACITY < 1.0
     decor = _decor(host)

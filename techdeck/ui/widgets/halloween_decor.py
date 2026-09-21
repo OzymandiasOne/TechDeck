@@ -159,11 +159,16 @@ class _Overlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
-def render_web(size: int, corner: str, seed: int = WEB_SEED) -> QPixmap:
+def render_web(size: int, corner: str, seed: int = WEB_SEED,
+               quarter: bool = False) -> QPixmap:
     """One corner cobweb, drawn once. Built in 'web space' (u, v measured out
     of the corner along the two walls) and mapped into the pixmap per corner,
     so that GRAVITY - the droop of a snapped strand, the hang of a stray
-    thread - always points down the screen whichever corner it is in."""
+    thread - always points down the screen whichever corner it is in.
+
+    `quarter=True` draws a true 90-degree fan: spokes from wall to wall, all
+    the same length, so the outline is a quarter circle of radius ~`size`.
+    Otherwise the middle spokes are shorter and the web sags into a kite."""
     rng = random.Random(seed * 7919 + size)
     pix = QPixmap(size, size)
     pix.fill(Qt.GlobalColor.transparent)
@@ -195,12 +200,20 @@ def render_web(size: int, corner: str, seed: int = WEB_SEED) -> QPixmap:
         p.drawPath(path)
 
     n = 8 if size < 200 else 10
-    angles = [math.radians(3 + 84 * i / (n - 1) + rng.uniform(-2.5, 2.5))
-              for i in range(n)]
-    reach = []
-    for i in range(n):
-        mid = 1 - abs(i - (n - 1) / 2) / ((n - 1) / 2)       # 0 at the walls
-        reach.append(size * (0.97 - 0.20 * mid) * rng.uniform(0.9, 1.0))
+    if quarter:
+        # wall to wall: the end spokes lie ALONG the two walls (half a degree
+        # in, so the hairline is not clipped by the pixmap edge)
+        angles = [math.radians(0.5 + 89 * i / (n - 1)
+                               + (rng.uniform(-2.0, 2.0) if 0 < i < n - 1 else 0))
+                  for i in range(n)]
+        reach = [size * 0.97 for _ in range(n)]
+    else:
+        angles = [math.radians(3 + 84 * i / (n - 1) + rng.uniform(-2.5, 2.5))
+                  for i in range(n)]
+        reach = []
+        for i in range(n):
+            mid = 1 - abs(i - (n - 1) / 2) / ((n - 1) / 2)   # 0 at the walls
+            reach.append(size * (0.97 - 0.20 * mid) * rng.uniform(0.9, 1.0))
 
     def at(i, r):
         r = min(r, reach[i])
@@ -611,9 +624,12 @@ class HalloweenDecor(QObject):
             for web in self._webs:
                 web.place()
             return
-        for size, corner in ((WEB_SMALL_PX, "tr"), (WEB_LARGE_PX, "bl")):
+        # top-right: a clean 90-degree quarter circle (his call); bottom-left
+        # keeps the saggy kite
+        for size, corner, quarter in ((WEB_SMALL_PX, "tr", True),
+                                      (WEB_LARGE_PX, "bl", False)):
             try:
-                pix = render_web(size, corner)
+                pix = render_web(size, corner, quarter=quarter)
             except Exception:
                 # decor that cannot draw simply does not appear
                 log.exception("halloween decor: could not draw the %s web", corner)
