@@ -56,6 +56,7 @@ PLUGIN_ICON_KEYS = {
     "qa_gemba_analyzer":    "magnifier",
     "911_sspo_invoicing_prep": "scrooge_mcduck",
     "902_dxf_prep":         "ruler",
+    "902_batch_validator":  "batch_validator",
     "911_baked_beans_wild_ride": "mr_beans",
     "sheet_metal_calculators": "calculator",
     "mietrak_tools":        "mietrak",

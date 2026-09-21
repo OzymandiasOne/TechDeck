@@ -807,6 +807,31 @@ def show_warning(params: dict, title: str, text: str) -> None:
     log(f"WARNING [{title}]: {text}")
 
 
+def link_output(params: dict, text: str, target_path, prefix: str = "") -> None:
+    """End the run with a CLICKABLE console line that opens `target_path` (a
+    report PDF, an output folder) in its default app - a Pilot Program path is
+    a long walk to go and find. Printed LAST, after the shell's completed line.
+
+    Never fails a run: headless, or on an older TechDeck whose console predates
+    `append_link` (or its keywords), it degrades to a plain log line naming the
+    path. The newest-first TypeError ladder used to be hand-copied per plugin."""
+    log = params.get("log", print)
+    console = params.get("console")
+    target = str(target_path)
+    if console is None or not hasattr(console, "append_link"):
+        log(f"{prefix + ' ' if prefix else ''}{text}: {target}")
+        return
+    for kwargs in ({"prefix": prefix, "at_run_end": True}, {"prefix": prefix}, None):
+        try:
+            if kwargs is None:
+                console.append_link(f"{prefix + ' ' if prefix else ''}{text}", target)
+            else:
+                console.append_link(text, target, **kwargs)
+            return
+        except TypeError:
+            continue
+
+
 def show_report(params: dict, title: str, subtitle: str, body: str,
                 save_path: str = "") -> str:
     """Put a finished report on screen with a Save-as-.txt button. Returns a note
@@ -1609,6 +1634,138 @@ def _doc_source_is(doc, dest_path: Path) -> bool:
         return _strip_long_prefix(src) == _strip_long_prefix(dest_path)
     except Exception:
         return False
+
+
+# ── Color-coded PDF report ──────────────────────────────────────────────────
+# The report look 922 LST Organizer introduced (v3.0): a title, a summary
+# table, then red/orange/blue/green sections. Promoted here 2026-09-21 when the
+# 911 LST Organizer and 902 Batch Validator wanted the same report - one home,
+# so every app's report reads the same and a layout fix lands everywhere.
+
+REPORT_COLORS = {            # RGB 0-1
+    "band": (0.12, 0.31, 0.37),      # dark teal - titles + table header band
+    "white": (1, 1, 1),
+    "grey": (0.46, 0.46, 0.46),
+    "ink": (0.10, 0.10, 0.12),
+    "miss_bg": (0.97, 0.85, 0.85), "miss_tx": (0.60, 0.00, 0.00),   # red
+    "rev_bg": (0.99, 0.91, 0.82), "rev_tx": (0.70, 0.37, 0.02),     # orange
+    "ok_bg": (0.85, 0.93, 0.82), "ok_tx": (0.15, 0.31, 0.07),       # green
+    "extra_bg": (0.82, 0.90, 0.96), "extra_tx": (0.10, 0.32, 0.55),  # blue
+    "target_bg": (1.0, 0.95, 0.74),
+    "group_bg": (0.86, 0.89, 0.96),
+    "zebra": (0.96, 0.96, 0.97),
+}
+
+
+class ReportPdf:
+    """Tiny top-down PDF layout helper over PyMuPDF with auto page breaks.
+
+    `text()` writes a line, `row()` a table row (cells clipped to their column
+    width, optional fill), `gap()` adds space, `save()` writes + closes. Letter
+    portrait, 42pt margins. Build the whole report, then save once."""
+
+    PW, PH, M = 612, 792, 42
+
+    def __init__(self):
+        import fitz
+        self._fitz = fitz
+        self.doc = fitz.open()
+        self._page()
+
+    def _page(self):
+        self.p = self.doc.new_page(width=self.PW, height=self.PH)
+        self.y = self.M
+
+    def _fits(self, h):
+        if self.y + h > self.PH - self.M:
+            self._page()
+
+    @staticmethod
+    def _font(bold):
+        return "hebo" if bold else "helv"
+
+    def _clip(self, s, w, size, bold=False):
+        s = "" if s is None else str(s)
+        fn = self._font(bold)
+        measure = self._fitz.get_text_length
+        if measure(s, fontname=fn, fontsize=size) <= w - 6:
+            return s
+        while s and measure(s + "..", fontname=fn, fontsize=size) > w - 6:
+            s = s[:-1]
+        return s + ".."
+
+    def gap(self, h):
+        self.y += h
+
+    def new_page(self):
+        """Start the next section on a fresh page (no-op on an untouched one)."""
+        if self.y > self.M:
+            self._page()
+
+    def text(self, s, size: float = 9, bold=False, color=None, dx=0):
+        self._fits(size + 4)
+        self.y += size
+        self.p.insert_text((self.M + dx, self.y), s, fontsize=size,
+                           fontname=self._font(bold),
+                           color=color or REPORT_COLORS["ink"])
+        self.y += 4
+
+    def _wrap(self, s, w, size, bold=False):
+        """Greedy word wrap of one cell to its column width (a single word
+        wider than the column is clipped, never split mid-word)."""
+        s = "" if s is None else str(s)
+        fn = self._font(bold)
+        measure = self._fitz.get_text_length
+        lines, cur = [], ""
+        for word in s.split():
+            trial = f"{cur} {word}" if cur else word
+            if not cur or measure(trial, fontname=fn, fontsize=size) <= w - 6:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+        return [self._clip(ln, w, size, bold) for ln in lines]
+
+    def row(self, cells, widths, size=8.5, h=15, bold=False,
+            fill=None, tcolor=None, wrap=False):
+        """One table row. `wrap=True` lets a long cell run onto more lines (the
+        row grows to fit) instead of being clipped with '..' - use it where
+        the cell is a sentence someone has to read in full."""
+        cols = [self._wrap(c, w, size, bold) if wrap
+                else [self._clip(c, w, size, bold)]
+                for c, w in zip(cells, widths)]
+        line_h = size + 3
+        h = h + line_h * (max(len(c) for c in cols) - 1)
+        self._fits(h)
+        x0 = self.M
+        if fill is not None:
+            self.p.draw_rect(
+                self._fitz.Rect(x0, self.y, x0 + sum(widths), self.y + h),
+                fill=fill, width=0)
+        x = x0
+        first = self.y + (h - line_h * (max(len(c) for c in cols) - 1)) - 4.5
+        for lines, w in zip(cols, widths):
+            for k, ln in enumerate(lines):
+                self.p.insert_text((x + 3, first + k * line_h), ln,
+                                   fontsize=size, fontname=self._font(bold),
+                                   color=tcolor or REPORT_COLORS["ink"])
+            x += w
+        self.y += h
+
+    def header_row(self, cells, widths, size=8.5, h=16):
+        """The white-on-teal column header every report table opens with."""
+        self.row(cells, widths, size=size, h=h, bold=True,
+                 fill=REPORT_COLORS["band"], tcolor=REPORT_COLORS["white"])
+
+    def save(self, path):
+        """Write the report (long-path safe, parent folder created) + close."""
+        path = Path(path)
+        ensure_dir(path.parent)
+        try:
+            self.doc.save(long_path(path), garbage=3, deflate=True)
+        finally:
+            self.doc.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

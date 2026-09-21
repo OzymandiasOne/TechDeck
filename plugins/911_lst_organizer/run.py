@@ -1,5 +1,5 @@
 """
-911 LST Organizer Plugin - v2.2.0
+911 LST Organizer Plugin - v2.3.0
 Single-file TechDeck plugin.
 
 Pulls the .lst files for exactly the parts a nest's 1D cutting-pattern diagram
@@ -32,6 +32,14 @@ real 911 workflow 2026-07-07):
    the console + report AND raised as a blocking popup (sdk.show_warning) so
    they can't scroll past unseen.
 
+v2.3.0 (2026-09-21) - caught up with the 922 LST Organizer: the pull report
+is now ONE color-coded PDF ('LST Report - {batch} {nest}.pdf', drawn by the
+shared sdk.ReportPdf) instead of a tab-separated .txt plus a debug .jsonl; the
+source nests' .lst files are prefetched from OneDrive in the background; the
+attention popup NAMES the missing parts instead of pointing at the report; and
+problems the user can fix (wrong folder, no 1D diagram) read as plain-English
+stop messages, not tracebacks.
+
 The batch/nest/root are derived from the picked path itself (the component
 after the '911 QTDR' ancestor), so per-machine OneDrive layout differences
 ('Communication site - Electric Boat ASA Docs' vs 'Communication site - Pilot
@@ -39,7 +47,6 @@ Program') don't matter.
 """
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import time
@@ -60,7 +67,7 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # Hard Rule 3 nest shape (also the shape of a foreign-nest prefix in Parts Id).
 NEST_RE = sdk.NEST_ID_RE  # single home in the SDK — never re-type the pattern
@@ -268,43 +275,115 @@ def _retry_fileop(fn, *args, **kwargs):
 
 # ── Report ─────────────────────────────────────────────────────────────────────
 
-def _write_report(txt_path: Path, info: dict, rows: list,
+def _write_report(pdf_path: Path, info: dict, rows: list,
                   unresolved: Dict[str, List[str]], copied: int,
-                  issues: List[str]) -> None:
-    """rows: (part, nest, batch, [copied names] or None, variant part or None)."""
-    with open(sdk.long_path(txt_path), "w", encoding="utf-8", newline="") as f:
-        f.write("# 911 LST pull report (generated)\n")
-        f.write("# " + "=" * 76 + "\n")
-        for k, v in info.items():
-            f.write(f"# {k}: {v}\n")
-        missing = [r for r in rows if not r[3]]
-        f.write(f"# parts_listed: {len(rows) + sum(len(v) for v in unresolved.values())}\n")
-        f.write(f"# files_copied: {copied}\n")
-        f.write(f"# parts_missing_lst: {len(missing)}\n")
-        f.write(f"# unresolved_nests: {len(unresolved)}\n")
+                  issues: List[str], dry_run: bool = False) -> None:
+    """The color-coded pull report (same look as the 922 LST Organizer's).
+    rows: (part, nest, batch, [copied names] or None, variant part or None)."""
+    C = sdk.REPORT_COLORS
+    missing = [r for r in rows if not r[3]]
+    pulled = [r for r in rows if r[3]]
+    by_letter = [r for r in pulled if r[4]]
+    nest_missing = sum(len(v) for v in unresolved.values())
+    listed = len(rows) + nest_missing
 
-        if unresolved:
-            f.write("#\n# UNRESOLVED NESTS - no batch folder found on disk\n")
-            f.write("# " + "=" * 76 + "\n")
-            for nest in sorted(unresolved):
-                f.write(f"#   Nest {nest}: {', '.join(unresolved[nest])}\n")
-            f.write("# " + "=" * 76 + "\n")
+    d = sdk.ReportPdf()
+    d.text(f"911 LST Organizer  -  {info['batch']} {info['nest']}",
+           size=17, bold=True, color=C["band"])
+    d.text(f"Generated {time.strftime('%Y-%m-%d %H:%M')}   |   "
+           f"1D diagram: {info['pdf']}"
+           + ("   |   DRY RUN - nothing was copied" if dry_run else ""),
+           size=8.5, color=C["grey"])
+    d.gap(8)
 
-        f.write("\npart\tnest\tbatch\tstatus\tfiles\n")
-        for part, nest, batch, files, via in rows:
-            # 'OK as <part>' = the .lst spells the piece with a different
-            # trailing revision letter than the 1D diagram does.
-            status = ("OK" if not via else f"OK as {via}") if files else "MISSING"
-            f.write(f"{part}\t{nest}\t{batch or ''}\t{status}"
-                    f"\t{'; '.join(files or [])}\n")
+    d.text("LST RECONCILIATION", size=11, bold=True, color=C["band"])
+    recon = [
+        ("TARGET  -  parts on the 1D diagram", listed, C["target_bg"]),
+        ("Parts with a .lst pulled", f"{len(pulled)} / {listed}",
+         C["ok_bg"] if len(pulled) >= listed else None),
+        (".lst files copied", copied, None),
+        ("Matched by revision letter", len(by_letter),
+         C["extra_bg"] if by_letter else None),
+        ("MISSING .lst", len(missing), C["miss_bg"] if missing else C["ok_bg"]),
+        ("Parts in a nest that was NOT FOUND", nest_missing,
+         C["miss_bg"] if nest_missing else C["ok_bg"]),
+        ("Copy problems", len(issues), C["rev_bg"] if issues else C["ok_bg"]),
+    ]
+    for i, (label, val, fill) in enumerate(recon):
+        bold = label.startswith("TARGET") or label.startswith("MISSING")
+        bg = fill if fill is not None else (C["zebra"] if i % 2 else C["white"])
+        d.row([label, str(val)], [300, 90], size=9.5, h=18, bold=bold, fill=bg)
+    d.gap(4)
+    flags = []
+    if missing:
+        flags.append(f"{len(missing)} missing")
+    if nest_missing:
+        flags.append(f"{nest_missing} in a nest that was not found")
+    if issues:
+        flags.append(f"{len(issues)} copy problem(s)")
+    if flags:
+        d.text("  -  ".join(flags) + ".", size=10, bold=True, color=C["miss_tx"])
+    else:
+        d.text("Every part on the diagram has its .lst.", size=10, bold=True,
+               color=C["ok_tx"])
+    d.gap(10)
+
+    if missing:
+        d.text("MISSING  -  NO .LST FOUND FOR THESE PARTS", size=11, bold=True,
+               color=C["miss_tx"])
+        d.header_row(["Part", "Nest", "Batch"], [220, 150, 150])
+        for part, nest, batch, _f, _v in missing:
+            d.row([part, nest, batch or ""], [220, 150, 150], h=14,
+                  fill=C["miss_bg"], tcolor=C["miss_tx"])
+        d.gap(10)
+
+    if unresolved:
+        d.text("NEST NOT FOUND  -  no folder for these nests in any batch",
+               size=11, bold=True, color=C["miss_tx"])
+        d.text("Their parts were NOT pulled. Sync the nest's batch folder, "
+               "then run again.", size=8, color=C["grey"])
+        d.header_row(["Nest", "Part"], [150, 370])
         for nest in sorted(unresolved):
             for part in unresolved[nest]:
-                f.write(f"{part}\t{nest}\t\tNEST NOT FOUND\t\n")
+                d.row([nest, part], [150, 370], h=14,
+                      fill=C["miss_bg"], tcolor=C["miss_tx"])
+        d.gap(10)
 
-        if issues:
-            f.write("\n# Issues\n")
-            for it in issues:
-                f.write(f"# {it}\n")
+    if by_letter:
+        d.text("MATCHED BY REVISION LETTER  -  same piece, spelled differently",
+               size=11, bold=True, color=C["extra_tx"])
+        d.header_row(["Diagram says", "File is named", "Nest"], [200, 200, 120])
+        for part, nest, _b, _f, via in by_letter:
+            d.row([part, via, nest], [200, 200, 120], h=14,
+                  fill=C["extra_bg"], tcolor=C["extra_tx"])
+        d.gap(10)
+
+    if issues:
+        d.text("COPY PROBLEMS", size=11, bold=True, color=C["rev_tx"])
+        for it in issues:
+            d.row([it], [520], size=8, h=14, fill=C["rev_bg"],
+                  tcolor=C["rev_tx"], wrap=True)
+        d.gap(10)
+
+    d.text("PULL LIST BY NEST", size=11, bold=True, color=C["band"])
+    groups: Dict[Tuple[str, str], list] = defaultdict(list)
+    for r in pulled:
+        groups[(r[1], r[2] or "")].append(r)
+    if not groups:
+        d.text("No files were pulled.", size=9, color=C["grey"])
+    for (nest, batch) in sorted(groups):
+        items = groups[(nest, batch)]
+        own = "   (this nest)" if nest == info["nest"] else ""
+        d.row([f"Nest {nest}  -  batch {batch}{own}", f"{len(items)} pc"],
+              [430, 90], size=9.5, h=17, bold=True, fill=C["group_bg"])
+        d.row(["Part", "File(s)"], [170, 350], size=8, h=13, bold=True,
+              tcolor=C["grey"])
+        for i, (part, _n, _b, files, _via) in enumerate(items):
+            d.row([part, "; ".join(files)], [170, 350], h=13,
+                  fill=C["zebra"] if i % 2 else C["white"], wrap=True)
+        d.gap(6)
+
+    d.save(pdf_path)
 
 # ── TechDeck plugin entry point ────────────────────────────────────────────────
 
@@ -340,31 +419,35 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         return
     picked = Path(raw.strip().strip('"'))
     if not sdk.is_dir(picked):
-        raise ValueError(f"Folder not found: {picked}")
+        raise sdk.UserFacingError(
+            f"That folder could not be found: {picked}",
+            "Pick the nest's PRODUCTION PAPERWORK folder and run again.")
 
     root, batch, nest = derive_context(picked)
     if root is None:
-        raise RuntimeError(
-            f"'{picked}' is not inside a '911 QTDR' tree - pick the nest's "
-            f"PRODUCTION PAPERWORK folder (e.g. ...\\911 QTDR\\S035\\503874\\"
-            f"PRODUCTION PAPERWORK)."
-        )
+        raise sdk.UserFacingError(
+            f"'{picked.name}' is not inside the '911 QTDR' folder.",
+            "Pick the nest's PRODUCTION PAPERWORK folder (for example "
+            "911 QTDR > S035 > 503874 > PRODUCTION PAPERWORK).")
     log(f"911 QTDR root : {root}")
     log(f"Batch / nest  : {batch} / {nest}")
     progress_callback(5)
 
     pdf = find_1d_pdf(picked, batch, nest)
     if pdf is None:
-        raise RuntimeError(
-            f"No 1D cutting diagram (*1D*.pdf) found in {picked}."
-        )
+        raise sdk.UserFacingError(
+            f"There is no 1D cutting diagram in '{picked.name}' (a PDF with "
+            "'1D' in its name; the '1D POST' one does not count).",
+            "Save the nest's 1D diagram into that folder, or pick the folder "
+            "that holds it, then run again.")
     log(f"1D diagram    : {pdf.name}")
 
     pairs = parse_1d_parts(pdf, nest, log)
     if not pairs:
-        raise RuntimeError(
-            f"No part ids found in {pdf.name} - is this the 1D cutting diagram?"
-        )
+        raise sdk.UserFacingError(
+            f"No part numbers could be read from {pdf.name}.",
+            "Check that it is the nest's 1D cutting diagram. If it is, send a "
+            "debug report (Settings > Generate Debug Report) with the PDF.")
     foreign = sorted({n for n, _ in pairs if n != nest})
     log(f"Parts listed  : {len(pairs)}"
         + (f" (nests referenced besides {nest}: {', '.join(foreign)})" if foreign else ""))
@@ -375,9 +458,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     dest = picked / DEST_FOLDER_NAME
     if not dry_run:
         sdk.ensure_dir(dest)
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    debug_path = dest / f"debug_pull_lsts_{ts}.jsonl"
-    txt_path = dest / f"LST_Pull_{batch}_{nest}.txt"
+    report_path = dest / f"LST Report - {batch} {nest}.pdf"
 
     # Group the wanted parts by nest, resolve each nest to its batch on disk,
     # and index each resolved nest folder's .lst files once.
@@ -388,139 +469,147 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     nest_cache: Dict[str, Optional[Tuple[str, Path]]] = {
         nest: (batch, root / batch / nest)
     }
-    rows: list = []            # (part, nest, batch, [copied names] or None)
+    rows: list = []            # (part, nest, batch, [copied names] or None, via)
     unresolved: Dict[str, List[str]] = {}
     issues: List[str] = []
     seen_lower: Set[str] = set()
     copied_count = 0
 
-    debug_fp = (open(sdk.long_path(debug_path), "a", encoding="utf-8")
-                if not dry_run else None)
-    try:
-        if debug_fp:
-            debug_fp.write(json.dumps({
-                "event": "start", "ts": ts, "pdf": str(pdf), "batch": batch,
-                "nest": nest, "parts": len(pairs),
-            }) + "\n")
+    total_nests = len(by_nest)
+    resolved_nests: Dict[str, Tuple[str, Path]] = {}
+    for src_nest, parts in sorted(by_nest.items()):
+        sdk.raise_if_cancelled(cancel_event)
+        hit = resolve_nest_folder(root, batch, src_nest, nest_cache, cancel_event)
+        if hit is None:
+            log(f"  WARNING: nest {src_nest} not found in any batch folder "
+                f"({len(parts)} part(s) skipped).")
+            unresolved[src_nest] = parts
+        else:
+            resolved_nests[src_nest] = hit
 
-        total_nests = len(by_nest)
-        for ni, (src_nest, parts) in enumerate(sorted(by_nest.items()), 1):
-            if cancel_event.is_set():
-                log("Cancelled."); return
-            hit = resolve_nest_folder(root, batch, src_nest, nest_cache, cancel_event)
-            if hit is None:
-                log(f"  WARNING: nest {src_nest} not found in any batch folder "
-                    f"({len(parts)} part(s) skipped).")
-                unresolved[src_nest] = parts
-                if debug_fp:
-                    debug_fp.write(json.dumps({"event": "nest_unresolved",
-                                               "nest": src_nest, "parts": parts}) + "\n")
-                continue
-            src_batch, nest_folder = hit
-            log(f"  Nest {ni}/{total_nests}: {src_nest} -> batch {src_batch}"
-                f" ({len(parts)} part(s))")
-            index = index_nest_lsts(nest_folder, dest, cancel_event)
+    # Run ahead of the serial per-nest walk below: background workers hydrate
+    # every source nest's .lst files, so a cloud-only nest folder stops stalling
+    # the copy loop one file at a time (same move as the 922 LST Organizer).
+    def _read_set():
+        for _b, folder in resolved_nests.values():
+            yield from folder.rglob("*.lst")
+    if not dry_run:
+        sdk.prefetch_paths(_read_set(), cancel_event=cancel_event)
 
-            for part in parts:
-                if cancel_event.is_set():
-                    log("Cancelled."); return
-                hits = index.get(sdk.normalize_dypn(part), [])
-                via = None
-                if not hits:
-                    # A trailing revision letter is the same piece ('-3' vs
-                    # '-3A'): the 1D diagram and the .lst export don't always
-                    # agree on it, and calling a file that IS there "missing"
-                    # sends someone hunting for nothing. Conservative - only an
-                    # unambiguous single variant counts (sdk.match_dypn_variant).
-                    via = sdk.match_dypn_variant(part, index)
-                    if via:
-                        hits = index.get(via, [])
-                        log(f"    NOTE: no .lst named {part}; pulled {via} "
-                            "instead (same piece, different revision letter)")
-                copied_names: List[str] = []
-                for f in hits:
-                    fname_lower = f.name.lower()
-                    if fname_lower in seen_lower:
-                        if f.name not in copied_names:
-                            copied_names.append(f.name)
-                        continue
-                    target = dest / f.name
-                    try:
-                        if not dry_run:
-                            if not sdk.exists(target):
-                                sdk.ensure_local(f)  # Hard Rule 13
-                                _retry_fileop(shutil.copy2, sdk.long_path(f), sdk.long_path(target))
-                            if debug_fp:
-                                debug_fp.write(json.dumps({"event": "copied",
-                                                           "src": str(f)}) + "\n")
-                        seen_lower.add(fname_lower)
+    for ni, (src_nest, (src_batch, nest_folder)) in enumerate(
+            sorted(resolved_nests.items()), 1):
+        sdk.raise_if_cancelled(cancel_event)
+        parts = by_nest[src_nest]
+        log(f"  Nest {ni}/{len(resolved_nests)}: {src_nest} -> batch {src_batch}"
+            f" ({len(parts)} part(s))")
+        index = index_nest_lsts(nest_folder, dest, cancel_event)
+
+        for part in parts:
+            sdk.raise_if_cancelled(cancel_event)
+            hits = index.get(sdk.normalize_dypn(part), [])
+            via = None
+            if not hits:
+                # A trailing revision letter is the same piece ('-3' vs
+                # '-3A'): the 1D diagram and the .lst export don't always
+                # agree on it, and calling a file that IS there "missing"
+                # sends someone hunting for nothing. Conservative - only an
+                # unambiguous single variant counts (sdk.match_dypn_variant).
+                via = sdk.match_dypn_variant(part, index)
+                if via:
+                    hits = index.get(via, [])
+                    log(f"    NOTE: no .lst named {part}; pulled {via} "
+                        "instead (same piece, different revision letter)")
+            copied_names: List[str] = []
+            for f in hits:
+                fname_lower = f.name.lower()
+                if fname_lower in seen_lower:
+                    if f.name not in copied_names:
                         copied_names.append(f.name)
-                        copied_count += 1
-                    except Exception as e:
-                        issues.append(f"Failed to copy {f.name}: {e}")
-                if not hits:
-                    log(f"    MISSING: no .lst for {part} under {src_nest}")
-                rows.append((part, src_nest, src_batch, copied_names or None, via))
-            progress_callback(15 + int(70 * ni / total_nests))
-
-        if debug_fp:
-            debug_fp.write(json.dumps({"event": "done", "copied": copied_count}) + "\n")
-    finally:
-        if debug_fp:
-            debug_fp.close()
+                    continue
+                target = dest / f.name
+                try:
+                    if not dry_run and not sdk.exists(target):
+                        sdk.ensure_local(f)  # Hard Rule 6
+                        _retry_fileop(shutil.copy2, sdk.long_path(f),
+                                      sdk.long_path(target))
+                    seen_lower.add(fname_lower)
+                    copied_names.append(f.name)
+                    copied_count += 1
+                except Exception as e:
+                    issues.append(f"Failed to copy {f.name}: {e}")
+            if not hits:
+                log(f"    MISSING: no .lst for {part} under {src_nest}")
+            rows.append((part, src_nest, src_batch, copied_names or None, via))
+        progress_callback(15 + int(70 * ni / max(1, total_nests)))
 
     missing = [r for r in rows if not r[3]]
+    report_ok = False
     if not dry_run:
-        _write_report(
-            txt_path,
-            {"pdf": pdf.name, "batch": batch, "nest": nest, "root": str(root),
-             "dest": str(dest)},
-            rows, unresolved, copied_count, issues,
-        )
+        try:
+            _write_report(report_path,
+                          {"pdf": pdf.name, "batch": batch, "nest": nest},
+                          rows, unresolved, copied_count, issues)
+            report_ok = True
+        except Exception as e:
+            log(f"WARNING: could not write the PDF report: {e}")
     progress_callback(90)
 
     # ── Console summary ────────────────────────────────────────────────────────
+    nest_missing = sum(len(v) for v in unresolved.values())
     log("=" * 60)
-    log(f"911 LST Organizer - {batch} {nest} Complete")
+    log(f"911 LST Organizer - {batch} {nest}")
+    log(f"  Parts on the 1D diagram:      {len(pairs)}")
+    log(f"  .lst files copied:            {copied_count}"
+        + (" (dry run)" if dry_run else ""))
+    log(f"  Missing .lst:                 {len(missing)}")
+    log(f"  In a nest that was not found: {nest_missing}")
+    log(f"  Copy problems:                {len(issues)}")
     log("=" * 60)
-    log(f"Parts on the 1D diagram: {len(pairs)}")
-    log(f"LST files copied:        {copied_count}" + (" (dry run)" if dry_run else ""))
     by_letter = [r for r in rows if r[3] and r[4]]
     if by_letter:
-        log(f"\nMatched by revision letter ({len(by_letter)}) - same piece, the "
+        log(f"Matched by revision letter ({len(by_letter)}) - same piece, the "
             "diagram and the .lst spell the suffix differently:")
         for part, _n, _b, _f, via in by_letter:
             log(f"  - {part}  <-  {via}")
-    if missing:
-        log(f"\nWARNING: no .lst found for {len(missing)} part(s):")
-        for part, src_nest, src_batch, _f, _v in missing[:8]:
-            log(f"  - {part} (nest {src_nest}, batch {src_batch})")
-        if len(missing) > 8:
-            log(f"  ... and {len(missing) - 8} more. See report.")
-    if issues:
-        log(f"\n{len(issues)} copy issue(s) - see report.")
+    for it in issues:
+        log(f"  COPY PROBLEM: {it}")
     if not dry_run:
-        log(f"\nLST folder: {dest}")
-        log(f"Report:     {txt_path}")
-    log("=" * 60)
+        log(f"LST folder: {dest}")
     progress_callback(100)
 
-    # Blocking popup for anything the user must not miss.
-    if unresolved or missing:
-        parts_bits = []
-        if unresolved:
-            parts_bits.append(
-                "These nests were not found in any batch folder (their parts "
-                "were NOT pulled):\n  "
-                + "\n  ".join(f"{n}: {', '.join(ps)}" for n, ps in sorted(unresolved.items()))
-            )
+    # Anything short of a clean pull is reported honestly, not as a blank tick.
+    if (unresolved or missing or issues) and hasattr(sdk, "set_run_outcome"):
+        bits = []
         if missing:
-            parts_bits.append(
-                f"No .lst file was found for {len(missing)} part(s) - "
-                "see the report in the LST folder."
-            )
-        sdk.show_warning(params, "911 LST Organizer - attention needed",
-                         "\n\n".join(parts_bits))
+            bits.append(f"{len(missing)} part(s) have no .lst")
+        if nest_missing:
+            bits.append(f"{nest_missing} part(s) are in a nest that was not found")
+        if issues:
+            bits.append(f"{len(issues)} file(s) could not be copied")
+        sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING, "; ".join(bits))
+
+    # Blocking popup for anything the user must not miss - it NAMES the parts
+    # (v2.3.0), so nobody has to open the report to learn what to chase.
+    if unresolved or missing:
+        lines: List[str] = []
+        if missing:
+            lines.append(f"{len(missing)} part(s) have no .lst file:")
+            lines += [f"  - {part}  (nest {n}, batch {b})"
+                      for part, n, b, _f, _v in missing[:12]]
+            if len(missing) > 12:
+                lines.append(f"  ...and {len(missing) - 12} more (see the report)")
+        if unresolved:
+            if lines:
+                lines.append("")
+            lines.append("These nests were not found in any batch folder "
+                         "(their parts were NOT pulled):")
+            lines += [f"  - {n}: {', '.join(ps)}"
+                      for n, ps in sorted(unresolved.items())]
+        sdk.show_warning(params, f"911 LST - {batch} {nest}", "\n".join(lines))
+
+    if report_ok:
+        sdk.link_output(params, f"Open the LST report for {batch} {nest}",
+                        report_path, prefix="[REPORT]")
 
 
 # ── Standalone test harness ────────────────────────────────────────────────────

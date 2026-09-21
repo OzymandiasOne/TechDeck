@@ -50,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
@@ -88,8 +88,13 @@ def clean_stem(stem: str) -> str:
             return s
         m = _SUFFIX_TOKEN_RE.search(s)
         if not m:
-            return s
+            break
         s = s[: m.start()]
+    # Export tags the token list does not know ('R6432001-F45-1_R_AS_1F01_of_1
+    # _FLAT-PATTERN#1', EB batch 4406). A DYPN never holds an underscore, so
+    # everything before the FIRST one is the part number - when it is one.
+    head = s.split("_", 1)[0].strip()
+    return head if _PART_RE.match(head) else s
 
 
 def _find_pricing_workbook(batch_folder: Path, log) -> Path | None:
@@ -103,7 +108,10 @@ def _find_pricing_workbook(batch_folder: Path, log) -> Path | None:
     if not candidates:
         return None
     pricing = [p for p in candidates if "PRICING" in p.name.upper()]
-    pick = sorted(pricing or candidates)[0]
+    # No pricing workbook yet (a just-received batch): EB's own part list,
+    # 'B4406 902 OFFLOAD TO ASA ....xlsx', beats any other stray workbook.
+    eb_list = [p for p in candidates if re.match(r"^B\d{3,5}\b", p.name, re.IGNORECASE)]
+    pick = sorted(pricing or eb_list or candidates)[0]
     if len(candidates) > 1:
         log(f"  ({len(candidates)} workbooks in the batch folder; using {pick.name})")
     return pick
@@ -121,8 +129,12 @@ def _load_po_rows(pricing_path: Path, log):
         # fallback below must never read one of those. [-_ ]* tolerates any
         # separator run in the tab name ('PO-4130', 'PO- 4130', 'PO 4130').
         visible = sdk.visible_sheetnames(wb)
+        # 'BATCH' is the part-list tab of EB's own 'B#### 902 OFFLOAD TO ASA'
+        # workbook - the only list there is on the day a batch arrives, before
+        # the pricing workbook exists. Its quantity column is 'DYPN QTY'.
         po_sheets = [n for n in visible
-                     if re.match(r"^PO[-_ ]*\d+", n.strip(), re.IGNORECASE)]
+                     if re.match(r"^PO[-_ ]*\d+", n.strip(), re.IGNORECASE)
+                     or n.strip().upper() == "BATCH"]
         sheet_names = po_sheets or visible
 
         for name in sheet_names:
@@ -134,7 +146,7 @@ def _load_po_rows(pricing_path: Path, log):
             # whitespace before matching names (Hard Rules 1-2: by name only).
             norm = {" ".join(k.split()): v for k, v in cols.items()}
             dypn_col = norm.get("DYPN")
-            qty_col = norm.get("QTY ORDERED")
+            qty_col = norm.get("QTY ORDERED") or norm.get("DYPN QTY")
             if dypn_col is None or qty_col is None:
                 continue
 

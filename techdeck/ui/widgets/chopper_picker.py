@@ -17,7 +17,7 @@ chopper-gunner fantasy around it:
 Everything is drawn on the overlay — the real dialog is only moved a few px
 (shake/jitter) and has its window opacity flickered; no UI is repainted or
 distorted. All effect timings run through DT (slow-motion factor) exactly as
-locked in the approved HTML mockup (see docs/PLUGINS.md, 922 Setup).
+locked in the approved HTML mockup (see docs/plugins/922_setup.md).
 
 Entry point: :func:`pick_folder_chopper` (GUI thread only). Reached via
 ``sdk.request_directory(..., style="chopper_gunner")`` →
