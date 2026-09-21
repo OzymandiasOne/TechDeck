@@ -79,10 +79,20 @@ def test_his_store_picture_is_not_the_empty_still():
                for y in range(img.height()) for x in range(img.width()))
 
 
-def test_all_24_frames_ship():
-    assert len(gs.GHOST_FRAMES) == 24
-    for name in gs.GHOST_FRAMES:
-        assert (gs._garden_dir() / name).is_file(), name
+def test_his_house_sprite_is_the_small_hand_drawn_one():
+    """~25% smaller than the 13x22 rip (his call: "he's really big"), REDRAWN
+    rather than resampled so the dome and droopy eyes survive."""
+    from techdeck.ui import pixel_art
+    data = pixel_art.load(gs._garden_dir().parent / "sprites" / gs.GHOST_SPRITE)
+    w, h = pixel_art.dimensions(data)
+    assert (w, h) == (10, 17)
+    assert 0.70 <= w / 13 <= 0.80 and 0.70 <= h / 22 <= 0.80
+    rows = data["rows"]
+    assert rows[0].count("B") < rows[1].count("B") <= rows[3].count("B") + 4
+    # mirror-symmetric face: he must not look lopsided
+    for r in rows:
+        assert [c == "." for c in r] == [c == "." for c in r[::-1]]
+        assert [c in "EK" for c in r] == [c in "EK" for c in r[::-1]]
 
 
 class _Page:
@@ -126,36 +136,86 @@ def test_no_ghost_without_the_bookshelf(scene):
     assert scene({"deco_ghost"})._ghost is None
 
 
-def test_the_shelf_slides_left_he_comes_out_and_it_slides_home(scene):
+def test_the_whole_haunt_in_order(scene):
     s = scene({"deco_books", "deco_ghost"})
     _open(s)
     s._ghost["t"] = 0.0
-    assert _run(s, 12) == ["out", "show", "back", "idle"]
-    assert s._ghost["slide"] == 0.0 and s._ghost["seen"]
+    assert _run(s, 14) == ["out", "emerge", "linger", "retreat", "back", "idle"]
+    assert s._ghost["slide"] == 0.0 and s._ghost["out"] == 0 and s._ghost["seen"]
     assert gs.GHOST_DELAY_S[0] <= s._ghost["t"] <= gs.GHOST_DELAY_S[1]
 
 
-def test_he_only_shows_once_the_shelf_is_fully_out_of_the_way(scene):
+def test_the_shelf_slides_to_the_right(scene):
+    assert gs.GHOST_SHELF_SLIDE > 0
+    s = scene({"deco_books", "deco_ghost"})
+    _open(s)
+    bx, by = gs.PLACEMENT["deco_books"]
+    home = s._compose_native().toImage()
+    s._ghost.update(state="emerge", slide=1.0, out=0)
+    moved = s._compose_native().toImage()
+    d = gs.GHOST_SHELF_SLIDE
+    for dx in (2, 8, 13):
+        assert moved.pixelColor(bx + d + dx, by + 10) == home.pixelColor(bx + dx, by + 10)
+
+
+def test_he_only_comes_out_once_the_shelf_is_fully_aside(scene):
     s = scene({"deco_books", "deco_ghost"})
     _open(s)
     s._ghost["t"] = 0.0
-    while s._ghost["state"] != "show":
+    while s._ghost["state"] != "emerge":
         s._update_ghost(0.06)
-        assert s._ghost["state"] in ("out", "show")
+        assert s._ghost["out"] == 0
     assert s._ghost["slide"] == 1.0
-    assert gs.GHOST_SHELF_SLIDE < 0                 # to the LEFT
 
 
-def test_he_lingers_fully_out(scene):
+def _pale(c):
+    return c.red() > 150 and c.green() > 150 and c.blue() > 150
+
+
+def test_he_slides_out_from_BEHIND_the_shelf_into_the_gap(scene):
     s = scene({"deco_books", "deco_ghost"})
     _open(s)
-    s._ghost.update(state="show", idx=gs.GHOST_PEAK_FRAME, wt=0.0,
-                    hold=gs.GHOST_PEAK_HOLD_S)
-    held = 0.0
-    while s._ghost["idx"] == gs.GHOST_PEAK_FRAME:
-        s._update_ghost(0.06)
+    bx, by = gs.PLACEMENT["deco_books"]
+    edge = bx + gs.GHOST_SHELF_SLIDE                # the slid shelf's left edge
+    gw = s._ghost["pm"].width()
+    y = by + 32 - 5                                 # through his plain lower body
+    # half out: pale pixels hug the shelf edge, and NONE are drawn past it
+    s._ghost.update(state="emerge", slide=1.0, out=gw // 2)
+    img = s._compose_native().toImage()
+    assert all(_pale(img.pixelColor(x, y)) for x in range(edge - gw // 2, edge))
+    assert not _pale(img.pixelColor(edge - gw // 2 - 1, y))
+    # fully out: the whole ghost stands in the gap, a sliver of daylight to the shelf
+    s._ghost.update(state="linger", out=s._ghost_travel(), age=0.0)
+    img = s._compose_native().toImage()
+    left = edge - s._ghost_travel()
+    assert all(_pale(img.pixelColor(x, y)) for x in range(left, left + gw))
+    assert not any(_pale(img.pixelColor(x, y)) for x in range(left + gw, edge))
+    assert bx <= left and left + gw <= edge         # inside the space the shelf left
+
+
+def test_he_moves_a_pixel_at_a_time(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    _open(s)
+    s._ghost.update(state="emerge", slide=1.0, out=0, wt=0.0)
+    seen = []
+    while s._ghost["state"] == "emerge":
+        s._update_ghost(0.03)
+        if not seen or seen[-1] != s._ghost["out"]:
+            seen.append(s._ghost["out"])
+    assert seen == list(range(1, s._ghost_travel() + 1))
+
+
+def test_he_lingers_and_bobs_fully_out(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    _open(s)
+    s._ghost.update(state="linger", slide=1.0, out=s._ghost_travel(),
+                    hold=gs.GHOST_HOLD_S, age=0.0)
+    held, repaints = 0.0, 0
+    while s._ghost["state"] == "linger":
+        repaints += bool(s._update_ghost(0.06))
         held += 0.06
-    assert held >= gs.GHOST_PEAK_HOLD_S
+    assert held >= gs.GHOST_HOLD_S
+    assert repaints > 10                            # bobbing needs repaints
 
 
 def test_the_clock_only_runs_while_the_house_is_open(scene):
@@ -173,7 +233,7 @@ def test_first_visit_is_soon_so_a_buyer_sees_what_he_bought(scene):
     assert gs.GHOST_FIRST_DELAY_S[1] < gs.GHOST_DELAY_S[0]
 
 
-def test_never_slides_the_shelf_out_from_under_buddy(scene):
+def test_never_moves_the_shelf_while_buddy_is_using_it(scene):
     s = scene({"deco_books", "deco_ghost", "friend_buddy"})
     _open(s)
     s._ghost["t"] = 0.0
@@ -188,42 +248,14 @@ def test_buddy_cannot_pick_the_shelf_mid_haunt(scene):
     s = scene({"deco_books", "deco_ghost", "friend_buddy"})
     shelf = s._rec_by_id("deco_books")
     assert s._can_use(shelf)
-    s._ghost["state"] = "show"
+    s._ghost["state"] = "linger"
     assert not s._can_use(shelf)
     assert shelf not in s._interactive_int()
 
 
 def test_navigating_back_puts_the_shelf_home(scene):
     s = scene({"deco_books", "deco_ghost"})
-    s._ghost.update(state="show", slide=1.0, idx=9)
+    s._ghost.update(state="linger", slide=1.0, out=9)
     s._reset_ghost()
     assert s._ghost["state"] == "idle" and s._ghost["slide"] == 0.0
-
-
-def test_it_really_draws_the_shelf_moved_and_the_ghost_in_the_gap(scene):
-    s = scene({"deco_books", "deco_ghost"})
-    _open(s)
-    bx, by = gs.PLACEMENT["deco_books"]
-    home = s._compose_native().toImage()
-    s._ghost.update(state="show", slide=1.0, idx=gs.GHOST_PEAK_FRAME)
-    out = s._compose_native().toImage()
-    # the ghost's pale body now shows where the shelf used to stand
-    gap = [out.pixelColor(x, by + 16) for x in range(bx, bx + 12)]
-    assert any(c.red() > 150 and c.green() > 150 and c.blue() > 150 for c in gap)
-    assert not any(home.pixelColor(x, by + 16).red() > 150
-                   and home.pixelColor(x, by + 16).green() > 150
-                   for x in range(bx, bx + 12))
-    # and the shelf itself has moved 16 px left
-    assert out.pixelColor(bx - 12, by + 10) == home.pixelColor(bx + 4, by + 10)
-
-
-def test_he_fades_into_the_cut_instead_of_being_sliced(scene):
-    s = scene({"deco_books", "deco_ghost"})
-    img = s._ghost["frames"][0].toImage()           # frame 0: hard against the cut
-    w = img.width()
-    ys = [y for y in range(img.height()) if img.pixelColor(w - 8, y).alpha() == 255]
-    assert ys
-    y = ys[len(ys) // 2]
-    alphas = [img.pixelColor(x, y).alpha() for x in range(w - 6, w)]
-    assert alphas[-1] < alphas[-2] < alphas[-3] < 255
-    assert alphas[0] == 255
+    assert s._ghost["out"] == 0
