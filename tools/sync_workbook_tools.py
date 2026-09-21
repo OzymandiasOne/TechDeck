@@ -172,13 +172,15 @@ TOOL_SECTIONS = [
    "against the PO spreadsheet -- extras separated, missing parts listed, "
    "quantities prefixed.",
    "Active", "0.8.6.4"),
-  ("902 Part Validator",
-   "Checks a received 902 batch for missing, empty, and corrupt part files.",
+  ("902 Batch Validator",
+   "Checks a received 902 batch for missing, empty, and corrupt part files "
+   "and for missing prints.",
    "Reads the customer's part list, opens every DXF and IGES file in the batch, "
-   "and reports each part with issue yes/no and the reason -- no DXF sent, a "
-   "DXF with nothing to cut, or an IGES that was cut off or holds no part "
-   "outline -- in one color-coded PDF that goes back to the customer. "
-   "Read-only: no part file is moved or changed.",
+   "reads the part number off every page of the scanned prints, and reports "
+   "each part with issue yes/no and the reason -- no DXF sent, a DXF with "
+   "nothing to cut, an IGES that was cut off or holds no part outline, or no "
+   "print -- in one color-coded PDF that goes back to the customer. "
+   "Read-only: no file is moved or changed.",
    "Active", "0.8.7.7"),
  ]),
  ("QUALITY, ESTIMATING & SHOP TOOLS", [

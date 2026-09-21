@@ -1,4 +1,4 @@
-"""902 Part Validator: the three checks the app exists for.
+"""902 Batch Validator: the three checks the app exists for.
 
   1. a PO part with no DXF                    -> MISSING
   2. a DXF that opens but holds no geometry   -> UNUSABLE
@@ -25,7 +25,7 @@ PLUGINS = Path(__file__).resolve().parents[2] / "plugins"
 @pytest.fixture(scope="module")
 def pv():
     spec = importlib.util.spec_from_file_location(
-        "pv902_run", PLUGINS / "902_part_validator" / "run.py")
+        "pv902_run", PLUGINS / "902_batch_validator" / "run.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -216,7 +216,7 @@ def test_report_page_one_is_the_five_counts_then_every_part(pv, tmp_path):
         _fc(pv, "H7777777-9.dxf", "DXF", pv.GOOD),
     ]
     parts, extras = pv.reconcile(po, checks)
-    out = tmp_path / "deep" / "3921 - PART VALIDATION REPORT.pdf"
+    out = tmp_path / "deep" / "3921 - BATCH VALIDATION REPORT.pdf"
     pv.write_report(out, "Batch 3921", "PO.xlsm", Path("C:/b/files"),
                     parts, extras, checks)
     doc = fitz.open(out)
@@ -254,3 +254,122 @@ def test_report_ready_when_everything_is_good(pv, tmp_path):
     doc.close()
     assert "READY  -  all 1 part(s) have a good file." in text
     assert "NOT READY" not in text
+
+
+# ── prints (the WPDD folder) ────────────────────────────────────────────────
+# Every case below is a REAL read off an example EB batch - the part numbers and
+# the reader's exact output, misreads included.
+
+PRINT_CASES = [
+    # title box: part + process + rev glued on
+    (["R6432701-F107-1WJ_A"], ["R6432701-F107-1", "R6432701-F108-1"], "R6432701-F107-1", "exact"),
+    # view caption, stroke-font misreads (O for 0, I for 1), a space after the dash
+    (["O0IAV - R5730036- 131 FLAT-PATTERN"], ["R5730036-130", "R5730036-131"], "R5730036-131", "exact"),
+    (["O02AV-R4232522-3IIF0RMEDVIEW-RIGHT"], ["R4232522-311"], "R4232522-311", "folded"),
+    # batch 4420: the print pads the piece number
+    (["WATER JET", "H5391611-010", "EB218001958"], ["H5391611-10"], "H5391611-10", "exact"),
+    # the list says -47M, the print says -47 (4423 / 4426 / 4457)
+    (["001AV - H5534001-47 FLAT-PATTERN"], ["H5534001-47M", "H5534001-48M"], "H5534001-47M", "letter"),
+    # one digit of the DRAWING number misread (4359 p7: 7 read as 8)
+    (["H5248924-48", "211015229DSSA"], ["H5247924-48", "H5247924-23"], "H5247924-48", "misread"),
+    # 4363 p1: the part number is etched in a font the reader garbles, but the
+    # page names the drawing and only one part on the list has it
+    (["STL_Q.I87", "R52H7g2H-Hg", "SEE R524-7924 SHEET 13"], ["R5247924-49", "H5742601-8"], "R5247924-49", "drawing"),
+    # '-F8-1' must not swallow a print of '-F8-10'
+    (["R6432401-F8-10WJ_A"], ["R6432401-F8-1"], None, ""),
+]
+
+
+@pytest.mark.parametrize("lines,parts,want,how", PRINT_CASES)
+def test_match_print_real_reads(pv, lines, parts, want, how):
+    assert pv.match_print(lines, parts) == (want, how)
+
+
+def test_a_clean_print_of_another_piece_is_never_credited(pv):
+    """The two traps that cost a rule each. Neighbouring parts differ by ONE
+    digit of the piece number, so a guess there hides a missing print."""
+    # 4363 p43: a clean print of -6, which is NOT on the list; -8 is.
+    assert pv.match_print(["H5742601 -6", "EB218002119 +"],
+                          ["H5742601-8", "H5742601-61"]) == (None, "")
+    # 4419 p5: title block names the drawing on one line and piece -72 on
+    # another; -72 is not on the list, -74 is the only part of that drawing.
+    assert pv.match_print(["ERH573-5152A34REV.A TYPE", "EB218001 957", "H5735152-72"],
+                          ["H5735152-74", "H5391611-10"]) == (None, "")
+
+
+def test_match_print_never_picks_between_two_candidates(pv):
+    # the print says -47; the list has BOTH -47M and -47N -> no guess
+    assert pv.match_print(["001AV - H5534001-47 FLAT-PATTERN"],
+                          ["H5534001-47M", "H5534001-47N"]) == (None, "")
+
+
+def test_read_prints_images_by_name_and_typed_pdf_pages(pv, tmp_path):
+    import threading
+    fitz = pytest.importorskip("fitz")
+    wpdd = tmp_path / "4363 902 OFFLOAD" / "WPDD Files-COMPLETE"
+    wpdd.mkdir(parents=True)
+    # ORDER_DYPN_n.jpg - the trailing _1 must not read as more piece-number digits
+    (wpdd / "BM350696_R5741813-208_1.jpg").write_bytes(b"jpg")
+    (wpdd / "BM350697_R5741813-207_2.jpg").write_bytes(b"jpg")
+    (wpdd / "X1_R9999999-1_1.jpg").write_bytes(b"jpg")             # not on the list
+    doc = fitz.open()
+    for caption in ("001AV - R5742811-99 FLAT-PATTERN", "GENERAL NOTES"):
+        doc.new_page().insert_text((72, 72), caption)               # typed: no OCR needed
+    doc.save(wpdd / "4363 - 902 OFFLOAD.pdf")
+    doc.close()
+
+    assert pv.find_print_folders(wpdd.parent) == [wpdd]
+    parts = ["R5741813-207", "R5741813-208", "R5742811-99", "R5742811-100"]
+    pages, problem = pv.read_prints([wpdd], parts, lambda *_: None, threading.Event())
+    assert problem == ""
+    got = {pg.source: pg.part for pg in pages}
+    assert got["BM350696_R5741813-208_1.jpg"] == "R5741813-208"
+    assert got["BM350697_R5741813-207_2.jpg"] == "R5741813-207"
+    assert got["X1_R9999999-1_1.jpg"] is None
+    assert got["4363 - 902 OFFLOAD.pdf p1"] == "R5742811-99"
+    assert got["4363 - 902 OFFLOAD.pdf p2"] is None
+
+
+def test_no_print_is_an_issue_only_when_prints_were_checked(pv):
+    good = [_fc(pv, "H1000000-1.dxf", "DXF", pv.GOOD), _fc(pv, "H1000000-1.igs", "IGES", pv.GOOD)]
+    part = pv.reconcile([("H1000000-1", 1.0)], good)[0][0]
+    assert part.prints is None and not part.no_print and not part.issue    # not checked
+    without = part._replace(prints=[])
+    assert without.no_print and without.issue and without.wrong == "No print was sent"
+    page = pv.PrintPage("x.pdf p1", "H1000000-1", "exact", "H1000000-1")
+    assert not part._replace(prints=[page]).issue
+    guess = pv.PrintPage("x.pdf p3", "H1000000-1", "drawing", "SEE H100-0000 SHEET 2")
+    assert "by drawing number only (x.pdf p3) - check it" in part._replace(prints=[guess]).wrong
+
+
+def test_report_has_the_no_print_count_and_sections(pv, tmp_path):
+    fitz = pytest.importorskip("fitz")
+    checks = [_fc(pv, f"H1000000-{n}.{e}", k, pv.GOOD)
+              for n in (1, 2) for e, k in (("dxf", "DXF"), ("igs", "IGES"))]
+    parts, extras = pv.reconcile([("H1000000-1", 1.0), ("H1000000-2", 1.0)], checks)
+    pages = [pv.PrintPage("b.pdf p1", "H1000000-1", "exact", "H1000000-1"),
+             pv.PrintPage("b.pdf p2", None, "", "H5742601 -6")]
+    parts = [p._replace(prints=[pg for pg in pages if pg.part == p.dypn]) for p in parts]
+    out = tmp_path / "r.pdf"
+    pv.write_report(out, "Batch 1", "PO.xlsm", Path("C:/b"), parts, extras, checks, pages)
+    doc = fitz.open(out)
+    text = [pg.get_text() for pg in doc]
+    doc.close()
+    first, rest = text[0], "\n".join(text[1:])
+    order = [first.index(k) for k in ("TARGET PARTS", "MISSING", "UNUSABLE", "CORRUPT",
+                                     "NO PRINT", "NEEDS A LOOK", "EVERY PART")]
+    assert order == sorted(order)
+    assert "NOT READY  -  1 of 2 part(s) have an issue." in first
+    assert "No print was sent" in first
+    assert "NO PRINT  -  NO PRINT WAS SENT" in rest and "PRINTS THAT MATCH NO PART" in rest
+    assert "H5742601 -6" in rest
+
+    # prints not checked -> the count says so, and no part is blamed for it
+    parts = [p._replace(prints=None) for p in parts]
+    pv.write_report(out, "Batch 1", "PO.xlsm", Path("C:/b"), parts, extras, checks,
+                    None, "The prints were NOT checked: the drawing reader could not start.")
+    doc = fitz.open(out)
+    first = doc[0].get_text()
+    doc.close()
+    assert "not checked" in first and "The prints were NOT checked" in first
+    assert "READY  -  all 2 part(s) have a good file." in first

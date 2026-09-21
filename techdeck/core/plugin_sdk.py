@@ -1639,7 +1639,7 @@ def _doc_source_is(doc, dest_path: Path) -> bool:
 # ── Color-coded PDF report ──────────────────────────────────────────────────
 # The report look 922 LST Organizer introduced (v3.0): a title, a summary
 # table, then red/orange/blue/green sections. Promoted here 2026-09-21 when the
-# 911 LST Organizer and 902 Part Validator wanted the same report - one home,
+# 911 LST Organizer and 902 Batch Validator wanted the same report - one home,
 # so every app's report reads the same and a layout fix lands everywhere.
 
 REPORT_COLORS = {            # RGB 0-1

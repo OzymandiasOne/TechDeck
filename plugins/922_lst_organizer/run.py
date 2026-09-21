@@ -32,7 +32,7 @@ shows each tube's SOURCE MATERIAL description instead of the where-to-look
 path hint (the material is what you take to the floor).
 
 v3.3.2 - the report layout moved into the SDK (sdk.ReportPdf) so the 911 LST
-Organizer and 902 Part Validator draw the same report; the run now ends with a
+Organizer and 902 Batch Validator draw the same report; the run now ends with a
 clickable console line that opens the report (sdk.link_output).
 
 Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
@@ -343,7 +343,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
 # ── report ──────────────────────────────────────────────────────────────────
 
 # The color-coded report layout lives in the SDK (sdk.ReportPdf) since
-# 2026-09-21 - 911 LST Organizer and 902 Part Validator draw the same report.
+# 2026-09-21 - 911 LST Organizer and 902 Batch Validator draw the same report.
 _RC = sdk.REPORT_COLORS
 _C_BAND, _C_WHITE, _C_GREY, _C_INK = _RC["band"], _RC["white"], _RC["grey"], _RC["ink"]
 _C_MISS_BG, _C_MISS_TX = _RC["miss_bg"], _RC["miss_tx"]

@@ -35,6 +35,9 @@ _PLUGIN_ID_RENAMES = {
     "po_packet_extractor": "911_po_pdf_extractor",
     "run_time_estimator": "922_runtime_genie",
     "911_repeater": "911_batch_repeater",  # id now matches its folder
+    # Renamed the day it was built (2026-09-21), before any release - the
+    # prints check made it a BATCH validator. It did load in dev runs.
+    "902_part_validator": "902_batch_validator",
     # Chain entries point at the FINAL id: tile/unlock migration is a single
     # dict lookup (no chaining), so an old->intermediate entry would leave a
     # stale tile for one launch.

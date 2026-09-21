@@ -2,7 +2,7 @@
 Organizer's use of it.
 
 The layout helper was promoted out of the 922 LST Organizer on 2026-09-21 so
-the 911 organizer (and the 902 Part Validator) draw the same report. These
+the 911 organizer (and the 902 Batch Validator) draw the same report. These
 tests pin the things a reader depends on: the report lands where it was asked
 to, every attention section names its parts, a clean run says so, and a long
 report page-breaks instead of running off the sheet.
