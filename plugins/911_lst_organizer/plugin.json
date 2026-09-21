@@ -2,7 +2,7 @@
   "id": "911_lst_organizer",
   "name": "911 LST Organizer",
   "description": "Pulls the .lst files for the parts on a nest's 1D cutting diagram (cross-batch aware) into the nest's PRODUCTION PAPERWORK\\LST folder",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -16,8 +16,9 @@
       "A trailing revision letter counts as the same piece, so a part listed as '-3' still matches a file named '-3A' (and vice versa); those swaps are logged and marked on the report."
     ],
     "output": [
-      "The parts' .lst files gathered into an LST folder under PRODUCTION PAPERWORK, plus a pull-list text file.",
-      "A blocking popup if any nests couldn't be found or any .lst files are missing."
+      "The parts' .lst files gathered into an LST folder under PRODUCTION PAPERWORK.",
+      "A color-coded 'LST Report - {batch} {nest}.pdf' in that folder: what was pulled from which nest, anything missing in red, revision-letter swaps in blue. Click the last line in the console to open it.",
+      "A popup naming any parts with no .lst file and any nests that couldn't be found."
     ]
   },
   "icon": "📋",
