@@ -53,6 +53,21 @@ SCALE = 1.0                     # size of EVERY bug at once (each kind has its o
 WEB_SMALL_PX = 150              # top-right
 WEB_LARGE_PX = 250              # bottom-left
 WEB_SEED = 13                   # same webs every launch
+# Which cobwebs each tab wears: (where, size px, how far along that edge 0..1,
+# seed, true quarter circle?). ALWAYS on the window border. `where` is a corner
+# (tl/tr/bl/br) or an edge (top/bottom/left/right) - an edge web is a half
+# circle hung off the border at `along`. Home keeps the approved pair; every
+# other tab gets exactly ONE, each somewhere different (his call).
+WEB_LAYOUTS = {
+    "home": [("tr", WEB_SMALL_PX, 0.0, WEB_SEED, True),
+             ("bl", WEB_LARGE_PX, 0.0, WEB_SEED, False)],
+    "library": [("br", 210, 0.0, 29, False)],
+    "settings": [("top", 135, 0.63, 41, False)],
+    "account": [("right", 140, 0.40, 53, False)],
+    "assistant": [("left", 130, 0.60, 67, False)],
+    "devkit": [("tl", 175, 0.0, 83, False)],
+}
+WEB_FALLBACK = [("tr", 160, 0.0, 97, False)]    # a tab nobody listed
 WEB_OPACITY = 0.70              # whole-web see-through (1.0 = as drawn)
 # RARE on purpose (his call): a long quiet gap is what makes it a shock. Never
 # less than ten minutes between two visits; the spread on top keeps anyone
@@ -159,22 +174,49 @@ class _Overlay(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
 
+CORNERS = ("tl", "tr", "bl", "br")
+EDGES = ("top", "bottom", "left", "right")
+
+
 def render_web(size: int, corner: str, seed: int = WEB_SEED,
                quarter: bool = False) -> QPixmap:
-    """One corner cobweb, drawn once. Built in 'web space' (u, v measured out
-    of the corner along the two walls) and mapped into the pixmap per corner,
+    """One cobweb on the window border, drawn once. Built in 'web space' (u, v
+    measured out of the anchor point) and mapped into the pixmap per anchor,
     so that GRAVITY - the droop of a snapped strand, the hang of a stray
-    thread - always points down the screen whichever corner it is in.
+    thread - always points down the screen wherever the web is.
 
-    `quarter=True` draws a true 90-degree fan: spokes from wall to wall, all
-    the same length, so the outline is a quarter circle of radius ~`size`.
-    Otherwise the middle spokes are shorter and the web sags into a kite."""
+    `corner` is a corner (tl/tr/bl/br): a 90-degree fan in a size x size
+    pixmap; or an EDGE (top/bottom/left/right): a 180-degree half circle of
+    radius `size`, hung off the middle of the pixmap's border side (the pixmap
+    is 2*size long on that side).
+
+    `quarter=True` draws a true fan: spokes from wall to wall, all the same
+    length, so the outline is a clean arc of radius ~`size`. Otherwise the
+    middle spokes are shorter and the web sags into a kite."""
     rng = random.Random(seed * 7919 + size)
-    pix = QPixmap(size, size)
+    edge = corner in EDGES
+    span = 180 if edge else 90
+    # exactly pi/2 for a corner: the approved webs must not move by an ulp
+    span_rad = math.pi if edge else math.pi / 2
+    if corner in ("top", "bottom"):
+        pw, ph = 2 * size, size
+    elif edge:
+        pw, ph = size, 2 * size
+    else:
+        pw, ph = size, size
+    pix = QPixmap(pw, ph)
     pix.fill(Qt.GlobalColor.transparent)
     flip_x, flip_y = corner in ("tr", "br"), corner in ("bl", "br")
 
     def px(u, v):
+        if corner == "top":
+            return QPointF(size + u, v)
+        if corner == "bottom":
+            return QPointF(size + u, size - v)
+        if corner == "left":
+            return QPointF(v, size + u)
+        if corner == "right":
+            return QPointF(size - v, size + u)
         return QPointF(size - u if flip_x else u, size - v if flip_y else v)
 
     p = QPainter(pix)
@@ -186,7 +228,7 @@ def render_web(size: int, corner: str, seed: int = WEB_SEED,
     haze.setColorAt(1.0, QColor(233, 230, 242, 0))
     p.setPen(Qt.PenStyle.NoPen)
     p.setBrush(haze)
-    p.drawRect(0, 0, size, size)
+    p.drawRect(0, 0, pw, ph)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
     def strand(path: QPainterPath, alpha: float, width: float = 1.0):
@@ -200,15 +242,18 @@ def render_web(size: int, corner: str, seed: int = WEB_SEED,
         p.drawPath(path)
 
     n = 8 if size < 200 else 10
+    if edge:
+        n = 2 * n - 1                       # same spoke density over 180 deg
     if quarter:
         # wall to wall: the end spokes lie ALONG the two walls (half a degree
         # in, so the hairline is not clipped by the pixmap edge)
-        angles = [math.radians(0.5 + 89 * i / (n - 1)
+        angles = [math.radians(0.5 + (span - 1) * i / (n - 1)
                                + (rng.uniform(-2.0, 2.0) if 0 < i < n - 1 else 0))
                   for i in range(n)]
         reach = [size * 0.97 for _ in range(n)]
     else:
-        angles = [math.radians(3 + 84 * i / (n - 1) + rng.uniform(-2.5, 2.5))
+        angles = [math.radians(3 + (span - 6) * i / (n - 1)
+                               + rng.uniform(-2.5, 2.5))
                   for i in range(n)]
         reach = []
         for i in range(n):
@@ -256,7 +301,7 @@ def render_web(size: int, corner: str, seed: int = WEB_SEED,
     # the messy tangle right in the corner
     for _ in range(16):
         r0, r1 = rng.uniform(0.02, 0.2) * size, rng.uniform(0.02, 0.2) * size
-        a0, a1 = rng.uniform(0, math.pi / 2), rng.uniform(0, math.pi / 2)
+        a0, a1 = rng.uniform(0, span_rad), rng.uniform(0, span_rad)
         path = QPainterPath(px(r0 * math.cos(a0), r0 * math.sin(a0)))
         path.lineTo(px(r1 * math.cos(a1), r1 * math.sin(a1)))
         strand(path, rng.uniform(0.18, 0.4), 0.8)
@@ -285,21 +330,37 @@ def render_web(size: int, corner: str, seed: int = WEB_SEED,
 
 
 class CornerWeb(_Overlay):
-    def __init__(self, host, pixmap: QPixmap, corner: str):
+    """One web, pinned to the host's border: in a corner, or - for an edge
+    web - with its anchor point `along` (0..1) that edge."""
+
+    def __init__(self, host, pixmap: QPixmap, corner: str, along: float = 0.0):
         super().__init__(host)
         self._host = host
         self._pix = pixmap
         self.corner = corner
+        self.along = along
         self.setFixedSize(pixmap.size())
         host.installEventFilter(self)
         self.place()
 
     def place(self):
-        host = self._host
-        x = host.width() - self.width() if self.corner in ("tr", "br") else 0
-        y = host.height() - self.height() if self.corner in ("bl", "br") else 0
+        host, c = self._host, self.corner
+        if c in ("top", "bottom"):
+            x = int(self.along * host.width() - self.width() / 2)
+            y = 0 if c == "top" else host.height() - self.height()
+        elif c in ("left", "right"):
+            x = 0 if c == "left" else host.width() - self.width()
+            y = int(self.along * host.height() - self.height() / 2)
+        else:
+            x = host.width() - self.width() if c in ("tr", "br") else 0
+            y = host.height() - self.height() if c in ("bl", "br") else 0
         self.move(x, y)
         self.raise_()
+
+    def detach(self):
+        self._host.removeEventFilter(self)
+        self.hide()
+        self.deleteLater()
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, '_host', None):
@@ -312,6 +373,18 @@ class CornerWeb(_Overlay):
         painter.setOpacity(WEB_OPACITY)
         painter.drawPixmap(0, 0, self._pix)
         painter.end()
+
+
+_WEB_CACHE: dict[tuple, QPixmap] = {}
+
+
+def _web_pixmap(size, corner, seed, quarter) -> QPixmap:
+    """Each web is drawn ONCE per session: flipping between tabs must cost
+    nothing (first-interaction feel is protected)."""
+    key = (size, corner, seed, quarter)
+    if key not in _WEB_CACHE:
+        _WEB_CACHE[key] = render_web(size, corner, seed, quarter)
+    return _WEB_CACHE[key]
 
 
 def _turn_toward(current: float, target: float, max_step: float) -> float:
@@ -560,6 +633,7 @@ class HalloweenDecor(QObject):
         self._settings = settings
         self._rng = rng or random.Random()
         self._webs: list[CornerWeb] = []
+        self._page = "home"
         self._critter: Critter | None = None
         self._last_kind = None
         self._clock = QTimer(self)
@@ -580,10 +654,26 @@ class HalloweenDecor(QObject):
         else:
             self.clear()
             self._clock.stop()
-            for web in self._webs:
-                web.hide()
-                web.deleteLater()
-            self._webs = []
+            self._drop_webs()
+
+    def set_page(self, page: str):
+        """The tab changed: swap to the webs that tab wears. Crawlies do not
+        care which tab is up - the spawn clock is left alone."""
+        page = page or "home"
+        if page == self._page:
+            return
+        self._page = page
+        self._drop_webs()
+        if self.is_active():
+            self._ensure_webs()
+
+    def page(self) -> str:
+        return self._page
+
+    def _drop_webs(self):
+        for web in self._webs:
+            web.detach()
+        self._webs = []
 
     def clear(self):
         """Send the current crawly away (/clear). Cobwebs stay."""
@@ -624,19 +714,20 @@ class HalloweenDecor(QObject):
             for web in self._webs:
                 web.place()
             return
-        # top-right: a clean 90-degree quarter circle (his call); bottom-left
-        # keeps the saggy kite
-        for size, corner, quarter in ((WEB_SMALL_PX, "tr", True),
-                                      (WEB_LARGE_PX, "bl", False)):
+        for corner, size, along, seed, quarter in WEB_LAYOUTS.get(
+                self._page, WEB_FALLBACK):
             try:
-                pix = render_web(size, corner, quarter=quarter)
+                pix = _web_pixmap(size, corner, seed, quarter)
             except Exception:
                 # decor that cannot draw simply does not appear
                 log.exception("halloween decor: could not draw the %s web", corner)
                 continue
-            web = CornerWeb(self._host, pix, corner)
+            web = CornerWeb(self._host, pix, corner, along)
             web.show()
             self._webs.append(web)
+        # a crawly out right now must stay ABOVE the fresh webs
+        if self._critter is not None:
+            self._critter.raise_()
 
     def _arm(self):
         lo, hi = FIRST_MS if self._first else EVERY_MS

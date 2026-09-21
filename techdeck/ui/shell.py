@@ -253,6 +253,9 @@ class MainWindow(QMainWindow):
             from techdeck.ui.widgets.halloween_decor import HalloweenDecor
             self.halloween_decor = HalloweenDecor(self, settings=self.settings)
             self.halloween_decor.refresh()
+            # each tab wears its own cobweb (Home keeps its pair)
+            self.page_stack.currentChanged.connect(self._sync_decor_page)
+            self._sync_decor_page(self.page_stack.currentIndex())
         except Exception:
             logger.exception("halloween decor failed to start")
 
@@ -270,6 +273,22 @@ class MainWindow(QMainWindow):
         self._fadein.setStartValue(0.0)
         self._fadein.setEndValue(1.0)
         self._fadein.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    _DECOR_PAGES = {0: "home", 1: "library", 2: "settings", 3: "account",
+                    4: "assistant"}
+
+    def _sync_decor_page(self, index: int):
+        """Tell the Halloween dressing which tab is showing."""
+        decor = getattr(self, "halloween_decor", None)
+        if decor is None:
+            return
+        name = self._DECOR_PAGES.get(index)
+        if name is None and index == getattr(self, "_devkit_page_index", -1):
+            name = "devkit"
+        try:
+            decor.set_page(name or f"page{index}")
+        except Exception:
+            logger.exception("halloween decor page sync failed")
 
     def start_fadein(self):
         """Begin the startup fade-in animation. Called by __main__.py once

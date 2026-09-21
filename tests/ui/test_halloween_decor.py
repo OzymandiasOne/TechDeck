@@ -152,6 +152,132 @@ def test_only_the_top_right_web_is_the_quarter_circle(host, season):
             == hd.render_web(hd.WEB_LARGE_PX, "bl", quarter=False).toImage())
 
 
+# ── one web per tab ──────────────────────────────────────────────────────
+
+OTHER_TABS = ["library", "settings", "account", "assistant", "devkit"]
+
+
+def _touches_border(web, host):
+    g = web.geometry()
+    return {"tl": g.left() == 0 and g.top() == 0,
+            "tr": g.right() == host.width() - 1 and g.top() == 0,
+            "bl": g.left() == 0 and g.bottom() == host.height() - 1,
+            "br": (g.right() == host.width() - 1
+                   and g.bottom() == host.height() - 1),
+            "top": g.top() == 0,
+            "bottom": g.bottom() == host.height() - 1,
+            "left": g.left() == 0,
+            "right": g.right() == host.width() - 1}[web.corner]
+
+
+def test_home_keeps_its_approved_pair(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    assert decor.page() == "home"
+    assert sorted(w.corner for w in decor._webs) == ["bl", "tr"]
+
+
+@pytest.mark.parametrize("tab", OTHER_TABS)
+def test_every_other_tab_wears_exactly_one_web_on_the_border(host, season, tab):
+    decor = _decor(host)
+    decor.refresh()
+    decor.set_page(tab)
+    assert len(decor._webs) == 1
+    web = decor._webs[0]
+    assert _touches_border(web, host)
+    assert web.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    host.resize(1280, 860)                      # and it stays there
+    web.place()
+    assert _touches_border(web, host)
+
+
+def test_no_two_tabs_put_their_web_in_the_same_place():
+    spots = [(where, round(along, 2))
+             for tab in OTHER_TABS
+             for where, _size, along, _seed, _q in hd.WEB_LAYOUTS[tab]]
+    assert len(set(spots)) == len(spots) == len(OTHER_TABS)
+    home = {where for where, *_ in hd.WEB_LAYOUTS["home"]}
+    assert not home & {where for where, _ in spots}
+    # a real mix: corners AND webs hung off the middle of an edge
+    assert {w for w, _ in spots} & set(hd.CORNERS)
+    assert {w for w, _ in spots} & set(hd.EDGES)
+
+
+def test_switching_tabs_swaps_the_webs_and_leaves_none_behind(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    for tab in OTHER_TABS + ["home"]:
+        decor.set_page(tab)
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        live = [w for w in host.findChildren(hd.CornerWeb) if w.isVisible()]
+        assert len(live) == len(decor._webs) == len(hd.WEB_LAYOUTS[tab])
+
+
+def test_a_tab_nobody_listed_still_gets_one_web(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    decor.set_page("page9")
+    assert len(decor._webs) == 1 and _touches_border(decor._webs[0], host)
+
+
+@pytest.mark.parametrize("edge", ["top", "bottom", "left", "right"])
+def test_an_edge_web_hangs_off_its_border_as_a_half_circle(qapp, edge):
+    r = 120
+    img = hd.render_web(r, edge, 41).toImage()
+    wide = edge in ("top", "bottom")
+    assert (img.width(), img.height()) == ((2 * r, r) if wide else (r, 2 * r))
+    anchor = {"top": (r, 0), "bottom": (r, r - 1),
+              "left": (0, r), "right": (r - 1, r)}[edge]
+    inked = [(x, y) for y in range(0, img.height(), 2)
+             for x in range(0, img.width(), 2)
+             if img.pixelColor(x, y).alpha() > 60]
+    assert len(inked) > 120
+    far = max(math.hypot(x - anchor[0], y - anchor[1]) for x, y in inked)
+    assert 0.7 * r < far <= 1.25 * r            # a fan of about that radius
+    # silk on BOTH sides of the anchor: a half circle, not a quarter
+    along = [(x - anchor[0]) if wide else (y - anchor[1]) for x, y in inked]
+    assert min(along) < -0.5 * r and max(along) > 0.5 * r
+
+
+def test_an_edge_web_sits_where_its_tab_says_along_the_edge(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    decor.set_page("settings")
+    web = decor._webs[0]
+    where, _size, along, _seed, _q = hd.WEB_LAYOUTS["settings"][0]
+    assert where == "top"
+    centre = web.geometry().center().x()
+    assert centre == pytest.approx(along * host.width(), abs=2)
+
+
+def test_changing_tab_never_touches_the_crawly_clock(host, season):
+    decor = _decor(host)
+    decor.refresh()
+    left = decor._clock.remainingTime()
+    critter = decor.spawn("spider", dangle=False)
+    critter._timer.stop()
+    decor.set_page("library")
+    assert decor.current() is critter           # still out, still the only one
+    assert not critter._gone
+    decor.set_page("home")
+    assert decor.current() is critter
+    assert left > 0
+
+
+def test_webs_are_drawn_once_not_on_every_tab_switch(host, season, monkeypatch):
+    calls = []
+    real = hd.render_web
+    monkeypatch.setattr(hd, "_WEB_CACHE", {})
+    monkeypatch.setattr(hd, "render_web",
+                        lambda *a, **k: (calls.append(a), real(*a, **k))[1])
+    decor = _decor(host)
+    decor.refresh()
+    for _ in range(3):
+        for tab in OTHER_TABS + ["home"]:
+            decor.set_page(tab)
+    assert len(calls) == 2 + len(OTHER_TABS)
+
+
 def test_the_webs_are_drawn_see_through(host, season):
     assert 0.4 <= hd.WEB_OPACITY < 1.0
     decor = _decor(host)
