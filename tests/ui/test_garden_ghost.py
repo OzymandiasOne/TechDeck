@@ -136,19 +136,38 @@ def test_no_ghost_without_the_bookshelf(scene):
     assert scene({"deco_ghost"})._ghost is None
 
 
-def test_the_whole_haunt_in_order(scene):
-    s = scene({"deco_books", "deco_ghost"})
+def _haunt(s, seed=1, dt=0.05):
+    """Run one whole haunt. Returns a list of snapshots, one per step."""
+    import random
+    random.seed(seed)
     _open(s)
     s._ghost["t"] = 0.0
-    seen, steps = [], 0
-    while not s._ghost["seen"]:                     # stop the MOMENT he is done:
-        s._update_ghost(0.06)                       # the idle clock keeps ticking,
-        if not seen or seen[-1] != s._ghost["state"]:   # so checking his next wait
-            seen.append(s._ghost["state"])          # any later is a coin toss
+    shots, steps = [], 0
+    while not s._ghost["seen"]:
+        s._update_ghost(dt)
+        g = s._ghost
+        shots.append({"state": g["state"], "slide": g["slide"], "fade": g["fade"],
+                      "seg": g.get("seg"), "phase": g.get("phase"),
+                      "x": g.get("x"), "y": g.get("y")})
         steps += 1
-        assert steps < 1000
-    assert seen == ["out", "emerge", "linger", "retreat", "back", "idle"]
+        assert steps < 4000, "the haunt never ended"
+    return shots
+
+
+def _order(shots, key):
+    out = []
+    for sh in shots:
+        if not out or out[-1] != sh[key]:
+            out.append(sh[key])
+    return out
+
+
+def test_the_whole_haunt_in_order(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = _haunt(s)
+    assert _order(shots, "state") == ["out", "emerge", "linger", "roam", "idle"]
     assert s._ghost["slide"] == 0.0 and s._ghost["fade"] == 0
+    # checked the MOMENT he is done: the idle clock keeps ticking afterwards
     assert gs.GHOST_DELAY_S[0] <= s._ghost["t"] <= gs.GHOST_DELAY_S[1]
 
 
@@ -290,15 +309,6 @@ def test_he_only_appears_once_the_shelf_is_fully_aside(scene):
     assert s._ghost["slide"] == 1.0
 
 
-def test_he_is_gone_before_the_shelf_comes_home(scene):
-    s = scene({"deco_books", "deco_ghost"})
-    _open(s)
-    s._ghost.update(state="retreat", slide=1.0, fade=2, wt=0.0)
-    while s._ghost["state"] == "retreat":
-        s._update_ghost(0.03)
-    assert s._ghost["state"] == "back" and s._ghost["fade"] == 0
-
-
 def test_he_lingers_and_only_bobs_upward(scene):
     s = scene({"deco_books", "deco_ghost"})
     _open(s)
@@ -352,3 +362,119 @@ def test_navigating_back_puts_the_shelf_home(scene):
     s._reset_ghost()
     assert s._ghost["state"] == "idle" and s._ghost["slide"] == 0.0
     assert s._ghost["fade"] == 0
+
+
+# ── he roams the house ───────────────────────────────────────────────────
+
+def _planned(s, seed=1):
+    import random
+    random.seed(seed)
+    shelf = s._rec_by_id("deco_books")
+    s._plan_roam(shelf)
+    return s._ghost["path"], s._ghost_pos(shelf)
+
+
+def test_the_route_out_of_the_passage_round_the_house_and_home(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    path, (gx, gy) = _planned(s)
+    first, visits, last = path[0], path[1:-1], path[-1]
+    # 1. he floats OUT of the passage, to the left, already visible
+    assert (first["x"], first["y"]) == (gx, gy)
+    assert first["dx"] < 0 and first["fade_in"] is False and first["floor"] == 0
+    # 2. then two or three OTHER floors, never the same one twice
+    floors = [v["floor"] for v in visits]
+    assert gs.GHOST_VISITS[0] <= len(visits) <= gs.GHOST_VISITS[1]
+    assert 0 not in floors and len(set(floors)) == len(floors)
+    assert all(v["fade_in"] for v in visits)
+    # 3. last, home: he ends standing in FRONT of the shelf, where the passage was
+    assert last["floor"] == 0 and last["fade_in"] and last["dx"] > 0
+    assert last["x"] + last["dx"] == pytest.approx(gx) and last["y"] == gy
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_every_haunt_is_different_but_always_inside_the_house(scene, seed):
+    s = scene({"deco_books", "deco_ghost"})
+    path, _ = _planned(s, seed)
+    gw, gh = s._ghost["pm"].width(), s._ghost["pm"].height()
+    for leg in path:
+        f = gs.HOUSE_FLOORS[leg["floor"]]
+        x0, x1 = gs.GHOST_FLOOR_X.get(leg["floor"], (f["x0"], f["x1"]))
+        for x in (leg["x"], leg["x"] + leg["dx"]):
+            assert x0 <= x and x + gw <= x1 + 1     # the attic: clear of the eaves
+        assert abs(leg["dx"]) > 12                  # he actually goes somewhere
+        if leg is not path[0] and leg is not path[-1]:
+            hover = f["y"] - (leg["y"] + gh)
+            assert gs.GHOST_HOVER_PX[0] <= hover <= gs.GHOST_HOVER_PX[1]
+
+
+def test_routes_vary_from_haunt_to_haunt(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    routes = set()
+    for seed in range(10):
+        path, _ = _planned(s, seed)
+        routes.add(tuple((v["floor"], round(v["x"])) for v in path[1:-1]))
+    assert len(routes) >= 8
+
+
+def test_the_shelf_shuts_behind_him_and_never_opens_again(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s) if sh["state"] == "roam"]
+    leaving = [sh for sh in shots if sh["seg"] == 0]
+    assert leaving[0]["slide"] == 1.0               # still open as he sets off
+    assert leaving[-1]["slide"] == 0.0              # shut before his first fade ends
+    # and he was still VISIBLE while it shut: it closes behind him, not after him
+    assert any(0.0 < sh["slide"] < 1.0 and sh["fade"] > 0 for sh in leaving)
+    assert all(sh["slide"] == 0.0 for sh in shots if sh["seg"] and sh["seg"] > 0)
+
+
+def test_he_disappears_and_reappears_between_floors(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s) if sh["state"] == "roam"]
+    legs = sorted({sh["seg"] for sh in shots})
+    assert len(legs) >= 4                           # out, 2+ floors, home
+    for seg in legs:
+        mine = [sh for sh in shots if sh["seg"] == seg]
+        assert max(sh["fade"] for sh in mine) == len(gs.GHOST_FADE) - 1
+        assert mine[-1]["fade"] == 0                # gone before the next one
+        if seg > 0:
+            assert mine[0]["fade"] <= 1             # and he fades IN, not pops
+    # every appearance is on the floor its leg says
+    ys = {sh["seg"]: sh["y"] for sh in shots}
+    assert len({round(y) for y in ys.values()}) >= 3
+
+
+def test_he_fades_out_in_front_of_the_shut_shelf(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s) if sh["state"] == "roam"]
+    last = [sh for sh in shots if sh["seg"] == shots[-1]["seg"]]
+    gx, gy = s._ghost_pos(s._rec_by_id("deco_books"))
+    fading = [sh for sh in last if sh["phase"] == "out"]
+    assert fading and all(sh["slide"] == 0.0 for sh in fading)
+    assert all(sh["x"] == pytest.approx(gx) and sh["y"] == gy for sh in fading)
+
+
+def test_loose_in_the_house_he_is_drawn_in_front_of_the_shut_shelf(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    _planned(s)
+    _open(s)
+    shelf = s._rec_by_id("deco_books")
+    gx, gy = s._ghost_pos(shelf)
+    top = len(gs.GHOST_FADE) - 1
+    s._ghost.update(state="roam", slide=0.0, fade=0, x=float(gx), y=float(gy), age=0.0)
+    shut = s._compose_native().toImage()
+    s._ghost.update(fade=top)
+    img = s._compose_native().toImage()
+    # pale ghost pixels now sit ON the shelf, which has none of its own
+    row = gy + 14
+    assert all(_pale(img.pixelColor(x, row)) for x in range(gx, gx + 10))
+    assert not any(_pale(shut.pixelColor(x, row)) for x in range(gx, gx + 10))
+
+
+def test_buddy_may_read_again_once_the_shelf_is_shut(scene):
+    s = scene({"deco_books", "deco_ghost", "friend_buddy"})
+    shelf = s._rec_by_id("deco_books")
+    _planned(s)
+    s._ghost.update(state="roam", slide=0.4)        # still shutting
+    assert not s._can_use(shelf)
+    s._ghost.update(slide=0.0)                      # shut; the ghost is upstairs
+    assert s._can_use(shelf)

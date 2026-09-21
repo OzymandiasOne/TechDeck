@@ -264,11 +264,16 @@ FROG_HOP_START = 1             # first hop frame (frog leaps from its sitting po
 FROG_HOP_MS = 120              # ms/frame for the leap + ripples (snappy)
 FROG_HOP_DELAY_S = (20.0, 60.0)  # random idle wait before the single hop
 
-# The Ghost (deco_ghost): he has no spot of his own - he HAUNTS THE BOOKSHELF.
-# While the house is open, every so often the shelf slides to the RIGHT and
-# reveals a HIDDEN PASSAGE: a black opening exactly where the shelf's own black
-# shadow was. The ghost fades in out of that dark, bobs there a beat looking at
-# you, and fades back; then the shelf slides home and the passage is gone.
+# The Ghost (deco_ghost): he has no spot of his own - he HAUNTS THE HOUSE, and the
+# BOOKSHELF is his way in. While the house is open, every so often:
+#   1. the shelf slides to the RIGHT and reveals a HIDDEN PASSAGE - a black opening
+#      exactly where the shelf's own black shadow was;
+#   2. he fades in out of that dark and bobs there a beat, looking at you;
+#   3. he floats out to the left, and the shelf slides shut behind him;
+#   4. he ROAMS: fades out, then reappears on two or three OTHER floors, drifting
+#      along each before fading away again (never the same haunt twice);
+#   5. last he fades in on the shelf's own floor, drifts over to stand IN FRONT of
+#      the closed shelf, and fades out there - the shelf does not open again.
 #
 # The passage is its own sprite (assets/sprites/house_passage.tdart), the size
 # of the black shadow inside the bookshelf sprite (16x26 - the shelf's bottom 6
@@ -293,9 +298,22 @@ GHOST_SLIDE_S = 0.8             # seconds for the shelf to slide, each way
 # cross-fade smoothly); the last value is how solid he ever gets.
 GHOST_FADE = (0.0, 0.15, 0.32, 0.50, 0.68, 0.88)
 GHOST_FADE_STEP_MS = 120        # ms per step, in and out
-GHOST_HOLD_S = 1.8              # fully there, he lingers, looking at you
-GHOST_BOB_PX = 1                # he bobs UP this much while he lingers (never
-                                # down: his bottom rests on the passage's bottom)
+GHOST_HOLD_S = 1.2              # fully there, he lingers in the passage, looking at you
+GHOST_BOB_PX = 1                # he bobs UP this much in the passage (never down:
+                                # his bottom rests on the passage's bottom)
+GHOST_DRIFT_SPEED = (11.0, 17.0)     # px/s while he floats - unhurried
+GHOST_LEAVE_PX = (34.0, 48.0)        # how far left he floats out of the passage
+GHOST_CLEAR_PX = 7.0                 # ...the shelf starts to shut once he is this far out
+GHOST_VISITS = (2, 3)                # how many OTHER floors he turns up on
+GHOST_VISIT_DRIFT_PX = (28.0, 60.0)  # how far he drifts along each
+GHOST_HOVER_PX = (3, 7)              # how high off a floor he floats
+# Floors whose usable width is narrower than HOUSE_FLOORS says. The attic sits
+# under a SLOPED roof: out at the eaves there is no headroom and he would poke
+# through it, so he keeps to the span the attic furniture proves is indoors.
+GHOST_FLOOR_X = {3: (209, 304)}
+GHOST_GAP_S = (0.7, 1.4)             # unseen, between one appearance and the next
+GHOST_RETURN_PX = (36.0, 52.0)       # how far from the shelf he reappears to go home
+GHOST_FAREWELL_S = 0.7               # in front of the shut shelf, before he fades
 GHOST_FIRST_DELAY_S = (8.0, 20.0)    # soon after the house opens: see what you bought
 GHOST_DELAY_S = (45.0, 120.0)        # then a rare surprise
 
@@ -717,6 +735,7 @@ class GardenScene(QWidget):
                 p.drawPixmap(*self._item_draw(rec))
         if self._buddy is not None and self._buddy["inside"]:
             self._draw_buddy(p)                # indoors — drawn among the interior
+        self._draw_roaming_ghost(p)            # loose in the house: in front of it all
         # The facade and anything mounted on it (satellite, perched bird) lift up
         # and fade together when the house opens.
         eased = _ease_out_cubic(self._open_progress)
@@ -946,6 +965,13 @@ class GardenScene(QWidget):
         g = getattr(self, "_ghost", None)
         return g is not None and g["state"] != "idle"
 
+    def _shelf_open(self):
+        """Is the bookshelf out of place (or about to be)? Only THEN is it off
+        limits to Buddy - while the ghost is merely roaming, he may read."""
+        g = getattr(self, "_ghost", None)
+        return g is not None and (g["slide"] > 0.0
+                                  or g["state"] in ("out", "emerge", "linger"))
+
     def _passage_rect(self, rec):
         """Where the hidden passage sits: on the shelf's RESTING spot, under its
         black shadow. It never moves."""
@@ -972,7 +998,8 @@ class GardenScene(QWidget):
     def _update_ghost(self, dt):
         """Advance the haunt. Returns True if anything moved (needs a repaint).
         idle -> out (shelf slides right, uncovering the passage) -> emerge (he
-        fades in) -> linger -> retreat (fades out) -> back (shelf home) -> idle."""
+        fades in) -> linger -> roam (floats off, shelf shuts, other floors,
+        home to the front of the shelf) -> idle."""
         g = getattr(self, "_ghost", None)
         if g is None:
             return False
@@ -986,50 +1013,116 @@ class GardenScene(QWidget):
                 return False        # never move the shelf while Buddy is using it
             g.update(state="out", slide=0.0)
             return True
-        if st in ("out", "back"):
-            step = dt / GHOST_SLIDE_S
-            if st == "out":
-                g["slide"] = min(1.0, g["slide"] + step)
-                if g["slide"] >= 1.0:
-                    g.update(state="emerge", fade=0, wt=GHOST_FADE_STEP_MS / 1000.0)
-            else:
-                g["slide"] = max(0.0, g["slide"] - step)
-                if g["slide"] <= 0.0:
-                    g.update(state="idle", seen=True,
-                             t=random.uniform(*GHOST_DELAY_S))
+        if st == "out":
+            g["slide"] = min(1.0, g["slide"] + dt / GHOST_SLIDE_S)
+            if g["slide"] >= 1.0:
+                g.update(state="emerge", fade=0, wt=GHOST_FADE_STEP_MS / 1000.0)
+            return True
+        if st == "emerge":
+            if self._fade_step(g, dt, +1):
+                g.update(state="linger", hold=GHOST_HOLD_S, age=0.0)
             return True
         if st == "linger":
             g["age"] += dt
             g["hold"] -= dt
             if g["hold"] <= 0:
-                g.update(state="retreat", wt=GHOST_FADE_STEP_MS / 1000.0)
+                self._plan_roam(self._rec_by_id(GHOST_HOST))
+                g.update(state="roam", age=0.0)
             return True             # he bobs, so keep repainting
-        # emerge / retreat: one opacity step at a time
+        return self._update_roam(dt)
+
+    @staticmethod
+    def _fade_step(g, dt, direction):
+        """One hard opacity step per GHOST_FADE_STEP_MS. True once he is fully
+        in (direction +1) or fully gone (-1)."""
+        top = len(GHOST_FADE) - 1
         g["wt"] -= dt
-        if g["wt"] > 0:
-            return False
-        g["wt"] = GHOST_FADE_STEP_MS / 1000.0
-        if st == "emerge":
-            g["fade"] += 1
-            if g["fade"] >= len(GHOST_FADE) - 1:
-                g.update(state="linger", fade=len(GHOST_FADE) - 1,
-                         hold=GHOST_HOLD_S, age=0.0)
-        else:
-            g["fade"] -= 1
-            if g["fade"] <= 0:
-                g.update(state="back", fade=0)
+        if g["wt"] <= 0:
+            g["wt"] = GHOST_FADE_STEP_MS / 1000.0
+            g["fade"] = max(0, min(top, g["fade"] + direction))
+        return g["fade"] >= top if direction > 0 else g["fade"] <= 0
+
+    def _plan_roam(self, rec):
+        """Lay out this haunt: out of the passage, a few other floors, home."""
+        g = self._ghost
+        gw, gh = g["pm"].width(), g["pm"].height()
+        gx, gy = self._ghost_pos(rec)
+
+        def leg(x, y, dx, fade_in, hold, floor):
+            return {"x": float(x), "y": float(y), "dx": float(dx),
+                    "fade_in": fade_in, "hold": hold, "floor": floor,
+                    "speed": random.uniform(*GHOST_DRIFT_SPEED)}
+
+        # 1. out of the passage and away to the left; the shelf shuts behind him
+        path = [leg(gx, gy, -random.uniform(*GHOST_LEAVE_PX), False, 0.0, 0)]
+        # 2. other levels - each somewhere different
+        others = list(range(1, len(HOUSE_FLOORS)))
+        random.shuffle(others)
+        for fi in others[:random.randint(*GHOST_VISITS)]:
+            f = HOUSE_FLOORS[fi]
+            fx0, fx1 = GHOST_FLOOR_X.get(fi, (f["x0"], f["x1"]))
+            lo, hi = fx0 + 4, fx1 - gw - 4
+            x0 = random.uniform(lo, hi)
+            dist = random.uniform(*GHOST_VISIT_DRIFT_PX) * random.choice((-1, 1))
+            x1 = max(lo, min(hi, x0 + dist))
+            if abs(x1 - x0) < GHOST_VISIT_DRIFT_PX[0] * 0.6:     # pinned at a wall:
+                x1 = max(lo, min(hi, x0 - dist))                 # drift the other way
+            y = f["y"] - gh - random.randint(*GHOST_HOVER_PX)
+            path.append(leg(x0, y, x1 - x0, True, 0.3, fi))
+        # 3. home: he reappears on the shelf's floor and drifts over to stand IN
+        #    FRONT of the (shut) shelf, where he fades - it does not open again
+        back = random.uniform(*GHOST_RETURN_PX)
+        path.append(leg(gx - back, gy, back, True, GHOST_FAREWELL_S, 0))
+        g.update(path=path, seg=0, phase="drift", moved=0.0,
+                 x=float(gx), y=float(gy))
+
+    def _update_roam(self, dt):
+        g = self._ghost
+        leg = g["path"][g["seg"]]
+        g["age"] += dt
+        # the shelf slides shut behind him once he is clear of the passage
+        if g["slide"] > 0.0 and (g["seg"] > 0 or g["moved"] >= GHOST_CLEAR_PX):
+            g["slide"] = max(0.0, g["slide"] - dt / GHOST_SLIDE_S)
+        ph = g["phase"]
+        if ph == "in":
+            if self._fade_step(g, dt, +1):
+                g["phase"] = "drift"
+        elif ph == "drift":
+            step = leg["speed"] * dt
+            g["moved"] = min(abs(leg["dx"]), g["moved"] + step)
+            g["x"] = leg["x"] + math.copysign(g["moved"], leg["dx"])
+            if g["moved"] >= abs(leg["dx"]):
+                g.update(phase="hold", hold=leg["hold"])
+        elif ph == "hold":
+            g["hold"] -= dt
+            if g["hold"] <= 0:
+                g.update(phase="out", wt=GHOST_FADE_STEP_MS / 1000.0)
+        elif ph == "out":
+            if self._fade_step(g, dt, -1):
+                g.update(phase="gap", hold=random.uniform(*GHOST_GAP_S))
+        else:                       # gap: unseen, between appearances
+            g["hold"] -= dt
+            if g["hold"] <= 0 and g["slide"] <= 0.0:
+                if g["seg"] + 1 < len(g["path"]):
+                    nxt = g["path"][g["seg"] + 1]
+                    g.update(seg=g["seg"] + 1, phase="in", moved=0.0, fade=0,
+                             x=nxt["x"], y=nxt["y"], age=0.0,
+                             wt=GHOST_FADE_STEP_MS / 1000.0)
+                else:
+                    g.update(state="idle", seen=True, fade=0, slide=0.0,
+                             t=random.uniform(*GHOST_DELAY_S))
         return True
 
     def _draw_haunted_shelf(self, p, rec):
-        """Back to front: the passage (fixed), the ghost inside it, then the
-        bookshelf at its slid position on top."""
+        """Back to front: the passage (fixed), the ghost while he is still IN it,
+        then the bookshelf at its slid position on top."""
         g = self._ghost
         x, y, pm = self._item_draw(rec)
         s = g["slide"]
         shelf_x = x + int(round(GHOST_SHELF_SLIDE * s * s * (3 - 2 * s)))
         passage = self._passage_rect(rec)
         p.drawPixmap(passage.topLeft(), g["passage"])
-        if g["fade"] > 0:
+        if g["fade"] > 0 and g["state"] in ("emerge", "linger"):
             gx, gy = self._ghost_pos(rec)
             if g["state"] == "linger":
                 gy -= int(round(GHOST_BOB_PX * abs(math.sin(g["age"] * 2.6))))
@@ -1039,6 +1132,17 @@ class GardenScene(QWidget):
             p.drawPixmap(gx, gy, g["pm"])
             p.restore()
         p.drawPixmap(shelf_x, y, pm)
+
+    def _draw_roaming_ghost(self, p):
+        """Once he has left the passage he is IN FRONT of everything indoors -
+        furniture, Buddy, and the shelf he finally fades out before."""
+        g = getattr(self, "_ghost", None)
+        if g is None or g["state"] != "roam" or g["fade"] <= 0:
+            return
+        bob = int(round(math.sin(g["age"] * 2.6)))
+        p.setOpacity(GHOST_FADE[g["fade"]])
+        p.drawPixmap(int(round(g["x"])), int(round(g["y"])) + bob, g["pm"])
+        p.setOpacity(1.0)
 
     def _init_frog(self, rec):
         """Take the lily pad off the generic ambient loop and onto its own rare-hop
@@ -1217,8 +1321,8 @@ class GardenScene(QWidget):
         """Buddy can use a placed item if it's an interaction with either a Buddy
         pose OR an item clip (a clip-only item, e.g. the chest, plays its own
         animation while Buddy stands idle by it)."""
-        if r["id"] == GHOST_HOST and self._ghost_busy():
-            return False            # the shelf is mid-haunt: not now, Buddy
+        if r["id"] == GHOST_HOST and self._shelf_open():
+            return False            # the shelf is out of place: not now, Buddy
         return r["id"] in BUDDY_INTERACTIONS and (r["id"] in self._buddy_acts
                                                   or r.get("clip"))
 
