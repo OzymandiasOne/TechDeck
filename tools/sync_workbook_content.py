@@ -293,6 +293,29 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.7", "Sep 21, 2026", "Feature",
+     "A new incoming-batch validation tool answers, on the day a 902 batch "
+     "arrives, which parts are not yet ready to work: parts with no drawing "
+     "file, drawing files that open but hold no geometry, damaged model files, "
+     "and parts with no print. It reads the customer's own part list, so it "
+     "runs before internal pricing paperwork exists, and reads the part number "
+     "off each scanned print page to match prints to parts. Read-only: no file "
+     "in the batch is moved or altered. The result is one report listing every "
+     "part with issue yes/no and the reason in plain words, which goes back to "
+     "the customer as a single request instead of a part at a time; over three "
+     "thousand parts were on hold waiting on a handful of files when this was "
+     "commissioned. Validated against fourteen received batches and the "
+     "program's own delay log. The 911 nest-file gathering tool now issues the "
+     "same color-coded reconciliation report as its 922 counterpart. In 911 "
+     "batch setup the scribe verification sheet now matches the nest's part "
+     "count (it was fixed at twenty-four rows, silently omitting parts beyond "
+     "that on larger nests), lists parts in nest-package order for final "
+     "inspection, takes quantities from the nest package where it disagrees "
+     "with the batch list, and fills the material specification per part from "
+     "the part print for non-ferrous plate. A quantity verification that had "
+     "never run on plate work is fixed.",
+     "902 Batch Validator (new), 911 Setup, 911 LST Organizer, 902 DXF Prep, "
+     "922 LST Organizer"),
     ("Beta 0.8.7.6", "Sep 17, 2026", "Feature",
      "A new MieTrak Tools window collects small MieTrak helpers behind one "
      "picker. Its first tool, the Hardware Code Generator, builds a hardware "
@@ -644,7 +667,7 @@ PI_RENAMES = {
 
 # ---- Process Improvement log :: NEW entries (task, state, description) ------
 PI_NEW = [
-    ("902 INCOMING PART FILE VALIDATION", "IN PROGRESS",
+    ("902 INCOMING PART FILE VALIDATION", "COMPLETE",
      "THE CUSTOMER DIRECTED THAT NO 902 BATCH SHIP WITH PARTS MISSING, AND "
      "OVER 3,000 PARTS WERE ON HOLD WAITING ON A HANDFUL OF DRAWING FILES, "
      "BECAUSE ON RECEIPT NOBODY COULD TELL WHICH PARTS HAD NO FILE, WHICH DXF "
@@ -654,7 +677,8 @@ PI_NEW = [
      "PRODUCES ONE REPORT LISTING EVERY PART WITH ISSUE YES/NO AND THE REASON "
      "IN PLAIN WORDS, SO THE FULL REQUEST GOES BACK TO THE CUSTOMER ON DAY ONE; "
      "VALIDATED READ-ONLY AGAINST 14 REAL BATCHES (440 PART FILES), WHERE ITS "
-     "VERDICT ON EVERY IGES FILE MATCHED WHAT THE CONVERTED DRAWING SHOWED"),
+     "VERDICT ON EVERY IGES FILE MATCHED WHAT THE CONVERTED DRAWING SHOWED, AND "
+     "ITS MISSING-PRINT FINDINGS MATCHED THE PROGRAM'S OWN DELAY LOG"),
     ("IN-APP USER MANUAL", "COMPLETE",
      "A COMPLETE ILLUSTRATED USER MANUAL FOR THE PLATFORM AND ALL 26 "
      "PRODUCTION TOOLS, WRITTEN IN PLAIN SHOP LANGUAGE WITH NUMBERED "
@@ -976,7 +1000,7 @@ GANTT_ROWS = [
     ("Flat Bar Forming Support", GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "902 QTDR WORKFLOW"),
     ("902 DXF Prep", GANTT_DONE, 1, "2026-06", "2026-07"),
-    ("902 Batch Validator", GANTT_DEV, 0.9, "2026-09", "2026-09"),
+    ("902 Batch Validator", GANTT_DONE, 1, "2026-09", "2026-09"),
     ("902 Documentation & Paperwork Rebuild (Automation Prep)",
      GANTT_DEV, 0.6, "2026-08", "2026-10"),
     ("902 Setup App Suite (Mirrors 911/922 Toolchains)",
