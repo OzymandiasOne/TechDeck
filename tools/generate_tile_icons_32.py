@@ -858,6 +858,52 @@ def qr(d):                  # qr code generator
     _draw_grid(d, _QR_GRID, _QR_TONES)
 
 
+_BATCH_VALIDATOR_GRID = [
+    "................................",
+    "................................",
+    "......bbbbbbbbbbbbbbbbbbbbbb....",
+    "......bbbbbbbbbbbbbbbbbbbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwaaaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwaaaawwwwwwwwwwbbbb....",
+    "..wwaawwaaaawwwwbbbbbbwwbbbb....",
+    "..wwaawwaaaawwwwbbbbbbwwbbbb....",
+    "..wwaaaaaawwwwwwwwwwwwwwbbbb....",
+    "..wwaaaaaawwwwwwwwwwwwwwbbbb....",
+    "..wwwwaawwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwaawwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwwwrrwwwwwwbbbbbbwwbbbb....",
+    "..wwwwwwrrwwwwwwbbbbbbwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwww........",
+    "..wwwwwwwwwwwwwwwwwwwwww........",
+    "................................",
+    "................................",
+]
+_BATCH_VALIDATOR_TONES = {"a": "#064678", "r": "#E41E2F", "b": "#589BD4", "w": "#E6E5E5"}
+
+def batch_validator(d):     # 902 batch validator
+    # Tournament winner v19 (tools/pixel_playground/batch_validator/variants.py,
+    # maintainer's pick 2026-09-21): a pass row and a fail row on a sheet, a
+    # second sheet behind = a BATCH. The X is pack red because its luminance
+    # sits BETWEEN navy and mid blue - an orange X ranks third and recolors to
+    # pale grey on white in dark / blue / matrix. Keep both marks the two
+    # darkest tones if this is ever repainted.
+    _draw_grid(d, _BATCH_VALIDATOR_GRID, _BATCH_VALIDATOR_TONES)
+
+
 _SYM_BINOCULARS_GRID = [
     "................................",
     "................................",
@@ -2169,6 +2215,7 @@ ICONS = {
     "copy": copy,
     "badge": badge,
     "qr": qr,
+    "batch_validator": batch_validator,
     "caution": caution,
     "inspection_dims": inspection_dims,
 }
