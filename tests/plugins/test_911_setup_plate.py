@@ -6,7 +6,8 @@ up by hand. The three reported inaccuracies these tests pin down:
 1. MIL SPEC must be the literal 'N/A' for FERROUS (carbon) plate — decided
    by the packet's own MOVE TICKET 'FERROUS:' flag ('F'), never a keyword
    guess. Non-ferrous plate ('N': CRES/IN625/MONEL/CUNI/BRASS, 'A': aluminum)
-   keeps the real spec. SHAPE runs are byte-for-byte unaffected.
+   is left BLANK for a person to fill in (v2.3.0; it kept the packet's spec
+   before). SHAPE runs are byte-for-byte unaffected.
 2. The SCRIBE sheet's UNIQUE - TRACE column is real data on plate (manually
    entered from the forecast today, hardcoded to "N/A" by the SHAPE
    template's formulas) — plate runs fill it from the forecast's TRACE/MIC
@@ -72,8 +73,13 @@ def test_missing_plate_template_names_the_plate_pattern(su, tmp_path):
 @pytest.mark.parametrize("mil, ferrous, plate, expected", [
     ("MIL-S-22698", "F", True, "N/A"),          # carbon plate -> N/A
     ("MIL-S-22698", "f", True, "N/A"),          # case-tolerant
-    ("ASTM-A240", "N", True, "ASTM-A240"),      # stainless plate -> real spec
-    ("ASTM-B209", "A", True, "ASTM-B209"),      # aluminum plate -> real spec
+    # v2.3.0 (floor feedback 2026-09-18): non-ferrous plate is left BLANK - it
+    # DOES need a spec, and a blank says "fill me in" where a wrong value has
+    # to be noticed before it can be overridden. (v2.1.0 kept the packet's.)
+    ("ASTM-A240", "N", True, None),             # stainless plate -> blank
+    ("ASTM-B209", "A", True, None),             # aluminum plate -> blank
+    ("ASTM-B209", "n", True, None),             # case-tolerant
+    ("ASTM-A240", "N", False, "ASTM-A240"),     # SHAPE untouched, non-ferrous too
     ("MIL-S-22698", None, True, "MIL-S-22698"), # no flag -> keep, human strikes
     ("MIL-S-22698", "F", False, "MIL-S-22698"), # SHAPE untouched, even ferrous
     (None, "F", True, "N/A"),                   # carbon plate, blank spec field
