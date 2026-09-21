@@ -478,3 +478,51 @@ def test_buddy_may_read_again_once_the_shelf_is_shut(scene):
     assert not s._can_use(shelf)
     s._ghost.update(slide=0.0)                      # shut; the ghost is upstairs
     assert s._can_use(shelf)
+
+
+# ── pacing: he is in no hurry ────────────────────────────────────────────
+
+def test_he_settles_before_drifting_and_rests_before_fading(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s) if sh["state"] == "roam"]
+    for seg in sorted({sh["seg"] for sh in shots}):
+        phases = _order([sh for sh in shots if sh["seg"] == seg], "phase")
+        want = ["drift", "hold", "out", "gap"] if seg == 0 else \
+               ["in", "settle", "drift", "hold", "out", "gap"]
+        assert phases == want, (seg, phases)
+
+
+def test_while_he_rests_he_floats_in_place(scene):
+    """Not travelling - but still bobbing, so it must keep repainting."""
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s, dt=0.05) if sh["state"] == "roam"]
+    for phase, (lo, hi) in (("settle", gs.GHOST_SETTLE_S), ("hold", gs.GHOST_REST_S)):
+        for seg in sorted({sh["seg"] for sh in shots}):
+            mine = [sh for sh in shots if sh["seg"] == seg and sh["phase"] == phase]
+            if not mine or seg == max(sh["seg"] for sh in shots):
+                continue                            # the last hold is the farewell
+            assert len({sh["x"] for sh in mine}) == 1          # he does not move
+            assert all(sh["fade"] == len(gs.GHOST_FADE) - 1 for sh in mine)
+            assert lo - 0.1 <= len(mine) * 0.05 <= hi + 0.1
+
+
+def test_most_of_a_haunt_is_hanging_in_the_air_not_travelling(scene):
+    s = scene({"deco_books", "deco_ghost"})
+    shots = [sh for sh in _haunt(s) if sh["state"] == "roam"]
+    still = sum(sh["phase"] in ("settle", "hold") for sh in shots)
+    moving = sum(sh["phase"] == "drift" for sh in shots)
+    assert still > moving
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_a_whole_haunt_takes_about_a_minute(scene, seed):
+    s = scene({"deco_books", "deco_ghost"})
+    seconds = len(_haunt(s, seed=seed, dt=0.05)) * 0.05
+    assert 45 <= seconds <= 95
+    # and the next one is never queued on top of it
+    assert gs.GHOST_DELAY_S[0] >= 45
+
+
+def test_a_fade_takes_about_a_second(scene):
+    steps = len(gs.GHOST_FADE) - 1
+    assert 0.8 <= steps * gs.GHOST_FADE_STEP_MS / 1000.0 <= 1.4

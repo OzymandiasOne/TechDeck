@@ -297,11 +297,17 @@ GHOST_SLIDE_S = 0.8             # seconds for the shelf to slide, each way
 # He appears out of the dark in a few hard opacity steps (pixel art does not
 # cross-fade smoothly); the last value is how solid he ever gets.
 GHOST_FADE = (0.0, 0.15, 0.32, 0.50, 0.68, 0.88)
-GHOST_FADE_STEP_MS = 120        # ms per step, in and out
-GHOST_HOLD_S = 1.2              # fully there, he lingers in the passage, looking at you
+GHOST_FADE_STEP_MS = 210        # ms per step, in and out (~1 s a fade: unhurried)
+GHOST_HOLD_S = 2.4              # fully there, he lingers in the passage, looking at you
 GHOST_BOB_PX = 1                # he bobs UP this much in the passage (never down:
                                 # his bottom rests on the passage's bottom)
-GHOST_DRIFT_SPEED = (11.0, 17.0)     # px/s while he floats - unhurried
+# PACING (his call: "the full loop is quick... let him rest in spots a little
+# longer, just floating in place"). At every stop he SETTLES - hovers where he
+# faded in - before drifting, and RESTS - hovers where he arrives - before fading.
+# Most of a haunt is him hanging in the air, bobbing, not travelling.
+GHOST_DRIFT_SPEED = (8.0, 12.0)      # px/s while he floats - unhurried
+GHOST_SETTLE_S = (1.2, 2.2)          # floating in place after he fades in, before he moves
+GHOST_REST_S = (3.0, 5.0)            # floating in place where he arrives, before he fades
 GHOST_LEAVE_PX = (34.0, 48.0)        # how far left he floats out of the passage
 GHOST_CLEAR_PX = 7.0                 # ...the shelf starts to shut once he is this far out
 GHOST_VISITS = (2, 3)                # how many OTHER floors he turns up on
@@ -311,9 +317,9 @@ GHOST_HOVER_PX = (3, 7)              # how high off a floor he floats
 # under a SLOPED roof: out at the eaves there is no headroom and he would poke
 # through it, so he keeps to the span the attic furniture proves is indoors.
 GHOST_FLOOR_X = {3: (209, 304)}
-GHOST_GAP_S = (0.7, 1.4)             # unseen, between one appearance and the next
+GHOST_GAP_S = (1.2, 2.2)             # unseen, between one appearance and the next
 GHOST_RETURN_PX = (36.0, 52.0)       # how far from the shelf he reappears to go home
-GHOST_FAREWELL_S = 0.7               # in front of the shut shelf, before he fades
+GHOST_FAREWELL_S = 2.6               # in front of the shut shelf, before he fades
 GHOST_FIRST_DELAY_S = (8.0, 20.0)    # soon after the house opens: see what you bought
 GHOST_DELAY_S = (45.0, 120.0)        # then a rare surprise
 
@@ -1051,10 +1057,14 @@ class GardenScene(QWidget):
         def leg(x, y, dx, fade_in, hold, floor):
             return {"x": float(x), "y": float(y), "dx": float(dx),
                     "fade_in": fade_in, "hold": hold, "floor": floor,
+                    # he hovers where he appeared before setting off (leg 0 has
+                    # already lingered in the passage, so it just goes)
+                    "settle": random.uniform(*GHOST_SETTLE_S) if fade_in else 0.0,
                     "speed": random.uniform(*GHOST_DRIFT_SPEED)}
 
         # 1. out of the passage and away to the left; the shelf shuts behind him
-        path = [leg(gx, gy, -random.uniform(*GHOST_LEAVE_PX), False, 0.0, 0)]
+        path = [leg(gx, gy, -random.uniform(*GHOST_LEAVE_PX), False,
+                    random.uniform(*GHOST_REST_S), 0)]
         # 2. other levels - each somewhere different
         others = list(range(1, len(HOUSE_FLOORS)))
         random.shuffle(others)
@@ -1068,7 +1078,7 @@ class GardenScene(QWidget):
             if abs(x1 - x0) < GHOST_VISIT_DRIFT_PX[0] * 0.6:     # pinned at a wall:
                 x1 = max(lo, min(hi, x0 - dist))                 # drift the other way
             y = f["y"] - gh - random.randint(*GHOST_HOVER_PX)
-            path.append(leg(x0, y, x1 - x0, True, 0.3, fi))
+            path.append(leg(x0, y, x1 - x0, True, random.uniform(*GHOST_REST_S), fi))
         # 3. home: he reappears on the shelf's floor and drifts over to stand IN
         #    FRONT of the (shut) shelf, where he fades - it does not open again
         back = random.uniform(*GHOST_RETURN_PX)
@@ -1086,6 +1096,10 @@ class GardenScene(QWidget):
         ph = g["phase"]
         if ph == "in":
             if self._fade_step(g, dt, +1):
+                g.update(phase="settle", hold=leg["settle"])
+        elif ph == "settle":        # floating in place where he appeared
+            g["hold"] -= dt
+            if g["hold"] <= 0:
                 g["phase"] = "drift"
         elif ph == "drift":
             step = leg["speed"] * dt
