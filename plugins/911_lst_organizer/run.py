@@ -361,7 +361,8 @@ def _write_report(pdf_path: Path, info: dict, rows: list,
     if issues:
         d.text("COPY PROBLEMS", size=11, bold=True, color=C["rev_tx"])
         for it in issues:
-            d.row([it], [520], size=8, h=14, fill=C["rev_bg"], tcolor=C["rev_tx"])
+            d.row([it], [520], size=8, h=14, fill=C["rev_bg"],
+                  tcolor=C["rev_tx"], wrap=True)
         d.gap(10)
 
     d.text("PULL LIST BY NEST", size=11, bold=True, color=C["band"])
@@ -379,7 +380,7 @@ def _write_report(pdf_path: Path, info: dict, rows: list,
               tcolor=C["grey"])
         for i, (part, _n, _b, files, _via) in enumerate(items):
             d.row([part, "; ".join(files)], [170, 350], h=13,
-                  fill=C["zebra"] if i % 2 else C["white"])
+                  fill=C["zebra"] if i % 2 else C["white"], wrap=True)
         d.gap(6)
 
     d.save(pdf_path)

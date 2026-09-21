@@ -1156,6 +1156,7 @@ Explorer and on pinned shortcuts.
 
 | Plugin | Description |
 |---|---|
+| 902 Part Validator | Checks a 902 batch's part files against the PO before work starts - parts with no file, DXFs with no geometry, corrupt IGES files - and writes one color-coded PDF report |
 | 902 DXF Prep | Batch DXF cleanup and prep for Boost 902 part files - IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles against the PO spreadsheet |
 | 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs, inspection sheets and Move Ticket Omit stamping - behind a checklist of what to run that remembers your selection between sessions |
 | 911 Teams Cards | Posts one Teams modeling card per 911 nest the EB 922 Schedule marks NEED TEAMS/SETUP, into the MODELING bucket of the SOPO D911 PIPELINE plan with its difficulty, its saw-cut or tube-laser machine and its scheduled due date, then moves each nest's status along the schedule as its card goes out. Pick which nests you want cards for - all ticked by default - and the rest stay queued for next time. Needs no batch number |

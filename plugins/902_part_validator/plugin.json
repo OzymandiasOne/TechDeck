@@ -1,0 +1,39 @@
+{
+  "id": "902_part_validator",
+  "name": "902 Part Validator",
+  "description": "Checks a 902 batch before work starts: which parts on the list have no DXF, which DXFs are empty (no geometry), and which IGES files are corrupt - then writes one color-coded PDF report to send back to EB.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "902",
+  "details": {
+    "setup": [
+      "Have the batch folder ready, with the DXF and IGES files EB sent inside it. Subfolders are fine.",
+      "The batch folder needs a part list: EB's own 'B#### 902 OFFLOAD TO ASA' workbook, or the pricing workbook with the PO tab. Close it in Excel before running."
+    ],
+    "how_it_works": [
+      "Pick the batch folder (or the folder with its part files) when the picker opens.",
+      "The app reads the part list, then opens every DXF and IGES file it finds and checks that it really has a part in it.",
+      "EB sends each part as a DXF and an IGES. They are checked separately, and a part has an issue when either one is wrong: no DXF sent, a DXF with nothing to cut, or an IGES that was cut off or holds no part outline.",
+      "When the list says '-145M' and the files say '-145' it is the same piece: matched, and noted on the report. Nothing in the batch is moved, renamed or changed."
+    ],
+    "output": [
+      "One color-coded PDF in the batch folder: '{batch} - PART VALIDATION REPORT.pdf'. Page 1 is the five counts (target, missing, unusable, corrupt, needs a look) and then EVERY part with Issue Y/N and what is wrong. The next page breaks the problems down by kind, plus files that are not on the PO.",
+      "The parts with an issue are also listed in the console so they can be copied straight into a message to EB, and a popup names them."
+    ]
+  },
+  "icon": "✅",
+  "requires_admin": false,
+  "settings": {
+    "fields": [
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
+      }
+    ]
+  }
+}

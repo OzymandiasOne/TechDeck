@@ -58,6 +58,31 @@ def test_report_pdf_creates_parent_and_page_breaks(tmp_path):
     assert "x" * 400 not in text                      # clipped to the column
 
 
+def test_report_pdf_wrap_keeps_the_whole_sentence(tmp_path):
+    long = "DXF: the file is blank; IGES: corrupt - lines lost: says 14 directory lines, has 13"
+    clipped, wrapped = sdk.ReportPdf(), sdk.ReportPdf()
+    clipped.row(["H1-1", long], [140, 160])
+    wrapped.row(["H1-1", long], [140, 160], wrap=True)
+    assert wrapped.y > clipped.y                       # the row grew to fit
+    clipped.save(tmp_path / "c.pdf"); wrapped.save(tmp_path / "w.pdf")
+    flat = lambda t: " ".join(t.split())
+    assert "has 13" not in flat(_text(tmp_path / "c.pdf")[0])
+    assert long in flat(_text(tmp_path / "w.pdf")[0])
+
+
+def test_report_pdf_new_page(tmp_path):
+    d = sdk.ReportPdf()
+    d.new_page()                                        # untouched page: no-op
+    d.text("page one")
+    d.new_page()
+    d.text("page two")
+    d.save(tmp_path / "p.pdf")
+    doc = fitz.open(tmp_path / "p.pdf")
+    pages = [pg.get_text() for pg in doc]
+    doc.close()
+    assert len(pages) == 2 and "page two" in pages[1] and "page two" not in pages[0]
+
+
 def test_911_report_names_every_problem(lst911, tmp_path):
     rows = [
         ("H4143481-3", "503874", "S035", ["H4143481-3A_P_Tube1.lst"], "H4143481-3A"),

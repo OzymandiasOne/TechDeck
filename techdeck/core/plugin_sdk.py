@@ -1697,6 +1697,11 @@ class ReportPdf:
     def gap(self, h):
         self.y += h
 
+    def new_page(self):
+        """Start the next section on a fresh page (no-op on an untouched one)."""
+        if self.y > self.M:
+            self._page()
+
     def text(self, s, size: float = 9, bold=False, color=None, dx=0):
         self._fits(size + 4)
         self.y += size
@@ -1705,19 +1710,46 @@ class ReportPdf:
                            color=color or REPORT_COLORS["ink"])
         self.y += 4
 
+    def _wrap(self, s, w, size, bold=False):
+        """Greedy word wrap of one cell to its column width (a single word
+        wider than the column is clipped, never split mid-word)."""
+        s = "" if s is None else str(s)
+        fn = self._font(bold)
+        measure = self._fitz.get_text_length
+        lines, cur = [], ""
+        for word in s.split():
+            trial = f"{cur} {word}" if cur else word
+            if not cur or measure(trial, fontname=fn, fontsize=size) <= w - 6:
+                cur = trial
+            else:
+                lines.append(cur)
+                cur = word
+        lines.append(cur)
+        return [self._clip(ln, w, size, bold) for ln in lines]
+
     def row(self, cells, widths, size=8.5, h=15, bold=False,
-            fill=None, tcolor=None):
+            fill=None, tcolor=None, wrap=False):
+        """One table row. `wrap=True` lets a long cell run onto more lines (the
+        row grows to fit) instead of being clipped with '..' - use it where
+        the cell is a sentence someone has to read in full."""
+        cols = [self._wrap(c, w, size, bold) if wrap
+                else [self._clip(c, w, size, bold)]
+                for c, w in zip(cells, widths)]
+        line_h = size + 3
+        h = h + line_h * (max(len(c) for c in cols) - 1)
         self._fits(h)
         x0 = self.M
         if fill is not None:
             self.p.draw_rect(
                 self._fitz.Rect(x0, self.y, x0 + sum(widths), self.y + h),
                 fill=fill, width=0)
-        x, base = x0, self.y + h - 4.5
-        for c, w in zip(cells, widths):
-            self.p.insert_text((x + 3, base), self._clip(c, w, size, bold),
-                               fontsize=size, fontname=self._font(bold),
-                               color=tcolor or REPORT_COLORS["ink"])
+        x = x0
+        first = self.y + (h - line_h * (max(len(c) for c in cols) - 1)) - 4.5
+        for lines, w in zip(cols, widths):
+            for k, ln in enumerate(lines):
+                self.p.insert_text((x + 3, first + k * line_h), ln,
+                                   fontsize=size, fontname=self._font(bold),
+                                   color=tcolor or REPORT_COLORS["ink"])
             x += w
         self.y += h
 
