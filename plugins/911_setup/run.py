@@ -153,9 +153,10 @@ v2.3.0 changes (floor feedback 2026-09-18 -- the SCRIBE VERIFICATION sheet)
     so on PLATE nests ('3X24-814') the QTY check silently never ran for most
     rows (L022 5CDBBM: 4 of 34). With the plate shape added, 682 of 682 rows
     across 14 batches verify - and all 682 agree with the packet.
-  - PLATE: non-ferrous stock ('N' / 'A') now leaves MIL SPEC BLANK to be filled
-    in by hand. It kept the packet's spec, which was not reliably the right
-    one; carbon ('F') is still N/A, a missing flag still keeps the packet's.
+  - PLATE: MIL SPEC follows the packet's FERROUS flag - carbon ('F') is N/A,
+    non-ferrous ('N' / 'A') is BLANK to be filled in by hand (it kept the
+    packet's spec, which was not reliably the right one), and a packet with no
+    flag at all is BLANK too: when the app cannot tell, it does not guess.
 
 v2.1.0 changes (coworker feedback 2026-09-03 -- PLATE batches)
   - New "PLATE batch" toggle in the master window, default OFF (= SHAPE) and
@@ -1105,17 +1106,18 @@ def _effective_mil_spec(mil_spec, ferrous, plate: bool):
           one read off the packet was not reliably the right one - a blank cell
           says "fill me in", a wrong value has to be noticed before it can be
           overridden. v2.1.0-v2.2.1 kept the packet's spec here.
-      flag missing            -> the packet's spec, as before: with nothing to
-          go on, a spec a human can strike out beats silently hiding one.
+      flag missing            -> BLANK too (maintainer's rule, 2026-09-21: "can
+          we tell ferrous from non-ferrous? if not, have the column blank").
+          It is the rare case - 212 of 212 recent packets carry the flag
+          (F 195, N 14, A 3, matching the material every time) - but when the
+          app cannot tell, it must not guess a value someone has to catch.
 
     SHAPE mode: always the real spec, exactly as before.
     """
+    if not plate:
+        return mil_spec
     flag = str(ferrous).strip().upper() if ferrous else ""
-    if plate and flag == "F":
-        return "N/A"
-    if plate and flag:
-        return None
-    return mil_spec
+    return "N/A" if flag == "F" else None
 
 
 def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
@@ -2173,11 +2175,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                     f"BLANK to be filled in by hand (packet said "
                     f"{mil_spec or 'nothing'}).")
             elif plate:
-                log("  WARNING: No FERROUS flag in the nest packet -- keeping "
-                    "the packet's MIL spec; strike it out by hand if this is "
-                    "carbon plate.")
+                log("  WARNING: No FERROUS flag in the nest packet -- cannot tell "
+                    "carbon from non-ferrous, so MIL Spec is left BLANK to be "
+                    f"filled in by hand (packet said {mil_spec or 'nothing'}).")
 
-            mil_left_blank = plate and bool(ferrous) and effective_mil is None
+            mil_left_blank = plate and effective_mil is None
             if effective_mil:
                 nest_ws.cell(4, 4).value = effective_mil   # D4
                 log(f"  MIL Spec -> D4: {effective_mil}")

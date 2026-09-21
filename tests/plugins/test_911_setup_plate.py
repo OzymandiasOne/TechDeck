@@ -80,7 +80,12 @@ def test_missing_plate_template_names_the_plate_pattern(su, tmp_path):
     ("ASTM-B209", "A", True, None),             # aluminum plate -> blank
     ("ASTM-B209", "n", True, None),             # case-tolerant
     ("ASTM-A240", "N", False, "ASTM-A240"),     # SHAPE untouched, non-ferrous too
-    ("MIL-S-22698", None, True, "MIL-S-22698"), # no flag -> keep, human strikes
+    # no flag -> the app cannot tell carbon from non-ferrous, so it does not
+    # guess: blank (maintainer's rule 2026-09-21). 212 of 212 real packets
+    # carry the flag, so this is the rare case, not the normal one.
+    ("MIL-S-22698", None, True, None),
+    ("MIL-S-22698", "", True, None),
+    ("MIL-S-22698", None, False, "MIL-S-22698"),  # SHAPE untouched without a flag too
     ("MIL-S-22698", "F", False, "MIL-S-22698"), # SHAPE untouched, even ferrous
     (None, "F", True, "N/A"),                   # carbon plate, blank spec field
     (None, "N", True, None),                    # nothing to write
