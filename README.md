@@ -13,70 +13,72 @@ the `.exe`.
 
 ### New app: 902 Batch Validator
 
-**What it does:** you point it at a 902 batch the day it arrives and it tells you which
-parts are not ready to work on, before anyone starts.
+**What it does:** use this on a 902 batch and it tells you which parts are missing files
+or have corrupted data.
 
-- It reads the part list off EB's own `B#### 902 OFFLOAD TO ASA` workbook, or the
-  pricing workbook if that one is there yet. Either works, so you can run it the day the
-  batch lands.
-- It opens every DXF and IGES in the batch and checks there is really a part in it. EB
-  sends each part as a pair, so the two are checked separately.
-- It reads the prints in the WPDD folder. The part number is drawn on the page rather
-  than typed, so it reads it the same way 911 Inspection Dimensions reads a drawing. A
-  90 page book takes about two minutes.
-- Four things put a part on the list: no DXF was sent, the DXF is empty or damaged, the
-  IGES is corrupt or holds no part outline, or no print was sent.
+It reads the part list off EB's Offload to ASA workbook (or the pricing workbook if
+present), so you can run it the day the batch lands. Then it opens every DXF and IGES to
+check there's actual geometry in the file, and finally it reads the prints in the WPDD
+folder. The part number on the prints has weird formatting the system struggles with, so
+it uses our system from the Inspection Dimensions app to parse the data. A 90 page book
+takes about two minutes.
+
+- A part lands on the flagged list for one of four reasons: no DXF was sent, the DXF is
+  empty or damaged, the IGES is corrupt or holds no part outline, or no print was sent.
+- EB sends each part as a DXF and an IGES pair, so the two are checked separately.
 - It only reads the batch. Nothing is moved, renamed or changed, so it is safe to run
   before or after 902 DXF Prep.
 
 **What you get at the end:** one file in the batch folder, `{batch} - BATCH VALIDATION
 REPORT.pdf`. The first page is the counts, then every part on the list with Issue Y or N
 and what is wrong in plain words. The next page breaks the problems down by kind, and
-lists the print pages it could not tie to a part so you can check those by eye. The parts
-with an issue are printed in the console too, so the list can go straight into a message
+lists the print pages it could not tie to a part so you can check those by eye. The
+flagged parts are printed in the console too, so the list can go straight into a message
 to EB.
 
-**How to run it:** it is under 902 in the Library. Pick the batch folder, or the folder
-with the part files in it. Both work.
+**How to run it:** run this on either the batch folder or the folder with the part files
+in it. Both work.
 
-### 911 LST Organizer writes a report you can read
+### 911 LST Organizer final report has been overhauled to match 922 LST Organizer
 
-The pull report is now one color-coded PDF, the same as the 922 LST Organizer's, instead
-of a text file. Missing parts in red, nests that could not be found in red, revision
-letter swaps in blue, then the pull list grouped by nest. The popup at the end names the
-parts with no .lst file instead of pointing you at the report, and the last line in the
-console opens the report when you click it. The 922 one got that clickable line too.
+The pull report is now one color-coded PDF, the same as the 922 one, instead of a text
+file. Missing parts and nests it could not find in red, revision letter swaps in blue,
+then the pull list grouped by nest. The popup at the end names the parts with no .lst
+file, and the last line in the console opens the report when you click it. The 922 one
+got that clickable line too.
 
-### 911 Setup: the scribe verification sheet
+### 911 Setup: Scribe verification sheet now fits the nest
 
-- **It fits the nest now.** Both of the SACO templates ship that sheet with room for 24
-  parts, so on a bigger nest the parts past the 24th never showed up at all. The table is
-  now as long as the nest is. A six part nest prints six lines.
-- **The parts are in the same order as the nest package summary**, which is the order QA
+Previously both SACO templates' sheet contained room for 24 parts, which was an oversight
+on my part. So on a bigger nest everything past the 24th part never appeared. The table
+now expands to the correct length of the nest. So a 26 part nest now actually prints 26
+lines. Additional changes include:
+
+- **Parts are now in the same order as the nest package summary**, which is the order QA
   walks them in at final inspection. The inspection sheets follow the same order.
 - **Where the nest package and the BATCH LIST disagree on a quantity, the package's
-  number is the one written**, highlighted yellow, with both numbers named in the run
+  number is now the one written**, highlighted yellow, with both numbers named in the run
   summary. It used to keep the BATCH LIST number.
-- **On a plate run the MIL SPEC column follows the stock.** Carbon plate is N/A. For
-  non-ferrous plate each part gets its own MIL spec, read off the labeling block at the
-  bottom of that part's PART SKETCH page. If a part has no spec printed, the cell is left
-  blank and the console names the part. It never guesses one.
-- **The whole NEST tab is centered**, not just the top of it.
+- **On a plate run the MIL SPEC column now follows the stock.** Carbon plate is N/A.
+  Non-ferrous plate gets each part's own MIL spec, read off the labeling block at the
+  bottom of that part's PART SKETCH page. A part with no spec printed is left blank and
+  the console names it.
+- **The whole NEST tab is centered now**, not just the top of it.
 
 ### 902 DXF Prep
 
-It works on a batch the day it arrives: the part list can come from EB's own
-`B#### 902 OFFLOAD TO ASA` workbook, before the pricing workbook exists. It also
-recognises EB's longer file names now (the `_R_AS_1F01_of_1_FLAT-PATTERN#1` kind), which
-were being moved to the EXTRA folder as unrecognised.
+It now works on a batch the day it arrives: the part list can come from EB's Offload to
+ASA workbook, before the pricing workbook exists. It also recognises EB's longer file
+names now (the `_R_AS_1F01_of_1_FLAT-PATTERN#1` kind), which were being moved to the
+EXTRA folder as unrecognised.
 
 ### Fixes
 
-- **911 Setup: the quantity check never ran on plate nests.** It compared each part's
-  quantity against the nest package for shape work only, because a plate work order is
-  written differently (`3X24-814` rather than `XX700969`). On one plate nest that meant 4
-  of 34 parts were actually checked. All of them are checked now. For the record, across
-  682 parts in 14 batches every quantity agrees with its package.
+- **911 Setup was not checking part quantities on plate nests.** It compared each part
+  against the nest package for shape work only, because a plate work order is written
+  differently (`3X24-814` rather than `XX700969`). On one plate nest that meant 4 of 34
+  parts were actually checked. All of them are checked now. For the record, across 682
+  parts in 14 batches every quantity agrees with its package.
 
 ---
 
