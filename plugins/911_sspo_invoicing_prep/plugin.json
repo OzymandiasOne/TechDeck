@@ -2,7 +2,7 @@
   "id": "911_sspo_invoicing_prep",
   "name": "911 SSPO Invoicing Prep",
   "description": "Feed it the whole SSPO pricing master and pick a close-out date range: rows whose Firm VPD falls in the range are split into one workbook per Batch + Nest ('BATCH NEST Pricing Back Up.xlsx', each in its own 'BATCH NEST Invoicing Docs' folder) with an Invoice Supplement tab (PO/Line, invoice number and ship date from the Working Forecast List) printed to PDF as 'ASA Invoice No. XXXXX Supplement.pdf' once the nest has its PS/Inv number, plus two top-level weekly reports - 'D911 Workorder Close Outs' (cols A-Machine, Scheduling Group set to Closed) and the full 'D911 Workorder Material Status' listing. Each nest's pricing calcs ride along too: the shape calc folder zipped, the plate LINEAR INCH CALC workbook copied; a nest with neither is flagged.",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {

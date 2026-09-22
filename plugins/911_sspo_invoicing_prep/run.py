@@ -110,7 +110,7 @@ INV_SHEET = "Invoice Supplement"
 TOTAL_HEADER = "TOTAL PRICE PER WO"
 LOGO_NAME = "asa_logo.png"
 
-# Workorder Close Outs sheet: these 20 source columns (by header NAME), with
+# Workorder Close Outs sheet: these 21 source columns (by header NAME), with
 # Scheduling Group forced to "Closed" (reconstructs the sheet invoicing used to
 # rip from the pricing master by hand). Widths reproduce the hand-made original.
 #
@@ -132,6 +132,12 @@ CLOSEOUT_COLUMNS = [  # (source header, column width)
     ("Division", 13.0), ("Scheduling Group", 13.0), ("Firm VPD", 13.0),
     ("Notes", 13.0), ("ASA SALES REP", 13.0), ("QUOTE DATE", 13.0),
     ("Shape_Plate", 13.0), ("MATERIAL_TYPE", 13.0), ("Machine", 13.0),
+    # v2.4.2 (invoicing, 2026-09-22): "add column CQ (Total Price per WO) from
+    # the master feed sheet, to column U on the workorder close out sheet".
+    # It is the 21st entry, so it lands in column U. Keyed off TOTAL_HEADER -
+    # the same constant the supplement's total already looks up - so the header
+    # has one home; CQ is where it sits in today's master, not how it is found.
+    (TOTAL_HEADER, 13.0),
 ]
 CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
 CLOSEOUT_STATUS_VALUE = "Closed"

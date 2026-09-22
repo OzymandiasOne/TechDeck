@@ -362,6 +362,7 @@ _REAL_POSITIONS = {  # header -> its column in the real pricing master
     "Line": 39, "SubGroup": 40, "Division": 41, "Scheduling Group": 42,
     "Firm VPD": 45, "Notes": 46, "ASA SALES REP": 71, "QUOTE DATE": 72,
     "Shape_Plate": 74, "MATERIAL_TYPE": 75, "Machine": 76,
+    "Total Price per WO": 95,        # column CQ, well past Machine
 }
 
 
@@ -370,13 +371,13 @@ def _master(drop=None):
     scattered, junk and a formula error in between."""
     wb = Workbook()
     ws = wb.active
-    for j in range(1, 77):
+    for j in range(1, 101):
         ws.cell(row=1, column=j, value=f"Filler {j}")
     for name, col in _REAL_POSITIONS.items():
         if name != drop:
             ws.cell(row=1, column=col, value=name)
     for r in (2, 3):
-        for j in range(1, 77):
+        for j in range(1, 101):
             ws.cell(row=r, column=j, value=f"v{r}c{j}")
         ws.cell(row=r, column=42, value="Open")          # Scheduling Group
         ws.cell(row=r, column=65, value="#DIV/0!")       # junk the sheet must not carry
@@ -396,9 +397,11 @@ def _run_closeouts(mod, ws, tmp_path, log=None):
 
 def test_close_outs_take_only_the_named_columns_from_a_full_master(mod, tmp_path):
     ws, name = _run_closeouts(mod, _master(), tmp_path)
-    headers = [str(c.value).strip() for c in ws[1] if c.value is not None]
-    assert headers == [h.strip() for h, _ in mod.CLOSEOUT_COLUMNS]
-    assert ws.max_column == 20, "the whole 76-column master was copied again"
+    # the header text is copied from the source cell, so it carries the
+    # master's own casing - the list entries are lookup keys, not display text
+    headers = [str(c.value).strip().upper() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip().upper() for h, _ in mod.CLOSEOUT_COLUMNS]
+    assert ws.max_column == 21, "the whole master was copied again"
     assert not any(isinstance(c.value, str) and c.value.startswith("#")
                    for row in ws.iter_rows() for c in row)
     assert name == "D911 Workorder Close Outs 9-18-2026.xlsx"
@@ -407,28 +410,40 @@ def test_close_outs_take_only_the_named_columns_from_a_full_master(mod, tmp_path
 def test_close_outs_pull_each_column_from_its_real_position(mod, tmp_path):
     ws, _ = _run_closeouts(mod, _master(), tmp_path)
     # DYPN QTY lives at master column 10, Machine at 76 - the values must follow
-    out = {str(ws.cell(1, j).value).strip(): ws.cell(2, j).value
+    out = {str(ws.cell(1, j).value).strip().upper(): ws.cell(2, j).value
            for j in range(1, ws.max_column + 1)}
     assert out["DYPN QTY"] == "v2c10"
     assert out["SCOPE OF WORK"] == "v2c33"
-    assert out["Machine"] == "v2c76"
-    assert out["Program"] == "v2c1"
+    assert out["MACHINE"] == "v2c76"
+    assert out["PROGRAM"] == "v2c1"
+    # invoicing's 2026-09-22 ask: master column CQ, as close-out column U
+    assert out["TOTAL PRICE PER WO"] == "v2c95"
+
+
+def test_total_price_per_wo_is_column_U(mod, tmp_path):
+    """Invoicing asked for master column CQ at close-out column U (the 21st)."""
+    from openpyxl.utils import get_column_letter
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    j = next(j for j in range(1, ws.max_column + 1)
+             if str(ws.cell(1, j).value).strip().upper() == "TOTAL PRICE PER WO")
+    assert get_column_letter(j) == "U"
+    assert ws.cell(2, j).value == "v2c95"
 
 
 def test_close_outs_force_scheduling_group_to_closed(mod, tmp_path):
     ws, _ = _run_closeouts(mod, _master(), tmp_path)
     col = next(j for j in range(1, ws.max_column + 1)
-               if str(ws.cell(1, j).value).strip() == "Scheduling Group")
+               if str(ws.cell(1, j).value).strip().upper() == "SCHEDULING GROUP")
     assert [ws.cell(r, col).value for r in (2, 3)] == ["Closed", "Closed"]
 
 
 def test_a_missing_column_warns_and_blanks_it_without_shifting_the_rest(mod, tmp_path):
     logged = []
     ws, _ = _run_closeouts(mod, _master(drop="Notes"), tmp_path, logged.append)
-    headers = [str(c.value).strip() for c in ws[1] if c.value is not None]
-    assert headers == [h.strip() for h, _ in mod.CLOSEOUT_COLUMNS]   # still 20, in order
-    col = headers.index("Notes") + 1
+    headers = [str(c.value).strip().upper() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip().upper() for h, _ in mod.CLOSEOUT_COLUMNS]  # still 21, in order
+    col = headers.index("NOTES") + 1
     assert ws.cell(2, col).value is None
     assert any("Notes" in ln for ln in logged)
     # the column after it is still the right one, not shifted left
-    assert str(ws.cell(1, col + 1).value).strip() == "ASA SALES REP"
+    assert str(ws.cell(1, col + 1).value).strip().upper() == "ASA SALES REP"
