@@ -345,3 +345,90 @@ def test_real_exporter_reports_missing_excel_without_raising(mod, monkeypatch, t
     assert "pywin32" in ex.error
     assert sum("no supplement PDFs" in l for l in logs) == 1      # warned once
     ex.close()
+
+
+# ── Workorder Close Outs: the columns are chosen BY NAME ────────────────────
+# v2.4.1 (invoicing, 2026-09-22). The sheet used to be "every column from A
+# through the one headed Machine" - a positional range wearing a header name.
+# That produced the right 20 columns only while the input was a sheet already
+# trimmed to them. Since v2.2.0 the input is a copy of the WHOLE pricing
+# master, where Machine is column 76 and the wanted columns are scattered, so
+# the close-out sheet came out with all 76 columns and the master's #DIV/0!
+# cells in it. The positions below are the real ones from her 9-18 sheet.
+
+_REAL_POSITIONS = {  # header -> its column in the real pricing master
+    "Program": 1, "Batch": 2, "Work Order": 3, "DYPN": 4, "Material": 7,
+    "DYPN QTY": 10, "Nest Pkg Nbr": 11, "SCOPE OF WORK ": 33, "PO": 38,
+    "Line": 39, "SubGroup": 40, "Division": 41, "Scheduling Group": 42,
+    "Firm VPD": 45, "Notes": 46, "ASA SALES REP": 71, "QUOTE DATE": 72,
+    "Shape_Plate": 74, "MATERIAL_TYPE": 75, "Machine": 76,
+}
+
+
+def _master(drop=None):
+    """A pricing master shaped like the real one: 76 columns, the wanted ones
+    scattered, junk and a formula error in between."""
+    wb = Workbook()
+    ws = wb.active
+    for j in range(1, 77):
+        ws.cell(row=1, column=j, value=f"Filler {j}")
+    for name, col in _REAL_POSITIONS.items():
+        if name != drop:
+            ws.cell(row=1, column=col, value=name)
+    for r in (2, 3):
+        for j in range(1, 77):
+            ws.cell(row=r, column=j, value=f"v{r}c{j}")
+        ws.cell(row=r, column=42, value="Open")          # Scheduling Group
+        ws.cell(row=r, column=65, value="#DIV/0!")       # junk the sheet must not carry
+    return ws
+
+
+def _hmap(ws):
+    return {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
+
+
+def _run_closeouts(mod, ws, tmp_path, log=None):
+    name = mod._write_closeouts(
+        ws, 1, _hmap(ws), [tuple(r) for r in ws.iter_rows(min_row=2)],
+        tmp_path, date(2026, 9, 18), log or (lambda *_: None))
+    return load_workbook(tmp_path / name).active, name
+
+
+def test_close_outs_take_only_the_named_columns_from_a_full_master(mod, tmp_path):
+    ws, name = _run_closeouts(mod, _master(), tmp_path)
+    headers = [str(c.value).strip() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip() for h, _ in mod.CLOSEOUT_COLUMNS]
+    assert ws.max_column == 20, "the whole 76-column master was copied again"
+    assert not any(isinstance(c.value, str) and c.value.startswith("#")
+                   for row in ws.iter_rows() for c in row)
+    assert name == "D911 Workorder Close Outs 9-18-2026.xlsx"
+
+
+def test_close_outs_pull_each_column_from_its_real_position(mod, tmp_path):
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    # DYPN QTY lives at master column 10, Machine at 76 - the values must follow
+    out = {str(ws.cell(1, j).value).strip(): ws.cell(2, j).value
+           for j in range(1, ws.max_column + 1)}
+    assert out["DYPN QTY"] == "v2c10"
+    assert out["SCOPE OF WORK"] == "v2c33"
+    assert out["Machine"] == "v2c76"
+    assert out["Program"] == "v2c1"
+
+
+def test_close_outs_force_scheduling_group_to_closed(mod, tmp_path):
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    col = next(j for j in range(1, ws.max_column + 1)
+               if str(ws.cell(1, j).value).strip() == "Scheduling Group")
+    assert [ws.cell(r, col).value for r in (2, 3)] == ["Closed", "Closed"]
+
+
+def test_a_missing_column_warns_and_blanks_it_without_shifting_the_rest(mod, tmp_path):
+    logged = []
+    ws, _ = _run_closeouts(mod, _master(drop="Notes"), tmp_path, logged.append)
+    headers = [str(c.value).strip() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip() for h, _ in mod.CLOSEOUT_COLUMNS]   # still 20, in order
+    col = headers.index("Notes") + 1
+    assert ws.cell(2, col).value is None
+    assert any("Notes" in ln for ln in logged)
+    # the column after it is still the right one, not shifted left
+    assert str(ws.cell(1, col + 1).value).strip() == "ASA SALES REP"

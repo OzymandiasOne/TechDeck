@@ -110,10 +110,29 @@ INV_SHEET = "Invoice Supplement"
 TOTAL_HEADER = "TOTAL PRICE PER WO"
 LOGO_NAME = "asa_logo.png"
 
-# Workorder Close Outs sheet: the source's columns A..Machine, verbatim, with
-# Scheduling Group forced to "Closed" (reconstructs the sheet previously hand-ripped
-# from the pricing master).
-CLOSEOUT_LAST_HEADER = "MACHINE"
+# Workorder Close Outs sheet: these 20 source columns (by header NAME), with
+# Scheduling Group forced to "Closed" (reconstructs the sheet invoicing used to
+# rip from the pricing master by hand). Widths reproduce the hand-made original.
+#
+# v2.4.1 (2026-09-22) - this WAS "every column from A through the one headed
+# Machine". That is a positional range wearing a header name, and it only ever
+# produced the right sheet while the input was already trimmed to these 20
+# columns with Machine last. Since v2.2.0 the input is a copy of the WHOLE
+# pricing master, where Machine is column 76 and the 20 wanted columns are
+# scattered across it (1,2,3,4,7,10,11,33,38,39,40,41,42,45,46,71,72,74,75,76)
+# - so the close-out sheet came out with all 76 columns, junk and #DIV/0! cells
+# included. Reported by invoicing 2026-09-22 against the 9-18 sheet; the 9-4
+# one, produced before the whole-master change reached her, is the reference.
+# Hard Rule 1 is the lesson: select BY NAME, never by position.
+CLOSEOUT_TITLE = "D911 Workorder Close Outs"
+CLOSEOUT_COLUMNS = [  # (source header, column width)
+    ("Program", 13.0), ("Batch", 15.9), ("Work Order", 13.0), ("DYPN", 13.0),
+    ("Material", 13.0), ("DYPN QTY", 13.0), ("Nest Pkg Nbr", 13.0),
+    ("SCOPE OF WORK", 13.0), ("PO", 13.0), ("Line", 13.0), ("SubGroup", 13.0),
+    ("Division", 13.0), ("Scheduling Group", 13.0), ("Firm VPD", 13.0),
+    ("Notes", 13.0), ("ASA SALES REP", 13.0), ("QUOTE DATE", 13.0),
+    ("Shape_Plate", 13.0), ("MATERIAL_TYPE", 13.0), ("Machine", 13.0),
+]
 CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
 CLOSEOUT_STATUS_VALUE = "Closed"
 
@@ -462,38 +481,48 @@ def _copy_cell(src_c, dst_c, value=None):
 
 def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date, log):
     """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
-    out_dir: the source sheet's columns A through "Machine" (values and cell styles
-    verbatim, so the hand-ripped original is reproduced exactly) with every row's
+    out_dir: the CLOSEOUT_COLUMNS source columns (by header NAME, values and cell
+    styles verbatim, so the hand-ripped original is reproduced) with every row's
     Scheduling Group set to "Closed". Named for `report_date` (the range's end date,
     so a Monday catch-up run still stamps the close-out Friday). Returns the
     filename written."""
-    last_col = hmap.get(CLOSEOUT_LAST_HEADER)
-    if not last_col:
-        last_col = max(hmap.values())
-        log(f"  WARNING: no '{CLOSEOUT_LAST_HEADER}' column - the Close Outs sheet "
-            "will include every column instead.")
+    cols = []                               # (source col or None, header text)
+    missing = []
+    for name, _ in CLOSEOUT_COLUMNS:
+        c = hmap.get(name.strip().upper())
+        if c is None:
+            missing.append(name)
+            cols.append((None, name))
+        else:
+            cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
+    if missing:
+        log(f"  WARNING: the source has no {', '.join(missing)} column(s) - "
+            "those Close Outs columns will be blank.")
+
     status_col = hmap.get(CLOSEOUT_STATUS_HEADER)
-    if not status_col or status_col > last_col:
-        status_col = None
+    if not status_col:
         log(f"  WARNING: no '{CLOSEOUT_STATUS_HEADER}' column - no rows marked "
             f"'{CLOSEOUT_STATUS_VALUE}'.")
 
     wb = openpyxl.Workbook()
     ws = wb.active                      # stays "Sheet1", like the hand-made original
-    for j in range(1, last_col + 1):
-        letter = get_column_letter(j)
-        dim = src_ws.column_dimensions.get(letter)
-        if dim is not None and dim.width:
-            ws.column_dimensions[letter].width = dim.width
-        _copy_cell(src_ws.cell(row=hdr_row, column=j), ws.cell(row=1, column=j))
+    for j, ((c, header), (_, width)) in enumerate(zip(cols, CLOSEOUT_COLUMNS),
+                                                  start=1):
+        ws.column_dimensions[get_column_letter(j)].width = width
+        if c is None:
+            ws.cell(row=1, column=j, value=header)
+        else:
+            _copy_cell(src_ws.cell(row=hdr_row, column=c), ws.cell(row=1, column=j))
     for r_i, src_row in enumerate(valid_rows, start=2):
-        for j in range(1, last_col + 1):
-            _copy_cell(src_row[j - 1], ws.cell(row=r_i, column=j),
-                       value=CLOSEOUT_STATUS_VALUE if j == status_col else None)
+        for j, (c, _header) in enumerate(cols, start=1):
+            if c is None:
+                continue
+            _copy_cell(src_row[c - 1], ws.cell(row=r_i, column=j),
+                       value=CLOSEOUT_STATUS_VALUE if c == status_col else None)
 
     d = report_date
     fname = _safe_filename(
-        f"D911 Workorder Close Outs {d.month}-{d.day}-{d.year}.xlsx")
+        f"{CLOSEOUT_TITLE} {d.month}-{d.day}-{d.year}.xlsx")
     sdk.save_workbook(wb, out_dir / fname)
     return fname
 
