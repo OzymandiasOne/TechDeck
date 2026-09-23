@@ -527,6 +527,118 @@ def request_922_batch_folder(
     return batch_no, batch_path
 
 
+# A 911 QTDR root holds the batch folders AND its own housekeeping folders:
+# "01 - WIP Packages", "05 - RFQs", "_ASA PROGRAM DIRECTORY", ".Oracle DR's".
+# None of those is a batch, and picking one would run the plugin across every
+# package inside it.
+_NOT_A_911_BATCH_RE = re.compile(r'^(\d{2}\s*-\s|_|\.)')
+
+# What a 911 batch folder USUALLY looks like: V060, F071, GX030, WJ244. Used
+# only to LOG a "that doesn't look like a batch" note - never to refuse a pick.
+# Refusing on a name shape is the 2026-09-23 mistake in miniature: 222 folders
+# match this today, and the next naming scheme is not obliged to.
+_LOOKS_LIKE_911_BATCH_RE = re.compile(r'^[A-Z]{1,2}\d{3,4}$')
+
+
+def request_911_batch_folder(
+    params: dict, base_override: str = ""
+) -> Optional[tuple]:
+    """Resolve the 911 batch for this run by FOLDER PICK, not typed number.
+
+    The 911 twin of :func:`request_922_batch_folder`, and it exists for the
+    same reason: typing is a guess the app then has to go hunting for. 911
+    Setup built ``qtdr_root / typed`` and died on a typo; the Batch Auditor
+    typed the batch too. Picking cannot typo, and the user can SEE the 305
+    folders under the root rather than remember which one they want.
+
+    Order:
+      1. Family cache hit — an earlier 911 plugin in this queued run already
+         picked the batch (``shared_state["911"]["batch_number"]``); reuse it.
+      2. Folder pick via request_directory, starting at the 911 QTDR root —
+         Sentry Drone capable (no ``style=`` passed), native dialog otherwise.
+         The batch is the picked folder's NAME.
+      3. Seed the family cache so every later 911 plugin reuses this answer.
+
+    Validation is STRUCTURAL, not by name. The pick must be a real directory
+    under the root and must not BE the root (a user picked the 911 QTDR root
+    once and 911 Inspection Dimensions started across every order) nor one of
+    the root's housekeeping folders. A batch whose name looks unusual is
+    accepted with a logged note — the user is looking right at the folder they
+    chose, and a name-shape rule would refuse the first batch named differently.
+
+    Returns ``(batch, batch_path)``, or ``None`` when the user cancelled the
+    pick (the run's cancel flag is already set by then — just return).
+    """
+    log = params.get("log", print)
+
+    root = resolve_911_qtdr_root((base_override or "").strip())
+    if root is None or not root.exists():
+        raise UserFacingError(
+            "Couldn't find the '911 QTDR' folder.",
+            "Make sure OneDrive is synced, or set the 911 QTDR Base Directory "
+            "in this plugin's Settings, then run again.")
+
+    # 1. Family cache — never re-prompt inside one queued run. The bucket is
+    # the literal "911" (matching run_session's fixed buckets), so the answer
+    # is shared with request_batch_number exactly as the 922 helper's is.
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("911", {}).get("batch_number")
+    if cached:
+        batch = normalize_911_batch(str(cached))
+        batch_path = find_911_batch_folder(root, batch)
+        if batch_path is None:
+            raise UserFacingError(
+                f"Couldn't find batch '{batch}' under the 911 QTDR folder.",
+                "Check the batch folder exists, then run again.")
+        log(f"Batch {batch} (shared from an earlier plugin)")
+        return batch, batch_path
+
+    # 2. Folder pick (drone-capable: style defaults to sentry_style(params)).
+    raw = request_directory(params, "Select the 911 batch folder", str(root))
+    if not raw:
+        # request_directory already flagged the run cancelled.
+        log("Folder selection cancelled - nothing was run.")
+        return None
+
+    batch_path = Path(raw)
+    if not is_dir(batch_path):
+        raise UserFacingError(
+            f"That isn't a folder: {batch_path}",
+            "Run it again and pick the batch's own folder.")
+
+    try:
+        same_as_root = batch_path.resolve() == root.resolve()
+    except OSError:
+        same_as_root = False
+    if same_as_root:
+        raise UserFacingError(
+            "That's the 911 QTDR folder itself, not a batch.",
+            "Run it again and pick the batch's own folder inside it (the one "
+            "named like 'V060').")
+
+    if _NOT_A_911_BATCH_RE.match(batch_path.name):
+        raise UserFacingError(
+            f"'{batch_path.name}' is one of the 911 QTDR folder's own folders, "
+            "not a batch.",
+            "Run it again and pick the batch's own folder (the one named like "
+            "'V060').")
+
+    batch = normalize_911_batch(batch_path.name)
+    if not batch:
+        raise UserFacingError(
+            "That folder has no name to read a batch from.",
+            "Run it again and pick the batch's own folder.")
+    if not _LOOKS_LIKE_911_BATCH_RE.match(batch):
+        log(f"NOTE: '{batch}' doesn't look like the usual batch name (V060, "
+            f"GX030) - carrying on with the folder you picked.")
+
+    # 3. Seed the family cache for the rest of the queued run.
+    if shared_state is not None:
+        shared_state.setdefault("911", {})["batch_number"] = batch
+    log(f"Batch {batch}: {batch_path}")
+    return batch, batch_path
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Console input
 # ─────────────────────────────────────────────────────────────────────────────

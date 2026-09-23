@@ -2,12 +2,12 @@
   "id": "batch_auditor",
   "name": "Batch Auditor",
   "description": "Read-only readiness check for a 911 or 922 batch. Verifies the batch is complete before the floor (orders & prints, LST, run time, forming, pallets, kitting) and presents the results as a dashboard in the console.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "General",
   "details": {
     "setup": [
-      "Sync the 911 and/or 922 folders. Know the batch line you want to check - the audit is read-only and changes nothing."
+      "Sync the 911 and/or 922 folders. You pick the line (911 or 922) and then the batch folder when it runs - the audit is read-only and changes nothing."
     ],
     "how_it_works": [
       "Pick the batch. The app checks each readiness item - orders & prints, LST, run time, forming, pallets, kitting - for a 911 or 922 batch.",
