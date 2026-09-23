@@ -1457,6 +1457,29 @@ _TITLE_BLOCK_MARKERS = (
 # four is stricter than a scanned or oddly-encoded print can be relied on to be.
 _TITLE_BLOCK_MIN_HITS = 2
 
+# A 922 work packet identifies itself POSITIVELY. The absence of a title block
+# used to stand in for "this is the packet", and that is not the same claim: a
+# part SKETCH or a customer PRINT filed beside the packet carries no title
+# block either, so it answered "packet" and got the stamp.
+#
+# Reported 2026-09-23 on Batch 494 / BN331786-R8653362-H11L, which holds both
+# `BN331786 Sketch.pdf` and `BN331786.pdf`. Windows sorts the sketch FIRST -
+# after the shared "BN331786", a space (0x20) precedes a dot (0x2E) - so the
+# sketch was read first, showed no title block, and won. Measured across every
+# PDF in the live 922 batches that day: 6 order folders were stamped on the
+# wrong file and their real packets were blank.
+#
+# These three markers were measured over all 427 live PDFs: they appear on
+# 252 of 252 work packets and on 0 of 166 drawings and 0 of 9 sketch/print
+# files. "LEAD TRADE" alone covers all 252; the other two are the headers of
+# the two packet layouts in use (166 "FRM 922" + 86 "DESKTOP WORK PACKAGE"),
+# kept as alternates so a layout that drops one is still recognised.
+_WORK_PACKET_MARKERS = (
+    "LEAD TRADE",
+    "FRM 922",
+    "DESKTOP WORK PACKAGE",
+)
+
 # Office lock files (~$...) and stray Python temp files (tmpab12cd34.pdf) are
 # not real PDFs of ours. A leftover temp PDF in an order folder would otherwise
 # be picked as that order's work packet by "the first PDF in the folder".
@@ -1472,20 +1495,11 @@ def is_real_pdf(path) -> bool:
     return not _NOT_A_REAL_PDF_RE.match(Path(path).stem)
 
 
-def is_drawing_pdf(path, log=None) -> bool:
-    """True when page 1 of `path` is a part DRAWING (a title-block print).
+def read_page1_text(path, log=None) -> Optional[str]:
+    """Upper-cased page-1 text of `path`, or None when it cannot be read.
 
-    This is how a drawing binder is told apart from a work packet. Name alone
-    cannot do it: the binders sort BEFORE the packet in an order folder
-    ('Binder1.pdf' before 'BK394153 NOFORN.pdf' in Windows' case-insensitive
-    order), so "the first PDF in the folder" stamps the drawing (reported by a
-    922 Pallet Stamper user, 2026-08-20), and a binder is not always named
-    'Binder'.
-
-    An UNREADABLE PDF answers False on purpose. Treating a read error as "this
-    is a drawing" would silently skip a real work packet and the run would look
-    clean; answering False sends the caller on to its own open, which reports
-    the failure properly.
+    None is the honest answer for an unreadable file - callers decide what to
+    do with "I don't know", which is never the same as a confident verdict.
     """
     import fitz
     path = Path(path)
@@ -1493,15 +1507,61 @@ def is_drawing_pdf(path, log=None) -> bool:
         ensure_local(path)
         doc = fitz.open(long_path(path))
         try:
-            text = doc[0].get_text().upper()
+            return doc[0].get_text().upper()
         finally:
             doc.close()
     except Exception as exc:
         if log:
-            log(f"  NOTE: couldn't read {path.name} to check for a title "
-                f"block ({exc}); treating it as a work packet.")
-        return False
-    return text_has_title_block(text)
+            log(f"  NOTE: couldn't read page 1 of {path.name} ({exc}).")
+        return None
+
+
+def classify_pdf(path, log=None) -> str:
+    """What page 1 of `path` IS: 'packet', 'drawing', 'other' or 'unreadable'.
+
+    One open answers the whole question, so no caller pays a second OneDrive
+    round-trip to ask the follow-up.
+
+    * 'packet'     - carries a work-packet marker (LEAD TRADE / FRM 922 /
+                     DESKTOP WORK PACKAGE).
+    * 'drawing'    - carries the ASA/EB title block.
+    * 'other'      - readable, but neither: a part sketch, a customer print,
+                     a scanned page with no extractable text.
+    * 'unreadable' - the file would not open, or page 1 would not render.
+
+    'other' and 'unreadable' are deliberately NOT folded into 'packet'. That
+    conflation is the 2026-09-23 bug: a sketch is not a packet just because it
+    is not a drawing.
+    """
+    text = read_page1_text(path, log=log)
+    if text is None:
+        return "unreadable"
+    if text_is_work_packet(text):
+        return "packet"
+    if text_has_title_block(text):
+        return "drawing"
+    return "other"
+
+
+def is_work_packet_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a 922 work packet (a POSITIVE test)."""
+    return classify_pdf(path, log=log) == "packet"
+
+
+def is_drawing_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a part DRAWING (a title-block print).
+
+    Note this is NOT the inverse of `is_work_packet_pdf` - a sketch, a customer
+    print and an unreadable file are all neither. Use `classify_pdf` when you
+    need to tell those apart.
+    """
+    return classify_pdf(path, log=log) == "drawing"
+
+
+def text_is_work_packet(page_text: str) -> bool:
+    """The work-packet test on text you have ALREADY read."""
+    text = (page_text or "").upper()
+    return any(marker in text for marker in _WORK_PACKET_MARKERS)
 
 
 def text_has_title_block(page_text: str) -> bool:
@@ -1516,25 +1576,15 @@ def text_has_title_block(page_text: str) -> bool:
     return hits >= _TITLE_BLOCK_MIN_HITS
 
 
-def find_work_packet(order_dir, log=None) -> Optional[Path]:
-    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+def _ranked_order_pdfs(order_dir: Path) -> list:
+    """The real PDFs in a 922 order folder, best packet candidate first.
 
-    Returns None when the folder holds no work packet - INCLUDING the case
-    where every PDF in it is a drawing binder. Callers must treat that as
-    "nothing to do here", never as "stamp the first PDF anyway".
-
-    Candidates are ranked by NAME (a PDF named for the order first, a
-    Binder*.pdf last) and then each is confirmed by READING it: the first one
-    whose page 1 is not a title-block drawing wins. The ranking only decides
-    which file gets read first, so a binder that isn't named 'Binder' is still
-    caught, and the common case costs a single page-1 read.
+    A PDF named for the order comes first and a Binder*.pdf last. This is only
+    a READING ORDER - the page-1 read is what decides - so a packet named
+    nothing like its order is still found, and the common case costs one read.
     """
-    order_dir = Path(order_dir)
     pdfs = [p for p in sorted(order_dir.iterdir())
             if is_file(p) and p.suffix.lower() == ".pdf" and is_real_pdf(p)]
-    if not pdfs:
-        return None
-
     order_no = order_dir.name.split('-', 1)[0].strip().upper()
 
     def rank(p: Path) -> tuple:
@@ -1542,13 +1592,60 @@ def find_work_packet(order_dir, log=None) -> Optional[Path]:
         looks_like_binder = bool(_BINDER_NAME_RE.match(p.stem))
         return (0 if named_for_order else 1, 1 if looks_like_binder else 0, p.name)
 
-    for pdf in sorted(pdfs, key=rank):
-        if not is_drawing_pdf(pdf, log=log):
+    return sorted(pdfs, key=rank)
+
+
+def _why_not_packet(kind: str) -> str:
+    return {"drawing": "it's a drawing (title block)",
+            "other": "it carries no work-packet heading",
+            "unreadable": "it wouldn't open"}[kind]
+
+
+def find_work_packet(order_dir, log=None) -> Optional[Path]:
+    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+
+    Returns None when no PDF in the folder PROVES it is a work packet -
+    including a folder of drawings, a folder of sketches, and a folder whose
+    PDFs will not open. Callers must treat that as "nothing to do here", never
+    as "stamp the first one anyway" (v1.4.0) and never as "stamp the first one
+    that isn't obviously a drawing" (v1.5.0) - both of those stamped the wrong
+    file on real batches.
+
+    Stops reading at the packet. Use `find_work_packet_report` when you also
+    need to know what the OTHER files are.
+    """
+    for pdf in _ranked_order_pdfs(Path(order_dir)):
+        kind = classify_pdf(pdf, log=log)
+        if kind == "packet":
             return pdf
         if log:
-            log(f"  Skipping {pdf.name} - it's a drawing (ASA title block), "
-                f"not a work packet.")
+            log(f"  Skipping {pdf.name} - {_why_not_packet(kind)}, so it "
+                f"isn't the work packet.")
     return None
+
+
+def find_work_packet_report(order_dir, log=None) -> tuple:
+    """`find_work_packet`, plus what every OTHER PDF in the folder turned out
+    to be: `(packet_or_None, [(path, kind), ...])`.
+
+    Unlike `find_work_packet` this classifies EVERY PDF, including the ones
+    after the packet - a stray stamp does not stop existing just because it
+    sits on a file that sorts late. That is one page-1 read per PDF, which is
+    what a caller that wants to clean the folder was going to pay anyway.
+    """
+    order_dir = Path(order_dir)
+    packet = None
+    others: list = []
+    for pdf in _ranked_order_pdfs(order_dir):
+        kind = classify_pdf(pdf, log=log)
+        if kind == "packet" and packet is None:
+            packet = pdf
+            continue
+        others.append((pdf, kind))
+        if log and packet is None:
+            log(f"  Skipping {pdf.name} - {_why_not_packet(kind)}, so it "
+                f"isn't the work packet.")
+    return packet, others
 
 
 def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:

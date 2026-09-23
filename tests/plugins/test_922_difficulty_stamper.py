@@ -66,11 +66,24 @@ def test_temp_files_are_not_real_pdfs(ds, name, is_real):
     assert ds._is_real_pdf(Path(name)) is is_real
 
 
+def _packet_pdf(path):
+    """A minimal work packet - it must PROVE it is one, so it carries the
+    page-1 heading the real packets do (2026-09-23: a stub PDF with no text
+    used to qualify simply by not being a drawing)."""
+    import fitz
+    doc = fitz.open()
+    page = doc.new_page(width=792, height=612)
+    page.insert_text(fitz.Point(72, 72), "QA FRM 922", fontsize=10)
+    page.insert_text(fitz.Point(72, 88), "Lead Trade:  922", fontsize=10)
+    doc.save(str(path))
+    doc.close()
+
+
 def test_work_packet_prefers_the_order_numbered_pdf(ds, tmp_path):
     order = tmp_path / "BK573366-R8651569-H2"
     order.mkdir()
-    (order / "AAA other.pdf").write_bytes(b"%PDF-1.4\n")
-    (order / "BK573366.pdf").write_bytes(b"%PDF-1.4\n")
+    _packet_pdf(order / "AAA other.pdf")
+    _packet_pdf(order / "BK573366.pdf")
     # A stray temp PDF sorts first alphabetically but must never win.
     (order / "tmpzz99aa11.pdf").write_bytes(b"%PDF-1.4\n")
 

@@ -2,7 +2,7 @@
   "id": "922_pallet_stamper",
   "name": "922 Pallet Stamper",
   "description": "Stamp work-packet PDFs with PO batch number and pallet assignments. Failed stamps (e.g. OneDrive cloud errors) are retried after the main pass; anything still unstamped is listed with its pallet in a popup for manual stamping.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
