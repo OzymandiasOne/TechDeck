@@ -453,31 +453,32 @@ def run_902(app, window, settings):
 
 
 def run_batch_auditor(app, window, settings):
+    """v1.1.0: the line is a pick-one pop-up and the batch is a folder pick.
+
+    Both used to be typed into the console, which is what the old
+    batch_auditor_prompt shot showed. The folder dialog is native (a real
+    Windows window, not a Qt widget), so it is answered before it can open -
+    same trick run_902 uses.
+    """
     ensure_in_kit(settings, "batch_auditor")
     root = fx_batch_auditor()
     settings.set_plugin_setting("batch_auditor", "qtdr_911_root", str(root))
+
+    # Answer the folder pick before it opens: a native dialog cannot be
+    # screenshotted or driven from here.
+    window.console.request_directory = lambda *a, **k: str(root / "V041")
 
     con = window.console
     steps = Steps(app, window)
     steps.add("start app", lambda: True,
               lambda _: cam.start_app(app, window, "batch_auditor"))
 
-    def prompt_ready(contains):
-        def check():
-            if con.waiting_for_input:
-                prompt = getattr(con, "input_prompt", "") or ""
-                if contains in prompt.lower():
-                    return True
-            return None
-        return check
-
-    def shoot_prompt(_):
-        shot(app, con, "batch_auditor_prompt", settle_ms=600)
-        cam.answer_console(app, window, "911")
-    steps.add("line prompt", prompt_ready("which line"), shoot_prompt)
-
-    steps.add("batch prompt", prompt_ready("batch number"),
-              lambda _: cam.answer_console(app, window, "V041"))
+    def shoot_line_choice(box):
+        shot(app, box, "batch_auditor_line_choice", settle_ms=600)
+        click_soon(button(box, "911"))
+    steps.add("line choice",
+              lambda: toplevel(cls_name="QMessageBox", title_sub="Batch Auditor"),
+              shoot_line_choice)
 
     def audit_done():
         text = con.output.toPlainText()
