@@ -562,32 +562,31 @@ def run_sheet_metal(app, window, settings):
         state["win"] = win
         win._list.setCurrentRow(0)   # Flat Length Calculator
         cam.pump(app, 300)
-        _spec, thick = win._fields["thickness"]
+        form = win.forms[0]          # every calculator's form is built once
+        _spec, thick = form._fields["thickness"]
         thick.setText("0.250")
-        _spec, dim = win._fields["dimValue"]
+        _spec, dim = form._fields["dimValue"]
         dim.setText("6")
-        _spec, angle = win._fields["angle"]
+        _spec, angle = form._fields["angle"]
         angle.setText("360")
         cam.pump(app, 200)
-        button(win, "Calculate").click()
+        button(form, "Calculate").click()
         shot(app, win, "sheet_metal_calculators_flat_length", settle_ms=500)
         state["flat_shot"] = True   # gates the next step
     steps.add("window", lambda: toplevel(cls_name="SheetMetalCalculators"),
               flat_length)
 
     def weight(_):
-        from PySide6.QtCore import QCoreApplication, QEvent
-
         win = state["win"]
         win._list.setCurrentRow(2)   # Material Weight Calculator
-        # Purge the old form's deleteLater'd widgets: processEvents never runs
-        # DeferredDelete, so without this they still paint (ghosted labels).
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         cam.pump(app, 300)
-        _spec, thick = win._fields["thickness"]
+        # Scope lookups to THIS form: all three forms live in the window now,
+        # so a window-wide button(win, "Calculate") would find the first one.
+        form = win.forms[2]
+        _spec, thick = form._fields["thickness"]
         thick.setText("0.190")
         cam.pump(app, 200)
-        button(win, "Calculate").click()
+        button(form, "Calculate").click()
         shot(app, win, "sheet_metal_calculators_weight", settle_ms=500)
         hard_exit(0, "sheet_metal done")
     steps.add("weight calc", lambda: state.get("flat_shot"), weight)
@@ -602,17 +601,29 @@ def run_mietrak(app, window, settings):
 
     def hardware_code(win):
         win._list.setCurrentRow(0)   # Hardware Code Generator
+        # Tall enough that the Generator shot includes Copy Code and Reset.
+        win.resize(960, 720)
         cam.pump(app, 300)
-        tool = win._active
+        views = win.views["hardware_code_generator"]
+        tabs = win.tabs["hardware_code_generator"]
+        gen = views["Generator"]
 
         def pick(combo, label):
             combo.setCurrentIndex(combo.findText(label))
-        pick(tool.material, "ZINC PLATED, GRADE 5")
-        pick(tool.hardware, "CAP SCREW, HEX HEAD")
-        pick(tool.thread_size, "1/2-13")
-        pick(tool.length, "2")
+        pick(gen.material, "ZINC PLATED, GRADE 5")
+        pick(gen.hardware, "CAP SCREW, HEX HEAD")
+        pick(gen.thread_size, "1/2-13")
+        pick(gen.length, "2")
         cam.pump(app, 300)
         shot(app, win, "mietrak_tools_hardware_code", settle_ms=500)
+
+        tabs["Code Reference"].click()
+        shot(app, win, "mietrak_tools_code_reference", settle_ms=500)
+
+        # F16 on purpose: the one code that reads back as two threads.
+        tabs["Code Reader"].click()
+        views["Code Reader"].code_in.setText("HWZP5-HHCS-F16-2")
+        shot(app, win, "mietrak_tools_code_reader", settle_ms=500)
         hard_exit(0, "mietrak done")
     steps.add("window", lambda: toplevel(cls_name="MieTrakTools"), hardware_code)
     steps.start()
