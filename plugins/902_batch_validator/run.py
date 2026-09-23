@@ -633,7 +633,9 @@ class PartResult(NamedTuple):
       missing   no DXF was sent (with or without an IGES)
       unusable  a DXF was sent, but it is empty or damaged
       corrupt   an IGES was sent, but it is corrupt or holds no part
-      no_print  no print was sent (no WPDD page or image names the part)
+      no_print  no print was FOUND (no WPDD page or image names the part).
+                Not the same as "EB sent none" - a print we could not read
+                is a print we did not find, so the wording says found.
       look      a file could not be checked here (binary DXF)
 
     A kind is fine as soon as ONE of its files is good, so a second copy of a
@@ -702,7 +704,7 @@ class PartResult(NamedTuple):
         if self.corrupt:
             bits.append(f"IGES: {self._first_bad('IGES').detail}")
         if self.no_print:
-            bits.append("No print was sent")
+            bits.append("No print found, please review PDF for print if available")
         if not self.issue and iges == "none":
             bits.append("Note: DXF only, no IGES was sent")
         # A guess is only worth a note when it is ALL the part has to go on.
@@ -814,7 +816,7 @@ def write_report(path: Path, label: str, po_name: str, work_folder: Path,
         ("MISSING  -  no DXF was sent", len(missing), C["miss_bg"]),
         ("UNUSABLE  -  the DXF is empty or damaged", len(unusable), C["miss_bg"]),
         ("CORRUPT  -  the IGES is corrupt or empty", len(corrupt), C["miss_bg"]),
-        ("NO PRINT  -  no print was sent",
+        ("NO PRINT  -  no print found, review the PDF",
          len(no_print) if prints_checked else "not checked", C["miss_bg"]),
         ("NEEDS A LOOK  -  could not be checked here", len(look), C["rev_bg"]),
     ]
@@ -915,7 +917,7 @@ def write_report(path: Path, label: str, po_name: str, work_folder: Path,
                   "list included.", bad_iges)
 
     if prints_checked:
-        d.text("NO PRINT  -  NO PRINT WAS SENT FOR THESE PARTS", size=11, bold=True,
+        d.text("NO PRINT  -  NO PRINT FOUND FOR THESE PARTS", size=11, bold=True,
                color=C["miss_tx"])
         d.text("No page of the WPDD PDF and no WPDD image names the part.",
                size=8, color=C["grey"])
@@ -1101,7 +1103,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     log(f"  Missing (no DXF sent):        {len(missing)}")
     log(f"  Unusable (DXF empty/damaged): {len(unusable)}")
     log(f"  Corrupt (IGES corrupt/empty): {len(corrupt)}")
-    log(f"  No print:                     "
+    log(f"  No print found:               "
         f"{len(no_print) if prints is not None else 'NOT CHECKED'}")
     log(f"  Needs a look:                 {len(look)}")
     log(f"  Files not on the PO:          {len(extras)}")

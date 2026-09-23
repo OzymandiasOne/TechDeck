@@ -335,7 +335,7 @@ def test_no_print_is_an_issue_only_when_prints_were_checked(pv):
     part = pv.reconcile([("H1000000-1", 1.0)], good)[0][0]
     assert part.prints is None and not part.no_print and not part.issue    # not checked
     without = part._replace(prints=[])
-    assert without.no_print and without.issue and without.wrong == "No print was sent"
+    assert without.no_print and without.issue and without.wrong == "No print found, please review PDF for print if available"
     page = pv.PrintPage("x.pdf p1", "H1000000-1", "exact", "H1000000-1")
     assert not part._replace(prints=[page]).issue
     guess = pv.PrintPage("x.pdf p3", "H1000000-1", "drawing", "SEE H100-0000 SHEET 2")
@@ -360,8 +360,8 @@ def test_report_has_the_no_print_count_and_sections(pv, tmp_path):
                                      "NO PRINT", "NEEDS A LOOK", "EVERY PART")]
     assert order == sorted(order)
     assert "NOT READY  -  1 of 2 part(s) have an issue." in first
-    assert "No print was sent" in first
-    assert "NO PRINT  -  NO PRINT WAS SENT" in rest and "PRINTS THAT MATCH NO PART" in rest
+    assert "No print found, please review PDF for print if available" in first
+    assert "NO PRINT  -  NO PRINT FOUND" in rest and "PRINTS THAT MATCH NO PART" in rest
     assert "H5742601 -6" in rest
 
     # prints not checked -> the count says so, and no part is blamed for it
