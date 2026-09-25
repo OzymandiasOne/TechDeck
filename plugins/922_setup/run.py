@@ -122,7 +122,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.7.4"
+VERSION = "2.8.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -152,6 +152,13 @@ DEFAULT_LABELER_WEBHOOK_URL = (
     "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
     "&sig=REDACTED"
 )
+
+# The 'TechDeck 922 Material Labeler' Power Automate flow (#5, v2.8.0) - the
+# same second pass as #4, for the source-material labels. Its own flow so it
+# writes ONLY the material slots (FLOW5_MATERIAL_SLOTS) and #4 keeps writing
+# only the pallet slots - older TechDecks posting pallet-only payloads to #4
+# can never wipe a card's materials. The Settings field stays as an OVERRIDE.
+DEFAULT_MATERIAL_LABELER_WEBHOOK_URL = ""
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
@@ -434,10 +441,53 @@ def _write_preview(payload: dict, log) -> None:
     sdk.write_payload_preview(payload, "last_922_setup_payload.json", log)
 
 
-def _run_pallet_labels(params: dict, progress_callback, cancel_event,
-                       batch_path, batch: str) -> bool:
-    """Stage: put each order's PALLET 1/2/3 label on the card that ALREADY
-    exists on the D922 PIPELINE board. Default OFF.
+# Material labels are the part-size names in card_template.json's label_map
+# ("4.0 X 4.0 X 0.50"). Flow #5 hard-codes one Planner field per slot below,
+# so this set IS the flow's contract: test_material_slots_match_the_flow pins
+# it against the template, and a new size label added to the template fails
+# that test until the flow is taught the new slot too.
+_MATERIAL_LABEL_RE = re.compile(r"^\d+(\.\d+)? X \d+(\.\d+)? X \d+(\.\d+)?$")
+FLOW5_MATERIAL_SLOTS = frozenset({
+    "category1", "category5", "category6", "category7", "category8",
+    "category9", "category10", "category11", "category12", "category13",
+    "category14", "category15", "category16", "category17", "category18",
+    "category20", "category22", "category24",
+})
+
+
+def _material_slots(label_map: dict) -> set[str]:
+    """The slots whose label is a source-material size (raw label_map)."""
+    return {slot for name, slot in label_map.items()
+            if _MATERIAL_LABEL_RE.match(_norm_label(name))}
+
+
+# What differs between the two existing-card passes. Everything else
+# (folders, organizer, title format) is shared.
+_LABEL_PASSES = {
+    "pallets": {
+        "what": "pallet",
+        "headline": "Puts the PALLET 1/2/3 label on cards that already exist.",
+        "setting": "labeler_webhook_url",
+        "default_url": lambda: DEFAULT_LABELER_WEBHOOK_URL,
+        "preview": "last_922_pallet_label_payload.json",
+    },
+    "materials": {
+        "what": "source material",
+        "headline": ("Puts the source material labels (like 4.0 X 4.0 X 0.50) "
+                     "on cards that already exist."),
+        "setting": "material_labeler_webhook_url",
+        "default_url": lambda: DEFAULT_MATERIAL_LABELER_WEBHOOK_URL,
+        "preview": "last_922_material_label_payload.json",
+    },
+}
+
+
+def _run_existing_labels(params: dict, progress_callback, cancel_event,
+                         batch_path, batch: str, pallets: bool = True,
+                         materials: bool = True) -> bool:
+    """Stage: put labels on the cards that ALREADY exist on the D922
+    PIPELINE board. Two passes, each its own flow and its own child toggle:
+    PALLET 1/2/3 (flow #4) and source materials (flow #5).
 
     Why this stage exists (Batch 489, 2026-08-18)
     ---------------------------------------------
@@ -451,20 +501,28 @@ def _run_pallet_labels(params: dict, progress_callback, cancel_event,
     flow's own run history). Same version, same machine, three hours apart -
     the only variable was whether anyone had assigned the pallets yet.
 
-    So this is the second pass: tick it on its own once the organizer is
-    filled in, and the cards already on the board get labelled. It NEVER
-    creates a card. Flow #4 writes only the three pallet slots, so a card's
-    REPEAT and material labels survive; re-running changes nothing.
+    The materials pass (v2.8.0) is the same fix for the source-material
+    labels: C.D. re-ran Generate Teams Cards to get them onto cards that
+    were already up, and flow #1 skipped every card (2026-09-25).
 
-    Returns True when the stage completed (it counts for a ticket unit).
+    It NEVER creates a card. Flow #4 writes only the three pallet slots and
+    flow #5 only the material slots, so neither pass disturbs the other's
+    labels, REPEAT, FORMING or MACHINING; re-running changes nothing.
+
+    Returns True when every requested pass completed (a ticket unit).
     Problems warn loudly - a blocking popup + a warning run outcome - instead
     of raising, so the other stages in the run still finish; silence is
     exactly what let 489 through.
     """
     log = params.get("log", print)
-    settings = params.get("settings", {}) or {}
-
-    log("Puts the PALLET 1/2/3 label on cards that already exist.")
+    passes = [k for k, on in (("pallets", pallets), ("materials", materials))
+              if on]
+    if not passes:
+        log("Neither 'Pallet labels' nor 'Source material labels' is ticked "
+            "- nothing to do.")
+        return False
+    for key in passes:
+        log(_LABEL_PASSES[key]["headline"])
     log("It never creates a card - that is the Generate Teams Cards stage.")
     progress_callback(10)
 
@@ -483,35 +541,64 @@ def _run_pallet_labels(params: dict, progress_callback, cancel_event,
             f"label.")
         return False
     log(f"Found {len(folders)} order folder(s).")
-    progress_callback(30)
+    progress_callback(20)
 
-    # --- Pallet assignments -------------------------------------------------
+    # --- Pallet assignments + materials ------------------------------------
     organizer, warnings = _read_pallet_organizer(batch_path, batch, log)
     if organizer is None:
         _label_stage_problem(
             params,
-            f"Couldn't read the pallet assignments for Batch {batch}, so no "
-            f"labels were applied.\n\n" + "\n\n".join(warnings))
+            f"Couldn't read the Pallet & Rod Organizer for Batch {batch}, so "
+            f"no labels were applied.\n\n" + "\n\n".join(warnings))
         return False
-    log(f"Pallet Organizer: {len(organizer)} order-to-pallet assignment(s).")
-    progress_callback(45)
+    log(f"Pallet Organizer: {len(organizer)} order assignment(s).")
+    for w in warnings:
+        log(f"  ! {w}")
+    progress_callback(30)
 
-    # --- Resolve each folder's pallet slot ----------------------------------
     template = _load_template()
-    label_map = {_norm_label(name): slot
-                 for name, slot in (template.get("label_map") or {}).items()}
-    title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
+    raw_map = template.get("label_map") or {}
+    label_map = {_norm_label(name): slot for name, slot in raw_map.items()}
+    material_slots = _material_slots(raw_map)
 
+    all_ok = True
+    for n, key in enumerate(passes):
+        lo = 30 + 70 * n // len(passes)
+        hi = 30 + 70 * (n + 1) // len(passes)
+        ok = _post_label_pass(params, _scaled(progress_callback, lo, hi),
+                              cancel_event, key, batch, folders, organizer,
+                              template, label_map, material_slots)
+        all_ok = all_ok and ok
+        if cancel_event.is_set():
+            return False
+    return all_ok
+
+
+def _label_pass_cards(key: str, batch: str, folders: list[str],
+                      organizer: dict, template: dict, label_map: dict,
+                      material_slots: set[str]):
+    """Resolve each folder to one {title, labels} card for this pass.
+    Returns (cards, names_by_title, unlabelled_folders, warnings).
+
+    'pallets' keeps only non-material slots (the PALLET label); 'materials'
+    keeps only material slots - flow #5 owns nothing else. A folder with no
+    slot for this pass is left OUT, never sent with an empty list: for flow
+    #5 an empty list would CLEAR a card's materials just because the sheet
+    has none written yet."""
+    title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
+    warnings: list[str] = []
     unmatched: set = set()
     cards: list[dict] = []
     names_by_title: dict[str, list] = {}
     unlabelled: list[str] = []
     for folder in folders:
-        sdk.raise_if_cancelled(cancel_event)
-        # apply_materials=False: this is the PALLET pass. Source-material
-        # labels stay the card-creation stage's option.
         slots, names = _labels_for_folder(folder, organizer, label_map,
-                                          False, warnings, unmatched)
+                                          key == "materials", warnings,
+                                          unmatched)
+        keep = [i for i, s in enumerate(slots)
+                if (s in material_slots) == (key == "materials")]
+        slots = [slots[i] for i in keep]
+        names = [names[i] for i in keep]
         if not slots:
             unlabelled.append(folder)
             continue
@@ -521,27 +608,52 @@ def _run_pallet_labels(params: dict, progress_callback, cancel_event,
     if unmatched:
         warnings.append("No matching Teams label for: "
                         + ", ".join(sorted(unmatched)))
-    progress_callback(60)
+    return cards, names_by_title, unlabelled, warnings
 
-    if not cards:
-        _label_stage_problem(
-            params,
-            f"Not one of Batch {batch}'s {len(folders)} orders is listed under "
-            f"PALLET 1/2/3 on the Pallet Organizer sheet, so no labels were "
-            f"applied.\n\nFill in the pallet assignments in 'PO H{batch} "
-            f"Pallet & Rod Organizer.xlsx' (Documentation folder), then run "
-            f"this stage again.")
-        return False
+
+def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
+                     batch: str, folders: list[str], organizer: dict,
+                     template: dict, label_map: dict,
+                     material_slots: set[str]) -> bool:
+    """One existing-card pass ('pallets' -> flow #4, 'materials' -> flow
+    #5): build the {plan, batch, cards} payload, then post or preview it."""
+    log = params.get("log", print)
+    settings = params.get("settings", {}) or {}
+    spec = _LABEL_PASSES[key]
+    what = spec["what"]
 
     log("")
+    log(f"--- {what.capitalize()} labels ---")
+    sdk.raise_if_cancelled(cancel_event)
+    cards, names_by_title, unlabelled, warnings = _label_pass_cards(
+        key, batch, folders, organizer, template, label_map, material_slots)
+    progress_callback(40)
+
+    if not cards:
+        if key == "pallets":
+            fix = (f"Fill in the pallet assignments in 'PO H{batch} Pallet & "
+                   f"Rod Organizer.xlsx' (Documentation folder), then run "
+                   f"this stage again.")
+        else:
+            fix = (f"Fill in each order's source materials (the column next "
+                   f"to its order number) in 'PO H{batch} Pallet & Rod "
+                   f"Organizer.xlsx', then run this stage again.")
+        _label_stage_problem(
+            params,
+            f"Not one of Batch {batch}'s {len(folders)} orders has a {what} "
+            f"label on the Pallet Organizer sheet, so no {what} labels were "
+            f"applied.\n\n{fix}"
+            + ("\n\n" + "\n\n".join(warnings) if warnings else ""))
+        return False
+
     log(f"{len(cards)} card(s) to label:")
     for card in cards:
         log(f"  - {card['title']}   "
             f"[{', '.join(names_by_title[card['title']])}]")
     if unlabelled:
         log("")
-        log(f"{len(unlabelled)} order(s) are not on the Pallet Organizer "
-            f"sheet - their cards are left alone:")
+        log(f"{len(unlabelled)} order(s) have no {what} label on the Pallet "
+            f"Organizer sheet - their cards are left alone:")
         for name in unlabelled:
             log(f"  - {name}")
     if warnings:
@@ -550,67 +662,70 @@ def _run_pallet_labels(params: dict, progress_callback, cancel_event,
         for w in warnings:
             log(f"  ! {w}")
 
-    payload = {
-        "plan": template.get("plan", "D922 PIPELINE"),
-        "batch": str(batch),
-        "cards": cards,
-    }
-    progress_callback(75)
+    payload = _build_label_payload(template, batch, cards)
+    progress_callback(60)
     if cancel_event.is_set():
         return False
 
     # --- Post (or preview) --------------------------------------------------
-    url = ((settings.get("labeler_webhook_url", "") or "").strip()
-           or DEFAULT_LABELER_WEBHOOK_URL)
+    url = ((settings.get(spec["setting"], "") or "").strip()
+           or spec["default_url"]())
     dry_run = bool(settings.get("dry_run", False))
 
     if not url:
         log("")
-        log("No Pallet Labeler webhook is configured - previewing only, "
-            "NOTHING was sent to Teams.")
-        _write_label_preview(payload, log)
+        log(f"No {what} label webhook is configured - previewing only, "
+            f"NOTHING was sent to Teams.")
+        sdk.write_payload_preview(payload, spec["preview"], log)
         progress_callback(100)
         _label_stage_problem(
             params,
-            f"No pallet-label webhook is configured, so Batch {batch}'s cards "
-            f"were NOT labeled (the payload was previewed only).",
+            f"No {what}-label webhook is configured, so Batch {batch}'s "
+            f"cards were NOT given {what} labels (previewed only).",
             popup=False)
         return False
 
     if dry_run:
         log("")
         log("Dry run enabled in Settings -> not posting.")
-        _write_label_preview(payload, log)
+        sdk.write_payload_preview(payload, spec["preview"], log)
         progress_callback(100)
         log("DONE (dry run).")
         return True
 
     log("")
-    log("Posting the pallet labels to the webhook...")
+    log(f"Posting the {what} labels to the webhook...")
     ok = sdk.post_webhook(url, payload, log)
     progress_callback(100)
     if not ok:
         _label_stage_problem(
             params,
-            f"The pallet-label post failed - Batch {batch}'s cards were not "
-            f"labeled. See the errors above.",
+            f"The {what}-label post failed - Batch {batch}'s cards were not "
+            f"given {what} labels. See the errors above.",
             popup=False)
         return False
 
-    log("")
-    log(f"DONE. Requested labels for {len(cards)} card(s) in Batch {batch}.")
-    log("Check the D922 PIPELINE board in Teams to confirm.")
+    log(f"DONE. Requested {what} labels for {len(cards)} card(s) in Batch "
+        f"{batch}. Check the D922 PIPELINE board in Teams to confirm.")
     if unlabelled:
         _label_stage_problem(
             params,
-            f"{len(unlabelled)} order(s) are not on the Pallet Organizer "
-            f"sheet - their cards were left unlabeled.",
+            f"{len(unlabelled)} order(s) have no {what} label on the Pallet "
+            f"Organizer sheet - their cards were left alone.",
             popup=False)
     return True
 
 
-def _write_label_preview(payload: dict, log) -> None:
-    sdk.write_payload_preview(payload, "last_922_pallet_label_payload.json", log)
+def _build_label_payload(template: dict, batch: str, cards: list[dict]
+                         ) -> dict:
+    """The flow #4 / flow #5 payload - one shape for both labelers. Each card
+    is {title, labels}; `labels` is never empty (see _label_pass_cards).
+    Contract-tested: test_label_payload_carries_every_flow_contract_key."""
+    return {
+        "plan": template.get("plan", "D922 PIPELINE"),
+        "batch": str(batch),
+        "cards": cards,
+    }
 
 
 def _label_stage_problem(params: dict, message: str, popup: bool = True,
@@ -1220,10 +1335,16 @@ def _dialog_groups() -> list:
              {"key": "materials", "label": "Apply source material labels",
               "checked": True},
          ]},
+        # Key kept as "pallet_labels" (weights/order lists); since v2.8.0 it
+        # carries the materials pass too (flow #5), each pass its own child.
         {"key": "pallet_labels",
-         "label": "Apply pallet labels to existing cards",
+         "label": "Apply labels to existing cards",
          "checked": True,          # default ON since v2.7.1 (2026-09-17)
-         "children": []},
+         "children": [
+             {"key": "pallets", "label": "Pallet labels", "checked": True},
+             {"key": "materials", "label": "Source material labels",
+              "checked": True},
+         ]},
         {"key": "pallet_stamper",
          "label": "Pallet Stamper",
          "checked": True,
@@ -1407,20 +1528,23 @@ def run(params: dict, progress_callback, cancel_event):
                 "Continuing with the remaining stages.")
         progress_callback(hi)
 
-    # --- Stage 1b: Apply pallet labels to existing cards --------------------
-    # Default OFF. The second pass for a batch whose cards were created before
-    # the Pallet & Rod Organizer was filled in (Batch 489) - see
-    # _run_pallet_labels. Ticked alongside Generate Teams Cards it is simply a
-    # no-op re-assertion of the labels that stage just applied.
+    # --- Stage 1b: Apply labels to existing cards ---------------------------
+    # The second pass for a batch whose cards were created before the Pallet
+    # & Rod Organizer was filled in (Batch 489) - see _run_existing_labels.
+    # Ticked alongside Generate Teams Cards it is simply a no-op re-assertion
+    # of the labels that stage just applied.
     if "pallet_labels" in enabled and not cancel_event.is_set():
         assert batch_path is not None and batch is not None
         lo, hi = slices["pallet_labels"]
+        opts = choices["pallet_labels"].get("options", {})
         log("")
         log("=" * 60)
-        log("Stage: Apply pallet labels to existing cards")
+        log("Stage: Apply labels to existing cards")
         log("=" * 60)
-        if _run_pallet_labels(params, _scaled(progress_callback, lo, hi),
-                              cancel_event, batch_path, batch):
+        if _run_existing_labels(params, _scaled(progress_callback, lo, hi),
+                                cancel_event, batch_path, batch,
+                                pallets=opts.get("pallets", True),
+                                materials=opts.get("materials", True)):
             stages_done += 1
         if cancel_event.is_set():
             return
