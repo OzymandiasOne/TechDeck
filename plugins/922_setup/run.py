@@ -122,7 +122,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.7.3"
+VERSION = "2.7.4"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -674,7 +674,8 @@ def _pick_batch_folder(params: dict, cancel_event):
 def _run_teams_setup(params: dict, progress_callback, cancel_event,
                      batch_path: Path, batch: str,
                      apply_materials_opt: bool = False,
-                     repeat_folders: set[str] | None = None):
+                     repeat_folders: set[str] | None = None,
+                     repeat_stage_skipped: bool = False):
     """The original 922 Setup stage: build the cards for the already-picked
     batch folder, POST (or dry-run) the webhook payload. Pallet labels
     (PALLET 1/2/3) ALWAYS apply; ``apply_materials_opt`` (the master window's
@@ -687,6 +688,13 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
     (stage unchecked or failed) - the cards still go up, untagged, behind a
     LOUD warning, and the Batch Repeater's "Label REPEAT cards" pass is the
     fixer. An empty set means detection ran and found no repeats.
+
+    ``repeat_stage_skipped`` (v2.7.4): the user UNCHECKED the Find Repeats
+    stage on purpose, so a missing repeat set is their choice, not a failure
+    - one quiet console line, no popup, no warning outcome. The popup read as
+    "this run is labelling repeats" to someone who only wanted material
+    labels (C.D., 2026-09-25). A stage that ran and FAILED still warns
+    loudly (repeat_folders None with this False).
 
     Returns the batch number string on success, or None when cancelled /
     errored (the log says which)."""
@@ -754,7 +762,11 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
                         "label in Teams AND card_template.json to cover it).")
 
     # --- Repeats (v2.6.0): known up front, carded straight into MODEL CHECK -
-    if repeat_folders is None:
+    if repeat_folders is None and repeat_stage_skipped:
+        log("Find Repeats was not ticked, so no card gets a REPEAT tag this "
+            "run.")
+        repeat_folders = set()
+    elif repeat_folders is None:
         _label_stage_problem(
             params,
             "Repeat detection didn't run (the 'Fill Out MPL + Find Repeats' "
@@ -1384,7 +1396,8 @@ def run(params: dict, progress_callback, cancel_event):
         done = _run_teams_setup(params, _scaled(progress_callback, lo, hi),
                                 cancel_event, batch_path, batch,
                                 apply_materials_opt=apply_materials,
-                                repeat_folders=set(rf) if rf is not None else None)
+                                repeat_folders=set(rf) if rf is not None else None,
+                                repeat_stage_skipped="mpl_update" not in enabled)
         if cancel_event.is_set():
             return
         if done:

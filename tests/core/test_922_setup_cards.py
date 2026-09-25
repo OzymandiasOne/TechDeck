@@ -301,3 +301,48 @@ def test_real_template_progress_card_matches_the_office_card():
     cards = mod._build_cards(template, "494", ["AAA-1"], {})
     payload, _ = mod._build_payload(template, "494", cards)
     assert payload["tasks"][-1]["title"] == "BATCH 494 PROGRESS"
+
+
+# ── repeat warning: skipped on purpose vs failed (v2.7.4) ────────────────────
+# C.D. 2026-09-25: she unticked Find Repeats to run ONLY the cards with
+# material labels, got a "cards going up WITHOUT repeat tags" popup, and read
+# it as "it's labelling the repeats instead of the materials". Unticked on
+# purpose = one quiet line; a stage that ran and failed = the loud popup.
+
+def _run_cards_stage(tmp_path, monkeypatch, **kwargs):
+    mod = _load()
+    batch = tmp_path / "Batch 999"
+    (batch / "BK1-R1-H1").mkdir(parents=True)
+    popups, outcomes, lines = [], [], []
+    monkeypatch.setattr(mod.sdk, "show_warning",
+                        lambda params, title, msg: popups.append(title))
+    monkeypatch.setattr(mod.sdk, "set_run_outcome",
+                        lambda params, kind, msg: outcomes.append(kind),
+                        raising=False)
+    monkeypatch.setattr(mod.sdk, "write_payload_preview",
+                        lambda payload, name, log: None)
+    import threading
+    params = {"log": lines.append, "settings": {"dry_run": True}}
+    mod._run_teams_setup(params, lambda p: None, threading.Event(),
+                         batch, "999", **kwargs)
+    return popups, outcomes, lines
+
+
+def test_unticked_find_repeats_is_quiet(tmp_path, monkeypatch):
+    popups, outcomes, lines = _run_cards_stage(
+        tmp_path, monkeypatch, repeat_folders=None, repeat_stage_skipped=True)
+    assert "922 Setup - repeat cards" not in popups
+    assert not any("Repeat detection didn't run" in l for l in lines)
+    assert any("Find Repeats was not ticked" in l for l in lines)
+
+
+def test_failed_find_repeats_still_warns_loudly(tmp_path, monkeypatch):
+    popups, outcomes, lines = _run_cards_stage(
+        tmp_path, monkeypatch, repeat_folders=None)
+    assert "922 Setup - repeat cards" in popups
+    assert outcomes, "a failed repeat stage must set a warning outcome"
+
+
+def test_run_tells_the_card_stage_when_find_repeats_was_unticked():
+    src = _RUN_PY.read_text(encoding="utf-8")
+    assert 'repeat_stage_skipped="mpl_update" not in enabled' in src
