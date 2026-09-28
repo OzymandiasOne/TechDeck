@@ -170,6 +170,11 @@ FORECAST_COPY_NAME = "~ Working Forecast List (temp copy).xlsx"
 # on both sheets as of 2026-09-16) and the nest's ship date (column AT).
 INV_HEADER = "PS/INV"
 SHIP_DATE_HEADER = "SHIP DATE"
+# A nest shipped in parts is split into sub groups ("PARTIAL 1", "PARTIAL 2",
+# sometimes an order number) - the same header on the pricing master (AN) and
+# both forecast sheets (BC), per invoicing 2026-09-28. It is what ties a
+# close-out's rows to the right forecast shipment line.
+SUBGROUP_HEADER = "SUBGROUP"
 FORECAST_SCAN_COLS = 90        # header scan width: BD is column 56, keep headroom
 INV_NUMBER_CELL = "G2"
 INV_DATE_CELL = "G3"
@@ -183,6 +188,7 @@ class ForecastRow(NamedTuple):
     line: object = None
     invoice: str = ""          # PS/Inv, as typed (blank = not invoiced yet)
     ship_date: object = None   # date / datetime / None
+    subgroup: str = ""         # SubGroup (BC): "PARTIAL 1", an order no., or blank
 
 # ---- Invoice Supplement look (reproduced from the hand-made ASA sheet) ------------
 INV_HEADERS = ["PO ", "PO Line", "Batch", "Workorder", "DYPN",
@@ -350,7 +356,8 @@ def _read_po_map(copy_path, log, cancel_event):
                     if "PO" in hmap and "LINE" in hmap and "NEST" in hmap \
                             and batch_col is not None:
                         cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"],
-                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER))
+                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER),
+                                hmap.get(SUBGROUP_HEADER))
                         for label, idx in ((INV_HEADER, cols[4]),
                                            (SHIP_DATE_HEADER, cols[5])):
                             if idx is None:
@@ -361,7 +368,7 @@ def _read_po_map(copy_path, log, cancel_event):
                             f"'{sheet_name}' (looked in the first 8 rows).")
                         break
                     continue
-                i_po, i_line, i_batch, i_nest, i_inv, i_ship = cols
+                i_po, i_line, i_batch, i_nest, i_inv, i_ship, i_sub = cols
 
                 def at(idx):
                     return vals[idx] if idx is not None and idx < len(vals) else None
@@ -373,7 +380,7 @@ def _read_po_map(copy_path, log, cancel_event):
                     continue
                 po_map.setdefault((batch, nest), []).append(ForecastRow(
                     po=po, line=at(i_line), invoice=_as_str(at(i_inv)),
-                    ship_date=at(i_ship)))
+                    ship_date=at(i_ship), subgroup=_norm_subgroup(at(i_sub))))
     finally:
         wb.close()
     log(f"  found PO numbers for {len(po_map)} batch+nest combinations.")
@@ -396,13 +403,57 @@ def _as_date(v):
     return None
 
 
-def _pick_forecast_row(candidates, date_range):
+def _norm_subgroup(v) -> str:
+    """'Partial  2 ' -> 'PARTIAL 2'; None -> ''."""
+    return " ".join(_as_str(v).upper().split())
+
+
+def _pick_forecast_row(candidates, date_range, subgroups=None):
     """(ForecastRow or None, why) - the forecast line THIS run closes out;
     `why` is None, or the plain reason the Invoice # was left blank.
 
     v2.5.0 (A.T. 2026-09-25): a nest shipped in parts has one forecast line per
     shipment, and the first line found used to win - so every later partial
-    shipment went out with the FIRST shipment's invoice number and date. Now:
+    shipment went out with the FIRST shipment's invoice number and date.
+
+    SubGroup first (invoicing, 2026-09-28): partial shipments are split with a
+    sub group ("PARTIAL 1", "PARTIAL 2"...) on BOTH the pricing master and the
+    forecast. `subgroups` = the set of SubGroup values on this nest's in-range
+    pricing rows (None when the master has no SubGroup column):
+      * one value -> only the forecast lines with that same SubGroup compete
+        (blank matches blank). A named SubGroup with no forecast line is left
+        blank, never matched to another partial's line. A BLANK one with no
+        blank forecast line falls through to every line: in the real forecast
+        the first partial is often left blank beside a "PARTIAL 2".
+      * two or more values (two partials closing out together) -> blank.
+    Whatever is left is decided by `_pick_by_date`.
+    """
+    if not candidates:
+        return None, None
+    if subgroups is not None:
+        if len(subgroups) > 1:
+            return _blank_row(candidates), (
+                f"this close-out holds {len(subgroups)} SubGroups: "
+                + ", ".join(sorted(s or "(blank)" for s in subgroups)))
+        (want,) = subgroups
+        same = [c for c in candidates if c.subgroup == want]
+        if same:
+            candidates = same
+        elif want:
+            return _blank_row(candidates), (
+                f"no forecast line has SubGroup {want}")
+    return _pick_by_date(candidates, date_range)
+
+
+def _blank_row(candidates) -> ForecastRow:
+    """PO / Line kept when every line agrees on them; invoice + date blank."""
+    po_line = {(c.po, c.line) for c in candidates}
+    po, line = next(iter(po_line)) if len(po_line) == 1 else (None, None)
+    return ForecastRow(po=po, line=line, invoice="", ship_date=None)
+
+
+def _pick_by_date(candidates, date_range):
+    """The date half of `_pick_forecast_row`, for lines SubGroup can't separate:
 
       * one line (or several that agree on PS/Inv + Ship Date) -> that line;
       * otherwise the shipment CLOSEST to the close-out week: inside it, else
@@ -439,9 +490,7 @@ def _pick_forecast_row(candidates, date_range):
                    f"invoices share the closest Ship Date")
     else:
         why = f"{n} shipments on the forecast and no date range to choose by"
-    po_line = {(c.po, c.line) for c in candidates}
-    po, line = next(iter(po_line)) if len(po_line) == 1 else (None, None)
-    return ForecastRow(po=po, line=line, invoice="", ship_date=None), why
+    return _blank_row(candidates), why
 
 
 # ---------------------------------------------------------------------------------
@@ -934,6 +983,7 @@ def split_workbook(src_path, out_dir, settings, log,
         i_nest = hmap["NEST PKG NBR"]
 
         i_vpd = hmap.get(VPD_HEADER)
+        i_sub = hmap.get(SUBGROUP_HEADER)          # 1-based; None = no column
         if date_range is not None and not i_vpd:
             log(f"WARNING: no '{VPD_HEADER}' column in the source - the date range "
                 "can't be applied, so every valid row is included (the pre-2.2.0 "
@@ -1017,7 +1067,9 @@ def split_workbook(src_path, out_dir, settings, log,
                 break
             rows = groups[(batch, nest)]
             lines = po_map.get((batch.upper(), nest.upper()), [])
-            po_info, why = _pick_forecast_row(lines, date_range)
+            subgroups = ({_norm_subgroup(r[i_sub - 1].value) for r in rows}
+                         if i_sub else None)
+            po_info, why = _pick_forecast_row(lines, date_range, subgroups)
             ambiguous = why is not None
             if ambiguous:
                 ambiguous_invoice.append(f"{batch} {nest} ({why})")

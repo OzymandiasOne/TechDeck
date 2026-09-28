@@ -40,10 +40,10 @@ def _pricing_workbook(path: Path, rows):
     wb = Workbook()
     ws = wb.active
     ws.append(PRICING_HEADERS)
-    for batch, nest, wo, total in rows:
+    for batch, nest, wo, total, *sub in rows:      # optional 5th: SubGroup
         ws.append([batch, wo, f"H{wo}", "HSS", 2, nest, total,
-                   datetime(2026, 9, 4), "V807", "Open", "911", "CUT", "A",
-                   "SOPO", "", "OK"])
+                   datetime(2026, 9, 4), "V807", "Open", "911", "CUT",
+                   sub[0] if sub else None, "SOPO", "", "OK"])
     wb.save(path)
 
 
@@ -61,13 +61,15 @@ def _forecast_workbook(path: Path, active_rows, complete_rows, with_inv=True):
         hdr = [""] * 56
         hdr[0], hdr[1], hdr[2], hdr[6] = "PO", "Line", batch_header, "Nest"
         hdr[45] = "Ship Date"
+        hdr[54] = "SubGroup"                       # BC, as on the real forecast
         if with_inv:
             hdr[55] = "PS/Inv"
         sheet.append(hdr)
-        for po, line, batch, nest, ship, inv in rows:
+        for po, line, batch, nest, ship, inv, *sub in rows:   # optional 7th: SubGroup
             r = [None] * 56
             r[0], r[1], r[2], r[6] = po, line, batch, nest
             r[45], r[55] = ship, inv
+            r[54] = sub[0] if sub else None
             sheet.append(r)
 
     fill(wb["911 Forecast"], "Batch /DR", active_rows)
@@ -242,6 +244,64 @@ def test_typed_ship_date_text_is_understood(mod):
     b = mod.ForecastRow("PO", 1, "2", "09/04/2026")
     row, why = mod._pick_forecast_row([a, b], RANGE)
     assert why is None and row.invoice == "2"
+
+
+# SubGroup first (invoicing 2026-09-28): partials are split "PARTIAL 1",
+# "PARTIAL 2"... on the pricing master (AN) AND the forecast (BC).
+P1 = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "52671", "PARTIAL 1")
+P2 = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "54502", "PARTIAL 2")
+
+
+def test_subgroup_splits_two_partials_that_shipped_the_same_day(mod, run_split):
+    # The real V087 P08091 case: two invoices, same Ship Date - dates can't
+    # tell them apart, the SubGroup can.
+    result, out, exporter, _ = run_split(
+        active_rows=[P1, P2], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10, "Partial  2")])  # case/space-blind
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "54502"
+    assert result.ambiguous_invoice == []
+
+
+def test_a_named_subgroup_is_never_matched_to_another_partial(mod, run_split):
+    result, out, exporter, _ = run_split(
+        active_rows=[P1, P2], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10, "PARTIAL 3")])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value is None and exporter.calls == []
+    assert result.ambiguous_invoice == [
+        "S038 P08348 (no forecast line has SubGroup PARTIAL 3)"]
+
+
+def test_blank_subgroup_takes_the_blank_forecast_line(mod):
+    # Real forecast pattern: the first partial left blank beside a "PARTIAL 2".
+    first = mod.ForecastRow("PO", 1, "55293", date(2026, 9, 4), "")
+    second = mod.ForecastRow("PO", 1, "56077", date(2026, 9, 5), "PARTIAL 2")
+    row, why = mod._pick_forecast_row([first, second], RANGE, {""})
+    assert why is None and row.invoice == "55293"
+
+
+def test_blank_subgroup_with_no_blank_line_falls_back_to_dates(mod):
+    a = mod.ForecastRow("PO", 1, "1", date(2026, 8, 21), "BK555410")
+    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 4), "BK555740")
+    row, why = mod._pick_forecast_row([a, b], RANGE, {""})
+    assert why is None and row.invoice == "2"
+
+
+def test_two_subgroups_in_one_close_out_are_left_blank(mod):
+    row, why = mod._pick_forecast_row(
+        [mod.ForecastRow(*P1[:2], P1[5], P1[4], P1[6]),
+         mod.ForecastRow(*P2[:2], P2[5], P2[4], P2[6])],
+        RANGE, {"PARTIAL 1", "PARTIAL 2"})
+    assert row.invoice == "" and why == (
+        "this close-out holds 2 SubGroups: PARTIAL 1, PARTIAL 2")
+
+
+def test_forecast_subgroup_is_read_by_name(mod, tmp_path):
+    p = tmp_path / "wf.xlsx"
+    _forecast_workbook(p, [P1, P2], [])
+    m = mod._read_po_map(p, lambda *_: None, None)
+    assert [r.subgroup for r in m[("S038", "P08348")]] == ["PARTIAL 1", "PARTIAL 2"]
 
 
 # ---------------------------------------------------------------------------------
