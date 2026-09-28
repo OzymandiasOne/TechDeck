@@ -47,6 +47,7 @@ mcp = MCPServer(
 
 _last = {"ox": 0, "oy": 0, "scale": 1.0, "title": ""}   # where the last screenshot came from
 _TMP = os.path.join(tempfile.gettempdir(), "desktop_mcp")   # burst frames live here, briefly
+_driving = {"granted": False}       # the person said Accept to the pop-up
 
 
 # ── windows ──────────────────────────────────────────────────────────────
@@ -95,15 +96,76 @@ def _foreground_title() -> str:
 
 
 def _guard(force: bool):
-    """Hands only touch the window that was last looked at, and only while it
-    is in front. The person owns this desktop; a click into their Teams
-    window is the one thing this tool must never do."""
+    """Hands only move once the person pressed Accept on the pop-up, only touch
+    the window that was last looked at, and only while it is in front. The
+    person owns this desktop; a click into their Teams window is the one
+    thing this tool must never do."""
+    if not _driving["granted"]:
+        raise ValueError("hands are locked: call request_drive() and wait for Accept")
     if force or not _last["title"]:
         return
     fg = _foreground_title()
     if _last["title"].lower() not in fg.lower():
         raise ValueError(f"refusing: the front window is {fg!r}, not {_last['title']!r}. "
                          f"focus() it first, or pass force=True if you mean it")
+
+
+def _ask_to_drive(reason: str, timeout_s: int) -> bool:
+    """A small top-most dialog with Accept / Decline. Runs in this process; the
+    tool call blocks until the person answers or the timeout passes."""
+    import tkinter as tk
+    answer = {"ok": False}
+    root = tk.Tk()
+    root.title("Claude")
+    root.attributes("-topmost", True)
+    root.resizable(False, False)
+    root.configure(bg="#1b1b1f")
+    tk.Label(root, text="Claude would like to drive.", font=("Segoe UI", 14, "bold"),
+             fg="#f2f2f2", bg="#1b1b1f", padx=28, pady=(18)).pack()
+    tk.Label(root, text=("When you're ready, select Accept or Decline.\n"
+                         "Accept = hands off your mouse and keyboard until Claude says it is done."
+                         + (f"\n\n{reason}" if reason else "")),
+             font=("Segoe UI", 10), fg="#c8c8cc", bg="#1b1b1f", padx=28, pady=6, justify="left").pack()
+    row = tk.Frame(root, bg="#1b1b1f"); row.pack(pady=(10, 18))
+
+    def accept():
+        answer["ok"] = True; root.destroy()
+
+    def decline():
+        root.destroy()
+
+    tk.Button(row, text="Accept", width=12, command=accept, bg="#2f9e44", fg="white",
+              activebackground="#37b24d", relief="flat", font=("Segoe UI", 10, "bold")).pack(side="left", padx=8)
+    tk.Button(row, text="Decline", width=12, command=decline, bg="#495057", fg="white",
+              activebackground="#5c636a", relief="flat", font=("Segoe UI", 10)).pack(side="left", padx=8)
+    root.after(int(timeout_s * 1000), root.destroy)
+    root.update_idletasks()
+    w, h = root.winfo_reqwidth(), root.winfo_reqheight()
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"+{(sw - w) // 2}+{(sh - h) // 3}")
+    root.bind("<Return>", lambda e: accept()); root.bind("<Escape>", lambda e: decline())
+    root.focus_force()
+    root.mainloop()
+    return answer["ok"]
+
+
+@mcp.tool()
+def request_drive(reason: str = "", timeout_s: int = 120) -> str:
+    """Ask the person for the mouse and keyboard. Shows a top-most pop-up
+    ('Claude would like to drive... Accept / Decline') and waits. Hands stay
+    locked until this returns 'accepted'. Call it once per run; release_drive()
+    when done so they get their desk back."""
+    ok = _ask_to_drive(reason, timeout_s)
+    _driving["granted"] = ok
+    return "accepted: you may drive now (they were asked to keep hands off)" if ok else \
+        "declined or timed out: hands stay locked; ask in chat when they are ready"
+
+
+@mcp.tool()
+def release_drive() -> str:
+    """Give the desk back: locks the hands again. Say so in chat too."""
+    _driving["granted"] = False
+    return "released: hands locked until the next request_drive()"
 
 
 @mcp.tool()
