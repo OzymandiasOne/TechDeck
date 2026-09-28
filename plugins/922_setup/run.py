@@ -158,7 +158,14 @@ DEFAULT_LABELER_WEBHOOK_URL = (
 # writes ONLY the material slots (FLOW5_MATERIAL_SLOTS) and #4 keeps writing
 # only the pallet slots - older TechDecks posting pallet-only payloads to #4
 # can never wipe a card's materials. The Settings field stays as an OVERRIDE.
-DEFAULT_MATERIAL_LABELER_WEBHOOK_URL = ""
+# Built 2026-09-25 as a Save As of flow #4 (docs/TEAMS_CARDS.md flow #5).
+DEFAULT_MATERIAL_LABELER_WEBHOOK_URL = (
+    "https://REDACTED-ENVIRONMENT.api"
+    ".powerplatform.com:443/powerautomate/automations/direct/cu/07/workflows/"
+    "08581d033d4f48c6a71f5d6f891dba0d/triggers/manual/paths/invoke"
+    "?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0"
+    "&sig=REDACTED"
+)
 
 # Folders that are never orders, so they never become cards:
 #   - "Batch {n} - Documentation" (matched loosely on "documentation")
