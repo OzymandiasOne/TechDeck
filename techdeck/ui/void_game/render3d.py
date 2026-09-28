@@ -13,6 +13,7 @@ whole frame and adding it back costs 2), then scanlines and dark corners.
 from __future__ import annotations
 
 import math
+import os
 import random
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -96,10 +97,16 @@ def hand_pose(k: float, lift: float = 0.0):
     return c, u, v
 
 
+# The slow camera sway. TECHDECK_TABLE_STILL=1 freezes it (playtesting by
+# screenshot: a card must be where the picture said it was).
+CAMERA_SWAY = 0.0 if os.environ.get("TECHDECK_TABLE_STILL") else 1.0
+
+
 def default_camera(t: float, shake: float = 0.0) -> Camera:
-    sx = 0.50 * math.sin(t * 0.55) + shake * math.sin(t * 61) * 0.08
-    sy = 5.6 + 0.10 * math.sin(t * 0.8) + shake * math.cos(t * 53) * 0.06
-    return Camera((sx, sy, 9.6), (0.10 * math.sin(t * 0.4), 0.95, -1.4), fov=50.0)
+    sw = CAMERA_SWAY
+    sx = 0.50 * sw * math.sin(t * 0.55) + shake * math.sin(t * 61) * 0.08
+    sy = 5.6 + 0.10 * sw * math.sin(t * 0.8) + shake * math.cos(t * 53) * 0.06
+    return Camera((sx, sy, 9.6), (0.10 * sw * math.sin(t * 0.4), 0.95, -1.4), fov=50.0)
 
 
 # ── drawing in 3D ────────────────────────────────────────────────────────
