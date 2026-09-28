@@ -359,6 +359,9 @@ class SettingsManager:
         if self.data.get("settings", {}).get("theme") == "salmon":
             self.data["settings"]["theme"] = "cherry_blossom"
 
+        # The built-in Blue theme was retired in 0.8.7.8 -> Dark
+        self._migrate_retired_blue_theme()
+
         # Repair total_runs frozen by the pre-singleton settings race
         self._backfill_total_runs()
 
@@ -651,6 +654,19 @@ class SettingsManager:
 
     # ========== App Settings ==========
     
+    def _migrate_retired_blue_theme(self) -> None:
+        """Blue was retired in 0.8.7.8. A custom theme named "blue" is kept."""
+        settings = self.data.get("settings", {})
+        if settings.get("theme") != "blue":
+            return
+        try:
+            custom = self.get_custom_themes_dir() / "blue.json"
+            if custom.is_file():
+                return
+        except OSError:
+            pass
+        settings["theme"] = "dark"
+
     def get_theme(self) -> str:
         """Get current theme name."""
         return self.data.get("settings", {}).get("theme", "dark")

@@ -26,6 +26,7 @@ from techdeck.ui.widgets.library_card import (                           # noqa:
     LibraryPluginCard, PluginInfoDialog, _MissingLibraryTile,
 )
 from techdeck.ui.dialogs.profile_dialog import ProfileDialog             # noqa: F401
+from techdeck.ui.theme import icon_folder_for_theme
 
 
 class LibraryPage(QWidget, ThemeAware):
@@ -203,7 +204,7 @@ class LibraryPage(QWidget, ThemeAware):
             f"font-size: 14px; color: {theme.text}; background: transparent;"
         )
 
-        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        icon_folder = icon_folder_for_theme(theme_name)
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
 

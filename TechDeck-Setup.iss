@@ -93,6 +93,11 @@ Type: filesandordirs; Name: "{app}\plugins\dxf_offset_tool"
 ; Removed - so also purge the running copy under %LOCALAPPDATA%.
 Type: filesandordirs; Name: "{app}\plugins\911_linear_inch_cuttime"
 Type: filesandordirs; Name: "{localappdata}\TechDeck\plugins\911_linear_inch_cuttime"
+; 0.8.7.8: the Blue theme was retired - its splash GIF and pixel icon set go too
+Type: files; Name: "{app}\assets\images\blue.gif"
+Type: files; Name: "{app}\_internal\assets\images\blue.gif"
+Type: filesandordirs; Name: "{app}\assets\icons\tile icons\TechDeck pixel 32\blue"
+Type: filesandordirs; Name: "{app}\_internal\assets\icons\tile icons\TechDeck pixel 32\blue"
 
 [Dirs]
 ; Create %LOCALAPPDATA%\TechDeck directory structure with full user permissions

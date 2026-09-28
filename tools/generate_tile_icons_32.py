@@ -43,7 +43,6 @@ THEME_PALETTES = {
     "dark":           _pal("dgrey", "lavender", "blue", "orange", "lgrey", "white"),
     "light":          _pal("black", "dgrey", "brown", "orange", "lgrey"),
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
-    "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
     "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
     "matrix":         _pal("dgreen", "green", "dgrey", "lgrey", "white"),
 }
@@ -82,7 +81,6 @@ ICON_SUBSTITUTIONS = {
     ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#5F574F"},
     ("cherry_blossom", "sym_opened_folder_911"): {"#FFF1E8": "#AB5236"},
-    ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#FF77A8"},
     ("matrix", "sym_opened_folder_911"):         {"#9BFFB0": "#00E436"},
     # caution (922 Difficulty Stamper): the luminance-rank recolor sends the
@@ -94,7 +92,6 @@ ICON_SUBSTITUTIONS = {
     ("dark", "caution"):                         {"#FFF1E8": "#FFA300"},
     ("light", "caution"):                        {"#C2C3C7": "#FFA300"},
     ("cherry_blossom", "caution"):               {"#FFF1E8": "#FFCCAA"},
-    ("blue", "caution"):                         {"#FFF1E8": "#FFA300"},
     ("cyberpunk", "caution"):                    {"#FFF1E8": "#FFEC27"},
 }
 

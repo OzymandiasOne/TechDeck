@@ -25,6 +25,7 @@ from techdeck.ui.theme import get_theme_names, get_current_palette, THEMES, is_b
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.utils import make_tinted_svg_copy
 from techdeck.ui.widgets.plugin_settings_widget import PluginSettingsWidget
+from techdeck.ui.theme import icon_folder_for_theme
 
 
 class SettingsPage(QWidget, ThemeAware):
@@ -114,7 +115,7 @@ class SettingsPage(QWidget, ThemeAware):
         # force an unpolish/polish/update so the background, text, and
         # chevron all pick up the new theme.
         theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        icon_folder = icon_folder_for_theme(theme_name)
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
         combo_style = self._combo_style(theme, arrow_path)
@@ -336,7 +337,7 @@ class SettingsPage(QWidget, ThemeAware):
 
         theme = get_current_palette(self.settings.get_theme())
         theme_name = self.settings.get_theme()
-        icon_folder = "light" if theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        icon_folder = icon_folder_for_theme(theme_name)
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         src_arrow = icons_dir / "chevron-down.svg"
         arrow_path = make_tinted_svg_copy(src_arrow, theme.text)
@@ -434,7 +435,7 @@ class SettingsPage(QWidget, ThemeAware):
         # Compute combo arrow style once; reused for theme_combo and rm_combo
         _p_theme = get_current_palette(self.settings.get_theme())
         _p_theme_name = self.settings.get_theme()
-        _p_icon_folder = "light" if _p_theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _p_icon_folder = icon_folder_for_theme(_p_theme_name)
         _p_icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / _p_icon_folder
         _p_arrow_path = make_tinted_svg_copy(_p_icons_dir / "chevron-down.svg", _p_theme.text)
 

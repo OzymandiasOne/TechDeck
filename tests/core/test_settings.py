@@ -28,12 +28,12 @@ def test_save_reload_roundtrip(tmp_path):
 
 def test_recovers_from_backup_when_live_file_corrupt(tmp_path):
     s = SettingsManager(settings_dir=tmp_path)
-    s.set_theme("blue")                                  # writes settings.json + .bak
+    s.set_theme("cyberpunk")                             # writes settings.json + .bak
     bak = tmp_path / "settings.bak"                       # settings.json -> settings.bak
     assert bak.exists()
     (tmp_path / "settings.json").write_text("{ not valid json", encoding="utf-8")
     recovered = SettingsManager(settings_dir=tmp_path)
-    assert recovered.get_theme() == "blue"
+    assert recovered.get_theme() == "cyberpunk"
 
 
 def test_plugin_id_migration_remaps_dedupes_and_drops_retired(tmp_path):
@@ -111,3 +111,22 @@ def test_ticket_economy_clamps(tmp_path):
     assert s.spend_tickets(999) is False             # refuse unaffordable
     assert s.get_tickets() == 30
     assert s.spend_tickets(-5) is False              # refuse negative
+
+
+def _saved_theme(tmp_path, theme):
+    SettingsManager(settings_dir=tmp_path).set_theme(theme)
+    path = tmp_path / "settings.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["settings"]["theme"] == theme
+
+
+def test_retired_blue_theme_lands_on_dark(tmp_path):
+    _saved_theme(tmp_path, "blue")
+    assert SettingsManager(settings_dir=tmp_path).get_theme() == "dark"
+
+
+def test_custom_theme_named_blue_is_kept(tmp_path):
+    _saved_theme(tmp_path, "blue")
+    (tmp_path / "themes").mkdir(exist_ok=True)
+    (tmp_path / "themes" / "blue.json").write_text("{}", encoding="utf-8")
+    assert SettingsManager(settings_dir=tmp_path).get_theme() == "blue"

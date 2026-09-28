@@ -183,40 +183,6 @@ THEMES: Dict[str, ColorPalette] = {
         tile_missing_border="#B87870",
     ),
 
-    "blue": ColorPalette(
-        text="#E0E7FF",
-        text_secondary="#A5B4FC",
-        background="#1E1B4B",
-        surface="#312E81",
-        surface_hover="#3730A3",
-
-        accent="#3B82F6",
-        accent_hover="#60A5FA",
-        accent_pressed="#2563EB",
-
-        accent_two="#6D28D9",
-        accent_two_hover="#7c40dd",
-        accent_two_pressed="#5E22BF",
-
-        border="#4338CA",
-        border_strong="#4F46E5",
-        divider="#2E2870",
-
-        console_bg="#1E1B4B",
-        console_text="#E0E7FF",
-
-        success="#10B981",
-        warning="#F59E0B",
-        error="#EF4444",
-        info="#60A5FA",
-
-        tile_selected="#4338CA",
-        shadow="rgba(30, 27, 75, 0.5)",
-
-        tile_missing_bg="#2E2870",
-        tile_missing_text="#6366F1",
-        tile_missing_border="#4338CA",
-    ),
 
     "cyberpunk": ColorPalette(
         text="#FFE100",
@@ -369,9 +335,22 @@ def delete_custom_theme(name: str, custom_dir: Path) -> None:
     THEMES.pop(name.lower(), None)
 
 
+# The built-in themes, each with its own pixel icon set on disk
+# (assets/icons/tile icons/TechDeck pixel 32/<name>/). "professional" is a
+# built-in mode of the light look, so it has no set of its own.
+PIXEL_ICON_THEMES = ("dark", "light", "cherry_blossom", "cyberpunk", "matrix")
+
+# Built-in themes with a dark background. Custom themes use the dark icon set.
+DARK_BUILTIN_THEMES = ("dark", "cyberpunk", "matrix")
+
+
 def is_builtin_theme(name: str) -> bool:
-    return name.lower() in ("dark", "light", "professional", "cherry_blossom",
-                            "blue", "cyberpunk", "matrix")
+    return name.lower() in PIXEL_ICON_THEMES + ("professional",)
+
+
+def icon_folder_for_theme(theme_name: str) -> str:
+    """Light icons for dark backgrounds, dark icons for light backgrounds."""
+    return "light" if theme_name in DARK_BUILTIN_THEMES else "dark"
 
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────
