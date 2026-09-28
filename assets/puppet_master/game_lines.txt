@@ -1,0 +1,119 @@
+# =====================================================================
+#  THE PUPPET MASTER AT THE TABLE
+#  What he says while you play him. Edit freely.
+#
+#  HOW TO EDIT
+#    key | emotion | what he says
+#
+#    key      when he says it (the list is below). Several lines with the
+#             same key are a pool: he picks one, never the same twice running.
+#    emotion  calm, curious, amused, pleased, displeased, grave.
+#             The emotion is what his face and the screen DO while he talks:
+#             pleased brightens him, displeased scrambles his face and dims
+#             the room, grave turns the light behind him to ember.
+#    holes    {name} is the card's name, {n} a number, where it makes sense.
+#
+#  THE FILE HOT-RELOADS. Save it, play on. No restart needed.
+#
+#  VOICE RULES: cold, declarative, never uncertain, never apologetic,
+#  never explains itself twice. He STATES. No em-dashes.
+#
+#  KEYS
+#    welcome            the table appears
+#    rules              right after welcome, once
+#    first_turn         your first turn begins
+#    draw_deck          you took from your deck
+#    draw_votary        you took a votary
+#    sacrifice          you offered one card
+#    sacrifice_many     you offered two or more at once
+#    play_small         you played something cheap
+#    play_big           you played something costing 3
+#    play_{card id}     you played that card (votary, scarab, hound, huginn,
+#                       weigher, gorgon, ouroboros, cerberus, sleeper,
+#                       monolith, dead_star)
+#    commit_{card id}   he slid that card into his incoming row
+#    hit_him            your strike landed on the scale
+#    hit_you            his strike landed on the scale
+#    kill_his           you killed one of his
+#    kill_yours         he killed one of yours
+#    venom              a venom kill, either side
+#    undying            your Ouroboros came back
+#    grow               a Dead Star woke
+#    close_you          you are one hit from winning
+#    close_him          he is one hit from winning
+#    idle               you have been thinking a long while
+#    win                you tipped the scale
+#    lose               he tipped the scale
+# =====================================================================
+
+welcome | amused | So. You sat down.
+welcome | curious | You found the table. Few do.
+welcome | calm | Sit. The rules are simple. You will still get them wrong.
+
+rules | calm | Four lanes. Your side, my side. A strike that meets nothing lands on the scale. Tip it five toward me and you have won.
+rules | calm | The greater things want blood. Offer them your lesser things. Every one you lose leaves a remnant. Some things are bought with remnants alone.
+
+first_turn | calm | Begin.
+first_turn | curious | Show me what you brought.
+
+draw_deck | calm | You reach into the dark.
+draw_deck | curious | And what did you find.
+draw_votary | amused | Another one. They always come.
+draw_votary | calm | It came willingly.
+
+sacrifice | calm | It goes willingly. They always do.
+sacrifice | amused | Gone. Was it worth it.
+sacrifice_many | pleased | Two at once. You are learning what the game is.
+sacrifice_many | amused | So much blood for so little.
+
+play_small | calm | Small.
+play_small | curious | A start.
+play_big | pleased | Now that is a card.
+play_big | curious | You paid dearly for that. Let us see if it pays you back.
+
+play_votary | amused | A worshipper. Of what, I wonder.
+play_scarab | calm | It rolls the sun. It does not ask why.
+play_hound | curious | It has my scent now.
+play_huginn | amused | Thought, on black wings. It does not stop for walls.
+play_weigher | grave | It weighs the heart. The heart is always too heavy.
+play_gorgon | curious | Do not look. You are looking.
+play_ouroboros | amused | The end of it is the beginning of it. Kill it and see.
+play_cerberus | pleased | Three mouths. One hunger.
+play_sleeper | grave | You woke it. That was your choice.
+play_monolith | grave | It was here before the ground was.
+play_dead_star | calm | The light you see left it long ago. Wait.
+
+commit_hound | amused | Mine has three of yours to choose from.
+commit_huginn | curious | Watch the sky.
+commit_gorgon | calm | Do not look at it. That is the trick.
+commit_weigher | grave | Mine weighs too.
+commit_cerberus | pleased | Three mouths. Choose which of yours it eats.
+commit_sleeper | grave | Now you have my attention.
+commit_dead_star | calm | I will wait. I am good at it.
+
+hit_him | displeased | That landed.
+hit_him | calm | Weight. I felt that.
+hit_you | pleased | And the scale tips.
+hit_you | amused | You left that lane open. I noticed.
+hit_you | calm | Weight.
+
+kill_his | displeased | That one was mine.
+kill_his | calm | It served.
+kill_yours | amused | It goes to the remnants.
+kill_yours | pleased | Gone.
+venom | grave | What it wounds, dies. There is no size that matters.
+undying | curious | Back again. Stronger. It remembers dying.
+grow | pleased | There it is.
+
+close_you | displeased | One more and you have me. Do not get used to the feeling.
+close_you | grave | Careful. Winning changes things.
+close_him | amused | One more. Think carefully.
+close_him | pleased | The scale is nearly done with you.
+
+idle | amused | Take your time. I have all of it.
+idle | curious | Thinking. I can hear it.
+
+win | grave | The scale tips. Toward me. Enjoy it. It will not happen twice.
+win | displeased | You won. Remember how. You will need it.
+lose | pleased | And that is the game. Sit down again whenever you like. You will.
+lose | amused | The scale does not lie. Neither do I.

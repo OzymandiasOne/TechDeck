@@ -272,7 +272,8 @@ class Game:
                     continue
                 defender.health -= power
                 events.append(ev("strike", card=attacker, lane=lane, target_lane=t, direct=False,
-                                 power=power, defender=defender, flew=False))
+                                 power=power, defender=defender, flew=False,
+                                 hp_after=defender.health))
                 if defender.health <= 0 or attacker.has(VENOM):
                     events += self._die(defender, t, cause="venom" if attacker.has(VENOM)
                                         and defender.health > 0 else "strike")
