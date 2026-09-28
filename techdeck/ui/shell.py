@@ -6,6 +6,7 @@ PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
 import logging
+import os
 import time
 import random
 from pathlib import Path
@@ -242,8 +243,11 @@ class MainWindow(QMainWindow):
         # Create main layout
         self._setup_ui()
         
-        # Start update checker after UI is ready (delayed by 3 seconds)
-        QTimer.singleShot(3000, self.update_checker.start)
+        # Start update checker after UI is ready (delayed by 3 seconds).
+        # TECHDECK_NO_UPDATE_CHECK=1 skips it: a dev branch behind the shipped
+        # version otherwise gets the pop-up on every launch (found playtesting).
+        if not os.environ.get("TECHDECK_NO_UPDATE_CHECK"):
+            QTimer.singleShot(3000, self.update_checker.start)
 
         # Halloween dressing: corner cobwebs + one scurrying crawly at a time
         # (widgets/halloween_decor.py). Gated inside on season + theme, and
