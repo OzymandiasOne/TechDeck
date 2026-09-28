@@ -26,7 +26,6 @@ sys.path.insert(0, str(REPO_ROOT / "plugins" / "922_batch_repeater"))
 import master_parts as mp  # noqa: E402
 from techdeck.core import plugin_sdk as sdk  # noqa: E402
 
-QUOTE_REL = Path("2 - Planning") / "EB 922 H# Quote.xlsx"
 MPL_NAME = "922 MPL.xlsx"
 
 
@@ -84,7 +83,7 @@ def main():
     root = Path(sdk.resolve_922_root(args.root) or "")
     if not root.is_dir():
         raise SystemExit("could not resolve the 922 QTDR Production Packages root")
-    quote_path = root / QUOTE_REL
+    quote_path = mp.quote_path(root)
     mpl_path = root / MPL_NAME
     today = _dt.date.today().isoformat()
 

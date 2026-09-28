@@ -337,8 +337,7 @@ def build() -> None:
         for src_batch, folder, where in REPEAT_SOURCES:
             _copytree(root / where / folder,
                       common / "1 - Completed" / f"Batch {src_batch}" / folder)
-        # Mirrors the REAL layout on purpose: the master quote lives in
-        # Batch Setup\Quote, not where the Repeater's QUOTE_RELPATH looks.
+        # Mirrors the REAL layout (Batch Setup\Quote - master_parts.quote_path).
         sdk.copy_resilient(root / MASTER_QUOTE, common / MASTER_QUOTE)
 
         # ---- raw: Documentation + Work Packets ----------------------------

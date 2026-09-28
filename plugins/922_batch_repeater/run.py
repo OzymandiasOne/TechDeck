@@ -88,14 +88,15 @@ assert _MP_SPEC is not None and _MP_SPEC.loader is not None
 mp = _ilu.module_from_spec(_MP_SPEC)
 _MP_SPEC.loader.exec_module(mp)
 
-VERSION = "2.7.0"
+VERSION = "2.7.1"
 
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
 COMPLETED_FOLDER_NAME = "1 - Completed"
-# One home for the quote-workbook location - 922 Setup's MPL stage reads this
-# constant too, so the two plugins can never disagree on where the quote lives.
-QUOTE_RELPATH = Path("2 - Planning") / "EB 922 H# Quote.xlsx"
+# The quote-workbook location lives in master_parts (one home, shared with
+# 922 Setup's MPL stage and tools/mpl_build_master.py) - see mp.quote_path.
+QUOTE_RELPATH = mp.QUOTE_RELPATH
+quote_path = mp.quote_path
 
 # The 'TechDeck 922 Repeat Tagger' Power Automate flow. Baked in so a fresh
 # install labels cards out of the box (v0.8.6.8 shipped with a blank default
@@ -625,9 +626,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     if do_mpl_matrix or do_master_parts:
         log("")
         log("Updating the MPL from the batch's PO workbook...")
-        quote_path = base_path / QUOTE_RELPATH
         mpl_errors = _update_mpl_sheets(
-            spreadsheet_path, quote_path, new_po_num, new_po_folder,
+            spreadsheet_path, mp.quote_path(base_path), new_po_num, new_po_folder,
             do_mpl_matrix, do_master_parts,
             bool(settings.get('dry_run', False)), log)
         log("")

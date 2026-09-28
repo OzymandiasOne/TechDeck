@@ -122,7 +122,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.8.0"
+VERSION = "2.8.1"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -1249,7 +1249,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
     if do_matrix or do_master:
         log("Updating the MPL from the batch's folders + PO workbook...")
         mpl_errors = rep._update_mpl_sheets(
-            spreadsheet_path, base_path / rep.QUOTE_RELPATH, int(batch),
+            spreadsheet_path, rep.quote_path(base_path), int(batch),
             batch_path, do_matrix, do_master, dry_run, log)
         state["mpl_update_done"] = (mpl_errors == 0 and not dry_run)
     else:

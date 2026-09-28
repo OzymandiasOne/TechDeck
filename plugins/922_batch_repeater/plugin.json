@@ -2,7 +2,7 @@
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
   "description": "Copy repeat orders from previous 922 batches - you pick the batch folder when it runs. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Can also label each repeat's Teams card with the REPEAT label and move it to the batch's MODEL CHECK bucket - normally 922 Setup already does that when it creates the cards, so this is the second pass for a batch carded before the MPL was filled in.",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
