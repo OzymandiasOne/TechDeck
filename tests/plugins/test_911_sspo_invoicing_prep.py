@@ -188,44 +188,60 @@ def test_partial_shipment_takes_the_line_shipping_in_range(mod, run_split):
     assert result.ambiguous_invoice == []
 
 
-def test_no_shipment_in_range_leaves_it_blank_and_names_the_nest(mod, run_split):
-    late = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 18), "55600")
+def test_late_shipment_after_the_week_is_still_found(mod, run_split):
+    # Nests do ship after their Firm VPD (confirmed 2026-09-28): the closest
+    # shipment AFTER the close-out week wins, and last month's never does.
+    late = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 9), "55600")
+    later = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 25), "55700")
+    result, out, exporter, _ = run_split(
+        active_rows=[FIRST, later, late], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "55600" and ws["G3"].value == datetime(2026, 9, 9)
+    assert result.ambiguous_invoice == []
+
+
+def test_an_earlier_weeks_shipment_is_never_reused(mod, run_split):
+    # This week's shipment has no Ship Date on the forecast yet. Taking the
+    # earlier line would reuse its invoice number - the original bug.
+    not_yet = ("1000129724", 14, "S038", "P08348", None, None)
     result, out, exporter, logs = run_split(
-        active_rows=[FIRST, late], complete_rows=[],
+        active_rows=[FIRST, not_yet], complete_rows=[],
         pricing_rows=[("S038", "P08348", 26308, 10)])
     ws = _supplement(out, "S038", "P08348", mod)
     assert ws["G2"].value is None and ws["G3"].value is None     # never a guess
     assert ws["A" + str(mod.INV_DATA_START)].value == "1000129724"  # PO still filled
     assert exporter.calls == []
     assert result.ambiguous_invoice == [
-        "S038 P08348 (2 shipments on the forecast, 0 with a Ship Date in this range)"]
+        "S038 P08348 (2 shipments on the forecast and no Ship Date during or "
+        "after this range)"]
     assert result.missing_invoice == []                  # listed once, not twice
 
 
-def test_two_shipments_in_range_is_ambiguous_too(mod):
+def test_two_invoices_on_the_closest_date_is_a_tie(mod):
     a = mod.ForecastRow("PO", 1, "1", date(2026, 9, 2))
-    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 5))
-    row, ambiguous = mod._pick_forecast_row([a, b], RANGE)
-    assert ambiguous and row.invoice == "" and row.po == "PO"
+    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 5))   # both inside the week
+    row, why = mod._pick_forecast_row([a, b], RANGE)
+    assert why and row.invoice == "" and row.po == "PO"
 
 
 def test_repeated_identical_lines_are_not_ambiguous(mod):
     a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 9, 4))
-    row, ambiguous = mod._pick_forecast_row([a, a._replace()], RANGE)
-    assert not ambiguous and row.invoice == "55501"
+    row, why = mod._pick_forecast_row([a, a._replace()], RANGE)
+    assert why is None and row.invoice == "55501"
 
 
 def test_single_line_is_used_whatever_its_ship_date(mod):
     # One forecast line = the nest's only shipment: nothing to choose between.
     a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 12, 1))
-    assert mod._pick_forecast_row([a], RANGE) == (a, False)
+    assert mod._pick_forecast_row([a], RANGE) == (a, None)
 
 
 def test_typed_ship_date_text_is_understood(mod):
     a = mod.ForecastRow("PO", 1, "1", "8/21/2026")
     b = mod.ForecastRow("PO", 1, "2", "09/04/2026")
-    row, ambiguous = mod._pick_forecast_row([a, b], RANGE)
-    assert not ambiguous and row.invoice == "2"
+    row, why = mod._pick_forecast_row([a, b], RANGE)
+    assert why is None and row.invoice == "2"
 
 
 # ---------------------------------------------------------------------------------

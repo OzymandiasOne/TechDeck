@@ -396,39 +396,52 @@ def _as_date(v):
     return None
 
 
-def _in_range(row, date_range) -> bool:
-    d = _as_date(row.ship_date)
-    return (date_range is not None and d is not None
-            and date_range[0] <= d <= date_range[1])
-
-
 def _pick_forecast_row(candidates, date_range):
-    """(ForecastRow or None, ambiguous) - the forecast line THIS run closes out.
+    """(ForecastRow or None, why) - the forecast line THIS run closes out;
+    `why` is None, or the plain reason the Invoice # was left blank.
 
     v2.5.0 (A.T. 2026-09-25): a nest shipped in parts has one forecast line per
     shipment, and the first line found used to win - so every later partial
     shipment went out with the FIRST shipment's invoice number and date. Now:
 
       * one line (or several that agree on PS/Inv + Ship Date) -> that line;
-      * otherwise the one line whose Ship Date falls in the close-out range;
-      * zero or several in range -> NEVER a guess: Invoice # and date left
-        blank (no PDF), ambiguous=True so the run summary names the nest. PO /
-        Line are still filled when every line agrees on them.
+      * otherwise the shipment CLOSEST to the close-out week: inside it, else
+        the earliest one after it - nests do ship after their Firm VPD, which
+        the close-out stamps with the close-out Friday (confirmed 2026-09-28).
+        A shipment dated BEFORE the week is never taken: it was invoiced in an
+        earlier close-out, and this week's late shipment may simply not have
+        its Ship Date on the forecast yet - taking the old line would reuse its
+        invoice number, the very bug being fixed;
+      * nothing eligible, or two different invoices tied on the same date ->
+        NEVER a guess: Invoice # and date left blank (no PDF), the nest named in
+        the run summary. PO / Line still filled when every line agrees on them.
     """
     if not candidates:
-        return None, False
+        return None, None
 
     def key(c):
         return (c.invoice, _as_date(c.ship_date))
 
     if len({key(c) for c in candidates}) == 1:
-        return candidates[0], False
-    hits = [c for c in candidates if _in_range(c, date_range)]
-    if len({key(c) for c in hits}) == 1:
-        return hits[0], False
+        return candidates[0], None
+    n = len(candidates)
+    why = f"{n} shipments on the forecast and no Ship Date during or after this range"
+    if date_range is not None:
+        start, end = date_range
+        dated = [(d, c) for c in candidates
+                 if (d := _as_date(c.ship_date)) is not None and d >= start]
+        if dated:
+            gap = min(max((d - end).days, 0) for d, _c in dated)
+            nearest = [c for d, c in dated if max((d - end).days, 0) == gap]
+            if len({key(c) for c in nearest}) == 1:
+                return nearest[0], None
+            why = (f"{n} shipments on the forecast; {len(nearest)} different "
+                   f"invoices share the closest Ship Date")
+    else:
+        why = f"{n} shipments on the forecast and no date range to choose by"
     po_line = {(c.po, c.line) for c in candidates}
     po, line = next(iter(po_line)) if len(po_line) == 1 else (None, None)
-    return ForecastRow(po=po, line=line, invoice="", ship_date=None), True
+    return ForecastRow(po=po, line=line, invoice="", ship_date=None), why
 
 
 # ---------------------------------------------------------------------------------
@@ -833,7 +846,7 @@ class SplitResult(NamedTuple):
     missing_calcs: list = []          # "BATCH NEST (why)" - flagged, run carried on
     calc_error: Optional[str] = None  # 911 QTDR root not found: calcs skipped wholesale
     ambiguous_invoice: list = []      # "BATCH NEST (why)": several shipments on the
-                                      # forecast, not exactly one in range -> blank
+                                      # forecast, none picked -> blank
 
 
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
@@ -1004,11 +1017,9 @@ def split_workbook(src_path, out_dir, settings, log,
                 break
             rows = groups[(batch, nest)]
             lines = po_map.get((batch.upper(), nest.upper()), [])
-            po_info, ambiguous = _pick_forecast_row(lines, date_range)
+            po_info, why = _pick_forecast_row(lines, date_range)
+            ambiguous = why is not None
             if ambiguous:
-                n_in = sum(1 for c in lines if _in_range(c, date_range))
-                why = (f"{len(lines)} shipments on the forecast, {n_in} with a "
-                       "Ship Date in this range")
                 ambiguous_invoice.append(f"{batch} {nest} ({why})")
                 log(f"  WARNING: {batch} {nest}: {why} - Invoice # and date left "
                     "blank, no PDF (won't guess which shipment this is).")
@@ -1168,8 +1179,8 @@ def run(params, progress_callback, cancel_event):
                 + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
                   "PS/Inv in on the forecast and re-run, or print that one by hand.")
     if result.ambiguous_invoice:
-        msg += ("\n\nMore than one shipment on the Working Forecast List, and not "
-                "exactly one with a Ship Date in this range:\n  "
+        msg += ("\n\nThese nests shipped in parts, and the Working Forecast List "
+                "doesn't show which shipment belongs to this close-out:\n  "
                 + "\n  ".join(result.ambiguous_invoice)
                 + "\n\nTheir Invoice # and date were left blank and no PDF was "
                   "printed, so a wrong invoice can't go out. Check the Ship Dates "
