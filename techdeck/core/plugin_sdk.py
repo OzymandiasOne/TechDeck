@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -326,8 +327,28 @@ def _resolve_root(override: str, *parts: str) -> Optional[Path]:
     return None
 
 
+# The 922 test sandbox (tools/devkit/sandbox_922.py). When this env var names a
+# folder, every 922 app treats it as the whole 922 root - batch lookups, the
+# 922 MPL, the quote, "1 - Completed" - so a test batch can never reach a real
+# file, and post_webhook refuses to send. Dev runs only: a frozen build ignores
+# it. It beats a saved Settings override on purpose (a stale base_path pointing
+# at the real root must not leak the sandbox out).
+SANDBOX_922_ENV = "TECHDECK_SANDBOX_922_ROOT"
+
+
+def sandbox_922_root() -> Optional[Path]:
+    """The active 922 sandbox root, or None outside a sandbox dev run."""
+    if getattr(sys, "frozen", False):
+        return None
+    raw = (os.environ.get(SANDBOX_922_ENV) or "").strip()
+    return Path(raw) if raw else None
+
+
 def resolve_922_root(override: str = "") -> Optional[Path]:
-    """'922 QTDR Production Packages' root."""
+    """'922 QTDR Production Packages' root (the sandbox root when one is on)."""
+    sandbox = sandbox_922_root()
+    if sandbox is not None:
+        return sandbox
     return _resolve_root(override, "922 QTDR Production Packages")
 
 
@@ -2457,7 +2478,16 @@ def post_webhook(url: str, payload: dict, log) -> bool:
     """POST `payload` as JSON to a Power Automate webhook. Returns True on a
     2xx response; logs the failure (and the flow's response body, truncated)
     otherwise. `requests` is bundled (the updater uses it) and respects
-    corporate proxies."""
+    corporate proxies.
+
+    In a 922 sandbox run nothing is sent: the payload is previewed to
+    last_sandbox_webhook_payload.json and the call reports success, so the
+    app's own flow carries on exactly as after a real post."""
+    if sandbox_922_root() is not None:
+        log("SANDBOX: webhook NOT sent - payload previewed instead.")
+        write_payload_preview(payload, "last_sandbox_webhook_payload.json", log)
+        return True
+
     import requests
 
     try:
