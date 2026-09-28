@@ -74,9 +74,7 @@ THEME_ICON_SWAPS = {
 # theme's lightest tier (which the 922 folder keeps) onto the slot that renders
 # pink #FF77A8 in cyberpunk -- the tier the calculator's buttons and the
 # magnifier's glass land on, taken per theme from those same icons (third-
-# darkest palette color). blue theme: the two anchors disagree (buttons orange,
-# glass lgrey); orange matches the palette rank and stays distinct from the
-# 922 folder's white body.
+# darkest palette color).
 ICON_SUBSTITUTIONS = {
     ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#5F574F"},
@@ -896,7 +894,7 @@ def batch_validator(d):     # 902 batch validator
     # maintainer's pick 2026-09-21): a pass row and a fail row on a sheet, a
     # second sheet behind = a BATCH. The X is pack red because its luminance
     # sits BETWEEN navy and mid blue - an orange X ranks third and recolors to
-    # pale grey on white in dark / blue / matrix. Keep both marks the two
+    # pale grey on white in dark / matrix. Keep both marks the two
     # darkest tones if this is ever repainted.
     _draw_grid(d, _BATCH_VALIDATOR_GRID, _BATCH_VALIDATOR_TONES)
 
