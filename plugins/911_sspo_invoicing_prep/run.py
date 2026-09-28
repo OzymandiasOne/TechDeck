@@ -315,10 +315,11 @@ def _copy_forecast(settings, out_dir, log):
 
 
 def _read_po_map(copy_path, log, cancel_event):
-    """{(BATCH, NEST): ForecastRow} from the local forecast copy.
-
-    Reads the '911 Forecast' sheet first, then 'Complete 911 QTDR' (older batches
-    roll off to it) — first sheet wins on duplicate keys. PO and Line are copied
+    """{(BATCH, NEST): [ForecastRow, ...]} from the local forecast copy - EVERY
+    forecast line for the nest, '911 Forecast' lines first, then 'Complete 911
+    QTDR' (older batches roll off to it). A nest shipped in parts has one line
+    per shipment, each with its own PS/Inv + Ship Date; `_pick_forecast_row`
+    chooses the one this run is closing out (v2.5.0). PO and Line are copied
     verbatim (Line is sometimes the text 'SSPO', not a number); PS/Inv and Ship
     Date ride along for the supplement's title block (v2.3.0) — either column
     missing on a sheet just leaves those fields blank, with one warning.
@@ -370,13 +371,64 @@ def _read_po_map(copy_path, log, cancel_event):
                 po = at(i_po)
                 if not batch or not NEST_RE.match(nest) or po in (None, ""):
                     continue
-                po_map.setdefault((batch, nest), ForecastRow(
+                po_map.setdefault((batch, nest), []).append(ForecastRow(
                     po=po, line=at(i_line), invoice=_as_str(at(i_inv)),
                     ship_date=at(i_ship)))
     finally:
         wb.close()
     log(f"  found PO numbers for {len(po_map)} batch+nest combinations.")
     return po_map
+
+
+def _as_date(v):
+    """A forecast Ship Date as a date: datetime/date as-is, a typed m/d/yyyy
+    (or ISO) string parsed, anything else None."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    text = _as_str(v)
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _in_range(row, date_range) -> bool:
+    d = _as_date(row.ship_date)
+    return (date_range is not None and d is not None
+            and date_range[0] <= d <= date_range[1])
+
+
+def _pick_forecast_row(candidates, date_range):
+    """(ForecastRow or None, ambiguous) - the forecast line THIS run closes out.
+
+    v2.5.0 (A.T. 2026-09-25): a nest shipped in parts has one forecast line per
+    shipment, and the first line found used to win - so every later partial
+    shipment went out with the FIRST shipment's invoice number and date. Now:
+
+      * one line (or several that agree on PS/Inv + Ship Date) -> that line;
+      * otherwise the one line whose Ship Date falls in the close-out range;
+      * zero or several in range -> NEVER a guess: Invoice # and date left
+        blank (no PDF), ambiguous=True so the run summary names the nest. PO /
+        Line are still filled when every line agrees on them.
+    """
+    if not candidates:
+        return None, False
+
+    def key(c):
+        return (c.invoice, _as_date(c.ship_date))
+
+    if len({key(c) for c in candidates}) == 1:
+        return candidates[0], False
+    hits = [c for c in candidates if _in_range(c, date_range)]
+    if len({key(c) for c in hits}) == 1:
+        return hits[0], False
+    po_line = {(c.po, c.line) for c in candidates}
+    po, line = next(iter(po_line)) if len(po_line) == 1 else (None, None)
+    return ForecastRow(po=po, line=line, invoice="", ship_date=None), True
 
 
 # ---------------------------------------------------------------------------------
@@ -780,6 +832,8 @@ class SplitResult(NamedTuple):
     calcs: list = []                  # relative paths of pricing-calc zips/copies
     missing_calcs: list = []          # "BATCH NEST (why)" - flagged, run carried on
     calc_error: Optional[str] = None  # 911 QTDR root not found: calcs skipped wholesale
+    ambiguous_invoice: list = []      # "BATCH NEST (why)": several shipments on the
+                                      # forecast, not exactly one in range -> blank
 
 
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
@@ -937,6 +991,7 @@ def split_workbook(src_path, out_dir, settings, log,
         log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
 
         written, missing_po, missing_invoice, pdfs = [], [], [], []
+        ambiguous_invoice = []
         calcs, missing_calcs, calc_error = [], [], None
         qtdr_root = sdk.resolve_911_qtdr_root(str(settings.get("qtdr_root", "") or ""))
         if qtdr_root is None or not sdk.is_dir(qtdr_root):
@@ -948,7 +1003,15 @@ def split_workbook(src_path, out_dir, settings, log,
                 log("Cancelled.")
                 break
             rows = groups[(batch, nest)]
-            po_info = po_map.get((batch.upper(), nest.upper()))
+            lines = po_map.get((batch.upper(), nest.upper()), [])
+            po_info, ambiguous = _pick_forecast_row(lines, date_range)
+            if ambiguous:
+                n_in = sum(1 for c in lines if _in_range(c, date_range))
+                why = (f"{len(lines)} shipments on the forecast, {n_in} with a "
+                       "Ship Date in this range")
+                ambiguous_invoice.append(f"{batch} {nest} ({why})")
+                log(f"  WARNING: {batch} {nest}: {why} - Invoice # and date left "
+                    "blank, no PDF (won't guess which shipment this is).")
             if po_info is None:
                 missing_po.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} not found in the forecast - "
@@ -970,7 +1033,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 if exporter.export(sub_dir / fname, sub_dir / pdf_name):
                     pdfs.append(f"{sub_dir.name}\\{pdf_name}")
                     log(f"  wrote {sub_dir.name}\\{pdf_name}")
-            elif po_info is not None:
+            elif po_info is not None and not ambiguous:
                 missing_invoice.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
                     "- Invoice # left blank, no PDF.")
@@ -1009,7 +1072,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 "the range (they stay in the Material Status listing).")
         return SplitResult(written, missing_po, closeout_name, matstatus_name,
                            missing_invoice, pdfs, exporter.error,
-                           calcs, missing_calcs, calc_error)
+                           calcs, missing_calcs, calc_error, ambiguous_invoice)
     finally:
         exporter.close()
         # The forecast copy is working scratch only - always remove it, even on
@@ -1104,6 +1167,13 @@ def run(params, progress_callback, cancel_event):
                 "\n  " + "\n  ".join(result.missing_invoice)
                 + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
                   "PS/Inv in on the forecast and re-run, or print that one by hand.")
+    if result.ambiguous_invoice:
+        msg += ("\n\nMore than one shipment on the Working Forecast List, and not "
+                "exactly one with a Ship Date in this range:\n  "
+                + "\n  ".join(result.ambiguous_invoice)
+                + "\n\nTheir Invoice # and date were left blank and no PDF was "
+                  "printed, so a wrong invoice can't go out. Check the Ship Dates "
+                  "on the forecast and re-run, or fill that supplement in by hand.")
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)

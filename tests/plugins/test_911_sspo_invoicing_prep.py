@@ -148,10 +148,12 @@ def test_lookup_carries_invoice_and_ship_date_from_both_sheets(mod, tmp_path):
         complete_rows=[("1000129724", 11, "V094", "503891", datetime(2026, 8, 20), "55420"),
                        ("1000129724", 14, "S038", "P08348", datetime(2025, 1, 1), "OLD")])
     m = mod._read_po_map(p, lambda *_: None, None)
-    assert m[("S038", "P08348")] == mod.ForecastRow(
-        "1000129724", 14, "55501", datetime(2026, 9, 3))   # active sheet wins
-    assert m[("V094", "503891")].invoice == "55420"
-    assert m[("V094", "503891")].ship_date == datetime(2026, 8, 20)
+    # v2.5.0: every line is kept, active sheet first - the picker chooses.
+    assert m[("S038", "P08348")] == [
+        mod.ForecastRow("1000129724", 14, "55501", datetime(2026, 9, 3)),
+        mod.ForecastRow("1000129724", 14, "OLD", datetime(2025, 1, 1))]
+    assert m[("V094", "503891")][0].invoice == "55420"
+    assert m[("V094", "503891")][0].ship_date == datetime(2026, 8, 20)
 
 
 def test_lookup_without_the_column_warns_once_and_leaves_blank(mod, tmp_path):
@@ -161,9 +163,69 @@ def test_lookup_without_the_column_warns_once_and_leaves_blank(mod, tmp_path):
         with_inv=False)
     logs = []
     m = mod._read_po_map(p, logs.append, None)
-    row = m[("S038", "P08348")]
+    row = m[("S038", "P08348")][0]
     assert row.invoice == "" and row.po == "1000129724"
     assert sum(mod.INV_HEADER in l for l in logs) == 2    # one warning per sheet
+
+
+# ---------------------------------------------------------------------------------
+# Partial shipments (v2.5.0, A.T. 2026-09-25): one forecast line per shipment.
+# The first line used to win, so later shipments got the FIRST invoice number.
+# ---------------------------------------------------------------------------------
+RANGE = (date(2026, 9, 1), date(2026, 9, 7))       # run_split's close-out range
+FIRST = ("1000129724", 14, "S038", "P08348", datetime(2026, 8, 21), "55400")
+SECOND = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "55501")
+
+
+def test_partial_shipment_takes_the_line_shipping_in_range(mod, run_split):
+    result, out, exporter, _ = run_split(
+        active_rows=[FIRST, SECOND], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "55501"                      # not the first line's 55400
+    assert ws["G3"].value == datetime(2026, 9, 4)
+    assert [c[1].name for c in exporter.calls] == ["ASA Invoice No. 55501 Supplement.pdf"]
+    assert result.ambiguous_invoice == []
+
+
+def test_no_shipment_in_range_leaves_it_blank_and_names_the_nest(mod, run_split):
+    late = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 18), "55600")
+    result, out, exporter, logs = run_split(
+        active_rows=[FIRST, late], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value is None and ws["G3"].value is None     # never a guess
+    assert ws["A" + str(mod.INV_DATA_START)].value == "1000129724"  # PO still filled
+    assert exporter.calls == []
+    assert result.ambiguous_invoice == [
+        "S038 P08348 (2 shipments on the forecast, 0 with a Ship Date in this range)"]
+    assert result.missing_invoice == []                  # listed once, not twice
+
+
+def test_two_shipments_in_range_is_ambiguous_too(mod):
+    a = mod.ForecastRow("PO", 1, "1", date(2026, 9, 2))
+    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 5))
+    row, ambiguous = mod._pick_forecast_row([a, b], RANGE)
+    assert ambiguous and row.invoice == "" and row.po == "PO"
+
+
+def test_repeated_identical_lines_are_not_ambiguous(mod):
+    a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 9, 4))
+    row, ambiguous = mod._pick_forecast_row([a, a._replace()], RANGE)
+    assert not ambiguous and row.invoice == "55501"
+
+
+def test_single_line_is_used_whatever_its_ship_date(mod):
+    # One forecast line = the nest's only shipment: nothing to choose between.
+    a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 12, 1))
+    assert mod._pick_forecast_row([a], RANGE) == (a, False)
+
+
+def test_typed_ship_date_text_is_understood(mod):
+    a = mod.ForecastRow("PO", 1, "1", "8/21/2026")
+    b = mod.ForecastRow("PO", 1, "2", "09/04/2026")
+    row, ambiguous = mod._pick_forecast_row([a, b], RANGE)
+    assert not ambiguous and row.invoice == "2"
 
 
 # ---------------------------------------------------------------------------------
