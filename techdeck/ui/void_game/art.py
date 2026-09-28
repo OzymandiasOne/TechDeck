@@ -17,7 +17,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap,
                            QPolygonF, QRadialGradient)
 
-from techdeck.ui.widgets.console_cat import FACE_ART, PHOSPHOR
+from techdeck.ui.widgets.console_cat import FACE_ART, PHOSPHOR, compose_face
 
 from . import cards as C
 
@@ -380,26 +380,29 @@ FACE_ROWS = 14
 _FACE_CACHE: dict[int, QPixmap] = {}
 
 
-def face_texture(flicker: float = 0.0, seed: int = 0) -> QPixmap:
-    """His face. Cached: 770 glyphs is too many to redraw per frame. A calm
-    face is one texture; a flickering one is cached per seed (a short loop)."""
-    key = 0 if flicker < 0.05 else 1 + seed % 6
+def face_texture(mouth: int = 0, blink: bool = False, iris=(2, 1), flicker: float = 0.0,
+                 seed: int = 0) -> QPixmap:
+    """His face, from the console face's own frames (compose_face): mouth 0 is
+    shut, 1/2 the speaking grin; blink drops the lids; iris is the 5x3 gaze.
+    Cached per pose: 800 glyphs is too many to redraw per frame. A flickering
+    face is cached per seed (a short loop)."""
+    key = (mouth, blink, tuple(iris), 0 if flicker < 0.05 else 1 + seed % 6)
     if key not in _FACE_CACHE:
-        _FACE_CACHE[key] = _face_texture(0.0 if key == 0 else flicker, seed)
+        _FACE_CACHE[key] = _face_texture(mouth, blink, iris, 0.0 if key[3] == 0 else flicker, seed)
     return _FACE_CACHE[key]
 
 
-def _face_texture(flicker: float, seed: int) -> QPixmap:
-    rows = FACE_ART[:FACE_ROWS]
+def _face_texture(mouth: int, blink: bool, iris, flicker: float, seed: int) -> QPixmap:
+    rows = compose_face(iris=tuple(iris), mouth=mouth, blink=blink)
     cw, ch = 15, 28
     pm = QPixmap(55 * cw, len(rows) * ch); pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm); f = QFont(MONO, 18); f.setBold(True); p.setFont(f)
     rng = random.Random(seed)
-    for j, ln in enumerate(rows):
-        for i, chh in enumerate(ln):
-            if chh == " ":
+    for j, row in enumerate(rows):
+        for i, (chh, tier) in enumerate(row):
+            if tier is None or chh == " ":
                 continue
-            col = QColor(TIER.get(chh, MID))
+            col = QColor(PHOSPHOR.get(tier, PHOSPHOR["mid"]))
             if rng.random() < flicker:
                 chh = rng.choice("@%#*+=01"); col = QColor(PEAK)
             p.setPen(col); p.drawText(QRectF(i * cw, j * ch, cw, ch), Qt.AlignmentFlag.AlignCenter, chh)

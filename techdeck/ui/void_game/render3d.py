@@ -87,14 +87,42 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
     return (LANES[lane], lift, row)
 
 
-def hand_pose(k: float, lift: float = 0.0):
-    """Where the k-th card of a fanned hand sits (k is centred: -1.5 .. 1.5)."""
+def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0):
+    """Where the k-th card of a fanned hand sits (k is centred: -1.5 .. 1.5).
+    `tuck` (0..1) drops the hand out of the way until only the tops show."""
     ang = -k * 0.13
     hs = HAND_SCALE
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
-    c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift, HAND_Z - lift * 0.6)
+    c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift - 1.15 * tuck, HAND_Z - lift * 0.6 + 0.35 * tuck)
     return c, u, v
+
+
+# The three places the camera can be. HAND is the resting view (with the slow
+# sway); DECK leans right toward the piles; BOARD is the top-down view where
+# every lane is clear. Moves between them glide (camera_between).
+VIEWS = {
+    "hand": ((0.0, 5.6, 9.6), (0.0, 0.95, -1.4), 50.0),
+    "deck": ((3.4, 5.0, 8.6), (4.9, 0.3, 2.0), 46.0),
+    "board": ((0.0, 11.4, 3.1), (0.0, 0.0, 0.35), 50.0),
+}
+VIEW_S = 0.45                         # a camera move, in seconds
+
+
+def camera_between(view_from: str, view_to: str, k: float, t: float, shake: float = 0.0) -> Camera:
+    """The camera part-way (k = 0..1) from one view to another."""
+    sw = CAMERA_SWAY
+    sway = (0.50 * sw * math.sin(t * 0.55) + shake * math.sin(t * 61) * 0.08,
+            0.10 * sw * math.sin(t * 0.8) + shake * math.cos(t * 53) * 0.06, 0.0)
+    look_sway = (0.10 * sw * math.sin(t * 0.4), 0.0, 0.0)
+    e = ease(k)
+    (pa, la, fa), (pb, lb, fb) = VIEWS[view_from], VIEWS[view_to]
+    wa = 1.0 if view_from == "hand" else 0.0
+    wb = 1.0 if view_to == "hand" else 0.0
+    ws = wa + (wb - wa) * e
+    pos = add(lerp(pa, pb, e), mul(sway, ws))
+    look = add(lerp(la, lb, e), mul(look_sway, ws))
+    return Camera(pos, look, fov=fa + (fb - fa) * e)
 
 
 # The slow camera sway. TECHDECK_TABLE_STILL=1 freezes it (playtesting by
@@ -231,9 +259,11 @@ def draw_void(fr: Frame, t: float):
         fr.line3((-22.4, 0, z), (22.4, 0, z), DIM, 0.9)
 
 
-def draw_him(fr: Frame, t: float, flicker: float = 0.0, seed: int = 0, halo=(40, 200, 90, 46), bob: float = 1.0):
-    """HIM, vast, far back, looking down at the board."""
-    ftex = art.face_texture(flicker, seed)
+def draw_him(fr: Frame, t: float, flicker: float = 0.0, seed: int = 0, halo=(40, 200, 90, 46), bob: float = 1.0,
+             mouth: int = 0, blink: bool = False, iris=(2, 1)):
+    """HIM, vast, far back, looking down at the board. The mouth moves while
+    he talks, the eyes blink and follow the mouse - the console face's own frames."""
+    ftex = art.face_texture(mouth, blink, iris, flicker, seed)
     fc = (FACE_CENTER[0], FACE_CENTER[1] + 0.08 * bob * math.sin(t * 0.9), FACE_CENTER[2])
     fu = (6.4, 0, 0)
     fv = mul(norm((0, 1, 0.30)), 6.4 * ftex.height() / ftex.width())
