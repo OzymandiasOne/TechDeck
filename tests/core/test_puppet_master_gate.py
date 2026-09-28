@@ -10,10 +10,12 @@ leaking him early (the release is spoiled) or gating him so hard that flipping
 the flag at Halloween doesn't actually wake him (the release is broken and
 nobody finds out until the day). So every test asserts BOTH states.
 
-His only three entry points:
+His only entry points:
   1. the console's startup greeting + its "redefine" summon link
   2. the /puppetmaster command
   3. the techdeck://cat/summon link route
+  4. his card game (/play, and asking him to play while he is present) -
+     the table needs him, so it is held by the same flag
 
 Nothing else can reach him: ConsoleCat is a lazy singleton created only by
 those paths, and active_cat() returns None until one runs — so the free-text
@@ -157,6 +159,36 @@ def test_gating_him_did_not_break_every_other_command(gate, monkeypatch):
     assert h.console.errors == []
 
 
+def test_his_table_is_held_with_him(gate, monkeypatch):
+    """/play opens the card game (ui/void_game). It is a typo while he is
+    held and works the moment the flag flips - same door, same lock."""
+    from techdeck.core.command_handler import CommandHandler
+    assert "/play" in CommandHandler._HELD_COMMANDS
+    for enabled in (False, True):
+        gate(enabled)
+        h, _ = _handler(monkeypatch)
+        opened = []
+        h._cmd_play = lambda args: opened.append("table")
+        h.commands["/play"] = h._cmd_play
+        h.handle_command("/play")
+        assert opened == (["table"] if enabled else [])
+        assert h.console.errors == ([] if enabled else ["Unknown command: /play"])
+
+
+def test_asking_to_play_only_reaches_the_table_through_him():
+    """The free-text invitation is routed inside the branch that already
+    requires him to be PRESENT in the console (active_cat), so a colleague
+    typing "shall we play a game" while he is held gets the /help nudge."""
+    from pathlib import Path
+    src = (Path(constants.__file__).resolve().parents[2]
+           / "techdeck" / "ui" / "shell.py").read_text(encoding="utf-8")
+    body = src[src.index("def _on_message_entered"):][:1200]
+    before, sep, inside = body.partition("if cat is not None:")
+    assert sep
+    assert "is_invitation" not in before
+    assert "is_invitation(message)" in inside.split("return")[0]
+
+
 def test_he_is_absent_from_help_in_both_states():
     """He was always meant to be undiscoverable — 'those who know, know'."""
     from pathlib import Path
@@ -165,6 +197,7 @@ def test_he_is_absent_from_help_in_both_states():
         encoding="utf-8")
     help_text = src[src.index("def _cmd_help"):][:2500]
     assert "/puppetmaster" not in help_text
+    assert "/play" not in help_text
 
 
 # ── entry point 3: the techdeck://cat/summon link route ─────────────────────

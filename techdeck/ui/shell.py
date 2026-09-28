@@ -860,7 +860,11 @@ class MainWindow(QMainWindow):
         cat = self.command_handler.active_cat()
         if cat is not None:
             from techdeck.ui.widgets.console_cat import respond_to
+            from techdeck.ui.void_game.invite import is_invitation
             cat.speak(respond_to(message))
+            if is_invitation(message):
+                # "Shall we play a game?" He answers, then the table opens.
+                QTimer.singleShot(2200, self.command_handler.open_table)
             return
         self.console.append_system(
             "Commands start with a slash — type /help to see everything "

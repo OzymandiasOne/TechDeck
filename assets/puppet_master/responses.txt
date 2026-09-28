@@ -559,6 +559,20 @@
 ? stop
 > Silence is also information.
 
+? shall we play a game
+? do you want to play a game
+? lets play a game
+? play a game
+? can we play a game
+? lets play
+? play cards
+> Yes. Sit. The table is already set.
+
+? what game
+? what games do you play
+? do you play games
+> One. Ask me to play it and you will see.
+
 # =====================================================================
 #  When NOTHING above matches, he deflects with one of these.
 # =====================================================================

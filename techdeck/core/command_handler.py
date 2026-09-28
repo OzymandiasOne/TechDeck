@@ -97,6 +97,7 @@ class CommandHandler:
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
             '/puppetmaster': self._cmd_puppetmaster,
+            '/play': self._cmd_play,
             '/seance': self._cmd_seance,
             '/crawl': self._cmd_crawl,
             '/admin': self._cmd_admin,
@@ -114,7 +115,7 @@ class CommandHandler:
     # was already absent from /help ("those who know, know") — this makes the
     # command itself dormant too, until constants.PUPPET_MASTER_ENABLED flips
     # for Halloween 2026.
-    _HELD_COMMANDS = {'/puppetmaster'}
+    _HELD_COMMANDS = {'/puppetmaster', '/play'}
 
     # Commands that only exist DURING the Halloween season (constants.
     # halloween_active — which also folds in the professional-theme
@@ -207,6 +208,16 @@ class CommandHandler:
         if cat.is_present:
             return
         cat.summon("matrix")
+
+    def _cmd_play(self, args: str):
+        """Sit down at his table (ui/void_game). Held with him: absent from
+        /help and a typo until the flag flips. The other way in is asking him
+        outright while he is in the console - see open_table()."""
+        self.open_table()
+
+    def open_table(self):
+        from techdeck.ui.void_game.window import open_table
+        open_table(parent=self.main_window)
 
     def _cmd_seance(self, args: str):
         """Call something up. TechDeck itself is disturbed — the window
