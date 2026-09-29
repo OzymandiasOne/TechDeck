@@ -1206,6 +1206,14 @@ class ConsoleWidget(QWidget, ThemeAware):
                     return True
         return super().eventFilter(obj, event)
 
+    def wipe_history(self):
+        """Empty the history quietly - no 'Console cleared.' line, no sound, no
+        `cleared` signal. Used when the startup invitation is taken: whatever
+        was typed before it should not sit above him."""
+        self.tail_insert = None
+        self.clear_current()
+        self.output.clear()
+
     def remove_history_line(self, needle: str) -> bool:
         """Remove the first history block whose text contains ``needle``.
         Used to retire the startup invitation line once its "redefine" link

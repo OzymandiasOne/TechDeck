@@ -177,9 +177,12 @@ class CommandHandler:
             # a stale console document (a session open across a flag flip).
             if not puppet_master_enabled():
                 return
-            # The invitation has served its purpose: retire it from the
-            # history before he arrives.
-            if hasattr(self.console, "remove_history_line"):
+            # The invitation has served its purpose. Everything above him
+            # goes with it - the line itself, and anything typed meanwhile -
+            # so he arrives into an empty console.
+            if hasattr(self.console, "wipe_history"):
+                self.console.wipe_history()
+            elif hasattr(self.console, "remove_history_line"):
                 self.console.remove_history_line(
                     "I can help redefine those limits")
             self._console_cat().summon("materialize")
