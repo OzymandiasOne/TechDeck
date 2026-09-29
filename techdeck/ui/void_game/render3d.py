@@ -96,8 +96,9 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     hs = HAND_SCALE
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
+    # a raised card goes up AND a little toward the camera, so it stays in front
     c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift - 1.15 * tuck + 0.06 * front,
-         HAND_Z - lift * 0.6 + 0.35 * tuck + 0.42 * front)
+         HAND_Z + lift * 0.25 + 0.35 * tuck + 0.42 * front)
     return c, u, v
 
 

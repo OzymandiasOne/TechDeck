@@ -330,11 +330,12 @@ def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.hover = ("card", votary.uid)
     press(table, Q.Key.Key_Space)
-    assert table.selected == votary.uid and table.view == "hand"
-    press(table, Q.Key.Key_Space)                       # Space with a raised card: to the board
-    assert table.view == "board"
-    press(table, Q.Key.Key_Space)
-    assert votary in table.game.rows[YOU]
+    assert table.selected == votary.uid and table.view == "hand" and table.cursor is not None
+    lane = table.cursor
+    press(table, Q.Key.Key_D)
+    assert table.cursor == (lane + 1) % 4, "with a card raised, A / D choose its lane"
+    press(table, Q.Key.Key_Space)                       # and Space plays it there, from the hand
+    assert table.game.rows[YOU][(lane + 1) % 4] is votary
     settle(table)
 
 
@@ -494,9 +495,7 @@ def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table
         press(table, Q.Key.Key_D)
     press(table, Q.Key.Key_Space)
     assert table.selected == hand[table.hand_cursor].uid and table.view == "hand"
-    press(table, Q.Key.Key_W)
-    assert table.view == "board"
-    press(table, Q.Key.Key_Space)
+    press(table, Q.Key.Key_Space)                       # plays into the lit lane
     settle(table)
     assert table.view == "hand" and table.selected is None
     press(table, Q.Key.Key_A)                           # after a play the hand can still be walked

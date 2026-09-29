@@ -655,7 +655,8 @@ class VoidTable(RoadScenes, QWidget):
             elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy():
                 front = 1.0                             # to the front of the fan, not up
             tucked = self.view != "hand" or self.peek or self.book is not None
-            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 1.0 if tucked else 0.0, front)
+            tuck = 1.0 if tucked else (0.6 if (self.selected is not None and self.selected != vc.uid) else 0.0)
+            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, tuck, front)
             if force or pose != vc.dst:
                 vc.go(pose, self.t, HAND_S if not force else DEAL_S, 0.0)
 
@@ -705,7 +706,7 @@ class VoidTable(RoadScenes, QWidget):
             for lane in range(LANES):
                 if not g.why_not(self.selected, lane, self.sacrifices):
                     highlight.add(("you", lane))
-        if self.view == "board" and self.cursor is not None:
+        if self.cursor is not None and (self.view == "board" or (self.view == "hand" and self.selected is not None)):
             highlight.add(("you", self.cursor))
         pulse = 0.5 + 0.5 * math.sin(self.t * 5)          # everything he speaks of breathes
         pulsing = set()
@@ -714,6 +715,11 @@ class VoidTable(RoadScenes, QWidget):
         elif self.glow == "lanes_him":
             pulsing = {("him", l) for l in range(LANES)} | {("next", l) for l in range(LANES)}
         r3.draw_slots(fr, highlight - pulsing, pulsing, pulse)
+        if ("you", self.cursor) in highlight and self.cursor is not None:
+            poly = r3.slot_polygon(fr, r3.ROW_YOU, self.cursor)   # the lane the card will land in: a soft fill
+            if poly:
+                fill = QColor(PEAK); fill.setAlpha(int(40 + 40 * pulse))
+                fr.p.setPen(Qt.PenStyle.NoPen); fr.p.setBrush(fill); fr.p.drawPolygon(poly)
         r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, pulse if self.glow == "scale" else 0.0))
         self._draw_progress(fr)
         self._draw_candles(fr)
@@ -952,10 +958,10 @@ class VoidTable(RoadScenes, QWidget):
         """Take a card from the hand: it rises, and the view goes to the board
         with a lane lit. S goes back to the hand with it still raised."""
         self.selected, self.sacrifices = uid, []
+        self.cursor = self._first_lane()            # a lane is lit at once, seen from the hand too
         if self._tutorial():
             return                                  # the first time, you find the board yourself (W)
         self.set_view("board")
-        self.cursor = self._first_lane()
 
     def put_down(self):
         self.selected, self.sacrifices = None, []
@@ -1151,6 +1157,7 @@ class VoidTable(RoadScenes, QWidget):
     def _raise(self, uid: int):
         """Lift a card in the hand without leaving the hand view."""
         self.selected, self.sacrifices = uid, []
+        self.cursor = self._first_lane()
 
     def _look_at_piles(self):
         """To the piles. A raised card lies flat meanwhile and is remembered."""
@@ -1219,8 +1226,8 @@ class VoidTable(RoadScenes, QWidget):
                 elif self.view == "deck" and self.cursor is not None:
                     self.enqueue(self.game.draw("deck" if self.cursor == 0 else "votary"))
                 elif self.view == "hand":
-                    if self.selected is not None:
-                        self.set_view("board")             # the pick is made: back to the lanes
+                    if self.selected is not None and self.cursor is not None:
+                        self._act_on_lane(self.cursor)     # play it into the lit lane, from here
                     else:
                         hand = self._hand_cards()
                         if self.hover and self.hover[0] == "card":
@@ -1252,14 +1259,18 @@ class VoidTable(RoadScenes, QWidget):
                 else:
                     self.set_view("hand")
             elif key == Qt.Key.Key_D:
-                if self.view == "hand":
+                if self.view == "hand" and self.selected is not None and self.cursor is not None:
+                    self.cursor = (self.cursor + 1) % LANES  # a card raised: choose its lane
+                elif self.view == "hand":
                     self._walk_hand(+1)                    # ...and past the last card, the piles
                 elif self.view == "deck":
                     self.cursor = 1
                 elif self.cursor is not None:
                     self.cursor = (self.cursor + 1) % LANES
             elif key == Qt.Key.Key_A:
-                if self.view == "hand":
+                if self.view == "hand" and self.selected is not None and self.cursor is not None:
+                    self.cursor = (self.cursor - 1) % LANES
+                elif self.view == "hand":
                     self._walk_hand(-1)
                 elif self.view == "deck":
                     self._back_to_hand()
