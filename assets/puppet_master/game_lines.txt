@@ -34,8 +34,6 @@
 #    rules_lanes        the first time you pick up a card you can play (first fight of your first run)
 #    rules_blood        the first time you reach for a card you cannot pay for (same)
 #    first_turn         your first turn begins
-#    draw_deck          you took from your deck
-#    draw_votary        you took a votary
 #    first_sacrifice    the first time you offer a real creature (not a votary)
 #    sacrifice          you offered one card
 #    sacrifice_many     you offered two or more at once
@@ -107,10 +105,6 @@ rules_blood | calm | [costs]The greater things want blood. That is the price you
 
 first_turn | calm | Begin.
 first_turn | curious | Show me what you brought.
-
-draw_deck | calm | You reach into the dark.
-draw_votary | amused | Another one. They always come.
-draw_votary | calm | It came willingly.
 
 first_sacrifice | grave | Do not mourn it. What you offer is not lost to you. Its suffering was real. You will see it again.
 sacrifice | calm | It goes willingly. They always do.

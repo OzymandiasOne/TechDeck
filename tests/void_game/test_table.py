@@ -417,3 +417,29 @@ def test_a_pile_click_from_the_hand_only_looks_over_and_a_play_returns_to_the_ha
     press(table, Q.Key.Key_Space)
     settle(table)
     assert table.view == "hand", "after the play, back to the hand"
+
+
+def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    hand = table._hand_cards()
+    press(table, Q.Key.Key_Right)
+    assert table.hand_cursor == 0
+    press(table, Q.Key.Key_Right); press(table, Q.Key.Key_Left); press(table, Q.Key.Key_Left)
+    assert table.hand_cursor == len(hand) - 1
+    while not table.game.can_afford(hand[table.hand_cursor].uid):
+        press(table, Q.Key.Key_Right)
+    press(table, Q.Key.Key_Space)
+    assert table.selected == hand[table.hand_cursor].uid and table.view == "board"
+    press(table, Q.Key.Key_Space)
+    settle(table)
+    assert table.view == "hand" and table.selected is None
+    press(table, Q.Key.Key_Right)                       # after a play the hand can still be walked
+    assert table.hand_cursor is not None and 0 <= table.hand_cursor < len(table._hand_cards())
+
+
+def test_he_no_longer_remarks_on_every_draw(table):
+    settle(table); quiet(table)
+    table.set_view("deck"); table._click(("votary",)); settle(table)
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert not any(k.startswith("draw_") for k in said)

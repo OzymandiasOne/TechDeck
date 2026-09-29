@@ -47,6 +47,7 @@ GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "co
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
     ("SPACE ON A CARD", "the same, from the keyboard"),
+    ("LEFT / RIGHT", "move along your hand"),
     ("A / D", "move along the lanes or the piles"),
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W / S", "look at the board / back to your hand"),
@@ -202,6 +203,7 @@ class VoidTable(RoadScenes, QWidget):
         self.next_blink = 3.0
         self.blink_until = -1.0
         self.gaze = (2, 1)
+        self.hand_cursor: int | None = None   # the hand card the arrow keys are on
         self.view = "hand"
         self.view_prev = "hand"
         self.view_t0 = -9.0
@@ -345,7 +347,6 @@ class VoidTable(RoadScenes, QWidget):
             if k == "draw":
                 card, source = e["card"], e["source"]
                 self._act(DEAL_S, lambda c=card, s=source: self._deal(c, s))
-                self._act(0, lambda s=source: self.say("draw_" + s))
             elif k == "sacrifice":
                 sac_count += 1
                 if e["card"].defn.id != "votary" and not self.first_sacrifice_said:
@@ -614,7 +615,7 @@ class VoidTable(RoadScenes, QWidget):
             lift = 0.0
             if self.selected == vc.uid:
                 lift = 0.55
-            elif self.hover == ("card", vc.uid) and not self.busy():
+            elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy():
                 lift = 0.28
             tucked = self.view != "hand" or self.peek or self.book is not None
             pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 1.0 if tucked else 0.0)
@@ -991,6 +992,10 @@ class VoidTable(RoadScenes, QWidget):
     def mouseMoveEvent(self, event):
         pt = self._to_frame(event.position())
         self.hover = self._hit(pt)
+        if self.hover and self.hover[0] == "card":
+            hand = [v.uid for v in self._hand_cards()]
+            if self.hover[1] in hand:
+                self.hand_cursor = hand.index(self.hover[1])   # the mouse moves the cursor too
         self.gaze = (max(0, min(4, int(pt.x() / W * 5))), max(0, min(2, int(pt.y() / H * 3))))
 
     def leaveEvent(self, event):
@@ -1127,8 +1132,20 @@ class VoidTable(RoadScenes, QWidget):
                 elif self.view == "hand":
                     if self.selected is not None:
                         self.set_view("board")             # the pick is made: back to the lanes
-                    elif self.hover and self.hover[0] == "card":
-                        self._click(self.hover)             # Space on the card under the mouse
+                    else:
+                        hand = self._hand_cards()
+                        if self.hand_cursor is not None and 0 <= self.hand_cursor < len(hand):
+                            self._click(("card", hand[self.hand_cursor].uid))   # the card the cursor is on
+                        elif self.hover and self.hover[0] == "card":
+                            self._click(self.hover)         # or the one under the mouse
+            elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and self.view == "hand":
+                hand = self._hand_cards()
+                if hand:
+                    step = -1 if key == Qt.Key.Key_Left else 1
+                    cur = self.hand_cursor if self.hand_cursor is not None else (len(hand) if step < 0 else -1)
+                    self.hand_cursor = (cur + step) % len(hand)
+                    if self.selected is not None:          # a raised card: the arrows switch to another
+                        self.pick_up(hand[self.hand_cursor].uid); self.set_view("hand")
             elif key == Qt.Key.Key_Z:
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.ring_bell())
