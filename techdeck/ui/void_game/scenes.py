@@ -473,7 +473,7 @@ class RoadScenes:
         face = art.card_face(d, sigils=d.sigils)
         fr.draw_card(c, u, v, face, art.card_back(), 1.0 - 0.6 * e, EMBER)
         if k >= 1.0 and not self._talking() and not self.captions:
-            fr.text(0, H - 60, W, 18, "SPACE", DIM, 8, bold=False, spacing=3)
+            fr.keycap(W / 2, H - 52, "SPACE", 0.8, MID, 9)
 
     # ── the frame for a scene ────────────────────────────────────────────
     def render_scene(self):

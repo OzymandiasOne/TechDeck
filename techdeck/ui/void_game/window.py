@@ -773,7 +773,7 @@ class VoidTable(RoadScenes, QWidget):
         else:
             fr.text(x, y, w, h, shown.upper(), PEAK, 13)
         if not self._talking() and self.caption_until == float("inf"):
-            fr.text(x, y + h + 2, w, 14, "SPACE", DIM, 8, bold=False, spacing=3)
+            fr.keycap(x + w / 2, y + h + 14, "SPACE", 0.8, MID, 9)
 
     def _caption_rect(self):
         """Where his line sits: centred in the gap between his face and the far
