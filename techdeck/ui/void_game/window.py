@@ -47,8 +47,8 @@ GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "co
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
     ("SPACE ON A CARD", "the same, from the keyboard"),
-    ("LEFT / RIGHT", "move along your hand"),
-    ("A / D", "move along the lanes or the piles"),
+    ("A / D", "along your hand; past the last card, the piles. Then the lanes"),
+    ("RIGHT / LEFT", "straight to the piles, and back"),
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W / S", "look at the board / back to your hand"),
     ("D  (from the hand)", "lean toward the piles"),
@@ -203,7 +203,8 @@ class VoidTable(RoadScenes, QWidget):
         self.next_blink = 3.0
         self.blink_until = -1.0
         self.gaze = (2, 1)
-        self.hand_cursor: int | None = None   # the hand card the arrow keys are on
+        self.hand_cursor: int | None = None   # the hand card A / D are on
+        self.pending_pick: int | None = None  # a raised card, laid flat while you look at the piles
         self.view = "hand"
         self.view_prev = "hand"
         self.view_t0 = -9.0
@@ -610,6 +611,8 @@ class VoidTable(RoadScenes, QWidget):
             return
         hand = self._hand_cards()
         n = len(hand)
+        if self.hand_cursor is not None and self.hand_cursor >= n:
+            self.hand_cursor = n - 1 if n else None        # the card under the cursor was played
         for i, vc in enumerate(hand):
             k = i - (n - 1) / 2
             lift = 0.0
@@ -1082,6 +1085,47 @@ class VoidTable(RoadScenes, QWidget):
                 else:
                     self.sacrifices.append(vc.lane)
 
+    def _walk_hand(self, step: int):
+        """A / D along the hand. A raised card comes with the cursor; D past
+        the rightmost card looks at the piles."""
+        hand = self._hand_cards()
+        if not hand:
+            if step > 0:
+                self._look_at_piles()
+            return
+        cur = self.hand_cursor
+        if cur is None:
+            cur = 0 if step > 0 else len(hand) - 1
+        else:
+            cur += step
+        if cur >= len(hand):
+            self._look_at_piles()
+            return
+        cur = max(0, cur)
+        self.hand_cursor = cur
+        if self.selected is not None and self.selected != hand[cur].uid:
+            self._raise(hand[cur].uid)
+
+    def _raise(self, uid: int):
+        """Lift a card in the hand without leaving the hand view."""
+        self.selected, self.sacrifices = uid, []
+
+    def _look_at_piles(self):
+        """To the piles. A raised card lies flat meanwhile and is remembered."""
+        self.pending_pick = self.selected
+        self.selected, self.sacrifices = None, []
+        self.set_view("deck")
+
+    def _back_to_hand(self):
+        """Back from the piles to the rightmost card; the remembered card rises again."""
+        self.set_view("hand")
+        hand = self._hand_cards()
+        self.hand_cursor = len(hand) - 1 if hand else None
+        if self.pending_pick is not None and any(v.uid == self.pending_pick for v in hand):
+            self._raise(self.pending_pick)
+            self.hand_cursor = [v.uid for v in hand].index(self.pending_pick)
+        self.pending_pick = None
+
     def keyPressEvent(self, event):
         """Esc cancels/leaves. Space advances his dialogue, else picks (a lane in
         the board view, a pile in the deck view). W looks
@@ -1138,14 +1182,10 @@ class VoidTable(RoadScenes, QWidget):
                             self._click(("card", hand[self.hand_cursor].uid))   # the card the cursor is on
                         elif self.hover and self.hover[0] == "card":
                             self._click(self.hover)         # or the one under the mouse
-            elif key in (Qt.Key.Key_Left, Qt.Key.Key_Right) and self.view == "hand":
-                hand = self._hand_cards()
-                if hand:
-                    step = -1 if key == Qt.Key.Key_Left else 1
-                    cur = self.hand_cursor if self.hand_cursor is not None else (len(hand) if step < 0 else -1)
-                    self.hand_cursor = (cur + step) % len(hand)
-                    if self.selected is not None:          # a raised card: the arrows switch to another
-                        self.pick_up(hand[self.hand_cursor].uid); self.set_view("hand")
+            elif key == Qt.Key.Key_Right and self.view == "hand":
+                self._look_at_piles()
+            elif key == Qt.Key.Key_Left and self.view == "deck":
+                self._back_to_hand()
             elif key == Qt.Key.Key_Z:
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.ring_bell())
@@ -1168,17 +1208,16 @@ class VoidTable(RoadScenes, QWidget):
                     self.set_view("hand")
             elif key == Qt.Key.Key_D:
                 if self.view == "hand":
-                    self.set_view("deck")
+                    self._walk_hand(+1)                    # ...and past the last card, the piles
                 elif self.view == "deck":
                     self.cursor = 1
                 elif self.cursor is not None:
                     self.cursor = (self.cursor + 1) % LANES
             elif key == Qt.Key.Key_A:
-                if self.view == "deck":
-                    if self.cursor == 0:
-                        self.set_view("hand")
-                    else:
-                        self.cursor = 0
+                if self.view == "hand":
+                    self._walk_hand(-1)
+                elif self.view == "deck":
+                    self._back_to_hand()
                 elif self.view == "board" and self.cursor is not None:
                     self.cursor = (self.cursor - 1) % LANES
             else:
