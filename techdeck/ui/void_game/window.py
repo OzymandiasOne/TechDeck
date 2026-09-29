@@ -600,7 +600,7 @@ class VoidTable(QWidget):
             fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E")
             fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R")
         elif self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
-            fr.label3(r3.add(r3.BELL, (0, 0, 0.95)), "Z")
+            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "Z")     # over the bell's front edge, clear of the deck
         self._draw_inspect(fr)
         if self.menu:
             self._draw_menu(fr)
