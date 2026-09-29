@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
 from . import art, render3d as r3
@@ -846,30 +846,51 @@ class VoidTable(RoadScenes, QWidget):
             return
         (bx, by, _), (tx, ty, _), k = pts
         p = fr.p
-        p.setPen(QPen(QColor(MID), 1.2)); p.setBrush(QColor(2, 14, 7))
-        for dx, tip in ((-34, -16), (-4, -10)):
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        p.setPen(QPen(QColor(MID), 1.2)); p.setBrush(QColor(3, 18, 9))
+        for dx, tip, w in ((-38, -18, 26), (-6, -12, 24)):
             fx, fy = tx + dx * k, ty + tip * k
-            p.drawRoundedRect(QRectF(fx, fy, 26 * k, 120 * k), 12 * k, 12 * k)
+            p.drawRoundedRect(QRectF(fx, fy, w * k, 120 * k), 12 * k, 12 * k)
+            p.setPen(QPen(QColor(DIM), 1.0)); p.setBrush(Qt.BrushStyle.NoBrush)
+            nail = QPainterPath(); nail.moveTo(fx + 5 * k, fy + 14 * k)
+            nail.cubicTo(fx + 8 * k, fy + 3 * k, fx + w * k - 8 * k, fy + 3 * k, fx + w * k - 5 * k, fy + 14 * k)
+            p.drawPath(nail)
+            p.setPen(QPen(QColor(MID), 1.2)); p.setBrush(QColor(3, 18, 9))
 
     def _draw_holding_hand(self, fr: r3.Frame):
         """The thumb, in front of the cards at the fan's lower left, on the
-        heel of the hand that rises from the bottom of the screen."""
+        heel of the hand that rises from the bottom of the screen. Drawn as
+        smooth silhouettes with a soft rim, so it reads as a hand, not a shape."""
         pts = self._fan_points(fr)
         if not pts:
             return
         (bx, by, _), _, k = pts
         p = fr.p
-        p.setPen(QPen(QColor(MID), 1.2)); p.setBrush(QColor(2, 14, 7))
-        heel = QPolygonF([QPointF(bx - 130 * k, by + 40 * k), QPointF(bx - 20 * k, by + 10 * k),
-                          QPointF(bx + 70 * k, by + 60 * k), QPointF(bx + 40 * k, by + 160 * k),
-                          QPointF(bx - 160 * k, by + 160 * k)])
-        p.drawPolygon(heel)
-        thumb = QPolygonF([QPointF(bx - 96 * k, by + 44 * k), QPointF(bx - 84 * k, by - 40 * k),
-                           QPointF(bx - 62 * k, by - 72 * k), QPointF(bx - 40 * k, by - 66 * k),
-                           QPointF(bx - 30 * k, by - 10 * k), QPointF(bx - 44 * k, by + 44 * k)])
-        p.drawPolygon(thumb)
-        p.setPen(QPen(QColor(DIM), 1.0))
-        p.drawLine(QPointF(bx - 80 * k, by - 30 * k), QPointF(bx - 40 * k, by - 36 * k))   # the thumb's crease
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        skin = QColor(3, 18, 9)
+        rim = QColor(MID)
+        # the heel and wrist: a rounded mass coming up from the bottom edge
+        heel = QPainterPath()
+        heel.moveTo(bx - 150 * k, by + 175 * k)
+        heel.cubicTo(bx - 160 * k, by + 80 * k, bx - 110 * k, by + 30 * k, bx - 40 * k, by + 34 * k)
+        heel.cubicTo(bx + 30 * k, by + 38 * k, bx + 80 * k, by + 80 * k, bx + 60 * k, by + 175 * k)
+        heel.closeSubpath()
+        p.setPen(QPen(rim, 1.3)); p.setBrush(skin); p.drawPath(heel)
+        # the thumb: slim, leaning up and right across the lower-left corner of the middle card
+        thumb = QPainterPath()
+        thumb.moveTo(bx - 112 * k, by + 60 * k)
+        thumb.cubicTo(bx - 116 * k, by + 10 * k, bx - 98 * k, by - 30 * k, bx - 74 * k, by - 50 * k)
+        thumb.cubicTo(bx - 66 * k, by - 58 * k, bx - 54 * k, by - 52 * k, bx - 56 * k, by - 40 * k)
+        thumb.cubicTo(bx - 62 * k, by - 12 * k, bx - 76 * k, by + 20 * k, bx - 78 * k, by + 62 * k)
+        thumb.closeSubpath()
+        p.drawPath(thumb)
+        p.setPen(QPen(QColor(DIM), 1.0)); p.setBrush(Qt.BrushStyle.NoBrush)
+        crease = QPainterPath(); crease.moveTo(bx - 100 * k, by - 6 * k)
+        crease.cubicTo(bx - 90 * k, by - 14 * k, bx - 76 * k, by - 16 * k, bx - 66 * k, by - 10 * k)
+        p.drawPath(crease)                                   # the knuckle
+        nail = QPainterPath(); nail.moveTo(bx - 76 * k, by - 46 * k)
+        nail.cubicTo(bx - 70 * k, by - 54 * k, bx - 58 * k, by - 52 * k, bx - 57 * k, by - 42 * k)
+        p.drawPath(nail)
 
     def _draw_caption(self, fr: r3.Frame):
         """His line, burned into the tube between his face and the board. The
@@ -878,6 +899,10 @@ class VoidTable(RoadScenes, QWidget):
             return
         x, y, w, h = self._caption_rect()
         shown = self.caption[:self.caption_shown]
+        if self.scene == "fight" and self.view in ("board", "board_far"):
+            # looking down, the rows run to the top edge: a dark band keeps the words legible
+            fr.p.setPen(Qt.PenStyle.NoPen); fr.p.setBrush(QColor(1, 6, 3, 205))
+            fr.p.drawRoundedRect(QRectF(x - 12, y - 6, w + 24, h + 12 + (16 if self.waiting_for_key() else 0)), 6, 6)
         if self.mood.narrator:
             fr.text(x, y, w, h, shown, BRIGHT, 12, False, spacing=1)
         else:
@@ -894,8 +919,11 @@ class VoidTable(RoadScenes, QWidget):
         w = W - 220
         h = QFontMetrics(f).boundingRect(QRect(0, 0, w, 400), int(Qt.TextFlag.TextWordWrap),
                                          self.caption if narr else self.caption.upper()).height() + 6
-        centre = 246 if self.scene == "fight" else 172       # on the road the doors sit lower
-        y = max(120, int(centre - h / 2))
+        if self.scene == "fight" and self.view in ("board", "board_far"):
+            y = 14                                           # looking down: his line at the top, off the rows
+        else:
+            centre = 246 if self.scene == "fight" else 172   # on the road the doors sit lower
+            y = max(120, int(centre - h / 2))
         return 110, y, w, h
 
     # ── the menu (Esc) ──────────────────────────────────────────────────
