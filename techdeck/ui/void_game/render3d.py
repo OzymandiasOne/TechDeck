@@ -112,9 +112,10 @@ VIEW_S = 0.45                         # a camera move, in seconds
 def camera_between(view_from: str, view_to: str, k: float, t: float, shake: float = 0.0) -> Camera:
     """The camera part-way (k = 0..1) from one view to another."""
     sw = CAMERA_SWAY
-    sway = (0.50 * sw * math.sin(t * 0.55) + shake * math.sin(t * 61) * 0.08,
-            0.10 * sw * math.sin(t * 0.8) + shake * math.cos(t * 53) * 0.06, 0.0)
-    look_sway = (0.10 * sw * math.sin(t * 0.4), 0.0, 0.0)
+    # the slow drift, at half the speed it first had (his call)
+    sway = (0.50 * sw * math.sin(t * 0.275) + shake * math.sin(t * 61) * 0.08,
+            0.10 * sw * math.sin(t * 0.4) + shake * math.cos(t * 53) * 0.06, 0.0)
+    look_sway = (0.10 * sw * math.sin(t * 0.2), 0.0, 0.0)
     e = ease(k)
     (pa, la, fa), (pb, lb, fb) = VIEWS[view_from], VIEWS[view_to]
     wa = 1.0 if view_from == "hand" else 0.0
@@ -132,9 +133,9 @@ CAMERA_SWAY = 0.0 if os.environ.get("TECHDECK_TABLE_STILL") else 1.0
 
 def default_camera(t: float, shake: float = 0.0) -> Camera:
     sw = CAMERA_SWAY
-    sx = 0.50 * sw * math.sin(t * 0.55) + shake * math.sin(t * 61) * 0.08
-    sy = 5.6 + 0.10 * sw * math.sin(t * 0.8) + shake * math.cos(t * 53) * 0.06
-    return Camera((sx, sy, 9.6), (0.10 * sw * math.sin(t * 0.4), 0.95, -1.4), fov=50.0)
+    sx = 0.50 * sw * math.sin(t * 0.275) + shake * math.sin(t * 61) * 0.08
+    sy = 5.6 + 0.10 * sw * math.sin(t * 0.4) + shake * math.cos(t * 53) * 0.06
+    return Camera((sx, sy, 9.6), (0.10 * sw * math.sin(t * 0.2), 0.95, -1.4), fov=50.0)
 
 
 # ── drawing in 3D ────────────────────────────────────────────────────────

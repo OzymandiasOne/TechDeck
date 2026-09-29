@@ -349,12 +349,15 @@ def leviathan(p):
 
 
 def deathcard(p):
-    # someone, once: a face of falling glyphs behind a plain hood
-    _poly(p, [(38, 3), (18, 30), (16, 61), (60, 61), (58, 30)], F)
-    _ell(p, 38, 28, 11, 13, D)
-    for k, (x, y) in enumerate(((31, 20), (38, 18), (45, 20), (30, 27), (38, 26), (46, 27), (32, 34), (38, 35), (44, 34))):
-        _poly(p, [(x - 1.5, y - 1.5), (x + 1.5, y - 1.5), (x + 1.5, y + 1.5), (x - 1.5, y + 1.5)], H if k % 2 else M)
-    _line(p, [(24, 48), (52, 48)], D, 1.2); _line(p, [(24, 54), (52, 54)], D, 1.2)
+    # someone, once: a person, head and shoulders, in plain silhouette
+    _ell(p, 38, 18, 10, 12, F)                                   # the head
+    _poly(p, [(34, 28), (42, 28), (43, 35), (33, 35)], F)        # the neck
+    path = QPainterPath(QPointF(8, 61))
+    path.cubicTo(9, 44, 22, 36, 33, 34); path.lineTo(43, 34); path.cubicTo(54, 36, 67, 44, 68, 61)
+    path.lineTo(8, 61)
+    p.setPen(Qt.PenStyle.NoPen); p.setBrush(F); p.drawPath(path)   # the shoulders
+    _line(p, [(38, 40), (38, 61)], D, 1.0)                        # a collar line
+    _line(p, [(30, 44), (38, 40), (46, 44)], D, 1.0)
 
 
 PORTRAITS = {"votary": votary, "scarab": scarab, "hound": hound, "huginn": huginn, "weigher": weigher,
