@@ -266,6 +266,7 @@ def test_w_looks_down_at_the_board_and_the_hand_tucks_away(table):
 def test_d_walks_the_hand_then_the_piles_and_a_comes_back(table):
     from PySide6.QtCore import Qt as Q
     ready(table)
+    table.hand_cursor = None                                    # start from nowhere
     n = len(table._hand_cards())
     for i in range(n):
         press(table, Q.Key.Key_D)
@@ -484,6 +485,7 @@ def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table
     from PySide6.QtCore import Qt as Q
     ready(table)
     hand = table._hand_cards()
+    table.hand_cursor = None
     press(table, Q.Key.Key_D)
     assert table.hand_cursor == 0
     press(table, Q.Key.Key_A)
@@ -507,3 +509,17 @@ def test_he_no_longer_remarks_on_every_draw(table):
     table.set_view("deck"); table._click(("votary",)); settle(table)
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert not any(k.startswith("draw_") for k in said)
+
+
+def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_D)                                  # cursor on the first card
+    press(table, Q.Key.Key_Right)                              # to the piles
+    press(table, Q.Key.Key_R); settle(table)
+    hand = table._hand_cards()
+    assert table.view == "hand" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
+    front = hand[table.hand_cursor].dst[0]
+    other = hand[0].dst[0]
+    assert front[2] > other[2] + 0.3, "the cursor card sits nearer the camera"
+    assert front[1] <= other[1] + 0.2, "and is not lifted up"

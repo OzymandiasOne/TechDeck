@@ -87,14 +87,17 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
     return (LANES[lane], lift, row)
 
 
-def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0):
+def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0):
     """Where the k-th card of a fanned hand sits (k is centred: -1.5 .. 1.5).
-    `tuck` (0..1) drops the hand out of the way until only the tops show."""
+    `lift` raises a chosen card; `front` (0..1) brings the card the cursor
+    is on to the front of the fan - toward the camera, in front of its
+    neighbours, not up; `tuck` (0..1) drops the hand out of the way."""
     ang = -k * 0.13
     hs = HAND_SCALE
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
-    c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift - 1.15 * tuck, HAND_Z - lift * 0.6 + 0.35 * tuck)
+    c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift - 1.15 * tuck + 0.06 * front,
+         HAND_Z - lift * 0.6 + 0.35 * tuck + 0.42 * front)
     return c, u, v
 
 

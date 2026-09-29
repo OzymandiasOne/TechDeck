@@ -440,6 +440,9 @@ class VoidTable(RoadScenes, QWidget):
         self.show_draw_arrow = False
         if self.view == "deck":
             self.set_view("hand")                  # the draw is made: back to the hand on its own
+        self.pending_pick = None                   # the new card takes the cursor, not the old pick
+        hand = self._hand_cards()
+        self.hand_cursor = next((i for i, v in enumerate(hand) if v.uid == card.uid), self.hand_cursor)
         self._layout_hand(force=True)
 
     def _play(self, card: Card, lane: int, sacrificed: int):
@@ -646,13 +649,13 @@ class VoidTable(RoadScenes, QWidget):
             self.hand_cursor = n - 1 if n else None        # the card under the cursor was played
         for i, vc in enumerate(hand):
             k = i - (n - 1) / 2
-            lift = 0.0
+            lift, front = 0.0, 0.0
             if self.selected == vc.uid:
                 lift = 0.55
             elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy():
-                lift = 0.28
+                front = 1.0                             # to the front of the fan, not up
             tucked = self.view != "hand" or self.peek or self.book is not None
-            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 1.0 if tucked else 0.0)
+            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 1.0 if tucked else 0.0, front)
             if force or pose != vc.dst:
                 vc.go(pose, self.t, HAND_S if not force else DEAL_S, 0.0)
 
@@ -1220,10 +1223,10 @@ class VoidTable(RoadScenes, QWidget):
                         self.set_view("board")             # the pick is made: back to the lanes
                     else:
                         hand = self._hand_cards()
-                        if self.hand_cursor is not None and 0 <= self.hand_cursor < len(hand):
-                            self._click(("card", hand[self.hand_cursor].uid))   # the card the cursor is on
-                        elif self.hover and self.hover[0] == "card":
-                            self._click(self.hover)         # or the one under the mouse
+                        if self.hover and self.hover[0] == "card":
+                            self._click(self.hover)         # the card under the mouse...
+                        elif self.hand_cursor is not None and 0 <= self.hand_cursor < len(hand):
+                            self._click(("card", hand[self.hand_cursor].uid))   # ...else the cursor's
             elif key == Qt.Key.Key_Right and self.view == "hand":
                 self._look_at_piles()
             elif key == Qt.Key.Key_Left and self.view == "deck":
