@@ -40,11 +40,12 @@ NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this
 
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
+    ("SPACE ON A CARD", "the same, from the keyboard"),
     ("A / D", "move along the lanes or the piles"),
-    ("SPACE", "pick the lit lane or pile; move him along"),
+    ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W / S", "look at the board / back to your hand"),
     ("D  (from the hand)", "lean toward the piles"),
-    ("TAB", "put the raised card down (or click it)"),
+    ("TAB / S", "put the raised card down"),
     ("Z", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
     ("ESC", "this menu"),
@@ -830,7 +831,6 @@ class VoidTable(QWidget):
                 self.close()
             return
         if event.button() == Qt.MouseButton.RightButton:
-            self.put_down()
             return
         if self.advance_dialogue():
             return
@@ -862,7 +862,7 @@ class VoidTable(QWidget):
                 return
             if vc.where == "hand":
                 if self.selected == vc.uid:
-                    self.put_down()
+                    return                                  # only Tab / S put it down
                 elif g.phase == "draw":
                     raise IllegalMove("Draw first.")
                 elif not g.can_afford(vc.uid):
@@ -910,6 +910,11 @@ class VoidTable(QWidget):
                     self._act_on_lane(self.cursor)
                 elif self.view == "deck" and self.cursor is not None:
                     self.enqueue(self.game.draw("deck" if self.cursor == 0 else "votary"))
+                elif self.view == "hand":
+                    if self.selected is not None:
+                        self.set_view("board")             # the pick is made: back to the lanes
+                    elif self.hover and self.hover[0] == "card":
+                        self._click(self.hover)             # Space on the card under the mouse
             elif key == Qt.Key.Key_Z:
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.ring_bell())
@@ -919,7 +924,10 @@ class VoidTable(QWidget):
             elif key == Qt.Key.Key_W:
                 self.set_view("board")
             elif key == Qt.Key.Key_S:
-                self.set_view("hand")
+                if self.view == "hand" and self.selected is not None:
+                    self.put_down()                         # S again: the card goes back in line
+                else:
+                    self.set_view("hand")
             elif key == Qt.Key.Key_D:
                 if self.view == "hand":
                     self.set_view("deck")

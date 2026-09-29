@@ -213,8 +213,37 @@ def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
     assert table.view == "hand" and table.selected == votary.uid
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.selected == votary.uid
-    press(table, Q.Key.Key_Tab)
+    press(table, Q.Key.Key_S)
+    assert table.view == "hand" and table.selected == votary.uid
+    press(table, Q.Key.Key_S)                                   # S again: put down
     assert table.selected is None
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_Tab)
+    assert table.selected is None
+
+
+def test_clicking_the_raised_card_keeps_it_and_another_card_switches(table):
+    settle(table); quiet(table)
+    hand = table._hand_cards()
+    votary = next(v for v in hand if v.card.defn.id == "votary")
+    table._click(("card", votary.uid))
+    table._click(("card", votary.uid))
+    assert table.selected == votary.uid, "a click on the raised card no longer drops it"
+    other = next((v for v in hand if v.uid != votary.uid and table.game.can_afford(v.uid)), None)
+    if other is not None:
+        table._click(("card", other.uid))
+        assert table.selected == other.uid
+
+
+def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table.hover = ("card", votary.uid)
+    press(table, Q.Key.Key_Space)
+    assert table.selected == votary.uid and table.view == "board"
+    press(table, Q.Key.Key_Space)
+    assert votary in table.game.rows[YOU]
+    settle(table)
 
 
 def test_a_second_space_on_a_marked_lane_plays_the_card(table):

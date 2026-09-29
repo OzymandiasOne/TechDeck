@@ -216,10 +216,19 @@ class Frame:
                 for i in range(n + 1)]
 
     def label3(self, at: Vec, s: str, color=BRIGHT, size: int = 11):
-        """A small floating label at a point in the world (a key hint under a prop)."""
+        """A key hint floating at a point in the world: the letter in a small keycap."""
         q = self.cam.project(at)
-        if q:
-            self.text(q[0] - 40, q[1] - 8, 80, 16, s, color, size, True, spacing=3)
+        if not q:
+            return
+        k = max(0.6, min(1.0, 7.0 / q[2]))
+        w, h = 22 * k, 22 * k
+        x, y = q[0] - w / 2, q[1] - h / 2
+        p = self.p
+        p.setPen(QPen(QColor(color), 1.2)); p.setBrush(QColor(1, 8, 4, 210))
+        p.drawRoundedRect(QRectF(x, y, w, h), 4 * k, 4 * k)
+        p.setPen(QPen(QColor(color), 1.0)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawLine(QPointF(x + 4 * k, y + h - 3 * k), QPointF(x + w - 4 * k, y + h - 3 * k))   # the cap's lip
+        self.text(x, y - 1, w, h - 2, s, color, int(size * k), True, spacing=0)
 
     def text(self, x, y, w, h, s, color=PEAK, size=13, bold=True, align=Qt.AlignmentFlag.AlignCenter, spacing=2):
         f = QFont(MONO, size); f.setBold(bold)
