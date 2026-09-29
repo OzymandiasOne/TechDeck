@@ -94,9 +94,7 @@ class RoadScenes:
         if run.stop and run.stop.kind == "boss":
             self.say("boss_welcome")
         elif run.fights == 0:
-            self.say("welcome")
-            if run.memory["runs"] == 1:
-                self.say("rules"); self.say("rules")
+            self.say("welcome")                      # the rules come when you reach for things
         else:
             self.say("welcome_again")
         self.enqueue(self.game.start())

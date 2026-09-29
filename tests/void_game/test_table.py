@@ -113,9 +113,32 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pt), Qt.MouseButton.LeftButton,
                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     table.mousePressEvent(ev)
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    # the first unpayable card of your first fight is the blood lesson; after that, a plain refusal
+    assert "rules_blood" in said and table.selected == big.uid
+    quiet(table); table.put_down()
+    for _ in range(12):
+        table._tick()                                    # the card settles back into line
+    poly = next(p for k, p in table.hits if k == ("card", big.uid))
+    pt = poly.boundingRect().center()
+    ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pt), Qt.MouseButton.LeftButton,
+                     Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    table.mousePressEvent(ev)
     assert table.selected is None
     said = [table.caption] + [c[0] for c in table.captions]
     assert any("demands" in s for s in said), "he should say why, in his own words"
+
+
+def test_the_lanes_lesson_comes_with_your_first_playable_card_and_glows(table):
+    ready(table)
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid))
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "rules_lanes" in said
+    glows = [table.glow] + [c[3] for c in table.captions]
+    assert "lanes_you" in glows and "lanes_him" in glows and "scale" in glows
+    table._tick()
+    assert table.frame is not None
 
 
 def test_a_whole_game_plays_through_to_the_end(table):
@@ -146,7 +169,7 @@ def test_the_clock_keeps_going_with_the_lines_file_missing(qapp, tmp_path):
 # ── dialogue and views (his playtest feedback) ────────────────────────────
 def test_rules_wait_for_space_and_a_remark_lingers_then_goes(table):
     settle(table)
-    assert table.caption and table.caption_key in ("welcome", "rules")
+    assert table.caption and table.caption_key == "welcome"
     for _ in range(600):                       # 20 s: a must-read line does not leave on its own
         table._tick()
     assert table.caption and table.caption_until == float("inf")
@@ -157,7 +180,7 @@ def test_rules_wait_for_space_and_a_remark_lingers_then_goes(table):
     table._tick()
     assert table.caption_key != "welcome" or table.caption == ""
     quiet(table)
-    table.captions.append(("A passing remark.", "calm", "hit_you"))
+    table.captions.append(("A passing remark.", "calm", "hit_you", ""))
     table._tick()
     assert table.caption == "A passing remark."
     for _ in range(int((1 + 6.0 + 2) * 30)):

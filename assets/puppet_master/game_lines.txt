@@ -15,6 +15,12 @@
 #             person, past tense, three short beats. Shown in the narrator's
 #             type, not the master's. Use it for the road, not the table.
 #    holes    {name} is the card's name, {n} a number, where it makes sense.
+#    pages    a long line breaks into pages at " // ". Each page types out,
+#             then the next follows at the same pace, always.
+#    glow     a page may start with a tag like [scale]: while that page
+#             shows, that thing on the table glows. Tags: lanes_you,
+#             lanes_him, scale, bell, piles, remnants, costs (every card in
+#             hand with a price), cost_icon (the raised card's price).
 #
 #  THE FILE HOT-RELOADS. Save it, play on. No restart needed.
 #
@@ -25,7 +31,8 @@
 #  KEYS - the table
 #    welcome            the table appears (first fight of a run)
 #    welcome_again      the table appears (a later fight)
-#    rules              right after welcome, once
+#    rules_lanes        the first time you pick up a card you can play (first fight of your first run)
+#    rules_blood        the first time you reach for a card you cannot pay for (same)
 #    first_turn         your first turn begins
 #    draw_deck          you took from your deck
 #    draw_votary        you took a votary
@@ -95,14 +102,13 @@ welcome_again | calm | Again.
 welcome_again | amused | Sit. You know where.
 welcome_again | curious | You came back to the table. They usually do.
 
-rules | calm | Four lanes. Your side, my side. A strike that meets nothing lands on the scale. Tip it five toward me and you have won.
-rules | calm | The greater things want blood. Offer them your lesser things. Every one you lose leaves a remnant. Some things are bought with remnants alone.
+rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [bell]When you are done, ring the bell.
+rules_blood | calm | [costs]The greater things want blood. That is the price you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. // [remnants]Every one you lose leaves a remnant. Some things are bought with remnants alone.
 
 first_turn | calm | Begin.
 first_turn | curious | Show me what you brought.
 
 draw_deck | calm | You reach into the dark.
-draw_deck | curious | And what did you find.
 draw_votary | amused | Another one. They always come.
 draw_votary | calm | It came willingly.
 

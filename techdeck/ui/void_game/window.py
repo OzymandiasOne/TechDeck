@@ -15,7 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPolygonF
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
 from . import art, render3d as r3
@@ -36,12 +36,13 @@ IDLE_LINE_S = 40.0
 CHARS_PER_S = 34.0                    # he types his lines, as in the console
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
-MUST_READ = {"welcome", "welcome_again", "rules", "first_turn", "win", "first_win", "lose", "teeth",
+MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "win", "first_win", "lose", "teeth",
              "candle_out", "boss_welcome", "boss_phase", "run_won", "dead", "deathcard", "deathcard_named",
              "digitize", "first_sacrifice", "famine", "scene_road", "scene_fight", "scene_choice", "scene_rare",
              "scene_fire", "scene_altar", "scene_boss", "fire_buffed", "fire_eaten", "altar_done",
              "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
+GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
@@ -191,8 +192,9 @@ class VoidTable(RoadScenes, QWidget):
         self.menu_index = 0
         self.settings = load_settings()
         self._apply_settings()
-        self.captions: deque[tuple[str, str, str]] = deque()
+        self.captions: deque[tuple[str, str, str, str]] = deque()   # text, emotion, key, glow
         self.caption_key = ""
+        self.glow = ""                    # what on the table glows while this page shows
         self.caption: str = ""
         self.caption_shown = 0
         self.type_t0 = 0.0
@@ -246,16 +248,23 @@ class VoidTable(RoadScenes, QWidget):
                 return
             self.said_this_phase.add(key)
         got = self.dlg.line(key, **holes)
-        if got and len(self.captions) < 3:
-            self.captions.append((got[0], got[1], key))
+        if not got:
+            return
+        text, emotion = got
+        for page in (p.strip() for p in text.split("//")):
+            glow = ""
+            if page.startswith("[") and "]" in page:
+                tag, page = page[1:].split("]", 1)
+                glow = tag.strip() if tag.strip() in GLOW_TAGS else ""
+                page = page.strip()
+            if page:
+                self.captions.append((page, emotion, key, glow))
 
     def nag(self, text: str):
-        """A rule slip, in his voice: 'Draw first.' Shown at once, briefly."""
+        """A rule slip, in his voice: 'Draw first.' After whatever he is saying."""
         if self.caption == text or any(c[0] == text for c in self.captions):
             return
-        self.captions.appendleft((text, "amused", "nag"))
-        if self.caption and self.caption_key == "nag":
-            self.caption_until = self.t            # the newer slip replaces the older
+        self.captions.append((text, "amused", "nag", ""))
         if text == "Draw first." and self.run.fights == 0 and self.run.memory["runs"] == 1:
             self.show_draw_arrow = True            # the tutorial: point the way to the piles
 
@@ -268,9 +277,10 @@ class VoidTable(RoadScenes, QWidget):
             self.caption_shown = min(len(self.caption), int((self.t - self.type_t0) * CHARS_PER_S))
             return
         self.caption = ""
+        self.glow = ""
         if self.captions:
-            text, emotion, key = self.captions.popleft()
-            self.caption, self.caption_key = text, key
+            text, emotion, key, glow = self.captions.popleft()
+            self.caption, self.caption_key, self.glow = text, key, glow
             self.caption_shown = 0
             self.type_t0 = self.t
             self.mood = MOODS.get(emotion, MOODS["calm"])
@@ -583,8 +593,6 @@ class VoidTable(RoadScenes, QWidget):
 
     def _game_over(self, winner: str):
         self.over = True
-        self.captions.clear()
-        self.caption = ""
         self.fight_ended(winner)
 
     # ── layout ───────────────────────────────────────────────────────────
@@ -655,26 +663,34 @@ class VoidTable(RoadScenes, QWidget):
                     highlight.add(("you", lane))
         if self.view == "board" and self.cursor is not None:
             highlight.add(("you", self.cursor))
+        pulse = 0.5 + 0.5 * math.sin(self.t * 5)
+        if self.glow == "lanes_you":
+            highlight |= {("you", l) for l in range(LANES)}
+        elif self.glow == "lanes_him":
+            highlight |= {("him", l) for l in range(LANES)} | {("next", l) for l in range(LANES)}
         r3.draw_slots(fr, highlight)
-        r3.draw_scale(fr, self.scale_shown, self.scale_glow)
+        r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, 0.6 + 0.4 * pulse if self.glow == "scale" else 0.0))
         self._draw_progress(fr)
         self._draw_candles(fr)
         can_act = not self.busy() and not self.over
         ringing = self.t - self.bell_t0
-        bell = r3.draw_bell(fr, can_act and g.phase == "play", ringing if 0 <= ringing < 1 else 0.0)
+        bell = r3.draw_bell(fr, (can_act and g.phase == "play") or self.glow == "bell",
+                            ringing if 0 <= ringing < 1 else 0.0)
         if bell:
             self.hits.append((("bell",), bell))
         must_draw = can_act and g.phase == "draw"
         in_deck = self.view == "deck"
         vot = r3.draw_pile(fr, r3.VOTARIES, g.votaries, art.card_face(CARDS["votary"]),
-                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1))
+                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1) or self.glow == "piles")
         if vot:
             self.hits.append((("votary",), vot))
         deck = r3.draw_pile(fr, r3.DECK, len(g.deck), art.card_back(),
-                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0))
+                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0) or self.glow == "piles")
         if deck:
             self.hits.append((("deck",), deck))
         r3.draw_remnants(fr, self.remnants_shown)
+        if self.glow == "remnants":
+            fr.polyline3(fr.ring(r3.REMNANTS, 0.7, 12), PEAK, 1.6)
         # slots you may play into are also click targets
         if self.selected is not None or self.view == "board":
             for lane in range(LANES):
@@ -695,6 +711,16 @@ class VoidTable(RoadScenes, QWidget):
             poly = fr.draw_card(c, u, v, face, art.card_back(), vc.opacity, edge)
             if poly and vc.where != "gone":
                 self.hits.append((("card", vc.uid), poly))
+            if vc.where == "hand" and vc.card.defn.cost > 0 and (
+                    (self.glow == "cost_icon" and self.selected == vc.uid) or self.glow == "costs"):
+                # a pulsing ring around the price: every priced card, or just the raised one
+                at = add(add(c, mul(u, 0.55)), mul(v, 0.55))
+                q = cam.project(at)
+                if q:
+                    kk = max(0.6, min(1.2, 7.0 / q[2]))
+                    col = QColor(EMBER); col.setAlphaF(0.5 + 0.5 * pulse)
+                    fr.p.setPen(QPen(col, 2.0)); fr.p.setBrush(Qt.BrushStyle.NoBrush)
+                    fr.p.drawEllipse(QPointF(q[0], q[1]), 16 * kk, 12 * kk)
             if self.selected == vc.uid and vc.card.sigils and self.book is None:
                 # the book's key, floating under the raised card
                 at = add(c, mul(v, -1.22))
@@ -869,12 +895,18 @@ class VoidTable(RoadScenes, QWidget):
                     return lane
         return 0
 
+    def _tutorial(self) -> bool:
+        return self.run.fights == 0 and self.run.memory["runs"] == 1
+
     def pick_up(self, uid: int):
         """Take a card from the hand: it rises, and the view goes to the board
         with a lane lit. S goes back to the hand with it still raised."""
         self.selected, self.sacrifices = uid, []
         self.set_view("board")
         self.cursor = self._first_lane()
+        if self._tutorial() and "rules_lanes" not in self.played_lines:
+            self.played_lines.add("rules_lanes")
+            self.say("rules_lanes")                 # the first card you could play: the lanes
 
     def put_down(self):
         self.selected, self.sacrifices = None, []
@@ -1022,6 +1054,11 @@ class VoidTable(RoadScenes, QWidget):
                     raise IllegalMove("Draw first.")
                 elif not g.can_afford(vc.uid):
                     d = vc.card.defn
+                    if self._tutorial() and "rules_blood" not in self.played_lines and d.cost_kind == OFFER:
+                        self.played_lines.add("rules_blood")
+                        self.selected = vc.uid          # raised, so its price can be pointed at
+                        self.say("rules_blood")         # the first card you could not pay for: blood
+                        return
                     raise IllegalMove(f"It demands {d.cost} {'remnants' if d.cost_kind == REMNANT else 'offerings'}. "
                                       f"You cannot pay.")
                 else:

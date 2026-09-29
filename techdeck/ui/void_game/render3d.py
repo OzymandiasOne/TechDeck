@@ -343,19 +343,20 @@ def draw_scale(fr: Frame, value: float, glow: float = 0.0):
     weights on his pan), - tips toward you. Weight, not numbers."""
     base = SCALE_BASE
     tilt = -0.16 * max(-1.0, min(1.0, value / 5.0))
-    fr.polyline3(fr.ring(base, 0.55), MID)
+    frame_col, frame_w = (PEAK, 1.6 + 1.2 * glow) if glow > 0.3 else (BRIGHT, 1.6)   # lit while he speaks of it
+    fr.polyline3(fr.ring(base, 0.55), PEAK if glow > 0.3 else MID)
     top = add(base, (0, 1.9, 0))
-    fr.line3(base, top, BRIGHT, 1.6)
+    fr.line3(base, top, frame_col, frame_w)
     la = add(top, (-1.25 * math.cos(tilt), -1.25 * math.sin(tilt), 0))
     ra = add(top, (1.25 * math.cos(tilt), 1.25 * math.sin(tilt), 0))
-    fr.line3(la, ra, BRIGHT, 1.6)
+    fr.line3(la, ra, frame_col, frame_w)
     yours = max(0, int(round(value)))       # weights YOU have landed sit on the right pan
     his = max(0, int(round(-value)))
     for arm, n_w in ((la, his), (ra, yours)):
         pan = add(arm, (0, -0.75, 0))
         for a in (0, 2.1, 4.2):
             fr.line3(arm, add(pan, (0.42 * math.cos(a), 0, 0.42 * math.sin(a))), MID, 1.0)
-        fr.polyline3(fr.ring(pan, 0.42), BRIGHT)
+        fr.polyline3(fr.ring(pan, 0.42), PEAK if glow > 0.3 else BRIGHT, 1.0 + glow)
         for i in range(n_w):
             wq = fr.cam.project(add(pan, (-0.2 + 0.2 * (i % 3), 0.10 + 0.17 * (i // 3), 0)))
             if wq:
