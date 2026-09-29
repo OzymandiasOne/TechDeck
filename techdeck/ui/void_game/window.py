@@ -8,7 +8,9 @@ and only listens to the mouse when no act is running.
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -34,9 +36,43 @@ CHARS_PER_S = 34.0                    # he types his lines, as in the console
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
 MUST_READ = {"welcome", "rules", "first_turn", "win", "lose"}   # these wait for you
-KEY_HELP = {"hand": "W: BOARD   D: DECK   ENTER: BELL",
-            "deck": "A/D: PILE   SPACE: DRAW   S: BACK",
-            "board": "A/D: MOVE   SPACE: PICK   S: BACK"}
+NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
+
+KEYS_TEXT = [
+    ("CLICK A CARD", "pick it up (the board lights a lane)"),
+    ("A / D", "move along the lanes, or the piles"),
+    ("SPACE", "pick the lit lane, draw the lit pile, or move him along"),
+    ("W / S", "look down at the board / back to your hand"),
+    ("D  (from the hand)", "lean toward the piles"),
+    ("TAB, or click the raised card", "put it back down"),
+    ("ENTER", "ring the bell"),
+    ("ESC", "this menu"),
+]
+MENU_MAIN = ["RESUME", "KEYS", "DISPLAY", "SOUND", "QUIT"]
+DEFAULT_SETTINGS = {"sway": True, "scanlines": True, "volume": 70}
+
+
+def settings_path():
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "TechDeck", "void_game.json")
+
+
+def load_settings() -> dict:
+    try:
+        with open(settings_path(), encoding="utf-8") as f:
+            got = json.load(f)
+        return {**DEFAULT_SETTINGS, **{k: got[k] for k in DEFAULT_SETTINGS if k in got}}
+    except (OSError, ValueError):
+        return dict(DEFAULT_SETTINGS)
+
+
+def save_settings(s: dict):
+    try:
+        os.makedirs(os.path.dirname(settings_path()), exist_ok=True)
+        with open(settings_path(), "w", encoding="utf-8") as f:
+            json.dump(s, f)
+    except OSError:
+        pass
 FAR_AWAY: Vec = (0.0, 3.5, -7.0)         # where his cards come from
 
 
@@ -138,7 +174,10 @@ class VoidTable(QWidget):
         self.sacrifices: list[int] = []
         self.hover = None                 # ("card", uid) | ("slot", lane) | ("bell",) | ("deck",) | ("votary",)
         self.hits: list[tuple[tuple, QPolygonF]] = []
-        self.hint = ""
+        self.menu: str | None = None      # None | main | keys | display | sound
+        self.menu_index = 0
+        self.settings = load_settings()
+        self._apply_settings()
         self.captions: deque[tuple[str, str, str]] = deque()
         self.caption_key = ""
         self.caption: str = ""
@@ -180,7 +219,14 @@ class VoidTable(QWidget):
 
     def closeEvent(self, event):
         self.timer.stop()
+        save_settings(self.settings)
         super().closeEvent(event)
+
+    def event(self, ev):
+        if ev.type() == ev.Type.KeyPress and ev.key() == Qt.Key.Key_Tab:
+            self.keyPressEvent(ev)
+            return True
+        return super().event(ev)
 
     # ── his voice ────────────────────────────────────────────────────────
     def say(self, key: str, once_per_phase: bool = False, **holes):
@@ -191,6 +237,18 @@ class VoidTable(QWidget):
         got = self.dlg.line(key, **holes)
         if got and len(self.captions) < 3:
             self.captions.append((got[0], got[1], key))
+
+    def nag(self, text: str):
+        """A rule slip, in his voice: 'Draw first.' Shown at once, briefly."""
+        if self.caption == text or any(c[0] == text for c in self.captions):
+            return
+        self.captions.appendleft((text, "amused", "nag"))
+        if self.caption and self.caption_key == "nag":
+            self.caption_until = self.t            # the newer slip replaces the older
+
+    def _apply_settings(self):
+        if not os.environ.get("TECHDECK_TABLE_STILL"):
+            r3.CAMERA_SWAY = 1.0 if self.settings["sway"] else 0.0
 
     def _speech_tick(self):
         if self.caption and self.t < self.caption_until:
@@ -206,7 +264,8 @@ class VoidTable(QWidget):
             self.mood_t0 = self.t
             typed = len(text) / CHARS_PER_S
             # Rules and greetings wait for Space or a click; a passing remark lingers.
-            self.caption_until = float("inf") if key in MUST_READ else self.t + typed + FLAVOR_HOLD_S
+            hold = NAG_HOLD_S if key == "nag" else FLAVOR_HOLD_S
+            self.caption_until = float("inf") if key in MUST_READ else self.t + typed + hold
 
     def advance_dialogue(self) -> bool:
         """Space or a click while he is talking: finish the line if it is still
@@ -533,14 +592,12 @@ class VoidTable(QWidget):
             fr.text(x, y, w, h, self.caption[:self.caption_shown].upper(), PEAK, 13)
             if not self._talking() and self.caption_until == float("inf"):
                 fr.text(x, y + h + 2, w, 14, "SPACE", DIM, 8, bold=False, spacing=3)
-        # a quiet hint for the hands
-        hint = self.hint or self._standing_hint()
-        if hint:
-            fr.text(W - 330, H - 38, 316, 32, hint, MID, 9, bold=False,
-                    align=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, spacing=1)
         self._draw_inspect(fr)
+        if self.menu:
+            self._draw_menu(fr)
         img = fr.end()
-        return r3.finish(img, self.mood.dim * strength)
+        return r3.finish(img, max(self.mood.dim * strength, 0.55 if self.menu else 0.0),
+                         self.settings["scanlines"])
 
     def _caption_rect(self):
         """Where his line sits: centred in the gap between his face and the far
@@ -553,25 +610,92 @@ class VoidTable(QWidget):
         y = max(150, int(246 - h / 2))
         return 110, y, w, h
 
-    def _standing_hint(self) -> str:
-        g = self.game
-        if self.over:
-            return "CLICK TO LEAVE THE TABLE"
-        if self.busy():
-            return ""
-        keys = KEY_HELP[self.view]
-        if self.view == "board" and self.selected is None:
-            return keys
-        if g.phase == "draw":
-            return "DRAW: YOUR DECK, OR A VOTARY"
-        if self.selected is not None:
-            card = g._hand_card(self.selected)
-            d = card.defn
-            if d.cost_kind == OFFER and d.cost:
-                worth = sum(g.offering_worth(g.rows[YOU][s]) for s in self.sacrifices)
-                return f"OFFER {d.cost} ({worth} SO FAR): PICK YOUR CARDS TO OFFER, THEN A LIT LANE   {keys}"
-            return f"PICK A LIT LANE   {keys}"
-        return f"PLAY WHAT YOU CAN. THEN RING THE BELL.   {keys}"
+    # ── the menu (Esc) ──────────────────────────────────────────────────
+    def _menu_items(self) -> list[tuple[str, str]]:
+        """(label, value) rows for the open menu page."""
+        s = self.settings
+        if self.menu == "main":
+            return [(m, "") for m in MENU_MAIN]
+        if self.menu == "keys":
+            return KEYS_TEXT + [("BACK", "")]
+        if self.menu == "display":
+            return [("CAMERA SWAY", "ON" if s["sway"] else "OFF"),
+                    ("SCANLINES", "ON" if s["scanlines"] else "OFF"), ("BACK", "")]
+        if self.menu == "sound":
+            return [("VOLUME", f"{s['volume']}  (no sound yet)"), ("BACK", "")]
+        return []
+
+    def open_menu(self, page: str = "main"):
+        self.menu, self.menu_index = page, 0
+
+    def close_menu(self):
+        self.menu = None
+        save_settings(self.settings)
+
+    def _menu_adjust(self, step: int):
+        """A / D on a setting row."""
+        label = self._menu_items()[self.menu_index][0]
+        if label == "CAMERA SWAY":
+            self.settings["sway"] = not self.settings["sway"]; self._apply_settings()
+        elif label == "SCANLINES":
+            self.settings["scanlines"] = not self.settings["scanlines"]
+        elif label == "VOLUME":
+            self.settings["volume"] = max(0, min(100, self.settings["volume"] + 10 * step))
+
+    def _menu_pick(self):
+        label = self._menu_items()[self.menu_index][0]
+        if self.menu == "main":
+            if label == "RESUME":
+                self.close_menu()
+            elif label == "QUIT":
+                self.close()
+            else:
+                self.open_menu(label.lower())
+        elif label == "BACK":
+            self.open_menu("main")
+        else:
+            self._menu_adjust(1)
+
+    def _menu_key(self, key):
+        if key == Qt.Key.Key_Escape:
+            self.open_menu("main") if self.menu != "main" else self.close_menu()
+        elif key in (Qt.Key.Key_W, Qt.Key.Key_Up):
+            self.menu_index = (self.menu_index - 1) % len(self._menu_items())
+        elif key in (Qt.Key.Key_S, Qt.Key.Key_Down):
+            self.menu_index = (self.menu_index + 1) % len(self._menu_items())
+        elif key in (Qt.Key.Key_A, Qt.Key.Key_Left):
+            self._menu_adjust(-1)
+        elif key in (Qt.Key.Key_D, Qt.Key.Key_Right):
+            self._menu_adjust(1)
+        elif key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self._menu_pick()
+
+    def _draw_menu(self, fr: r3.Frame):
+        items = self._menu_items()
+        title = {"main": "THE TABLE", "keys": "KEYS", "display": "DISPLAY", "sound": "SOUND"}[self.menu]
+        row_h = 26 if self.menu != "keys" else 22
+        h = 70 + row_h * len(items)
+        w = 560 if self.menu == "keys" else 340
+        x, y = (W - w) // 2, (H - h) // 2
+        p = fr.p
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(1, 6, 3, 235)); p.drawRect(QRectF(x, y, w, h))
+        p.setPen(QColor(BRIGHT)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(QRectF(x, y, w, h))
+        fr.text(x, y + 14, w, 24, title, PEAK, 14)
+        cy = y + 52
+        for i, (label, value) in enumerate(items):
+            on = i == self.menu_index
+            col, size = (PEAK if on else MID), (11 if self.menu != "keys" else 9)
+            if self.menu == "keys" and label != "BACK":
+                fr.text(x + 22, cy, 210, row_h, label, col, size, True,
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
+                fr.text(x + 236, cy, w - 250, row_h, value, col, size, False,
+                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 0)
+            else:
+                text = f"{'> ' if on else ''}{label}{'   ' + value if value else ''}"
+                fr.text(x, cy, w, row_h, text, col, size)
+            poly = QPolygonF([QPointF(x, cy), QPointF(x + w, cy), QPointF(x + w, cy + row_h), QPointF(x, cy + row_h)])
+            self.hits.append((("menu", i), poly))
+            cy += row_h
 
     # ── views and the cursor ────────────────────────────────────────────
     def set_view(self, view: str):
@@ -593,24 +717,36 @@ class VoidTable(QWidget):
                     return lane
         return 0
 
+    def pick_up(self, uid: int):
+        """Take a card from the hand: it rises, and the view goes to the board
+        with a lane lit. S goes back to the hand with it still raised."""
+        self.selected, self.sacrifices = uid, []
+        self.set_view("board")
+        self.cursor = self._first_lane()
+
+    def put_down(self):
+        self.selected, self.sacrifices = None, []
+        if self.view == "board":
+            self.cursor = self._first_lane()
+
     def _act_on_lane(self, lane: int):
         """Space or a click on a lane of yours: offer the card standing there,
-        or play the chosen card into it."""
+        or play the chosen card into it. A second Space on a marked lane plays
+        if the offering is now enough, else takes the mark back."""
         g = self.game
         if self.selected is None:
             raise IllegalMove("Choose a card from your hand first.")
         d = g._hand_card(self.selected).defn
         standing = g.rows[YOU][lane]
-        if standing is not None and d.cost_kind == OFFER and d.cost and lane not in self.sacrifices:
-            if not g.why_not(self.selected, lane, self.sacrifices):
-                self.enqueue(g.play(self.selected, lane, self.sacrifices))
-            else:
-                self.sacrifices.append(lane)
-            return
-        if lane in self.sacrifices:
+        legal = not g.why_not(self.selected, lane, self.sacrifices)
+        if legal:
+            self.enqueue(g.play(self.selected, lane, self.sacrifices))
+        elif lane in self.sacrifices:
             self.sacrifices.remove(lane)
-            return
-        self.enqueue(g.play(self.selected, lane, self.sacrifices))
+        elif standing is not None and d.cost_kind == OFFER and d.cost:
+            self.sacrifices.append(lane)
+        else:
+            raise IllegalMove(g.why_not(self.selected, lane, self.sacrifices))
 
     def _draw_inspect(self, fr: r3.Frame):
         if not self.hover or self.hover[0] != "card":
@@ -675,13 +811,18 @@ class VoidTable(QWidget):
 
     def mousePressEvent(self, event):
         self.last_input_t = self.t
-        self.hint = ""
+        if self.menu:
+            hit = self._hit(self._to_frame(event.position()))
+            if hit and hit[0] == "menu":
+                self.menu_index = hit[1]
+                self._menu_pick()
+            return
         if self.over:
             if not self.captions and self.t > self.caption_until - 1.0:
                 self.close()
             return
         if event.button() == Qt.MouseButton.RightButton:
-            self.selected, self.sacrifices = None, []
+            self.put_down()
             return
         if self.advance_dialogue():
             return
@@ -693,7 +834,7 @@ class VoidTable(QWidget):
         try:
             self._click(hit)
         except IllegalMove as why:
-            self.hint = str(why).upper()
+            self.nag(str(why))
 
     def _click(self, hit):
         g = self.game
@@ -713,16 +854,15 @@ class VoidTable(QWidget):
                 return
             if vc.where == "hand":
                 if self.selected == vc.uid:
-                    self.selected, self.sacrifices = None, []
+                    self.put_down()
                 elif g.phase == "draw":
                     raise IllegalMove("Draw first.")
+                elif not g.can_afford(vc.uid):
+                    d = vc.card.defn
+                    raise IllegalMove(f"It demands {d.cost} {'remnants' if d.cost_kind == REMNANT else 'offerings'}. "
+                                      f"You cannot pay.")
                 else:
-                    self.selected, self.sacrifices = vc.uid, []
-                    if not g.can_afford(vc.uid):
-                        self.selected = None
-                        d = vc.card.defn
-                        raise IllegalMove(f"It demands {d.cost} {'remnants' if d.cost_kind == REMNANT else 'offerings'}. "
-                                          f"You cannot pay.")
+                    self.pick_up(vc.uid)
             elif vc.where == "you" and self.selected is not None:
                 d = g._hand_card(self.selected).defn
                 if d.cost_kind != OFFER or not d.cost:
@@ -741,14 +881,18 @@ class VoidTable(QWidget):
         moves it left (and from the deck's first pile returns to the hand), S
         comes back to the hand. The mouse only ever clicks."""
         self.last_input_t = self.t
-        self.hint = ""
         key = event.key()
+        if self.menu:
+            self._menu_key(key)
+            return
         try:
             if key == Qt.Key.Key_Escape:
-                if self.over or self.selected is None:
+                if self.over:
                     self.close()
                 else:
-                    self.selected, self.sacrifices = None, []
+                    self.open_menu()
+            elif key == Qt.Key.Key_Tab:
+                self.put_down()
             elif key == Qt.Key.Key_Space:
                 if self.advance_dialogue() or self.busy():
                     return
@@ -783,7 +927,7 @@ class VoidTable(QWidget):
             else:
                 super().keyPressEvent(event)
         except IllegalMove as why:
-            self.hint = str(why).upper()
+            self.nag(str(why))
 
 
 _TABLE: VoidTable | None = None

@@ -376,27 +376,28 @@ def draw_remnants(fr: Frame, count: int):
 
 
 # ── the tube ─────────────────────────────────────────────────────────────
-_OVERLAY: QImage | None = None
+_OVERLAYS: dict[bool, QImage] = {}
 
 
-def _tube_overlay() -> QImage:
+def _tube_overlay(scanlines: bool = True) -> QImage:
     """Scanlines + dark corners, drawn ONCE and reused every frame."""
-    global _OVERLAY
-    if _OVERLAY is None:
+    o = _OVERLAYS.get(scanlines)
+    if o is None:
         o = QImage(W, H, QImage.Format.Format_ARGB32_Premultiplied)
         o.fill(Qt.GlobalColor.transparent)
         p = QPainter(o)
-        p.setPen(QPen(QColor(0, 0, 0, 58), 1))
-        for y in range(0, H, 3):
-            p.drawLine(0, y, W, y)
+        if scanlines:
+            p.setPen(QPen(QColor(0, 0, 0, 58), 1))
+            for y in range(0, H, 3):
+                p.drawLine(0, y, W, y)
         v = QRadialGradient(QPointF(W / 2, H / 2), W * 0.72)
         v.setColorAt(0.55, QColor(0, 0, 0, 0)); v.setColorAt(1.0, QColor(0, 0, 0, 215))
         p.fillRect(0, 0, W, H, v); p.end()
-        _OVERLAY = o
-    return _OVERLAY
+        _OVERLAYS[scanlines] = o
+    return o
 
 
-def finish(img: QImage, dim: float = 0.0) -> QImage:
+def finish(img: QImage, dim: float = 0.0, scanlines: bool = True) -> QImage:
     """Bloom = shrink the frame, blow it back up soft, ADD it on top: one glow
     for everything on screen. Then scanlines and dark corners. `dim` darkens
     the whole tube (his displeasure)."""
@@ -408,7 +409,7 @@ def finish(img: QImage, dim: float = 0.0) -> QImage:
     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_Plus); p.setOpacity(0.85)
     p.drawImage(0, 0, soft)
     p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver); p.setOpacity(1.0)
-    p.drawImage(0, 0, _tube_overlay())
+    p.drawImage(0, 0, _tube_overlay(scanlines))
     if dim > 0:
         p.fillRect(0, 0, W, H, QColor(0, 0, 0, int(200 * min(1.0, dim))))
     p.end()

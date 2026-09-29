@@ -7,7 +7,9 @@ from techdeck.ui.void_game.window import VoidTable
 
 
 @pytest.fixture
-def table(qapp):
+def table(qapp, tmp_path, monkeypatch):
+    import techdeck.ui.void_game.window as win
+    monkeypatch.setattr(win, "settings_path", lambda: str(tmp_path / "void_game.json"))
     w = VoidTable(seed=3)
     w.timer.stop()
     yield w
@@ -105,7 +107,8 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     table.mousePressEvent(ev)
     assert table.selected is None
-    assert "DEMANDS" in table.hint
+    said = [table.caption] + [c[0] for c in table.captions]
+    assert any("demands" in s for s in said), "he should say why, in his own words"
 
 
 def test_a_whole_game_plays_through_to_the_end(table):
@@ -200,12 +203,91 @@ def test_d_leans_to_the_deck_and_a_comes_back(table):
     press(table, Q.Key.Key_A); assert table.view == "hand"
 
 
+def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid))
+    assert table.view == "board" and table.cursor is not None and table.selected == votary.uid
+    press(table, Q.Key.Key_S)
+    assert table.view == "hand" and table.selected == votary.uid
+    press(table, Q.Key.Key_W)
+    assert table.view == "board" and table.selected == votary.uid
+    press(table, Q.Key.Key_Tab)
+    assert table.selected is None
+
+
+def test_a_second_space_on_a_marked_lane_plays_the_card(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    g = table.game
+    votary = next(c for c in g.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_Space); settle(table)
+    lane = next(l for l in range(LANES) if g.rows[YOU][l] is votary)
+    cheap = next((c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer"), None)
+    if cheap is None:
+        return
+    table._click(("card", cheap.uid))
+    while table.cursor != lane:
+        press(table, Q.Key.Key_D)
+    press(table, Q.Key.Key_Space)
+    assert table.sacrifices == [lane]
+    press(table, Q.Key.Key_Space)
+    assert g.rows[YOU][lane] is cheap, "the second Space should play, not unmark"
+    settle(table)
+
+
+def test_a_rule_slip_is_said_by_him_not_printed(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_Enter); settle(table); quiet(table)   # turn 2: must draw
+    assert table.game.phase == "draw"
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table.mousePressEvent(_click_at(table, ("card", votary.uid)))
+    assert table.caption == "Draw first." or any(c[0] == "Draw first." for c in table.captions)
+
+
+def _click_at(table, key):
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    poly = next(p for k, p in table.hits if k == key)
+    pt = poly.boundingRect().center()
+    table._view = (0, 0, 1.0)
+    return QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pt), Qt.MouseButton.LeftButton,
+                       Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+
+def test_esc_opens_the_menu_and_quit_closes(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_Escape)
+    assert table.menu == "main"
+    press(table, Q.Key.Key_S); press(table, Q.Key.Key_Space)        # KEYS
+    assert table.menu == "keys"
+    press(table, Q.Key.Key_Escape)
+    assert table.menu == "main"
+    press(table, Q.Key.Key_S); press(table, Q.Key.Key_S); press(table, Q.Key.Key_Space)   # DISPLAY
+    assert table.menu == "display"
+    was = table.settings["sway"]
+    press(table, Q.Key.Key_D)
+    assert table.settings["sway"] is (not was)
+    press(table, Q.Key.Key_D)                                         # and back, so the file stays as it was
+    press(table, Q.Key.Key_Escape); press(table, Q.Key.Key_Escape)
+    assert table.menu is None
+    table._tick()
+    press(table, Q.Key.Key_Escape)
+    for _ in range(4):
+        press(table, Q.Key.Key_S)
+    assert table._menu_items()[table.menu_index][0] == "QUIT"
+    press(table, Q.Key.Key_Space)
+    assert not table.timer.isActive()
+
+
 def test_space_on_a_cursor_lane_plays_the_chosen_card(table):
     from PySide6.QtCore import Qt as Q
     settle(table); quiet(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
-    press(table, Q.Key.Key_W)
     press(table, Q.Key.Key_D); press(table, Q.Key.Key_D)
     assert table.cursor == 2
     press(table, Q.Key.Key_Space)
