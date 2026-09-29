@@ -217,9 +217,22 @@ def nova(p):
         _ell(p, x, y, 1.3, 1.3, H)
 
 
+def famine(p):
+    # a hooded thing, all ribs, holding out an empty bowl
+    _poly(p, [(38, 3), (20, 22), (18, 61), (58, 61), (56, 22)], F)
+    _ell(p, 38, 20, 9, 10, D)                                    # the hollow of the hood
+    _ell(p, 34, 19, 2.2, 2.6, F); _ell(p, 42, 19, 2.2, 2.6, F)   # sunken eyes, lit
+    _ell(p, 34, 19, 0.9, 0.9, E); _ell(p, 42, 19, 0.9, 0.9, E)
+    for y in (33, 38, 43, 48):                                   # ribs cut into the robe
+        _line(p, [(24, y), (33, y + 2)], D, 1.5); _line(p, [(52, y), (43, y + 2)], D, 1.5)
+    _line(p, [(38, 30), (38, 52)], D, 1.5)
+    _ell(p, 38, 55, 12, 4.5, D); _ell(p, 38, 54, 10, 3, F); _ell(p, 38, 54, 7.5, 1.8, D)   # the bowl
+    _line(p, [(24, 50), (27, 55)], F, 2.0); _line(p, [(52, 50), (49, 55)], F, 2.0)         # the hands
+
+
 PORTRAITS = {"votary": votary, "scarab": scarab, "hound": hound, "huginn": huginn, "weigher": weigher,
              "gorgon": gorgon, "ouroboros": ouroboros, "cerberus": cerberus, "sleeper": sleeper,
-             "monolith": monolith, "dead_star": dead_star, "nova": nova}
+             "monolith": monolith, "dead_star": dead_star, "nova": nova, "famine": famine}
 
 
 # ── sigil icons (22 x 22) - the metaphor, not the maths ───────────────────
@@ -303,18 +316,21 @@ def sigil_icon(sigil: str, scale: int = 3) -> QImage:
 _FACES: dict[tuple, QPixmap] = {}
 
 
-def card_face(defn: C.CardDef, power: int | None = None, health: int | None = None) -> QPixmap:
-    """The texture for one card. Cached per (card, numbers): a wounded card
-    shows its wound, a grown Ouroboros its new strength."""
+def card_face(defn: C.CardDef, power: int | None = None, health: int | None = None,
+              sigils: tuple[str, ...] | None = None) -> QPixmap:
+    """The texture for one card. Cached per (card, numbers, sigils): a wounded
+    card shows its wound, a grown Ouroboros its new strength, a fifth Famine
+    its wings."""
     power = defn.power if power is None else power
     health = defn.health if health is None else health
-    key = (defn.id, power, health)
+    sigils = defn.sigils if sigils is None else tuple(sigils)
+    key = (defn.id, power, health, sigils)
     if key not in _FACES:
-        _FACES[key] = _card_face(defn, power, health)
+        _FACES[key] = _card_face(defn, power, health, sigils)
     return _FACES[key]
 
 
-def _card_face(defn: C.CardDef, power: int, health: int) -> QPixmap:
+def _card_face(defn: C.CardDef, power: int, health: int, sigils: tuple[str, ...]) -> QPixmap:
     w, h = CARD_PX
     pm = QPixmap(w, h)
     pm.fill(CARD_DARK)
@@ -343,8 +359,8 @@ def _card_face(defn: C.CardDef, power: int, health: int) -> QPixmap:
     p.drawText(QRectF(20, h - 102, 80, 88), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(power))
     p.setPen(PEAK if health >= defn.health else EMBER)
     p.drawText(QRectF(w - 100, h - 102, 80, 88), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(health))
-    if defn.sigils:
-        icons = [sigil_icon(s, 3) for s in defn.sigils]
+    if sigils:
+        icons = [sigil_icon(s, 3) for s in sigils]
         total = sum(i.width() for i in icons) + 10 * (len(icons) - 1)
         x = (w - total) / 2
         for ic in icons:

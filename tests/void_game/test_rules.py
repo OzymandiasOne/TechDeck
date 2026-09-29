@@ -345,6 +345,62 @@ def test_his_dead_star_grows_on_his_turn():
     assert g.rows[HIM][3].defn.id == "nova"
 
 
+# ── famine: nothing left to draw ──────────────────────────────────────────
+def starve(g: Game):
+    g.deck.clear(); g.votaries = 0
+
+
+def test_with_nothing_to_draw_famine_lands_on_his_first_free_lane(seed=1):
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    put(g, "scarab", HIM, 0)
+    events = g.ring_bell()
+    fam = next(e for e in events if e.kind == "famine")
+    assert fam["lane"] == 1 and fam["count"] == 1
+    card = g.rows[HIM][1]
+    assert card.defn.id == "famine" and (card.power, card.health) == (1, 1)
+    assert g.phase == "play"                      # no draw step: straight to playing
+    assert not any(e.kind == "draw" for e in events)
+
+
+def test_each_famine_is_bigger_and_the_fifth_flies():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    for n in range(1, 6):
+        g.rows[HIM] = [None] * LANES              # clear so each lands fresh
+        g.ring_bell()
+        card = next(c for c in g.rows[HIM] if c is not None)
+        assert (card.power, card.health) == (n, n)
+        assert card.has(C.WINGED) == (n >= 5)
+        g.rows[YOU] = [None] * LANES; g.scale = 0    # keep the game from ending
+
+
+def test_a_full_row_feeds_his_leftmost_card_to_the_famine():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    for lane in range(LANES):
+        put(g, "sleeper", HIM, lane)
+    g.rows[YOU] = [put(g, "monolith", YOU, l) for l in range(LANES)]   # walls, so nobody dies to combat
+    events = g.ring_bell()
+    die = next(e for e in events if e.kind == "die")
+    assert die["lane"] == 0 and die["cause"] == "famine" and die["card"].defn.id == "sleeper"
+    assert g.rows[HIM][0].defn.id == "famine"
+
+
+def test_the_ninth_famine_drops_a_weight_on_you():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    g.famines = 8
+    g.rows[YOU] = [put(g, "monolith", YOU, l) for l in range(LANES)]
+    events = g.ring_bell()
+    assert any(e.kind == "scale" and e["delta"] == -1 for e in events)
+    assert g.rows[HIM][0].power == 9
+
+
 # ── the whole game holds together ─────────────────────────────────────────
 def greedy_turn(g: Game):
     """Free cards first, then the biggest card you can pay for, then ring."""

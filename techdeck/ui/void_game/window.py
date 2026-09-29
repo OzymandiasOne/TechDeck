@@ -353,6 +353,8 @@ class VoidTable(QWidget):
                 self._act(MOVE_S, lambda c=e["card"], l=e["lane"]: self._advance(c, l))
             elif k == "commit":
                 self._act(MOVE_S, lambda c=e["card"], l=e["lane"]: self._commit(c, l))
+            elif k == "famine":
+                self._act(MOVE_S + 0.3, lambda c=e["card"], l=e["lane"], n=e["count"]: self._famine(c, l, n))
             elif k == "your_turn":
                 self._act(0.1, lambda turn=e["turn"]: self._your_turn(turn))
             elif k == "game_over":
@@ -474,6 +476,16 @@ class VoidTable(QWidget):
             self.played_lines.add(key)
             self.say(key, name=card.name)
 
+    def _famine(self, card: Card, lane: int, count: int):
+        """Hunger lands on his row, straight down out of the dark."""
+        start = (r3.add(r3.slot_center(r3.ROW_HIM, lane), (0, 3.0, 0)), r3.FLAT_U, r3.FLAT_V)
+        vc = VCard(card, start, start, card.power, card.health, where="him", lane=lane, opacity=0.0)
+        vc.fade(1.0, MOVE_S)
+        vc.go(self._slot_pose(r3.ROW_HIM, lane), self.t, MOVE_S + 0.2)
+        vc.flash_until = self.t + 0.5
+        self.vcards[card.uid] = vc
+        self.say("famine" if count == 1 else "famine_again", n=count)
+
     def _your_turn(self, turn: int):
         self.said_this_phase.clear()
         self.idle_said_turn = 0
@@ -584,7 +596,7 @@ class VoidTable(QWidget):
                 c = add(c, (0, 0.15, 0))
             elif self.selected == vc.uid or self.t < vc.flash_until:
                 edge = PEAK
-            face = art.card_face(vc.card.defn, vc.shown_power, vc.shown_health)
+            face = art.card_face(vc.card.defn, vc.shown_power, vc.shown_health, vc.card.sigils)
             poly = fr.draw_card(c, u, v, face, art.card_back(), vc.opacity, edge)
             if poly and vc.where != "gone":
                 self.hits.append((("card", vc.uid), poly))

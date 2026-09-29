@@ -42,6 +42,8 @@
 #    close_you          you are one hit from winning
 #    close_him          he is one hit from winning
 #    idle               you have been thinking a long while
+#    famine             you had nothing left to draw; hunger took his row
+#    famine_again       ...and again ({n} is how many times)
 #    win                you tipped the scale
 #    lose               he tipped the scale
 # =====================================================================
@@ -109,6 +111,10 @@ close_you | displeased | One more and you have me. Do not get used to the feelin
 close_you | grave | Careful. Winning changes things.
 close_him | amused | One more. Think carefully.
 close_him | pleased | The scale is nearly done with you.
+
+famine | grave | Your supply is spent. Nothing left to draw. Hunger sets in, and hunger is on my side.
+famine_again | amused | Hungrier.
+famine_again | grave | It grows. It always grows.
 
 idle | amused | Take your time. I have all of it.
 idle | curious | Thinking. I can hear it.

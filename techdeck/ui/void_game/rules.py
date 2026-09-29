@@ -29,6 +29,8 @@ from .cards import (CARDS, FIRST_GAME_PLAN, GAZE, GROWS, HIS_POOL, OFFER, REMNAN
 
 LANES = 4
 SCALE_TO_WIN = 5
+FAMINE_WINGS_AT = 5        # the fifth famine flies
+FAMINE_WEIGHT_AT = 9       # the ninth onward drops a weight on you as it lands
 OPENING_HAND = 3            # from your deck, plus one votary
 YOU, HIM = "you", "him"
 
@@ -89,6 +91,7 @@ class Game:
         self.plan = [list(t) for t in (plan if plan is not None else FIRST_GAME_PLAN)]
         self.pool = list(pool if pool is not None else HIS_POOL)
         self.undying_bonus: dict[str, int] = {}     # card id -> times it has come back
+        self.famines = 0                             # how many times hunger has come
 
     # ── making cards ─────────────────────────────────────────────────────
     def _make(self, card_id: str, owner: str) -> Card:
@@ -233,8 +236,37 @@ class Game:
         self.turn += 1
         events += self._grow(YOU)
         can_draw = bool(self.deck) or self.votaries > 0
+        if not can_draw:
+            events += self._famine()
+            if self.winner:
+                return events
         self.phase = "draw" if can_draw else "play"
         events.append(ev("your_turn", turn=self.turn, draw=can_draw))
+        return events
+
+    def _famine(self) -> list[Event]:
+        """Nothing left to draw: hunger takes his row instead. The first free
+        lane from your left; if his row is full, his leftmost card is eaten.
+        Each famine is one bigger than the last."""
+        self.famines += 1
+        n = self.famines
+        self._uid += 1
+        sigils = (WINGED,) if n >= FAMINE_WINGS_AT else ()
+        card = Card(self._uid, CARDS["famine"], HIM, n, n, sigils=sigils)
+        events: list[Event] = []
+        free = [i for i in range(LANES) if self.rows[HIM][i] is None]
+        lane = free[0] if free else 0
+        if not free:
+            events += self._die(self.rows[HIM][lane], lane, cause="famine")
+        self.rows[HIM][lane] = card
+        events.append(ev("famine", card=card, lane=lane, count=n))
+        if n >= FAMINE_WEIGHT_AT:
+            self.scale -= 1
+            events.append(ev("scale", value=self.scale, delta=-1))
+            if self.scale <= -SCALE_TO_WIN:
+                self.winner = HIM
+                self.phase = "over"
+                events.append(ev("game_over", winner=HIM))
         return events
 
     # ── combat ───────────────────────────────────────────────────────────

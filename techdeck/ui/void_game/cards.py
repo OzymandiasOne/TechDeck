@@ -64,6 +64,8 @@ _ALL = [
     CardDef("dead_star", "DEAD STAR", 0, 2, 1, sigils=(GROWS,), grows_into="nova",
             note="The light you see left it long ago."),
     CardDef("nova", "NOVA", 4, 1, 1, note="Oh. There it is."),
+    # Not in any deck. It comes for you when you have nothing left to draw.
+    CardDef("famine", "FAMINE", 1, 1, note="What is left when nothing is left."),
 ]
 CARDS: dict[str, CardDef] = {c.id: c for c in _ALL}
 
