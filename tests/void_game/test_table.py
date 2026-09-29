@@ -72,7 +72,7 @@ def test_every_card_on_the_table_is_clickable(table):
 
 
 def test_a_played_card_travels_to_its_lane(table):
-    settle(table)
+    ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
     assert table.selected == votary.uid
@@ -82,6 +82,13 @@ def test_a_played_card_travels_to_its_lane(table):
     vc = table.vcards[votary.uid]
     assert vc.where == "you" and vc.lane == 2
     assert abs(vc.pose[0][2] - 2.55) < 1e-6, "it did not land on your row"
+
+
+def ready(w: VoidTable):
+    """Settled, his opening lines waved through, the first draw taken."""
+    settle(w); quiet(w)
+    if w.game.phase == "draw":
+        w._click(("votary",)); settle(w); quiet(w)
 
 
 def quiet(w: VoidTable):
@@ -94,8 +101,7 @@ def quiet(w: VoidTable):
 
 
 def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
-    settle(table)
-    quiet(table)
+    ready(table)
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
     big = next(c for c in table.game.hand if c.defn.cost >= 2)
@@ -180,7 +186,7 @@ def press(w: VoidTable, key):
 
 def test_w_looks_down_at_the_board_and_the_hand_tucks_away(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     hand_y = table._hand_cards()[0].dst[0][1]
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.cursor == 0
@@ -195,7 +201,7 @@ def test_w_looks_down_at_the_board_and_the_hand_tucks_away(table):
 
 def test_d_leans_to_the_deck_and_a_comes_back(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     press(table, Q.Key.Key_D)
     assert table.view == "deck" and table.cursor == 0
     press(table, Q.Key.Key_D); assert table.cursor == 1
@@ -205,7 +211,7 @@ def test_d_leans_to_the_deck_and_a_comes_back(table):
 
 def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
     assert table.view == "board" and table.cursor is not None and table.selected == votary.uid
@@ -222,7 +228,7 @@ def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
 
 
 def test_clicking_the_raised_card_keeps_it_and_another_card_switches(table):
-    settle(table); quiet(table)
+    ready(table)
     hand = table._hand_cards()
     votary = next(v for v in hand if v.card.defn.id == "votary")
     table._click(("card", votary.uid))
@@ -236,7 +242,7 @@ def test_clicking_the_raised_card_keeps_it_and_another_card_switches(table):
 
 def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.hover = ("card", votary.uid)
     press(table, Q.Key.Key_Space)
@@ -248,7 +254,7 @@ def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
 
 def test_a_second_space_on_a_marked_lane_plays_the_card(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     g = table.game
     votary = next(c for c in g.hand if c.defn.id == "votary")
     table._click(("card", votary.uid)); press(table, Q.Key.Key_Space); settle(table)
@@ -256,6 +262,7 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
     cheap = next((c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer"), None)
     if cheap is None:
         return
+    quiet(table)
     table._click(("card", cheap.uid))
     while table.cursor != lane:
         press(table, Q.Key.Key_D)
@@ -268,7 +275,7 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
 
 def test_a_rule_slip_is_said_by_him_not_printed(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     press(table, Q.Key.Key_Z); settle(table); quiet(table)   # turn 2: must draw
     assert table.game.phase == "draw"
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
@@ -288,7 +295,7 @@ def _click_at(table, key):
 
 def test_esc_opens_the_menu_and_quit_closes(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     press(table, Q.Key.Key_Escape)
     assert table.menu == "main"
     press(table, Q.Key.Key_S); press(table, Q.Key.Key_Space)        # KEYS
@@ -314,7 +321,7 @@ def test_esc_opens_the_menu_and_quit_closes(table):
 
 def test_space_on_a_cursor_lane_plays_the_chosen_card(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
     press(table, Q.Key.Key_D); press(table, Q.Key.Key_D)
@@ -326,7 +333,7 @@ def test_space_on_a_cursor_lane_plays_the_chosen_card(table):
 
 def test_the_camera_glides_between_views(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     from techdeck.ui.void_game import render3d as r3
     press(table, Q.Key.Key_W)
     table._tick()
@@ -337,7 +344,7 @@ def test_the_camera_glides_between_views(table):
 
 def test_z_rings_the_bell(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     press(table, Q.Key.Key_Z)
     settle(table)
     assert table.game.turn == 2
@@ -345,7 +352,7 @@ def test_z_rings_the_bell(table):
 
 def test_e_and_r_draw_from_the_piles(table):
     from PySide6.QtCore import Qt as Q
-    settle(table); quiet(table)
+    ready(table)
     press(table, Q.Key.Key_Z); settle(table); quiet(table)
     assert table.game.phase == "draw"
     votaries = table.game.votaries

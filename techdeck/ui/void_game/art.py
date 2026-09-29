@@ -230,9 +230,139 @@ def famine(p):
     _line(p, [(24, 50), (27, 55)], F, 2.0); _line(p, [(52, 50), (49, 55)], F, 2.0)         # the hands
 
 
+def mote(p):
+    # a spark that got away: a bright core, four wisps, two small wings
+    for a in (30, 150, 210, 330):
+        r = math.radians(a)
+        _line(p, [(38 + 8 * math.cos(r), 31 + 8 * math.sin(r)), (38 + 22 * math.cos(r), 31 + 22 * math.sin(r))], M, 1.4)
+    _poly(p, [(30, 31), (14, 20), (10, 34), (24, 38)], F); _poly(p, [(46, 31), (62, 20), (66, 34), (52, 38)], F)
+    _line(p, [(16, 24), (26, 32)], D, 1.0); _line(p, [(60, 24), (50, 32)], D, 1.0)
+    _ell(p, 38, 31, 8, 8, H); _ell(p, 38, 31, 4, 4, E)
+
+
+def hydra(p):
+    # three necks from one body, each with a jaw
+    _ell(p, 38, 50, 20, 10, F)
+    for i, (sx, ex, ey) in enumerate(((30, 12, 12), (38, 38, 8), (46, 64, 12))):
+        pts = _wave(sx, 46, ex, ey, 2.5, 1.2, phase=i * 1.1)
+        _line(p, pts, F, 4.5)
+        hx, hy = pts[-1]
+        side = -1 if ex < 38 else (1 if ex > 38 else 0)
+        _poly(p, [(hx - 6, hy - 4), (hx + 6, hy - 4), (hx + 9 * (side or 1) if side else hx + 8, hy + 1), (hx + 4, hy + 5), (hx - 4, hy + 5)], F)
+        _ell(p, hx + 1.5 * (side or 1), hy - 1, 1.2, 1.2, E)
+        _line(p, [(hx - 3, hy + 3), (hx + 3, hy + 3)], D, 1.0)
+    for x in (30, 38, 46):
+        _line(p, [(x - 6, 52), (x - 4, 58)], D, 1.0)
+
+
+def thornback(p):
+    # a low hump of a creature, spikes along the back
+    _ell(p, 38, 42, 25, 14, F)
+    for k in range(8):
+        x = 16 + k * 6.3
+        _poly(p, [(x - 3, 34 - abs(k - 3.5) * 0.4), (x, 18 + abs(k - 3.5) * 2.2), (x + 3, 34 - abs(k - 3.5) * 0.4)], F)
+    _ell(p, 62, 46, 6, 5, F)
+    _ell(p, 63, 45, 1.3, 1.3, E)
+    for x in (24, 34, 44, 54):
+        _line(p, [(x, 54), (x - 2, 60)], F, 2.2)
+    _line(p, [(18, 44), (56, 44)], D, 1.2)
+
+
+def watcher(p):
+    # tall, thin, one great eye, arms held out
+    _poly(p, [(38, 4), (30, 20), (28, 61), (48, 61), (46, 20)], F)
+    _line(p, [(30, 26), (6, 40)], F, 3.0); _line(p, [(46, 26), (70, 40)], F, 3.0)
+    _ell(p, 38, 20, 8, 5.5, D); _ell(p, 38, 20, 3.4, 3.4, F); _ell(p, 38, 20, 1.6, 1.6, E)
+    for y in (34, 42, 50):
+        _line(p, [(31, y), (45, y)], D, 1.0)
+
+
+def martyr(p):
+    # kneeling, hooded, arms crossed, a halo
+    _ell(p, 38, 10, 12, 3.5, F); _ell(p, 38, 10, 9, 1.6, D)
+    path = [(38, 14), (26, 24), (22, 48), (14, 61), (62, 61), (54, 48), (50, 24)]
+    _poly(p, path, F)
+    _ell(p, 38, 26, 6.5, 8, D)
+    _line(p, [(28, 40), (38, 46), (48, 40)], D, 1.6); _line(p, [(28, 46), (38, 40), (48, 46)], D, 1.6)
+    _line(p, [(22, 56), (54, 56)], D, 1.2)
+
+
+def locust(p):
+    # a locust: big hind legs, folded wings
+    p.save(); p.translate(36, 36); p.rotate(-18); _ell(p, 0, 0, 20, 8, F); p.restore()
+    _ell(p, 56, 24, 6, 5, F); _ell(p, 58, 23, 1.4, 1.4, E)
+    _line(p, [(60, 20), (72, 10)], F, 1.4); _line(p, [(58, 19), (66, 6)], F, 1.4)
+    _poly(p, [(20, 34), (44, 22), (50, 26), (24, 40)], D); _poly(p, [(22, 34), (42, 24), (47, 27), (25, 38)], M)
+    _line(p, [(30, 44), (16, 40), (8, 56)], F, 2.6); _line(p, [(42, 44), (36, 52), (28, 58)], F, 2.0)
+    _line(p, [(46, 40), (50, 50), (56, 56)], F, 1.8)
+
+
+def wraith(p):
+    # tattered, floating, no legs, two ember eyes
+    path = QPainterPath(QPointF(38, 4))
+    path.cubicTo(24, 8, 22, 26, 20, 40); path.lineTo(16, 61); path.lineTo(24, 52); path.lineTo(30, 61)
+    path.lineTo(38, 50); path.lineTo(46, 61); path.lineTo(52, 52); path.lineTo(60, 61); path.lineTo(56, 40)
+    path.cubicTo(54, 26, 52, 8, 38, 4)
+    p.setPen(Qt.PenStyle.NoPen); p.setBrush(F); p.drawPath(path)
+    _ell(p, 38, 22, 9, 10, D)
+    _ell(p, 34, 21, 1.6, 1.6, E); _ell(p, 42, 21, 1.6, 1.6, E)
+    for y in (36, 42, 48):
+        _line(p, [(26, y), (50, y + 2)], D, 1.0)
+
+
+def crowned(p):
+    # a head in profile under a tall crown of rays
+    _ell(p, 38, 42, 15, 17, F)
+    for k in range(7):
+        x = 20 + k * 6
+        _poly(p, [(x - 2.5, 30), (x, 8 + (3 if k % 2 else 0)), (x + 2.5, 30)], F)
+    _line(p, [(19, 30), (57, 30)], H, 1.6)
+    _poly(p, [(30, 38), (40, 37), (42, 41), (32, 42)], D); _ell(p, 36.5, 39.6, 1.4, 1.4, E)
+    _line(p, [(32, 50), (44, 50)], D, 1.3)
+    _ell(p, 38, 61, 20, 4, F)
+
+
+def seraph(p):
+    # six wings around one eye
+    for a in (-90, -30, 30, 90, 150, 210):
+        r = math.radians(a)
+        tip = (38 + 30 * math.cos(r), 31 + 28 * math.sin(r))
+        l = (38 + 12 * math.cos(r - 0.55), 31 + 11 * math.sin(r - 0.55))
+        rr = (38 + 12 * math.cos(r + 0.55), 31 + 11 * math.sin(r + 0.55))
+        _poly(p, [(38, 31), l, tip, rr], F)
+        _line(p, [(38 + 8 * math.cos(r), 31 + 7 * math.sin(r)), (tip[0] * 0.8 + 38 * 0.2, tip[1] * 0.8 + 31 * 0.2)], D, 1.0)
+    _ell(p, 38, 31, 11, 11, F); _ell(p, 38, 31, 8, 8, D)
+    _poly(p, [(30, 31), (38, 26), (46, 31), (38, 36)], H); _ell(p, 38, 31, 2.2, 2.2, E)
+
+
+def leviathan(p):
+    # a coil of it, breaking the surface, one eye and a fin
+    _line(p, [(2, 50), (74, 50)], M, 1.2)
+    _line(p, _wave(4, 44, 40, 44, 9, 1.0, n=24), F, 9.0)
+    _line(p, [(40, 44), (52, 30), (60, 18)], F, 9.0)
+    _poly(p, [(54, 8), (72, 12), (70, 24), (56, 26)], F)
+    _ell(p, 66, 16, 1.8, 1.8, E)
+    _line(p, [(58, 22), (70, 23)], D, 1.0)
+    _poly(p, [(40, 38), (44, 24), (50, 34)], F)
+    for x in (12, 20, 28, 36):
+        _line(p, [(x, 40), (x + 2, 48)], D, 1.0)
+
+
+def deathcard(p):
+    # someone, once: a face of falling glyphs behind a plain hood
+    _poly(p, [(38, 3), (18, 30), (16, 61), (60, 61), (58, 30)], F)
+    _ell(p, 38, 28, 11, 13, D)
+    for k, (x, y) in enumerate(((31, 20), (38, 18), (45, 20), (30, 27), (38, 26), (46, 27), (32, 34), (38, 35), (44, 34))):
+        _poly(p, [(x - 1.5, y - 1.5), (x + 1.5, y - 1.5), (x + 1.5, y + 1.5), (x - 1.5, y + 1.5)], H if k % 2 else M)
+    _line(p, [(24, 48), (52, 48)], D, 1.2); _line(p, [(24, 54), (52, 54)], D, 1.2)
+
+
 PORTRAITS = {"votary": votary, "scarab": scarab, "hound": hound, "huginn": huginn, "weigher": weigher,
              "gorgon": gorgon, "ouroboros": ouroboros, "cerberus": cerberus, "sleeper": sleeper,
-             "monolith": monolith, "dead_star": dead_star, "nova": nova, "famine": famine}
+             "monolith": monolith, "dead_star": dead_star, "nova": nova, "famine": famine,
+             "mote": mote, "hydra": hydra, "thornback": thornback, "watcher": watcher, "martyr": martyr,
+             "locust": locust, "wraith": wraith, "crowned": crowned, "seraph": seraph, "leviathan": leviathan,
+             "deathcard": deathcard}
 
 
 # ── sigil icons (22 x 22) - the metaphor, not the maths ───────────────────
@@ -288,8 +418,55 @@ def _gaze(p):
     _ell(p, 11, 11, 4.2, 4.2, D); _ell(p, 11, 11, 2.4, 2.4, E)
 
 
+def _two_mouths(p):
+    for cx, flip in ((5, 1), (17, -1)):
+        _poly(p, [(cx - 3, 4), (cx + 3, 4), (cx + 3, 18), (cx - 3, 18)], F)
+        teeth = [(cx - 2.6 + i * 1.3, 8 if i % 2 else 11) for i in range(5)]
+        _line(p, teeth, D, 1.0); _line(p, [(cx - 2.6, 14), (cx + 2.6, 14)], D, 1.0)
+    _line(p, [(9, 11), (13, 11)], D, 1.0)
+
+
+def _thorns(p):
+    _ell(p, 11, 11, 5.5, 5.5, F)
+    for a in range(0, 360, 45):
+        r = math.radians(a)
+        _poly(p, [(11 + 5 * math.cos(r - 0.35), 11 + 5 * math.sin(r - 0.35)),
+                  (11 + 10.5 * math.cos(r), 11 + 10.5 * math.sin(r)),
+                  (11 + 5 * math.cos(r + 0.35), 11 + 5 * math.sin(r + 0.35))], F)
+    _ell(p, 11, 11, 2, 2, D)
+
+
+def _sentinel(p):
+    _poly(p, [(8, 20), (14, 20), (13, 6), (9, 6)], F); _ell(p, 11, 5, 3.5, 3, F); _ell(p, 11, 5, 1.2, 1.2, E)
+    _line(p, [(7, 13), (1, 13)], F, 1.4); _poly(p, [(1, 10), (1, 16), (-2, 13)], F)
+    _line(p, [(15, 13), (21, 13)], F, 1.4); _poly(p, [(21, 10), (21, 16), (24, 13)], F)
+
+
+def _endless(p):
+    for cx in (6.5, 15.5):
+        _ell(p, cx, 11, 5.5, 4.5, F); _ell(p, cx, 11, 3, 2.2, D)
+
+
+def _spawn(p):
+    _ell(p, 8, 9, 5, 5, F); _ell(p, 8, 9, 1.4, 1.4, D)
+    _ell(p, 16, 15, 3.5, 3.5, F); _ell(p, 16, 15, 1, 1, D)
+    _line(p, [(12, 12), (13.5, 13)], D, 1.2)
+
+
+def _herald(p):
+    _poly(p, [(3, 19), (19, 19), (20, 9), (15, 13), (11, 4), (7, 13), (2, 9)], F)
+    _line(p, [(5, 16), (17, 16)], D, 1.0)
+
+
+def _abhorred(p):
+    _ell(p, 11, 11, 9, 9, F); _ell(p, 11, 11, 6.5, 6.5, D)
+    _line(p, [(5, 17), (17, 5)], F, 2.4)
+
+
 SIGIL_ICONS = {C.WINGED: _winged, C.WARDEN: _warden, C.VENOM: _venom, C.THREE_MOUTHS: _three_mouths,
-               C.UNDYING: _undying, C.WORTHY: _worthy, C.GROWS: _grows, C.GAZE: _gaze}
+               C.UNDYING: _undying, C.WORTHY: _worthy, C.GROWS: _grows, C.GAZE: _gaze,
+               C.TWO_MOUTHS: _two_mouths, C.THORNS: _thorns, C.SENTINEL: _sentinel, C.ENDLESS: _endless,
+               C.SPAWN: _spawn, C.HERALD: _herald, C.ABHORRED: _abhorred}
 
 
 # ── hard-pixel rendering ──────────────────────────────────────────────────
@@ -305,7 +482,8 @@ def _hard(w, h, draw, scale):
 
 
 def portrait(card_id: str, scale: int = 3) -> QImage:
-    return _hard(PW, PH, PORTRAITS[card_id], scale)
+    """A card's picture; anything without its own (a forged deathcard) gets the hooded face."""
+    return _hard(PW, PH, PORTRAITS.get(card_id, deathcard), scale)
 
 
 def sigil_icon(sigil: str, scale: int = 3) -> QImage:

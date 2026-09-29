@@ -10,9 +10,13 @@ def kinds(events):
     return [e.kind for e in events]
 
 
-def fresh(**kw) -> Game:
+def fresh(draw: bool = True, **kw) -> Game:
+    """A started game. The first turn draws now, so by default the draw is
+    done (a votary) and the table is ready to play; draw=False leaves it."""
     g = Game(seed=kw.pop("seed", 1), **kw)
     g.start()
+    if draw and g.phase == "draw":
+        g.draw("votary")
     return g
 
 
@@ -33,7 +37,7 @@ def in_hand(g: Game, card_id: str) -> Card:
 
 # ── the opening ───────────────────────────────────────────────────────────
 def test_opening_hand_is_three_from_the_deck_plus_one_votary():
-    g = fresh()
+    g = fresh(draw=False)
     assert len(g.hand) == 4
     assert sum(c.defn.id == "votary" for c in g.hand) == 1
     assert len(g.deck) == len(C.STARTER_DECK) - 3
@@ -41,16 +45,16 @@ def test_opening_hand_is_three_from_the_deck_plus_one_votary():
 
 
 def test_you_see_his_first_move_before_you_act():
-    g = fresh()
+    g = fresh(draw=False)
     assert any(c is not None for c in g.incoming)
     assert all(c is None for c in g.rows[HIM])
 
 
-def test_no_draw_on_turn_one():
-    g = fresh()
-    assert g.phase == "play"
-    with pytest.raises(IllegalMove):
-        g.draw("deck")
+def test_the_first_turn_draws_too():
+    g = fresh(draw=False)
+    assert g.phase == "draw"
+    g.draw("votary")
+    assert len(g.hand) == 5 and g.phase == "play"
 
 
 def test_cannot_start_twice():
@@ -60,8 +64,15 @@ def test_cannot_start_twice():
 
 
 # ── paying for cards ──────────────────────────────────────────────────────
+def played(g: Game) -> Game:
+    """A fresh game with the first draw done, ready to play."""
+    if g.phase == "draw":
+        g.draw("votary")
+    return g
+
+
 def test_a_free_card_needs_an_empty_lane():
-    g = fresh()
+    g = played(fresh())
     votary = next(c for c in g.hand if c.defn.id == "votary")
     events = g.play(votary.uid, 0)
     assert kinds(events) == ["play"]
@@ -72,7 +83,7 @@ def test_a_free_card_needs_an_empty_lane():
 
 
 def test_offerings_pay_for_a_card():
-    g = fresh()
+    g = played(fresh())
     put(g, "votary", YOU, 0)
     put(g, "votary", YOU, 1)
     hound = in_hand(g, "hound")               # costs 2
@@ -86,7 +97,7 @@ def test_offerings_pay_for_a_card():
 
 
 def test_you_can_play_into_the_lane_you_just_emptied():
-    g = fresh()
+    g = played(fresh())
     put(g, "votary", YOU, 0)
     scarab = in_hand(g, "scarab")
     g.play(scarab.uid, 0, [0])
@@ -94,7 +105,7 @@ def test_you_can_play_into_the_lane_you_just_emptied():
 
 
 def test_the_same_offering_cannot_be_used_twice():
-    g = fresh()
+    g = played(fresh())
     put(g, "votary", YOU, 0)
     hound = in_hand(g, "hound")
     with pytest.raises(IllegalMove, match="same one twice"):
@@ -102,7 +113,7 @@ def test_the_same_offering_cannot_be_used_twice():
 
 
 def test_a_worthy_offering_counts_as_three():
-    g = fresh()
+    g = played(fresh())
     worthy = put(g, "votary", YOU, 0)
     worthy.sigils = (C.WORTHY,)
     sleeper = in_hand(g, "sleeper")           # costs 3
@@ -111,14 +122,14 @@ def test_a_worthy_offering_counts_as_three():
 
 
 def test_free_cards_refuse_offerings():
-    g = fresh()
+    g = played(fresh())
     put(g, "votary", YOU, 0)
     with pytest.raises(IllegalMove, match="asks for no offering"):
         g.play(in_hand(g, "votary").uid, 1, [0])
 
 
 def test_remnant_cards_cost_remnants_not_lives():
-    g = fresh()
+    g = played(fresh())
     monolith = in_hand(g, "monolith")         # 3 remnants
     assert "costs 3 remnants" in g.why_not(monolith.uid, 0)
     g.remnants = 3
@@ -128,7 +139,7 @@ def test_remnant_cards_cost_remnants_not_lives():
 
 
 def test_can_afford_looks_at_the_whole_board():
-    g = fresh()
+    g = played(fresh())
     hound = in_hand(g, "hound")
     assert not g.can_afford(hound.uid)
     put(g, "votary", YOU, 0)
@@ -138,7 +149,7 @@ def test_can_afford_looks_at_the_whole_board():
 
 # ── drawing ───────────────────────────────────────────────────────────────
 def test_second_turn_starts_with_one_draw_from_either_pile():
-    g = fresh()
+    g = played(fresh())
     g.ring_bell()
     assert g.phase == "draw"
     with pytest.raises(IllegalMove, match="Draw first"):
@@ -151,7 +162,7 @@ def test_second_turn_starts_with_one_draw_from_either_pile():
 
 
 def test_empty_piles_cannot_be_drawn_from():
-    g = fresh()
+    g = played(fresh())
     g.ring_bell()
     g.deck.clear()
     assert not g.can_draw("deck")
@@ -317,7 +328,7 @@ def test_undying_returns_to_hand_stronger():
 
 
 def test_undying_keeps_its_bonus_when_sacrificed_too():
-    g = fresh()
+    g = played(fresh())
     snake = put(g, "ouroboros", YOU, 0)
     g.play(in_hand(g, "scarab").uid, 1, [0])
     back = next(c for c in g.hand if c.defn.id == "ouroboros")
@@ -343,6 +354,83 @@ def test_his_dead_star_grows_on_his_turn():
     g.draw("votary")
     g.ring_bell()                             # it wakes at the start of his next turn
     assert g.rows[HIM][3].defn.id == "nova"
+
+
+# ── the newer sigils ──────────────────────────────────────────────────────
+def arena(**kw) -> Game:
+    """A quiet table: no script, nothing incoming, first draw done."""
+    g = fresh(plan=[[]] * 40, **kw)
+    g.incoming = [None] * LANES
+    return played(g)
+
+
+def test_nothing_strikes_the_abhorred_but_wings_pass_over():
+    g = arena()
+    put(g, "hound", YOU, 0); put(g, "huginn", YOU, 1)
+    f0 = put(g, "famine", HIM, 0); f1 = put(g, "famine", HIM, 1)
+    events = g.ring_bell()
+    assert f0.health == 1 and any(e.kind == "repelled" for e in events)
+    assert f1.health == 1 and g.scale == 1              # the raven flew over; the famines were blocked
+
+
+def test_two_mouths_bites_the_sides_never_the_front():
+    g = arena()
+    put(g, "hydra", YOU, 1)
+    front = put(g, "sleeper", HIM, 1); left = put(g, "sleeper", HIM, 0)
+    g.ring_bell()
+    assert front.health == 6 and left.health == 5
+    assert g.scale == 1 - 4                              # lane 2 was open: 1 landed; his open lane hit back
+
+
+def test_thorns_wound_whatever_strikes():
+    g = arena()
+    put(g, "thornback", YOU, 0)
+    striker = put(g, "scarab", HIM, 0)                  # 1/2: takes 1 from the strike, 1 from the thorns
+    events = g.ring_bell()
+    assert any(e.kind == "thorns" for e in events)
+    assert striker.health == 0 and g.rows[HIM][0] is None
+
+
+def test_a_sentinel_steps_across_to_meet_an_arrival():
+    g = arena()
+    watcher = put(g, "watcher", YOU, 0)
+    put(g, "scarab", HIM, 3, incoming=True)
+    events = g.ring_bell()
+    assert any(e.kind == "guard" for e in events)
+    assert g.rows[YOU][3] is watcher and g.rows[YOU][0] is None
+
+
+def test_the_endless_gives_blood_and_stays():
+    g = arena()
+    martyr = put(g, "martyr", YOU, 0)
+    hound = in_hand(g, "hound")                          # costs 2
+    put(g, "votary", YOU, 1)
+    g.play(hound.uid, 2, [0, 1])
+    assert g.rows[YOU][0] is martyr and g.rows[YOU][1] is None
+    assert g.rows[YOU][2] is hound
+
+
+def test_spawn_puts_another_in_your_hand():
+    g = arena()
+    put(g, "votary", YOU, 0); put(g, "votary", YOU, 1)
+    locust = in_hand(g, "locust")
+    events = g.play(locust.uid, 2, [0, 1])
+    assert any(e.kind == "spawn" for e in events)
+    assert sum(c.defn.id == "locust" for c in g.hand) == 1
+
+
+def test_a_herald_lifts_its_neighbours():
+    g = arena()
+    put(g, "crowned", YOU, 1)                            # 1 power itself
+    put(g, "scarab", YOU, 0); put(g, "scarab", YOU, 2); put(g, "scarab", YOU, 3)
+    g.ring_bell()
+    assert g.scale == 5 and g.winner == YOU              # 2 + 1 + 2 tips it before lane 3 even strikes
+
+
+def test_the_undying_bonus_can_be_carried_in():
+    g = fresh(undying_bonus={"ouroboros": 2})
+    snake = g._make("ouroboros", YOU)
+    assert (snake.power, snake.health) == (3, 3)
 
 
 # ── famine: nothing left to draw ──────────────────────────────────────────

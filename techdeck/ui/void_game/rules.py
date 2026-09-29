@@ -23,9 +23,9 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 
-from .cards import (CARDS, FIRST_GAME_PLAN, GAZE, GROWS, HIS_POOL, OFFER, REMNANT,
-                    STARTER_DECK, THREE_MOUTHS, UNDYING, VENOM, VOTARY_PILE, WARDEN,
-                    WINGED, WORTHY, CardDef)
+from .cards import (ABHORRED, CARDS, ENDLESS, FIRST_GAME_PLAN, GAZE, GROWS, HERALD, HIS_POOL,
+                    OFFER, REMNANT, SENTINEL, SPAWN, STARTER_DECK, THORNS, THREE_MOUTHS,
+                    TWO_MOUTHS, UNDYING, VENOM, VOTARY_PILE, WARDEN, WINGED, WORTHY, CardDef)
 
 LANES = 4
 SCALE_TO_WIN = 5
@@ -74,12 +74,13 @@ def ev(kind: str, **data) -> Event:
 
 
 class Game:
-    def __init__(self, seed: int | None = None, deck=None, plan=None, pool=None):
+    def __init__(self, seed: int | None = None, deck=None, plan=None, pool=None,
+                 undying_bonus: dict[str, int] | None = None, votaries: int = VOTARY_PILE):
         self.rng = random.Random(seed)
         self._uid = 0
         self.deck: list[str] = list(deck if deck is not None else STARTER_DECK)
         self.rng.shuffle(self.deck)
-        self.votaries = VOTARY_PILE
+        self.votaries = votaries
         self.hand: list[Card] = []
         self.rows: dict[str, list[Card | None]] = {YOU: [None] * LANES, HIM: [None] * LANES}
         self.incoming: list[Card | None] = [None] * LANES
@@ -90,7 +91,9 @@ class Game:
         self.winner: str | None = None
         self.plan = [list(t) for t in (plan if plan is not None else FIRST_GAME_PLAN)]
         self.pool = list(pool if pool is not None else HIS_POOL)
-        self.undying_bonus: dict[str, int] = {}     # card id -> times it has come back
+        # card id -> times it has come back. Passed in from the run, so an
+        # Ouroboros remembers dying across fights (and, saved, across runs).
+        self.undying_bonus: dict[str, int] = dict(undying_bonus or {})
         self.famines = 0                             # how many times hunger has come
 
     # ── making cards ─────────────────────────────────────────────────────
@@ -110,8 +113,9 @@ class Game:
         events += self._draw_from("votary")
         events += self._his_commit()            # you see his first move before yours
         self.turn = 1
-        self.phase = "play"                     # no draw on the very first turn
-        events.append(ev("your_turn", turn=self.turn, draw=False))
+        can_draw = bool(self.deck) or self.votaries > 0
+        self.phase = "draw" if can_draw else "play"
+        events.append(ev("your_turn", turn=self.turn, draw=can_draw))
         return events
 
     # ── drawing ──────────────────────────────────────────────────────────
@@ -202,7 +206,10 @@ class Game:
         for s in sacrifices:
             victim = self.rows[YOU][s]
             events.append(ev("sacrifice", card=victim, lane=s))
-            events += self._die(victim, s, cause="sacrifice")
+            if victim.has(ENDLESS) and s != lane:
+                events.append(ev("endless", card=victim, lane=s))   # it gives, and stays
+            else:
+                events += self._die(victim, s, cause="sacrifice")
         if card.defn.cost_kind == REMNANT and card.defn.cost:
             self.remnants -= card.defn.cost
             events.append(ev("remnants", total=self.remnants, delta=-card.defn.cost))
@@ -210,6 +217,10 @@ class Game:
         self.rows[YOU][lane] = card
         card.turns_on_board = 0
         events.append(ev("play", card=card, lane=lane))
+        if card.has(SPAWN):
+            twin = self._make(card.defn.id, YOU)
+            self.hand.append(twin)
+            events.append(ev("spawn", card=twin, source=card))
         return events
 
     # ── the bell ─────────────────────────────────────────────────────────
@@ -273,7 +284,10 @@ class Game:
     def _strike_power(self, attacker: Card, lane: int) -> int:
         facing = self.rows[HIM if attacker.owner == YOU else YOU][lane]
         penalty = 1 if (facing is not None and facing.has(GAZE)) else 0
-        return max(0, attacker.power - penalty)
+        own = self.rows[attacker.owner]
+        heralds = sum(1 for n in (lane - 1, lane + 1)
+                      if 0 <= n < LANES and own[n] is not None and own[n].has(HERALD))
+        return max(0, attacker.power + heralds - penalty)
 
     def _combat(self, side: str) -> list[Event]:
         other = HIM if side == YOU else YOU
@@ -285,11 +299,19 @@ class Game:
             power = self._strike_power(attacker, lane)
             if power <= 0:
                 continue
-            targets = [lane - 1, lane, lane + 1] if attacker.has(THREE_MOUTHS) else [lane]
+            if attacker.has(THREE_MOUTHS):
+                targets = [lane - 1, lane, lane + 1]
+            elif attacker.has(TWO_MOUTHS):
+                targets = [lane - 1, lane + 1]
+            else:
+                targets = [lane]
             for t in (t for t in targets if 0 <= t < LANES):
                 if self.rows[side][lane] is not attacker:
                     break                       # it died mid-flurry
                 defender = self.rows[other][t]
+                if defender is not None and defender.has(ABHORRED) and not attacker.has(WINGED):
+                    events.append(ev("repelled", card=attacker, lane=lane, target_lane=t, defender=defender))
+                    continue                    # nothing will strike it
                 flies = attacker.has(WINGED) and not (defender is not None and defender.has(WARDEN))
                 if defender is None or flies:
                     self.scale += power if side == YOU else -power
@@ -309,6 +331,12 @@ class Game:
                 if defender.health <= 0 or attacker.has(VENOM):
                     events += self._die(defender, t, cause="venom" if attacker.has(VENOM)
                                         and defender.health > 0 else "strike")
+                if defender.has(THORNS) and self.rows[side][lane] is attacker:
+                    attacker.health -= 1
+                    events.append(ev("thorns", card=defender, lane=t, striker=attacker,
+                                     striker_lane=lane, hp_after=attacker.health))
+                    if attacker.health <= 0:
+                        events += self._die(attacker, lane, cause="thorns")
         return events
 
     def _die(self, card: Card, lane: int, cause: str) -> list[Event]:
@@ -346,7 +374,20 @@ class Game:
                 self.rows[HIM][lane] = card
                 card.turns_on_board = 0
                 events.append(ev("advance", card=card, lane=lane))
+                events += self._guard(lane)
         return events
+
+    def _guard(self, lane: int) -> list[Event]:
+        """One of his arrived facing an empty lane of yours: a SENTINEL of yours
+        elsewhere steps across to meet it."""
+        if self.rows[YOU][lane] is not None:
+            return []
+        for src, c in enumerate(self.rows[YOU]):
+            if c is not None and c.has(SENTINEL):
+                self.rows[YOU][src] = None
+                self.rows[YOU][lane] = c
+                return [ev("guard", card=c, from_lane=src, lane=lane)]
+        return []
 
     def _his_commit(self) -> list[Event]:
         """He slides new cards into his incoming row: the script first, then
