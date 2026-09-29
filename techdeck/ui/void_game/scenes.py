@@ -45,6 +45,7 @@ class RoadScenes:
         self.book: int | None = None      # page of the rule book, or None
         self.seen_this_fight: set[str] = set()
         self.first_sacrifice_said = False
+        self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
 
     def _save_memory(self):

@@ -361,3 +361,17 @@ def test_e_and_r_draw_from_the_piles(table):
     press(table, Q.Key.Key_E)                       # already drawn: he says so, no crash
     said = [table.caption] + [c[0] for c in table.captions]
     assert any("already drawn" in x for x in said)
+
+
+def test_the_tutorial_points_at_the_piles_and_a_draw_returns_you_to_the_hand(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    assert table.game.phase == "draw" and not table.show_draw_arrow
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table.mousePressEvent(_click_at(table, ("card", votary.uid)))    # too early: "Draw first."
+    assert table.show_draw_arrow
+    press(table, Q.Key.Key_D)
+    assert table.view == "deck"
+    press(table, Q.Key.Key_Space)                                     # draws from the lit pile
+    settle(table)
+    assert table.view == "hand" and not table.show_draw_arrow

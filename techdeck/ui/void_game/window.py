@@ -256,6 +256,8 @@ class VoidTable(RoadScenes, QWidget):
         self.captions.appendleft((text, "amused", "nag"))
         if self.caption and self.caption_key == "nag":
             self.caption_until = self.t            # the newer slip replaces the older
+        if text == "Draw first." and self.run.fights == 0 and self.run.memory["runs"] == 1:
+            self.show_draw_arrow = True            # the tutorial: point the way to the piles
 
     def _apply_settings(self):
         if not os.environ.get("TECHDECK_TABLE_STILL"):
@@ -392,6 +394,9 @@ class VoidTable(RoadScenes, QWidget):
         start = (add(base, (0, 0.4, 0)), mul(r3.FLAT_U, 0.8), mul(r3.FLAT_V, 0.8))
         vc = VCard(card, start, start, card.power, card.health, where="hand")
         self.vcards[card.uid] = vc
+        self.show_draw_arrow = False
+        if self.view == "deck":
+            self.set_view("hand")                  # the draw is made: back to the hand on its own
         self._layout_hand(force=True)
 
     def _play(self, card: Card, lane: int, sacrificed: int):
@@ -705,6 +710,8 @@ class VoidTable(RoadScenes, QWidget):
             fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R")
         elif self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
             fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "Z")     # over the bell's front edge, clear of the deck
+        if self.show_draw_arrow and self.view == "hand" and g.phase == "draw":
+            self._draw_arrow_to_deck(fr)
         self._draw_inspect(fr)
         if self.book is not None:
             self._draw_book(fr)
@@ -713,6 +720,19 @@ class VoidTable(RoadScenes, QWidget):
         img = fr.end()
         return r3.finish(img, max(self.mood.dim * strength, 0.55 if self.menu else 0.0),
                          self.settings["scanlines"])
+
+    def _draw_arrow_to_deck(self, fr: r3.Frame):
+        """The tutorial's one pointer: an arrow at the right edge toward the
+        piles, with the key that looks that way. Pulses until you draw."""
+        pulse = 0.5 + 0.5 * math.sin(self.t * 4)
+        col = QColor(PEAK); col.setAlphaF(0.55 + 0.45 * pulse)
+        x, y = W - 92 + 6 * pulse, H * 0.62
+        p = fr.p
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(col)
+        p.drawPolygon(QPolygonF([QPointF(x, y - 12), QPointF(x + 22, y), QPointF(x, y + 12),
+                                 QPointF(x + 6, y), ]))
+        p.drawRect(QRectF(x - 26, y - 4, 30, 8))
+        fr.keycap(x - 52, y, "D", 1.1)
 
     def _draw_caption(self, fr: r3.Frame):
         """His line, burned into the tube between his face and the board. The
