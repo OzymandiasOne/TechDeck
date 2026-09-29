@@ -43,6 +43,8 @@ MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_tu
              "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
+HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
+LESSON_DELAY_S = 1.0                  # the board lesson starts this long after you look down
 
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
@@ -196,6 +198,9 @@ class VoidTable(RoadScenes, QWidget):
         self.captions: deque[tuple[str, str, str, str]] = deque()   # text, emotion, key, glow
         self.caption_key = ""
         self.glow = ""                    # what on the table glows while this page shows
+        self.caption_auto = False         # this page lets go by itself
+        self.typed_at = -1.0              # when the page finished typing
+        self.lesson_at: float | None = None   # the board lesson, pending
         self.caption: str = ""
         self.caption_shown = 0
         self.type_t0 = 0.0
@@ -255,13 +260,17 @@ class VoidTable(RoadScenes, QWidget):
             return
         text, emotion = got
         for page in (p.strip() for p in text.split("//")):
-            glow = ""
+            glow, auto = "", False
             if page.startswith("[") and "]" in page:
-                tag, page = page[1:].split("]", 1)
-                glow = tag.strip() if tag.strip() in GLOW_TAGS else ""
+                tags, page = page[1:].split("]", 1)
+                for tag in (t.strip() for t in tags.split(",")):
+                    if tag in GLOW_TAGS:
+                        glow = tag
+                    elif tag == "auto":
+                        auto = True
                 page = page.strip()
             if page:
-                self.captions.append((page, emotion, key, glow))
+                self.captions.append((page, emotion, key, glow + ("|auto" if auto else "")))
 
     def nag(self, text: str):
         """A rule slip, in his voice: 'Draw first.' After whatever he is saying."""
@@ -280,18 +289,33 @@ class VoidTable(RoadScenes, QWidget):
             self.caption_shown = min(len(self.caption), int((self.t - self.type_t0) * CHARS_PER_S))
             return
         self.caption = ""
+        ended = self.caption_key if self.caption_key else ""
         self.glow = ""
         if self.captions:
             text, emotion, key, glow = self.captions.popleft()
+            glow, _, auto = glow.partition("|")
             self.caption, self.caption_key, self.glow = text, key, glow
+            self.caption_auto = auto == "auto"
             self.caption_shown = 0
             self.type_t0 = self.t
+            self.typed_at = -1.0
             self.mood = MOODS.get(emotion, MOODS["calm"])
             self.mood_t0 = self.t
             typed = len(text) / CHARS_PER_S
-            # Rules and greetings wait for Space or a click; a passing remark lingers.
+            # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
             hold = NAG_HOLD_S if key == "nag" else FLAVOR_HOLD_S
-            self.caption_until = float("inf") if key in MUST_READ else self.t + typed + hold
+            waits = key in MUST_READ and not self.caption_auto
+            self.caption_until = float("inf") if waits else self.t + typed + hold
+            if key != ended and ended:
+                self._blurb_ended(ended)
+        elif ended:
+            self.caption_key = ""
+            self._blurb_ended(ended)
+
+    def _blurb_ended(self, key: str):
+        """The last page of a blurb has gone. The board lesson hands you back your hand."""
+        if key == "rules_lanes" and self.view == "board":
+            self.set_view("hand")
 
     def advance_dialogue(self) -> bool:
         """Space or a click while he is talking: finish the line if it is still
@@ -308,7 +332,14 @@ class VoidTable(RoadScenes, QWidget):
         return True
 
     def _talking(self) -> bool:
-        return bool(self.caption) and self.caption_shown < len(self.caption)
+        talking = bool(self.caption) and self.caption_shown < len(self.caption)
+        if self.caption and not talking and self.typed_at < 0:
+            self.typed_at = self.t
+        return talking
+
+    def waiting_for_key(self) -> bool:
+        """A line that will not go on until you press something."""
+        return bool(self.caption) and self.caption_until == float("inf")
 
     def _mouth(self) -> int:
         """The console's own rhythm: the jaw alternates every three characters."""
@@ -630,6 +661,12 @@ class VoidTable(RoadScenes, QWidget):
         dt = TICK_MS / 1000.0
         self.t += dt
         self._acts_tick()
+        if self.lesson_at is not None and self.t >= self.lesson_at:
+            self.lesson_at = None
+            if self.view == "board":
+                self.say("rules_lanes")
+            else:
+                self.played_lines.discard("rules_lanes")     # they looked away; next time
         self._speech_tick()
         self._blink_tick()
         self._layout_hand()
@@ -779,7 +816,7 @@ class VoidTable(RoadScenes, QWidget):
             fr.text(x, y, w, h, shown, BRIGHT, 12, False, spacing=1)
         else:
             fr.text(x, y, w, h, shown.upper(), PEAK, 13)
-        if not self._talking() and self.caption_until == float("inf"):
+        if not self._talking() and self.caption_until == float("inf") and self.t - self.typed_at > HINT_AFTER_S:
             fr.keycap(x + w / 2, y + h + 14, "SPACE", 0.8, MID, 9)
 
     def _caption_rect(self):
@@ -889,6 +926,9 @@ class VoidTable(RoadScenes, QWidget):
         self.view_prev, self.view, self.view_t0 = self.view, view, self.t
         if view == "board":
             self.cursor = self._first_lane()
+            if self._tutorial() and "rules_lanes" not in self.played_lines:
+                self.played_lines.add("rules_lanes")
+                self.lesson_at = self.t + LESSON_DELAY_S     # give them a second to look
         elif view == "deck":
             self.cursor = 0 if self.game.deck else 1
         else:
@@ -909,11 +949,10 @@ class VoidTable(RoadScenes, QWidget):
         """Take a card from the hand: it rises, and the view goes to the board
         with a lane lit. S goes back to the hand with it still raised."""
         self.selected, self.sacrifices = uid, []
+        if self._tutorial():
+            return                                  # the first time, you find the board yourself (W)
         self.set_view("board")
         self.cursor = self._first_lane()
-        if self._tutorial() and "rules_lanes" not in self.played_lines:
-            self.played_lines.add("rules_lanes")
-            self.say("rules_lanes")                 # the first card you could play: the lanes
 
     def put_down(self):
         self.selected, self.sacrifices = None, []
@@ -1147,6 +1186,9 @@ class VoidTable(RoadScenes, QWidget):
             return
         if key == Qt.Key.Key_Escape:
             self.open_menu()
+            return
+        if self.waiting_for_key() or (self.caption_key in MUST_READ and self._talking()):
+            self.advance_dialogue()                 # everything else is frozen: any key moves him on
             return
         if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.advance_dialogue():
             return

@@ -21,6 +21,8 @@
 #             shows, that thing on the table glows. Tags: lanes_you,
 #             lanes_him, scale, bell, piles, remnants, costs (every card in
 #             hand with a price), cost_icon (the raised card's price).
+#    auto     a page tagged [auto] (or [bell,auto]) does not wait for a key:
+#             it holds a moment after typing and lets go by itself.
 #
 #  THE FILE HOT-RELOADS. Save it, play on. No restart needed.
 #
@@ -31,7 +33,7 @@
 #  KEYS - the table
 #    welcome            the table appears (first fight of a run)
 #    welcome_again      the table appears (a later fight)
-#    rules_lanes        the first time you pick up a card you can play (first fight of your first run)
+#    rules_lanes        the first time you look down at the board (first fight of your first run)
 #    rules_blood        the first time you reach for a card you cannot pay for (same)
 #    first_turn         your first turn begins
 #    first_sacrifice    the first time you offer a real creature (not a votary)
@@ -100,7 +102,7 @@ welcome_again | calm | Again.
 welcome_again | amused | Sit. You know where.
 welcome_again | curious | You came back to the table. They usually do.
 
-rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [bell]When you are done, ring the bell.
+rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [bell,auto]When you are done, ring the bell.
 rules_blood | calm | [costs]The greater things want blood. That is the price you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. // [remnants]Every one you lose leaves a remnant. Some things are bought with remnants alone.
 
 first_turn | calm | Begin.

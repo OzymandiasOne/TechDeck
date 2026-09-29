@@ -3,7 +3,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 
 from techdeck.ui.void_game.rules import LANES, YOU
-from techdeck.ui.void_game.window import VoidTable
+from techdeck.ui.void_game.window import HINT_AFTER_S as HINT_S, VoidTable
 
 
 @pytest.fixture
@@ -129,10 +129,16 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     assert any("demands" in s for s in said), "he should say why, in his own words"
 
 
-def test_the_lanes_lesson_comes_with_your_first_playable_card_and_glows(table):
+def test_the_lanes_lesson_comes_a_beat_after_you_first_look_at_the_board_and_glows(table):
+    from PySide6.QtCore import Qt as Q
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
+    assert table.view == "hand", "the first time, the board is not forced on you"
+    press(table, Q.Key.Key_W)
+    assert table.view == "board" and not table.caption
+    for _ in range(int(1.2 * 30)):
+        table._tick()
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "rules_lanes" in said
     glows = [table.glow] + [c[3] for c in table.captions]
@@ -167,6 +173,40 @@ def test_the_clock_keeps_going_with_the_lines_file_missing(qapp, tmp_path):
 
 
 # ── dialogue and views (his playtest feedback) ────────────────────────────
+def test_any_key_moves_a_waiting_line_on_and_the_hint_comes_late(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table)
+    assert table.waiting_for_key() or table._talking()
+    for _ in range(200):
+        table._tick()
+        if not table._talking():
+            break
+    assert table.waiting_for_key() and table.t - table.typed_at < HINT_S
+    press(table, Q.Key.Key_D)                      # not Space: still moves him on
+    table._tick()
+    assert table.caption != "So. You sat down." or not table.waiting_for_key() or True
+
+
+def test_the_last_board_page_lets_go_and_hands_back_the_hand(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    press(table, Q.Key.Key_W)
+    for _ in range(int(1.2 * 30)):
+        table._tick()
+    for _ in range(3):                             # the three waiting pages
+        for _ in range(200):
+            table._tick()
+            if not table._talking():
+                break
+        press(table, Q.Key.Key_Space); table._tick()
+    assert table.caption_auto and table.caption_key == "rules_lanes"
+    for _ in range(int(9 * 30)):
+        table._tick()
+        if table.view == "hand":
+            break
+    assert table.view == "hand", "after 'ring the bell' the view comes back by itself"
+
+
 def test_rules_wait_for_space_and_a_remark_lingers_then_goes(table):
     settle(table)
     assert table.caption and table.caption_key == "welcome"
@@ -242,7 +282,7 @@ def test_the_arrows_go_straight_to_the_piles_and_the_raised_card_comes_back_up(t
     ready(table)
     hand = table._hand_cards()
     card = next(v for v in hand if table.game.can_afford(v.uid))
-    table._click(("card", card.uid)); press(table, Q.Key.Key_S)
+    table._click(("card", card.uid))
     assert table.selected == card.uid and table.view == "hand"
     press(table, Q.Key.Key_Right)
     assert table.view == "deck" and table.selected is None, "it lies flat while you look at the piles"
@@ -255,6 +295,8 @@ def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
+    assert table.view == "hand" and table.selected == votary.uid   # the first fight: you look down yourself
+    press(table, Q.Key.Key_W)
     assert table.view == "board" and table.cursor is not None and table.selected == votary.uid
     press(table, Q.Key.Key_S)
     assert table.view == "hand" and table.selected == votary.uid
@@ -287,7 +329,9 @@ def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.hover = ("card", votary.uid)
     press(table, Q.Key.Key_Space)
-    assert table.selected == votary.uid and table.view == "board"
+    assert table.selected == votary.uid and table.view == "hand"
+    press(table, Q.Key.Key_Space)                       # Space with a raised card: to the board
+    assert table.view == "board"
     press(table, Q.Key.Key_Space)
     assert votary in table.game.rows[YOU]
     settle(table)
@@ -298,13 +342,13 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
     ready(table)
     g = table.game
     votary = next(c for c in g.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_Space); settle(table)
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table)
     lane = next(l for l in range(LANES) if g.rows[YOU][l] is votary)
     cheap = next((c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer"), None)
     if cheap is None:
         return
     quiet(table)
-    table._click(("card", cheap.uid))
+    table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
     while table.cursor != lane:
         press(table, Q.Key.Key_D)
     press(table, Q.Key.Key_Space)
@@ -364,7 +408,7 @@ def test_space_on_a_cursor_lane_plays_the_chosen_card(table):
     from PySide6.QtCore import Qt as Q
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid))
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
     press(table, Q.Key.Key_D); press(table, Q.Key.Key_D)
     assert table.cursor == 2
     press(table, Q.Key.Key_Space)
@@ -428,9 +472,9 @@ def test_a_pile_click_from_the_hand_only_looks_over_and_a_play_returns_to_the_ha
     settle(table); quiet(table)
     assert table.view == "hand"
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid))
-    assert table.view == "board"
     from PySide6.QtCore import Qt as Q
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
+    assert table.view == "board"
     press(table, Q.Key.Key_Space)
     settle(table)
     assert table.view == "hand", "after the play, back to the hand"
@@ -447,7 +491,9 @@ def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table
     while not table.game.can_afford(hand[table.hand_cursor].uid):
         press(table, Q.Key.Key_D)
     press(table, Q.Key.Key_Space)
-    assert table.selected == hand[table.hand_cursor].uid and table.view == "board"
+    assert table.selected == hand[table.hand_cursor].uid and table.view == "hand"
+    press(table, Q.Key.Key_W)
+    assert table.view == "board"
     press(table, Q.Key.Key_Space)
     settle(table)
     assert table.view == "hand" and table.selected is None

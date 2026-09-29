@@ -104,7 +104,7 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0):
 VIEWS = {
     "hand": ((0.0, 5.6, 9.6), (0.0, 0.95, -1.4), 50.0),
     "deck": ((0.0, 5.6, 9.6), (1.9, 0.75, -0.6), 50.0),
-    "board": ((0.0, 11.4, 3.1), (0.0, 0.0, 0.35), 50.0),
+    "board": ((0.0, 9.6, 6.2), (0.0, 0.0, 0.1), 50.0),      # over the board, at a slight angle
 }
 VIEW_S = 0.45                         # a camera move, in seconds
 
