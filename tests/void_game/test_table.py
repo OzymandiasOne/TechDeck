@@ -312,3 +312,16 @@ def test_z_rings_the_bell(table):
     press(table, Q.Key.Key_Z)
     settle(table)
     assert table.game.turn == 2
+
+
+def test_e_and_r_draw_from_the_piles(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_Z); settle(table); quiet(table)
+    assert table.game.phase == "draw"
+    votaries = table.game.votaries
+    press(table, Q.Key.Key_R); settle(table)
+    assert table.game.votaries == votaries - 1 and table.game.phase == "play"
+    press(table, Q.Key.Key_E)                       # already drawn: he says so, no crash
+    said = [table.caption] + [c[0] for c in table.captions]
+    assert any("already drawn" in x for x in said)

@@ -215,6 +215,12 @@ class Frame:
         return [add(center, (r * math.cos(math.tau * i / n), 0, r * math.sin(math.tau * i / n)))
                 for i in range(n + 1)]
 
+    def label3(self, at: Vec, s: str, color=DIM, size: int = 9):
+        """A small floating label at a point in the world (a key hint under a prop)."""
+        q = self.cam.project(at)
+        if q:
+            self.text(q[0] - 40, q[1] - 8, 80, 16, s, color, size, True, spacing=3)
+
     def text(self, x, y, w, h, s, color=PEAK, size=13, bold=True, align=Qt.AlignmentFlag.AlignCenter, spacing=2):
         f = QFont(MONO, size); f.setBold(bold)
         if spacing:

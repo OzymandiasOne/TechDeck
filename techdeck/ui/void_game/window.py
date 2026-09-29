@@ -46,6 +46,7 @@ KEYS_TEXT = [
     ("D  (from the hand)", "lean toward the piles"),
     ("TAB", "put the raised card down (or click it)"),
     ("Z", "ring the bell"),
+    ("E / R", "draw from your deck / from the votaries"),
     ("ESC", "this menu"),
 ]
 MENU_MAIN = ["RESUME", "KEYS", "DISPLAY", "SOUND", "QUIT"]
@@ -592,6 +593,13 @@ class VoidTable(QWidget):
             fr.text(x, y, w, h, self.caption[:self.caption_shown].upper(), PEAK, 13)
             if not self._talking() and self.caption_until == float("inf"):
                 fr.text(x, y + h + 2, w, 14, "SPACE", DIM, 8, bold=False, spacing=3)
+        # small key hints where the eye is: E / R under the piles in the deck
+        # view, Z under the bell from the hand
+        if self.view == "deck" and not self.over:
+            fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E")
+            fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R")
+        elif self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
+            fr.label3(r3.add(r3.BELL, (0, 0, 0.95)), "Z")
         self._draw_inspect(fr)
         if self.menu:
             self._draw_menu(fr)
@@ -905,6 +913,9 @@ class VoidTable(QWidget):
             elif key == Qt.Key.Key_Z:
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.ring_bell())
+            elif key in (Qt.Key.Key_E, Qt.Key.Key_R):
+                if not self.busy() and not self.over:
+                    self.enqueue(self.game.draw("deck" if key == Qt.Key.Key_E else "votary"))
             elif key == Qt.Key.Key_W:
                 self.set_view("board")
             elif key == Qt.Key.Key_S:
