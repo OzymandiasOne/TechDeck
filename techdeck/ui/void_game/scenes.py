@@ -288,7 +288,14 @@ class RoadScenes:
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
             fr.text(cx + 56, cy + 22, w / 2 - 90, 56, rule, MID, 9, False,
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, 0)
-        fr.text(x, y + h - 26, w, 18, f"{(self.book or 0) + 1} / {self.book_pages()}     A  D", DIM, 9, False, spacing=2)
+        # each page numbered in its own bottom corner; the turn keys in the top corners
+        left_no = (self.book or 0) * 2 + 1
+        fr.text(x + 16, y + h - 26, 60, 18, str(left_no), DIM, 9, False, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
+        fr.text(x + w - 76, y + h - 26, 60, 18, str(left_no + 1), DIM, 9, False, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, 1)
+        if (self.book or 0) > 0:
+            fr.page_icon(x + 22, y + 20, "left", 0.9, MID); fr.keycap(x + 44, y + 20, "A", 0.9, MID)
+        if (self.book or 0) < self.book_pages() - 1:
+            fr.keycap(x + w - 44, y + 20, "D", 0.9, MID); fr.page_icon(x + w - 22, y + 20, "right", 0.9, MID)
 
     # ── drawing the road ─────────────────────────────────────────────────
     def _draw_progress(self, fr: r3.Frame):

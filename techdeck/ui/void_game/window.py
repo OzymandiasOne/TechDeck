@@ -689,6 +689,14 @@ class VoidTable(RoadScenes, QWidget):
             poly = fr.draw_card(c, u, v, face, art.card_back(), vc.opacity, edge)
             if poly and vc.where != "gone":
                 self.hits.append((("card", vc.uid), poly))
+            if self.selected == vc.uid and vc.card.sigils and self.book is None:
+                # the book's key, hovering by the raised card's mark
+                at = add(add(c, mul(u, 0.42)), mul(v, -0.58))
+                q = cam.project(add(at, (0, 0.12, 0)))
+                if q:
+                    kk = max(0.6, min(1.0, 7.0 / q[2]))
+                    fr.page_icon(q[0] - 12 * kk, q[1], "right", kk)
+                    fr.keycap(q[0] + 12 * kk, q[1], "Q", kk)
         self._draw_caption(fr)
         # small key hints where the eye is: E / R under the piles in the deck
         # view, Z under the bell from the hand

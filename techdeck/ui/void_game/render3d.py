@@ -215,20 +215,47 @@ class Frame:
         return [add(center, (r * math.cos(math.tau * i / n), 0, r * math.sin(math.tau * i / n)))
                 for i in range(n + 1)]
 
-    def label3(self, at: Vec, s: str, color=BRIGHT, size: int = 11):
-        """A key hint floating at a point in the world: the letter in a small keycap."""
-        q = self.cam.project(at)
-        if not q:
-            return
-        k = max(0.6, min(1.0, 7.0 / q[2]))
-        w, h = 22 * k, 22 * k
-        x, y = q[0] - w / 2, q[1] - h / 2
+    def keycap(self, cx: float, cy: float, s: str, k: float = 1.0, color=BRIGHT, size: int = 11):
+        """A key, drawn flat at a screen point: one letter is square, a word is a
+        bar (the space bar is wide). `k` scales with distance."""
+        w = max(22, 12 + 9 * len(s)) * k
+        h = 22 * k
+        x, y = cx - w / 2, cy - h / 2
         p = self.p
         p.setPen(QPen(QColor(color), 1.2)); p.setBrush(QColor(1, 8, 4, 210))
         p.drawRoundedRect(QRectF(x, y, w, h), 4 * k, 4 * k)
         p.setPen(QPen(QColor(color), 1.0)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawLine(QPointF(x + 4 * k, y + h - 3 * k), QPointF(x + w - 4 * k, y + h - 3 * k))   # the cap's lip
         self.text(x, y - 1, w, h - 2, s, color, int(size * k), True, spacing=0)
+        return w, h
+
+    def page_icon(self, cx: float, cy: float, side: str = "right", k: float = 1.0, color=BRIGHT):
+        """A page with its corner turning: `side` is the corner that curls."""
+        w, h = 14 * k, 18 * k
+        x, y = cx - w / 2, cy - h / 2
+        p = self.p
+        p.setPen(QPen(QColor(color), 1.2)); p.setBrush(QColor(1, 8, 4, 210))
+        f = 6 * k
+        if side == "right":
+            pts = [QPointF(x, y), QPointF(x + w - f, y), QPointF(x + w, y + f), QPointF(x + w, y + h), QPointF(x, y + h)]
+            fold = [QPointF(x + w - f, y), QPointF(x + w - f, y + f), QPointF(x + w, y + f)]
+        else:
+            pts = [QPointF(x + f, y), QPointF(x + w, y), QPointF(x + w, y + h), QPointF(x, y + h), QPointF(x, y + f)]
+            fold = [QPointF(x + f, y), QPointF(x + f, y + f), QPointF(x, y + f)]
+        p.drawPolygon(QPolygonF(pts))
+        p.setBrush(QColor(color)); p.drawPolygon(QPolygonF(fold))
+        p.setPen(QPen(QColor(color), 0.9))
+        for i in (1, 2):
+            yy = y + h * (0.45 + 0.18 * i)
+            p.drawLine(QPointF(x + 3 * k, yy), QPointF(x + w - 3 * k, yy))
+
+    def label3(self, at: Vec, s: str, color=BRIGHT, size: int = 11):
+        """A key hint floating at a point in the world."""
+        q = self.cam.project(at)
+        if not q:
+            return
+        k = max(0.6, min(1.0, 7.0 / q[2]))
+        self.keycap(q[0], q[1], s, k, color, size)
 
     def text(self, x, y, w, h, s, color=PEAK, size=13, bold=True, align=Qt.AlignmentFlag.AlignCenter, spacing=2):
         f = QFont(MONO, size); f.setBold(bold)
