@@ -47,7 +47,7 @@ mcp = MCPServer(
 
 _last = {"ox": 0, "oy": 0, "scale": 1.0, "title": ""}   # where the last screenshot came from
 _TMP = os.path.join(tempfile.gettempdir(), "desktop_mcp")   # burst frames live here, briefly
-_driving = {"granted": False}       # the person said Accept to the pop-up
+_driving = {"granted": False, "monitor": None}   # Accept pressed; the monitor it was pressed on (x, y, w, h)
 
 
 # ── windows ──────────────────────────────────────────────────────────────
@@ -95,6 +95,37 @@ def _foreground_title() -> str:
     return _title(user32.GetForegroundWindow())
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+
+def _monitor_at(x: int, y: int) -> tuple[int, int, int, int]:
+    """The screen rect of the monitor under a point."""
+    h = user32.MonitorFromPoint(wt.POINT(x, y), 2)          # MONITOR_DEFAULTTONEAREST
+    mi = _MONITORINFO(); mi.cbSize = ctypes.sizeof(_MONITORINFO)
+    user32.GetMonitorInfoW(h, ctypes.byref(mi))
+    r = mi.rcMonitor
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
+def _drive_monitor():
+    return _driving["monitor"]
+
+
+def _move_to_drive_monitor(hwnd):
+    """Put a window on the test monitor (same size, centred) if it is elsewhere."""
+    mon = _drive_monitor()
+    if not mon:
+        return
+    mx, my, mw, mh = mon
+    x, y, w, h = _rect(hwnd)
+    if mx <= x + w // 2 < mx + mw and my <= y + h // 2 < my + mh:
+        return
+    user32.ShowWindow(hwnd, 9)
+    w, h = min(w, mw), min(h, mh)
+    user32.SetWindowPos(hwnd, None, mx + (mw - w) // 2, my + (mh - h) // 2, w, h, 0x0004 | 0x0040)   # NOZORDER|SHOWWINDOW
+
+
 def _guard(force: bool):
     """Hands only move once the person pressed Accept on the pop-up, only touch
     the window that was last looked at, and only while it is in front. The
@@ -123,13 +154,16 @@ def _ask_to_drive(reason: str, timeout_s: int) -> bool:
     tk.Label(root, text="Claude would like to drive.", font=("Segoe UI", 14, "bold"),
              fg="#f2f2f2", bg="#1b1b1f", padx=28, pady=(18)).pack()
     tk.Label(root, text=("When you're ready, select Accept or Decline.\n"
+                         "Drag this box to the monitor Claude should use, then Accept.\n"
                          "Accept = hands off your mouse and keyboard until Claude says it is done."
                          + (f"\n\n{reason}" if reason else "")),
              font=("Segoe UI", 10), fg="#c8c8cc", bg="#1b1b1f", padx=28, pady=6, justify="left").pack()
     row = tk.Frame(root, bg="#1b1b1f"); row.pack(pady=(10, 18))
 
     def accept():
-        answer["ok"] = True; root.destroy()
+        answer["ok"] = True
+        answer["at"] = (root.winfo_x() + root.winfo_width() // 2, root.winfo_y() + root.winfo_height() // 2)
+        root.destroy()
 
     def decline():
         root.destroy()
@@ -146,6 +180,8 @@ def _ask_to_drive(reason: str, timeout_s: int) -> bool:
     root.bind("<Return>", lambda e: accept()); root.bind("<Escape>", lambda e: decline())
     root.focus_force()
     root.mainloop()
+    if answer["ok"]:
+        _driving["monitor"] = _monitor_at(*answer["at"])
     return answer["ok"]
 
 
@@ -157,7 +193,8 @@ def request_drive(reason: str = "", timeout_s: int = 120) -> str:
     when done so they get their desk back."""
     ok = _ask_to_drive(reason, timeout_s)
     _driving["granted"] = ok
-    return "accepted: you may drive now (they were asked to keep hands off)" if ok else \
+    return (f"accepted: you may drive now (they were asked to keep hands off). Test monitor: "
+            f"{_driving['monitor']} - focus() moves the window there; screenshot() with no title shows it") if ok else \
         "declined or timed out: hands stay locked; ask in chat when they are ready"
 
 
@@ -181,9 +218,10 @@ def focus(title: str) -> str:
     """Bring the window whose title contains `title` to the front."""
     hwnd, t, _ = _find(title)
     user32.ShowWindow(hwnd, 9)           # SW_RESTORE
+    _move_to_drive_monitor(hwnd)
     user32.SetForegroundWindow(hwnd)
     time.sleep(0.25)
-    return f"focused {t!r}"
+    return f"focused {t!r} at {_rect(hwnd)}"
 
 
 # ── eyes ─────────────────────────────────────────────────────────────────
@@ -202,6 +240,9 @@ def screenshot(title: str = "", scale: float = 0.5, region: list[int] | None = N
         except ValueError as why:
             return [str(why)]
         what = f"window {t!r}"
+    elif _drive_monitor():
+        x, y, w, h = _drive_monitor()
+        what = "the test monitor"
     else:
         x = user32.GetSystemMetrics(76); y = user32.GetSystemMetrics(77)
         w = user32.GetSystemMetrics(78); h = user32.GetSystemMetrics(79)
@@ -390,6 +431,9 @@ def record(title: str = "", seconds: float = 4.0, fps: float = 3.0, scale: float
             _, t, (x, y, w, h) = _find(title)
         except ValueError as why:
             return [str(why)]
+    elif _drive_monitor():
+        t = ""
+        x, y, w, h = _drive_monitor()
     else:
         t = ""
         x, y = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
