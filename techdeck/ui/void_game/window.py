@@ -404,6 +404,7 @@ class VoidTable(RoadScenes, QWidget):
         vc.where, vc.lane = "you", lane
         vc.go(self._slot_pose(r3.ROW_YOU, lane), self.t, PLAY_S, arc=1.4)
         self.selected, self.sacrifices = None, []
+        self.set_view("hand")                      # the card is down: back to the hand
         if sacrificed >= 2:
             self.say("sacrifice_many")
         elif sacrificed == 1:
@@ -1000,7 +1001,11 @@ class VoidTable(RoadScenes, QWidget):
         if kind == "bell":
             self.enqueue(g.ring_bell())
         elif kind in ("deck", "votary"):
-            self.enqueue(g.draw(kind))
+            if self.view != "deck":
+                self.set_view("deck")              # look over first; the next click draws
+                self.cursor = 0 if kind == "deck" else 1
+            else:
+                self.enqueue(g.draw(kind))
         elif kind == "slot":
             if self.view == "board":
                 self.cursor = hit[1]

@@ -30,6 +30,7 @@ def greedy(w: VoidTable):
     """One turn the way a simple player would: draw, play what pays, ring."""
     g = w.game
     if g.phase == "draw":
+        w.set_view("deck")                        # look over first, then draw
         w._click(("votary",) if not any(c.defn.cost == 0 for c in g.hand) and g.votaries else ("deck",))
         settle(w)
     for card in sorted(list(g.hand), key=lambda c: (c.defn.cost > 0, -c.power)):
@@ -88,7 +89,7 @@ def ready(w: VoidTable):
     """Settled, his opening lines waved through, the first draw taken."""
     settle(w); quiet(w)
     if w.game.phase == "draw":
-        w._click(("votary",)); settle(w); quiet(w)
+        w.set_view("deck"); w._click(("votary",)); settle(w); quiet(w)
 
 
 def quiet(w: VoidTable):
@@ -375,3 +376,21 @@ def test_the_tutorial_points_at_the_piles_and_a_draw_returns_you_to_the_hand(tab
     press(table, Q.Key.Key_Space)                                     # draws from the lit pile
     settle(table)
     assert table.view == "hand" and not table.show_draw_arrow
+
+
+def test_a_pile_click_from_the_hand_only_looks_over_and_a_play_returns_to_the_hand(table):
+    settle(table); quiet(table)
+    votaries = table.game.votaries
+    table._click(("votary",))
+    assert table.view == "deck" and table.game.votaries == votaries, "the first click only pans"
+    table._click(("votary",))
+    assert table.game.votaries == votaries - 1
+    settle(table); quiet(table)
+    assert table.view == "hand"
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid))
+    assert table.view == "board"
+    from PySide6.QtCore import Qt as Q
+    press(table, Q.Key.Key_Space)
+    settle(table)
+    assert table.view == "hand", "after the play, back to the hand"
