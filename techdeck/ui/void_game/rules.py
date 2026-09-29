@@ -75,10 +75,14 @@ def ev(kind: str, **data) -> Event:
 
 class Game:
     def __init__(self, seed: int | None = None, deck=None, plan=None, pool=None,
-                 undying_bonus: dict[str, int] | None = None, votaries: int = VOTARY_PILE):
+                 undying_bonus: dict[str, int] | None = None, votaries: int = VOTARY_PILE,
+                 boss: bool = False):
         self.rng = random.Random(seed)
         self._uid = 0
-        self.deck: list[str] = list(deck if deck is not None else STARTER_DECK)
+        # deck entries: a card id, or {"id", "power", "health", "sigils"} from the road
+        self.deck: list = list(deck if deck is not None else STARTER_DECK)
+        self.boss = boss
+        self.boss_phase = 1
         self.rng.shuffle(self.deck)
         self.votaries = votaries
         self.hand: list[Card] = []
@@ -102,6 +106,17 @@ class Game:
         self._uid += 1
         bonus = self.undying_bonus.get(card_id, 0) if owner == YOU else 0
         return Card(self._uid, d, owner, d.power + bonus, d.health + bonus, sigils=d.sigils)
+
+    def _make_entry(self, entry) -> Card:
+        """A card from your deck, with what the road gave it."""
+        if isinstance(entry, str):
+            return self._make(entry, YOU)
+        card = self._make(entry["id"], YOU)
+        card.power += entry.get("power", 0)
+        card.health += entry.get("health", 0)
+        extra = tuple(s for s in entry.get("sigils", ()) if s not in card.sigils)
+        card.sigils = card.sigils + extra
+        return card
 
     # ── the opening ──────────────────────────────────────────────────────
     def start(self) -> list[Event]:
@@ -139,7 +154,7 @@ class Game:
         if source == "deck":
             if not self.deck:
                 return []
-            card = self._make(self.deck.pop(), YOU)
+            card = self._make_entry(self.deck.pop())
         else:
             if self.votaries <= 0:
                 return []
@@ -319,6 +334,9 @@ class Game:
                                      direct=True, power=power, flew=bool(flies and defender)))
                     events.append(ev("scale", value=self.scale, delta=power if side == YOU else -power))
                     if abs(self.scale) >= SCALE_TO_WIN:
+                        if self.scale > 0 and self.boss and self.boss_phase == 1:
+                            events += self._boss_second_phase()
+                            return events
                         self.winner = YOU if self.scale > 0 else HIM
                         self.phase = "over"
                         events.append(ev("game_over", winner=self.winner))
@@ -337,6 +355,28 @@ class Game:
                                      striker_lane=lane, hp_after=attacker.health))
                     if attacker.health <= 0:
                         events += self._die(attacker, lane, cause="thorns")
+        return events
+
+    def _boss_second_phase(self) -> list[Event]:
+        """You tipped the scale on him once. He resets it, clears his side, and
+        unmakes what you have on the board - worshippers again - then plays
+        what he kept back."""
+        self.boss_phase = 2
+        self.scale = 0
+        events = [ev("boss_phase", phase=2)]
+        for lane in range(LANES):
+            self.rows[HIM][lane] = None
+            self.incoming[lane] = None
+            mine = self.rows[YOU][lane]
+            if mine is not None:
+                husk = self._make("votary", YOU)
+                self.rows[YOU][lane] = husk
+                events.append(ev("unmade", was=mine, card=husk, lane=lane))
+        events.append(ev("scale", value=0, delta=0))
+        self.plan = [[("leviathan", 1)], [("seraph", None)], [("crowned", None), ("sleeper", None)],
+                     [("cerberus", None)], [("wraith", None), ("hydra", None)], [("leviathan", None)]]
+        self.pool = ["sleeper", "cerberus", "seraph", "wraith", "watcher", "crowned"]
+        events += self._his_commit()
         return events
 
     def _die(self, card: Card, lane: int, cause: str) -> list[Event]:
