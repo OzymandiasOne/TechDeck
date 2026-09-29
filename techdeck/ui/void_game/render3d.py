@@ -215,7 +215,7 @@ class Frame:
         return [add(center, (r * math.cos(math.tau * i / n), 0, r * math.sin(math.tau * i / n)))
                 for i in range(n + 1)]
 
-    def label3(self, at: Vec, s: str, color=DIM, size: int = 9):
+    def label3(self, at: Vec, s: str, color=BRIGHT, size: int = 11):
         """A small floating label at a point in the world (a key hint under a prop)."""
         q = self.cam.project(at)
         if q:
