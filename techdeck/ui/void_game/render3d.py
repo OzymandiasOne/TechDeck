@@ -87,7 +87,7 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
     return (LANES[lane], lift, row)
 
 
-HAND_LOW_Y, HAND_HIGH_Y = 1.55, 3.05    # the hand half off the bottom (names and prices); held up to eye level
+HAND_LOW_Y, HAND_HIGH_Y = 1.85, 3.05    # the hand low (names and prices showing); held up to eye level
 HAND_HIGH_Z = 0.55                      # ...and nearer, so it fills the middle of the screen
 
 
@@ -103,7 +103,7 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
     y = HAND_LOW_Y + (HAND_HIGH_Y - HAND_LOW_Y) * high
-    c = (k * 0.82, y - abs(k) * 0.07 + lift - 1.15 * tuck + 0.12 * front,
+    c = (k * 0.66, y - abs(k) * 0.07 + lift - 1.15 * tuck + 0.12 * front,   # held a little closer together
          HAND_Z + HAND_HIGH_Z * high + lift * 0.25 + 0.35 * tuck + 0.45 * front)
     return c, u, v
 
