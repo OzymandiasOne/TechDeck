@@ -87,18 +87,24 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
     return (LANES[lane], lift, row)
 
 
-def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0):
+HAND_LOW_Y, HAND_HIGH_Y = 1.55, 3.05    # the hand half off the bottom (names and prices); held up to eye level
+HAND_HIGH_Z = 0.55                      # ...and nearer, so it fills the middle of the screen
+
+
+def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0, high: float = 0.0):
     """Where the k-th card of a fanned hand sits (k is centred: -1.5 .. 1.5).
-    `lift` raises a chosen card; `front` (0..1) brings the card the cursor
-    is on to the front of the fan - toward the camera, in front of its
-    neighbours, not up; `tuck` (0..1) drops the hand out of the way."""
+    `high` (0..1) is the hand held up in the middle of the screen; at 0 it
+    rests half off the bottom. `lift` raises a chosen card (up, and a touch
+    nearer, so it stays in front); `front` (0..1) brings the card the cursor
+    is on straight toward the camera through its neighbours, a touch up;
+    `tuck` (0..1) drops the hand out of the way."""
     ang = -k * 0.13
     hs = HAND_SCALE
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
-    # a raised card goes up AND a little toward the camera, so it stays in front
-    c = (k * 0.82, 2.75 - abs(k) * 0.07 + lift - 1.15 * tuck + 0.06 * front,
-         HAND_Z + lift * 0.25 + 0.35 * tuck + 0.42 * front)
+    y = HAND_LOW_Y + (HAND_HIGH_Y - HAND_LOW_Y) * high
+    c = (k * 0.82, y - abs(k) * 0.07 + lift - 1.15 * tuck + 0.12 * front,
+         HAND_Z + HAND_HIGH_Z * high + lift * 0.25 + 0.35 * tuck + 0.45 * front)
     return c, u, v
 
 
@@ -107,9 +113,13 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
 # every lane is clear. Moves between them glide (camera_between).
 VIEWS = {
     "hand": ((0.0, 5.6, 9.6), (0.0, 0.95, -1.4), 50.0),
-    "deck": ((0.0, 5.6, 9.6), (1.9, 0.75, -0.6), 50.0),
-    "board": ((0.0, 9.6, 6.2), (0.0, 0.0, 0.1), 50.0),      # over the board, at a slight angle
+    "hand_high": ((0.0, 5.6, 9.6), (0.0, 0.1, -1.4), 50.0),   # the same spot, looking down a touch
+    "deck": ((0.0, 5.6, 9.6), (2.6, 0.7, -0.2), 50.0),      # planted; the piles just right of centre
+    "board": ((0.0, 5.4, 5.3), (0.0, 0.0, 1.75), 50.0),     # your row and his front row fill it; the back row's top edge
+    "board_far": ((0.0, 7.6, 2.4), (0.0, 0.0, -1.35), 50.0), # lifted: the back row; your row cut in half at the bottom
 }
+# the window's views map onto these cameras (the hand has two heights, one camera)
+CAM_OF = {"hand_low": "hand", "hand_high": "hand_high", "deck": "deck", "board": "board", "board_far": "board_far"}
 VIEW_S = 0.45                         # a camera move, in seconds
 
 
@@ -121,9 +131,10 @@ def camera_between(view_from: str, view_to: str, k: float, t: float, shake: floa
             0.10 * sw * math.sin(t * 0.4) + shake * math.cos(t * 53) * 0.06, 0.0)
     look_sway = (0.10 * sw * math.sin(t * 0.2), 0.0, 0.0)
     e = ease(k)
+    view_from, view_to = CAM_OF.get(view_from, view_from), CAM_OF.get(view_to, view_to)
     (pa, la, fa), (pb, lb, fb) = VIEWS[view_from], VIEWS[view_to]
-    wa = 1.0 if view_from == "hand" else 0.0
-    wb = 1.0 if view_to == "hand" else 0.0
+    wa = 1.0 if view_from in ("hand", "hand_high") else 0.0
+    wb = 1.0 if view_to in ("hand", "hand_high") else 0.0
     ws = wa + (wb - wa) * e
     pos = add(lerp(pa, pb, e), mul(sway, ws))
     look = add(lerp(la, lb, e), mul(look_sway, ws))

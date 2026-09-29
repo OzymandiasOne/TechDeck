@@ -125,18 +125,21 @@ def test_the_altar_takes_one_and_marks_another(table):
     assert table.scene == "road"
 
 
-def test_s_pulls_the_hand_down_then_opens_the_book(table):
+def test_s_raises_the_hand_then_opens_the_book(table):
     ready(table)
+    assert table.view == "hand_low"                 # after a draw the hand rests low
     press(table, Qt.Key.Key_S)
-    assert table.peek and table.book is None
-    press(table, Qt.Key.Key_S)
+    assert table.view == "hand_high" and table.book is None
+    press(table, Qt.Key.Key_W)
+    assert table.view == "hand_low" and table.book is None
+    press(table, Qt.Key.Key_S); press(table, Qt.Key.Key_S)
     assert table.book == 0
     press(table, Qt.Key.Key_D)
     assert table.book == 1
     press(table, Qt.Key.Key_A)
     assert table.book == 0
     press(table, Qt.Key.Key_W)
-    assert table.book is None and not table.peek
+    assert table.book is None
     table._tick()
 
 

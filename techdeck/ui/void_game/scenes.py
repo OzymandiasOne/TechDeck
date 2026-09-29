@@ -87,7 +87,7 @@ class RoadScenes:
         self.scene, self.scene_t0 = "fight", self.t
         self.vcards.clear(); self.acts.clear(); self.act_end = -1.0
         self.selected, self.sacrifices, self.cursor = None, [], None
-        self.view = self.view_prev = "hand"; self.peek = False; self.book = None
+        self.view = self.view_prev = "hand_low"; self.peek = False; self.book = None
         self.over = False; self.after_fight = ""
         self.scale_shown = self.scale_target = 0.0; self.remnants_shown = 0
         self.seen_this_fight = set(); self.said_this_phase = set()
@@ -259,8 +259,9 @@ class RoadScenes:
             self.book = min(self.book_pages() - 1, self.book + 1)
         elif key in (Qt.Key.Key_A, Qt.Key.Key_Left):
             self.book = max(0, self.book - 1)
-        elif key in (Qt.Key.Key_W, Qt.Key.Key_Escape, Qt.Key.Key_S, Qt.Key.Key_Q, Qt.Key.Key_Up):
+        elif key in (Qt.Key.Key_W, Qt.Key.Key_Escape, Qt.Key.Key_Q, Qt.Key.Key_Up):
             self.book = None; self.peek = False
+            self.set_view("hand_low")                       # up from the book: the hand at rest
         return True
 
     def _draw_book(self, fr: r3.Frame):

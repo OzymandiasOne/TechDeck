@@ -134,7 +134,7 @@ def test_the_lanes_lesson_comes_a_beat_after_you_first_look_at_the_board_and_glo
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
-    assert table.view == "hand", "the first time, the board is not forced on you"
+    assert table.view == "hand_low", "the board is never forced on you"
     press(table, Q.Key.Key_W)
     assert table.view == "board" and not table.caption
     for _ in range(int(1.2 * 30)):
@@ -202,9 +202,9 @@ def test_the_last_board_page_lets_go_and_hands_back_the_hand(table):
     assert table.caption_auto and table.caption_key == "rules_lanes"
     for _ in range(int(9 * 30)):
         table._tick()
-        if table.view == "hand":
+        if table.view.startswith("hand"):
             break
-    assert table.view == "hand", "after 'ring the bell' the view comes back by itself"
+    assert table.view == "hand_high", "after 'ring the bell' the view comes back by itself"
 
 
 def test_rules_wait_for_space_and_a_remark_lingers_then_goes(table):
@@ -254,41 +254,54 @@ def test_w_looks_down_at_the_board_and_the_hand_tucks_away(table):
     hand_y = table._hand_cards()[0].dst[0][1]
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.cursor == 0
+    press(table, Q.Key.Key_W)
+    assert table.view == "board_far"
+    press(table, Q.Key.Key_S)
+    assert table.view == "board"
     for _ in range(30):
         table._tick()
     assert table._hand_cards()[0].dst[0][1] < hand_y - 0.5, "the hand did not tuck"
-    press(table, Q.Key.Key_D); assert table.cursor == 1
-    press(table, Q.Key.Key_A); press(table, Q.Key.Key_A); assert table.cursor == LANES - 1
     press(table, Q.Key.Key_S)
-    assert table.view == "hand" and table.cursor is None
+    assert table.view == "hand_low" and table.cursor is None
 
 
 def test_d_walks_the_hand_then_the_piles_and_a_comes_back(table):
     from PySide6.QtCore import Qt as Q
-    ready(table)
+    settle(table); quiet(table)                                 # a draw is owed: the piles are open
+    assert table.view == "deck", "a turn with a draw opens at the piles"
+    press(table, Q.Key.Key_A)
+    assert table.view == "hand_high", "left from the piles: the hand, held up"
     table.hand_cursor = None                                    # start from nowhere
     n = len(table._hand_cards())
     for i in range(n):
         press(table, Q.Key.Key_D)
-        assert table.view == "hand" and table.hand_cursor == i
+        assert table.view == "hand_high" and table.hand_cursor == i
     press(table, Q.Key.Key_D)                                   # past the last card: the piles
     assert table.view == "deck" and table.cursor == 0
     press(table, Q.Key.Key_D); assert table.cursor == 1
     press(table, Q.Key.Key_A)
-    assert table.view == "hand" and table.hand_cursor == n - 1  # back to the rightmost card
+    assert table.view == "hand_high" and table.hand_cursor == n - 1  # back to the rightmost card
+    press(table, Q.Key.Key_W)
+    assert table.view == "deck", "low is not open while a draw is owed; up is the piles"
+    press(table, Q.Key.Key_R); settle(table)
+    assert table.view == "hand_low", "the draw made, the hand rests low"
+    press(table, Q.Key.Key_D)
+    assert table.view == "hand_low", "and the piles are shut: D past the last card stays put"
 
 
 def test_the_arrows_go_straight_to_the_piles_and_the_raised_card_comes_back_up(table):
     from PySide6.QtCore import Qt as Q
-    ready(table)
-    hand = table._hand_cards()
-    card = next(v for v in hand if table.game.can_afford(v.uid))
-    table._click(("card", card.uid))
-    assert table.selected == card.uid and table.view == "hand"
+    settle(table); quiet(table)                                 # a draw is owed
+    press(table, Q.Key.Key_A)
+    assert table.view == "hand_high"
     press(table, Q.Key.Key_Right)
-    assert table.view == "deck" and table.selected is None, "it lies flat while you look at the piles"
+    assert table.view == "deck", "right: straight to the piles"
     press(table, Q.Key.Key_Left)
-    assert table.view == "hand" and table.selected == card.uid, "and rises again when you come back"
+    assert table.view == "hand_high", "left: straight back to the held hand"
+    press(table, Q.Key.Key_E); settle(table)
+    assert table.view == "hand_low", "the draw made, the hand rests low"
+    press(table, Q.Key.Key_Right)
+    assert table.view == "hand_low", "and the piles are shut until the next turn"
 
 
 def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
@@ -296,15 +309,15 @@ def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table._click(("card", votary.uid))
-    assert table.view == "hand" and table.selected == votary.uid   # the first fight: you look down yourself
+    assert table.view == "hand_low" and table.selected == votary.uid   # you look down yourself
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.cursor is not None and table.selected == votary.uid
     press(table, Q.Key.Key_S)
-    assert table.view == "hand" and table.selected == votary.uid
+    assert table.view == "hand_low" and table.selected == votary.uid
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.selected == votary.uid
     press(table, Q.Key.Key_S)
-    assert table.view == "hand" and table.selected == votary.uid
+    assert table.view == "hand_low" and table.selected == votary.uid
     press(table, Q.Key.Key_S)                                   # S again: put down
     assert table.selected is None
     table._click(("card", votary.uid)); press(table, Q.Key.Key_Tab)
@@ -330,7 +343,7 @@ def test_space_on_the_hovered_card_picks_it_up_and_space_again_plays(table):
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.hover = ("card", votary.uid)
     press(table, Q.Key.Key_Space)
-    assert table.selected == votary.uid and table.view == "hand" and table.cursor is not None
+    assert table.selected == votary.uid and table.view == "hand_low" and table.cursor is not None
     lane = table.cursor
     press(table, Q.Key.Key_D)
     assert table.cursor == (lane + 1) % 4, "with a card raised, A / D choose its lane"
@@ -426,7 +439,7 @@ def test_the_camera_glides_between_views(table):
     table._tick()
     mid = r3.camera_between("hand", "board", 0.5, table.t).pos
     start, end = r3.VIEWS["hand"][0], r3.VIEWS["board"][0]
-    assert start[1] < mid[1] < end[1]
+    assert min(start[2], end[2]) < mid[2] < max(start[2], end[2]), "half-way there, in between"
 
 
 def test_z_rings_the_bell(table):
@@ -454,6 +467,8 @@ def test_the_tutorial_points_at_the_piles_and_a_draw_returns_you_to_the_hand(tab
     from PySide6.QtCore import Qt as Q
     settle(table); quiet(table)
     assert table.game.phase == "draw" and not table.show_draw_arrow
+    assert table.view == "deck", "the turn opens at the piles"
+    press(table, Q.Key.Key_A)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.mousePressEvent(_click_at(table, ("card", votary.uid)))    # too early: "Draw first."
     assert table.show_draw_arrow
@@ -461,25 +476,27 @@ def test_the_tutorial_points_at_the_piles_and_a_draw_returns_you_to_the_hand(tab
     assert table.view == "deck"
     press(table, Q.Key.Key_Space)                                     # draws from the lit pile
     settle(table)
-    assert table.view == "hand" and not table.show_draw_arrow
+    assert table.view == "hand_low" and not table.show_draw_arrow
 
 
 def test_a_pile_click_from_the_hand_only_looks_over_and_a_play_returns_to_the_hand(table):
+    from PySide6.QtCore import Qt as Q
     settle(table); quiet(table)
     votaries = table.game.votaries
+    press(table, Q.Key.Key_A)                              # from the piles to the hand
     table._click(("votary",))
     assert table.view == "deck" and table.game.votaries == votaries, "the first click only pans"
     table._click(("votary",))
     assert table.game.votaries == votaries - 1
     settle(table); quiet(table)
-    assert table.view == "hand"
+    assert table.view == "hand_low"
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     from PySide6.QtCore import Qt as Q
     table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
     assert table.view == "board"
     press(table, Q.Key.Key_Space)
     settle(table)
-    assert table.view == "hand", "after the play, back to the hand"
+    assert table.view == "hand_low", "after the play, back to the hand"
 
 
 def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table):
@@ -494,12 +511,12 @@ def test_the_arrow_keys_walk_the_hand_and_space_picks_the_card_they_are_on(table
     while not table.game.can_afford(hand[table.hand_cursor].uid):
         press(table, Q.Key.Key_D)
     press(table, Q.Key.Key_Space)
-    assert table.selected == hand[table.hand_cursor].uid and table.view == "hand"
+    assert table.selected == hand[table.hand_cursor].uid and table.view == "hand_low"
     press(table, Q.Key.Key_Space)                       # plays into the lit lane
     settle(table)
-    assert table.view == "hand" and table.selected is None
+    assert table.view == "hand_low" and table.selected is None
     press(table, Q.Key.Key_A)                           # after a play the hand can still be walked
-    assert table.view == "hand" and table.hand_cursor is not None
+    assert table.view == "hand_low" and table.hand_cursor is not None
     assert 0 <= table.hand_cursor < len(table._hand_cards())
 
 
@@ -513,11 +530,12 @@ def test_he_no_longer_remarks_on_every_draw(table):
 def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(table):
     from PySide6.QtCore import Qt as Q
     settle(table); quiet(table)
+    press(table, Q.Key.Key_A)                                  # from the piles to the hand
     press(table, Q.Key.Key_D)                                  # cursor on the first card
     press(table, Q.Key.Key_Right)                              # to the piles
     press(table, Q.Key.Key_R); settle(table)
     hand = table._hand_cards()
-    assert table.view == "hand" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
+    assert table.view == "hand_low" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
     front = hand[table.hand_cursor].dst[0]
     other = hand[0].dst[0]
     assert front[2] > other[2] + 0.3, "the cursor card sits nearer the camera"
