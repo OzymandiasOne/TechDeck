@@ -240,7 +240,7 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
 def test_a_rule_slip_is_said_by_him_not_printed(table):
     from PySide6.QtCore import Qt as Q
     settle(table); quiet(table)
-    press(table, Q.Key.Key_Enter); settle(table); quiet(table)   # turn 2: must draw
+    press(table, Q.Key.Key_Z); settle(table); quiet(table)   # turn 2: must draw
     assert table.game.phase == "draw"
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     table.mousePressEvent(_click_at(table, ("card", votary.uid)))
@@ -304,3 +304,11 @@ def test_the_camera_glides_between_views(table):
     mid = r3.camera_between("hand", "board", 0.5, table.t).pos
     start, end = r3.VIEWS["hand"][0], r3.VIEWS["board"][0]
     assert start[1] < mid[1] < end[1]
+
+
+def test_z_rings_the_bell(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_Z)
+    settle(table)
+    assert table.game.turn == 2

@@ -39,13 +39,13 @@ MUST_READ = {"welcome", "rules", "first_turn", "win", "lose"}   # these wait for
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
 
 KEYS_TEXT = [
-    ("CLICK A CARD", "pick it up (the board lights a lane)"),
-    ("A / D", "move along the lanes, or the piles"),
-    ("SPACE", "pick the lit lane, draw the lit pile, or move him along"),
-    ("W / S", "look down at the board / back to your hand"),
+    ("CLICK A CARD", "pick it up; the board lights a lane"),
+    ("A / D", "move along the lanes or the piles"),
+    ("SPACE", "pick the lit lane or pile; move him along"),
+    ("W / S", "look at the board / back to your hand"),
     ("D  (from the hand)", "lean toward the piles"),
-    ("TAB, or click the raised card", "put it back down"),
-    ("ENTER", "ring the bell"),
+    ("TAB", "put the raised card down (or click it)"),
+    ("Z", "ring the bell"),
     ("ESC", "this menu"),
 ]
 MENU_MAIN = ["RESUME", "KEYS", "DISPLAY", "SOUND", "QUIT"]
@@ -675,7 +675,7 @@ class VoidTable(QWidget):
         title = {"main": "THE TABLE", "keys": "KEYS", "display": "DISPLAY", "sound": "SOUND"}[self.menu]
         row_h = 26 if self.menu != "keys" else 22
         h = 70 + row_h * len(items)
-        w = 560 if self.menu == "keys" else 340
+        w = 620 if self.menu == "keys" else 340
         x, y = (W - w) // 2, (H - h) // 2
         p = fr.p
         p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(1, 6, 3, 235)); p.drawRect(QRectF(x, y, w, h))
@@ -686,9 +686,9 @@ class VoidTable(QWidget):
             on = i == self.menu_index
             col, size = (PEAK if on else MID), (11 if self.menu != "keys" else 9)
             if self.menu == "keys" and label != "BACK":
-                fr.text(x + 22, cy, 210, row_h, label, col, size, True,
+                fr.text(x + 22, cy, 200, row_h, label, col, size, True,
                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
-                fr.text(x + 236, cy, w - 250, row_h, value, col, size, False,
+                fr.text(x + 230, cy, w - 244, row_h, value, col, size, False,
                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 0)
             else:
                 text = f"{'> ' if on else ''}{label}{'   ' + value if value else ''}"
@@ -876,10 +876,10 @@ class VoidTable(QWidget):
 
     def keyPressEvent(self, event):
         """Esc cancels/leaves. Space advances his dialogue, else picks (a lane in
-        the board view, a pile in the deck view). Enter rings the bell. W looks
+        the board view, a pile in the deck view). W looks
         down at the board, D leans to the deck (or moves the cursor right), A
         moves it left (and from the deck's first pile returns to the hand), S
-        comes back to the hand. The mouse only ever clicks."""
+        comes back to the hand. Z rings the bell. The mouse only ever clicks."""
         self.last_input_t = self.t
         key = event.key()
         if self.menu:
@@ -902,7 +902,7 @@ class VoidTable(QWidget):
                     self._act_on_lane(self.cursor)
                 elif self.view == "deck" and self.cursor is not None:
                     self.enqueue(self.game.draw("deck" if self.cursor == 0 else "votary"))
-            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            elif key == Qt.Key.Key_Z:
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.ring_bell())
             elif key == Qt.Key.Key_W:
