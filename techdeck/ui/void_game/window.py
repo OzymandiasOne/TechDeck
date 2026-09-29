@@ -663,34 +663,35 @@ class VoidTable(RoadScenes, QWidget):
                     highlight.add(("you", lane))
         if self.view == "board" and self.cursor is not None:
             highlight.add(("you", self.cursor))
-        pulse = 0.5 + 0.5 * math.sin(self.t * 5)
+        pulse = 0.5 + 0.5 * math.sin(self.t * 5)          # everything he speaks of breathes
+        pulsing = set()
         if self.glow == "lanes_you":
-            highlight |= {("you", l) for l in range(LANES)}
+            pulsing = {("you", l) for l in range(LANES)}
         elif self.glow == "lanes_him":
-            highlight |= {("him", l) for l in range(LANES)} | {("next", l) for l in range(LANES)}
-        r3.draw_slots(fr, highlight)
-        r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, 0.6 + 0.4 * pulse if self.glow == "scale" else 0.0))
+            pulsing = {("him", l) for l in range(LANES)} | {("next", l) for l in range(LANES)}
+        r3.draw_slots(fr, highlight - pulsing, pulsing, pulse)
+        r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, pulse if self.glow == "scale" else 0.0))
         self._draw_progress(fr)
         self._draw_candles(fr)
         can_act = not self.busy() and not self.over
         ringing = self.t - self.bell_t0
-        bell = r3.draw_bell(fr, (can_act and g.phase == "play") or self.glow == "bell",
+        bell = r3.draw_bell(fr, (can_act and g.phase == "play") or (self.glow == "bell" and pulse > 0.5),
                             ringing if 0 <= ringing < 1 else 0.0)
         if bell:
             self.hits.append((("bell",), bell))
         must_draw = can_act and g.phase == "draw"
         in_deck = self.view == "deck"
         vot = r3.draw_pile(fr, r3.VOTARIES, g.votaries, art.card_face(CARDS["votary"]),
-                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1) or self.glow == "piles")
+                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1) or (self.glow == "piles" and pulse > 0.5))
         if vot:
             self.hits.append((("votary",), vot))
         deck = r3.draw_pile(fr, r3.DECK, len(g.deck), art.card_back(),
-                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0) or self.glow == "piles")
+                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0) or (self.glow == "piles" and pulse > 0.5))
         if deck:
             self.hits.append((("deck",), deck))
         r3.draw_remnants(fr, self.remnants_shown)
         if self.glow == "remnants":
-            fr.polyline3(fr.ring(r3.REMNANTS, 0.7, 12), PEAK, 1.6)
+            fr.polyline3(fr.ring(r3.REMNANTS, 0.7, 12), r3._mix(DIM, PEAK, pulse), 1.0 + 1.6 * pulse)
         # slots you may play into are also click targets
         if self.selected is not None or self.view == "board":
             for lane in range(LANES):
@@ -732,10 +733,12 @@ class VoidTable(RoadScenes, QWidget):
         self._draw_caption(fr)
         # small key hints where the eye is: E / R under the piles in the deck
         # view, Z under the bell from the hand
-        if self.view == "deck" and not self.over:
-            fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E")
-            fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R")
-        elif self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
+        draw_on = can_act and g.phase == "draw"
+        if self.view in ("deck", "hand") and not self.over and (draw_on or self.view == "deck"):
+            col = BRIGHT if draw_on else DIM               # dim once the draw is spent
+            fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", col)
+            fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", col)
+        if self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
             fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "Z")     # over the bell's front edge, clear of the deck
         if self.show_draw_arrow and self.view == "hand" and g.phase == "draw":
             self._draw_arrow_to_deck(fr)

@@ -103,7 +103,7 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0):
 # every lane is clear. Moves between them glide (camera_between).
 VIEWS = {
     "hand": ((0.0, 5.6, 9.6), (0.0, 0.95, -1.4), 50.0),
-    "deck": ((3.4, 5.0, 8.6), (4.9, 0.3, 2.0), 46.0),
+    "deck": ((0.0, 5.6, 9.6), (1.9, 0.75, -0.6), 50.0),
     "board": ((0.0, 11.4, 3.1), (0.0, 0.0, 0.35), 50.0),
 }
 VIEW_S = 0.45                         # a camera move, in seconds
@@ -320,13 +320,23 @@ def draw_him(fr: Frame, t: float, flicker: float = 0.0, seed: int = 0, halo=(40,
     fr.draw_textured(pr, ftex)
 
 
-def draw_slots(fr: Frame, highlight: set[tuple[str, int]] = frozenset()):
+def _mix(a: QColor, b: QColor, k: float) -> QColor:
+    return QColor(int(a.red() + (b.red() - a.red()) * k), int(a.green() + (b.green() - a.green()) * k),
+                  int(a.blue() + (b.blue() - a.blue()) * k))
+
+
+def draw_slots(fr: Frame, highlight: set[tuple[str, int]] = frozenset(),
+               pulse: set[tuple[str, int]] = frozenset(), pulse_k: float = 0.0):
     """Card slots etched into the grid, each with a watching eye. `highlight`
-    holds (row_name, lane) pairs to light up (legal targets)."""
+    holds (row_name, lane) pairs to light up (legal targets); `pulse` holds the
+    ones he is talking about, breathing between dark and peak by `pulse_k`."""
     for name, z, tone in (("next", ROW_NEXT, DIM), ("him", ROW_HIM, MID), ("you", ROW_YOU, MID)):
         for lane, x in enumerate(LANES):
             c = (x, 0.01, z)
-            col, wd = (PEAK, 1.8) if (name, lane) in highlight else (tone, 1.0)
+            if (name, lane) in pulse:
+                col, wd = _mix(DIM, PEAK, pulse_k), 1.0 + 1.6 * pulse_k
+            else:
+                col, wd = (PEAK, 1.8) if (name, lane) in highlight else (tone, 1.0)
             pts = [add(c, (-CW2 - .07, 0, -CH2 - .07)), add(c, (CW2 + .07, 0, -CH2 - .07)),
                    add(c, (CW2 + .07, 0, CH2 + .07)), add(c, (-CW2 - .07, 0, CH2 + .07))]
             fr.polyline3(pts + [pts[0]], col, wd)
