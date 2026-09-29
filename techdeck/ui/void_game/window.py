@@ -20,7 +20,8 @@ from PySide6.QtWidgets import QWidget
 
 from . import art, render3d as r3
 from .art import BONE, BRIGHT, DIM, EMBER, MID, PEAK, VOID
-from .cards import CARDS, OFFER, REMNANT, SIGILS
+from .cards import CARDS, HIS_PET, OFFER, REMNANT, SIGILS
+from .scenes import RoadScenes
 from .dialogue import MOODS, Dialogue, Mood
 from .rules import HIM, LANES, SCALE_TO_WIN, YOU, Card, Game, IllegalMove
 from .render3d import H, W, Vec, add, dot, ease, lerp, mul, norm
@@ -35,7 +36,11 @@ IDLE_LINE_S = 40.0
 CHARS_PER_S = 34.0                    # he types his lines, as in the console
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
-MUST_READ = {"welcome", "rules", "first_turn", "win", "lose"}   # these wait for you
+MUST_READ = {"welcome", "welcome_again", "rules", "first_turn", "win", "first_win", "lose", "teeth",
+             "candle_out", "boss_welcome", "boss_phase", "run_won", "dead", "deathcard", "deathcard_named",
+             "digitize", "first_sacrifice", "famine", "scene_road", "scene_fight", "scene_choice", "scene_rare",
+             "scene_fire", "scene_altar", "scene_boss", "fire_buffed", "fire_eaten", "altar_done",
+             "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
 
 KEYS_TEXT = [
@@ -48,6 +53,8 @@ KEYS_TEXT = [
     ("TAB / S", "put the raised card down"),
     ("Z", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
+    ("S, S", "pull the hand down; then open the book of marks"),
+    ("Q", "the book, at the raised card's mark"),
     ("ESC", "this menu"),
 ]
 MENU_MAIN = ["RESUME", "KEYS", "DISPLAY", "SOUND", "QUIT"]
@@ -63,7 +70,10 @@ def load_settings() -> dict:
     try:
         with open(settings_path(), encoding="utf-8") as f:
             got = json.load(f)
-        return {**DEFAULT_SETTINGS, **{k: got[k] for k in DEFAULT_SETTINGS if k in got}}
+        kept = {k: got[k] for k in DEFAULT_SETTINGS if k in got}
+        if isinstance(got.get("memory"), dict):
+            kept["memory"] = got["memory"]                 # what survives a run
+        return {**DEFAULT_SETTINGS, **kept}
     except (OSError, ValueError):
         return dict(DEFAULT_SETTINGS)
 
@@ -155,10 +165,11 @@ class Act:
     start: object = None                  # callable(), run when the act begins
 
 
-class VoidTable(QWidget):
+class VoidTable(RoadScenes, QWidget):
     """The window. Create it with `open_table()` so something owns it."""
 
-    def __init__(self, seed: int | None = None, parent=None, dialogue: Dialogue | None = None):
+    def __init__(self, seed: int | None = None, parent=None, dialogue: Dialogue | None = None,
+                 memory: dict | None = None):
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("The Puppet Master")
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
@@ -166,7 +177,7 @@ class VoidTable(QWidget):
         self.setMinimumSize(640, 360)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.game = Game(seed)
+        self.game: Game | None = None     # the current fight's engine; set by begin_fight
         self.dlg = dialogue or Dialogue(seed=seed)
         self.t = 0.0
         self.vcards: dict[int, VCard] = {}
@@ -206,6 +217,7 @@ class VoidTable(QWidget):
         self.said_this_phase: set[str] = set()
         self.played_lines: set[str] = set()
         self.frame = None
+        self._init_run(seed, memory if memory is not None else self.settings.get("memory"))
         self.timer = QTimer(self)
         self.timer.setInterval(TICK_MS)
         self.timer.timeout.connect(self._tick)
@@ -213,10 +225,7 @@ class VoidTable(QWidget):
 
     # ── lifecycle ────────────────────────────────────────────────────────
     def _begin(self):
-        self.say("welcome")
-        self.say("rules")
-        self.say("rules")
-        self.enqueue(self.game.start())
+        self.road_show()                 # the first door is the table, and it opens itself
         self.timer.start()
 
     def closeEvent(self, event):
@@ -327,7 +336,24 @@ class VoidTable(QWidget):
                 self._act(0, lambda s=source: self.say("draw_" + s))
             elif k == "sacrifice":
                 sac_count += 1
+                if e["card"].defn.id != "votary" and not self.first_sacrifice_said:
+                    self.first_sacrifice_said = True
+                    self._act(0, lambda: self.say("first_sacrifice"))
                 self._act(FADE_S, lambda c=e["card"]: self._kill(c, ember=True))
+            elif k == "endless":
+                self._act(0.3, lambda c=e["card"]: self._endless(c))
+            elif k == "spawn":
+                self._act(DEAL_S, lambda c=e["card"]: self._spawn(c))
+            elif k == "thorns":
+                self._act(0.3, lambda ev=e: self._thorns(ev))
+            elif k == "repelled":
+                self._act(LUNGE_S, lambda ev=e: self._repelled(ev))
+            elif k == "guard":
+                self._act(MOVE_S, lambda c=e["card"], f=e["from_lane"], l=e["lane"]: self._guard(c, f, l))
+            elif k == "unmade":
+                self._act(0.35, lambda was=e["was"], c=e["card"], l=e["lane"]: self._unmade(was, c, l))
+            elif k == "boss_phase":
+                self._act(1.2, self._boss_phase)
             elif k == "play":
                 card, lane = e["card"], e["lane"]
                 self._act(PLAY_S, lambda c=card, l=lane, n=sac_count: self._play(c, l, n))
@@ -378,14 +404,68 @@ class VoidTable(QWidget):
         elif sacrificed == 1:
             self.say("sacrifice")
         key = "play_" + card.defn.id
+        seen = card.defn.id in self.seen_this_fight
+        self.seen_this_fight.add(card.defn.id)
         if self.dlg.has(key) and key not in self.played_lines:
             self.played_lines.add(key)
             self.say(key, name=card.name)
+        elif seen and card.defn.id != "votary":
+            self.say("play_repeat", once_per_phase=True, name=card.name)
         elif card.defn.cost >= 3:
             self.say("play_big", name=card.name)
-        elif sacrificed == 0 and card.defn.cost == 0 and card.defn.id != "votary":
-            self.say("play_small", name=card.name)
+        elif not seen and card.defn.id != "votary":
+            self.say("play_new", once_per_phase=True, name=card.name)
         self._layout_hand()
+
+    def _endless(self, card: Card):
+        vc = self.vcards.get(card.uid)
+        if vc is not None:
+            vc.flash_until = self.t + 0.5
+        self.say("endless", once_per_phase=True)
+
+    def _spawn(self, card: Card):
+        start = (add(r3.slot_center(r3.ROW_YOU, 1), (0, 1.0, 0)), r3.FLAT_U, r3.FLAT_V)
+        vc = VCard(card, start, start, card.power, card.health, where="hand", opacity=0.0)
+        vc.fade(1.0, DEAL_S)
+        self.vcards[card.uid] = vc
+        self._layout_hand(force=True)
+        self.say("spawn", once_per_phase=True)
+
+    def _thorns(self, e):
+        striker = self.vcards.get(e["striker"].uid)
+        if striker is not None:
+            striker.shown_health = e["hp_after"]
+            striker.shake_until = self.t + 0.3
+        self.say("thorns", once_per_phase=True)
+
+    def _repelled(self, e):
+        attacker = self.vcards.get(e["card"].uid)
+        if attacker is not None:
+            toward = -1.0 if e["card"].owner == YOU else 1.0
+            attacker.lunge = (0.0, 0.1, toward * 0.4)
+            attacker.lunge_t0 = self.t
+        self.say("repelled", once_per_phase=True)
+
+    def _guard(self, card: Card, from_lane: int, lane: int):
+        vc = self.vcards.get(card.uid)
+        if vc is not None:
+            vc.lane = lane
+            vc.go(self._slot_pose(r3.ROW_YOU, lane), self.t, MOVE_S, arc=0.4)
+        self.say("guard", once_per_phase=True)
+
+    def _unmade(self, was: Card, card: Card, lane: int):
+        old = self.vcards.pop(was.uid, None)
+        pose = old.pose if old else self._slot_pose(r3.ROW_YOU, lane)
+        vc = VCard(card, pose, pose, card.power, card.health, where="you", lane=lane)
+        vc.flash_until = self.t + 0.6
+        self.vcards[card.uid] = vc
+
+    def _boss_phase(self):
+        for vc in self.vcards.values():
+            if vc.where in ("him", "next"):
+                vc.where = "gone"; vc.fade(0.0, 0.6)
+        self.scale_target = 0.0
+        self.say("boss_phase")
 
     def _kill(self, card: Card, ember: bool = False):
         vc = self.vcards.get(card.uid)
@@ -435,6 +515,8 @@ class VoidTable(QWidget):
         self._kill(card)
         if cause == "venom":
             self.say("venom", once_per_phase=True)
+        elif card.owner == HIM and card.defn.id == HIS_PET:
+            self.say("pet_dies")
         elif card.owner == HIM:
             self.say("kill_his", once_per_phase=True)
         else:
@@ -497,7 +579,7 @@ class VoidTable(QWidget):
         self.over = True
         self.captions.clear()
         self.caption = ""
-        self.say("win" if winner == YOU else "lose")
+        self.fight_ended(winner)
 
     # ── layout ───────────────────────────────────────────────────────────
     def _slot_pose(self, row: float, lane: int) -> Pose:
@@ -509,6 +591,8 @@ class VoidTable(QWidget):
                       key=lambda v: order.get(v.uid, 99))
 
     def _layout_hand(self, force: bool = False):
+        if self.game is None:
+            return
         hand = self._hand_cards()
         n = len(hand)
         for i, vc in enumerate(hand):
@@ -518,7 +602,8 @@ class VoidTable(QWidget):
                 lift = 0.55
             elif self.hover == ("card", vc.uid) and not self.busy():
                 lift = 0.28
-            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 0.0 if self.view == "hand" else 1.0)
+            tucked = self.view != "hand" or self.peek or self.book is not None
+            pose = r3.hand_pose(k * min(1.0, 4.0 / max(n, 1)), lift, 1.0 if tucked else 0.0)
             if force or pose != vc.dst:
                 vc.go(pose, self.t, HAND_S if not force else DEAL_S, 0.0)
 
@@ -536,11 +621,13 @@ class VoidTable(QWidget):
                 del self.vcards[vc.uid]
         self.scale_shown += (self.scale_target - self.scale_shown) * min(1.0, dt * 6)
         self.scale_glow = max(0.0, self.scale_glow - dt * 1.5)
-        if (not self.over and not self.busy() and self.game.phase in ("play", "draw")
-                and self.t - self.last_input_t > IDLE_LINE_S and self.idle_said_turn != self.game.turn):
-            self.idle_said_turn = self.game.turn
+        g = self.game
+        if (self.scene == "fight" and g is not None and not self.over and not self.busy()
+                and g.phase in ("play", "draw") and self.t - self.last_input_t > IDLE_LINE_S
+                and self.idle_said_turn != g.turn):
+            self.idle_said_turn = g.turn
             self.say("idle")
-        self.frame = self._render()
+        self.frame = self._render() if self.scene == "fight" else self.render_scene()
         self.update()
 
     # ── drawing ──────────────────────────────────────────────────────────
@@ -564,6 +651,8 @@ class VoidTable(QWidget):
             highlight.add(("you", self.cursor))
         r3.draw_slots(fr, highlight)
         r3.draw_scale(fr, self.scale_shown, self.scale_glow)
+        self._draw_progress(fr)
+        self._draw_candles(fr)
         can_act = not self.busy() and not self.over
         ringing = self.t - self.bell_t0
         bell = r3.draw_bell(fr, can_act and g.phase == "play", ringing if 0 <= ringing < 1 else 0.0)
@@ -600,12 +689,7 @@ class VoidTable(QWidget):
             poly = fr.draw_card(c, u, v, face, art.card_back(), vc.opacity, edge)
             if poly and vc.where != "gone":
                 self.hits.append((("card", vc.uid), poly))
-        # his caption, burned into the tube between his face and the board
-        if self.caption:
-            x, y, w, h = self._caption_rect()
-            fr.text(x, y, w, h, self.caption[:self.caption_shown].upper(), PEAK, 13)
-            if not self._talking() and self.caption_until == float("inf"):
-                fr.text(x, y + h + 2, w, 14, "SPACE", DIM, 8, bold=False, spacing=3)
+        self._draw_caption(fr)
         # small key hints where the eye is: E / R under the piles in the deck
         # view, Z under the bell from the hand
         if self.view == "deck" and not self.over:
@@ -614,21 +698,39 @@ class VoidTable(QWidget):
         elif self.view == "hand" and not self.over and not self.busy() and g.phase == "play":
             fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "Z")     # over the bell's front edge, clear of the deck
         self._draw_inspect(fr)
+        if self.book is not None:
+            self._draw_book(fr)
         if self.menu:
             self._draw_menu(fr)
         img = fr.end()
         return r3.finish(img, max(self.mood.dim * strength, 0.55 if self.menu else 0.0),
                          self.settings["scanlines"])
 
+    def _draw_caption(self, fr: r3.Frame):
+        """His line, burned into the tube between his face and the board. The
+        narrator's lines are set differently: not shouted, a quieter green."""
+        if not self.caption:
+            return
+        x, y, w, h = self._caption_rect()
+        shown = self.caption[:self.caption_shown]
+        if self.mood.narrator:
+            fr.text(x, y, w, h, shown, BRIGHT, 12, False, spacing=1)
+        else:
+            fr.text(x, y, w, h, shown.upper(), PEAK, 13)
+        if not self._talking() and self.caption_until == float("inf"):
+            fr.text(x, y + h + 2, w, 14, "SPACE", DIM, 8, bold=False, spacing=3)
+
     def _caption_rect(self):
         """Where his line sits: centred in the gap between his face and the far
         row, as tall as the wrapped text needs (it used to clip at three lines)."""
-        f = QFont(art.MONO, 13); f.setBold(True)
-        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 2)
+        narr = self.mood.narrator
+        f = QFont(art.MONO, 12 if narr else 13); f.setBold(not narr)
+        f.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1 if narr else 2)
         w = W - 220
         h = QFontMetrics(f).boundingRect(QRect(0, 0, w, 400), int(Qt.TextFlag.TextWordWrap),
-                                         self.caption.upper()).height() + 6
-        y = max(150, int(246 - h / 2))
+                                         self.caption if narr else self.caption.upper()).height() + 6
+        centre = 246 if self.scene == "fight" else 172       # on the road the doors sit lower
+        y = max(120, int(centre - h / 2))
         return 110, y, w, h
 
     # ── the menu (Esc) ──────────────────────────────────────────────────
@@ -838,18 +940,26 @@ class VoidTable(QWidget):
                 self.menu_index = hit[1]
                 self._menu_pick()
             return
-        if self.over:
-            if not self.captions and self.t > self.caption_until - 1.0:
-                self.close()
-            return
         if event.button() == Qt.MouseButton.RightButton:
+            return
+        if self.book is not None:
+            self.book = None; self.peek = False
             return
         if self.advance_dialogue():
             return
-        if self.busy():
+        if self.over:
+            if not self.captions:
+                self.after_fight_go()
             return
         hit = self._hit(self._to_frame(event.position()))
-        if hit is None:
+        if self.scene != "fight":
+            if self.scene == "digitize":
+                if self.t - self.digitize_t0 > 4.5:
+                    self.close()
+                return
+            self.scene_click(hit)
+            return
+        if self.busy() or hit is None:
             return
         try:
             self._click(hit)
@@ -905,20 +1015,39 @@ class VoidTable(QWidget):
         if self.menu:
             self._menu_key(key)
             return
+        if self.scene == "forge" and self.forge_step == 3 and key not in (Qt.Key.Key_Escape,):
+            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Backspace):
+                self.scene_key(key)
+            else:
+                self.forge_type(event.text())
+            return
+        if self.book_key(key):
+            return
+        if key == Qt.Key.Key_Escape:
+            self.open_menu()
+            return
+        if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.advance_dialogue():
+            return
+        if self.over:
+            if key in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter) and not self.captions:
+                self.after_fight_go()
+            return
+        if self.scene != "fight":
+            self.scene_key(key)
+            return
         try:
-            if key == Qt.Key.Key_Escape:
-                if self.over:
-                    self.close()
-                else:
-                    self.open_menu()
-            elif key == Qt.Key.Key_Tab:
+            if key == Qt.Key.Key_Tab:
                 self.put_down()
+            elif key == Qt.Key.Key_Q:
+                if self.selected is not None:
+                    d = self.game._hand_card(self.selected).defn
+                    self.open_book_at(d.sigils[0] if d.sigils else None)
+                else:
+                    self.open_book_at(None)
             elif key == Qt.Key.Key_Space:
-                if self.advance_dialogue() or self.busy():
+                if self.busy():
                     return
-                if self.over:
-                    self.close()
-                elif self.view == "board" and self.cursor is not None:
+                if self.view == "board" and self.cursor is not None:
                     self._act_on_lane(self.cursor)
                 elif self.view == "deck" and self.cursor is not None:
                     self.enqueue(self.game.draw("deck" if self.cursor == 0 else "votary"))
@@ -934,10 +1063,17 @@ class VoidTable(QWidget):
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.draw("deck" if key == Qt.Key.Key_E else "votary"))
             elif key == Qt.Key.Key_W:
-                self.set_view("board")
+                if self.peek:
+                    self.peek = False                       # the hand comes back up
+                else:
+                    self.set_view("board")
             elif key == Qt.Key.Key_S:
                 if self.view == "hand" and self.selected is not None:
                     self.put_down()                         # S again: the card goes back in line
+                elif self.view == "hand" and not self.peek:
+                    self.peek = True                        # the hand pulls down out of the way
+                elif self.view == "hand" and self.peek:
+                    self.open_book_at(None)                 # and looking further down: the book
                 else:
                     self.set_view("hand")
             elif key == Qt.Key.Key_D:

@@ -7,50 +7,93 @@
 #
 #    key      when he says it (the list is below). Several lines with the
 #             same key are a pool: he picks one, never the same twice running.
-#    emotion  calm, curious, amused, pleased, displeased, grave.
+#    emotion  calm, curious, amused, pleased, displeased, grave, narrate.
 #             The emotion is what his face and the screen DO while he talks:
 #             pleased brightens him, displeased scrambles his face and dims
 #             the room, grave turns the light behind him to ember.
+#             NARRATE is his other voice: he tells it as a story, second
+#             person, past tense, three short beats. Shown in the narrator's
+#             type, not the master's. Use it for the road, not the table.
 #    holes    {name} is the card's name, {n} a number, where it makes sense.
 #
 #  THE FILE HOT-RELOADS. Save it, play on. No restart needed.
 #
 #  VOICE RULES: cold, declarative, never uncertain, never apologetic,
-#  never explains itself twice. He STATES. No em-dashes.
+#  never explains itself twice. He STATES. No em-dashes. The narrator
+#  voice is the same mind telling it later: "You did this. Then that."
 #
-#  KEYS
-#    welcome            the table appears
+#  KEYS - the table
+#    welcome            the table appears (first fight of a run)
+#    welcome_again      the table appears (a later fight)
 #    rules              right after welcome, once
 #    first_turn         your first turn begins
 #    draw_deck          you took from your deck
 #    draw_votary        you took a votary
+#    first_sacrifice    the first time you offer a real creature (not a votary)
 #    sacrifice          you offered one card
 #    sacrifice_many     you offered two or more at once
+#    play_new           you played a card he has not seen this fight
+#    play_repeat        you played the same card again this fight
 #    play_small         you played something cheap
-#    play_big           you played something costing 3
+#    play_big           you played something costing 3 or more
 #    play_{card id}     you played that card (votary, scarab, hound, huginn,
 #                       weigher, gorgon, ouroboros, cerberus, sleeper,
-#                       monolith, dead_star)
+#                       monolith, dead_star, mote, hydra, thornback, watcher,
+#                       martyr, locust, wraith, crowned, seraph, leviathan)
 #    commit_{card id}   he slid that card into his incoming row
 #    hit_him            your strike landed on the scale
 #    hit_you            his strike landed on the scale
 #    kill_his           you killed one of his
 #    kill_yours         he killed one of yours
+#    pet_dies           you killed his hound. He minds.
 #    venom              a venom kill, either side
+#    thorns             thorns bit a striker
+#    repelled           a strike was refused by something abhorred
+#    guard              your sentinel stepped across
+#    spawn              a locust made another
+#    endless            the martyr gave blood and stayed
 #    undying            your Ouroboros came back
 #    grow               a Dead Star woke
+#    famine             you had nothing left to draw; hunger took his row
+#    famine_again       ...and again ({n} is how many times)
 #    close_you          you are one hit from winning
 #    close_him          he is one hit from winning
 #    idle               you have been thinking a long while
-#    famine             you had nothing left to draw; hunger took his row
-#    famine_again       ...and again ({n} is how many times)
+#    first_win          you won your first fight ever
 #    win                you tipped the scale
+#    teeth              you won with weight to spare ({n} teeth)
 #    lose               he tipped the scale
+#    candle_out         a candle went out (you have one left)
+#    boss_welcome       the last table of the road
+#    boss_phase         you tipped the scale on him once; he starts again
+#    run_won            you beat the road
+#    dead               the last candle went out
+#    deathcard          the forge: choose whose cost, whose numbers, whose marks
+#    deathcard_named    you named it
+#    digitize           the card is taken; you are kept
+#
+#  KEYS - the road (narrate)
+#    scene_road         the doors appear
+#    scene_fight        you chose a fight
+#    scene_choice       you chose the cards
+#    scene_rare         you chose the rarer cards
+#    scene_fire         you chose the fire
+#    scene_altar        you chose the altar
+#    scene_boss         the last door
+#    fire_buffed        the fire helped
+#    fire_eaten         the fire took the card
+#    altar_done         the altar took one and marked another
+#    card_taken         you took a card
 # =====================================================================
 
+# ── the table ─────────────────────────────────────────────────────────
 welcome | amused | So. You sat down.
 welcome | curious | You found the table. Few do.
-welcome | calm | Sit. The rules are simple. You will still get them wrong.
+welcome | calm | Another one. It has been a while. Sit. You will have forgotten how this is played. I will remind you.
+
+welcome_again | calm | Again.
+welcome_again | amused | Sit. You know where.
+welcome_again | curious | You came back to the table. They usually do.
 
 rules | calm | Four lanes. Your side, my side. A strike that meets nothing lands on the scale. Tip it five toward me and you have won.
 rules | calm | The greater things want blood. Offer them your lesser things. Every one you lose leaves a remnant. Some things are bought with remnants alone.
@@ -63,11 +106,16 @@ draw_deck | curious | And what did you find.
 draw_votary | amused | Another one. They always come.
 draw_votary | calm | It came willingly.
 
+first_sacrifice | grave | Do not mourn it. What you offer is not lost to you. Its suffering was real. You will see it again.
 sacrifice | calm | It goes willingly. They always do.
 sacrifice | amused | Gone. Was it worth it.
 sacrifice_many | pleased | Two at once. You are learning what the game is.
 sacrifice_many | amused | So much blood for so little.
 
+play_new | curious | I have not seen that one tonight.
+play_new | calm | New. Good.
+play_repeat | amused | That one again. You lean on it.
+play_repeat | calm | The same answer. We will see if it is the right one twice.
 play_small | calm | Small.
 play_small | curious | A start.
 play_big | pleased | Now that is a card.
@@ -84,6 +132,16 @@ play_cerberus | pleased | Three mouths. One hunger.
 play_sleeper | grave | You woke it. That was your choice.
 play_monolith | grave | It was here before the ground was.
 play_dead_star | calm | The light you see left it long ago. Wait.
+play_mote | amused | A spark. Careful. They spread.
+play_hydra | curious | Two mouths, and neither for what stands in front.
+play_thornback | calm | Touch it and learn. Mine will.
+play_watcher | curious | It goes where the gap is. I will remember that.
+play_martyr | grave | It dies for you. Then it does it again. Do not thank it.
+play_locust | amused | Where there was one.
+play_wraith | calm | No weight. All edge.
+play_crowned | pleased | Those beside it stand taller. A court.
+play_seraph | grave | Six wings. It is not here to comfort you.
+play_leviathan | grave | The sea was made to hold it. This table was not.
 
 commit_hound | amused | Mine has three of yours to choose from.
 commit_huginn | curious | Watch the sky.
@@ -92,6 +150,9 @@ commit_weigher | grave | Mine weighs too.
 commit_cerberus | pleased | Three mouths. Choose which of yours it eats.
 commit_sleeper | grave | Now you have my attention.
 commit_dead_star | calm | I will wait. I am good at it.
+commit_leviathan | grave | I was saving this.
+commit_seraph | grave | Look up.
+commit_crowned | pleased | A court of my own.
 
 hit_him | displeased | That landed.
 hit_him | calm | Weight. I felt that.
@@ -103,23 +164,60 @@ kill_his | displeased | That one was mine.
 kill_his | calm | It served.
 kill_yours | amused | It goes to the remnants.
 kill_yours | pleased | Gone.
+pet_dies | displeased | That was my hound.
+pet_dies | grave | It was defenceless. You knew that.
 venom | grave | What it wounds, dies. There is no size that matters.
+thorns | amused | It bit back. They do.
+repelled | calm | Nothing strikes it. Not yours. Not mine.
+guard | curious | It moved to meet me. Loyal thing.
+spawn | amused | And now there are two.
+endless | grave | It gave, and it stayed. Some things cannot be spent.
 undying | curious | Back again. Stronger. It remembers dying.
 grow | pleased | There it is.
+
+famine | grave | Your supply is spent. Nothing left to draw. Hunger sets in, and hunger is on my side.
+famine_again | amused | Hungrier.
+famine_again | grave | It grows. It always grows.
 
 close_you | displeased | One more and you have me. Do not get used to the feeling.
 close_you | grave | Careful. Winning changes things.
 close_him | amused | One more. Think carefully.
 close_him | pleased | The scale is nearly done with you.
 
-famine | grave | Your supply is spent. Nothing left to draw. Hunger sets in, and hunger is on my side.
-famine_again | amused | Hungrier.
-famine_again | grave | It grows. It always grows.
-
 idle | amused | Take your time. I have all of it.
 idle | curious | Thinking. I can hear it.
 
+first_win | calm | You won this one. They will not all be so easy.
 win | grave | The scale tips. Toward me. Enjoy it. It will not happen twice.
 win | displeased | You won. Remember how. You will need it.
-lose | pleased | And that is the game. Sit down again whenever you like. You will.
+teeth | amused | More than you needed. Keep the difference. I will find a use for it.
+lose | pleased | And that is the game.
 lose | amused | The scale does not lie. Neither do I.
+candle_out | grave | A light went out. You have one left. Mind it.
+
+boss_welcome | grave | The road ends here. So do the games you were winning.
+boss_phase | displeased | Enough. We start again. What you had on the board, you no longer have.
+boss_phase | grave | You tipped it once. I unmake what you built and we begin again. Sit.
+run_won | grave | The scale tipped. The road is walked. Remember this feeling. It does not last.
+run_won | displeased | You won. I did not expect to say it. I will not say it twice.
+
+dead | grave | The last light is out. You are not leaving.
+deathcard | calm | Every one who loses here leaves something behind. Choose. Whose cost. Whose numbers. Whose marks.
+deathcard_named | grave | {name}. It will do.
+digitize | grave | I keep what I catch. You will turn up again, at this table, in a hand. Perhaps mine.
+
+# ── the road (his other voice) ────────────────────────────────────────
+scene_road | narrate | The dark opened in three directions... Each way had been walked before... You chose.
+scene_road | narrate | Three doors stood in the nothing... None of them was locked... That was the trick of them.
+scene_road | narrate | You stood between the fights... The void offered you a choice... It always does, before it takes.
+scene_fight | narrate | You heard the bell before you saw the table... The board was already set... He was already waiting.
+scene_fight | narrate | The grid rose to meet you... Cards lay face down in the dark... You sat.
+scene_choice | narrate | Three cards floated where the road should have been... Each one wanted to be chosen... Only one would be.
+scene_rare | narrate | Something old lay in the dark ahead... It was not supposed to be found... You found it.
+scene_fire | narrate | A fire burned where no fire should... Something warmed itself beside it... You approached.
+scene_altar | narrate | A stone stood in the void, worn smooth by hands... The hands were gone... The stone remembered them.
+scene_boss | narrate | The road ended... He turned to face you at last... The bell rang itself.
+fire_buffed | narrate | The fire took nothing... The card came away stronger... The thing beside the fire watched you leave.
+fire_eaten | narrate | The fire took the card... Something beside it chewed... You did not stay to watch.
+altar_done | narrate | The stone took one and marked another... The marks did not wash off... They never do.
+card_taken | narrate | You took it... The other two went dark... They would be there for the next one.

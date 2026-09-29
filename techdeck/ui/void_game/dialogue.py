@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-EMOTIONS = ("calm", "curious", "amused", "pleased", "displeased", "grave")
+EMOTIONS = ("calm", "curious", "amused", "pleased", "displeased", "grave", "narrate")
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class Mood:
     dim: float = 0.0           # the whole tube darkens
     shake: float = 0.0         # the camera trembles
     hold_ms: int = 2600        # how long the caption stays
+    narrator: bool = False     # his other voice: the story told later, in the narrator's type
 
 
 MOODS = {
@@ -39,6 +40,7 @@ MOODS = {
     "pleased": Mood(flicker=0.03, halo=(110, 255, 150, 95), hold_ms=3000),
     "displeased": Mood(flicker=0.16, halo=(30, 120, 60, 40), dim=0.25, shake=1.0, hold_ms=3000),
     "grave": Mood(flicker=0.01, halo=(120, 70, 40, 60), dim=0.35, hold_ms=3600),
+    "narrate": Mood(flicker=0.0, halo=(30, 150, 70, 40), dim=0.15, hold_ms=5000, narrator=True),
 }
 
 
