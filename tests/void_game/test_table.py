@@ -128,7 +128,7 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     table.mousePressEvent(ev)
     assert table.selected is None
     said = [table.caption] + [c[0] for c in table.captions]
-    assert any("demands" in s for s in said), "he should say why, in his own words"
+    assert any("requires" in s for s in said), "he should say why, in his own words"
 
 
 def test_the_lanes_lesson_comes_a_beat_after_you_first_look_at_the_board_and_glows(table):

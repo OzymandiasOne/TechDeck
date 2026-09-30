@@ -14,7 +14,8 @@
 #             NARRATE is his other voice: he tells it as a story, second
 #             person, past tense, three short beats. Shown in the narrator's
 #             type, not the master's. Use it for the road, not the table.
-#    holes    {name} is the card's name, {n} a number, where it makes sense.
+#    holes    {name} is the card's name, {n} a number, {what} 'power' or 'health'
+#             (the fire), where it makes sense.
 #    pages    a long line breaks into pages at " // ". Each page types out,
 #             then the next follows at the same pace, always.
 #    glow     a page may start with a tag like [scale]: while that page
@@ -94,20 +95,19 @@
 # =====================================================================
 
 # ── the table ─────────────────────────────────────────────────────────
-welcome | calm | Another one. It has been a while. Sit. You will have forgotten how this is played. I will remind you.
+welcome | calm | Another challenger... It has been ages. Sit. Perhaps you have forgotten how this is played. Allow me to remind you.
 
 welcome_again | calm | Again.
 welcome_again | amused | Sit. You know where.
 welcome_again | curious | You came back to the table. They usually do.
 
-rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [scale]Tip it five the other way and I have you. // [bell,auto]When you are done, ring the bell.
-rules_blood | calm | [costs]The greater things want blood. That is the price you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. // [remnants]Every one you lose leaves a remnant. Some things are bought with remnants alone.
+rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. You win if you tip my side completely downward. // [scale]Tip it five the other way and I have you. // [bell,auto]Ring the bell to end your turn... And begin the combat.
+rules_blood | calm | [costs]The greater souls want blood. That is the cost you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. 
 
-first_turn | calm | Begin.
 first_turn | calm | Draw a card.
 
-first_sacrifice | grave | Do not mourn it. What you offer is not lost to you. Its suffering was real. You will see it again.
-sacrifice | calm | It goes willingly. They always do.
+first_sacrifice | grave | Do not mourn. What you sacrifice is not lost, though it's suffering was real... You will see it again.
+sacrifice | calm | Sacrifices must be made. An honorable death.
 sacrifice | amused | Gone. Was it worth it.
 sacrifice_many | pleased | Two at once. You are learning what the game is.
 sacrifice_many | amused | So much blood for so little.
@@ -154,7 +154,7 @@ commit_leviathan | grave | I was saving this.
 commit_seraph | grave | Look up.
 commit_crowned | pleased | A court of my own.
 
-hit_him | displeased | That landed.
+hit_him | displeased | {n} damage dealt. {n} weights on the scale.
 hit_him | calm | Weight. I felt that.
 hit_you | pleased | And the scale tips.
 hit_you | amused | You left that lane open. I noticed.
@@ -186,7 +186,7 @@ close_him | pleased | The scale is nearly done with you.
 
 idle | amused | Take your time. I have all of it.
 
-first_win | calm | You won this one. They will not all be so easy.
+first_win | calm | You've won this match. They won't all be this easy.
 win | grave | The scale tips. Toward me. Enjoy it. It will not happen twice.
 win | displeased | You won. Remember how. You will need it.
 teeth | amused | More than you needed. Keep the difference. I will find a use for it.
@@ -211,12 +211,12 @@ scene_road | narrate | Three doors stood in the nothing... None of them was lock
 scene_road | narrate | You stood between the fights... The void offered you a choice... It always does, before it takes.
 scene_fight | narrate | You heard the bell before you saw the table... The board was already set... He was already waiting.
 scene_fight | narrate | The grid rose to meet you... Cards lay face down in the dark... You sat.
-scene_choice | narrate | Three cards floated where the road should have been... Each one wanted to be chosen... Only one would be.
+scene_choice | narrate | Three cards floated where the road should have been... Each one wanted to be chosen... Only 1 may grace your paltry deck.
 scene_rare | narrate | Something old lay in the dark ahead... It was not supposed to be found... You found it.
-scene_fire | narrate | A fire burned where no fire should... Something warmed itself beside it... You approached.
+scene_fire | narrate | You came across a small group of survivors. Faces shrunken from starvation, they huddled around a campfire. They looked upon your group of creatures and beckoned. // 'Come, warm one of your creatures by the fire...' one said. 'Warm it by the fire. That will enhance its {what}.' said another. // You noticed one of the survivors wiping drool from their mouth.
 scene_altar | narrate | A stone stood in the void, worn smooth by hands... The hands were gone... The stone remembered them.
 scene_boss | narrate | The road ended... He turned to face you at last... The bell rang itself.
-fire_buffed | narrate | The fire took nothing... The card came away stronger... The thing beside the fire watched you leave.
-fire_eaten | narrate | The fire took the card... Something beside it chewed... You did not stay to watch.
+fire_buffed | narrate | The fire warmed the poor {name}, enhancing its {what}.
+fire_eaten | narrate | Before you could stop them, one of the survivors seized the {name} and began tearing at its flesh. // The other survivors followed the example and began devouring the creature alive. Fearing for your own life, you retreated.
 altar_done | narrate | The stone took one and marked another... The marks did not wash off... They never do.
-card_taken | narrate | You took it... The other two went dark... They would be there for the next one.
+card_taken | narrate | Another creature joins your caravan.

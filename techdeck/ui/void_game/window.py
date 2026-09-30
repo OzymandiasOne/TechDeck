@@ -588,7 +588,7 @@ class VoidTable(RoadScenes, QWidget):
         attacker.lunge_t0 = self.t
         if e["direct"]:
             self.scale_glow = 1.0
-            self.say("hit_him" if e["card"].owner == YOU else "hit_you", once_per_phase=True)
+            self.say("hit_him" if e["card"].owner == YOU else "hit_you", once_per_phase=True, n=e["power"])
         else:
             d = self.vcards.get(e["defender"].uid)
             if d is not None:
@@ -1252,8 +1252,10 @@ class VoidTable(RoadScenes, QWidget):
                         self.selected = vc.uid          # raised, so its price can be pointed at
                         self.say("rules_blood")         # the first card you could not pay for: blood
                         return
-                    raise IllegalMove(f"It demands {d.cost} {'remnants' if d.cost_kind == REMNANT else 'offerings'}. "
-                                      f"You cannot pay.")
+                    if d.cost_kind == REMNANT:
+                        raise IllegalMove(f"It demands {d.cost} remnants. You cannot pay.")
+                    raise IllegalMove(f"{d.name.title()} requires {d.cost} sacrifice{'s' if d.cost > 1 else ''}. "
+                                      f"You do not have enough.")
                 else:
                     self.pick_up(vc.uid)
             elif vc.where == "you" and self.selected is not None:

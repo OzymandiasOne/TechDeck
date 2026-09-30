@@ -75,7 +75,7 @@ class RoadScenes:
             self.say("scene_rare" if k == "rare" else "scene_choice")
         elif k == "fire":
             self.scene, self.pick, self.scene_t0 = "fire", 0, self.t
-            self.say("scene_fire")
+            self.say("scene_fire", what=stop.fire)
         elif k == "altar":
             self.scene, self.pick, self.scene_t0 = "altar", 0, self.t
             self.forge_from = [None, None, None]
@@ -143,8 +143,10 @@ class RoadScenes:
     def fire_go(self):
         if not self.run.deck:
             return
+        card = self.run.deck[self.pick]
         out = self.run.rest(self.pick)
-        self.say("fire_buffed" if out == "buffed" else "fire_eaten")
+        self.say("fire_buffed" if out == "buffed" else "fire_eaten", name=card.defn.name.title(),
+                 what=self.run.stop.fire if self.run.stop else "power")
         if out == "eaten" or not self.run.deck:
             self.pick = 0
             self.road_show()
