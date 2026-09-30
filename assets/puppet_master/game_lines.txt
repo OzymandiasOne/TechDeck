@@ -94,15 +94,13 @@
 # =====================================================================
 
 # ── the table ─────────────────────────────────────────────────────────
-welcome | amused | So. You sat down.
-welcome | curious | You found the table. Few do.
 welcome | calm | Another one. It has been a while. Sit. You will have forgotten how this is played. I will remind you.
 
 welcome_again | calm | Again.
 welcome_again | amused | Sit. You know where.
 welcome_again | curious | You came back to the table. They usually do.
 
-rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [bell,auto]When you are done, ring the bell.
+rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. Tip it five toward me and you have won. // [scale]Tip it five the other way and I have you. // [bell,auto]When you are done, ring the bell.
 rules_blood | calm | [costs]The greater things want blood. That is the price you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. // [remnants]Every one you lose leaves a remnant. Some things are bought with remnants alone.
 
 first_turn | calm | Begin.
@@ -187,7 +185,6 @@ close_him | amused | One more. Think carefully.
 close_him | pleased | The scale is nearly done with you.
 
 idle | amused | Take your time. I have all of it.
-idle | curious | Thinking. I can hear it.
 
 first_win | calm | You won this one. They will not all be so easy.
 win | grave | The scale tips. Toward me. Enjoy it. It will not happen twice.

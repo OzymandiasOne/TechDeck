@@ -33,7 +33,8 @@ Pose = tuple[Vec, Vec, Vec]               # centre, half-width vector, half-heig
 DEAL_S, PLAY_S, MOVE_S, HAND_S = 0.45, 0.55, 0.45, 0.16
 LUNGE_S, FADE_S, GROW_S = 0.22, 0.42, 0.5
 IDLE_LINE_S = 40.0
-CHARS_PER_S = 34.0                    # he types his lines, as in the console
+CHARS_PER_S = 25.5                    # he types his lines, as in the console (a quarter slower than first cut)
+GLANCE_WAIT_S = 1.0                   # a beat after a key before the camera glances at the scale or the bell
 PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
@@ -45,7 +46,7 @@ MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_tu
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
-LESSON_DELAY_S = 1.0                  # the board lesson starts this long after you look down
+LESSON_DELAY_S = 1.6                  # the board lesson starts this long after the camera sets off for the board
 
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
@@ -200,6 +201,7 @@ class VoidTable(RoadScenes, QWidget):
         self.captions: deque[tuple[str, str, str, str]] = deque()   # text, emotion, key, glow
         self.caption_key = ""
         self.glow = ""                    # what on the table glows while this page shows
+        self.glance_at: float | None = None   # a pending turn of the camera, a beat after a key
         self.caption_auto = False         # this page lets go by itself
         self.typed_at = -1.0              # when the page finished typing
         self.lesson_at: float | None = None   # the board lesson, pending
@@ -288,7 +290,10 @@ class VoidTable(RoadScenes, QWidget):
 
     def _speech_tick(self):
         if self.caption and self.t < self.caption_until:
-            self.caption_shown = min(len(self.caption), int((self.t - self.type_t0) * CHARS_PER_S))
+            if self.glance_at is not None and self.t >= self.glance_at:
+                self.glance_at = None
+                self._glance_for(self.glow)
+            self.caption_shown = max(0, min(len(self.caption), int((self.t - self.type_t0) * CHARS_PER_S)))
             return
         self.caption = ""
         ended = self.caption_key if self.caption_key else ""
@@ -303,8 +308,14 @@ class VoidTable(RoadScenes, QWidget):
             self.typed_at = -1.0
             self.mood = MOODS.get(emotion, MOODS["calm"])
             self.mood_t0 = self.t
-            self._glance_for(glow)
-            typed = len(text) / CHARS_PER_S
+            if self._needs_glance(glow):
+                # a beat of silence, then the camera turns, then he speaks
+                self.glance_at = self.t + GLANCE_WAIT_S
+                self.type_t0 = self.glance_at + r3.VIEW_S
+            else:
+                self.glance_at = None
+                self._glance_for(glow)
+            typed = len(text) / CHARS_PER_S + max(0.0, self.type_t0 - self.t)
             # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
             hold = NAG_HOLD_S if key == "nag" else FLAVOR_HOLD_S
             waits = key in MUST_READ and not self.caption_auto
@@ -314,6 +325,13 @@ class VoidTable(RoadScenes, QWidget):
         elif ended:
             self.caption_key = ""
             self._blurb_ended(ended)
+
+    def _needs_glance(self, glow: str) -> bool:
+        """A page about the scale or the bell, from the board, when the camera
+        is not already looking that way."""
+        if self.view not in r3.BOARD_VIEWS or self.scene != "fight":
+            return False
+        return (glow == "scale" and self.view != "board_left") or (glow == "bell" and self.view != "board_right")
 
     def _glance_for(self, glow: str):
         """While he speaks of the scale or the bell from the board, the camera
@@ -327,10 +345,17 @@ class VoidTable(RoadScenes, QWidget):
         elif self.view in ("board_left", "board_right"):
             self.set_view("board")
 
+    def active_glow(self) -> str:
+        """The page's glow, but only from halfway through the line."""
+        if not self.glow or not self.caption:
+            return ""
+        return self.glow if self.caption_shown * 2 >= len(self.caption) else ""
+
     def _blurb_ended(self, key: str):
-        """The last page of a blurb has gone. The board lesson hands you back your hand."""
+        """The last page of a blurb has gone. The board lesson leaves you on the
+        board, your lane still lit, your card still waiting."""
         if key == "rules_lanes" and self.view in r3.BOARD_VIEWS:
-            self.set_view("hand_high")
+            self.set_view("board")
 
     def advance_dialogue(self) -> bool:
         """Space or a click while he is talking: finish the line if it is still
@@ -351,6 +376,9 @@ class VoidTable(RoadScenes, QWidget):
         if self.caption and not talking and self.typed_at < 0:
             self.typed_at = self.t
         return talking
+
+    def _draw_glows(self):
+        return self.active_glow()
 
     def waiting_for_key(self) -> bool:
         """A line that will not go on until you press something."""
@@ -674,8 +702,9 @@ class VoidTable(RoadScenes, QWidget):
             lift, front = 0.0, 0.0
             if self.selected == vc.uid:
                 lift = 1.0                              # high above the hand
-            elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy():
-                front = 1.0                             # straight toward you, through the others
+            elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy() \
+                    and self.view == "hand_high":
+                front = 1.0                             # up, clear of the others (held hand only)
             tucked = self.view in r3.BOARD_VIEWS or self.book is not None
             if tucked and self.selected == vc.uid:
                 pose = r3.held_pose(self.view)          # the chosen card stays in view, bottom left
@@ -741,10 +770,11 @@ class VoidTable(RoadScenes, QWidget):
         if self.cursor is not None and (self.view in r3.BOARD_VIEWS or self.selected is not None):
             highlight.add(("you", self.cursor))
         pulse = 0.5 + 0.5 * math.sin(self.t * 5)          # everything he speaks of breathes
+        glow = self.active_glow()                          # from halfway through the line
         pulsing = set()
-        if self.glow == "lanes_you":
+        if glow == "lanes_you":
             pulsing = {("you", l) for l in range(LANES)}
-        elif self.glow == "lanes_him":
+        elif glow == "lanes_him":
             pulsing = {("him", l) for l in range(LANES)} | {("next", l) for l in range(LANES)}
         r3.draw_slots(fr, highlight - pulsing, pulsing, pulse)
         if ("you", self.cursor) in highlight and self.cursor is not None:
@@ -752,27 +782,27 @@ class VoidTable(RoadScenes, QWidget):
             if poly:
                 fill = QColor(PEAK); fill.setAlpha(int(40 + 40 * pulse))
                 fr.p.setPen(Qt.PenStyle.NoPen); fr.p.setBrush(fill); fr.p.drawPolygon(poly)
-        r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, pulse if self.glow == "scale" else 0.0))
+        r3.draw_scale(fr, self.scale_shown, max(self.scale_glow, pulse if glow == "scale" else 0.0))
         self._draw_progress(fr)
         self._draw_candles(fr)
         can_act = not self.busy() and not self.over
         ringing = self.t - self.bell_t0
-        bell = r3.draw_bell(fr, (can_act and g.phase == "play") or (self.glow == "bell" and pulse > 0.5),
+        bell = r3.draw_bell(fr, (can_act and g.phase == "play") or (glow == "bell" and pulse > 0.5),
                             ringing if 0 <= ringing < 1 else 0.0)
         if bell:
             self.hits.append((("bell",), bell))
         must_draw = can_act and g.phase == "draw"
         in_deck = self.view == "deck"
         vot = r3.draw_pile(fr, r3.VOTARIES, g.votaries, art.card_face(CARDS["votary"]),
-                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1) or (self.glow == "piles" and pulse > 0.5))
+                           (must_draw and g.votaries > 0) or (in_deck and self.cursor == 1) or (glow == "piles" and pulse > 0.5))
         if vot:
             self.hits.append((("votary",), vot))
         deck = r3.draw_pile(fr, r3.DECK, len(g.deck), art.card_back(),
-                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0) or (self.glow == "piles" and pulse > 0.5))
+                            (must_draw and bool(g.deck)) or (in_deck and self.cursor == 0) or (glow == "piles" and pulse > 0.5))
         if deck:
             self.hits.append((("deck",), deck))
         r3.draw_remnants(fr, self.remnants_shown)
-        if self.glow == "remnants":
+        if glow == "remnants":
             fr.polyline3(fr.ring(r3.REMNANTS, 0.7, 12), r3._mix(DIM, PEAK, pulse), 1.0 + 1.6 * pulse)
         # slots you may play into are also click targets
         if self.selected is not None or self.view == "board":
@@ -793,12 +823,14 @@ class VoidTable(RoadScenes, QWidget):
                 c = add(c, (0, 0.15, 0))
             elif self.selected == vc.uid or self.t < vc.flash_until:
                 edge = PEAK
+            elif vc.where == "hand" and self.hand_cursor is not None and self._hand_cards()[self.hand_cursor:self.hand_cursor + 1] == [vc]:
+                edge = PEAK                             # the current card, marked but not moved
             face = art.card_face(vc.card.defn, vc.shown_power, vc.shown_health, vc.card.sigils)
             poly = fr.draw_card(c, u, v, face, art.card_back(), vc.opacity, edge)
             if poly and vc.where != "gone":
                 self.hits.append((("card", vc.uid), poly))
             if vc.where == "hand" and vc.card.defn.cost > 0 and (
-                    (self.glow == "cost_icon" and self.selected == vc.uid) or self.glow == "costs"):
+                    (glow == "cost_icon" and self.selected == vc.uid) or glow == "costs"):
                 # a pulsing ring around the price: every priced card, or just the raised one
                 at = add(add(c, mul(u, 0.55)), mul(v, 0.55))
                 q = cam.project(at)
@@ -1388,6 +1420,7 @@ class VoidTable(RoadScenes, QWidget):
                 elif v == "deck":
                     self.set_view("hand_high")
                 elif v == "board":
+                    self.put_down()
                     self.set_view("deck" if self._drawing() else "hand_low")
                 elif v in ("board_far", "board_left", "board_right"):
                     self.set_view("board")

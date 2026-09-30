@@ -141,6 +141,9 @@ def test_the_lanes_lesson_comes_a_beat_after_you_first_look_at_the_board_and_glo
     assert table.view == "board" and not table.caption
     for _ in range(int(1.2 * 30)):
         table._tick()
+    assert not table.caption, "a beat before the lesson"
+    for _ in range(int(0.8 * 30)):
+        table._tick()
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "rules_lanes" in said
     glows = [table.glow] + [c[3] for c in table.captions]
@@ -193,21 +196,23 @@ def test_the_last_board_page_lets_go_and_hands_back_the_hand(table):
     from PySide6.QtCore import Qt as Q
     ready(table)
     press(table, Q.Key.Key_W)
-    for _ in range(int(1.2 * 30)):
+    for _ in range(int(1.8 * 30)):
         table._tick()
-    for _ in range(3):                             # the three waiting pages
-        for _ in range(200):
+    for _ in range(4):                             # the four waiting pages
+        for _ in range(400):
             table._tick()
-            if not table._talking():
+            if table.caption and not table._talking():
                 break
         press(table, Q.Key.Key_Space); table._tick()
     assert table.caption_auto and table.caption_key == "rules_lanes"
-    assert table.view == "board_right", "the bell page glances right at the bell"
-    for _ in range(int(9 * 30)):
+    for _ in range(int(2 * 30)):
         table._tick()
-        if table.view.startswith("hand"):
+    assert table.view == "board_right", "the bell page glances right at the bell, a beat later"
+    for _ in range(int(12 * 30)):
+        table._tick()
+        if table.view == "board":
             break
-    assert table.view == "hand_high", "after 'ring the bell' the view comes back by itself"
+    assert table.view == "board", "after 'ring the bell' the view comes back to the board"
 
 
 def test_rules_wait_for_space_and_a_remark_lingers_then_goes(table):
@@ -316,12 +321,10 @@ def test_picking_a_card_goes_to_the_board_and_s_keeps_it_raised(table):
     press(table, Q.Key.Key_W)
     assert table.view == "board" and table.cursor is not None and table.selected == votary.uid
     press(table, Q.Key.Key_S)
-    assert table.view == "hand_low" and table.selected == votary.uid
-    press(table, Q.Key.Key_W)
-    assert table.view == "board" and table.selected == votary.uid
-    press(table, Q.Key.Key_S)
-    assert table.view == "hand_low" and table.selected == votary.uid
-    press(table, Q.Key.Key_S)                                   # S again: put down
+    assert table.view == "hand_low" and table.selected is None, "leaving the board puts the card down"
+    table._click(("card", votary.uid))
+    assert table.selected == votary.uid
+    press(table, Q.Key.Key_S)                                   # S in the hand: put down
     assert table.selected is None
     table._click(("card", votary.uid)); press(table, Q.Key.Key_Tab)
     assert table.selected is None
@@ -539,6 +542,8 @@ def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(ta
     press(table, Q.Key.Key_R); settle(table)
     hand = table._hand_cards()
     assert table.view == "hand_low" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
+    press(table, Q.Key.Key_S)                                  # the held hand: the current card steps up
+    table._layout_hand()
     front = hand[table.hand_cursor].dst[0]
     other = hand[0].dst[0]
     assert front[1] > other[1] + 0.1, "the cursor card steps up, clear of its neighbours"
@@ -549,23 +554,25 @@ def test_the_scale_page_glances_left_and_a_glances_at_the_scale_any_time(table):
     from PySide6.QtCore import Qt as Q
     ready(table)
     press(table, Q.Key.Key_W)
-    for _ in range(int(1.2 * 30)):
+    for _ in range(int(1.8 * 30)):
         table._tick()
     for _ in range(2):                             # your side, my side
-        for _ in range(200):
+        for _ in range(400):
             table._tick()
-            if not table._talking():
+            if table.caption and not table._talking():
                 break
         press(table, Q.Key.Key_Space); table._tick()
-    assert table.glow == "scale" and table.view == "board_left", "the scale page looks left"
-    quiet(table)
-    for _ in range(int(9 * 30)):
+    assert table.glow == "scale" and table.view == "board", "a beat of silence first"
+    for _ in range(int(1.4 * 30)):
         table._tick()
-        if table.view.startswith("hand"):
+    assert table.view == "board_left", "then the camera looks left at the scale"
+    assert table.active_glow() == "", "the glow waits for the middle of the line"
+    quiet(table)
+    for _ in range(int(12 * 30)):
+        table._tick()
+        if table.view == "board" and not table.caption:
             break
-    press(table, Q.Key.Key_W)                      # the held hand rests...
-    press(table, Q.Key.Key_W)                      # ...and from the low hand, the board
-    assert table.view == "board"
+    assert table.view == "board", "the lesson ends on the board"
     press(table, Q.Key.Key_A)
     assert table.view == "board_left"
     press(table, Q.Key.Key_D)
