@@ -743,9 +743,8 @@ class VoidTable(RoadScenes, QWidget):
             lift, front = 0.0, 0.0
             if self.selected == vc.uid:
                 lift = 1.0                              # high above the hand
-            elif self.hand_cursor == i and not self.busy() \
-                    and self.view == "hand_high":
-                front = 1.0                             # up, clear of the others (held hand only)
+            elif self.hand_cursor == i and not self.busy() and self.view in ("hand_high", "hand_low"):
+                front = 1.0 if self.view == "hand_high" else 0.45   # up, clear of the others (a smaller lift when low)
             tucked = self.view in r3.BOARD_VIEWS or self.book is not None
             if tucked and self.selected == vc.uid:
                 pose = r3.held_pose(self.view)          # the chosen card stays in view, bottom left
