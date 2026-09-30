@@ -34,6 +34,7 @@ DEAL_S, PLAY_S, MOVE_S, HAND_S = 0.45, 0.55, 0.45, 0.16
 LUNGE_S, FADE_S, GROW_S = 0.22, 0.42, 0.5
 IDLE_LINE_S = 40.0
 CHARS_PER_S = 34.0                    # he types his lines, as in the console
+PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
 MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "win", "first_win", "lose", "teeth",
@@ -202,6 +203,7 @@ class VoidTable(RoadScenes, QWidget):
         self.caption_auto = False         # this page lets go by itself
         self.typed_at = -1.0              # when the page finished typing
         self.lesson_at: float | None = None   # the board lesson, pending
+        self.board_at: float | None = None    # a chosen card has risen; the camera follows a beat later
         self.caption: str = ""
         self.caption_shown = 0
         self.type_t0 = 0.0
@@ -690,6 +692,11 @@ class VoidTable(RoadScenes, QWidget):
         dt = TICK_MS / 1000.0
         self.t += dt
         self._acts_tick()
+        if self.board_at is not None and self.t >= self.board_at:
+            self.board_at = None
+            still_held = self.selected is not None and any(c.uid == self.selected for c in self.game.hand)
+            if still_held and self.view in ("hand_low", "hand_high"):
+                self.set_view("board")             # the card has risen: on to the lanes
         if self.lesson_at is not None and self.t >= self.lesson_at:
             self.lesson_at = None
             if self.view in r3.BOARD_VIEWS:
@@ -1047,7 +1054,7 @@ class VoidTable(RoadScenes, QWidget):
 
     def _first_lane(self) -> int:
         g = self.game
-        if self.selected is not None:
+        if self.selected is not None and any(c.uid == self.selected for c in g.hand):
             for lane in range(LANES):
                 if not g.why_not(self.selected, lane, self.sacrifices):
                     return lane
@@ -1057,12 +1064,16 @@ class VoidTable(RoadScenes, QWidget):
         return self.run.fights == 0 and self.run.memory["runs"] == 1
 
     def pick_up(self, uid: int):
-        """Take a card from the hand: it rises, and the view goes to the board
-        with a lane lit. S goes back to the hand with it still raised."""
+        """Choose a card from the hand: it rises first; a beat later the camera
+        moves on to the board with a lane lit and the card waiting at the left.
+        One fluid step, in two parts. S puts it down / comes back to the hand."""
         self.selected, self.sacrifices = uid, []
-        self.cursor = self._first_lane()            # a lane is lit at once, seen from the hand
+        self.cursor = self._first_lane()
+        if self.view in ("hand_low", "hand_high"):
+            self.board_at = self.t + PICK_RISE_S
 
     def put_down(self):
+        self.board_at = None
         self.selected, self.sacrifices = None, []
         if self.view == "board":
             self.cursor = self._first_lane()
@@ -1254,9 +1265,8 @@ class VoidTable(RoadScenes, QWidget):
             self._raise(hand[cur].uid)
 
     def _raise(self, uid: int):
-        """Lift a card in the hand without leaving the hand view."""
-        self.selected, self.sacrifices = uid, []
-        self.cursor = self._first_lane()
+        """Lift a card in the hand; the camera follows to the board a beat later."""
+        self.pick_up(uid)
 
     def _look_at_piles(self):
         """To the piles - only while a draw is owed. A raised card lies flat

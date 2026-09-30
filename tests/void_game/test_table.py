@@ -34,7 +34,7 @@ def greedy(w: VoidTable):
         w._click(("votary",) if not any(c.defn.cost == 0 for c in g.hand) and g.votaries else ("deck",))
         settle(w)
     for card in sorted(list(g.hand), key=lambda c: (c.defn.cost > 0, -c.power)):
-        if g.phase != "play" or not g.can_afford(card.uid) or w.over:
+        if card not in g.hand or g.phase != "play" or not g.can_afford(card.uid) or w.over:
             continue
         w._click(("card", card.uid))
         if w.selected != card.uid:
@@ -46,11 +46,11 @@ def greedy(w: VoidTable):
                 if c is not None and worth < d.cost:
                     w._click(("card", c.uid)); worth += g.offering_worth(c)
             if card.power <= sum(g.rows[YOU][l].power for l in w.sacrifices):
-                w._click(("card", card.uid))          # deselect: not worth it
+                w.put_down()                          # not worth it
                 continue
         free = [l for l in range(LANES) if g.rows[YOU][l] is None or l in w.sacrifices]
         if not free:
-            w._click(("card", card.uid))
+            w.put_down()
             continue
         w._click(("slot", free[0]))
         settle(w)
@@ -541,8 +541,8 @@ def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(ta
     assert table.view == "hand_low" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
     front = hand[table.hand_cursor].dst[0]
     other = hand[0].dst[0]
-    assert front[2] > other[2] + 0.3, "the cursor card sits nearer the camera"
-    assert front[1] <= other[1] + 0.2, "and is not lifted up"
+    assert front[1] > other[1] + 0.1, "the cursor card steps up, clear of its neighbours"
+    assert abs(front[2] - other[2]) < 0.4, "and not toward the camera (it must not grow)"
 
 
 def test_the_scale_page_glances_left_and_a_glances_at_the_scale_any_time(table):
