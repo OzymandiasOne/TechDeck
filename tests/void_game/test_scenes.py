@@ -169,3 +169,30 @@ def test_he_minds_his_hound(table):
     settle(table)
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "pet_dies" in said or table.game.rows[HIM][0] is None
+
+
+def test_the_fire_refuses_a_second_rest_until_five_deaths_and_narrates_leaving(table):
+    to_road(table)
+    table.run.offers = [table.run._stop("fire")] * 3
+    press(table, Qt.Key.Key_Space); quiet(table)
+    card = table.run.deck[0]
+    press(table, Qt.Key.Key_Space); quiet(table)                      # the first rest is free
+    rests = table.run.stop.rests.get(0, 0)
+    press(table, Qt.Key.Key_Space); quiet(table)                      # a second: refused, no deaths yet
+    assert table.run.stop.rests.get(0, 0) == rests
+    table.run.memory["deaths"] = 5
+    press(table, Qt.Key.Key_Space)
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "fire_again" in said
+    quiet(table)
+    assert table.run.stop.rests.get(0, 0) == rests + 1 or card not in table.run.deck
+    if card in table.run.deck:
+        press(table, Qt.Key.Key_Tab)
+        said = [table.caption_key] + [c[2] for c in table.captions]
+        assert "fire_leave" in said
+
+
+def test_the_road_opens_with_his_recollection_once(table):
+    to_road(table)
+    assert table.caption_key == "scene_road_first" or any(c[2] == "scene_road_first" for c in table.captions) or table.caption_key == ""
+    assert table.road_opened

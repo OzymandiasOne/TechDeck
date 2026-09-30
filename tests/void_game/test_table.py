@@ -2,7 +2,7 @@
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, Qt
 
-from techdeck.ui.void_game.rules import LANES, YOU
+from techdeck.ui.void_game.rules import HIM, LANES, YOU
 from techdeck.ui.void_game.window import HINT_AFTER_S as HINT_S, VoidTable
 
 
@@ -542,6 +542,7 @@ def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(ta
     press(table, Q.Key.Key_R); settle(table)
     hand = table._hand_cards()
     assert table.view == "hand_low" and table.hand_cursor == len(hand) - 1, "the new card is the one under the cursor"
+    quiet(table)                                               # his "play your Votary" waits for a key
     press(table, Q.Key.Key_S)                                  # the held hand: the current card steps up
     table._layout_hand()
     front = hand[table.hand_cursor].dst[0]
@@ -577,3 +578,22 @@ def test_the_scale_page_glances_left_and_a_glances_at_the_scale_any_time(table):
     assert table.view == "board_left"
     press(table, Q.Key.Key_D)
     assert table.view == "board"
+
+
+def test_the_tutorial_points_at_the_votary_after_the_first_draw(table):
+    settle(table); quiet(table)
+    table.set_view("deck"); table._click(("votary",)); settle(table)
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "first_draw" in said and table.selected is None, "he points; you play it yourself"
+
+
+def test_his_first_hit_on_your_card_is_narrated_with_names(table):
+    ready(table)
+    from tests.void_game.test_rules import put
+    g = table.game
+    g.incoming = [None] * LANES
+    put(g, "sleeper", HIM, 0); put(g, "hound", YOU, 0)
+    table.enqueue(g.ring_bell())
+    settle(table)
+    lines = [table.caption] + [c[0] for c in table.captions]
+    assert any("Sleeper" in ln and "Hound" in ln for ln in lines), lines

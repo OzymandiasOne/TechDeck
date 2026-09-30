@@ -28,6 +28,7 @@ FAN_Z, FAN_Y = 4.6, 0.9
 LAMP_X = -6.6
 BOOK_PER_PAGE = 4
 DIGITIZE_S = 4.5
+FIRE_AGAIN_DEATHS = 5                 # a second rest at the same fire is only offered after this many deaths
 
 
 class RoadScenes:
@@ -45,6 +46,8 @@ class RoadScenes:
         self.book: int | None = None      # page of the rule book, or None
         self.seen_this_fight: set[str] = set()
         self.first_sacrifice_said = False
+        self.road_opened = False              # the road's first doors have been narrated
+        self.warmed: str = ""                 # the last card warmed at this fire, for leaving
         self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
 
@@ -63,7 +66,11 @@ class RoadScenes:
                 self.say("scene_boss")
             self.road_pick()
             return
-        self.say("scene_road")
+        if self.run.step == 1 and not self.road_opened:
+            self.road_opened = True
+            self.say("scene_road_first")           # once per run: he recalls your story
+        else:
+            self.say("scene_road")
 
     def road_pick(self):
         stop = self.run.choose(self.pick)
@@ -88,7 +95,7 @@ class RoadScenes:
         self.vcards.clear(); self.acts.clear(); self.act_end = -1.0
         self.selected, self.sacrifices, self.cursor = None, [], None
         self.view = self.view_prev = "hand_low"; self.peek = False; self.book = None
-        self.over = False; self.after_fight = ""
+        self.over = False; self.after_fight = ""; self.opening_done = False
         self.scale_shown = self.scale_target = 0.0; self.remnants_shown = 0
         self.seen_this_fight = set(); self.said_this_phase = set()
         if run.stop and run.stop.kind == "boss":
@@ -144,7 +151,13 @@ class RoadScenes:
         if not self.run.deck:
             return
         card = self.run.deck[self.pick]
+        times = self.run.stop.rests.get(self.pick, 0) if self.run.stop else 0
+        if times >= 1:
+            if self.run.memory["deaths"] < FIRE_AGAIN_DEATHS:
+                return                          # not yet: the survivors keep their manners
+            self.say("fire_again")
         out = self.run.rest(self.pick)
+        self.warmed = card.defn.name.title() if out == "buffed" else ""
         self.say("fire_buffed" if out == "buffed" else "fire_eaten", name=card.defn.name.title(),
                  what=self.run.stop.fire if self.run.stop else "power")
         if out == "eaten" or not self.run.deck:
@@ -166,6 +179,9 @@ class RoadScenes:
         self.road_show()
 
     def leave_stop(self):
+        if self.scene == "fire" and self.warmed:
+            self.say("fire_leave", name=self.warmed)
+            self.warmed = ""
         if self.scene in ("fire", "altar"):
             self.road_show()
 

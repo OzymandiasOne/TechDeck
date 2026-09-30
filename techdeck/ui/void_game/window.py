@@ -38,7 +38,7 @@ GLANCE_WAIT_S = 1.0                   # a beat after a key before the camera gla
 PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
-MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "win", "first_win", "lose", "teeth",
+MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "first_draw", "first_hit", "deck_empty", "win", "first_win", "lose", "teeth",
              "candle_out", "boss_welcome", "boss_phase", "run_won", "dead", "deathcard", "deathcard_named",
              "digitize", "first_sacrifice", "famine", "scene_road", "scene_fight", "scene_choice", "scene_rare",
              "scene_fire", "scene_altar", "scene_boss", "fire_buffed", "fire_eaten", "altar_done",
@@ -206,6 +206,7 @@ class VoidTable(RoadScenes, QWidget):
         self.typed_at = -1.0              # when the page finished typing
         self.lesson_at: float | None = None   # the board lesson, pending
         self.board_at: float | None = None    # a chosen card has risen; the camera follows a beat later
+        self.opening_done = False             # the opening deal is over; draws from here are yours
         self.caption: str = ""
         self.caption_shown = 0
         self.type_t0 = 0.0
@@ -481,6 +482,10 @@ class VoidTable(RoadScenes, QWidget):
         vc = VCard(card, start, start, card.power, card.health, where="hand")
         self.vcards[card.uid] = vc
         self.show_draw_arrow = False
+        if self._tutorial() and self.opening_done and "first_draw" not in self.played_lines and any(
+                c.defn.id == "votary" for c in self.game.hand):        # your first real draw, not the opening deal
+            self.played_lines.add("first_draw")
+            self.say("first_draw")                 # he points at the votary; you play it yourself
         if self.view in ("deck", "hand_high"):
             self.set_view("hand_low")              # the draw is made: the hand rests, on its own
         self.pending_pick = None                   # the new card takes the cursor, not the old pick
@@ -579,6 +584,10 @@ class VoidTable(RoadScenes, QWidget):
         self.said_this_phase.clear()
 
     def _strike(self, e):
+        if (not e["direct"] and e["card"].owner == HIM and self._tutorial()
+                and "first_hit" not in self.played_lines):
+            self.played_lines.add("first_hit")     # the first time one of his wounds one of yours: narrated
+            self.say("first_hit", yours=e["defender"].name.title(), his=e["card"].name.title(), n=e["power"])
         attacker = self.vcards.get(e["card"].uid)
         if attacker is None:
             return
@@ -664,11 +673,15 @@ class VoidTable(RoadScenes, QWidget):
         self.say("famine" if count == 1 else "famine_again", n=count)
 
     def _your_turn(self, turn: int):
+        self.opening_done = True
         self.said_this_phase.clear()
         self.idle_said_turn = 0
         self.last_input_t = self.t
         if self._drawing():
             self.set_view("deck")                  # the turn opens at the piles
+            if not self.game.deck and self.game.votaries > 0 and "deck_empty" not in self.played_lines:
+                self.played_lines.add("deck_empty")
+                self.say("deck_empty")
         if turn == 1:
             self.say("first_turn")
 

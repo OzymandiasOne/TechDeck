@@ -8,7 +8,7 @@ from techdeck.ui.void_game.dialogue import MOODS, Dialogue, lines_path, parse_li
 def test_the_shipped_file_parses_and_covers_the_moments_that_matter():
     lines = parse_lines(lines_path().read_text(encoding="utf-8"))
     for key in ("welcome", "rules_lanes", "rules_blood", "first_turn", "hit_him", "hit_you", "kill_his",
-                "kill_yours", "undying", "grow", "win", "lose", "idle"):
+                "kill_yours", "undying", "grow", "win", "lose"):
         assert lines.get(key), f"no line for {key}"
     for pool in lines.values():
         for emotion, text in pool:

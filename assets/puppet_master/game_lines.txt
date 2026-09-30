@@ -37,6 +37,9 @@
 #    rules_lanes        the first time you look down at the board (first fight of your first run)
 #    rules_blood        the first time you reach for a card you cannot pay for (same)
 #    first_turn         your first turn begins
+#    first_draw         you made your first draw ever (the tutorial); he points at the votary
+#    first_hit          the first time one of his strikes one of yours (the tutorial):
+#                       {yours} {his} {n} are the cards and the damage
 #    first_sacrifice    the first time you offer a real creature (not a votary)
 #    sacrifice          you offered one card
 #    sacrifice_many     you offered two or more at once
@@ -62,6 +65,7 @@
 #    endless            the martyr gave blood and stayed
 #    undying            your Ouroboros came back
 #    grow               a Dead Star woke
+#    deck_empty         your deck is empty at the start of a turn; only votaries remain
 #    famine             you had nothing left to draw; hunger took his row
 #    famine_again       ...and again ({n} is how many times)
 #    close_you          you are one hit from winning
@@ -81,6 +85,7 @@
 #    digitize           the card is taken; you are kept
 #
 #  KEYS - the road (narrate)
+#    scene_road_first   the road's first doors, once per run
 #    scene_road         the doors appear
 #    scene_fight        you chose a fight
 #    scene_choice       you chose the cards
@@ -88,6 +93,8 @@
 #    scene_fire         you chose the fire
 #    scene_altar        you chose the altar
 #    scene_boss         the last door
+#    fire_again         you rest the same card a second time (only after five deaths)
+#    fire_leave         you leave the fire with a warmed card ({name})
 #    fire_buffed        the fire helped
 #    fire_eaten         the fire took the card
 #    altar_done         the altar took one and marked another
@@ -98,22 +105,20 @@
 welcome | calm | Another challenger... It has been ages. Sit. Perhaps you have forgotten how this is played. Allow me to remind you.
 
 welcome_again | calm | Again.
-welcome_again | amused | Sit. You know where.
-welcome_again | curious | You came back to the table. They usually do.
 
 rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. You win if you tip my side completely downward. // [scale]Tip it five the other way and I have you. // [bell,auto]Ring the bell to end your turn... And begin the combat.
 rules_blood | calm | [costs]The greater souls want blood. That is the cost you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. 
 
 first_turn | calm | Draw a card.
+first_draw | calm | Now, play your Votary.
+first_hit | calm | Your {yours} stands in the path of my {his}. // My {his} has dealt {n} points of damage to your {yours}. That means its health is {n} points lower. // If a creature's health reaches 0, it dies.
 
 first_sacrifice | grave | Do not mourn. What you sacrifice is not lost, though it's suffering was real... You will see it again.
 sacrifice | calm | Sacrifices must be made. An honorable death.
-sacrifice | amused | Gone. Was it worth it.
 sacrifice_many | pleased | Two at once. You are learning what the game is.
 sacrifice_many | amused | So much blood for so little.
 
 play_new | curious | I have not seen that one tonight.
-play_new | calm | New. Good.
 play_repeat | amused | That one again. You lean on it.
 play_repeat | calm | The same answer. We will see if it is the right one twice.
 play_small | calm | Small.
@@ -156,48 +161,30 @@ commit_crowned | pleased | A court of my own.
 
 hit_him | displeased | {n} damage dealt. {n} weights on the scale.
 hit_him | calm | Weight. I felt that.
-hit_you | pleased | And the scale tips.
-hit_you | amused | You left that lane open. I noticed.
 hit_you | calm | Weight.
 
 kill_his | displeased | That one was mine.
-kill_his | calm | It served.
-kill_yours | amused | It goes to the remnants.
 kill_yours | pleased | Gone.
 pet_dies | displeased | That was my hound.
-pet_dies | grave | It was defenceless. You knew that.
 venom | grave | What it wounds, dies. There is no size that matters.
 thorns | amused | It bit back. They do.
-repelled | calm | Nothing strikes it. Not yours. Not mine.
 guard | curious | It moved to meet me. Loyal thing.
 spawn | amused | And now there are two.
-endless | grave | It gave, and it stayed. Some things cannot be spent.
 undying | curious | Back again. Stronger. It remembers dying.
 grow | pleased | There it is.
 
-famine | grave | Your supply is spent. Nothing left to draw. Hunger sets in, and hunger is on my side.
+deck_empty | calm | You've drawn all the creatures from your deck. A votary is the only choice.
+famine | grave | Famine begins to set in...
 famine_again | amused | Hungrier.
-famine_again | grave | It grows. It always grows.
-
-close_you | displeased | One more and you have me. Do not get used to the feeling.
-close_you | grave | Careful. Winning changes things.
-close_him | amused | One more. Think carefully.
-close_him | pleased | The scale is nearly done with you.
-
-idle | amused | Take your time. I have all of it.
 
 first_win | calm | You've won this match. They won't all be this easy.
 win | grave | The scale tips. Toward me. Enjoy it. It will not happen twice.
-win | displeased | You won. Remember how. You will need it.
 teeth | amused | More than you needed. Keep the difference. I will find a use for it.
 lose | pleased | And that is the game.
-lose | amused | The scale does not lie. Neither do I.
 candle_out | grave | A light went out. You have one left. Mind it.
 
 boss_welcome | grave | The road ends here. So do the games you were winning.
 boss_phase | displeased | Enough. We start again. What you had on the board, you no longer have.
-boss_phase | grave | You tipped it once. I unmake what you built and we begin again. Sit.
-run_won | grave | The scale tipped. The road is walked. Remember this feeling. It does not last.
 run_won | displeased | You won. I did not expect to say it. I will not say it twice.
 
 dead | grave | The last light is out. You are not leaving.
@@ -206,7 +193,7 @@ deathcard_named | grave | {name}. It will do.
 digitize | grave | I keep what I catch. You will turn up again, at this table, in a hand. Perhaps mine.
 
 # ── the road (his other voice) ────────────────────────────────────────
-scene_road | narrate | The dark opened in three directions... Each way had been walked before... You chose.
+scene_road_first | narrate | Let me recall your story... Oh, yes... You were lost deep in the void... Three paths lay before you.
 scene_road | narrate | Three doors stood in the nothing... None of them was locked... That was the trick of them.
 scene_road | narrate | You stood between the fights... The void offered you a choice... It always does, before it takes.
 scene_fight | narrate | You heard the bell before you saw the table... The board was already set... He was already waiting.
@@ -217,6 +204,8 @@ scene_fire | narrate | You came across a small group of survivors. Faces shrunke
 scene_altar | narrate | A stone stood in the void, worn smooth by hands... The hands were gone... The stone remembered them.
 scene_boss | narrate | The road ended... He turned to face you at last... The bell rang itself.
 fire_buffed | narrate | The fire warmed the poor {name}, enhancing its {what}.
+fire_again | narrate | You had an idea. Why not warm your creature by the fire... for just a moment longer? // One of the survivors took a step closer. This would be risky.
+fire_leave | narrate | One of the survivors reached toward it. Another gnashed their teeth. // Without a word, you pulled the {name} away from the fire and left.
 fire_eaten | narrate | Before you could stop them, one of the survivors seized the {name} and began tearing at its flesh. // The other survivors followed the example and began devouring the creature alive. Fearing for your own life, you retreated.
 altar_done | narrate | The stone took one and marked another... The marks did not wash off... They never do.
 card_taken | narrate | Another creature joins your caravan.
