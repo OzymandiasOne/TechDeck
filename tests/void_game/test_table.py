@@ -620,3 +620,16 @@ def test_his_instructions_never_eat_your_keys(table):
     table._click(("card", votary.uid))
     table._tick()
     assert table.caption_key != "first_draw", "you did what he asked: the line lets go"
+
+
+def test_the_tutorial_looks_at_the_piles_only_when_he_offers_the_draw(table):
+    settle(table)                                               # the welcome is still up
+    assert table.game.phase == "draw" and table.caption_key == "welcome"
+    assert table.view != "deck", "the camera waits for his line"
+    for _ in range(40):
+        table._tick()
+        if table.caption_key == "first_turn":
+            break
+        table.advance_dialogue()
+    assert table.caption_key == "first_turn"
+    assert table.view == "deck", "the piles open as he offers the choice"

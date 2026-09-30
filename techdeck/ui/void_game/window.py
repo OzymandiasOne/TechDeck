@@ -329,6 +329,9 @@ class VoidTable(RoadScenes, QWidget):
             else:
                 self.glance_at = None
                 self._glance_for(glow)
+            if key in ("first_turn", "second_turn") and self._drawing() and self.view != "deck":
+                self.set_view("deck")              # the piles open as he offers the choice
+                self.type_t0 = max(self.type_t0, self.t + r3.VIEW_S)
             typed = len(text) / CHARS_PER_S + max(0.0, self.type_t0 - self.t)
             # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
             hold = NAG_HOLD_S if key == "nag" else (PROMPT_HOLD_S if key in PROMPT_KEYS else FLAVOR_HOLD_S)
@@ -703,7 +706,8 @@ class VoidTable(RoadScenes, QWidget):
         self.idle_said_turn = 0
         self.last_input_t = self.t
         if self._drawing():
-            self.set_view("deck")                  # the turn opens at the piles
+            if not self._offers_draw(turn):
+                self.set_view("deck")              # the turn opens at the piles
             if not self.game.deck and self.game.votaries > 0 and "deck_empty" not in self.played_lines:
                 self.played_lines.add("deck_empty")
                 self.say("deck_empty")
@@ -712,6 +716,11 @@ class VoidTable(RoadScenes, QWidget):
                 self.say("first_turn")
             elif turn == 2:
                 self.say("second_turn")
+
+    def _offers_draw(self, turn: int) -> bool:
+        """The tutorial's first two turns: he offers the draw in words, and the
+        camera does not look at the piles until that line begins."""
+        return self._tutorial() and turn in (1, 2)
 
     def _drawing(self) -> bool:
         """A draw is owed: the piles are open, and the hand does not rest low."""
