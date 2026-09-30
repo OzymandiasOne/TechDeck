@@ -41,6 +41,7 @@
 #    first_draw         the tutorial: you made your first real draw; he points at the votary
 #    first_hit          the tutorial: the first time one of his wounds one of yours
 #                       ({yours} {his} {n} are the cards and the damage)
+#    bell_early         the tutorial: you reached for the bell before he told you about it
 #    first_sacrifice    the first time you offer a real creature (not a votary)
 #    sacrifice          you offered one card
 #    sacrifice_many     you offered two or more at once
@@ -106,6 +107,7 @@ rules_blood | calm | [costs]The greater souls want blood. That is the cost you s
 first_turn | calm | You can draw a card from your deck or a votary.
 second_turn | calm | Again, the choice: a random card from your deck? Or the certainty of a votary?
 first_draw | calm | Play the votary card.
+bell_early | displeased | Don't touch that.
 first_hit | calm | Your {yours} stands in the path of my {his}. // My {his} has dealt {n} points of damage to your {yours}. That means its health is {n} points lower. // If a creature's health reaches 0, it dies.
 first_sacrifice | grave | Do not mourn. What you sacrifice is not lost, though it's suffering was real... You will see it again.
 sacrifice | calm | Sacrifices must be made. An honorable death.

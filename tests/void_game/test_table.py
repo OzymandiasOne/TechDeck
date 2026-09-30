@@ -29,6 +29,7 @@ def settle(w: VoidTable, limit: int = 900):
 def greedy(w: VoidTable):
     """One turn the way a simple player would: draw, play what pays, ring."""
     g = w.game
+    w.bell_told = True                                  # the tutorial's bell guard is not under test here
     if g.phase == "draw":
         w.set_view("deck")                        # look over first, then draw
         w._click(("votary",) if not any(c.defn.cost == 0 for c in g.hand) and g.votaries else ("deck",))
@@ -86,8 +87,9 @@ def test_a_played_card_travels_to_its_lane(table):
 
 
 def ready(w: VoidTable):
-    """Settled, his opening lines waved through, the first draw taken."""
+    """Settled, his opening lines waved through, the first draw taken, the bell spoken of."""
     settle(w); quiet(w)
+    w.bell_told = True
     if w.game.phase == "draw":
         w.set_view("deck"); w._click(("votary",)); settle(w); quiet(w)
 
@@ -633,3 +635,25 @@ def test_the_tutorial_looks_at_the_piles_only_when_he_offers_the_draw(table):
         table.advance_dialogue()
     assert table.caption_key == "first_turn"
     assert table.view == "deck", "the piles open as he offers the choice"
+
+
+def test_the_tutorial_keeps_the_bell_out_of_reach_until_he_speaks_of_it(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    press(table, Q.Key.Key_R); settle(table); quiet(table)          # drawn: it is your turn to play
+    assert table.game.phase == "play" and not table.bell_told
+    press(table, Q.Key.Key_Tab); settle(table)
+    assert table.game.phase == "play", "the bell did not ring"
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "bell_early" in said
+    quiet(table)
+    table.set_view("board")                                          # the lesson, bell page included
+    for _ in range(400):
+        table._tick()
+        if table.bell_told:
+            break
+        table.advance_dialogue()
+    assert table.bell_told
+    quiet(table)
+    press(table, Q.Key.Key_Tab); settle(table)
+    assert table.game.phase != "play" or table.game.turn > 1, "now it rings"

@@ -232,6 +232,7 @@ class VoidTable(RoadScenes, QWidget):
         self.scale_glow = 0.0
         self.remnants_shown = 0
         self.bell_t0 = -9.0
+        self.bell_told = False            # the tutorial: he has spoken of the bell (until then, hands off)
         self.over = False
         self.last_input_t = 0.0
         self.idle_said_turn = 0
@@ -273,6 +274,9 @@ class VoidTable(RoadScenes, QWidget):
         if not got:
             return
         text, emotion = got
+        if (self._must_read(key) and self.caption and self.caption_until != float("inf")
+                and self.caption_shown >= len(self.caption)):
+            self.caption_until = self.t            # a passing remark makes way at once for one that waits
         pages = [p.strip() for p in text.split("//")]
         if part == "head":
             pages = pages[:-1]
@@ -317,6 +321,8 @@ class VoidTable(RoadScenes, QWidget):
             glow, _, auto = glow.partition("|")
             self.caption, self.caption_key, self.glow = text, key, glow
             self.caption_auto = auto == "auto"
+            if glow == "bell":
+                self.bell_told = True
             self.caption_shown = 0
             self.type_t0 = self.t
             self.typed_at = -1.0
@@ -335,13 +341,19 @@ class VoidTable(RoadScenes, QWidget):
             typed = len(text) / CHARS_PER_S + max(0.0, self.type_t0 - self.t)
             # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
             hold = NAG_HOLD_S if key == "nag" else (PROMPT_HOLD_S if key in PROMPT_KEYS else FLAVOR_HOLD_S)
-            waits = key in MUST_READ and not self.caption_auto
+            waits = self._must_read(key) and not self.caption_auto
             self.caption_until = float("inf") if waits else self.t + typed + hold
             if key != ended and ended:
                 self._blurb_ended(ended)
         elif ended:
             self.caption_key = ""
             self._blurb_ended(ended)
+
+    @staticmethod
+    def _must_read(key: str) -> bool:
+        """A line that waits for a key: the rules, the greetings, the scenes -
+        and every remark on a card you played or offered."""
+        return key in MUST_READ or key.startswith(("play_", "sacrifice"))
 
     def _needs_glance(self, glow: str) -> bool:
         """A page about the scale or the bell, from the board, when the camera
@@ -722,6 +734,13 @@ class VoidTable(RoadScenes, QWidget):
         camera does not look at the piles until that line begins."""
         return self._tutorial() and turn in (1, 2)
 
+    def _bell_allowed(self) -> bool:
+        """The tutorial keeps the bell out of reach until he has spoken of it."""
+        if self._tutorial() and not self.bell_told:
+            self.say("bell_early")
+            return False
+        return True
+
     def _drawing(self) -> bool:
         """A draw is owed: the piles are open, and the hand does not rest low."""
         g = self.game
@@ -913,8 +932,12 @@ class VoidTable(RoadScenes, QWidget):
             col = BRIGHT if draw_on else DIM               # dim once the draw is spent
             fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", col)
             fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", col)
-        if self.view != "board_left" and not self.over and not self.busy() and g.phase == "play":
-            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "TAB")   # wherever the bell is in view
+        if (self.view != "board_left" and not self.over and not self.busy() and g.phase == "play"
+                and (self.bell_told or not self._tutorial())):
+            at = r3.add(r3.BELL, (0, 0.05, 0.55))
+            q = fr.cam.project(at)
+            if q and not self._under_a_hand_card(q[0], q[1]):
+                fr.label3(at, "TAB")                       # wherever the bell is in view, and not behind a card
         if self.view == "hand_high" and not tucked_all and self.selected is None:
             self._draw_holding_hand(fr)
         if self.show_draw_arrow and self.view in ("hand_low", "hand_high") and g.phase == "draw":
@@ -940,6 +963,15 @@ class VoidTable(RoadScenes, QWidget):
                                  QPointF(x + 6, y), ]))
         p.drawRect(QRectF(x - 26, y - 4, 30, 8))
         fr.keycap(x - 52, y, "D", 1.1)
+
+    def _under_a_hand_card(self, x: float, y: float, reach: float = 16.0) -> bool:
+        """Is a screen point (or its near neighbours) covered by a card in the hand?"""
+        hand = {vc.uid for vc in self._hand_cards()}
+        pts = [QPointF(x, y), QPointF(x - reach, y), QPointF(x + reach, y), QPointF(x, y - reach), QPointF(x, y + reach)]
+        for kind, poly in self.hits:
+            if kind[0] == "card" and kind[1] in hand and any(poly.containsPoint(p, Qt.FillRule.OddEvenFill) for p in pts):
+                return True
+        return False
 
     def _fan_points(self, fr: r3.Frame):
         """The screen point at the bottom middle of the held fan (it moves only
@@ -1288,7 +1320,8 @@ class VoidTable(RoadScenes, QWidget):
         g = self.game
         kind = hit[0]
         if kind == "bell":
-            self.enqueue(g.ring_bell())
+            if self._bell_allowed():
+                self.enqueue(g.ring_bell())
         elif kind in ("deck", "votary"):
             if self.view != "deck":
                 self.set_view("deck")              # look over first; the next click draws
@@ -1416,7 +1449,7 @@ class VoidTable(RoadScenes, QWidget):
             return
         try:
             if key == Qt.Key.Key_Tab:
-                if not self.busy() and not self.over:
+                if not self.busy() and not self.over and self._bell_allowed():
                     self.enqueue(self.game.ring_bell())     # the bell
             elif key == Qt.Key.Key_Q:
                 if self.selected is not None:
