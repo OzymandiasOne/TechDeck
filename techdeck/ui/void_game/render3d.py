@@ -107,7 +107,7 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     z = HAND_Z + HAND_LOW_Z + (HAND_HIGH_Z - HAND_LOW_Z) * high
     # the current card goes UP only (no nearer): it clears its neighbours without growing
     c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.45 - 2.4 * tuck + 0.22 * front,
-         z + k * 0.05 + lift * 0.4 + 0.35 * tuck + 0.06 * front)       # the right card lies on top
+         z + k * 0.05 + lift * 0.4 + 0.35 * tuck)                      # the right card lies on top
     return c, u, v
 
 
