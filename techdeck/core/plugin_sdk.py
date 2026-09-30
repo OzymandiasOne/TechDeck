@@ -1493,6 +1493,23 @@ def match_dypn_variant(part, candidates, prefer=None) -> Optional[str]:
     return names[0] if len(names) == 1 else None
 
 
+def ppn_dypn(ppn, dypn) -> str:
+    """The DYPN rebuilt from the PO row's own PPN - PPN + '-' + the DYPN's last
+    segment - or '' when the PO's DYPN already agrees with its PPN (or there is
+    no PPN). Drawings and the organizer's kit pages name a part PPN + item, but
+    the PO's DYPN column can disagree with its PPN column: Batch 496 order
+    X6514350 has PPN 'H7658162-H3DR' and DYPN 'H7658162-H3-2' for the drawing
+    'H7658162-H3DR-2 PLT F.pdf'. A reader that joins PO rows to files should
+    index each row under this spelling TOO (never instead of the PO's own)."""
+    ppn = str(ppn or "").strip()
+    dypn = str(dypn or "").strip()
+    if not ppn or "-" not in dypn:
+        return ""
+    if dypn.casefold().startswith(ppn.casefold() + "-"):
+        return ""
+    return f"{ppn}-{dypn.rsplit('-', 1)[1]}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 922 tube materials + PO (QF-QU-09) reading
 #

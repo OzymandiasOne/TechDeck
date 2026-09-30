@@ -35,6 +35,10 @@ v3.3.2 - the report layout moved into the SDK (sdk.ReportPdf) so the 911 LST
 Organizer and 902 Batch Validator draw the same report; the run now ends with a
 clickable console line that opens the report (sdk.link_output).
 
+v3.3.3 - a PO row whose DYPN disagrees with its own PPN (Batch 496: PPN
+H7658162-H3DR, DYPN H7658162-H3-4A) is also matched under PPN + item, the
+spelling the drawings use (sdk.ppn_dypn).
+
 Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
 the report so the target (standard tubes) reconciles cleanly.
 """
@@ -54,7 +58,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "3.3.2"
+VERSION = "3.3.3"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -115,6 +119,23 @@ def _scan_headers(ws, required: List[str], max_rows: int = 25) -> Tuple[int, Dic
     raise ValueError(f"headers {sorted(want)} not found in first {max_rows} rows")
 
 
+class _PoMap(dict):
+    """normalized PO DYPN -> (order, serial), plus `aliases`: the PPN + item
+    spelling of any row whose DYPN disagrees with its PPN -> that row's key."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.aliases: Dict[str, str] = {}
+
+
+def _po_spelling(part: str, mapping) -> str:
+    """`part` as the PO spells it: itself when the PO has it, else the PO key
+    it aliases (see _PoMap), else unchanged."""
+    if part in mapping:
+        return part
+    return getattr(mapping, "aliases", {}).get(part, part)
+
+
 def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optional[str]]],
                                             Dict[str, str]]:
     """(dypn_map, serial_desc) from a QF-QU-09 workbook.
@@ -127,8 +148,9 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
             raise ValueError("workbook has no 'PO' sheet")
         po_ws = wb[smap["po"]]
         hdr, cols = _scan_headers(po_ws, ["ORDER", "DYPN", "SOURCE MATERIAL"])
-        dypn_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        dypn_map = _PoMap()
         respelled: List[Tuple[str, str]] = []
+        aliases: List[Tuple[str, str]] = []
         for row in po_ws.iter_rows(min_row=hdr + 1, values_only=True):
             dypn = _cell(row, cols["DYPN"])
             if not dypn:
@@ -138,6 +160,22 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
                 respelled.append((dypn, key))
             dypn_map[key] = (
                 _cell(row, cols["ORDER"]), _cell(row, cols["SOURCE MATERIAL"]))
+            # Also file it under PPN + item: the drawings are named that way
+            # even when the PO's DYPN column disagrees with its PPN column
+            # (Batch 496: PPN H7658162-H3DR, DYPN H7658162-H3-4A).
+            if "PPN" in cols:
+                alias = sdk.ppn_dypn(_cell(row, cols["PPN"]), dypn)
+                if alias:
+                    aliases.append((_normalize_part(alias), key))
+        # Aliases never overwrite a real PO spelling and never go INTO the
+        # map (the "expected" list walks it); _po_spelling() translates a
+        # drawing's name back to the PO's own key at lookup time.
+        for alias, key in aliases:
+            if alias not in dypn_map:
+                dypn_map.aliases.setdefault(alias, key)
+        if dypn_map.aliases and log:
+            log(f"  {len(dypn_map.aliases)} PO DYPN(s) disagree with their PPN "
+                f"- also matching them by PPN + item number.")
         if respelled and log:
             raw, key = respelled[0]
             log(f"  {len(respelled)} PO DYPN(s) respelled to the standard form "
@@ -266,7 +304,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
     results: List[Pulled] = []
     deferred: List[Pulled] = []
     for order_name, src in files:
-        part = _normalize_part(src.stem)
+        part = _po_spelling(_normalize_part(src.stem), master_map)
         hit = _lookup(part, master_map)
         how = "exact"
         if not hit:
@@ -282,6 +320,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
                 order_cache[order_name] = omap
                 for k, v in odesc.items():
                     serial_desc.setdefault(k, v)
+            part = _po_spelling(part, order_cache[order_name])
             hit = _lookup(part, order_cache[order_name])
             how = "order-po"
         if hit:

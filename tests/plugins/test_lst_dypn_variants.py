@@ -288,3 +288,36 @@ def test_batch_491_po_without_the_sheet_hyphen_matches_the_file(lst922, tmp_path
     missing = [d for d, v in expected.items()
                if v[2] == "standard" and d not in covered]
     assert missing == ["H5222069-H84-4"]      # the one with no file, and only it
+
+
+# ── 922 LST Organizer: Batch 496, the PO's DYPN disagrees with its PPN ──────
+
+def test_batch_496_dypn_that_disagrees_with_its_ppn_matches_by_ppn(lst922, tmp_path):
+    """Batch 496 (2026-09-30): order X6514350's PO rows read PPN
+    'H7658162-H3DR' but DYPN 'H7658162-H3-4A'; the drawings are named
+    'H7658162-H3DR-4A'. The file must hit the PO row exactly, and the tube
+    must be expected ONCE (the alias is not a second tube)."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PO"
+    ws.append(["ORDER", "PPN", "DYPN", "SOURCE MATERIAL"])
+    ws.append(["X6514350", "H7658162-H3DR", "H7658162-H3-4A", TUBE])
+    ws.append(["X3607697", "H7656366-H12", "H7656366-H12-4A", TUBE])   # agrees
+    po = tmp_path / "PO H496 QF-QU-09.xlsx"
+    wb.save(po)
+
+    seen = []
+    master, _desc = lst922._read_po(po, log=seen.append)
+    assert set(master) == {"H7658162-H3-4A", "H7656366-H12-4A"}
+    assert master.aliases == {"H7658162-H3DR-4A": "H7658162-H3-4A"}
+    assert any("1 PO DYPN(s) disagree with their PPN" in m for m in seen)
+
+    pulled, expected, _ = _resolve(
+        lst922,
+        [("X6514350-H7658162-H3DR", "H7658162-H3DR-4A-STEP.lst"),
+         ("X3607697-H7656366-H12", "H7656366-H12-4A-STEP.lst")],
+        master, tmp_path)
+
+    assert [p.how for p in pulled] == ["exact", "exact"]
+    assert {p.part for p in pulled} == set(expected)

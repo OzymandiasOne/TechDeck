@@ -100,6 +100,10 @@ LARGER_CAPACITY = len(LARGER_PART_ROWS)  # 15 - beyond this even the big page do
 
 _XL_SHEET_VISIBLE = -1
 
+# A rod's Material Desc ('0.375 OD NICU', 'OSS 0.625 OD ASTM A36'). Word-
+# bounded, same rule as FormingFinder's _material_kind.
+_ROD_DESC_RE = re.compile(r'\b(?:OD|ROD)\b', re.IGNORECASE)
+
 LUMINANCE_DARK_CUTOFF = 140.0
 LIGHTEN_FACTOR = 0.40
 
@@ -297,6 +301,13 @@ def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log,
                     log(f"    Skip {dypn_val} at {desc_col}{r}: Raw Material "
                         f"{raw_mat!r} not a formed source {sorted(sources)}")
                     continue
+            elif _ROD_DESC_RE.search(str(ws.Range(f"{desc_col}{r}").Value or "")):
+                # No source recorded, so the DYPN alone matched - and a formed
+                # part is never a rod. Batch 496's H7658162-H3DR-2 stamped
+                # FORMED on its 0.375 OD NICU rods this way.
+                log(f"    Skip {dypn_val} at {desc_col}{r}: a rod, and Bent "
+                    f"Plates has no SOURCE MATERIAL for this part")
+                continue
             desc_addr = f"{desc_col}{r}"
             try:
                 desc_cell = ws.Range(desc_addr)

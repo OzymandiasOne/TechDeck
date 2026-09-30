@@ -202,3 +202,45 @@ def test_merge_warns_when_an_iteration_is_short_a_page(kit, tmp_path):
     kit._merge_kit_pages(pdfs, iterations, {}, dest, messages.append)
     assert _page_labels(dest) == ["order1"]
     assert any("no page to merge" in m for m in messages)
+
+
+# --- FORMED stamping with no source material on Bent Plates ------------------
+
+class _EditRange:
+    def __init__(self, cells, addr):
+        self._cells, self._addr = cells, addr
+
+    @property
+    def Value(self):
+        return self._cells.get(self._addr)
+
+    @property
+    def Formula(self):
+        return self._cells.get(self._addr)
+
+    @Formula.setter
+    def Formula(self, v):
+        self._cells[self._addr] = v
+
+
+class _EditSheet:
+    def __init__(self, cells):
+        self.cells = cells
+
+    def Range(self, addr):
+        return _EditRange(self.cells, addr)
+
+
+def test_no_source_material_never_stamps_a_rod(kit):
+    # Batch 496 page 19: H7658162-H3DR-2 reached Bent Plates with no SOURCE
+    # MATERIAL, the DYPN alone matched, and both NICU rod rows printed FORMED.
+    ws = _EditSheet({
+        "F24": "H7658162-H3DR-2", "G24": "262028653-11", "H24": "OSS 0.50 THK",
+        "F26": "H7658162-H3DR-2", "G26": "262028653-143", "H26": "0.375 OD NICU",
+    })
+    edits = kit._apply_formed_edits(
+        ws, {"h7658162-h3dr-2": set()}, lambda *a: None,
+        part_rows=range(22, 32), col_triples=kit.STANDARD_COLS)
+    assert [addr for addr, _ in edits] == ["H24"]
+    assert ws.cells["H24"].endswith("FORMED")
+    assert ws.cells["H26"] == "0.375 OD NICU"

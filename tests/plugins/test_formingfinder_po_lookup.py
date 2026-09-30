@@ -256,3 +256,44 @@ def test_unique_dest_suffixes_repeat_filenames(ff, tmp_path):
     assert names == ["R7211262-H2-3 PLT F.pdf",
                      "R7211262-H2-3 PLT F (2).pdf",
                      "R7211262-H2-3 PLT F (3).pdf"]
+
+
+def test_dypn_that_disagrees_with_its_ppn_matches_by_ppn(ff, tmp_path):
+    # Batch 496, order X6514350: the PO's DYPN column dropped the 'DR' its PPN
+    # column carries. The drawing is 'H7658162-H3DR-2 PLT F.pdf', so the
+    # exact key missed and the Bent Plates row went out blank - and Kitting
+    # stamped FORMED on the part's 0.375 OD NICU rods.
+    mats = _MATERIALS + [("262028653-143", "OSS 0.375 OD NICU",
+                          "0.375 OD X 12.00 Length")]
+    po = _po_workbook(tmp_path, [
+        ["X6514350", "H7658162-H3DR", "H7658162-H3-2", "262028653-143", "NICU"],
+        ["X6514350", "H7658162-H3DR", "H7658162-H3-2", "262028653-11", ""],
+    ], mats)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    row = lookup[("x6514350", "h7658162-h3dr-2")]
+    assert row["SOURCE MATERIAL"] == "262028653-11"
+    assert row["PPN"] == "H7658162-H3DR"
+    assert "_ALIAS_NOTE" in row
+    # The PO's own spelling still resolves, with no alias note on it.
+    assert "_ALIAS_NOTE" not in lookup[("x6514350", "h7658162-h3-2")]
+
+
+def test_agreeing_dypn_gets_no_alias(ff, tmp_path):
+    po = _po_workbook(tmp_path, [
+        ["X3607697", "H7656366-H12", "H7656366-H12-2", "262028653-11", ""],
+        ["X3607696", "E6433278-H23", "E6433278-H23-2-1", "262028653-11", ""],
+    ], _MATERIALS)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    assert set(lookup) == {("x3607697", "h7656366-h12-2"),
+                           ("x3607696", "e6433278-h23-2-1")}
+
+
+@pytest.mark.parametrize("ppn, dypn, alias", [
+    ("H7658162-H3DR", "H7658162-H3-2", "H7658162-H3DR-2"),
+    ("H7658162-H3DR", "H7658162-H3-4A", "H7658162-H3DR-4A"),
+    ("H7656366-H12", "H7656366-H12-2", ""),       # already agrees
+    ("E6433278-H23", "E6433278-H23-2-1", ""),     # multi-segment item
+    (None, "H7658162-H3-2", ""),                  # no PPN to build from
+])
+def test_ppn_dypn(ff, ppn, dypn, alias):
+    assert ff.sdk.ppn_dypn(ppn, dypn) == alias
