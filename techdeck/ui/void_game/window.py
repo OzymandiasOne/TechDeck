@@ -702,7 +702,7 @@ class VoidTable(RoadScenes, QWidget):
             lift, front = 0.0, 0.0
             if self.selected == vc.uid:
                 lift = 1.0                              # high above the hand
-            elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy() \
+            elif self.hand_cursor == i and not self.busy() \
                     and self.view == "hand_high":
                 front = 1.0                             # up, clear of the others (held hand only)
             tucked = self.view in r3.BOARD_VIEWS or self.book is not None
@@ -884,21 +884,13 @@ class VoidTable(RoadScenes, QWidget):
         fr.keycap(x - 52, y, "D", 1.1)
 
     def _fan_points(self, fr: r3.Frame):
-        """Screen points of the held fan: the bottom middle of the current card
-        (or of the fan), its left edge, with a scale."""
-        hand = self._hand_cards()
-        n = len(hand)
-        if self.hand_cursor is not None and 0 <= self.hand_cursor < n:
-            vc = hand[self.hand_cursor]
-            c, u, v = vc.pose
-        else:
-            c, u, v = r3.hand_pose(0.0, 0.0, 0.0, 0.0, 1.0)
+        """The screen point at the bottom middle of the held fan (it moves only
+        with the fan, never with the card you are on), and a scale."""
+        c, u, v = r3.hand_pose(0.0, 0.0, 0.0, 0.0, 1.0)
         bottom = fr.cam.project(add(c, mul(v, -1.0)))
-        cl, ul, vl = r3.hand_pose(-(n - 1) / 2 * min(1.0, 5.0 / max(n, 1)), 0.0, 0.0, 0.0, 1.0) if n else (c, u, v)
-        left = fr.cam.project(add(add(cl, mul(ul, -1.0)), mul(vl, -1.0)))
-        if not bottom or not left:
+        if not bottom:
             return None
-        return bottom, left, max(0.6, min(1.6, 6.0 / bottom[2]))
+        return bottom, max(0.6, min(1.6, 6.0 / bottom[2]))
 
     def _draw_holding_fingers(self, fr: r3.Frame):
         """The palm and curled fingers BEHIND the cards, at the fan's lower
@@ -906,19 +898,20 @@ class VoidTable(RoadScenes, QWidget):
         pts = self._fan_points(fr)
         if not pts:
             return
-        _, (lx, ly, _), k = pts
+        (bx, by, _), k = pts
         p = fr.p
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         p.setPen(QPen(QColor(DIM), 1.2)); p.setBrush(QColor(2, 12, 6))
-        palm = QPainterPath()
-        palm.moveTo(lx - 10 * k, ly + 120 * k)
-        palm.cubicTo(lx - 30 * k, ly + 30 * k, lx + 10 * k, ly - 30 * k, lx + 70 * k, ly - 26 * k)
-        palm.cubicTo(lx + 130 * k, ly - 22 * k, lx + 160 * k, ly + 30 * k, lx + 150 * k, ly + 120 * k)
-        palm.closeSubpath()
-        p.drawPath(palm)
-        for i in range(3):                                   # knuckles along the top edge
-            kx = lx + (16 + 34 * i) * k
-            p.drawEllipse(QPointF(kx, ly - (26 - 4 * i) * k), 13 * k, 9 * k)
+        # BEHIND the cards: the wrist and the gathered fingers of a pinching hand
+        # (mano a borsa) rising from the bottom edge at the fan's centre
+        wrist = QPainterPath()
+        wrist.moveTo(bx - 70 * k, by + 240 * k)
+        wrist.cubicTo(bx - 90 * k, by + 120 * k, bx - 60 * k, by + 20 * k, bx + 10 * k, by - 10 * k)
+        wrist.cubicTo(bx + 70 * k, by + 20 * k, bx + 100 * k, by + 120 * k, bx + 80 * k, by + 240 * k)
+        wrist.closeSubpath()
+        p.drawPath(wrist)
+        for dx, tip in ((-14, -34), (10, -40), (32, -30)):    # three fingertips gathered behind the pinch
+            p.drawRoundedRect(QRectF(bx + dx * k - 11 * k, by + tip * k, 22 * k, 70 * k), 10 * k, 10 * k)
 
     def _draw_holding_hand(self, fr: r3.Frame):
         """The thumb, in front of the cards at the fan's lower left, on the
@@ -927,27 +920,26 @@ class VoidTable(RoadScenes, QWidget):
         pts = self._fan_points(fr)
         if not pts:
             return
-        (bx, by, _), _, k = pts
+        (bx, by, _), k = pts
         p = fr.p
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         skin = QColor(3, 18, 9)
         rim = QColor(MID)
-        # the heel and wrist: a rounded mass coming up from the bottom edge
-        # the thumb: rising from the bottom edge to hold the current card from below,
-        # its pad on the card's lower middle, leaning a little left
+        # IN FRONT: the thumb, rising from the bottom edge to the pinch at the fan's
+        # centre, leaning in from the left; its pad rests on the cards' bottom edge
         thumb = QPainterPath()
-        thumb.moveTo(bx - 34 * k, by + 220 * k)
-        thumb.cubicTo(bx - 60 * k, by + 120 * k, bx - 58 * k, by + 20 * k, bx - 26 * k, by - 34 * k)
-        thumb.cubicTo(bx - 12 * k, by - 58 * k, bx + 22 * k, by - 54 * k, bx + 30 * k, by - 26 * k)
-        thumb.cubicTo(bx + 40 * k, by + 20 * k, bx + 44 * k, by + 120 * k, bx + 50 * k, by + 220 * k)
+        thumb.moveTo(bx - 60 * k, by + 240 * k)
+        thumb.cubicTo(bx - 80 * k, by + 130 * k, bx - 70 * k, by + 30 * k, bx - 30 * k, by - 14 * k)
+        thumb.cubicTo(bx - 16 * k, by - 32 * k, bx + 14 * k, by - 30 * k, bx + 20 * k, by - 6 * k)
+        thumb.cubicTo(bx + 28 * k, by + 40 * k, bx + 26 * k, by + 140 * k, bx + 30 * k, by + 240 * k)
         thumb.closeSubpath()
         p.setPen(QPen(rim, 1.3)); p.setBrush(skin); p.drawPath(thumb)
         p.setPen(QPen(QColor(DIM), 1.0)); p.setBrush(Qt.BrushStyle.NoBrush)
-        crease = QPainterPath(); crease.moveTo(bx - 40 * k, by + 40 * k)
-        crease.cubicTo(bx - 20 * k, by + 28 * k, bx + 10 * k, by + 28 * k, bx + 32 * k, by + 42 * k)
+        crease = QPainterPath(); crease.moveTo(bx - 52 * k, by + 60 * k)
+        crease.cubicTo(bx - 34 * k, by + 46 * k, bx - 4 * k, by + 46 * k, bx + 16 * k, by + 62 * k)
         p.drawPath(crease)                                   # the knuckle
-        nail = QPainterPath(); nail.moveTo(bx - 18 * k, by - 30 * k)
-        nail.cubicTo(bx - 10 * k, by - 50 * k, bx + 16 * k, by - 48 * k, bx + 22 * k, by - 26 * k)
+        nail = QPainterPath(); nail.moveTo(bx - 22 * k, by - 12 * k)
+        nail.cubicTo(bx - 14 * k, by - 28 * k, bx + 10 * k, by - 26 * k, bx + 14 * k, by - 8 * k)
         p.drawPath(nail)
 
     def _draw_caption(self, fr: r3.Frame):
@@ -1293,6 +1285,8 @@ class VoidTable(RoadScenes, QWidget):
             return
         cur = max(0, cur)
         self.hand_cursor = cur
+        if self.hover and self.hover[0] == "card":
+            self.hover = None                       # the keys have the cursor now, not the mouse
         if self.selected is not None and self.selected != hand[cur].uid:
             self._raise(hand[cur].uid)
 
