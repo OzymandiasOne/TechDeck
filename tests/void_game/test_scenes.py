@@ -68,10 +68,18 @@ def test_the_forge_makes_a_deathcard_and_he_keeps_it(table):
     ready(table)
     rig_end(table, False)
     assert table.run.dead
-    quiet(table); press(table, Qt.Key.Key_Space); table._tick(); quiet(table)
+    quiet(table); press(table, Qt.Key.Key_Space); table._tick()
     assert table.scene == "forge" and table.forge_step == 0
-    for _ in range(3):
-        press(table, Qt.Key.Key_Space)
+    assert table.forge_first, "the first death of all: the guided forge"
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "deathcard_first_time" in said and "deathcard_cost_first_time" in said
+    for step in range(3):
+        quiet(table)                                   # his question waits for a key...
+        press(table, Qt.Key.Key_Space)                 # ...then Space picks the card
+        assert table.forge_step == step + 1
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "deathcard_before_named" in said
+    quiet(table)
     assert table.forge_step == 3
     for ch in "Ant hony":
         press(table, Qt.Key.Key_A, ch)
@@ -80,6 +88,8 @@ def test_the_forge_makes_a_deathcard_and_he_keeps_it(table):
     press(table, Qt.Key.Key_Return)
     assert table.scene == "digitize" and table.run.deathcard is not None
     assert table.run.deathcard.name == "ANT HON"
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "deathcard_post_named" in said and "digitize" in said
     assert table.settings["memory"]["deathcards"][0]["name"] == "ANT HON"
     for _ in range(40):
         table._tick()
@@ -196,3 +206,14 @@ def test_the_road_opens_with_his_recollection_once(table):
     to_road(table)
     assert table.caption_key == "scene_road_first" or any(c[2] == "scene_road_first" for c in table.captions) or table.caption_key == ""
     assert table.road_opened
+
+
+def test_a_later_death_gets_the_plain_forge(table):
+    table.run.memory["deaths"] = 3
+    table.run.candles = 1
+    ready(table)
+    rig_end(table, False)
+    quiet(table); press(table, Qt.Key.Key_Space); table._tick()
+    assert table.scene == "forge" and not table.forge_first
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "deathcard" in said and "deathcard_cost" in said and "deathcard_first_time" not in said

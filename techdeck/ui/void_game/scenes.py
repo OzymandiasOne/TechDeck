@@ -41,6 +41,7 @@ class RoadScenes:
         self.forge_step = 0               # 0 cost, 1 numbers, 2 marks, 3 name
         self.forge_from = [None, None, None]
         self.forge_name = ""
+        self.forge_first = False
         self.digitize_t0 = -9.0
         self.peek = False                 # the hand pulled down, nothing else
         self.book: int | None = None      # page of the rule book, or None
@@ -136,7 +137,13 @@ class RoadScenes:
         elif r == "dead":
             self.scene, self.pick, self.scene_t0 = "forge", 0, self.t
             self.forge_step, self.forge_from, self.forge_name = 0, [None, None, None], ""
-            self.say("deathcard")
+            self.forge_first = self.run.memory["deaths"] <= 1        # the first death of all
+            if self.forge_first:
+                self.say("deathcard_first_time")
+                self.say("deathcard_cost_first_time", part="head")
+            else:
+                self.say("deathcard")
+                self.say("deathcard_cost")
         else:
             self.close()
 
@@ -187,16 +194,42 @@ class RoadScenes:
 
     # ── the forge and what follows ───────────────────────────────────────
     def forge_go(self):
-        if self.forge_step < 3:
-            self.forge_from[self.forge_step] = self.pick
-            self.forge_step += 1
+        if self.forge_step >= 3:
+            self.forge_finish()
             return
-        self.forge_finish()
+        dc = self.run.deck[self.pick]
+        d = dc.defn
+        self.forge_from[self.forge_step] = self.pick
+        step = self.forge_step
+        self.forge_step += 1
+        first = self.forge_first
+        if step == 0:                                          # the cost is chosen
+            if first:
+                self.say("deathcard_cost_first_time", part="tail", cost=d.cost, card=d.name.title())
+                self.say("deathcard_power_first_time", part="head")
+            else:
+                self.say("deathcard_power")
+        elif step == 1:                                        # the numbers are chosen
+            if first:
+                self.say("deathcard_power_first_time", part="tail", power=d.power + dc.power,
+                         health=d.health + dc.health, card=d.name.title())
+                self.say("deathcard_sigil_first_time", part="head")
+            else:
+                self.say("deathcard_sigil")
+        else:                                                  # the marks are chosen
+            sigils = tuple(dict.fromkeys(d.sigils + dc.sigils))
+            names = [SIGILS[s][0].title() for s in sigils]
+            if first and len(names) >= 2:
+                self.say("deathcard_sigil_first_time_double", part="tail", sigil=names[0], sigil2=names[1],
+                         card=d.name.title())
+            elif first and names:
+                self.say("deathcard_sigil_first_time", part="tail", sigil=names[0], card=d.name.title())
+            self.say("deathcard_before_named")
 
     def forge_finish(self):
         d = self.run.forge_deathcard(self.forge_name, *self.forge_from)
         self._save_memory()
-        self.say("deathcard_named", name=d.name)
+        self.say("deathcard_post_named", name=d.name)
         self.say("digitize")
         self.scene, self.digitize_t0 = "digitize", self.t
 

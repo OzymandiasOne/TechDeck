@@ -38,11 +38,14 @@ GLANCE_WAIT_S = 1.0                   # a beat after a key before the camera gla
 PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
-MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "first_draw", "first_hit", "deck_empty", "win", "first_win", "lose", "teeth",
-             "candle_out", "boss_welcome", "boss_phase", "run_won", "dead", "deathcard", "deathcard_named",
-             "digitize", "first_sacrifice", "famine", "scene_road", "scene_fight", "scene_choice", "scene_rare",
-             "scene_fire", "scene_altar", "scene_boss", "fire_buffed", "fire_eaten", "altar_done",
-             "card_taken"}   # these wait for you
+MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "second_turn", "first_draw",
+             "first_hit", "deck_empty", "win", "first_win", "lose", "teeth", "candle_out", "boss_welcome",
+             "boss_phase", "run_won", "dead", "deathcard_first_time", "deathcard", "deathcard_cost_first_time",
+             "deathcard_cost", "deathcard_power_first_time", "deathcard_power", "deathcard_sigil_first_time",
+             "deathcard_sigil_first_time_double", "deathcard_sigil", "deathcard_before_named",
+             "deathcard_post_named", "digitize", "first_sacrifice", "famine", "scene_road_first", "scene_road",
+             "scene_fight", "scene_choice", "scene_rare", "scene_fire", "scene_altar", "scene_boss",
+             "fire_again", "fire_leave", "fire_buffed", "fire_eaten", "altar_done", "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
@@ -256,7 +259,10 @@ class VoidTable(RoadScenes, QWidget):
         return super().event(ev)
 
     # ── his voice ────────────────────────────────────────────────────────
-    def say(self, key: str, once_per_phase: bool = False, **holes):
+    def say(self, key: str, once_per_phase: bool = False, part: str = "all", **holes):
+        """Queue a line. `part` = "all", "head" (every page but the last) or
+        "tail" (only the last page) - the forge asks its question with the
+        head and recaps your choice with the tail."""
         if once_per_phase:
             if key in self.said_this_phase:
                 return
@@ -265,7 +271,12 @@ class VoidTable(RoadScenes, QWidget):
         if not got:
             return
         text, emotion = got
-        for page in (p.strip() for p in text.split("//")):
+        pages = [p.strip() for p in text.split("//")]
+        if part == "head":
+            pages = pages[:-1]
+        elif part == "tail":
+            pages = pages[-1:]
+        for page in pages:
             glow, auto = "", False
             if page.startswith("[") and "]" in page:
                 tags, page = page[1:].split("]", 1)
@@ -660,7 +671,18 @@ class VoidTable(RoadScenes, QWidget):
         key = "commit_" + card.defn.id
         if key not in self.played_lines:
             self.played_lines.add(key)
-            self.say(key, name=card.name)
+            self.say(key, name=card.name, n=self._reach(card, lane))
+
+    def _reach(self, card: Card, lane: int) -> int:
+        """How many of your cards a card of his could strike from that lane."""
+        from .cards import THREE_MOUTHS, TWO_MOUTHS
+        if card.has(THREE_MOUTHS):
+            lanes = (lane - 1, lane, lane + 1)
+        elif card.has(TWO_MOUTHS):
+            lanes = (lane - 1, lane + 1)
+        else:
+            lanes = (lane,)
+        return sum(1 for l in lanes if 0 <= l < LANES and self.game.rows[YOU][l] is not None)
 
     def _famine(self, card: Card, lane: int, count: int):
         """Hunger lands on his row, straight down out of the dark."""
@@ -682,8 +704,11 @@ class VoidTable(RoadScenes, QWidget):
             if not self.game.deck and self.game.votaries > 0 and "deck_empty" not in self.played_lines:
                 self.played_lines.add("deck_empty")
                 self.say("deck_empty")
-        if turn == 1:
-            self.say("first_turn")
+        if self._tutorial() and self._drawing():
+            if turn == 1:
+                self.say("first_turn")
+            elif turn == 2:
+                self.say("second_turn")
 
     def _drawing(self) -> bool:
         """A draw is owed: the piles are open, and the hand does not rest low."""

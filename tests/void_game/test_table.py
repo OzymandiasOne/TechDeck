@@ -94,7 +94,7 @@ def ready(w: VoidTable):
 
 def quiet(w: VoidTable):
     """Wave his dialogue through (rules wait for Space) so clicks reach the table."""
-    for _ in range(20):
+    for _ in range(80):                                # the forge's intro runs to ten pages
         w._tick()
         if not w.caption and not w.captions:
             return
@@ -597,3 +597,11 @@ def test_his_first_hit_on_your_card_is_narrated_with_names(table):
     settle(table)
     lines = [table.caption] + [c[0] for c in table.captions]
     assert any("Sleeper" in ln and "Hound" in ln for ln in lines), lines
+
+
+def test_the_tutorial_says_the_second_turns_choice_once(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    press(table, Q.Key.Key_Tab); settle(table)
+    said = [table.caption_key] + [c[2] for c in table.captions]
+    assert "second_turn" in said
