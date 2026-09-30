@@ -107,7 +107,8 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     from PySide6.QtGui import QMouseEvent
     big = next(c for c in table.game.hand if c.defn.cost >= 2)
     poly = next(p for k, p in table.hits if k == ("card", big.uid))
-    pt = poly.boundingRect().center()
+    r = poly.boundingRect()
+    pt = QPointF(r.left() + 12, r.center().y())            # the fan overlaps: aim at the card's own sliver
     ox, oy, k = 0, 0, 1.0
     table._view = (ox, oy, k)
     ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pt), Qt.MouseButton.LeftButton,
@@ -120,7 +121,8 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     for _ in range(12):
         table._tick()                                    # the card settles back into line
     poly = next(p for k, p in table.hits if k == ("card", big.uid))
-    pt = poly.boundingRect().center()
+    r = poly.boundingRect()
+    pt = QPointF(r.left() + 12, r.center().y())
     ev = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(pt), Qt.MouseButton.LeftButton,
                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
     table.mousePressEvent(ev)
