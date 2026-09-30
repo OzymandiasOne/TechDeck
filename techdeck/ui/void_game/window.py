@@ -54,6 +54,7 @@ KEYS_TEXT = [
     ("RIGHT / LEFT", "straight to the piles (while a draw is owed), and back"),
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W from the piles", "the board; W again lifts to his back row; S comes back down"),
+    ("A from the board", "a glance at the scale; D comes back"),
     ("TAB / S", "put the raised card down"),
     ("Z", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
@@ -62,7 +63,7 @@ KEYS_TEXT = [
     ("ESC", "this menu"),
 ]
 MENU_MAIN = ["RESUME", "KEYS", "DISPLAY", "SOUND", "QUIT"]
-DEFAULT_SETTINGS = {"sway": True, "scanlines": True, "volume": 70}
+DEFAULT_SETTINGS = {"scanlines": True, "volume": 70}
 
 
 def settings_path():
@@ -281,8 +282,7 @@ class VoidTable(RoadScenes, QWidget):
             self.show_draw_arrow = True            # the tutorial: point the way to the piles
 
     def _apply_settings(self):
-        if not os.environ.get("TECHDECK_TABLE_STILL"):
-            r3.CAMERA_SWAY = 1.0 if self.settings["sway"] else 0.0
+        pass                                        # nothing live to apply yet (scanlines are read each frame)
 
     def _speech_tick(self):
         if self.caption and self.t < self.caption_until:
@@ -301,6 +301,7 @@ class VoidTable(RoadScenes, QWidget):
             self.typed_at = -1.0
             self.mood = MOODS.get(emotion, MOODS["calm"])
             self.mood_t0 = self.t
+            self._glance_for(glow)
             typed = len(text) / CHARS_PER_S
             # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
             hold = NAG_HOLD_S if key == "nag" else FLAVOR_HOLD_S
@@ -312,9 +313,21 @@ class VoidTable(RoadScenes, QWidget):
             self.caption_key = ""
             self._blurb_ended(ended)
 
+    def _glance_for(self, glow: str):
+        """While he speaks of the scale or the bell from the board, the camera
+        glances that way by itself; any other page brings it back to the board."""
+        if self.view not in r3.BOARD_VIEWS or self.scene != "fight":
+            return
+        if glow == "scale":
+            self.set_view("board_left")
+        elif glow == "bell":
+            self.set_view("board_right")
+        elif self.view in ("board_left", "board_right"):
+            self.set_view("board")
+
     def _blurb_ended(self, key: str):
         """The last page of a blurb has gone. The board lesson hands you back your hand."""
-        if key == "rules_lanes" and self.view in ("board", "board_far"):
+        if key == "rules_lanes" and self.view in r3.BOARD_VIEWS:
             self.set_view("hand_high")
 
     def advance_dialogue(self) -> bool:
@@ -661,7 +674,7 @@ class VoidTable(RoadScenes, QWidget):
                 lift = 1.0                              # high above the hand
             elif (self.hover == ("card", vc.uid) or self.hand_cursor == i) and not self.busy():
                 front = 1.0                             # straight toward you, through the others
-            tucked = self.view in ("board", "board_far") or self.book is not None
+            tucked = self.view in r3.BOARD_VIEWS or self.book is not None
             if tucked and self.selected == vc.uid:
                 pose = r3.held_pose(self.view)          # the chosen card stays in view, bottom left
             else:
@@ -679,7 +692,7 @@ class VoidTable(RoadScenes, QWidget):
         self._acts_tick()
         if self.lesson_at is not None and self.t >= self.lesson_at:
             self.lesson_at = None
-            if self.view in ("board", "board_far"):
+            if self.view in r3.BOARD_VIEWS:
                 self.say("rules_lanes")
             else:
                 self.played_lines.discard("rules_lanes")     # they looked away; next time
@@ -718,7 +731,7 @@ class VoidTable(RoadScenes, QWidget):
             for lane in range(LANES):
                 if not g.why_not(self.selected, lane, self.sacrifices):
                     highlight.add(("you", lane))
-        if self.cursor is not None and (self.view in ("board", "board_far") or self.selected is not None):
+        if self.cursor is not None and (self.view in r3.BOARD_VIEWS or self.selected is not None):
             highlight.add(("you", self.cursor))
         pulse = 0.5 + 0.5 * math.sin(self.t * 5)          # everything he speaks of breathes
         pulsing = set()
@@ -905,7 +918,7 @@ class VoidTable(RoadScenes, QWidget):
             return
         x, y, w, h = self._caption_rect()
         shown = self.caption[:self.caption_shown]
-        if self.scene == "fight" and self.view in ("board", "board_far"):
+        if self.scene == "fight" and self.view in r3.BOARD_VIEWS:
             # looking down, the rows run to the top edge: a dark band keeps the words legible
             fr.p.setPen(Qt.PenStyle.NoPen); fr.p.setBrush(QColor(1, 6, 3, 205))
             fr.p.drawRoundedRect(QRectF(x - 12, y - 6, w + 24, h + 12 + (16 if self.waiting_for_key() else 0)), 6, 6)
@@ -925,7 +938,7 @@ class VoidTable(RoadScenes, QWidget):
         w = W - 220
         h = QFontMetrics(f).boundingRect(QRect(0, 0, w, 400), int(Qt.TextFlag.TextWordWrap),
                                          self.caption if narr else self.caption.upper()).height() + 6
-        if self.scene == "fight" and self.view in ("board", "board_far"):
+        if self.scene == "fight" and self.view in r3.BOARD_VIEWS:
             y = 14                                           # looking down: his line at the top, off the rows
         else:
             centre = 246 if self.scene == "fight" else 172   # on the road the doors sit lower
@@ -941,8 +954,7 @@ class VoidTable(RoadScenes, QWidget):
         if self.menu == "keys":
             return KEYS_TEXT + [("BACK", "")]
         if self.menu == "display":
-            return [("CAMERA SWAY", "ON" if s["sway"] else "OFF"),
-                    ("SCANLINES", "ON" if s["scanlines"] else "OFF"), ("BACK", "")]
+            return [("SCANLINES", "ON" if s["scanlines"] else "OFF"), ("BACK", "")]
         if self.menu == "sound":
             return [("VOLUME", f"{s['volume']}  (no sound yet)"), ("BACK", "")]
         return []
@@ -957,9 +969,7 @@ class VoidTable(RoadScenes, QWidget):
     def _menu_adjust(self, step: int):
         """A / D on a setting row."""
         label = self._menu_items()[self.menu_index][0]
-        if label == "CAMERA SWAY":
-            self.settings["sway"] = not self.settings["sway"]; self._apply_settings()
-        elif label == "SCANLINES":
+        if label == "SCANLINES":
             self.settings["scanlines"] = not self.settings["scanlines"]
         elif label == "VOLUME":
             self.settings["volume"] = max(0, min(100, self.settings["volume"] + 10 * step))
@@ -1024,8 +1034,8 @@ class VoidTable(RoadScenes, QWidget):
         if view == self.view:
             return
         self.view_prev, self.view, self.view_t0 = self.view, view, self.t
-        if view in ("board", "board_far"):
-            if self.cursor is None or self.view_prev not in ("board", "board_far"):
+        if view in r3.BOARD_VIEWS:
+            if self.cursor is None or self.view_prev not in r3.BOARD_VIEWS:
                 self.cursor = self._first_lane()
             if view == "board" and self._tutorial() and "rules_lanes" not in self.played_lines:
                 self.played_lines.add("rules_lanes")
@@ -1314,7 +1324,7 @@ class VoidTable(RoadScenes, QWidget):
             elif key == Qt.Key.Key_Space:
                 if self.busy():
                     return
-                if self.view in ("board", "board_far") and self.cursor is not None:
+                if self.view in r3.BOARD_VIEWS and self.cursor is not None:
                     self._act_on_lane(self.cursor)
                 elif self.view == "deck" and self.cursor is not None:
                     self.enqueue(self.game.draw("deck" if self.cursor == 0 else "votary"))
@@ -1355,6 +1365,8 @@ class VoidTable(RoadScenes, QWidget):
                     self.set_view("board")
                 elif v == "board":
                     self.set_view("board_far")
+                elif v in ("board_left", "board_right"):
+                    self.set_view("board")
             elif key in (Qt.Key.Key_S, Qt.Key.Key_Down):
                 v = self.view
                 if self.selected is not None and v in ("hand_low", "hand_high"):
@@ -1367,7 +1379,7 @@ class VoidTable(RoadScenes, QWidget):
                     self.set_view("hand_high")
                 elif v == "board":
                     self.set_view("deck" if self._drawing() else "hand_low")
-                elif v == "board_far":
+                elif v in ("board_far", "board_left", "board_right"):
                     self.set_view("board")
             elif key == Qt.Key.Key_D:
                 v = self.view
@@ -1377,6 +1389,8 @@ class VoidTable(RoadScenes, QWidget):
                     self._walk_hand(+1)                    # ...and past the last card, the piles (while a draw is owed)
                 elif v == "deck":
                     self.cursor = 1
+                elif v == "board_left":
+                    self.set_view("board")                 # back from the scale
                 elif v in ("board", "board_far") and self._drawing():
                     self.set_view("deck")
             elif key == Qt.Key.Key_A:
@@ -1387,6 +1401,10 @@ class VoidTable(RoadScenes, QWidget):
                     self._walk_hand(-1)
                 elif v == "deck":
                     self._back_to_hand()
+                elif v in ("board", "board_far"):
+                    self.set_view("board_left")            # a glance left, at the scale
+                elif v == "board_right":
+                    self.set_view("board")
             else:
                 super().keyPressEvent(event)
         except IllegalMove as why:

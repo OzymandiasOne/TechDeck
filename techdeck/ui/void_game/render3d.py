@@ -105,8 +105,8 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
     y = HAND_LOW_Y + (HAND_HIGH_Y - HAND_LOW_Y) * high
     z = HAND_Z + HAND_LOW_Z + (HAND_HIGH_Z - HAND_LOW_Z) * high
-    c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.62 - 2.4 * tuck + 0.18 * front,
-         z + k * 0.05 + lift * 0.4 + 0.35 * tuck + 0.4 * front)        # the right card lies on top
+    c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.62 - 2.4 * tuck + 0.10 * front,
+         z + k * 0.05 + lift * 0.4 + 0.35 * tuck + 0.18 * front)       # the right card lies on top
     return c, u, v
 
 
@@ -130,9 +130,13 @@ VIEWS = {
     "deck": ((0.0, 5.6, 9.6), (2.6, 0.7, -0.2), 50.0),      # planted; the piles just right of centre
     "board": ((0.0, 5.4, 5.3), (0.0, 0.0, 1.75), 50.0),     # your row and his front row fill it; the back row's top edge
     "board_far": ((0.0, 7.6, 2.4), (0.0, 0.0, -1.35), 50.0), # lifted: the back row; your row cut in half at the bottom
+    "board_left": ((0.0, 5.4, 5.3), (-4.2, 0.6, 1.3), 50.0),  # a glance left, at the scale
+    "board_right": ((0.0, 5.4, 5.3), (4.4, 0.4, 0.4), 50.0),  # a glance right, at the bell
 }
 # the window's views map onto these cameras (the hand has two heights, one camera)
-CAM_OF = {"hand_low": "hand", "hand_high": "hand_high", "deck": "deck", "board": "board", "board_far": "board_far"}
+CAM_OF = {"hand_low": "hand", "hand_high": "hand_high", "deck": "deck", "board": "board", "board_far": "board_far",
+          "board_left": "board_left", "board_right": "board_right"}
+BOARD_VIEWS = ("board", "board_far", "board_left", "board_right")
 VIEW_S = 0.45                         # a camera move, in seconds
 
 
@@ -154,9 +158,7 @@ def camera_between(view_from: str, view_to: str, k: float, t: float, shake: floa
     return Camera(pos, look, fov=fa + (fb - fa) * e)
 
 
-# The slow camera sway. TECHDECK_TABLE_STILL=1 freezes it (playtesting by
-# screenshot: a card must be where the picture said it was).
-CAMERA_SWAY = 0.0 if os.environ.get("TECHDECK_TABLE_STILL") else 1.0
+CAMERA_SWAY = 0.0                     # planted. The drift is gone (his call: the cards must not wander)
 
 
 def default_camera(t: float, shake: float = 0.0) -> Camera:

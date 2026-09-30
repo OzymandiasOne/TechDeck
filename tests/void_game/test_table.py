@@ -202,6 +202,7 @@ def test_the_last_board_page_lets_go_and_hands_back_the_hand(table):
                 break
         press(table, Q.Key.Key_Space); table._tick()
     assert table.caption_auto and table.caption_key == "rules_lanes"
+    assert table.view == "board_right", "the bell page glances right at the bell"
     for _ in range(int(9 * 30)):
         table._tick()
         if table.view.startswith("hand"):
@@ -406,9 +407,9 @@ def test_esc_opens_the_menu_and_quit_closes(table):
     assert table.menu == "main"
     press(table, Q.Key.Key_S); press(table, Q.Key.Key_S); press(table, Q.Key.Key_Space)   # DISPLAY
     assert table.menu == "display"
-    was = table.settings["sway"]
+    was = table.settings["scanlines"]
     press(table, Q.Key.Key_D)
-    assert table.settings["sway"] is (not was)
+    assert table.settings["scanlines"] is (not was)
     press(table, Q.Key.Key_D)                                         # and back, so the file stays as it was
     press(table, Q.Key.Key_Escape); press(table, Q.Key.Key_Escape)
     assert table.menu is None
@@ -542,3 +543,30 @@ def test_a_drawn_card_takes_the_cursor_and_the_cursor_card_comes_to_the_front(ta
     other = hand[0].dst[0]
     assert front[2] > other[2] + 0.3, "the cursor card sits nearer the camera"
     assert front[1] <= other[1] + 0.2, "and is not lifted up"
+
+
+def test_the_scale_page_glances_left_and_a_glances_at_the_scale_any_time(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    press(table, Q.Key.Key_W)
+    for _ in range(int(1.2 * 30)):
+        table._tick()
+    for _ in range(2):                             # your side, my side
+        for _ in range(200):
+            table._tick()
+            if not table._talking():
+                break
+        press(table, Q.Key.Key_Space); table._tick()
+    assert table.glow == "scale" and table.view == "board_left", "the scale page looks left"
+    quiet(table)
+    for _ in range(int(9 * 30)):
+        table._tick()
+        if table.view.startswith("hand"):
+            break
+    press(table, Q.Key.Key_W)                      # the held hand rests...
+    press(table, Q.Key.Key_W)                      # ...and from the low hand, the board
+    assert table.view == "board"
+    press(table, Q.Key.Key_A)
+    assert table.view == "board_left"
+    press(table, Q.Key.Key_D)
+    assert table.view == "board"
