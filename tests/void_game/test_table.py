@@ -605,3 +605,18 @@ def test_the_tutorial_says_the_second_turns_choice_once(table):
     press(table, Q.Key.Key_Tab); settle(table)
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "second_turn" in said
+
+
+def test_his_instructions_never_eat_your_keys(table):
+    from PySide6.QtCore import Qt as Q
+    settle(table); quiet(table)
+    table.set_view("deck"); table._click(("votary",)); settle(table)
+    assert table.caption_key == "first_draw" and not table.waiting_for_key()
+    press(table, Q.Key.Key_A)
+    assert table.view == "hand_low" and table.hand_cursor is not None, "A walked the hand, it did not dismiss him"
+    assert table.caption_key == "first_draw", "and he is still asking"
+    hand = table._hand_cards()
+    votary = next(v for v in hand if v.card.defn.id == "votary")
+    table._click(("card", votary.uid))
+    table._tick()
+    assert table.caption_key != "first_draw", "you did what he asked: the line lets go"

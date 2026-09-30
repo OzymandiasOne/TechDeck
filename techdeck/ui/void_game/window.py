@@ -38,8 +38,8 @@ GLANCE_WAIT_S = 1.0                   # a beat after a key before the camera gla
 PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
-MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_turn", "second_turn", "first_draw",
-             "first_hit", "deck_empty", "win", "first_win", "lose", "teeth", "candle_out", "boss_welcome",
+MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood",
+             "first_hit", "win", "first_win", "lose", "teeth", "candle_out", "boss_welcome",
              "boss_phase", "run_won", "dead", "deathcard_first_time", "deathcard", "deathcard_cost_first_time",
              "deathcard_cost", "deathcard_power_first_time", "deathcard_power", "deathcard_sigil_first_time",
              "deathcard_sigil_first_time_double", "deathcard_sigil", "deathcard_before_named_first_time", "deathcard_before_named",
@@ -47,6 +47,8 @@ MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_tu
              "scene_fight", "scene_choice", "scene_rare", "scene_fire", "scene_altar", "scene_boss",
              "fire_again", "fire_leave", "fire_buffed", "fire_eaten", "altar_done", "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
+PROMPT_KEYS = {"first_turn", "second_turn", "first_draw", "deck_empty"}   # instructions: they never eat a key
+PROMPT_HOLD_S = 25.0                  # ...and linger until you do the thing, or this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
 LESSON_DELAY_S = 1.6                  # the board lesson starts this long after the camera sets off for the board
@@ -329,7 +331,7 @@ class VoidTable(RoadScenes, QWidget):
                 self._glance_for(glow)
             typed = len(text) / CHARS_PER_S + max(0.0, self.type_t0 - self.t)
             # Rules and greetings wait for a key; a passing remark lingers; an [auto] page lets go.
-            hold = NAG_HOLD_S if key == "nag" else FLAVOR_HOLD_S
+            hold = NAG_HOLD_S if key == "nag" else (PROMPT_HOLD_S if key in PROMPT_KEYS else FLAVOR_HOLD_S)
             waits = key in MUST_READ and not self.caption_auto
             self.caption_until = float("inf") if waits else self.t + typed + hold
             if key != ended and ended:
@@ -493,6 +495,7 @@ class VoidTable(RoadScenes, QWidget):
         vc = VCard(card, start, start, card.power, card.health, where="hand")
         self.vcards[card.uid] = vc
         self.show_draw_arrow = False
+        self._prompt_done("first_turn", "second_turn", "deck_empty")
         if self._tutorial() and self.opening_done and "first_draw" not in self.played_lines and any(
                 c.defn.id == "votary" for c in self.game.hand):        # your first real draw, not the opening deal
             self.played_lines.add("first_draw")
@@ -1125,10 +1128,16 @@ class VoidTable(RoadScenes, QWidget):
     def _tutorial(self) -> bool:
         return self.run.fights == 0 and self.run.memory["runs"] == 1
 
+    def _prompt_done(self, *keys: str):
+        """An instruction he gave has been followed: let it go."""
+        if self.caption_key in keys and self.caption_until != float("inf"):
+            self.caption_until = self.t
+
     def pick_up(self, uid: int):
         """Choose a card from the hand: it rises first; a beat later the camera
         moves on to the board with a lane lit and the card waiting at the left.
         One fluid step, in two parts. S puts it down / comes back to the hand."""
+        self._prompt_done("first_draw")
         self.selected, self.sacrifices = uid, []
         self.cursor = self._first_lane()
         if self.view in ("hand_low", "hand_high"):
