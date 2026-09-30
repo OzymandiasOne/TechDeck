@@ -90,6 +90,7 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
 HAND_LOW_Y, HAND_HIGH_Y = 2.6, 4.6      # the hand low (the name band and price show); held up to eye level
 HAND_LOW_Z, HAND_HIGH_Z = 0.6, 1.4      # ...and near, so the cards are large in the hand
 HAND_STEP = 0.42                        # half a card: each card shows half of the next (held tight)
+FRONT_SLIDE = 0.26                      # how far the current card slides up its own face
 
 
 def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0, high: float = 0.0):
@@ -105,9 +106,12 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
     y = HAND_LOW_Y + (HAND_HIGH_Y - HAND_LOW_Y) * high
     z = HAND_Z + HAND_LOW_Z + (HAND_HIGH_Z - HAND_LOW_Z) * high
-    # the current card goes UP only (no nearer): it clears its neighbours without growing
-    c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.45 - 2.4 * tuck + 0.22 * front,
+    c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.45 - 2.4 * tuck,
          z + k * 0.05 + lift * 0.4 + 0.35 * tuck)                      # the right card lies on top
+    # the current card slides UP ITS OWN FACE (along the card's top-to-bottom axis, not the
+    # world's up): the fan's planes are near-parallel, so it clears its neighbours without
+    # crossing through any of them and without growing
+    c = add(c, mul(norm(v), FRONT_SLIDE * front))
     return c, u, v
 
 

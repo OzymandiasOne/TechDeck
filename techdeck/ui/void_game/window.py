@@ -862,8 +862,17 @@ class VoidTable(RoadScenes, QWidget):
         tucked_all = self.book is not None
         if self.view == "hand_high" and not tucked_all and self.selected is None:
             self._draw_holding_fingers(fr)
-        # cards, far to near
-        order = sorted(self.vcards.values(), key=lambda v: -cam.depth(v.pose[0]))
+        # cards, far to near - except the hand, which is a fan: left to right, the right card
+        # on top, whatever a card's centre does; the current card comes to the front of the
+        # fan (layer 2 to layer 1), a raised card tops them all
+        hand = self._hand_cards()
+        rank = {vc.uid: i for i, vc in enumerate(hand)}
+        if self.hand_cursor is not None and self.hand_cursor < len(hand):
+            rank[hand[self.hand_cursor].uid] = len(hand)
+        if self.selected in rank:
+            rank[self.selected] = len(hand) + 1
+        order = sorted(self.vcards.values(),
+                       key=lambda v: (v.uid in rank, rank[v.uid] if v.uid in rank else -cam.depth(v.pose[0])))
         for vc in order:
             c, u, v = vc.drawn_pose(self.t)
             edge = vc.edge
