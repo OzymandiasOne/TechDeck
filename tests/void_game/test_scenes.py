@@ -78,7 +78,7 @@ def test_the_forge_makes_a_deathcard_and_he_keeps_it(table):
         press(table, Qt.Key.Key_Space)                 # ...then Space picks the card
         assert table.forge_step == step + 1
     said = [table.caption_key] + [c[2] for c in table.captions]
-    assert "deathcard_before_named" in said
+    assert "deathcard_before_named_first_time" in said
     quiet(table)
     assert table.forge_step == 3
     for ch in "Ant hony":

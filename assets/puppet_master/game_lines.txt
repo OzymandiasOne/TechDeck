@@ -88,10 +88,11 @@
 #    deathcard_cost              choose the cost
 #    deathcard_power_first_time  choose the numbers ... recap: {power} {health} {card}
 #    deathcard_power             choose the numbers
-#    deathcard_sigil_first_time  choose the marks ... recap: {sigil} {card}
-#    deathcard_sigil_first_time_double   same, when that card carries two marks: {sigil} {sigil2} {card}
-#    deathcard_sigil             choose the marks
-#    deathcard_before_named      before you type its name
+#    deathcard_sigil_first_time  choose the sigils ... recap: {sigil} {card}
+#    deathcard_sigil_first_time_double   same, when that card carries two sigils: {sigil} {sigil2} {card}
+#    deathcard_sigil             choose the sigils
+#    deathcard_before_named_first_time   before you type its name (first death ever)
+#    deathcard_before_named      before you type its name (later deaths)
 #    deathcard_post_named        you named it ({name})
 #    digitize                    the card is taken; you are kept
 #
@@ -100,7 +101,7 @@
 # ── the table ─────────────────────────────────────────────────────────
 welcome | calm | Another challenger... It has been ages. Sit. Perhaps you have forgotten how this is played. Allow me to remind you.
 welcome_again | calm | Again.
-rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. You win if you tip my side completely downward. // [lanes_you]One more thing... // [bell,auto]Ring the bell to end your turn... And begin the combat.
+rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. // [scale]A strike that meets nothing lands on the scale. You win if you tip my side completely downward. // One more thing... // [bell,auto]Ring the bell to end your turn... And begin the combat.
 rules_blood | calm | [costs]The greater souls want blood. That is the cost you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better.
 first_turn | calm | You can draw a card from your deck or a votary.
 second_turn | calm | Again, the choice: a random card from your deck? Or the certainty of a votary?
@@ -178,8 +179,9 @@ deathcard_power_first_time | calm | And another. This time I will use its power 
 deathcard_power | calm | Choose your power and health.
 deathcard_sigil_first_time | calm | Now choose a card from which we will extract the sigils. // A sigil of {sigil} from the {card}.
 deathcard_sigil_first_time_double | calm | Now choose a card from which we will extract the sigils. // A sigil of {sigil} and a sigil of {sigil2} from the {card}.
-deathcard_sigil | calm | Choose your cost.
-deathcard_before_named | calm | I never did ask you your name...
+deathcard_sigil | calm | Choose your sigils.
+deathcard_before_named_first_time | calm | I never did ask you your name...
+deathcard_before_named | calm | What is your name?
 deathcard_post_named | grave | {name}. It will do.
 digitize | grave | I keep what I catch. Your existence will not be in vain.
 digitize | grave | Are you ready?

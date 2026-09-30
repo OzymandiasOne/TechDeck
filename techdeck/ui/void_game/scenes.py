@@ -224,7 +224,7 @@ class RoadScenes:
                          card=d.name.title())
             elif first and names:
                 self.say("deathcard_sigil_first_time", part="tail", sigil=names[0], card=d.name.title())
-            self.say("deathcard_before_named")
+            self.say("deathcard_before_named_first_time" if first else "deathcard_before_named")
 
     def forge_finish(self):
         d = self.run.forge_deathcard(self.forge_name, *self.forge_from)

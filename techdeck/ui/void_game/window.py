@@ -42,7 +42,7 @@ MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood", "first_tu
              "first_hit", "deck_empty", "win", "first_win", "lose", "teeth", "candle_out", "boss_welcome",
              "boss_phase", "run_won", "dead", "deathcard_first_time", "deathcard", "deathcard_cost_first_time",
              "deathcard_cost", "deathcard_power_first_time", "deathcard_power", "deathcard_sigil_first_time",
-             "deathcard_sigil_first_time_double", "deathcard_sigil", "deathcard_before_named",
+             "deathcard_sigil_first_time_double", "deathcard_sigil", "deathcard_before_named_first_time", "deathcard_before_named",
              "deathcard_post_named", "digitize", "first_sacrifice", "famine", "scene_road_first", "scene_road",
              "scene_fight", "scene_choice", "scene_rare", "scene_fire", "scene_altar", "scene_boss",
              "fire_again", "fire_leave", "fire_buffed", "fire_eaten", "altar_done", "card_taken"}   # these wait for you
@@ -893,8 +893,8 @@ class VoidTable(RoadScenes, QWidget):
             col = BRIGHT if draw_on else DIM               # dim once the draw is spent
             fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", col)
             fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", col)
-        if self.view in ("hand_low", "hand_high") and not self.over and not self.busy() and g.phase == "play":
-            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "TAB")   # over the bell's front edge, clear of the deck
+        if self.view != "board_left" and not self.over and not self.busy() and g.phase == "play":
+            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "TAB")   # wherever the bell is in view
         if self.view == "hand_high" and not tucked_all and self.selected is None:
             self._draw_holding_hand(fr)
         if self.show_draw_arrow and self.view in ("hand_low", "hand_high") and g.phase == "draw":
