@@ -57,8 +57,8 @@ KEYS_TEXT = [
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W from the piles", "the board; W again lifts to his back row; S comes back down"),
     ("A from the board", "a glance at the scale; D comes back"),
-    ("TAB / S", "put the raised card down"),
-    ("Z", "ring the bell"),
+    ("S", "put the raised card down"),
+    ("TAB", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
     ("S from the raised hand", "the book of marks"),
     ("Q", "the book, at the raised card's mark"),
@@ -856,7 +856,7 @@ class VoidTable(RoadScenes, QWidget):
             fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", col)
             fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", col)
         if self.view in ("hand_low", "hand_high") and not self.over and not self.busy() and g.phase == "play":
-            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "Z")     # over the bell's front edge, clear of the deck
+            fr.label3(r3.add(r3.BELL, (0, 0.05, 0.55)), "TAB")   # over the bell's front edge, clear of the deck
         if self.view == "hand_high" and not tucked_all and self.selected is None:
             self._draw_holding_hand(fr)
         if self.show_draw_arrow and self.view in ("hand_low", "hand_high") and g.phase == "draw":
@@ -1350,7 +1350,8 @@ class VoidTable(RoadScenes, QWidget):
             return
         try:
             if key == Qt.Key.Key_Tab:
-                self.put_down()
+                if not self.busy() and not self.over:
+                    self.enqueue(self.game.ring_bell())     # the bell
             elif key == Qt.Key.Key_Q:
                 if self.selected is not None:
                     d = self.game._hand_card(self.selected).defn
@@ -1377,9 +1378,6 @@ class VoidTable(RoadScenes, QWidget):
                 self._look_at_piles()
             elif key == Qt.Key.Key_Left and self.view == "deck":
                 self._back_to_hand()
-            elif key == Qt.Key.Key_Z:
-                if not self.busy() and not self.over:
-                    self.enqueue(self.game.ring_bell())
             elif key in (Qt.Key.Key_E, Qt.Key.Key_R):
                 if not self.busy() and not self.over:
                     self.enqueue(self.game.draw("deck" if key == Qt.Key.Key_E else "votary"))
