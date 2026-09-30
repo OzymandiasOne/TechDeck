@@ -60,8 +60,8 @@ KEYS_TEXT = [
     ("S / W", "raise the hand to eye level / rest it low. W from the low hand: the board"),
     ("RIGHT / LEFT", "straight to the piles (while a draw is owed), and back"),
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
-    ("W from the piles", "the board; W again lifts to his back row; S comes back down"),
-    ("A from the board", "a glance at the scale; D comes back"),
+    ("W from the piles", "the board; W again pitches up to his back row; S comes back down"),
+    ("A / D from the board", "a glance at the scale / at the bell and your candles; the other key comes back"),
     ("S", "put the raised card down"),
     ("TAB", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
@@ -1492,8 +1492,8 @@ class VoidTable(RoadScenes, QWidget):
                     self.cursor = 1
                 elif v == "board_left":
                     self.set_view("board")                 # back from the scale
-                elif v in ("board", "board_far") and self._drawing():
-                    self.set_view("deck")
+                elif v in ("board", "board_far"):
+                    self.set_view("board_right")           # a glance right, at the bell and your candles
             elif key == Qt.Key.Key_A:
                 v = self.view
                 if self.selected is not None and self.cursor is not None:

@@ -134,7 +134,7 @@ VIEWS = {
     "hand_high": ((0.0, 5.6, 9.6), (0.0, 0.1, -1.4), 50.0),   # the same spot, looking down a touch
     "deck": ((0.0, 5.6, 9.6), (2.6, 0.7, -0.2), 50.0),      # planted; the piles just right of centre
     "board": ((0.0, 5.4, 5.3), (0.0, 0.0, 1.75), 50.0),     # your row and his front row fill it; the back row's top edge
-    "board_far": ((0.0, 7.6, 2.4), (0.0, 0.0, -1.35), 50.0), # lifted: the back row; your row cut in half at the bottom
+    "board_far": ((0.0, 5.4, 5.3), (0.0, 0.0, -0.9), 50.0),  # the same spot, pitched up: his two rows in the middle
     "board_left": ((0.0, 5.4, 5.3), (-4.2, 0.6, 1.3), 50.0),  # a glance left, at the scale
     "board_right": ((0.0, 5.4, 5.3), (4.4, 0.4, 0.4), 50.0),  # a glance right, at the bell
 }
