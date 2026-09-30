@@ -328,8 +328,11 @@ class RoadScenes:
     def _draw_candles(self, fr: r3.Frame):
         """Your lives: two small flames at your right hand."""
         t = self.t
-        for i, cx in enumerate((4.3, 5.2)):
-            b = (cx, 0, 4.1)
+        for i, (cx, cz) in enumerate(((5.3, -1.4), (6.0, -1.9))):
+            b = (cx, 0, cz)                                  # behind the bell, off the piles, on stands
+            fr.line3(b, add(b, (0, 0.9, 0)), DIM, 1.0)
+            fr.polyline3(fr.ring(b, 0.3, 8), DIM)
+            b = add(b, (0, 0.9, 0))
             fr.polyline3(fr.ring(b, 0.14, 8), MID); fr.polyline3(fr.ring(add(b, (0, 0.7, 0)), 0.14, 8), MID)
             for a in range(0, 360, 90):
                 d = (0.14 * math.cos(math.radians(a)), 0, 0.14 * math.sin(math.radians(a)))

@@ -106,7 +106,7 @@ rules_lanes | calm | [lanes_you]Four lanes. Your side. // [lanes_him]My side. //
 rules_blood | calm | [costs]The greater things want blood. That is the price you see on them. // [cost_icon]Offer them your lesser things. Play something cheap first, then feed it to something better. // [remnants]Every one you lose leaves a remnant. Some things are bought with remnants alone.
 
 first_turn | calm | Begin.
-first_turn | curious | Show me what you brought.
+first_turn | calm | Draw a card.
 
 first_sacrifice | grave | Do not mourn it. What you offer is not lost to you. Its suffering was real. You will see it again.
 sacrifice | calm | It goes willingly. They always do.

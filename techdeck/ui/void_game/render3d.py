@@ -87,8 +87,9 @@ def slot_center(row: float, lane: int, lift: float = 0.03) -> Vec:
     return (LANES[lane], lift, row)
 
 
-HAND_LOW_Y, HAND_HIGH_Y = 1.85, 3.05    # the hand low (names and prices showing); held up to eye level
-HAND_HIGH_Z = 0.55                      # ...and nearer, so it fills the middle of the screen
+HAND_LOW_Y, HAND_HIGH_Y = 2.6, 4.6      # the hand low (the name band and price show); held up to eye level
+HAND_LOW_Z, HAND_HIGH_Z = 0.6, 1.4      # ...and near, so the cards are large in the hand
+HAND_STEP = 0.42                        # half a card: each card shows half of the next (held tight)
 
 
 def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0, high: float = 0.0):
@@ -98,13 +99,25 @@ def hand_pose(k: float, lift: float = 0.0, tuck: float = 0.0, front: float = 0.0
     nearer, so it stays in front); `front` (0..1) brings the card the cursor
     is on straight toward the camera through its neighbours, a touch up;
     `tuck` (0..1) drops the hand out of the way."""
-    ang = -k * 0.13
+    ang = -k * 0.06                     # near-parallel, a real held fan
     hs = HAND_SCALE
     u = (CW2 * hs * math.cos(ang), CW2 * hs * math.sin(ang), 0)
     v = mul(norm((-math.sin(ang) * 0.9, math.cos(ang) * 0.80, -0.60)), CH2 * hs)
     y = HAND_LOW_Y + (HAND_HIGH_Y - HAND_LOW_Y) * high
-    c = (k * 0.66, y - abs(k) * 0.07 + lift - 1.15 * tuck + 0.12 * front,   # held a little closer together
-         HAND_Z + HAND_HIGH_Z * high + lift * 0.25 + 0.35 * tuck + 0.45 * front)
+    z = HAND_Z + HAND_LOW_Z + (HAND_HIGH_Z - HAND_LOW_Z) * high
+    c = (k * HAND_STEP, y - abs(k) * 0.03 + lift * 0.62 - 2.4 * tuck + 0.18 * front,
+         z + k * 0.05 + lift * 0.4 + 0.35 * tuck + 0.4 * front)        # the right card lies on top
+    return c, u, v
+
+
+def held_pose(view: str):
+    """Where a chosen card waits while you look at the board: the bottom left
+    of that view, tilted toward you, always in sight."""
+    pos, look, fov = VIEWS[CAM_OF.get(view, view)]
+    cam = Camera(pos, look, fov)
+    c = add(add(add(cam.pos, mul(cam.fwd, 2.6)), mul(cam.right, -1.55)), mul(cam.up, -0.62))
+    u = mul(norm(add(cam.right, mul(cam.fwd, 0.25))), CW2 * 0.62)
+    v = mul(norm(add(cam.up, mul(cam.fwd, -0.35))), CH2 * 0.62)
     return c, u, v
 
 
