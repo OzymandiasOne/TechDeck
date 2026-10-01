@@ -52,7 +52,7 @@ PROMPT_KEYS = {"first_turn", "second_turn", "first_draw", "deck_empty"}   # inst
 PROMPT_HOLD_S = 25.0                  # ...and linger until you do the thing, or this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
-LESSON_DELAY_S = 1.6                  # the board lesson starts this long after the camera sets off for the board
+LESSON_DELAY_S = 0.98                 # the board lesson starts this long after the camera sets off for the board (1.3 s after Space: 0.32 rise + this)
 
 KEYS_TEXT = [
     ("CLICK A CARD", "pick it up; the board lights a lane"),
