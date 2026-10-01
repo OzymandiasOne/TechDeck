@@ -657,3 +657,25 @@ def test_the_tutorial_keeps_the_bell_out_of_reach_until_he_speaks_of_it(table):
     quiet(table)
     press(table, Q.Key.Key_Tab); settle(table)
     assert table.game.phase != "play" or table.game.turn > 1, "now it rings"
+
+
+def test_on_the_board_a_and_d_walk_the_slots_and_look_past_the_ends(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    press(table, Q.Key.Key_W); settle(table); quiet(table)          # the board, no card raised
+    table.set_view("board")
+    assert table.view == "board" and table.cursor == 0
+    for lane in (1, 2, 3):
+        press(table, Q.Key.Key_D)
+        assert table.view == "board" and table.cursor == lane
+    press(table, Q.Key.Key_D)
+    assert table.view == "board_right", "past the rightmost slot: the bell and the candles"
+    press(table, Q.Key.Key_A)
+    assert table.view == "board" and table.cursor == 3, "and back, on the same slot"
+    for lane in (2, 1, 0):
+        press(table, Q.Key.Key_A)
+        assert table.cursor == lane
+    press(table, Q.Key.Key_A)
+    assert table.view == "board_left", "past the leftmost slot: the scale"
+    press(table, Q.Key.Key_D)
+    assert table.view == "board" and table.cursor == 0

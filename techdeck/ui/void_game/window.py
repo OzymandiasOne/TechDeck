@@ -62,7 +62,7 @@ KEYS_TEXT = [
     ("RIGHT / LEFT", "straight to the piles (while a draw is owed), and back"),
     ("SPACE", "play into the lit lane; draw the lit pile; move him along"),
     ("W from the piles", "the board; W again pitches up to his back row; S comes back down"),
-    ("A / D from the board", "a glance at the scale / at the bell and your candles; the other key comes back"),
+    ("A / D on the board", "along the slots; past the leftmost, a glance at the scale; past the rightmost, the bell and your candles"),
     ("S", "put the raised card down"),
     ("TAB", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
@@ -930,12 +930,10 @@ class VoidTable(RoadScenes, QWidget):
         # small key hints where the eye is: E / R under the piles in the deck
         # view, Z under the bell from the hand
         draw_on = can_act and g.phase == "draw"
-        if self.view in ("deck", "hand_low", "hand_high") and not self.over and (draw_on or self.view == "deck"):
-            col = BRIGHT if draw_on else DIM               # dim once the draw is spent
-            fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", col)
-            fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", col)
-        if (self.view != "board_left" and not self.over and not self.busy() and g.phase == "play"
-                and (self.bell_told or not self._tutorial())):
+        if draw_on and self.view in ("deck", "hand_low", "hand_high"):   # only while a draw can be made
+            fr.label3(r3.add(r3.DECK, (0, 0, 1.25)), "E", BRIGHT)
+            fr.label3(r3.add(r3.VOTARIES, (0, 0, 1.25)), "R", BRIGHT)
+        if self.view != "board_left" and not self.over and not self.busy() and g.phase == "play":
             at = r3.add(r3.BELL, (0, 0.05, 0.55))
             q = fr.cam.project(at)
             if q and not self._under_a_hand_card(q[0], q[1]):
@@ -1529,28 +1527,38 @@ class VoidTable(RoadScenes, QWidget):
                     self.set_view("board")
             elif key == Qt.Key.Key_D:
                 v = self.view
-                if self.selected is not None and self.cursor is not None:
-                    self.cursor = (self.cursor + 1) % LANES  # a card raised: choose its lane
+                if v in ("board", "board_far"):
+                    if self.cursor is None:
+                        self.cursor = self._first_lane()
+                    elif self.cursor >= LANES - 1:
+                        self.set_view("board_right")       # past the rightmost slot: the bell and your candles
+                    else:
+                        self.cursor += 1                   # along the slots
+                elif self.selected is not None and self.cursor is not None:
+                    self.cursor = (self.cursor + 1) % LANES  # a card raised, from the hand: choose its lane
                 elif v in ("hand_low", "hand_high"):
                     self._walk_hand(+1)                    # ...and past the last card, the piles (while a draw is owed)
                 elif v == "deck":
                     self.cursor = 1
                 elif v == "board_left":
                     self.set_view("board")                 # back from the scale
-                elif v in ("board", "board_far"):
-                    self.set_view("board_right")           # a glance right, at the bell and your candles
             elif key == Qt.Key.Key_A:
                 v = self.view
-                if self.selected is not None and self.cursor is not None:
+                if v in ("board", "board_far"):
+                    if self.cursor is None:
+                        self.cursor = self._first_lane()
+                    elif self.cursor <= 0:
+                        self.set_view("board_left")        # past the leftmost slot: the scale
+                    else:
+                        self.cursor -= 1
+                elif self.selected is not None and self.cursor is not None:
                     self.cursor = (self.cursor - 1) % LANES
                 elif v in ("hand_low", "hand_high"):
                     self._walk_hand(-1)
                 elif v == "deck":
                     self._back_to_hand()
-                elif v in ("board", "board_far"):
-                    self.set_view("board_left")            # a glance left, at the scale
                 elif v == "board_right":
-                    self.set_view("board")
+                    self.set_view("board")                 # back from the bell
             else:
                 super().keyPressEvent(event)
         except IllegalMove as why:
