@@ -217,3 +217,34 @@ def test_a_later_death_gets_the_plain_forge(table):
     assert table.scene == "forge" and not table.forge_first
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "deathcard" in said and "deathcard_cost" in said and "deathcard_first_time" not in said
+
+
+def test_quitting_mid_road_brings_you_back_to_the_same_doors(table, tmp_path):
+    import json
+    to_road(table)
+    assert table.scene == "road" and len(table.run.offers) == 3
+    doors = [(s.kind, list(s.cards), s.fire) for s in table.run.offers]
+    step, candles, runs = table.run.step, table.run.candles, table.run.memory["runs"]
+    deck = [c.to_dict() for c in table.run.deck]
+    table.road_pick()                                   # into the next stop...
+    saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
+    assert saved["run"]["step"] == step, "the save is from the doors, not the stop"
+    again = VoidTable()                                 # ...quit, and open the table anew
+    again.timer.stop()
+    try:
+        assert again.scene == "road"
+        assert [(s.kind, list(s.cards), s.fire) for s in again.run.offers] == doors
+        assert (again.run.step, again.run.candles) == (step, candles)
+        assert [c.to_dict() for c in again.run.deck] == deck
+        assert again.run.memory["runs"] == runs, "the same run, not a new one"
+    finally:
+        again.close(); again.deleteLater()
+
+
+def test_the_run_slot_is_cleared_when_you_die(table, tmp_path):
+    import json
+    ready(table)
+    table.run.candles = 1
+    rig_end(table, False)
+    saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
+    assert saved.get("run") is None

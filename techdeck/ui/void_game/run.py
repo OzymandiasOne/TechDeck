@@ -88,6 +88,28 @@ class Run:
         self.dead = False
         self.deathcard: CardDef | None = None
 
+    # ── saving your place ────────────────────────────────────────────────
+    def to_dict(self) -> dict:
+        """Your place on the road, taken at the doors: restoring it rolls the
+        same doors again (the dice are saved too)."""
+        v, ints, gauss = self.rng.getstate()
+        return {"deck": [c.to_dict() for c in self.deck], "candles": self.candles, "step": self.step,
+                "teeth": self.teeth, "fights": self.fights, "rng": [v, list(ints), gauss]}
+
+    @classmethod
+    def restore(cls, saved: dict, memory: dict | None) -> "Run":
+        """The run you quit, back at the doors you were shown."""
+        run = cls(None, memory)
+        run.memory["runs"] -= 1                      # the same run, not a new one
+        run.deck = [DeckCard.from_dict(d) for d in saved["deck"]]
+        run.candles = saved["candles"]
+        run.step = saved["step"]
+        run.teeth = saved.get("teeth", 0)
+        run.fights = saved.get("fights", 0)
+        v, ints, gauss = saved["rng"]
+        run.rng.setstate((v, tuple(ints), gauss))
+        return run
+
     # ── the road ─────────────────────────────────────────────────────────
     def offer(self) -> list[Stop]:
         """The three doors ahead (one, at the end: him)."""

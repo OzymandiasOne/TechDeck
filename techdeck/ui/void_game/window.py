@@ -86,6 +86,8 @@ def load_settings() -> dict:
         kept = {k: got[k] for k in DEFAULT_SETTINGS if k in got}
         if isinstance(got.get("memory"), dict):
             kept["memory"] = got["memory"]                 # what survives a run
+        if isinstance(got.get("run"), dict):
+            kept["run"] = got["run"]                       # the run you quit, at its last doors
         return {**DEFAULT_SETTINGS, **kept}
     except (OSError, ValueError):
         return dict(DEFAULT_SETTINGS)

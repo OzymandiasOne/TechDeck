@@ -35,7 +35,11 @@ FIRE_AGAIN_DEATHS = 5                 # a second rest at the same fire is only o
 class RoadScenes:
     # ── state ────────────────────────────────────────────────────────────
     def _init_run(self, seed, memory):
-        self.run = Run(seed, memory)
+        saved = self.settings.get("run")
+        if isinstance(saved, dict) and seed is None:
+            self.run = Run.restore(saved, memory)    # the run you quit, back at its last doors
+        else:
+            self.run = Run(seed, memory)
         self.scene = "road"               # road | fight | pick | fire | altar | forge | digitize
         self.pick = 0
         self.after_fight = ""
@@ -50,19 +54,30 @@ class RoadScenes:
         self.card_remark_said = False         # he remarks on one played card per match
         self.generic_remark_ok = False        # ...and on a card with no line of its own only in some matches
         self.first_sacrifice_said = False
-        self.road_opened = False              # the road's first doors have been narrated
+        self.road_opened = self.run.step >= 1  # the road's first doors have been narrated
         self.warmed: str = ""                 # the last card warmed at this fire, for leaving
         self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
 
     def _save_memory(self):
         self.settings["memory"] = self.run.memory
+        if self.run.over:
+            self.settings["run"] = None              # the road is walked, or you are dead: nothing to come back to
+        from .window import save_settings
+        save_settings(self.settings)
+
+    def _save_run(self):
+        """Your place on the road, taken at the doors: quit mid-fight or mid-stop
+        and you come back here, to these doors."""
+        self.settings["memory"] = self.run.memory
+        self.settings["run"] = None if self.run.over else self.run.to_dict()
         from .window import save_settings
         save_settings(self.settings)
 
     # ── moving along the road ────────────────────────────────────────────
     def road_show(self):
         """The doors ahead. One door (the first table, or him) opens itself."""
+        self._save_run()                           # before the dice roll, so the same doors come back
         offers = self.run.offer()
         self.scene, self.pick, self.scene_t0 = "road", 0, self.t
         if len(offers) == 1:
