@@ -698,3 +698,35 @@ def test_he_remarks_on_one_played_card_per_match(table):
         said += [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
         quiet(table)
     assert len(set(said)) <= 1 and len(said) <= 1, said
+
+
+def test_the_generic_card_remarks_come_only_in_some_matches(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    g = table.game
+    votary = next(c for c in g.hand if c.defn.id == "votary")
+    cheap = next(c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer")
+    table.run.memory["cards_played"] = ["votary", cheap.defn.id]      # both played before, in some other run
+    table.generic_remark_ok = False
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table); quiet(table)
+    table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
+    while table.cursor != 0:
+        press(table, Q.Key.Key_D)
+    press(table, Q.Key.Key_Space); press(table, Q.Key.Key_Space); settle(table)
+    assert g.rows[YOU][0] is cheap
+    said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
+    assert not said, said
+    assert not table.card_remark_said, "nothing was said, so the match's one remark is still to come"
+
+
+def test_a_cards_first_play_is_remembered_across_runs_and_sessions(table, tmp_path):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table)
+    said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
+    assert said == ["play_votary"], said
+    assert "votary" in table.run.memory["cards_played"]
+    import json
+    saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
+    assert "votary" in saved["memory"]["cards_played"], "saved at once, for the next session"

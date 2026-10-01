@@ -28,6 +28,7 @@ FAN_Z, FAN_Y = 4.6, 0.9
 LAMP_X = -6.6
 BOOK_PER_PAGE = 4
 DIGITIZE_S = 4.5
+GENERIC_REMARK_CHANCE = 0.2           # one match in five, he remarks on a card that has no line of its own
 FIRE_AGAIN_DEATHS = 5                 # a second rest at the same fire is only offered after this many deaths
 
 
@@ -47,6 +48,7 @@ class RoadScenes:
         self.book: int | None = None      # page of the rule book, or None
         self.seen_this_fight: set[str] = set()
         self.card_remark_said = False         # he remarks on one played card per match
+        self.generic_remark_ok = False        # ...and on a card with no line of its own only in some matches
         self.first_sacrifice_said = False
         self.road_opened = False              # the road's first doors have been narrated
         self.warmed: str = ""                 # the last card warmed at this fire, for leaving
@@ -100,6 +102,7 @@ class RoadScenes:
         self.over = False; self.after_fight = ""; self.opening_done = False
         self.scale_shown = self.scale_target = 0.0; self.remnants_shown = 0
         self.seen_this_fight = set(); self.said_this_phase = set(); self.card_remark_said = False
+        self.generic_remark_ok = run.rng.random() < GENERIC_REMARK_CHANCE
         if run.stop and run.stop.kind == "boss":
             self.say("boss_welcome")
         elif run.fights == 0:

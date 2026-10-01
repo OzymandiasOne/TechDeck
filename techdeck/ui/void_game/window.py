@@ -534,24 +534,31 @@ class VoidTable(RoadScenes, QWidget):
             self.say("sacrifice_many")
         elif sacrificed == 1:
             self.say("sacrifice")
-        key = "play_" + card.defn.id
-        seen = card.defn.id in self.seen_this_fight
-        self.seen_this_fight.add(card.defn.id)
+        cid = card.defn.id
+        key = "play_" + cid
+        ever = self.run.memory["cards_played"]     # across runs and sessions
+        played_before = cid in ever
+        if not played_before:
+            ever.append(cid)
+            self._save_memory()
+        seen_tonight = cid in self.seen_this_fight
+        self.seen_this_fight.add(cid)
         if self.card_remark_said:
             pass                                   # one remark on a card per match
-        elif self.dlg.has(key) and key not in self.played_lines:
-            self.played_lines.add(key)
+        elif self.dlg.has(key) and not played_before:
             self.card_remark_said = True
-            self.say(key, name=card.name)
-        elif seen and card.defn.id != "votary":
+            self.say(key, name=card.name)          # the card's own line: its first play, ever
+        elif not self.generic_remark_ok:
+            pass                                   # the generic remarks: one match in five
+        elif played_before and cid != "votary":
             self.card_remark_said = True
             self.say("play_repeat", name=card.name)
         elif card.defn.cost >= 3:
             self.card_remark_said = True
             self.say("play_big", name=card.name)
-        elif not seen and card.defn.id != "votary":
+        elif not seen_tonight and cid != "votary":
             self.card_remark_said = True
-            self.say("play_new", name=card.name)
+            self.say("play_new", name=card.name)   # new tonight: the one remark that is per match
         self._layout_hand()
 
     def _endless(self, card: Card):

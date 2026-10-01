@@ -7,7 +7,9 @@ dead - and a dead player forges a DEATHCARD from their deck, which turns up in
 later runs, in your hand or, rarely, in his.
 
 What survives a run (the `memory` dict the window saves):
-    deathcards, the undying bonus (an Ouroboros remembers dying), run counts.
+    deathcards, the undying bonus (an Ouroboros remembers dying), run counts,
+    and every card you have ever played (he remarks on a card's first play once,
+    across runs and sessions).
 """
 from __future__ import annotations
 
@@ -58,7 +60,8 @@ class Stop:
 
 
 def empty_memory() -> dict:
-    return {"deathcards": [], "undying_bonus": {}, "runs": 0, "wins": 0, "deaths": 0, "best": 0}
+    return {"deathcards": [], "undying_bonus": {}, "runs": 0, "wins": 0, "deaths": 0, "best": 0,
+            "cards_played": []}
 
 
 class Run:
