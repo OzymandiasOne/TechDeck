@@ -1,27 +1,23 @@
 {
- "format": "tdart",
- "version": 1,
- "palette": {
-  "a": "#b7b6b6",
-  "g": "#706d67",
-  "b": "#0b1410"
- },
- "rows": [
-  "................",
-  "..aaaaaaaaaaa...",
-  "..agggabbbbba...",
-  "..aaaaabbbbba...",
-  "..agggabbbbba...",
-  "..aaaaabbbbba...",
-  "..agggabbbbba...",
-  "..aaaaabbbbba...",
-  "..agggabbbbba...",
-  "..aaaaabbbbba...",
-  "..agggaaaaaaa...",
-  "..aaaaaaaaaaa...",
-  "..aaaaaaaaaaa...",
-  "...aaaaaaaaa....",
-  "...aaaaaaaaa....",
-  "................"
- ]
+  "format": "tdart",
+  "version": 1,
+  "palette": {"a": "#b7b6b6", "g": "#706d67", "r": "#9c1522", "1": "#2e2e2e", "2": "#00aa00", "3": "#007400", "4": "#db0000"},
+  "rows": [
+    "................",
+    "..aaaaaaaaaaaa..",
+    "..aggga211112a..",
+    "..aaaaa321123a..",
+    "..aggga232232a..",
+    "..aaaaa422224a..",
+    "..aggga322223a..",
+    "..aaaaa22rr22a..",
+    "..aggga3rrrr3a..",
+    "..aaaaa133331a..",
+    "..agggaaaaaaaa..",
+    "..aaaaaaaaaaaa..",
+    "..aaaaaaaaaaaa..",
+    "...aaaaaaaaaa...",
+    "...aaaaaaaaaa...",
+    "................"
+  ]
 }
