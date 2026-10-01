@@ -243,6 +243,7 @@ class CommandHandler:
                 page.refresh()
             except Exception:
                 pass
+        self._refresh_emporium()                  # My Stuff lights its cartridge up too
         return True
 
     def _cmd_seance(self, args: str):

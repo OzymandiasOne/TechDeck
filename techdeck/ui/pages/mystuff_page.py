@@ -22,9 +22,10 @@ from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QImage
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.arcade_chrome import (
     EMP, _draw_bubble, _load_pixmap, _load_art, _trim_v,
-    _tile_ring, _equipped_badge,
+    _tile_ring, _equipped_badge, _greyed,
 )
 from techdeck.ui.emporium_catalog import CATALOG
+from techdeck.core.constants import gate_enabled
 
 # The diagonal-stripe wall, as a SEAMLESS tile so it fills the whole page (and
 # repeats as the locker scrolls) instead of the old stretched art whose solid
@@ -160,6 +161,7 @@ class InventoryTile(QFrame):
         self.setFixedSize(self.SIZE, self.HEIGHT)
         self.setStyleSheet("InventoryTile { background: transparent; }")
 
+        self.locked = False                  # a "found" item not yet found: greyed, inert
         self._icon = self._load_icon()
 
         lay = QVBoxLayout(self)
@@ -235,9 +237,17 @@ class InventoryTile(QFrame):
 
     def refresh(self):
         s = self.page.settings
+        self.locked = bool(self.item.get("found")) and not s.is_unlocked(self.item["id"])
         self.name.setPixmap(_sf().render_wrapped(self.item["name"].upper(), 2,
-                                                EMP["tile_text"], max_width=self.NAME_W))
-        if self.item["kind"] == "build":
+                                                EMP["tile_dim"] if self.locked else EMP["tile_text"],
+                                                max_width=self.NAME_W))
+        if self._icon is not None:
+            self.icon.setPixmap(_greyed(self._icon) if self.locked else self._icon)
+        if self.locked:
+            self.equipped = False
+            self._set_btn("LOCKED", EMP["owned"], EMP["owned"], False)
+            self.action_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        elif self.item["kind"] == "build":
             self.equipped = False
             self._set_btn("BUILD", EMP["owned"], "#b184e0", True)
             # Re-read the icon: this tile shows the player's build, so it has to
@@ -262,6 +272,8 @@ class InventoryTile(QFrame):
         self.update()
 
     def _activate(self):
+        if self.locked:
+            return                             # not found yet: nothing happens
         if self.item["kind"] == "build":
             self.page.build_beyblade()
         elif self.item["kind"] == "gadget":
@@ -356,7 +368,9 @@ class MyStuffPage(QWidget):
         owned_spinners = [c for c in CATALOG
                           if c["kind"] == "spinner" and s.is_unlocked(c["id"])]
         owned_games = [c for c in CATALOG
-                       if c["kind"] == "game" and s.is_unlocked(c["id"])]
+                       if c["kind"] == "game"
+                       and (s.is_unlocked(c["id"]) or c.get("found"))
+                       and (not c.get("gate") or gate_enabled(c["gate"]))]
 
         # Fidget spinners (always: the Default option + any you own). The
         # builder tile joins them once at least one beyblade is owned, since
@@ -371,7 +385,7 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._hint(
                 "Buy spinners at Woogy's Emporium to add them here."))
 
-        # Games (owned only).
+        # Games (owned, plus any "found" cartridge still greyed out).
         if owned_games:
             self._vbox.addWidget(self._section_header("Games"))
             self._vbox.addWidget(self._grid(owned_games))

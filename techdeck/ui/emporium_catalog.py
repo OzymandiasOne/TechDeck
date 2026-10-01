@@ -38,6 +38,12 @@ CATALOG = [
      "sprite": "beyblade/nightspur", "cost": 190, "kind": "spinner"},
     {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
+    # FOUND, not bought: never on the shelf ("hidden"); My Stuff shows it greyed
+    # out and inert ("found") until the table is first opened, which unlocks this
+    # same id (CommandHandler.discover_table). "gate" = absent while he is off.
+    {"id": "game_puppet_master", "name": "Puppet Master", "category": "toys",
+     "sprite": "cartridge_puppet_master.tdart", "cost": 1, "kind": "game",
+     "hidden": True, "found": True, "gate": "puppet_master"},
     # A GADGET: it doesn't get equipped, it gets CONFIGURED. Owning it unlocks
     # the kill-cam file/folder picker plus the per-app switches in My Stuff and
     # in Settings -> Apps (techdeck/core/sentry_mode.py).

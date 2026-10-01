@@ -190,3 +190,39 @@ def test_wrap_never_returns_an_overwide_line(qapp):
     for text in ("SUPERCALIFRAGILISTIC", "AAAAAAAAAAAAAAAAAAAAAAAA", "OK"):
         for line in f.wrap_lines(text, 2, 100):
             assert f.text_width(line, 2) <= 100, f"{line!r} overflows"
+
+
+# ---- found, not bought: the Puppet Master cartridge in My Stuff ------------
+
+def test_the_puppet_master_row_is_never_on_the_shelf():
+    from techdeck.ui.emporium_catalog import CATALOG
+    row = next(c for c in CATALOG if c["id"] == "game_puppet_master")
+    assert row["hidden"] and row["found"] and row["gate"] == "puppet_master" and row["kind"] == "game"
+
+
+def test_my_stuff_shows_a_found_cartridge_greyed_until_found(qapp, tmp_path, monkeypatch):
+    """With him on, the locker lists the cartridge greyed out and inert; the
+    unlock (the table's first opening) turns it into an owned game. With him
+    off it is not there at all."""
+    from techdeck.core import constants
+    from techdeck.ui.pages.mystuff_page import MyStuffPage
+    monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
+    monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", True)
+    s = SettingsManager(settings_dir=tmp_path)
+    page = MyStuffPage(s)
+    tile = next(t for t in page.tiles if t.item["id"] == "game_puppet_master")
+    assert tile.locked and not tile.action_btn.isEnabled()
+    img = tile.icon.pixmap().toImage()
+    opaque = [img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height())
+              if img.pixelColor(x, y).alpha() > 0]
+    assert opaque and all(c.red() == c.green() == c.blue() for c in opaque), "greyed"
+    s.unlock_item("game_puppet_master")
+    page.refresh()
+    tile = next(t for t in page.tiles if t.item["id"] == "game_puppet_master")
+    assert not tile.locked
+    img = tile.icon.pixmap().toImage()
+    assert any(c.red() != c.green() for c in
+               (img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height()))), "in colour"
+    monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", False)
+    page = MyStuffPage(SettingsManager(settings_dir=tmp_path / "off"))
+    assert not any(t.item["id"] == "game_puppet_master" for t in page.tiles)
