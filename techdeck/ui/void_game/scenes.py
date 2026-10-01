@@ -46,6 +46,7 @@ class RoadScenes:
         self.peek = False                 # the hand pulled down, nothing else
         self.book: int | None = None      # page of the rule book, or None
         self.seen_this_fight: set[str] = set()
+        self.card_remark_said = False         # he remarks on one played card per match
         self.first_sacrifice_said = False
         self.road_opened = False              # the road's first doors have been narrated
         self.warmed: str = ""                 # the last card warmed at this fire, for leaving
@@ -98,7 +99,7 @@ class RoadScenes:
         self.view = self.view_prev = "hand_low"; self.peek = False; self.book = None
         self.over = False; self.after_fight = ""; self.opening_done = False
         self.scale_shown = self.scale_target = 0.0; self.remnants_shown = 0
-        self.seen_this_fight = set(); self.said_this_phase = set()
+        self.seen_this_fight = set(); self.said_this_phase = set(); self.card_remark_said = False
         if run.stop and run.stop.kind == "boss":
             self.say("boss_welcome")
         elif run.fights == 0:

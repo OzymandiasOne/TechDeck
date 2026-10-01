@@ -537,15 +537,21 @@ class VoidTable(RoadScenes, QWidget):
         key = "play_" + card.defn.id
         seen = card.defn.id in self.seen_this_fight
         self.seen_this_fight.add(card.defn.id)
-        if self.dlg.has(key) and key not in self.played_lines:
+        if self.card_remark_said:
+            pass                                   # one remark on a card per match
+        elif self.dlg.has(key) and key not in self.played_lines:
             self.played_lines.add(key)
+            self.card_remark_said = True
             self.say(key, name=card.name)
         elif seen and card.defn.id != "votary":
-            self.say("play_repeat", once_per_phase=True, name=card.name)
+            self.card_remark_said = True
+            self.say("play_repeat", name=card.name)
         elif card.defn.cost >= 3:
+            self.card_remark_said = True
             self.say("play_big", name=card.name)
         elif not seen and card.defn.id != "votary":
-            self.say("play_new", once_per_phase=True, name=card.name)
+            self.card_remark_said = True
+            self.say("play_new", name=card.name)
         self._layout_hand()
 
     def _endless(self, card: Card):

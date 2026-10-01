@@ -73,6 +73,17 @@ def ev(kind: str, **data) -> Event:
     return Event(kind, data)
 
 
+_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+
+
+def _word(n: int) -> str:
+    return _WORDS[n] if 0 <= n < len(_WORDS) else str(n)
+
+
+def _souls(n: int) -> str:
+    return f"{_word(n)} soul" + ("" if n == 1 else "s")
+
+
 class Game:
     def __init__(self, seed: int | None = None, deck=None, plan=None, pool=None,
                  undying_bonus: dict[str, int] | None = None, votaries: int = VOTARY_PILE,
@@ -193,7 +204,7 @@ class Game:
         if d.cost_kind == OFFER and d.cost > 0:
             worth = sum(self.offering_worth(self.rows[YOU][s]) for s in sac_lanes)
             if worth < d.cost:
-                return f"It demands {d.cost}. You have offered {worth}."
+                return f"It demands {_souls(d.cost)}. You have offered {_word(worth)}."
         elif sac_lanes:
             return "It asks for no offering."
         if d.cost_kind == REMNANT and self.remnants < d.cost:

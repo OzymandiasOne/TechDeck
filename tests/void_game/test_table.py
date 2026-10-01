@@ -679,3 +679,22 @@ def test_on_the_board_a_and_d_walk_the_slots_and_look_past_the_ends(table):
     assert table.view == "board_left", "past the leftmost slot: the scale"
     press(table, Q.Key.Key_D)
     assert table.view == "board" and table.cursor == 0
+
+
+def test_he_remarks_on_one_played_card_per_match(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    g = table.game
+    said = []
+    for _ in range(4):
+        card = next((c for c in g.hand if not g.why_not(c.uid, 0)), None)
+        if card is None:
+            break
+        table._click(("card", card.uid)); press(table, Q.Key.Key_W)
+        lane = next(l for l in range(LANES) if not g.why_not(card.uid, l))
+        while table.cursor != lane:
+            press(table, Q.Key.Key_D)
+        press(table, Q.Key.Key_Space); settle(table)
+        said += [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
+        quiet(table)
+    assert len(set(said)) <= 1 and len(said) <= 1, said

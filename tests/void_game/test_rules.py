@@ -87,8 +87,8 @@ def test_offerings_pay_for_a_card():
     put(g, "votary", YOU, 0)
     put(g, "votary", YOU, 1)
     hound = in_hand(g, "hound")               # costs 2
-    assert "demands 2" in g.why_not(hound.uid, 2)
-    assert "demands 2" in g.why_not(hound.uid, 2, [0])
+    assert "demands two souls" in g.why_not(hound.uid, 2)
+    assert "demands two souls" in g.why_not(hound.uid, 2, [0])
     events = g.play(hound.uid, 2, [0, 1])
     assert kinds(events) == ["sacrifice", "die", "remnants", "sacrifice", "die", "remnants", "play"]
     assert g.rows[YOU][0] is None and g.rows[YOU][1] is None
