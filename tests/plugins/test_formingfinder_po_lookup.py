@@ -297,3 +297,65 @@ def test_agreeing_dypn_gets_no_alias(ff, tmp_path):
 ])
 def test_ppn_dypn(ff, ppn, dypn, alias):
     assert ff.sdk.ppn_dypn(ppn, dypn) == alias
+
+
+# --- Bent Plates finish: All Borders + yellow header ------------------------
+
+def _organizer(tmp_path, stale_rows=0):
+    """The organizer's Bent Plates sheet as the template ships it: A1:E1
+    merged title, headers on row 2 - plus `stale_rows` of an earlier run."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bent Plates"
+    ws.merge_cells("A1:E1")
+    for c, h in enumerate(["ORDER", "PPN", "DYPN", "SOURCE MATERIAL", "NOTES"], 1):
+        ws.cell(row=2, column=c, value=h)
+    thin = openpyxl.styles.Side(style="thin")
+    for r in range(3, 3 + stale_rows):
+        for c in range(1, 6):
+            ws.cell(row=r, column=c, value="old").border = openpyxl.styles.Border(
+                left=thin, right=thin, top=thin, bottom=thin)
+    path = tmp_path / "PO H496 Pallet & Rod Organizer.xlsx"
+    wb.save(path)
+    return path
+
+
+def _row(dypn):
+    return {"ORDER": "X1", "PPN": dypn.rsplit("-", 1)[0], "DYPN": dypn,
+            "SOURCE MATERIAL": "262028653-11", "NOTES": "BEND"}
+
+
+def _sides(cell):
+    b = cell.border
+    return tuple(s.style if s else None for s in (b.left, b.right, b.top, b.bottom))
+
+
+def test_bent_plates_gets_the_hand_finish(ff, tmp_path):
+    # What the user applied by hand to 494-496: All Borders on every filled
+    # cell, yellow on row 2's five headers.
+    path = _organizer(tmp_path)
+    ff._update_bent_plates(path, "496", [_row("H1-H12-2"), _row("H1-H12-3")],
+                           lambda *a: None)
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    for r in (2, 3, 4):
+        for c in range(1, 6):
+            assert _sides(ws.cell(r, c)) == ("thin",) * 4, ws.cell(r, c).coordinate
+    for c in range(1, 6):
+        assert ws.cell(2, c).fill.fgColor.rgb == "FFFFFF00"
+        assert ws.cell(3, c).fill.fill_type is None
+    # Merged title: an outline - cell for cell what the hand-finished Batch
+    # 494-496 sheets carry (Excel stores the top-left cell fully boxed).
+    assert _sides(ws["A1"]) == ("thin",) * 4
+    assert _sides(ws["C1"]) == (None, None, "thin", "thin")
+    assert _sides(ws["E1"]) == (None, "thin", "thin", "thin")
+    assert _sides(ws["F2"]) == (None,) * 4
+
+
+def test_rerun_with_fewer_parts_leaves_no_empty_boxes(ff, tmp_path):
+    path = _organizer(tmp_path, stale_rows=5)
+    ff._update_bent_plates(path, "496", [_row("H1-H12-2")], lambda *a: None)
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    assert _sides(ws["C3"]) == ("thin",) * 4
+    for r in range(4, 8):
+        assert ws.cell(r, 3).value is None
+        assert _sides(ws.cell(r, 3)) == (None,) * 4
