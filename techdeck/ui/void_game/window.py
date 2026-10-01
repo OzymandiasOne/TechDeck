@@ -36,6 +36,7 @@ IDLE_LINE_S = 40.0
 CHARS_PER_S = 25.5                    # he types his lines, as in the console (a quarter slower than first cut)
 GLANCE_WAIT_S = 1.0                   # a beat after a key before the camera glances at the scale or the bell
 PICK_RISE_S = 0.32                    # a chosen card rises this long before the camera goes to the board
+HAND_DIP_S = 0.5                      # the empty holding hand dips off the screen in this long
 BLINK_S = 0.16
 FLAVOR_HOLD_S = 6.0                   # a passing remark lingers this long after it is typed
 MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood",
@@ -198,6 +199,7 @@ class VoidTable(RoadScenes, QWidget):
         self.selected: int | None = None
         self.sacrifices: list[int] = []
         self.hover = None                 # ("card", uid) | ("slot", lane) | ("bell",) | ("deck",) | ("votary",)
+        self.hand_empty_since: float | None = None   # the holding hand dips away once the last card is gone
         self.hits: list[tuple[tuple, QPolygonF]] = []
         self.menu: str | None = None      # None | main | keys | display | sound
         self.menu_index = 0
@@ -975,12 +977,24 @@ class VoidTable(RoadScenes, QWidget):
 
     def _fan_points(self, fr: r3.Frame):
         """The screen point at the bottom middle of the held fan (it moves only
-        with the fan, never with the card you are on), and a scale."""
+        with the fan, never with the card you are on), and a scale. With no
+        card left to hold, the hand dips off the bottom of the screen (None once
+        it has gone)."""
         c, u, v = r3.hand_pose(0.0, 0.0, 0.0, 0.0, 1.0)
         bottom = fr.cam.project(add(c, mul(v, -1.0)))
         if not bottom:
             return None
-        return bottom, max(0.6, min(1.6, 6.0 / bottom[2]))
+        k = max(0.6, min(1.6, 6.0 / bottom[2]))
+        if self._hand_cards():
+            self.hand_empty_since = None
+            return bottom, k
+        if self.hand_empty_since is None:
+            self.hand_empty_since = self.t
+        dip = min(1.0, (self.t - self.hand_empty_since) / HAND_DIP_S)
+        if dip >= 1.0:
+            return None
+        dip = dip * dip * (3 - 2 * dip)                      # eased
+        return (bottom[0], bottom[1] + 340 * k * dip, bottom[2]), k
 
     def _draw_holding_fingers(self, fr: r3.Frame):
         """The palm and curled fingers BEHIND the cards, at the fan's lower
@@ -1000,8 +1014,6 @@ class VoidTable(RoadScenes, QWidget):
         wrist.cubicTo(bx + 70 * k, by + 20 * k, bx + 100 * k, by + 120 * k, bx + 80 * k, by + 240 * k)
         wrist.closeSubpath()
         p.drawPath(wrist)
-        for dx, tip in ((-14, -34), (10, -40), (32, -30)):    # three fingertips gathered behind the pinch
-            p.drawRoundedRect(QRectF(bx + dx * k - 11 * k, by + tip * k, 22 * k, 70 * k), 10 * k, 10 * k)
 
     def _draw_holding_hand(self, fr: r3.Frame):
         """The thumb, in front of the cards at the fan's lower left, on the
