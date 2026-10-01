@@ -1,0 +1,27 @@
+{
+ "format": "tdart",
+ "version": 1,
+ "palette": {
+  "a": "#b7b6b6",
+  "g": "#706d67",
+  "b": "#0b1410"
+ },
+ "rows": [
+  "................",
+  "..aaaaaaaaaaa...",
+  "..agggabbbbba...",
+  "..aaaaabbbbba...",
+  "..agggabbbbba...",
+  "..aaaaabbbbba...",
+  "..agggabbbbba...",
+  "..aaaaabbbbba...",
+  "..agggabbbbba...",
+  "..aaaaabbbbba...",
+  "..agggaaaaaaa...",
+  "..aaaaaaaaaaa...",
+  "..aaaaaaaaaaa...",
+  "...aaaaaaaaa....",
+  "...aaaaaaaaa....",
+  "................"
+ ]
+}

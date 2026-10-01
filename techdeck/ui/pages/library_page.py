@@ -363,7 +363,8 @@ class LibraryPage(QWidget, ThemeAware):
         self.available_plugins = [
             p for p in self.plugin_loader.plugins.values()
             if not (getattr(p, "locked", False)
-                    and not self.settings.is_unlocked(p.id))
+                    and not self.settings.is_unlocked(p.id)
+                    and not getattr(p, "show_locked", False))   # show_locked: greyed, not hidden
             and not (prof and getattr(p, "family", "") == "Games")
         ]
         self.available_tiles = [p.id for p in self.available_plugins]
@@ -415,7 +416,8 @@ class LibraryPage(QWidget, ThemeAware):
                     tile_id=tile_id,
                     theme=theme,
                     is_selected=is_selected,
-                    parent=self
+                    parent=self,
+                    locked=self._is_locked(plugin),
                 )
                 card.toggled.connect(lambda checked, tid=tile_id: self._on_tile_toggled_card(tid, checked))
 
@@ -433,6 +435,11 @@ class LibraryPage(QWidget, ThemeAware):
         # stale card geometry.
         self.tile_grid.invalidate()
         self._tile_container.updateGeometry()
+
+    def _is_locked(self, plugin) -> bool:
+        """A purchasable / discoverable plugin not yet unlocked: shown greyed
+        (only `show_locked` ones get this far - the rest are hidden)."""
+        return bool(getattr(plugin, "locked", False)) and not self.settings.is_unlocked(plugin.id)
 
     def showEvent(self, event):
         """Force the flow layout to run with real geometry on every show.

@@ -16,6 +16,8 @@ His only entry points:
   3. the techdeck://cat/summon link route
   4. his card game (/play, and asking him to play while he is present) -
      the table needs him, so it is held by the same flag
+  5. the game's Library cartridge (plugins/game_puppet_master) - its
+     plugin.json names his gate, so the loader skips the folder while he is off
 
 Nothing else can reach him: ConsoleCat is a lazy singleton created only by
 those paths, and active_cat() returns None until one runs — so the free-text
@@ -236,3 +238,47 @@ def test_unrelated_links_still_report_themselves_broken(monkeypatch):
     h, _ = _link_handler(False, monkeypatch)
     h.handle_internal_link("techdeck://nonsense/xyz")
     assert h.console.errors and "Unroutable" in h.console.errors[0]
+
+
+# ── entry point 5: his cartridge in the Library ─────────────────────────────
+
+def test_his_cartridge_is_gated_with_him(gate, monkeypatch):
+    """The Library cartridge (plugins/game_puppet_master) names his gate in
+    plugin.json, so the loader never discovers it while he is held - no
+    Library tile, no /moredetails row - and finds it the moment the flag flips."""
+    import json
+    from pathlib import Path
+    from techdeck.core.plugin_loader import PluginLoader
+    root = Path(constants.__file__).resolve().parents[2]
+    manifest = json.loads((root / "plugins" / "game_puppet_master" / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["gate"] == "puppet_master"
+    assert manifest["locked"] and manifest["show_locked"], "greyed in the Library until the table is found"
+    for enabled in (False, True):
+        gate(enabled)
+        loader = PluginLoader(plugins_dir=root / "plugins")
+        loader.discover_plugins()
+        assert ("game_puppet_master" in loader.plugins) is enabled
+
+
+def test_opening_the_table_discovers_the_cartridge_once(monkeypatch, tmp_path):
+    """The first time the table opens, the cartridge comes unlocked with the
+    success jingle; later openings are quiet."""
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    from techdeck.core import audio_manager
+    played = []
+
+    class _Audio:
+        def play(self, sound_id, **kw):
+            played.append(sound_id)
+    monkeypatch.setattr(audio_manager, "get_audio_manager", lambda: _Audio())
+    h = CommandHandler.__new__(CommandHandler)
+    h.settings = SettingsManager(settings_dir=tmp_path)
+    h.console = _Console()
+    h.main_window = None
+    assert not h.settings.is_unlocked(CommandHandler.TABLE_PLUGIN_ID)
+    assert h.discover_table() is True
+    assert h.settings.is_unlocked(CommandHandler.TABLE_PLUGIN_ID)
+    assert played == [audio_manager.SOUND_SUCCESS]
+    assert h.discover_table() is False
+    assert played == [audio_manager.SOUND_SUCCESS], "the jingle plays once"

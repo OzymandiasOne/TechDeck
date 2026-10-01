@@ -45,6 +45,13 @@ def puppet_master_enabled() -> bool:
     return PUPPET_MASTER_ENABLED
 
 
+def gate_enabled(name: str) -> bool:
+    """A plugin.json `gate` by name: the plugin is not discovered at all while
+    its gate is shut (so it is absent from the Library, /moredetails, Sentry -
+    everything). Unknown gate names are shut, so a typo cannot leak a plugin."""
+    return {"puppet_master": puppet_master_enabled}.get(name, lambda: False)()
+
+
 # ── The Halloween season gate ──────────────────────────────────────────────
 # Every Halloween-update feature (theme visuals, the bat, the ghost, /seance,
 # limited Emporium stock, garden props, the Haunting) checks ONE switch:

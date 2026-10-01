@@ -85,3 +85,37 @@ def test_library_page_still_builds_after_extraction(qapp, tmp_path):
     from techdeck.ui.pages.library_page import LibraryPage
     page = LibraryPage(SettingsManager(settings_dir=tmp_path))
     assert hasattr(page, "profile_combo")
+
+
+class _LockedPlugin:
+    id = "game_puppet_master"
+    name = "Puppet Master"
+    family = "Games"
+    description = "His table."
+    icon = None
+    path = None
+
+
+def test_a_locked_library_card_is_greyed_and_inert(qapp):
+    """A `show_locked` cartridge sits in the Library greyed out: no selection
+    on click, no info button, a dimmed name - until it is unlocked."""
+    from PySide6.QtCore import Qt, QPointF
+    from PySide6.QtGui import QMouseEvent
+    from techdeck.ui.widgets.library_card import LibraryPluginCard
+    theme = _palette()
+    card = LibraryPluginCard(_LockedPlugin(), "His table.", "game_puppet_master", theme, is_selected=True, locked=True)
+    assert card.is_locked() and not card.is_checked(), "a locked card cannot be in the kit"
+    assert not card.info_btn.isVisibleTo(card)
+    toggles = []
+    card.toggled.connect(lambda c: toggles.append(c))
+    ev = QMouseEvent(QMouseEvent.Type.MouseButtonPress, QPointF(30, 30), QPointF(30, 30),
+                     Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    card.mousePressEvent(ev)
+    assert toggles == [] and not card.is_checked()
+    open_card = LibraryPluginCard(_LockedPlugin(), "His table.", "game_puppet_master", theme)
+    assert not open_card.is_locked() and open_card.info_btn.isVisibleTo(open_card)
+    # the greyed icon is grey: every opaque pixel has r == g == b
+    img = card.icon_label.pixmap().toImage()
+    opaque = [img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height())
+              if img.pixelColor(x, y).alpha() > 0]
+    assert opaque and all(c.red() == c.green() == c.blue() for c in opaque)

@@ -218,9 +218,32 @@ class CommandHandler:
         outright while he is in the console - see open_table()."""
         self.open_table()
 
+    TABLE_PLUGIN_ID = "game_puppet_master"     # the Library cartridge for his table
+
     def open_table(self):
+        self.discover_table()
         from techdeck.ui.void_game.window import open_table
         open_table(parent=self.main_window)
+
+    def discover_table(self) -> bool:
+        """The first time the table opens, its cartridge in the Library comes
+        unlocked (it sat there greyed out) with the success jingle. Returns
+        True when that just happened."""
+        if self.settings.is_unlocked(self.TABLE_PLUGIN_ID):
+            return False
+        self.settings.unlock_item(self.TABLE_PLUGIN_ID)
+        try:
+            from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
+            get_audio_manager().play(SOUND_SUCCESS)
+        except Exception:
+            pass
+        page = getattr(self.main_window, "library_page", None)
+        if page is not None:
+            try:
+                page.refresh()
+            except Exception:
+                pass
+        return True
 
     def _cmd_seance(self, args: str):
         """Call something up. TechDeck itself is disturbed — the window
