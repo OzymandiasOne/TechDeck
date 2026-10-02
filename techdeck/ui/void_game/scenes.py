@@ -333,6 +333,10 @@ class RoadScenes:
         {"road": self.road_pick, "pick": self.pick_go, "fire": self.fire_go,
          "altar": self.altar_go, "forge": self.forge_go}[self.scene]()
 
+    def _first_run(self) -> bool:
+        """Key hints for SPACE show on the first run only; after that the player knows."""
+        return self.run.memory["runs"] == 1
+
     def _picked_mark(self) -> str | None:
         """The first mark of the card under the cursor in this scene, for the book."""
         s = self.scene
@@ -437,9 +441,8 @@ class RoadScenes:
                 poly = fr.draw_card(c, u, v, face, art.card_back(), 1.0, PEAK if i == self.deck_cursor else BRIGHT)
                 if poly:
                     self.hits.append((("deckgrid", i), poly))
-                if i == self.deck_cursor:                      # the book, at this card's mark: in the gap
-                    up = -1.0 if (top and row is top) else 1.0  # below a top-row card, above any other
-                    fr.label3(add(c, (0.0, up * (r3.CH2 * scale + 0.34), 0.0)), "Q")
+                if i == self.deck_cursor:                      # the book, at this card's mark: just below it
+                    fr.book3(add(c, (0.0, -(r3.CH2 * scale + 0.3), 0.0)))
         fr.keycap(70, H - 28, "S", 0.9); fr.text(90, H - 38, 90, 20, "BACK", DIM, 9, True,
                                                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
 
@@ -608,7 +611,7 @@ class RoadScenes:
             if poly:
                 self.hits.append((("deckcard", i), poly))
             if i == self.pick:
-                fr.label3(add(c, (0, -r3.CH2 * 0.62 - 0.3, 0.3)), "Q")   # the book, at this card's mark
+                fr.book3(add(c, (0, -r3.CH2 * 0.62 - 0.3, 0.3)))     # the book, at this card's mark
             if marks and i in marks:
                 q = fr.cam.project(add(c, (0, r3.CH2 * 0.62 + 0.25, 0)))
                 if q:
@@ -640,7 +643,8 @@ class RoadScenes:
         q = fr.cam.project(add(b, (0, 2.6, 0)))
         if q:
             fr.text(q[0] - 100, q[1] - 10, 200, 20, what, EMBER, 11, True, spacing=2)
-        fr.label3((0.0, 0.0, 2.2), "SPACE")
+        if self._first_run():
+            fr.label3((0.0, 0.0, 2.2), "SPACE")
 
     def _draw_altar(self, fr: r3.Frame):
         b = (0.0, 0.0, 0.4)
@@ -655,7 +659,8 @@ class RoadScenes:
         q = fr.cam.project(add(top, (0, 1.4, 0)))
         if q:
             fr.text(q[0] - 120, q[1] - 10, 240, 20, f"CHOOSE THE {step}", PEAK, 11, True, spacing=2)
-        fr.label3((0.0, 0.0, 2.2), "SPACE")
+        if self._first_run():
+            fr.label3((0.0, 0.0, 2.2), "SPACE")
 
     def _draw_forge(self, fr: r3.Frame):
         titles = ("WHOSE COST", "WHOSE NUMBERS", "WHOSE MARKS", "ITS NAME")
@@ -682,7 +687,8 @@ class RoadScenes:
                 if i is not None:
                     marks[i] = label
             self._draw_deck_fan(fr, marks)
-            fr.label3((0.0, 0.0, 2.2), "SPACE")
+            if self._first_run():
+                fr.label3((0.0, 0.0, 2.2), "SPACE")
 
     def _draw_digitize(self, fr: r3.Frame):
         k = min(1.0, (self.t - self.digitize_t0) / DIGITIZE_S)
@@ -696,7 +702,7 @@ class RoadScenes:
         u = r3.lerp(start[1], end[1], e); v = r3.lerp(start[2], end[2], e)
         face = art.card_face(d, sigils=d.sigils)
         fr.draw_card(c, u, v, face, art.card_back(), 1.0 - 0.6 * e, EMBER)
-        if k >= 1.0 and not self._talking() and not self.captions:
+        if k >= 1.0 and not self._talking() and not self.captions and self._first_run():
             fr.keycap(W / 2, H - 52, "SPACE", 0.8, MID, 9)
 
     # ── the frame for a scene ────────────────────────────────────────────
@@ -731,7 +737,8 @@ class RoadScenes:
                                        DOOR_LABEL.get(stop.kind, stop.kind.upper()), i == self.pick)
                 if poly:
                     self.hits.append((("door", i), poly))
-            fr.label3((DOOR_X[self.pick] if len(self.run.offers) == 3 else 0.0, 0.0, DOOR_Z + 1.7), "SPACE")
+            if self._first_run():
+                fr.label3((DOOR_X[self.pick] if len(self.run.offers) == 3 else 0.0, 0.0, DOOR_Z + 1.7), "SPACE")
         elif s == "pick":
             for i, cid in enumerate(self.run.stop.cards):
                 d = CARDS[cid]
@@ -740,8 +747,9 @@ class RoadScenes:
                                     art.card_face(d), art.card_back(), 1.0, PEAK if i == self.pick else BRIGHT)
                 if poly:
                     self.hits.append((("pick", i), poly))
-            fr.label3((PICK_X[self.pick], 0.0, 2.4), "SPACE")
-            fr.label3((PICK_X[self.pick] + 1.15, 0.0, 2.4), "Q")   # the book, at this card's mark
+            fr.book3((PICK_X[self.pick], 0.12, 1.25))               # the book, at this card's mark, just under it
+            if self._first_run():
+                fr.label3((PICK_X[self.pick], 0.0, 3.4), "SPACE")
         elif s == "fire":
             self._draw_fire(fr); self._draw_deck_fan(fr); self._draw_leave(fr)
         elif s == "altar":

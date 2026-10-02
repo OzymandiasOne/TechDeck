@@ -329,6 +329,31 @@ class Frame:
             yy = y + h * (0.45 + 0.18 * i)
             p.drawLine(QPointF(x + 3 * k, yy), QPointF(x + w - 3 * k, yy))
 
+    def book_icon(self, cx: float, cy: float, k: float = 1.0, color=BRIGHT):
+        """An open book with the key that opens it printed on its pages."""
+        w, h = 48 * k, 28 * k
+        x, y = cx - w / 2, cy - h / 2
+        p = self.p
+        p.setPen(QPen(QColor(color), 1.2)); p.setBrush(QColor(1, 8, 4, 210))
+        dip = 4 * k
+        left = [QPointF(x, y + dip), QPointF(cx - 1, y + 2 * dip), QPointF(cx - 1, y + h), QPointF(x, y + h - dip)]
+        right = [QPointF(cx + 1, y + 2 * dip), QPointF(x + w, y + dip), QPointF(x + w, y + h - dip), QPointF(cx + 1, y + h)]
+        p.drawPolygon(QPolygonF(left)); p.drawPolygon(QPolygonF(right))
+        p.setPen(QPen(QColor(color), 1.0))
+        p.drawLine(QPointF(cx, y + 2 * dip), QPointF(cx, y + h))                        # the spine
+        for i in (1, 2):
+            yy = y + dip + (h - 2 * dip) * (0.3 + 0.25 * i)
+            p.drawLine(QPointF(x + 4 * k, yy + 1.5 * k), QPointF(cx - 5 * k, yy))      # lines on the left page
+        self.text(cx + 1, y + dip - 1, w / 2 - 1, h - 2 * dip, "Q", color, int(13 * k), True, spacing=0)
+
+    def book3(self, at: Vec, color=BRIGHT):
+        """The book hint floating at a point in the world."""
+        q = self.cam.project(at)
+        if not q:
+            return
+        k = max(0.6, min(1.0, 7.0 / q[2]))
+        self.book_icon(q[0], q[1], k, color)
+
     def label3(self, at: Vec, s: str, color=BRIGHT, size: int = 11):
         """A key hint floating at a point in the world."""
         q = self.cam.project(at)

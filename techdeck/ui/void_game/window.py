@@ -1089,8 +1089,9 @@ class VoidTable(RoadScenes, QWidget):
             fr.text(x, y, w, h, shown, BRIGHT, 12, False, spacing=1)
         else:
             fr.text(x, y, w, h, shown.upper(), PEAK, 13)
-        if not self._talking() and self.caption_until == float("inf") and self.t - self.typed_at > HINT_AFTER_S:
-            fr.keycap(x + w / 2, y + h + 14, "SPACE", 0.8, MID, 9)
+        if (not self._talking() and self.caption_until == float("inf") and self.t - self.typed_at > HINT_AFTER_S
+                and self._first_run()):
+            fr.keycap(x + w / 2, y + h + 14, "SPACE", 0.8, MID, 9)      # the nudge: first run only
 
     def _caption_rect(self):
         """Where his line sits: centred in the gap between his face and the far
