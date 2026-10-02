@@ -39,11 +39,11 @@
 #    first_turn         the tutorial: your first turn begins
 #    second_turn        the tutorial: your second turn begins (the draw, again)
 #    first_draw         the tutorial: you made your first real draw; he points at the votary
-#    first_hit          the tutorial: the first time one of his wounds one of yours
-#                       ({yours} {his} {n} are the cards and the damage)
+#    first_hit          the tutorial: the first time one of his wounds one of yours - said ONCE, ever
+#                       ({yours} {his} {n} are the cards and the damage; {points} = point/points)
 #    bell_early         the tutorial: you reached for the bell before he told you about it
 #    first_sacrifice    the first time you offer a real creature (not a votary)
-#    sacrifice          you offered one card
+#    sacrifice          you offered one card (a 1-in-25 chance; then no more offering remarks that match)
 #    sacrifice_many     you offered two or more at once
 #    play_new           you played a card he has not seen this fight
 #    play_repeat        you played the same card again this fight
@@ -55,7 +55,7 @@
 #                       martyr, locust, wraith, crowned, seraph, leviathan)
 #    commit_{card id}   he slid that card into his incoming row
 #                       ({n} = how many of your cards it could strike from there)
-#    hit_him            your strike landed on the scale ({n} = the weight)
+#    hit_him            your strike landed on the scale ({n} = the weight; {weights} = weight/weights)
 #    hit_you            his strike landed on the scale
 #    kill_his           you killed one of his
 #    kill_yours         he killed one of yours
@@ -108,7 +108,7 @@ first_turn | calm | You can draw a card from your deck or a votary.
 second_turn | calm | Again, the choice: a random card from your deck? Or the certainty of a votary?
 first_draw | calm | Play the votary card.
 bell_early | displeased | Don't touch that.
-first_hit | calm | Your {yours} stands in the path of my {his}. // My {his} has dealt {n} points of damage to your {yours}. That means its health is {n} points lower. // If a creature's health reaches 0, it dies.
+first_hit | calm | Your {yours} stands in the path of my {his}. // My {his} has dealt {n} {points} of damage to your {yours}. That means its health is {n} {points} lower. // If a creature's health reaches 0, it dies.
 first_sacrifice | grave | Do not mourn. What you sacrifice is not lost, though it's suffering was real... You will see it again.
 sacrifice | calm | Sacrifices must be made. An honorable death.
 sacrifice_many | pleased | Two at once. You are learning what the game is.
@@ -148,7 +148,7 @@ commit_dead_star | calm | I will wait. I am good at it.
 commit_leviathan | grave | I was saving this.
 commit_seraph | grave | Look up.
 commit_crowned | pleased | A court of my own.
-hit_him | displeased | {n} damage dealt. {n} weights on the scale.
+hit_him | displeased | {n} damage dealt. {n} {weights} on the scale.
 hit_him | calm | Weight. I felt that.
 hit_you | calm | Weight.
 kill_his | displeased | That one was mine.

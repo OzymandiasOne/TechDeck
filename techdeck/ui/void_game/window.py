@@ -48,6 +48,11 @@ MUST_READ = {"welcome", "welcome_again", "rules_lanes", "rules_blood",
              "scene_fight", "scene_choice", "scene_rare", "scene_fire", "scene_altar", "scene_boss",
              "fire_again", "fire_leave", "fire_buffed", "fire_eaten", "altar_done", "card_taken"}   # these wait for you
 NAG_HOLD_S = 3.0                      # a rule slip ("Draw first.") lingers this long
+def plural(word: str, n: int) -> str:
+    """'point' / 'points' for a {n} in his lines."""
+    return word if n == 1 else word + "s"
+
+
 PROMPT_KEYS = {"first_turn", "second_turn", "first_draw", "deck_empty"}   # instructions: they never eat a key
 PROMPT_HOLD_S = 25.0                  # ...and linger until you do the thing, or this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
@@ -534,10 +539,11 @@ class VoidTable(RoadScenes, QWidget):
         vc.go(self._slot_pose(r3.ROW_YOU, lane), self.t, PLAY_S, arc=1.4)
         self.selected, self.sacrifices = None, []
         self.set_view("hand_low")                  # the card is down: the hand rests
-        if sacrificed >= 2:
-            self.say("sacrifice_many")
-        elif sacrificed == 1:
-            self.say("sacrifice")
+        if sacrificed and not self.sacrifice_remark_said:
+            from .scenes import SACRIFICE_REMARK_CHANCE
+            if self.run.rng.random() < SACRIFICE_REMARK_CHANCE:
+                self.sacrifice_remark_said = True          # that was the match's one
+                self.say("sacrifice_many" if sacrificed >= 2 else "sacrifice")
         cid = card.defn.id
         key = "play_" + cid
         ever = self.run.memory["cards_played"]     # across runs and sessions
@@ -633,9 +639,10 @@ class VoidTable(RoadScenes, QWidget):
 
     def _strike(self, e):
         if (not e["direct"] and e["card"].owner == HIM and self._tutorial()
-                and "first_hit" not in self.played_lines):
-            self.played_lines.add("first_hit")     # the first time one of his wounds one of yours: narrated
-            self.say("first_hit", yours=e["defender"].name.title(), his=e["card"].name.title(), n=e["power"])
+                and not self._retired("first_hit")):
+            self._retire("first_hit")              # the first time one of his wounds one of yours: narrated once, ever
+            self.say("first_hit", yours=e["defender"].name.title(), his=e["card"].name.title(), n=e["power"],
+                     points=plural("point", e["power"]))
         attacker = self.vcards.get(e["card"].uid)
         if attacker is None:
             return
@@ -645,7 +652,8 @@ class VoidTable(RoadScenes, QWidget):
         attacker.lunge_t0 = self.t
         if e["direct"]:
             self.scale_glow = 1.0
-            self.say("hit_him" if e["card"].owner == YOU else "hit_you", once_per_phase=True, n=e["power"])
+            self.say("hit_him" if e["card"].owner == YOU else "hit_you", once_per_phase=True, n=e["power"],
+                     weights=plural("weight", e["power"]))
         else:
             d = self.vcards.get(e["defender"].uid)
             if d is not None:
@@ -1201,6 +1209,15 @@ class VoidTable(RoadScenes, QWidget):
                 if not g.why_not(self.selected, lane, self.sacrifices):
                     return lane
         return 0
+
+    def _retired(self, key: str) -> bool:
+        """A line he says once, ever (kept with the memory, across runs and sessions)."""
+        return key in self.run.memory["retired"]
+
+    def _retire(self, key: str):
+        if key not in self.run.memory["retired"]:
+            self.run.memory["retired"].append(key)
+            self._save_memory()
 
     def _tutorial(self) -> bool:
         return self.run.fights == 0 and self.run.memory["runs"] == 1

@@ -761,3 +761,43 @@ def test_a_glance_with_a_card_raised_comes_back_with_the_other_key(table):
     assert table.view == "board_right" and table.cursor == 3
     press(table, Q.Key.Key_A)
     assert table.view == "board" and table.cursor == 3
+
+
+def test_offering_remarks_are_rare_and_once_a_match(table, monkeypatch):
+    """A 1-in-25 roll per offering; the first to land is the match's only one."""
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    g = table.game
+    table.run.memory["cards_played"] = [c.defn.id for c in g.hand]       # no card remarks in the way
+    table.generic_remark_ok = False
+    votary = next(c for c in g.hand if c.defn.id == "votary")
+    cheap = next(c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer")
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table); quiet(table)
+    monkeypatch.setattr(table.run.rng, "random", lambda: 0.99)           # the roll misses
+    table._click(("card", cheap.uid)); press(table, Q.Key.Key_W); walk_to(table, 0)
+    press(table, Q.Key.Key_Space); press(table, Q.Key.Key_Space); settle(table)
+    said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("sacrifice")]
+    assert said == [] and not table.sacrifice_remark_said
+    monkeypatch.setattr(table.run.rng, "random", lambda: 0.0)            # the roll lands
+    table.sacrifice_remark_said = False
+    table._play(cheap, 0, 1)                                              # the visual step alone, again
+    said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("sacrifice")]
+    assert said == ["sacrifice"] and table.sacrifice_remark_said
+    quiet(table)
+    table._play(cheap, 0, 2)                                              # a second offering this match: quiet
+    said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("sacrifice")]
+    assert said == []
+
+
+def test_the_first_hit_narration_is_said_once_ever_and_counts_its_points(table, tmp_path):
+    import json
+    ready(table)
+    assert not table._retired("first_hit")
+    table._retire("first_hit")
+    assert table._retired("first_hit")
+    saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
+    assert "first_hit" in saved["memory"]["retired"]
+    from techdeck.ui.void_game.window import plural
+    assert (plural("point", 1), plural("point", 2), plural("weight", 1)) == ("point", "points", "weight")
+    got = table.dlg.line("first_hit", yours="Votary", his="Hound", n=1, points=plural("point", 1))
+    assert got and "1 point of damage" in got[0] and "1 point lower" in got[0]

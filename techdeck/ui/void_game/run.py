@@ -9,7 +9,8 @@ later runs, in your hand or, rarely, in his.
 What survives a run (the `memory` dict the window saves):
     deathcards, the undying bonus (an Ouroboros remembers dying), run counts,
     and every card you have ever played (he remarks on a card's first play once,
-    across runs and sessions).
+    across runs and sessions), and the lines he retires for good once said
+    (`retired`: the tutorial's first-hit narration).
 """
 from __future__ import annotations
 
@@ -61,7 +62,7 @@ class Stop:
 
 def empty_memory() -> dict:
     return {"deathcards": [], "undying_bonus": {}, "runs": 0, "wins": 0, "deaths": 0, "best": 0,
-            "cards_played": []}
+            "cards_played": [], "retired": []}
 
 
 class Run:

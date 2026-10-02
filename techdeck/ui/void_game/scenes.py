@@ -29,6 +29,7 @@ LAMP_X = -6.6
 BOOK_PER_PAGE = 4
 DIGITIZE_S = 4.5
 GENERIC_REMARK_CHANCE = 0.2           # one match in five, he remarks on a card that has no line of its own
+SACRIFICE_REMARK_CHANCE = 1 / 25      # per offering; once it lands, no more offering remarks that match
 FIRE_AGAIN_DEATHS = 5                 # a second rest at the same fire is only offered after this many deaths
 
 
@@ -53,6 +54,7 @@ class RoadScenes:
         self.seen_this_fight: set[str] = set()
         self.card_remark_said = False         # he remarks on one played card per match
         self.generic_remark_ok = False        # ...and on a card with no line of its own only in some matches
+        self.sacrifice_remark_said = False    # one offering remark per match, and only by chance
         self.first_sacrifice_said = False
         self.road_opened = self.run.step >= 1  # the road's first doors have been narrated
         self.warmed: str = ""                 # the last card warmed at this fire, for leaving
@@ -118,6 +120,7 @@ class RoadScenes:
         self.scale_shown = self.scale_target = 0.0; self.remnants_shown = 0
         self.seen_this_fight = set(); self.said_this_phase = set(); self.card_remark_said = False
         self.generic_remark_ok = run.rng.random() < GENERIC_REMARK_CHANCE
+        self.sacrifice_remark_said = False
         if run.stop and run.stop.kind == "boss":
             self.say("boss_welcome")
         elif run.fights == 0:
