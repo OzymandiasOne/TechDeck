@@ -36,8 +36,8 @@ def to_road(w: VoidTable):
     ready(w)
     rig_end(w, True)
     quiet(w)
-    press(w, Qt.Key.Key_Space)             # his last word is out: on to the road
-    w._tick()
+    press(w, Qt.Key.Key_Space)             # his last word is out: the wipe, then the road
+    settle(w)
     quiet(w)
 
 
@@ -59,7 +59,7 @@ def test_a_lost_fight_costs_a_candle_and_the_road_goes_on(table):
     ready(table)
     rig_end(table, False)
     assert table.run.candles == 1
-    quiet(table); press(table, Qt.Key.Key_Space); table._tick(); quiet(table)
+    quiet(table); press(table, Qt.Key.Key_Space); settle(table); quiet(table)
     assert table.scene == "road"
 
 
@@ -68,7 +68,7 @@ def test_the_forge_makes_a_deathcard_and_he_keeps_it(table):
     ready(table)
     rig_end(table, False)
     assert table.run.dead
-    quiet(table); press(table, Qt.Key.Key_Space); table._tick()
+    quiet(table); press(table, Qt.Key.Key_Space); settle(table)
     assert table.scene == "forge" and table.forge_step == 0
     assert table.forge_first, "the first death of all: the guided forge"
     said = [table.caption_key] + [c[2] for c in table.captions]
@@ -213,7 +213,7 @@ def test_a_later_death_gets_the_plain_forge(table):
     table.run.candles = 1
     ready(table)
     rig_end(table, False)
-    quiet(table); press(table, Qt.Key.Key_Space); table._tick()
+    quiet(table); press(table, Qt.Key.Key_Space); settle(table)
     assert table.scene == "forge" and not table.forge_first
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "deathcard" in said and "deathcard_cost" in said and "deathcard_first_time" not in said
@@ -248,3 +248,34 @@ def test_the_run_slot_is_cleared_when_you_die(table, tmp_path):
     rig_end(table, False)
     saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
     assert saved.get("run") is None
+
+
+def test_a_match_ends_with_a_wipe_and_the_road_grows_in(table):
+    from techdeck.ui.void_game import render3d as r3
+    from techdeck.ui.void_game.window import WIPE_S, GROW_S
+    ready(table)
+    rig_end(table, True)
+    quiet(table)
+    press(table, Qt.Key.Key_Space)
+    assert table.scene == "fight" and table.wipe_t0 >= 0, "the board is being swept first"
+    w = table._warp()
+    assert w is not None and w((1.0, 0.5, 0.0))[0] >= 1.0
+    press(table, Qt.Key.Key_Space)                       # a second press while sweeping: nothing
+    assert table.scene == "fight"
+    settle(table)
+    assert table.scene == "road" and table.wipe_t0 < 0
+    assert table.t - table.scene_t0 < GROW_S, "the road has just begun to grow"
+    g = table._warp()
+    assert g is not None and 0.0 <= g((0.0, 2.0, 0.0))[1] < 2.0, "heights start from the floor"
+    for _ in range(int(GROW_S * 30) + 2):
+        table._tick()
+    assert table._warp() is None, "and the grow is done"
+
+
+def test_wipe_and_grow_warps_move_only_as_meant():
+    from techdeck.ui.void_game import render3d as r3
+    assert r3.warp_wipe(0.0)((1.0, 2.0, 3.0)) == (1.0, 2.0, 3.0)
+    far = r3.warp_wipe(1.0)((1.0, 2.0, 3.0))
+    assert far[0] > 10 and far[2] == 3.0
+    assert r3.warp_grow(0.0)((1.0, 2.0, 3.0)) == (1.0, 0.0, 3.0)
+    assert r3.warp_grow(1.0)((1.0, 2.0, 3.0)) == (1.0, 2.0, 3.0)

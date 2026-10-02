@@ -188,6 +188,50 @@ def _pen(color, width: float, alpha: float) -> QPen:
     return pen
 
 
+class Warped:
+    """A camera with a warp on the world: every point goes through `warp`
+    before it is projected, so a whole scene can be swept aside or grown
+    from the floor without any drawing code knowing."""
+
+    def __init__(self, cam: Camera, warp):
+        self._cam, self._warp = cam, warp
+
+    def project(self, p: Vec):
+        return self._cam.project(self._warp(p))
+
+    def depth(self, p: Vec) -> float:
+        return self._cam.depth(self._warp(p))
+
+    def __getattr__(self, name):
+        return getattr(self._cam, name)
+
+
+def ease_in(k: float) -> float:
+    return k * k * k
+
+
+def ease_out(k: float) -> float:
+    k = 1.0 - k
+    return 1.0 - k * k * k
+
+
+WIPE_DX = 18.0                        # how far the wipe carries the board off to the right
+
+
+def warp_wipe(k: float):
+    """0..1: the board slides off to the right, lifting a little as it goes -
+    as if an arm swept the table clear."""
+    e = ease_in(max(0.0, min(1.0, k)))
+    dx, dy = WIPE_DX * e, 0.6 * math.sin(math.pi * e)
+    return lambda p: (p[0] + dx, p[1] + dy, p[2])
+
+
+def warp_grow(k: float):
+    """0..1: everything stands up out of the floor (its height scaled from 0)."""
+    g = ease_out(max(0.0, min(1.0, k)))
+    return lambda p: (p[0], p[1] * g, p[2])
+
+
 class Frame:
     """One frame being drawn: the image, its painter and the camera."""
 

@@ -57,6 +57,8 @@ PROMPT_KEYS = {"first_turn", "second_turn", "first_draw", "deck_empty"}   # inst
 PROMPT_HOLD_S = 25.0                  # ...and linger until you do the thing, or this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
+WIPE_S = 0.55                         # the end of a match: the board is swept off to the side...
+GROW_S = 0.7                          # ...and the next scene grows up out of the floor
 SHAKE_PART = 0.25                     # the camera trembles for this much of a displeased mood's hold
 LESSON_DELAY_S = 0.98                 # the board lesson starts this long after the camera sets off for the board (1.3 s after Space: 0.32 rise + this)
 
@@ -858,6 +860,9 @@ class VoidTable(RoadScenes, QWidget):
         halo = tuple(int(a + (b - a) * strength) for a, b in zip(MOODS["calm"].halo, self.mood.halo))
         r3.draw_him(fr, self.t, self.mood.flicker * strength, int(self.t * 8), halo,
                     mouth=self._mouth(), blink=self.t < self.blink_until, iris=self.gaze)
+        warp = self._warp()
+        if warp:
+            fr.cam = r3.Warped(cam, warp)          # the wipe / the grow: every board object
         highlight = set()
         if self.selected is not None and not self.busy():
             for lane in range(LANES):
@@ -952,6 +957,7 @@ class VoidTable(RoadScenes, QWidget):
                     kk = max(0.7, min(1.1, 7.0 / q[2]))
                     fr.page_icon(q[0] - 14 * kk, q[1], "right", kk)
                     fr.keycap(q[0] + 14 * kk, q[1], "Q", kk)
+        fr.cam = cam
         self._draw_caption(fr)
         # small key hints where the eye is: E / R under the piles in the deck
         # view, Z under the bell from the hand
@@ -1209,6 +1215,14 @@ class VoidTable(RoadScenes, QWidget):
                 if not g.why_not(self.selected, lane, self.sacrifices):
                     return lane
         return 0
+
+    def _warp(self):
+        """The scene's warp this frame: the wipe at a match's end, else the
+        grow for the first moments of any scene, else none."""
+        if self.wipe_t0 >= 0:
+            return r3.warp_wipe((self.t - self.wipe_t0) / WIPE_S)
+        k = (self.t - self.scene_t0) / GROW_S
+        return r3.warp_grow(k) if k < 1.0 else None
 
     def _retired(self, key: str) -> bool:
         """A line he says once, ever (kept with the memory, across runs and sessions)."""

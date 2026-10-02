@@ -60,6 +60,7 @@ class RoadScenes:
         self.warmed: str = ""                 # the last card warmed at this fire, for leaving
         self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
+        self.wipe_t0 = -1.0               # the end-of-match wipe, while it runs
 
     def _save_memory(self):
         self.settings["memory"] = self.run.memory
@@ -151,7 +152,17 @@ class RoadScenes:
             self.say("lose"); self.say("dead")
 
     def after_fight_go(self):
-        """Space or a click once his last word is out."""
+        """Space or a click once his last word is out: the board is swept off
+        (WIPE_S), then the road (or the forge) grows up in its place."""
+        if self.wipe_t0 >= 0:
+            return                               # already sweeping
+        from .window import WIPE_S
+        self.wipe_t0 = self.t
+        self._act(WIPE_S)
+        self._act(0.0, self._after_wipe)
+
+    def _after_wipe(self):
+        self.wipe_t0 = -1.0
         r = self.after_fight
         self.over = False
         if r in ("won", "lost"):
@@ -566,6 +577,9 @@ class RoadScenes:
             flick = max(flick, 0.12 * min(1.0, (self.t - self.digitize_t0) / DIGITIZE_S))
         r3.draw_him(fr, self.t, flick, int(self.t * 8), halo,
                     mouth=self._mouth(), blink=self.t < self.blink_until, iris=self.gaze)
+        warp = self._warp()
+        if warp:
+            fr.cam = r3.Warped(cam, warp)          # the grow: the scene stands up out of the floor
         self._draw_progress(fr)
         self._draw_candles(fr)
         s = self.scene
@@ -595,6 +609,7 @@ class RoadScenes:
             self._draw_forge(fr)
         elif s == "digitize":
             self._draw_digitize(fr)
+        fr.cam = cam
         self._draw_caption(fr)
         if self.menu:
             self._draw_menu(fr)
