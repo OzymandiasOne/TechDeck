@@ -974,7 +974,6 @@ class VoidTable(RoadScenes, QWidget):
             self._draw_holding_hand(fr)
         if self.show_draw_arrow and self.view in ("hand_low", "hand_high") and g.phase == "draw":
             self._draw_arrow_to_deck(fr)
-        self._draw_inspect(fr)
         if self.book is not None:
             self._draw_book(fr)
         if self.menu:
@@ -1284,35 +1283,6 @@ class VoidTable(RoadScenes, QWidget):
             self.sacrifices.append(lane)
         else:
             raise IllegalMove(g.why_not(self.selected, lane, self.sacrifices))
-
-    def _draw_inspect(self, fr: r3.Frame):
-        if not self.hover or self.hover[0] != "card":
-            return
-        vc = self.vcards.get(self.hover[1])
-        if vc is None:
-            return
-        d = vc.card.defn
-        p = fr.p
-        x, y, w = 14, H - 150, 380
-        lines = [(d.name, PEAK, 12, True)]
-        cost = ("FREE" if not d.cost else
-                f"COST: {d.cost} {'REMNANT' if d.cost_kind == REMNANT else 'OFFERING'}{'S' if d.cost > 1 else ''}")
-        lines.append((f"{vc.shown_power} POWER   {vc.shown_health} HEALTH   {cost}", BRIGHT, 9, False))
-        for s in d.sigils:
-            name, rule = SIGILS[s]
-            lines.append((f"{name}: {rule}", BRIGHT, 9, False))
-        if d.note:
-            lines.append((d.note, MID, 9, False))
-        rows = [(22 if ln[2] > 10 else (30 if len(ln[0]) > 46 else 16)) for ln in lines]
-        h = 16 + sum(rows)
-        y = 14
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QColor(1, 6, 3, 200)); p.drawRect(QRectF(x, y, w, h))
-        p.setPen(QColor(MID)); p.setBrush(Qt.BrushStyle.NoBrush); p.drawRect(QRectF(x, y, w, h))
-        cy = y + 8
-        for (text, color, size, bold), hh in zip(lines, rows):
-            fr.text(x + 10, cy, w - 20, hh, text, color, size, bold,
-                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1 if bold else 0)
-            cy += hh
 
     def paintEvent(self, event):
         p = QPainter(self)
