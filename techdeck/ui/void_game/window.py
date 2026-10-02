@@ -1216,6 +1216,13 @@ class VoidTable(RoadScenes, QWidget):
                     return lane
         return 0
 
+    def _lesson_holds(self) -> bool:
+        """The tutorial's board lesson is about to start, or is running: no
+        card is played until it is over."""
+        if self.lesson_at is not None:
+            return True
+        return self.caption_key == "rules_lanes" or any(c[2] == "rules_lanes" for c in self.captions)
+
     def _warp(self):
         """The scene's warp this frame: the wipe at a match's end, else the
         grow for the first moments of any scene, else none."""
@@ -1264,6 +1271,8 @@ class VoidTable(RoadScenes, QWidget):
         g = self.game
         if self.selected is None:
             raise IllegalMove("Choose a card from your hand first.")
+        if self._lesson_holds():
+            return                                 # the board lesson first: the card waits
         d = g._hand_card(self.selected).defn
         standing = g.rows[YOU][lane]
         legal = not g.why_not(self.selected, lane, self.sacrifices)

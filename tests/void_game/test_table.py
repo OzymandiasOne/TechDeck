@@ -104,6 +104,17 @@ def walk_to(w: VoidTable, lane: int):
     raise AssertionError(f"could not walk to lane {lane}: cursor {w.cursor}, view {w.view}")
 
 
+def board(w: VoidTable):
+    """W to the board with a card raised - and, in the tutorial, through the
+    board lesson that holds the first play until it is over."""
+    from PySide6.QtCore import Qt as Q
+    press(w, Q.Key.Key_W)
+    if w.lesson_at is not None:
+        for _ in range(int(1.4 * 30)):
+            w._tick()
+        quiet(w)
+
+
 def quiet(w: VoidTable):
     """Wave his dialogue through (rules wait for Space) so clicks reach the table."""
     for _ in range(80):                                # the forge's intro runs to ten pages
@@ -375,13 +386,13 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
     ready(table)
     g = table.game
     votary = next(c for c in g.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table)
+    table._click(("card", votary.uid)); board(table); press(table, Q.Key.Key_Space); settle(table)
     lane = next(l for l in range(LANES) if g.rows[YOU][l] is votary)
     cheap = next((c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer"), None)
     if cheap is None:
         return
     quiet(table)
-    table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
+    table._click(("card", cheap.uid)); board(table)
     walk_to(table, lane)
     press(table, Q.Key.Key_Space)
     assert table.sacrifices == [lane]
@@ -440,7 +451,7 @@ def test_space_on_a_cursor_lane_plays_the_chosen_card(table):
     from PySide6.QtCore import Qt as Q
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
+    table._click(("card", votary.uid)); board(table)
     press(table, Q.Key.Key_D); press(table, Q.Key.Key_D)
     assert table.cursor == 2
     press(table, Q.Key.Key_Space)
@@ -509,7 +520,7 @@ def test_a_pile_click_from_the_hand_only_looks_over_and_a_play_returns_to_the_ha
     assert table.view == "hand_low"
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
     from PySide6.QtCore import Qt as Q
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
+    table._click(("card", votary.uid)); board(table)
     assert table.view == "board"
     press(table, Q.Key.Key_Space)
     settle(table)
@@ -716,8 +727,8 @@ def test_the_generic_card_remarks_come_only_in_some_matches(table):
     cheap = next(c for c in g.hand if c.defn.cost == 1 and c.defn.cost_kind == "offer")
     table.run.memory["cards_played"] = ["votary", cheap.defn.id]      # both played before, in some other run
     table.generic_remark_ok = False
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table); quiet(table)
-    table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
+    table._click(("card", votary.uid)); board(table); press(table, Q.Key.Key_Space); settle(table); quiet(table)
+    table._click(("card", cheap.uid)); board(table)
     walk_to(table, 0)
     press(table, Q.Key.Key_Space); press(table, Q.Key.Key_Space); settle(table)
     assert g.rows[YOU][0] is cheap
@@ -730,7 +741,7 @@ def test_a_cards_first_play_is_remembered_across_runs_and_sessions(table, tmp_pa
     from PySide6.QtCore import Qt as Q
     ready(table)
     votary = next(c for c in table.game.hand if c.defn.id == "votary")
-    table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table)
+    table._click(("card", votary.uid)); board(table); press(table, Q.Key.Key_Space); settle(table)
     said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
     assert said == ["play_votary"], said
     assert "votary" in table.run.memory["cards_played"]
@@ -801,3 +812,25 @@ def test_the_first_hit_narration_is_said_once_ever_and_counts_its_points(table, 
     assert (plural("point", 1), plural("point", 2), plural("weight", 1)) == ("point", "points", "weight")
     got = table.dlg.line("first_hit", yours="Votary", his="Hound", n=1, points=plural("point", 1))
     assert got and "1 point of damage" in got[0] and "1 point lower" in got[0]
+
+
+def test_the_board_lesson_holds_the_first_play_until_it_is_over(table):
+    """Reach the board with a card raised and play at once: the card waits,
+    the lesson runs, and only then does Space play it."""
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    g = table.game
+    votary = next(c for c in g.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
+    assert table.view == "board" and table.lesson_at is not None
+    press(table, Q.Key.Key_Space)                                    # too soon
+    assert table.selected == votary.uid and all(c is None for c in g.rows[YOU]), "the card waited"
+    for _ in range(int(1.3 * 30) + 2):
+        table._tick()
+    assert table.caption_key == "rules_lanes"
+    table._click(("slot", table.cursor))                              # a click during the lesson: nothing
+    assert all(c is None for c in g.rows[YOU])
+    quiet(table)
+    assert table.view == "board" and table.selected == votary.uid
+    press(table, Q.Key.Key_Space)
+    assert g.rows[YOU][table.cursor] is votary, "and now it plays"
