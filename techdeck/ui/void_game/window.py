@@ -52,6 +52,7 @@ PROMPT_KEYS = {"first_turn", "second_turn", "first_draw", "deck_empty"}   # inst
 PROMPT_HOLD_S = 25.0                  # ...and linger until you do the thing, or this long
 GLOW_TAGS = ("lanes_you", "lanes_him", "scale", "bell", "piles", "remnants", "costs", "cost_icon")
 HINT_AFTER_S = 3.5                    # a waiting line shows its SPACE key only after this long
+SHAKE_PART = 0.25                     # the camera trembles for this much of a displeased mood's hold
 LESSON_DELAY_S = 0.98                 # the board lesson starts this long after the camera sets off for the board (1.3 s after Space: 0.32 rise + this)
 
 KEYS_TEXT = [
@@ -426,9 +427,10 @@ class VoidTable(RoadScenes, QWidget):
             self.blink_until = self.t + BLINK_S
             self.next_blink = self.t + 2.5 + (self.t * 7.3) % 4.0
 
-    def _mood_strength(self) -> float:
+    def _mood_strength(self, part: float = 1.0) -> float:
+        """How strongly the mood shows, fading out over its hold (`part` of it)."""
         k = self.t - self.mood_t0
-        hold = self.mood.hold_ms / 1000.0
+        hold = self.mood.hold_ms / 1000.0 * part
         if k < 0 or k > hold:
             return 0.0
         return 1.0 if k < hold * 0.6 else 1.0 - (k - hold * 0.6) / (hold * 0.4)
@@ -840,7 +842,8 @@ class VoidTable(RoadScenes, QWidget):
         g = self.game
         strength = self._mood_strength()
         k = min(1.0, (self.t - self.view_t0) / r3.VIEW_S)
-        cam = r3.camera_between(self.view_prev, self.view, k, self.t, self.mood.shake * strength)
+        shake = self.mood.shake * self._mood_strength(SHAKE_PART)   # a short tremble, not the whole mood
+        cam = r3.camera_between(self.view_prev, self.view, k, self.t, shake)
         fr = r3.Frame(cam)
         self.hits = []
         r3.draw_void(fr, self.t)
@@ -1549,14 +1552,16 @@ class VoidTable(RoadScenes, QWidget):
                         self.set_view("board_right")       # past the rightmost slot: the bell and your candles
                     else:
                         self.cursor += 1                   # along the slots
+                elif v == "board_left":
+                    self.set_view("board")                 # back from the scale (card raised or not)
+                elif v == "board_right":
+                    pass                                   # already looking right
                 elif self.selected is not None and self.cursor is not None:
                     self.cursor = (self.cursor + 1) % LANES  # a card raised, from the hand: choose its lane
                 elif v in ("hand_low", "hand_high"):
                     self._walk_hand(+1)                    # ...and past the last card, the piles (while a draw is owed)
                 elif v == "deck":
                     self.cursor = 1
-                elif v == "board_left":
-                    self.set_view("board")                 # back from the scale
             elif key == Qt.Key.Key_A:
                 v = self.view
                 if v in ("board", "board_far"):
@@ -1566,14 +1571,16 @@ class VoidTable(RoadScenes, QWidget):
                         self.set_view("board_left")        # past the leftmost slot: the scale
                     else:
                         self.cursor -= 1
+                elif v == "board_right":
+                    self.set_view("board")                 # back from the bell (card raised or not)
+                elif v == "board_left":
+                    pass                                   # already looking left
                 elif self.selected is not None and self.cursor is not None:
                     self.cursor = (self.cursor - 1) % LANES
                 elif v in ("hand_low", "hand_high"):
                     self._walk_hand(-1)
                 elif v == "deck":
                     self._back_to_hand()
-                elif v == "board_right":
-                    self.set_view("board")                 # back from the bell
             else:
                 super().keyPressEvent(event)
         except IllegalMove as why:

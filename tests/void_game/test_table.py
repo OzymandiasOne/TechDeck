@@ -94,6 +94,16 @@ def ready(w: VoidTable):
         w.set_view("deck"); w._click(("votary",)); settle(w); quiet(w)
 
 
+def walk_to(w: VoidTable, lane: int):
+    """A / D along the board's slots to a lane (past an end is a glance, so walk the right way)."""
+    from PySide6.QtCore import Qt as Q
+    for _ in range(8):
+        if w.cursor == lane:
+            return
+        press(w, Q.Key.Key_D if (w.cursor is None or w.cursor < lane) else Q.Key.Key_A)
+    raise AssertionError(f"could not walk to lane {lane}: cursor {w.cursor}, view {w.view}")
+
+
 def quiet(w: VoidTable):
     """Wave his dialogue through (rules wait for Space) so clicks reach the table."""
     for _ in range(80):                                # the forge's intro runs to ten pages
@@ -141,10 +151,10 @@ def test_the_lanes_lesson_comes_a_beat_after_you_first_look_at_the_board_and_glo
     assert table.view == "hand_low", "the board is never forced on you"
     press(table, Q.Key.Key_W)
     assert table.view == "board" and not table.caption
-    for _ in range(int(1.2 * 30)):
+    for _ in range(int(0.7 * 30)):
         table._tick()
     assert not table.caption, "a beat before the lesson"
-    for _ in range(int(0.8 * 30)):
+    for _ in range(int(0.7 * 30)):
         table._tick()
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "rules_lanes" in said
@@ -268,7 +278,7 @@ def test_w_looks_down_at_the_board_and_the_hand_tucks_away(table):
     assert table.view == "board_far"
     press(table, Q.Key.Key_S)
     assert table.view == "board"
-    for _ in range(30):
+    for _ in range(20):                                         # (before the board lesson begins)
         table._tick()
     assert table._hand_cards()[0].dst[0][1] < hand_y - 0.5, "the hand did not tuck"
     press(table, Q.Key.Key_S)
@@ -372,8 +382,7 @@ def test_a_second_space_on_a_marked_lane_plays_the_card(table):
         return
     quiet(table)
     table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
-    while table.cursor != lane:
-        press(table, Q.Key.Key_D)
+    walk_to(table, lane)
     press(table, Q.Key.Key_Space)
     assert table.sacrifices == [lane]
     press(table, Q.Key.Key_Space)
@@ -692,8 +701,7 @@ def test_he_remarks_on_one_played_card_per_match(table):
             break
         table._click(("card", card.uid)); press(table, Q.Key.Key_W)
         lane = next(l for l in range(LANES) if not g.why_not(card.uid, l))
-        while table.cursor != lane:
-            press(table, Q.Key.Key_D)
+        walk_to(table, lane)
         press(table, Q.Key.Key_Space); settle(table)
         said += [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
         quiet(table)
@@ -710,8 +718,7 @@ def test_the_generic_card_remarks_come_only_in_some_matches(table):
     table.generic_remark_ok = False
     table._click(("card", votary.uid)); press(table, Q.Key.Key_W); press(table, Q.Key.Key_Space); settle(table); quiet(table)
     table._click(("card", cheap.uid)); press(table, Q.Key.Key_W)
-    while table.cursor != 0:
-        press(table, Q.Key.Key_D)
+    walk_to(table, 0)
     press(table, Q.Key.Key_Space); press(table, Q.Key.Key_Space); settle(table)
     assert g.rows[YOU][0] is cheap
     said = [k for k in [table.caption_key] + [c[2] for c in table.captions] if k.startswith("play_")]
@@ -730,3 +737,27 @@ def test_a_cards_first_play_is_remembered_across_runs_and_sessions(table, tmp_pa
     import json
     saved = json.loads((tmp_path / "void_game.json").read_text(encoding="utf-8"))
     assert "votary" in saved["memory"]["cards_played"], "saved at once, for the next session"
+
+
+def test_a_glance_with_a_card_raised_comes_back_with_the_other_key(table):
+    from PySide6.QtCore import Qt as Q
+    ready(table)
+    votary = next(c for c in table.game.hand if c.defn.id == "votary")
+    table._click(("card", votary.uid)); press(table, Q.Key.Key_W)
+    assert table.view == "board" and table.selected == votary.uid
+    while table.cursor > 0:
+        press(table, Q.Key.Key_A)
+    press(table, Q.Key.Key_A)
+    assert table.view == "board_left"
+    press(table, Q.Key.Key_A)
+    assert table.view == "board_left" and table.cursor == 0, "the lane does not move while looking away"
+    press(table, Q.Key.Key_D)
+    assert table.view == "board" and table.cursor == 0 and table.selected == votary.uid
+    while table.cursor < 3:
+        press(table, Q.Key.Key_D)
+    press(table, Q.Key.Key_D)
+    assert table.view == "board_right"
+    press(table, Q.Key.Key_D)
+    assert table.view == "board_right" and table.cursor == 3
+    press(table, Q.Key.Key_A)
+    assert table.view == "board" and table.cursor == 3
