@@ -27,6 +27,11 @@ PICK_X = (-1.7, 0.0, 1.7)
 FAN_Z, FAN_Y = 4.6, 0.9
 LAMP_X = -6.6
 BOOK_PER_PAGE = 4
+DECK_SPLIT_AT = 8                     # the deck view goes to two rows from this many cards
+DECK_LIFT = 0.28                      # how far the current card rises in the deck view
+DECK_LIFT_S = 0.14                    # ...and how long the rise / the drop takes
+DECK_ROW_Y = (3.75, 1.35)             # the two rows' heights (one row sits at the lower)
+DECK_Z = 1.2
 DIGITIZE_S = 4.5
 GENERIC_REMARK_CHANCE = 0.2           # one match in five, he remarks on a card that has no line of its own
 SACRIFICE_REMARK_CHANCE = 1 / 25      # per offering; once it lands, no more offering remarks that match
@@ -61,6 +66,10 @@ class RoadScenes:
         self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
         self.wipe_t0 = -1.0               # the end-of-match wipe, while it runs
+        self.deck_view = False            # W outside the fight: the whole deck laid out
+        self.deck_cursor = 0
+        self.deck_prev = -1               # the card that was current a moment ago (it drops back)
+        self.deck_cursor_t0 = -9.0
 
     def _save_memory(self):
         self.settings["memory"] = self.run.memory
@@ -299,6 +308,14 @@ class RoadScenes:
             return True
         if s not in ("road", "pick", "fire", "altar", "forge"):
             return False
+        if self.deck_view:
+            return self.deck_view_key(key)
+        if key == Qt.Key.Key_Q:
+            self.open_book_at(self._picked_mark())            # the book, from any event
+            return True
+        if key in (Qt.Key.Key_W, Qt.Key.Key_Up):
+            self.open_deck_view()
+            return True
         n = max(1, self.scene_count())
         if key in (Qt.Key.Key_A, Qt.Key.Key_Left):
             self.pick = (self.pick - 1) % n
@@ -314,7 +331,121 @@ class RoadScenes:
         {"road": self.road_pick, "pick": self.pick_go, "fire": self.fire_go,
          "altar": self.altar_go, "forge": self.forge_go}[self.scene]()
 
+    def _picked_mark(self) -> str | None:
+        """The first mark of the card under the cursor in this scene, for the book."""
+        s = self.scene
+        if s == "pick" and self.run.stop and self.run.stop.cards:
+            d = CARDS[self.run.stop.cards[self.pick % len(self.run.stop.cards)]]
+            return d.sigils[0] if d.sigils else None
+        if s in ("fire", "altar") and self.run.deck:
+            dc = self.run.deck[self.pick % len(self.run.deck)]
+            marks = dc.defn.sigils + dc.sigils
+            return marks[0] if marks else None
+        return None
+
+    # ── the deck view (W outside the fight) ──────────────────────────────
+    def deck_rows(self) -> tuple[list[int], list[int]]:
+        """Deck indices by row: one row under DECK_SPLIT_AT cards, else two with
+        the odd one on top; later cards go to the top row first, in order."""
+        n = len(self.run.deck)
+        if n < DECK_SPLIT_AT:
+            return [], list(range(n))
+        top = (n + 1) // 2
+        return list(range(top)), list(range(top, n))
+
+    def open_deck_view(self):
+        """The scene is swept off and the deck grows up in its place."""
+        if self.wipe_t0 >= 0 or not self.run.deck:
+            return
+        from .window import WIPE_S
+        self.wipe_t0 = self.t
+        self._act(WIPE_S)
+        self._act(0.0, self._deck_view_in)
+
+    def _deck_view_in(self):
+        self.wipe_t0 = -1.0
+        self.deck_view = True
+        self.deck_cursor = min(self.deck_cursor, len(self.run.deck) - 1)
+        self.deck_prev, self.deck_cursor_t0 = -1, self.t
+        self.scene_t0 = self.t                                 # the grid grows in
+
+    def close_deck_view(self):
+        if self.wipe_t0 >= 0:
+            return
+        from .window import WIPE_S
+        self.wipe_t0 = self.t
+        self._act(WIPE_S)
+        self._act(0.0, self._deck_view_out)
+
+    def _deck_view_out(self):
+        self.wipe_t0 = -1.0
+        self.deck_view = False
+        self.scene_t0 = self.t                                 # the scene grows back
+
+    def _deck_move_to(self, i: int):
+        if i != self.deck_cursor:
+            self.deck_prev, self.deck_cursor, self.deck_cursor_t0 = self.deck_cursor, i, self.t
+
+    def deck_view_key(self, key) -> bool:
+        top, bottom = self.deck_rows()
+        row = top if self.deck_cursor in top else bottom
+        at = row.index(self.deck_cursor) if self.deck_cursor in row else 0
+        if key in (Qt.Key.Key_A, Qt.Key.Key_Left):
+            self._deck_move_to(row[(at - 1) % len(row)])
+        elif key in (Qt.Key.Key_D, Qt.Key.Key_Right):
+            self._deck_move_to(row[(at + 1) % len(row)])
+        elif key in (Qt.Key.Key_W, Qt.Key.Key_Up):
+            if top and row is bottom:
+                self._deck_move_to(top[min(at, len(top) - 1)])
+        elif key in (Qt.Key.Key_S, Qt.Key.Key_Down):
+            if top and row is top:
+                self._deck_move_to(bottom[min(at, len(bottom) - 1)])
+            else:
+                self.close_deck_view()                         # S on the bottom row: back to the scene
+        elif key == Qt.Key.Key_Q:
+            dc = self.run.deck[self.deck_cursor]
+            marks = dc.defn.sigils + dc.sigils
+            self.open_book_at(marks[0] if marks else None)
+        return True
+
+    def _deck_lift(self, i: int) -> float:
+        """0..1: the current card rises over DECK_LIFT_S; the one it left drops back."""
+        k = max(0.0, min(1.0, (self.t - self.deck_cursor_t0) / DECK_LIFT_S))
+        k = k * k * (3 - 2 * k)
+        if i == self.deck_cursor:
+            return k
+        if i == self.deck_prev:
+            return 1.0 - k
+        return 0.0
+
+    def _draw_deck_grid(self, fr: r3.Frame):
+        top, bottom = self.deck_rows()
+        per_row = max(len(top), len(bottom), 1)
+        scale = min(0.78 if not top else 0.66, 12.6 / (per_row * (r3.CW2 * 2 + 0.22)))   # two rows: a touch smaller
+        step = (r3.CW2 * 2 + 0.22) * scale
+        rows = ((top, DECK_ROW_Y[0]), (bottom, DECK_ROW_Y[1])) if top else ((bottom, DECK_ROW_Y[1]),)
+        for row, y in rows:
+            x0 = -(len(row) - 1) / 2 * step
+            for j, i in enumerate(row):
+                dc = self.run.deck[i]
+                d = dc.defn
+                lift = DECK_LIFT * self._deck_lift(i)
+                c, u, v = self._upright_pose(x0 + j * step, y + r3.CH2 * scale + lift, DECK_Z, scale)
+                face = art.card_face(d, d.power + dc.power, d.health + dc.health, d.sigils + dc.sigils)
+                poly = fr.draw_card(c, u, v, face, art.card_back(), 1.0, PEAK if i == self.deck_cursor else BRIGHT)
+                if poly:
+                    self.hits.append((("deckgrid", i), poly))
+                if i == self.deck_cursor:                      # the book, at this card's mark: in the gap
+                    up = -1.0 if (top and row is top) else 1.0  # below a top-row card, above any other
+                    fr.label3(add(c, (0.0, up * (r3.CH2 * scale + 0.34), 0.0)), "Q")
+        fr.keycap(70, H - 28, "S", 0.9); fr.text(90, H - 38, 90, 20, "BACK", DIM, 9, True,
+                                                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
+
     def scene_click(self, hit) -> bool:
+        if self.deck_view:
+            if hit and hit[0] == "deckgrid":
+                self._deck_move_to(hit[1])
+            return True
         if hit and hit[0] in ("door", "pick", "deckcard"):
             self.pick = hit[1]
             self.scene_go()
@@ -345,7 +476,8 @@ class RoadScenes:
             self.book = max(0, self.book - 1)
         elif key in (Qt.Key.Key_W, Qt.Key.Key_Escape, Qt.Key.Key_Q, Qt.Key.Key_Up):
             self.book = None; self.peek = False
-            self.set_view("hand_low")                       # up from the book: the hand at rest
+            if self.scene == "fight":
+                self.set_view("hand_low")                   # up from the book: the hand at rest
         return True
 
     def _draw_book(self, fr: r3.Frame):
@@ -473,6 +605,8 @@ class RoadScenes:
             poly = fr.draw_card(c, u, v, face, art.card_back(), 1.0, edge)
             if poly:
                 self.hits.append((("deckcard", i), poly))
+            if i == self.pick:
+                fr.label3(add(c, (0, -r3.CH2 * 0.62 - 0.3, 0.3)), "Q")   # the book, at this card's mark
             if marks and i in marks:
                 q = fr.cam.project(add(c, (0, r3.CH2 * 0.62 + 0.25, 0)))
                 if q:
@@ -583,6 +717,12 @@ class RoadScenes:
         self._draw_progress(fr)
         self._draw_candles(fr)
         s = self.scene
+        if self.deck_view:
+            self._draw_deck_grid(fr)
+            s = "deck_view"
+        elif s in ("road", "pick", "fire", "altar") and self.run.deck:
+            fr.keycap(70, H - 28, "W", 0.9); fr.text(90, H - 38, 90, 20, "DECK", DIM, 9, True,
+                                                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
         if s == "road":
             for i, stop in enumerate(self.run.offers):
                 poly = self._draw_arch(fr, DOOR_X[i] if len(self.run.offers) == 3 else 0.0,
@@ -599,6 +739,7 @@ class RoadScenes:
                 if poly:
                     self.hits.append((("pick", i), poly))
             fr.label3((PICK_X[self.pick], 0.0, 2.4), "SPACE")
+            fr.label3((PICK_X[self.pick] + 1.15, 0.0, 2.4), "Q")   # the book, at this card's mark
         elif s == "fire":
             self._draw_fire(fr); self._draw_deck_fan(fr); self._draw_leave(fr)
         elif s == "altar":
@@ -611,6 +752,8 @@ class RoadScenes:
             self._draw_digitize(fr)
         fr.cam = cam
         self._draw_caption(fr)
+        if self.book is not None:
+            self._draw_book(fr)
         if self.menu:
             self._draw_menu(fr)
         img = fr.end()

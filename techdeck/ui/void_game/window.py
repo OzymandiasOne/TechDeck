@@ -75,6 +75,7 @@ KEYS_TEXT = [
     ("TAB", "ring the bell"),
     ("E / R", "draw from your deck / from the votaries"),
     ("S from the raised hand", "the book of marks"),
+    ("Q (on the road)", "the book, at the card you are on; W lays your whole deck out, S brings the road back"),
     ("Q", "the book, at the raised card's mark"),
     ("ESC", "this menu"),
 ]

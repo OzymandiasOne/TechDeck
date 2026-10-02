@@ -279,3 +279,51 @@ def test_wipe_and_grow_warps_move_only_as_meant():
     assert far[0] > 10 and far[2] == 3.0
     assert r3.warp_grow(0.0)((1.0, 2.0, 3.0)) == (1.0, 0.0, 3.0)
     assert r3.warp_grow(1.0)((1.0, 2.0, 3.0)) == (1.0, 2.0, 3.0)
+
+
+def _to_pick(w):
+    """To a THREE CARDS stop (rig the doors so one is a choice)."""
+    from techdeck.ui.void_game.run import Stop
+    to_road(w)
+    w.run.offers = [Stop("choice", cards=["scarab", "hound", "huginn"]), Stop("fire", fire="power"), Stop("fight")]
+    w.pick = 0
+    w.road_pick(); settle(w); quiet(w)
+    assert w.scene == "pick"
+
+
+def test_the_book_opens_from_any_event_at_the_picked_cards_mark(table):
+    from techdeck.ui.void_game.cards import CARDS, SIGILS
+    _to_pick(table)
+    press(table, Qt.Key.Key_Q)
+    assert table.book is not None
+    first = CARDS[table.run.stop.cards[table.pick]].sigils
+    if first:
+        assert table.book == list(SIGILS).index(first[0]) // 8
+    press(table, Qt.Key.Key_Q)
+    assert table.book is None and table.scene == "pick", "closing the book leaves you where you were"
+
+
+def test_w_lays_the_deck_out_and_s_on_the_bottom_row_brings_the_scene_back(table):
+    from techdeck.ui.void_game.run import DeckCard
+    from techdeck.ui.void_game.scenes import DECK_SPLIT_AT
+    _to_pick(table)
+    while len(table.run.deck) < DECK_SPLIT_AT + 1:               # nine: five on top, four below
+        table.run.deck.append(DeckCard("scarab"))
+    press(table, Qt.Key.Key_W)
+    assert table.wipe_t0 >= 0 and not table.deck_view, "the scene is swept first"
+    settle(table)
+    assert table.deck_view and table.scene == "pick"
+    top, bottom = table.deck_rows()
+    assert len(top) == 5 and len(bottom) == 4, "odd one to the top row"
+    assert table.deck_cursor == 0 and table.deck_cursor in top
+    press(table, Qt.Key.Key_D); assert table.deck_cursor == 1 and table.deck_prev == 0
+    press(table, Qt.Key.Key_S); assert table.deck_cursor == bottom[1], "down to the row below"
+    press(table, Qt.Key.Key_W); assert table.deck_cursor == top[1], "and back up"
+    press(table, Qt.Key.Key_S)
+    press(table, Qt.Key.Key_Q); assert table.book is not None; press(table, Qt.Key.Key_Q)
+    press(table, Qt.Key.Key_S)                                     # on the bottom row: back
+    assert table.wipe_t0 >= 0
+    settle(table)
+    assert not table.deck_view and table.scene == "pick"
+    table.run.deck[:] = table.run.deck[:7]                         # seven: one row
+    assert table.deck_rows() == ([], list(range(7)))
