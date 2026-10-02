@@ -327,3 +327,33 @@ def test_w_lays_the_deck_out_and_s_on_the_bottom_row_brings_the_scene_back(table
     assert not table.deck_view and table.scene == "pick"
     table.run.deck[:] = table.run.deck[:7]                         # seven: one row
     assert table.deck_rows() == ([], list(range(7)))
+
+
+def test_wasd_can_always_leave_the_deck_view(table):
+    """From every card the deck view can hold - one row or two - S (at most
+    twice) brings the scene back; W from the scene re-enters; keys pressed
+    mid-sweep wait."""
+    from techdeck.ui.void_game.run import DeckCard
+    _to_pick(table)
+    for n in (6, 9):
+        while len(table.run.deck) < n:
+            table.run.deck.append(DeckCard("scarab"))
+        press(table, Qt.Key.Key_W)
+        press(table, Qt.Key.Key_Space)                             # mid-sweep: nothing happens
+        settle(table)
+        assert table.deck_view and table.scene == "pick"
+        for i in range(n):
+            table._deck_move_to(i)
+            presses = 0
+            while table.deck_view and presses < 3:
+                press(table, Qt.Key.Key_S); presses += 1
+                settle(table)
+            assert not table.deck_view and table.scene == "pick", f"stuck at card {i} of {n}"
+            assert presses <= 2
+            press(table, Qt.Key.Key_W); settle(table)
+            assert table.deck_view
+        press(table, Qt.Key.Key_S)
+        if table.deck_view:
+            press(table, Qt.Key.Key_S)
+        settle(table)
+        assert not table.deck_view

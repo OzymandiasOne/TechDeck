@@ -308,6 +308,8 @@ class RoadScenes:
             return True
         if s not in ("road", "pick", "fire", "altar", "forge"):
             return False
+        if self.wipe_t0 >= 0:
+            return True                                   # mid-sweep: keys wait for the scene to land
         if self.deck_view:
             return self.deck_view_key(key)
         if key == Qt.Key.Key_Q:
