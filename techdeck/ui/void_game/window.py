@@ -193,7 +193,7 @@ class VoidTable(RoadScenes, QWidget):
     """The window. Create it with `open_table()` so something owns it."""
 
     def __init__(self, seed: int | None = None, parent=None, dialogue: Dialogue | None = None,
-                 memory: dict | None = None):
+                 memory: dict | None = None, jump: str | None = None):
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("The Puppet Master")
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
@@ -252,7 +252,8 @@ class VoidTable(RoadScenes, QWidget):
         self.said_this_phase: set[str] = set()
         self.played_lines: set[str] = set()
         self.frame = None
-        self._init_run(seed, memory if memory is not None else self.settings.get("memory"))
+        self.jump = jump
+        self._init_run(seed, memory if memory is not None else self.settings.get("memory"), fresh=jump is not None)
         self.timer = QTimer(self)
         self.timer.setInterval(TICK_MS)
         self.timer.timeout.connect(self._tick)
@@ -260,7 +261,10 @@ class VoidTable(RoadScenes, QWidget):
 
     # ── lifecycle ────────────────────────────────────────────────────────
     def _begin(self):
-        self.road_show()                 # the first door is the table, and it opens itself
+        if self.jump is not None:
+            self.jump_to(self.jump)      # a dev jump: straight to an event
+        else:
+            self.road_show()             # the first door is the table, and it opens itself
         self.timer.start()
 
     def closeEvent(self, event):
@@ -1602,13 +1606,16 @@ class VoidTable(RoadScenes, QWidget):
 _TABLE: VoidTable | None = None
 
 
-def open_table(seed: int | None = None, parent=None) -> VoidTable:
-    """Open (or raise) the table. Module-level ownership so Qt cannot collect it."""
+def open_table(seed: int | None = None, parent=None, jump: str | None = None) -> VoidTable:
+    """Open (or raise) the table. Module-level ownership so Qt cannot collect it.
+    `jump` (dev only) opens a fresh table straight at an event."""
     global _TABLE
     if _TABLE is not None and _TABLE.isVisible():
-        _TABLE.raise_(); _TABLE.activateWindow()
-        return _TABLE
-    _TABLE = VoidTable(seed, parent)
+        if jump is None:
+            _TABLE.raise_(); _TABLE.activateWindow()
+            return _TABLE
+        _TABLE.close()
+    _TABLE = VoidTable(seed, parent, jump=jump)
     _TABLE.resize(1280, 720)
     _TABLE.showMaximized()
     return _TABLE

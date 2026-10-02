@@ -32,6 +32,8 @@ DECK_LIFT = 0.28                      # how far the current card rises in the de
 DECK_LIFT_S = 0.14                    # ...and how long the rise / the drop takes
 DECK_ROW_Y = (3.75, 1.35)             # the two rows' heights (one row sits at the lower)
 DECK_Z = 1.2
+FLICK_S = 0.34                        # a card gained at an event flicks toward you and off the bottom in this long
+JUMPS = ("tutorial", "fresh", "road", "pick", "rare", "fire", "altar", "boss", "forge")   # /play <where> (dev only)
 DIGITIZE_S = 4.5
 GENERIC_REMARK_CHANCE = 0.2           # one match in five, he remarks on a card that has no line of its own
 SACRIFICE_REMARK_CHANCE = 1 / 25      # per offering; once it lands, no more offering remarks that match
@@ -40,9 +42,9 @@ FIRE_AGAIN_DEATHS = 5                 # a second rest at the same fire is only o
 
 class RoadScenes:
     # ── state ────────────────────────────────────────────────────────────
-    def _init_run(self, seed, memory):
+    def _init_run(self, seed, memory, fresh: bool = False):
         saved = self.settings.get("run")
-        if isinstance(saved, dict) and seed is None:
+        if isinstance(saved, dict) and seed is None and not fresh:
             self.run = Run.restore(saved, memory)    # the run you quit, back at its last doors
         else:
             self.run = Run(seed, memory)
@@ -66,6 +68,8 @@ class RoadScenes:
         self.show_draw_arrow = False        # the tutorial's pointer to the piles
         self.scene_t0 = 0.0
         self.wipe_t0 = -1.0               # the end-of-match wipe, while it runs
+        self.flick = None                 # (face, pose, t0): a card on its way into your deck
+        self.flick_hide = None            # ("pick" | "deckcard", index): the card it copies, hidden meanwhile
         self.deck_view = False            # W outside the fight: the whole deck laid out
         self.deck_cursor = 0
         self.deck_prev = -1               # the card that was current a moment ago (it drops back)
@@ -177,23 +181,61 @@ class RoadScenes:
         if r in ("won", "lost"):
             self.road_show()
         elif r == "dead":
-            self.scene, self.pick, self.scene_t0 = "forge", 0, self.t
-            self.forge_step, self.forge_from, self.forge_name = 0, [None, None, None], ""
-            self.forge_first = self.run.memory["deaths"] <= 1        # the first death of all
-            if self.forge_first:
-                self.say("deathcard_first_time")
-                self.say("deathcard_cost_first_time", part="head")
-            else:
-                self.say("deathcard")
-                self.say("deathcard_cost")
+            self._open_forge()
         else:
             self.close()
 
+    def _open_forge(self):
+        self.scene, self.pick, self.scene_t0 = "forge", 0, self.t
+        self.forge_step, self.forge_from, self.forge_name = 0, [None, None, None], ""
+        self.forge_first = self.run.memory["deaths"] <= 1        # the first death of all
+        if self.forge_first:
+            self.say("deathcard_first_time")
+            self.say("deathcard_cost_first_time", part="head")
+        else:
+            self.say("deathcard")
+            self.say("deathcard_cost")
+
+    def _depart(self, face=None, pose=None, hide=None):
+        """Leave an event: the card you gained flicks toward you and off the
+        bottom (FLICK_S), the scene is swept off (WIPE_S), the road grows back.
+        `hide` names the card the flick copies, so it is not drawn twice."""
+        if self.wipe_t0 >= 0 or self.flick is not None:
+            return
+        from .window import WIPE_S
+        if face is not None and pose is not None:
+            def start():
+                self.flick, self.flick_hide = (face, pose, self.t), hide
+            self._act(FLICK_S, start)
+        self._act(WIPE_S, lambda: setattr(self, "wipe_t0", self.t))
+        self._act(0.0, self._departed)
+
+    def _departed(self):
+        self.wipe_t0, self.flick, self.flick_hide = -1.0, None, None
+        self.road_show()
+
+    def _draw_flick(self, fr: r3.Frame):
+        """The flicked card: it leaps toward the lens and drops out of the frame."""
+        face, (c0, u0, v0), t0 = self.flick
+        k = max(0.0, min(1.0, (self.t - t0) / FLICK_S))             # a flick: fast from the first frame
+        c = r3.lerp(c0, (c0[0] * 0.4, c0[1] - 3.6, c0[2] + 7.5), k)
+        g = 1.0 + 0.5 * k
+        u = mul(u0, g)
+        v = r3.lerp(mul(v0, g), (0.0, 0.0, -abs(v0[1]) * g), k * 0.6)   # tipping back as it goes
+        fr.draw_card(c, u, v, face, art.card_back(), 1.0, PEAK)
+
+    def _deck_card_face(self, dc):
+        d = dc.defn
+        return art.card_face(d, d.power + dc.power, d.health + dc.health, d.sigils + dc.sigils)
+
     # ── the other stops ──────────────────────────────────────────────────
     def pick_go(self):
+        if self.wipe_t0 >= 0 or self.flick is not None:
+            return None
         card = self.run.take_card(self.pick)
         self.say("card_taken")
-        self.road_show()
+        self._depart(art.card_face(card.defn), self._upright_pose(PICK_X[self.pick], 1.8, 1.0, 1.0),
+                     hide=("pick", self.pick))
         return card
 
     def fire_go(self):
@@ -205,13 +247,17 @@ class RoadScenes:
             if self.run.memory["deaths"] < FIRE_AGAIN_DEATHS:
                 return                          # not yet: the survivors keep their manners
             self.say("fire_again")
+        pose = self._fan_pose(self.pick, len(self.run.deck), 0.35)
         out = self.run.rest(self.pick)
         self.warmed = card.defn.name.title() if out == "buffed" else ""
         self.say("fire_buffed" if out == "buffed" else "fire_eaten", name=card.defn.name.title(),
                  what=self.run.stop.fire if self.run.stop else "power")
         if out == "eaten" or not self.run.deck:
             self.pick = 0
-            self.road_show()
+            self._depart()                                   # nothing to take with you
+        elif self.run.memory["deaths"] < FIRE_AGAIN_DEATHS:
+            self.warmed = ""
+            self._depart(self._deck_card_face(card), pose, hide=("deckcard", self.pick))   # into your deck
         self.pick = min(self.pick, max(0, len(self.run.deck) - 1))
 
     def altar_go(self):
@@ -222,17 +268,24 @@ class RoadScenes:
             return
         if self.pick == self.forge_from[0]:
             return
+        pose = self._fan_pose(self.pick, len(self.run.deck), 0.35)
+        taker = self.run.deck[self.pick]
         self.run.altar(self.forge_from[0], self.pick)
         self.forge_from = [None, None, None]
         self.say("altar_done")
-        self.road_show()
+        self._depart(self._deck_card_face(taker), pose, hide=("deckcard", self.run.deck.index(taker)))
 
     def leave_stop(self):
         if self.scene == "fire" and self.warmed:
             self.say("fire_leave", name=self.warmed)
             self.warmed = ""
+            if self.run.deck:
+                dc = self.run.deck[self.pick]
+                self._depart(self._deck_card_face(dc), self._fan_pose(self.pick, len(self.run.deck), 0.35),
+                             hide=("deckcard", self.pick))
+                return
         if self.scene in ("fire", "altar"):
-            self.road_show()
+            self._depart()
 
     # ── the forge and what follows ───────────────────────────────────────
     def forge_go(self):
@@ -308,8 +361,8 @@ class RoadScenes:
             return True
         if s not in ("road", "pick", "fire", "altar", "forge"):
             return False
-        if self.wipe_t0 >= 0:
-            return True                                   # mid-sweep: keys wait for the scene to land
+        if self.wipe_t0 >= 0 or self.flick is not None:
+            return True                                   # mid-sweep / a card on its way: keys wait
         if self.deck_view:
             return self.deck_view_key(key)
         if key == Qt.Key.Key_Q:
@@ -443,6 +496,8 @@ class RoadScenes:
                                                  Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, 1)
 
     def scene_click(self, hit) -> bool:
+        if self.wipe_t0 >= 0 or self.flick is not None:
+            return True
         if self.deck_view:
             if hit and hit[0] == "deckgrid":
                 self._deck_move_to(hit[1])
@@ -455,6 +510,36 @@ class RoadScenes:
             self.leave_stop()
             return True
         return False
+
+    # ── dev jumps: /play <where> ─────────────────────────────────────────
+    def jump_to(self, where: str):
+        """Open straight at an event (source runs only): the tutorial is
+        skipped (unless asked for) and the saved place is left alone."""
+        from .run import ROAD_LENGTH, Stop, empty_memory
+        run = self.run
+        if where == "tutorial":
+            run.memory.update(empty_memory()); run.memory["runs"] = 1
+            self.road_show(); return
+        if run.memory["runs"] < 2:
+            run.memory["runs"] = 2                           # not the first run: no tutorial
+        if where in ("", "fresh"):
+            self.road_show(); return
+        if where == "boss":
+            run.step = ROAD_LENGTH; run.fights = 1
+            self.road_show(); return
+        if where == "forge":
+            run.candles = 0; run.dead = run.over = True
+            run.memory["deaths"] += 1
+            self._open_forge(); return
+        run.step, run.fights = 1, 1                          # one table behind you
+        if where == "road":
+            self.road_show(); return
+        kind = {"pick": "choice", "rare": "rare", "fire": "fire", "altar": "altar"}.get(where)
+        if kind is None:
+            self.road_show(); return
+        run.offers = [run._stop(kind)]
+        self.scene, self.pick, self.scene_t0 = "road", 0, self.t
+        self.road_pick()
 
     # ── the book ─────────────────────────────────────────────────────────
     def book_pages(self) -> int:
@@ -595,6 +680,8 @@ class RoadScenes:
         n = len(deck)
         order = sorted(range(n), key=lambda i: -abs(i - (n - 1) / 2))
         for i in order:
+            if self.flick_hide == ("deckcard", i):
+                continue                                       # its copy is on its way into you
             dc = deck[i]
             lift = 0.35 if i == self.pick else 0.0
             c, u, v = self._fan_pose(i, n, lift)
@@ -727,6 +814,8 @@ class RoadScenes:
                     self.hits.append((("door", i), poly))
         elif s == "pick":
             for i, cid in enumerate(self.run.stop.cards):
+                if self.flick_hide == ("pick", i):
+                    continue                                   # its copy is on its way into you
                 d = CARDS[cid]
                 lift = 0.3 if i == self.pick else 0.0
                 poly = fr.draw_card(*self._upright_pose(PICK_X[i], 1.5 + lift, 1.0, 1.0),
@@ -745,6 +834,8 @@ class RoadScenes:
         elif s == "digitize":
             self._draw_digitize(fr)
         fr.cam = cam
+        if self.flick is not None:
+            self._draw_flick(fr)
         self._draw_caption(fr)
         if self.book is not None:
             self._draw_book(fr)

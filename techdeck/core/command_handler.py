@@ -215,15 +215,19 @@ class CommandHandler:
     def _cmd_play(self, args: str):
         """Sit down at his table (ui/void_game). Held with him: absent from
         /help and a typo until the flag flips. The other way in is asking him
-        outright while he is in the console - see open_table()."""
-        self.open_table()
+        outright while he is in the console - see open_table().
+        Source runs only: `/play <where>` jumps straight to an event
+        (tutorial / fresh / road / pick / rare / fire / altar / boss / forge),
+        skipping the tutorial and the saved place; in the exe the word is ignored."""
+        where = args.strip().lower() if self._is_dev_run() else ""
+        self.open_table(jump=where or None)
 
     TABLE_PLUGIN_ID = "game_puppet_master"     # the Library cartridge for his table
 
-    def open_table(self):
+    def open_table(self, jump: str | None = None):
         self.discover_table()
         from techdeck.ui.void_game.window import open_table
-        open_table(parent=self.main_window)
+        open_table(parent=self.main_window, jump=jump)
 
     def discover_table(self) -> bool:
         """The first time the table opens, its cartridge in the Library comes

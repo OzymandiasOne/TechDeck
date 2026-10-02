@@ -106,7 +106,7 @@ def test_a_card_choice_adds_to_the_deck(table):
     press(table, Qt.Key.Key_D)
     press(table, Qt.Key.Key_Space)
     assert len(table.run.deck) == n + 1
-    quiet(table)
+    settle(table); quiet(table)                          # the card flicks into you, the scene sweeps
     assert table.scene == "road"
 
 
@@ -118,7 +118,7 @@ def test_the_fire_and_tab_to_leave(table):
     card = table.run.deck[0]
     press(table, Qt.Key.Key_Space); quiet(table)
     assert card.power + card.health > 0 or card not in table.run.deck
-    press(table, Qt.Key.Key_Tab); quiet(table)
+    settle(table); quiet(table)                          # one rest, no second offered: the card departs
     assert table.scene == "road"
 
 
@@ -131,7 +131,7 @@ def test_the_altar_takes_one_and_marks_another(table):
     press(table, Qt.Key.Key_Space)                       # giver
     press(table, Qt.Key.Key_D); press(table, Qt.Key.Key_Space)   # taker
     assert len(table.run.deck) == n - 1
-    quiet(table)
+    settle(table); quiet(table)                          # the marked card flicks into you
     assert table.scene == "road"
 
 
@@ -186,11 +186,10 @@ def test_the_fire_refuses_a_second_rest_until_five_deaths_and_narrates_leaving(t
     table.run.offers = [table.run._stop("fire")] * 3
     press(table, Qt.Key.Key_Space); quiet(table)
     card = table.run.deck[0]
-    press(table, Qt.Key.Key_Space); quiet(table)                      # the first rest is free
+    table.run.memory["deaths"] = 5                                     # only then is a second rest on offer
+    press(table, Qt.Key.Key_Space); quiet(table)                      # the first rest is free; the card stays
+    assert table.scene == "fire" and not table.busy()
     rests = table.run.stop.rests.get(0, 0)
-    press(table, Qt.Key.Key_Space); quiet(table)                      # a second: refused, no deaths yet
-    assert table.run.stop.rests.get(0, 0) == rests
-    table.run.memory["deaths"] = 5
     press(table, Qt.Key.Key_Space)
     said = [table.caption_key] + [c[2] for c in table.captions]
     assert "fire_again" in said
@@ -357,3 +356,40 @@ def test_wasd_can_always_leave_the_deck_view(table):
             press(table, Qt.Key.Key_S)
         settle(table)
         assert not table.deck_view
+
+
+def test_taking_a_card_flicks_it_into_you_then_sweeps_the_scene(table):
+    from techdeck.ui.void_game.scenes import FLICK_S
+    _to_pick(table)
+    n = len(table.run.deck)
+    press(table, Qt.Key.Key_Space)
+    assert len(table.run.deck) == n + 1 and table.scene == "pick"
+    for _ in range(3):
+        table._tick()
+    assert table.flick is not None and table.wipe_t0 < 0, "the card is on its way first"
+    press(table, Qt.Key.Key_Space)                                  # nothing lands mid-flick
+    assert len(table.run.deck) == n + 1
+    for _ in range(int(FLICK_S * 30) + 2):
+        table._tick()
+    assert table.wipe_t0 >= 0, "then the sweep"
+    settle(table)
+    assert table.scene == "road" and table.flick is None and table.wipe_t0 < 0
+
+
+def test_dev_jumps_open_straight_at_an_event(qapp, tmp_path, monkeypatch):
+    import techdeck.ui.void_game.window as win
+    from techdeck.ui.void_game.scenes import JUMPS
+    monkeypatch.setattr(win, "settings_path", lambda: str(tmp_path / "void_game.json"))
+    want = {"tutorial": "fight", "fresh": "fight", "road": "road", "pick": "pick", "rare": "pick",
+            "fire": "fire", "altar": "altar", "boss": "fight", "forge": "forge"}
+    assert set(want) == set(JUMPS)
+    for where, scene in want.items():
+        w = VoidTable(jump=where); w.timer.stop()
+        try:
+            settle(w)
+            assert w.scene == scene, where
+            assert w._tutorial() == (where == "tutorial"), where
+            if where == "boss":
+                assert w.run.stop and w.run.stop.kind == "boss"
+        finally:
+            w.close(); w.deleteLater()
