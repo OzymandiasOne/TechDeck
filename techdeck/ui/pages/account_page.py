@@ -455,7 +455,7 @@ class AccountPage(QWidget, ThemeAware):
         for index, sticker in self._tab_stickers.items():
             want = self._tab_badge[index] in badges and self.tabs.isTabVisible(index)
             if want and index not in self._tab_spacers:
-                spacer = QWidget(bar); spacer.setFixedSize(62, 1)     # the tab grows to make room...
+                spacer = QWidget(bar); spacer.setFixedSize(54, 1)     # the tab grows to make room...
                 spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
                 bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, spacer)
                 self._tab_spacers[index] = spacer
@@ -465,7 +465,7 @@ class AccountPage(QWidget, ThemeAware):
             if want:
                 r = bar.tabRect(index)
                 corner = bar.mapTo(self, QPoint(r.right(), r.top()))
-                sticker.place(corner.x() + 24, max(0, corner.y() - 2))   # ...the sticker hangs off its corner
+                sticker.place(corner.x() + 20, max(0, corner.y() - 2))   # ...the sticker covers that room and hangs off the corner
             sticker.setVisible(want)
 
     def resizeEvent(self, e):
