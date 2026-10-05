@@ -439,6 +439,8 @@ class MyStuffPage(QWidget):
                 "Friends are coming soon to Woogy's Emporium!"))
 
         self._vbox.addStretch(1)
+        for tile in self.tiles:                 # the grids are in the view now: stickers float on the view
+            whats_new.attach_sticker(tile)
 
     def refresh(self):
         # Ownership can change (a purchase in the Emporium), so rebuild the grids.

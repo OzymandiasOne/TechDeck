@@ -218,7 +218,9 @@ class AccountPage(QWidget, ThemeAware):
         # refresh whichever tab is being shown.
         self.tabs.currentChanged.connect(self._on_tab_changed)
         from techdeck.ui.whats_new import NewSticker
-        self._tab_stickers = {2: NewSticker(self, scale=2)}   # the My Stuff tab: an overlay on its corner
+        # the Ticket Counter tab (the Ghost to buy) and the My Stuff tab (the cartridge to find)
+        self._tab_stickers = {1: NewSticker(self, scale=2), 2: NewSticker(self, scale=2)}
+        self._tab_badge = {1: "decorations", 2: "my_stuff"}
         self._tab_spacers = {}                                 # room in the tab under the sticker, while it shows
         self._place_stickers()
         # Hidden tabs (the wide Emporium scene especially) must not lock the
@@ -451,7 +453,7 @@ class AccountPage(QWidget, ThemeAware):
         badges = whats_new.new_badges(self.settings)
         bar = self.tabs.tabBar()
         for index, sticker in self._tab_stickers.items():
-            want = whats_new.MY_STUFF in badges and self.tabs.isTabVisible(index)
+            want = self._tab_badge[index] in badges and self.tabs.isTabVisible(index)
             if want and index not in self._tab_spacers:
                 spacer = QWidget(bar); spacer.setFixedSize(62, 1)     # the tab grows to make room...
                 spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -463,7 +465,7 @@ class AccountPage(QWidget, ThemeAware):
             if want:
                 r = bar.tabRect(index)
                 corner = bar.mapTo(self, QPoint(r.right(), r.top()))
-                sticker.place(corner.x() + 22, max(0, corner.y() - 4))   # ...the sticker hangs off its corner
+                sticker.place(corner.x() + 24, max(0, corner.y() - 2))   # ...the sticker hangs off its corner
             sticker.setVisible(want)
 
     def resizeEvent(self, e):

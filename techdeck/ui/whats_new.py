@@ -68,7 +68,7 @@ class NewSticker(QWidget):
     def __init__(self, parent, scale: int = 2):
         super().__init__(parent)
         self.scale = scale
-        self.W, self.H = 34 * scale + 18, 14 * scale + 18   # room for the tilt
+        self.W, self.H = 34 * scale + 24, 14 * scale + 30   # room for the tilt
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFixedSize(self.W, self.H)
         self.hide()
@@ -79,7 +79,7 @@ class NewSticker(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        draw_new_sticker(p, self.W - 8, 6, self.scale)
+        draw_new_sticker(p, self.W - 10, 12, self.scale)
         p.end()
 
 
@@ -139,7 +139,9 @@ def _sticker_host(widget):
 
 
 def attach_sticker(tile):
-    """Give the tile's view an overlay (once) and register the tile on it."""
+    """Give the tile's view an overlay (once) and register the tile on it. A
+    tile registered earlier on a lower host (its grid box, before the box was
+    parented into the view) moves up to the view's overlay."""
     host = _sticker_host(tile)
     if host is None:
         return None
@@ -147,5 +149,12 @@ def attach_sticker(tile):
     if overlay is None:
         overlay = NewOverlay(host)
         host._new_overlay = overlay
+    old = getattr(tile, "_new_overlay_owner", None)
+    if old is not None and old is not overlay:
+        try:
+            old.tiles.remove(tile); old.update()
+        except (ValueError, RuntimeError):
+            pass
+    tile._new_overlay_owner = overlay
     overlay.watch(tile)
     return overlay
