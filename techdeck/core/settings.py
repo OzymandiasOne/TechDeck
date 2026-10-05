@@ -359,6 +359,9 @@ class SettingsManager:
         if self.data.get("settings", {}).get("theme") == "salmon":
             self.data["settings"]["theme"] = "cherry_blossom"
 
+        # The built-in Blue theme was retired in 0.8.7.8 -> Dark
+        self._migrate_retired_blue_theme()
+
         # Repair total_runs frozen by the pre-singleton settings race
         self._backfill_total_runs()
 
@@ -651,15 +654,53 @@ class SettingsManager:
 
     # ========== App Settings ==========
     
+    def _migrate_retired_blue_theme(self) -> None:
+        """Blue was retired in 0.8.7.8. A custom theme named "blue" is kept."""
+        settings = self.data.get("settings", {})
+        if settings.get("theme") != "blue":
+            return
+        try:
+            custom = self.get_custom_themes_dir() / "blue.json"
+            if custom.is_file():
+                return
+        except OSError:
+            pass
+        settings["theme"] = "dark"
+
     def get_theme(self) -> str:
-        """Get current theme name."""
-        return self.data.get("settings", {}).get("theme", "dark")
+        """Get current theme name.
+
+        During the Halloween season the seasonal theme is the DEFAULT: it
+        overrides the stored choice unless the stored theme is professional
+        (client presentations stay sober — checked on the STORED value, not
+        is_professional(), which calls back here) or the user opted out by
+        picking another theme during a season (set_theme records the year;
+        the opt-out expires with the year, so next October the magic
+        returns). Out of season the stored theme rules, untouched."""
+        block = self.data.get("settings", {})
+        stored = block.get("theme", "dark")
+        from techdeck.core.constants import is_halloween_season
+        if is_halloween_season() and stored != "professional":
+            import datetime
+            if block.get("halloween_opt_out_year") != datetime.date.today().year:
+                return "halloween"
+        return stored
 
     def set_theme(self, theme_name: str) -> None:
-        """Set current theme."""
+        """Set current theme. Choosing a NON-halloween theme during the
+        season records this year's opt-out so the seasonal default respects
+        an explicit choice; choosing halloween clears it."""
         if "settings" not in self.data:
             self.data["settings"] = {}
         self.data["settings"]["theme"] = theme_name
+        from techdeck.core.constants import is_halloween_season
+        if is_halloween_season():
+            import datetime
+            if theme_name == "halloween":
+                self.data["settings"].pop("halloween_opt_out_year", None)
+            else:
+                self.data["settings"]["halloween_opt_out_year"] = (
+                    datetime.date.today().year)
         self.save()
 
     def is_professional(self) -> bool:
@@ -667,6 +708,16 @@ class SettingsManager:
         Counter, My Stuff, My House, games, tickets, fidget) hidden — for client
         presentations."""
         return self.get_theme() == "professional"
+
+    def has_seen_my_stuff(self) -> bool:
+        """The NEW! sticker on My Account clears once My Stuff has been opened."""
+        return bool(self.data.get("settings", {}).get("seen_my_stuff", False))
+
+    def mark_my_stuff_seen(self) -> None:
+        if self.has_seen_my_stuff():
+            return
+        self.data.setdefault("settings", {})["seen_my_stuff"] = True
+        self.save()
 
     def get_dev_mode_enabled(self) -> bool:
         """Persisted state of the Home dev-mode toggle. Only source builds read

@@ -173,7 +173,7 @@ class PluginCard(QFrame, ThemeAware):
         name_font.setPointSize(11)
         name_font.setWeight(QFont.Weight.DemiBold)
         self.name_label.setFont(name_font)
-        self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
+        self.name_label.setStyleSheet(f"color: {theme.card_text or theme.text}; background-color: transparent;")
 
         layout.addStretch()
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -290,7 +290,7 @@ class PluginCard(QFrame, ThemeAware):
         self._hover_out.setEndValue(self._shadow_base_color)
         if self._status != self.STATUS_RUNNING:
             self._shadow.setColor(self._shadow_base_color)
-        self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
+        self.name_label.setStyleSheet(f"color: {self.theme.card_text or self.theme.text}; background-color: transparent;")
         # Icons are theme-matched; swap to the new theme's variant.
         self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, HOME_TILE_ICON))
         if self._eye_follow:

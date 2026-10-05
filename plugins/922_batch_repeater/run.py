@@ -88,14 +88,15 @@ assert _MP_SPEC is not None and _MP_SPEC.loader is not None
 mp = _ilu.module_from_spec(_MP_SPEC)
 _MP_SPEC.loader.exec_module(mp)
 
-VERSION = "2.6.0"
+VERSION = "2.7.1"
 
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
 COMPLETED_FOLDER_NAME = "1 - Completed"
-# One home for the quote-workbook location - 922 Setup's MPL stage reads this
-# constant too, so the two plugins can never disagree on where the quote lives.
-QUOTE_RELPATH = Path("2 - Planning") / "EB 922 H# Quote.xlsx"
+# The quote-workbook location lives in master_parts (one home, shared with
+# 922 Setup's MPL stage and tools/mpl_build_master.py) - see mp.quote_path.
+QUOTE_RELPATH = mp.QUOTE_RELPATH
+quote_path = mp.quote_path
 
 # The 'TechDeck 922 Repeat Tagger' Power Automate flow. Baked in so a fresh
 # install labels cards out of the box (v0.8.6.8 shipped with a blank default
@@ -590,83 +591,43 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     
     progress_callback(5)
     
-    # === ASK FOR BATCH FOLDER NAME ===
-    log("Input required from user...")
-    batch_name_input = sdk.request_batch_number(
-        params,
-        "Enter batch number or full folder name (e.g., '429' or 'Batch 429')"
-    )
+    # === PICK THE BATCH FOLDER ===
+    # It used to TYPE the batch, then hunt base_path for the first folder whose
+    # name contained that number, and create "Batch {n}" when nothing matched.
+    # Three ways to land on the wrong batch: the substring scan took whichever
+    # folder os.listdir returned first, it could not see a batch moved into
+    # "1 - Completed", and a typo silently created a brand-new empty folder
+    # instead of failing. The pick cannot typo, and the batch number comes off
+    # the folder NAME. Inside 922 Setup the up-front pick has already seeded the
+    # family cache, so this never prompts there.
+    picked = sdk.request_922_batch_folder(params, base_directory)
+    if picked is None or cancel_event.is_set():
+        return  # user cancelled - the helper already flagged the run
+    batch_no, new_po_folder = picked
+    actual_batch_name = new_po_folder.name
+    new_po_num = int(batch_no)
 
-    raw_input = batch_name_input.strip()
-    if not raw_input:
-        raise sdk.UserFacingError(
-            "No batch number was entered.",
-            "Run it again and type the batch number (e.g. '429').")
-
-    # Extract a number from whatever the user typed
-    num_match = re.search(r'\d+', raw_input)
-    if num_match:
-        extracted_num = num_match.group()
-        # Search base_path for any folder whose name contains that exact number
-        # (not preceded or followed by another digit, so "467" won't match "14670")
-        number_pattern = re.compile(r'(?<!\d)' + re.escape(extracted_num) + r'(?!\d)')
-        matched_folder = None
-        try:
-            for entry in os.listdir(base_path):
-                if sdk.is_dir(base_path / entry) and number_pattern.search(entry):
-                    matched_folder = entry
-                    break
-        except (FileNotFoundError, PermissionError) as e:
-            log(f"WARNING: Could not scan base directory: {e}")
-
-        if matched_folder:
-            actual_batch_name = matched_folder
-            log(f"Matched existing folder: {actual_batch_name}")
-        else:
-            actual_batch_name = f"Batch {extracted_num}"
-            log(f"No existing folder found - will create: {actual_batch_name}")
-    else:
-        # No number in input - use raw input as folder name (will create new)
-        actual_batch_name = raw_input
-        log(f"Using batch name: {actual_batch_name}")
-    
-    # === EXTRACT PO NUMBER FROM BATCH NAME ===
-    # Look for numbers in the batch name
-    po_match = re.search(r'\d+', actual_batch_name)
-    if not po_match:
-        raise sdk.UserFacingError(
-            f"There's no number in what you entered ('{actual_batch_name}').",
-            "Run it again and include the batch number (e.g. 'Batch 429').")
-    
-    new_po_num = int(po_match.group())
-    log(f"Extracted PO: {new_po_num}")
-    
     log("")
     log(f"PO Number: {new_po_num}")
     log(f"Batch folder: {actual_batch_name}")
     log("")
-    
+
     progress_callback(10)
-    
-    # Check for cancellation
+
     if cancel_event.is_set():
         log("Operation cancelled")
         return
 
     # === v2.4.0: MAINTAIN THE MPL (PO column + MASTER PARTS catalog) ========
-    # The batch folder is needed first - the batch's own PO workbook lives in
-    # its Documentation/order folders.
-    new_po_folder = base_path / actual_batch_name
+    # The batch's own PO workbook lives in its Documentation/order folders.
     sdk.ensure_dir(new_po_folder)
-    log(f"Batch folder: {new_po_folder.name}")
 
     mpl_errors = 0
     if do_mpl_matrix or do_master_parts:
         log("")
         log("Updating the MPL from the batch's PO workbook...")
-        quote_path = base_path / QUOTE_RELPATH
         mpl_errors = _update_mpl_sheets(
-            spreadsheet_path, quote_path, new_po_num, new_po_folder,
+            spreadsheet_path, mp.quote_path(base_path), new_po_num, new_po_folder,
             do_mpl_matrix, do_master_parts,
             bool(settings.get('dry_run', False)), log)
         log("")

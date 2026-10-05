@@ -324,46 +324,36 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     log("Starting Batch Auditor...")
     progress_callback(0)
 
-    # Not a batch number prompt — use request_text so the answer doesn't get
-    # cached into params['shared_state'][family]['batch_number'] and silently
-    # filled in for the real batch prompt below.
-    raw_line = sdk.request_text(params, "Which line to audit? Enter 911 or 922:")
-    line = "911" if "911" in (raw_line or "") else "922" if "922" in (raw_line or "") else None
-    if line is None:
-        raise ValueError(f"Unrecognised line: {raw_line!r} (expected 911 or 922)")
+    # Line + batch are both PICKED, never typed. The line was a free-text
+    # "enter 911 or 922" that only looked for the substring, and the batch was
+    # typed and then hunted for under the root - so a typo produced "not found"
+    # and the user had to guess which of hundreds of folders was meant.
+    line = sdk.request_choice(
+        params, "Batch Auditor", "Which line do you want to audit?",
+        ["911", "922"])
+    if line is None or cancel_event.is_set():
+        log("Cancelled - nothing was audited.")
+        return
 
-    raw_batch = sdk.request_batch_number(params, "Enter batch number:")
     progress_callback(10)
 
     if line == "922":
-        batch_no = sdk.parse_922_batch(raw_batch or "")
-        if not batch_no:
-            raise ValueError(f"Unrecognised 922 batch: {raw_batch!r}")
-        root = sdk.resolve_922_root(settings.get("qtdr_922_root", ""))
-        if not root:
-            raise RuntimeError(
-                "Could not locate '922 QTDR Production Packages'. Verify OneDrive "
-                "sync, or set the root in Settings > Apps > Batch Auditor.")
-        batch_path = sdk.find_922_batch_path(root, batch_no)
-        if not batch_path:
-            raise RuntimeError(f"Batch {batch_no} not found under {root} (also checked '1 - Completed').")
+        picked = sdk.request_922_batch_folder(
+            params, settings.get("qtdr_922_root", ""))
+        if picked is None or cancel_event.is_set():
+            return  # user cancelled - the helper already flagged the run
+        batch_no, batch_path = picked
         log(f"Auditing 922 Batch {batch_no}: {batch_path}")
         progress_callback(20)
         cards, charts, summary = _audit_922(batch_no, batch_path, log, cancel_event)
         title = f"922 Batch {batch_no} - Readiness"
         label = f"922 Batch {batch_no}"
     else:
-        batch = sdk.normalize_911_batch(raw_batch or "")
-        if not batch:
-            raise ValueError("No 911 batch entered.")
-        root = sdk.resolve_911_qtdr_root(settings.get("qtdr_911_root", ""))
-        if not root:
-            raise RuntimeError(
-                "Could not locate '911 QTDR'. Verify OneDrive sync, or set "
-                "the root in Settings > Apps > Batch Auditor.")
-        batch_folder = sdk.find_911_batch_folder(root, batch)
-        if not batch_folder:
-            raise RuntimeError(f"911 batch folder '{batch}' not found under {root}.")
+        picked = sdk.request_911_batch_folder(
+            params, settings.get("qtdr_911_root", ""))
+        if picked is None or cancel_event.is_set():
+            return  # user cancelled - the helper already flagged the run
+        batch, batch_folder = picked
         log(f"Auditing 911 Batch {batch}: {batch_folder}")
         progress_callback(20)
         cards, charts, summary = _audit_911(batch, batch_folder, log, cancel_event)

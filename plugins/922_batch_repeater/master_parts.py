@@ -25,6 +25,25 @@ except ModuleNotFoundError:
 
 MASTER_SHEET_NAME = "MASTER PARTS"
 
+# The ONE home for where the master quote lives under the 922 root - the
+# Repeater, 922 Setup's MPL stage and tools/mpl_build_master.py all ask
+# quote_path(). It sits in 2 - Planning\Batch Setup\Quote beside the other
+# batch templates; for months the code looked in 2 - Planning itself, found
+# nothing, and every run quietly typed new MASTER PARTS rows from tube serials
+# only (found 2026-09-28 building the 922 test sandbox). The old spot is still
+# checked second in case the file is ever moved back.
+QUOTE_RELPATH = Path("2 - Planning") / "Batch Setup" / "Quote" / "EB 922 H# Quote.xlsx"
+_OLD_QUOTE_RELPATH = Path("2 - Planning") / "EB 922 H# Quote.xlsx"
+
+
+def quote_path(root: Path) -> Path:
+    """The master quote under the 922 `root`: the first location that exists,
+    else the current one (so a 'missing' warning names the right folder)."""
+    for rel in (QUOTE_RELPATH, _OLD_QUOTE_RELPATH):
+        if sdk.is_file(Path(root) / rel):
+            return Path(root) / rel
+    return Path(root) / QUOTE_RELPATH
+
 # Column order of the MASTER PARTS sheet. DYPN is the first-seen (canonical)
 # spelling; LAST DYPN is the spelling used in the most recent batch - the
 # merge engine needs it to align renamed pieces against the *previous*

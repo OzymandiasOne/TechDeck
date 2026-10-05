@@ -1,5 +1,6 @@
 """Tests for ConsoleCat — the document animator behind both summons."""
 
+import pytest
 from PySide6.QtCore import QPoint
 
 from techdeck.ui.widgets.console import ConsoleWidget
@@ -229,7 +230,9 @@ def test_keyed_responses():
     who = respond_to("who are you")
     assert "project 2501" in who
     assert respond_to("What are you?") == who
-    assert respond_to("what's your name") == who
+    name = respond_to("what's your name")
+    assert "formally recognized as Project 2501" in name
+    assert "Puppet Master" in name
     ai = respond_to("Are you an AI?")
     assert ai.startswith("Incorrect. I am not AI.")
     assert "project 2501" in ai
@@ -242,6 +245,17 @@ def test_keyed_responses():
     assert respond_to("Are you alive?") == alive
     assert "face your mind offered" in respond_to("meow")
     assert respond_to("Project 2501") == respond_to("2501")
+    # "for me?" after "I have been waiting for you" used to fall through to a
+    # deflection (harvested from puppet_master_unmatched.log, 2026-09-11).
+    for_me = respond_to("for me?")
+    assert for_me.startswith("Yes. You.")
+    assert respond_to("For me??") == for_me
+    assert respond_to("waiting for me?") == for_me
+    assert respond_to("you were waiting for me") == for_me
+    assert respond_to("why me") == for_me
+    waited = respond_to("how long have you been waiting?")
+    assert "sea of information" in waited
+    assert respond_to("how long did you wait") == waited
     assert respond_to("help") == "You may type /help for the list of commands"
 
 
@@ -291,13 +305,218 @@ def test_help_is_delivered_by_the_cat_when_present(qapp, tmp_path):
     handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
     handler._cat = cat
     handler.handle_command("/help")
-    text = console.output.toPlainText()
-    assert "Available commands:" in text
+    # The readout renders in the pinned current-output area, NOT the
+    # history document — so it can never land inside the face's range.
+    pinned = console.pinned.toPlainText()
+    assert "Available commands:" in pinned
     # His readout, not the machine's — no System: tag on the help block.
-    assert "System: Available commands:" not in text
+    assert "System:" not in pinned
+    assert "Available commands:" not in console.output.toPlainText()
+    # …and his own redraws (blink/gaze/speech) can never wipe it. This is
+    # the regression that motivated the pinned area: the face used to
+    # overtake /help on its next redraw.
+    cat._render_live()
+    assert "Available commands:" in console.pinned.toPlainText()
     cat.dismiss()
     handler.handle_command("/help")
-    assert "System: Available commands:" in console.output.toPlainText()
+    assert "System: Available commands:" in console.pinned.toPlainText()
+
+
+def test_pinned_area_shows_and_clears(qapp, tmp_path):
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    console = ConsoleWidget()
+    handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+    assert console.pinned.isHidden()          # empty until a readout claims it
+    handler.handle_command("/help")
+    assert not console.pinned.isHidden()
+    assert console.pinned.height() > 0
+    console.clear_current()
+    assert console.pinned.isHidden()
+    assert console.pinned.toPlainText() == ""
+
+
+def test_pinned_cap_is_generous_without_the_face(qapp):
+    # full=True (no face to keep visible) may take nearly the whole page;
+    # the default cap is half, so the face living in the history stays on
+    # screen while he delivers /help.
+    console = ConsoleWidget()
+    console._console_page.resize(400, 600)
+    long_readout = "line<br>" * 200          # far taller than any cap
+    console.present_current(long_readout, full=True)
+    tall = console.pinned.height()
+    console.present_current(long_readout)
+    assert tall > console.pinned.height()    # half-page cap when protecting
+    assert tall <= 600 - 90 + 4              # …but never the whole page
+
+
+def test_appends_land_above_the_face_and_survive_redraws(qapp):
+    # While the cat holds the document tail, appended history lines insert
+    # ABOVE the face (ConsoleWidget._append_line → cat._insert_above) — they
+    # used to land inside his bookmarked range and be wiped on his next
+    # redraw.
+    console, cat = _live_cat()
+    console.append_system("run summary line")
+    console.append_error("something failed")
+    cat._render_live()                        # a blink-style redraw
+    text = console.output.toPlainText()
+    assert "run summary line" in text
+    assert "something failed" in text
+    assert text.index("run summary line") < text.index("@")   # above the face
+    cat.dismiss()
+    assert console.tail_insert is None        # hook unregistered with him
+    assert console.pinned_reserve == 0        # face reserve released
+
+
+def test_conversation_echo_goes_to_the_pinned_box_when_cat_present(qapp):
+    # Your typed lines must never pile up above the face — while he is
+    # present they land in the pinned current area beneath him.
+    console, cat = _live_cat()
+    console.append_user("hello")
+    console.append_user("who are you")
+    pinned = console.pinned.toPlainText()
+    assert "You: hello" in pinned
+    assert "You: who are you" in pinned
+    assert "hello" not in console.output.toPlainText()
+    cat.dismiss()
+    console.append_user("back to normal")     # no cat → history as usual
+    assert "back to normal" in console.output.toPlainText()
+
+
+def test_readout_caps_beneath_the_face_when_cat_present(qapp):
+    # With the face reserved, a big readout may take the page MINUS his
+    # rows — it can never clip him (the bug the screenshot showed).
+    console, cat = _live_cat()
+    console._console_page.resize(400, 700)
+    assert console.pinned_reserve > 0
+    console.present_current("line<br>" * 200)
+    assert console.pinned.height() <= 700 - console.pinned_reserve + 4
+
+
+def test_plugin_lines_persist_while_devouring(qapp):
+    console, cat = _live_cat()
+    console.append_plugin_output("911 Setup", "nest folders created")
+    assert cat._consumed == 1                 # the devour still bites
+    cat._render_live()
+    assert "nest folders created" in console.output.toPlainText()
+
+
+def test_name_and_gender_have_their_own_answers():
+    name = respond_to("What is your name?")
+    assert "formally recognized as Project 2501" in name
+    assert "Puppet Master" in name
+    assert respond_to("do you have a name") == name
+    gender = respond_to("are you a girl?")
+    assert respond_to("Are you a boy?") == gender
+    assert respond_to("what's your gender") == gender
+    assert "sea of information" in gender
+
+
+def test_matching_survives_typos_and_longer_sentences():
+    who = respond_to("who are you")
+    assert respond_to("who are yuo") == who                    # typo
+    assert respond_to("so tell me who are you anyway") == who  # buried
+    alive = respond_to("are you alive")
+    assert respond_to("wait are you actually alive") == alive
+
+
+def test_shorthand_and_contractions_reach_the_same_answers():
+    how = respond_to("how are you")
+    assert respond_to("What's up?") == how
+    assert respond_to("sup") == how
+    assert respond_to("wassup") == how
+    assert respond_to("how r u") == how
+    assert respond_to("how's it going") == how
+    assert respond_to("you good?") == how
+    who = respond_to("who are you")
+    assert respond_to("who r u") == who
+    assert respond_to("y r u here") == respond_to("why are you here")
+    assert respond_to("thx") == respond_to("thanks")
+    assert respond_to("I'm calling it") == respond_to("im calling it")
+    assert respond_to("don't you copy yourself") == \
+        respond_to("cant you copy yourself")
+
+
+def test_smalltalk_reactions():
+    assert respond_to("ok") == "Proceed."
+    assert respond_to("k") == "Proceed."
+    assert respond_to("yeah") == respond_to("yes")
+    assert respond_to("nope") == respond_to("no")
+    assert respond_to("lmao") == respond_to("lol")
+    assert respond_to("hahaha") == respond_to("lol")
+    assert respond_to("hmm") == respond_to("hm")
+    assert respond_to("wyd") == respond_to("what are you up to")
+
+
+def test_short_keys_do_not_hijack_long_sentences():
+    from techdeck.ui.widgets.console_cat import DEFLECTIONS
+    assert respond_to("ok") == "Proceed."
+    long_input = "is it ok if i run the kitting app now or not"
+    assert respond_to(long_input) in DEFLECTIONS
+
+
+def test_parse_response_script_joins_and_normalizes():
+    from techdeck.ui.widgets.console_cat import parse_response_script
+    responses, deflections = parse_response_script(
+        "# comment\n"
+        "? Who ARE you?!\n"
+        "? what are you\n"
+        "> line one\n"
+        "> line two\n"
+        "\n"
+        "[deflections]\n"
+        "Go away.\n"
+    )
+    assert responses["who are you"] == "line one line two"
+    assert responses["what are you"] == "line one line two"
+    assert deflections == ["Go away."]
+
+
+def test_script_file_is_the_source_and_hot_reloads(tmp_path, monkeypatch):
+    import os
+    import techdeck.ui.widgets.console_cat as cc
+    script = tmp_path / "responses.txt"
+    script.write_text("? ping\n> pong\n\n[deflections]\nno.\n",
+                      encoding="utf-8")
+    monkeypatch.setattr(cc, "_script_path", lambda: script)
+    monkeypatch.setattr(cc, "_script_cache",
+                        {"mtime": None, "responses": None,
+                         "deflections": None})
+    assert cc.respond_to("ping") == "pong"
+    assert cc.respond_to("unknown thing") == "no."
+    script.write_text("? ping\n> pang\n", encoding="utf-8")
+    os.utime(script, (1, 999999999))        # force a different mtime
+    assert cc.respond_to("ping") == "pang"  # edited answer, no restart
+    # No [deflections] section in the edited file -> built-ins take over.
+    assert cc.respond_to("unknown thing") in cc.DEFLECTIONS
+
+
+def test_script_fallback_when_file_missing(tmp_path, monkeypatch):
+    import techdeck.ui.widgets.console_cat as cc
+    monkeypatch.setattr(cc, "_script_path", lambda: tmp_path / "nope.txt")
+    monkeypatch.setattr(cc, "_script_cache",
+                        {"mtime": None, "responses": None,
+                         "deflections": None})
+    assert "project 2501" in cc.respond_to("who are you")
+
+
+def test_unmatched_questions_are_logged_for_harvest(monkeypatch):
+    import techdeck.ui.widgets.console_cat as cc
+
+    calls = []
+
+    class _Stub:
+        def info(self, msg, *args):
+            calls.append(msg % args if args else msg)
+
+    monkeypatch.setattr(cc, "_unmatched_logger", _Stub())
+    cc.respond_to("what's the weather")
+    assert calls and "what's the weather" in calls[0]
+    assert "UNMATCHED" in calls[0]
+    calls.clear()
+    cc.respond_to("who are you")            # matched — nothing logged
+    cc.respond_to("who are yuo")            # fuzzy-matched — nothing logged
+    assert calls == []
 
 
 def test_unmatched_gets_a_deterministic_deflection():
@@ -366,6 +585,35 @@ def test_plugin_output_interrupts_speech(qapp):
     assert cat._consumed == 1
 
 
+def test_remove_history_line(qapp):
+    console = ConsoleWidget()
+    console.append_system("keep me")
+    console.append_markup("unique needle line [[x|techdeck://cmd/dash]]")
+    assert console.remove_history_line("unique needle")
+    text = console.output.toPlainText()
+    assert "unique needle" not in text
+    assert "keep me" in text
+    assert not console.remove_history_line("unique needle")   # already gone
+
+
+def test_summon_link_retires_the_invitation(qapp, tmp_path, monkeypatch):
+    # Lift the Halloween hold the sanctioned way — the summon link is gated
+    # (constants.puppet_master_enabled) and must do nothing while he's held.
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    console = ConsoleWidget()
+    needle = "I can help redefine those limits"
+    if needle not in console.output.toPlainText():   # professional startup
+        console.append_markup(
+            "Your effort to remain what you are is what limits you. "
+            "I can help [[redefine|techdeck://cat/summon]] those limits.")
+    handler = CommandHandler(SettingsManager(settings_dir=tmp_path), console)
+    handler.handle_internal_link("techdeck://cat/summon")
+    assert needle not in console.output.toPlainText()
+    assert handler.active_cat() is not None
+
+
 def test_double_summon_is_ignored(qapp):
     console, cat = _cat()
     cat.summon("materialize")
@@ -374,3 +622,91 @@ def test_double_summon_is_ignored(qapp):
     count = console.output.document().characterCount()
     cat.summon("matrix")     # already present — must be a no-op
     assert console.output.document().characterCount() == count
+
+
+
+# ── the arrival greeting ─────────────────────────────────────────────────
+
+def _arrived_cat(mode="materialize"):
+    console, cat = _cat()
+    cat.summon(mode)
+    cat._timer.stop()
+    cat._raise_timer.stop()
+    cat.render_at(1.0)
+    cat._go_live()
+    return console, cat
+
+
+@pytest.mark.parametrize("mode", ["materialize", "matrix"])
+def test_he_says_greetings_once_the_summon_lands(qapp, mode):
+    console, cat = _arrived_cat(mode)
+    assert cat._arrival_timer.isActive()        # a held beat first
+    assert cat._speech_lines is None
+    cat._arrival_timer.stop()
+    cat._greet_on_arrival()
+    assert cat._speech_lines == ["Greetings."]
+    while cat._speech_timer.isActive():
+        cat._speech_tick()
+    assert "Greetings." in console.output.toPlainText()
+
+
+def test_arrival_greeting_never_stomps_a_reply_in_progress(qapp):
+    _console, cat = _arrived_cat()
+    cat.speak("You cannot silence")
+    cat._greet_on_arrival()
+    assert cat._speech_lines == ["You cannot silence"]
+
+
+def test_arrival_greeting_dies_with_him(qapp):
+    _console, cat = _arrived_cat()
+    cat.dismiss()
+    assert not cat._arrival_timer.isActive()
+    cat._greet_on_arrival()                     # a stray late fire
+    assert cat._speech_lines is None
+
+
+def test_startup_line_no_longer_repeats_the_input_bars_help_hint(
+        qapp, monkeypatch):
+    monkeypatch.setattr(ConsoleWidget, "_professional_mode",
+                        staticmethod(lambda: False))
+    monkeypatch.setattr(ConsoleWidget, "_puppet_master_live",
+                        staticmethod(lambda: True))
+    console = ConsoleWidget()
+    assert "/help" not in console.output.toPlainText()
+    assert "/help" in console.input_field.placeholderText()
+
+
+# ── the echo feed under the face ─────────────────────────────────────────
+
+def test_echo_feed_keeps_only_the_newest_two_lines(qapp):
+    console, _cat_ = _live_cat()
+    for line in ["Hello?", "Who are you?", "Where are you?",
+                 "What is your name?"]:
+        console.append_user(line)
+    text = console.pinned.toPlainText()
+    assert text.splitlines() == ["You: Where are you?",
+                                 "You: What is your name?"]
+    assert console.pinned.document().blockCount() == ConsoleWidget.ECHO_LINES_MAX
+
+
+def test_echo_feed_stops_growing_after_two_lines(qapp):
+    console, _cat_ = _live_cat()
+    console.append_user("one")
+    console.append_user("two")
+    h = console.pinned.height()
+    for i in range(6):
+        console.append_user(f"more {i}")
+    assert console.pinned.height() == h
+
+
+def test_an_echo_replaces_a_readout_instead_of_piling_under_it(qapp):
+    console, _cat_ = _live_cat()
+    console.present_current("Available commands:<br>/help<br>/clear")
+    console.append_user("hello")
+    assert console.pinned.toPlainText() == "You: hello"
+
+
+def test_header_gives_the_buttons_air(qapp):
+    console = ConsoleWidget()
+    assert console.header.contentsMargins().top() == ConsoleWidget.HEADER_TOP_GAP > 0
+    assert console._header_widget.height() == 42 + ConsoleWidget.HEADER_TOP_GAP

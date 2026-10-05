@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 import os
+from techdeck.core.constants import gate_enabled
 import logging
 
 
@@ -84,6 +85,8 @@ class Plugin:
     timeout: Optional[int] = None  # Per-plugin timeout override (None = use executor default)
     family: str = FAMILY_GENERAL
     locked: bool = False  # purchasable: hidden in the Library until is_unlocked(id)
+    show_locked: bool = False  # ...unless this: then it shows greyed out, not clickable, until unlocked
+    gate: str = ""  # constants.gate_enabled(name) must hold or the plugin is not discovered at all
     details: Optional[dict] = None  # rich /moredetails content: {setup, how_it_works, output}
 
 class PluginLoader:
@@ -233,6 +236,13 @@ class PluginLoader:
                     logger.error(f"Invalid plugin ID in {item}: '{plugin_id}'")
                     continue
                 
+                # A gated plugin (held behind a feature flag) is skipped outright
+                # while its gate is shut: nothing in the app can list it.
+                gate = str(metadata.get('gate') or '')
+                if gate and not gate_enabled(gate):
+                    logger.debug(f"Plugin {plugin_id}: gate '{gate}' is shut, skipping")
+                    continue
+
                 # Family: explicit field wins; fall back to ID prefix.
                 family = metadata.get('family')
                 family = _FAMILY_ALIASES.get(family, family)  # legacy "other" -> "General"
@@ -258,6 +268,8 @@ class PluginLoader:
                     timeout=metadata.get('timeout', None),
                     family=family,
                     locked=metadata.get('locked', False),
+                    show_locked=bool(metadata.get('show_locked', False)),
+                    gate=gate,
                     details=metadata.get('details') if isinstance(
                         metadata.get('details'), dict) else None,
                 )

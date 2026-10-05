@@ -31,6 +31,7 @@ from techdeck.ui.widgets.console_cat import (  # noqa: E402
 BG = "#070B07"
 LABEL = "#2FA84F"
 HALO_TIERS = {"bright", "peak"}
+_TIER_COLORS = dict(PHOSPHOR)
 
 VARIANTS = [
     ("center / closed", dict(iris=(2, 1), mouth=0)),
@@ -92,13 +93,14 @@ def render(panels, out_path: Path):
                     continue
                 x = ox + c * cw
                 y = oy + r * chh + fm.ascent()
+                colour = _TIER_COLORS[tier]
                 if tier in HALO_TIERS:
-                    halo = QColor(PHOSPHOR[tier])
+                    halo = QColor(colour)
                     halo.setAlpha(70)
                     p.setPen(halo)
                     for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                         p.drawText(x + dx, y + dy, ch)
-                p.setPen(QColor(PHOSPHOR[tier]))
+                p.setPen(QColor(colour))
                 p.drawText(x, y, ch)
     p.end()
 

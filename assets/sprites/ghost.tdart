@@ -1,0 +1,37 @@
+{
+  "format": "tdart",
+  "version": 1,
+  "palette": {
+    "H": "#EAF6FF",
+    "B": "#BFD8EC",
+    "S": "#7E9CBB",
+    "E": "#101A26"
+  },
+  "rows": [
+    "........................",
+    "........BBBBBBBB........",
+    "......HBBBBBBBBBBB......",
+    ".....HHBBBBBBBBBBBS.....",
+    "....HHHBBBBBBBBBBBSS....",
+    "...HHHHBBBBBBBBBBBSSS...",
+    "...HHHHBBBBBBBBBBBSSS...",
+    "..HHHHHEBBBBBBBBEBSSSS..",
+    "..HHHHEEEBBBBBBEEESSSS..",
+    "..HHHHEEEBBBBBBEEESSSS..",
+    "..HHHHEEEBBBBBBEEESSSS..",
+    "..HHHHHEBBBBBBBBEBSSSS..",
+    "..HHHHHBBBBBBBBBBBSSSS..",
+    "..HHHHHBBBBEEBBBBBSSSS..",
+    "..HHHHHBBBEEEEBBBBSSSS..",
+    "..HHHHHBBBEEEEBBBBSSSS..",
+    "..HHHHHBBBBEEBBBBBSSSS..",
+    "..HHHHHBBBBBBBBBBBSSSS..",
+    "..HHHHHBBBBBBBBBBBSSSS..",
+    "..HHHHHBBBBBBBBBBBSSSS..",
+    "..HHHHHBBBBBBBBBBBSSSS..",
+    "....HHHB..BBBB..BBSS....",
+    "....HHH...BBBB...BSS....",
+    "....HHH....BB....BSS....",
+    ".....H.....BB.....S....."
+  ]
+}

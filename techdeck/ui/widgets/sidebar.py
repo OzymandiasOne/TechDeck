@@ -11,7 +11,7 @@ left panel"; it also stays available in Settings → Help & Feedback).
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 )
-from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
+from PySide6.QtCore import QEvent, Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 import logging
@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 def _icon_folder_for_theme(theme_name: str) -> str:
     """Light icons for dark backgrounds, dark icons for light backgrounds."""
-    return "light" if theme_name in ("dark", "blue", "cyberpunk", "matrix") else "dark"
+    from techdeck.ui.theme import icon_folder_for_theme
+    return icon_folder_for_theme(theme_name)
 
 
 def _tint_svg(path: Path, color: str, size: int = 20) -> QPixmap:
@@ -264,7 +265,7 @@ class Sidebar(QWidget, ThemeAware):
         for icon_name, text, page_id in pages:
             btn = NavButton(
                 str(icons_dir / icon_name), text, page_id,
-                icon_color=self.theme.text,
+                icon_color=self.theme.sidebar_text or self.theme.text,
             )
             btn.clicked.connect(lambda checked, pid=page_id: self._on_nav_clicked(pid))
             self.nav_buttons.append(btn)
@@ -281,7 +282,7 @@ class Sidebar(QWidget, ThemeAware):
         if is_dev_build():
             self.devkit_btn = NavButton(
                 str(icons_dir / "devkit.svg"), "DevKit", "devkit",
-                icon_color=self.theme.text,
+                icon_color=self.theme.sidebar_text or self.theme.text,
             )
             self.devkit_btn.clicked.connect(
                 lambda checked: self._on_nav_clicked("devkit"))
@@ -295,11 +296,15 @@ class Sidebar(QWidget, ThemeAware):
 
         account_btn = NavButton(
             str(icons_dir / "account.svg"), "My Account", "account",
-            icon_color=self.theme.text,
+            icon_color=self.theme.sidebar_text or self.theme.text,
         )
         account_btn.clicked.connect(lambda checked: self._on_nav_clicked("account"))
         self.nav_buttons.append(account_btn)
         nav_layout.addWidget(account_btn)
+        from techdeck.ui.whats_new import NewSticker
+        self.account_btn = account_btn
+        self._account_sticker = NewSticker(self, scale=1)
+        account_btn.installEventFilter(self)
 
         # ===== Submit Feedback (accent-styled action button) =====
         self.feedback_btn = NavButton(
@@ -344,23 +349,25 @@ class Sidebar(QWidget, ThemeAware):
         """Rebuild every theme-sensitive surface on theme change."""
         self.theme = self.get_current_palette()
         icons_dir = self._current_icons_dir()
+        side_bg = self.theme.sidebar_bg or self.theme.surface
+        side_fg = self.theme.sidebar_text or self.theme.text
 
         # Sidebar bg + right border
         self.setStyleSheet(f"""
             Sidebar {{
-                background-color: {self.theme.surface};
+                background-color: {side_bg};
                 border-right: 1px solid {self.theme.border};
             }}
         """)
-        self.header.setStyleSheet(f"background-color: {self.theme.surface};")
-        self.nav_container.setStyleSheet(f"background-color: {self.theme.surface};")
+        self.header.setStyleSheet(f"background-color: {side_bg};")
+        self.nav_container.setStyleSheet(f"background-color: {side_bg};")
 
         # Toggle button
         toggle_icon = (self._expand_icon_path() if self.collapsed
                        else self._collapse_icon_path())
         if toggle_icon.exists():
             try:
-                pix = _tint_svg(toggle_icon, self.theme.text, 16)
+                pix = _tint_svg(toggle_icon, side_fg, 16)
                 self.toggle_btn.setIcon(QIcon(pix))
                 self.toggle_btn.setText("")
             except Exception:
@@ -375,7 +382,7 @@ class Sidebar(QWidget, ThemeAware):
                 border: none;
                 font-size: 14px;
                 border-radius: 6px;
-                color: {self.theme.text};
+                color: {side_fg};
             }}
             QPushButton:hover {{
                 background-color: rgba(127, 127, 127, 0.12);
@@ -386,7 +393,7 @@ class Sidebar(QWidget, ThemeAware):
         self.app_name.setStyleSheet(f"""
             font-size: 15px;
             font-weight: 600;
-            color: {self.theme.text};
+            color: {side_fg};
             background-color: transparent;
             border: none;
             padding: 0px;
@@ -398,8 +405,8 @@ class Sidebar(QWidget, ThemeAware):
             new_icon_path = str(icons_dir / Path(btn.icon_path).name)
             btn.update_theme(
                 icon_path=new_icon_path,
-                icon_color=self.theme.text,
-                text_color=self.theme.text,
+                icon_color=side_fg,
+                text_color=side_fg,
             )
 
         # Submit Feedback keeps the theme's CTA accent
@@ -462,7 +469,7 @@ class Sidebar(QWidget, ThemeAware):
                        else self._collapse_icon_path())
         if toggle_icon.exists():
             try:
-                pix = _tint_svg(toggle_icon, self.theme.text, 16)
+                pix = _tint_svg(toggle_icon, side_fg, 16)
                 self.toggle_btn.setIcon(QIcon(pix))
                 self.toggle_btn.setText("")
                 return
@@ -479,8 +486,10 @@ class Sidebar(QWidget, ThemeAware):
     def _on_nav_clicked(self, page_id: str):
         """Handle navigation button click."""
         for btn in self.nav_buttons:
-            if btn.page_id != page_id:
-                btn.setChecked(False)
+            # Re-assert the clicked one too: checkable buttons TOGGLE on
+            # click, so re-clicking the current tab was cycling its
+            # highlight dim -> off. Selection is not a toggle.
+            btn.setChecked(btn.page_id == page_id)
 
         if page_id != self._current_page_id:
             from techdeck.core.audio_manager import get_audio_manager, SOUND_NAV
@@ -494,6 +503,24 @@ class Sidebar(QWidget, ThemeAware):
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
         dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
         dlg.exec()
+
+    def refresh_new_badges(self, settings):
+        """Show or hide the NEW! on My Account (whats_new decides)."""
+        from techdeck.ui import whats_new
+        want = whats_new.ACCOUNT in whats_new.new_badges(settings)
+        self._place_account_sticker()
+        self._account_sticker.setVisible(want)
+
+    def _place_account_sticker(self):
+        from PySide6.QtCore import QPoint
+        b = self.account_btn
+        corner = b.mapTo(self, QPoint(b.width(), 0))
+        self._account_sticker.place_center(min(corner.x(), self.width()) - 30, corner.y() + 2)   # on the entry's corner, above the text
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "account_btn", None) and event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
+            self._place_account_sticker()
+        return super().eventFilter(obj, event)
 
     def set_current_page(self, page_id: str):
         """Programmatically set current page (no click sound — not user-initiated)."""

@@ -165,24 +165,37 @@ def stamp_single(pdf_path: str, batch_no: str, pallet_no: str, font_size: int,
         return False
 
 
-def unstamp_drawings(order_dir, packet, log) -> int:
-    """Take OUR pallet stamp back OFF any drawing in the order folder.
+def unstamp_non_packets(others, packet_found: bool, log) -> int:
+    """Take OUR pallet stamp back OFF anything that is not the work packet.
 
-    Runs before this fix stamped the drawing binder instead of the work packet
-    ("the first PDF in the folder" - Binder1.pdf sorts ahead of BK394153.pdf),
-    and that red stamp is still sitting on the print the floor reads. Skipping
-    the binder from now on stops the bleeding; this heals what already
-    happened, the same two-way idempotency the Difficulty Stamper has.
+    Two earlier pickers put the stamp on the wrong file and it is still sitting
+    there: v1.4.0 fixed "the first PDF in the folder" (a drawing binder sorts
+    ahead of the packet) and v1.5.0 fixed "the first PDF that isn't a drawing"
+    (a part SKETCH filed beside the packet isn't a drawing either, and sorts
+    ahead of it too - `BN331786 Sketch.pdf` before `BN331786.pdf`). Skipping
+    them from now on stops the bleeding; this heals what already happened, the
+    same two-way idempotency the Difficulty Stamper has.
 
-    Only a DRAWING is touched, and only if it actually carries our stamp - a
-    file with nothing to remove is never rewritten. Returns how many were
+    `others` is the non-packet half of `sdk.find_work_packet_report` - every
+    PDF in the folder bar the packet, already classified, so nothing is
+    re-classified here. What may be cleaned depends on whether we
+    actually identified the packet:
+
+    * packet found  - clean ANY other PDF carrying our stamp. We know where
+      the stamp belongs, so every other copy of it is stray.
+    * no packet     - clean only title-block DRAWINGS, the v1.4.0 rule. A file
+      we could only call 'other' might be a work packet in a layout we don't
+      recognise yet, and stripping a legitimate stamp off a real packet would
+      be a worse bug than leaving a stray one on a sketch.
+
+    A file with nothing to remove is never rewritten. Returns how many were
     cleaned.
     """
     removed = 0
-    for pdf in sorted(order_dir.iterdir()):
-        if pdf.suffix.lower() != ".pdf" or not sdk.is_real_pdf(pdf):
+    for pdf, kind in others:
+        if not packet_found and kind != "drawing":
             continue
-        if packet is not None and pdf == packet:
+        if kind == "unreadable":
             continue
         try:
             sdk.ensure_local(pdf)
@@ -193,10 +206,6 @@ def unstamp_drawings(order_dir, packet, log) -> int:
         saved = False
         try:
             page = doc[0]
-            # One open, both questions - a second open would cost another
-            # OneDrive round-trip on a file we probably won't touch.
-            if not sdk.text_has_title_block(page.get_text()):
-                continue
             rects = _find_all_stamp_rects(page)
             if not rects:
                 continue
@@ -206,8 +215,8 @@ def unstamp_drawings(order_dir, packet, log) -> int:
             sdk.save_pdf_atomic(doc, pdf)   # closes doc (Hard Rule 5)
             saved = True
             removed += 1
-            log(f"  Removed a stray pallet stamp from {pdf.name} (it's a "
-                f"drawing, not a work packet)")
+            log(f"  Removed a stray pallet stamp from {pdf.name} "
+                f"(it's not the work packet)")
         except Exception as e:
             log(f"  NOTE: couldn't clean the stray stamp off {pdf.name} ({e})")
         finally:
@@ -303,7 +312,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     total = len(subfolders)
     stamped_count = 0
     skipped_count = 0
-    unstamped_count = 0   # stray stamps taken back off drawings
+    unstamped_count = 0   # stray stamps taken back off non-packets
+    no_packet_but_pdfs: list = []  # (order, pallet, [unidentified pdfs])
     failures: list = []  # (order_no, pallet_no, pdf_path) - retried after the main pass
 
     log(f"Processing {total} order folders...")
@@ -329,20 +339,28 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             skipped_count += 1
             continue
 
-        # Find the order's WORK PACKET - not merely the first PDF in the
-        # folder. Drawing binders (Binder1.pdf ...) live in the same folder and
-        # sort ahead of the packet, so "first PDF" stamped the drawing
-        # (reported 2026-08-20). sdk.find_work_packet reads the page-1 title
-        # block to tell them apart; None means there is no packet here.
-        packet = sdk.find_work_packet(sub, log=log)
+        # Find the order's WORK PACKET. A packet must PROVE it is one (its
+        # page-1 heading), because the folder also holds drawing binders
+        # (reported 2026-08-20) and part sketches / customer prints
+        # (reported 2026-09-23) - and both sort AHEAD of the packet.
+        # None means nothing in this folder proved it is a packet.
+        packet, others = sdk.find_work_packet_report(sub, log=log)
 
-        # Clean up BEFORE the no-packet bail-out: a folder holding only
-        # drawings can still be carrying a stray stamp from a pre-fix run.
-        unstamped_count += unstamp_drawings(sub, packet, log)
+        # Clean up BEFORE the no-packet bail-out: a folder holding no packet
+        # can still be carrying a stray stamp from a pre-fix run.
+        unstamped_count += unstamp_non_packets(others, packet is not None, log)
 
         if packet is None:
             log(f"WARNING: No work-packet PDF found in {sub.name}")
             skipped_count += 1
+            # A folder of drawings genuinely has no packet - routine. A folder
+            # holding PDFs we could not identify is a different story: the
+            # packet may be here in a shape we do not recognise, and a silent
+            # skip is exactly how an order ships unstamped. Say so out loud.
+            unknown = [pdf.name for pdf, kind in others
+                       if kind in ("other", "unreadable")]
+            if unknown:
+                no_packet_but_pdfs.append((order_no, pallet_no, unknown))
             continue
 
         pdf_path = str(packet)
@@ -388,7 +406,12 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log(f"Skipped: {skipped_count}")
 
     if unstamped_count > 0:
-        log(f"Stray stamps removed from drawings: {unstamped_count}")
+        log(f"Stray stamps removed from non-packets: {unstamped_count}")
+
+    if no_packet_but_pdfs:
+        log(f"No packet identified, but PDFs were there: {len(no_packet_but_pdfs)}")
+        for order_no, pallet_no, names in no_packet_but_pdfs:
+            log(f"  {order_no} -> Pallet {pallet_no}  ({', '.join(names)})")
 
     if error_count > 0:
         log(f"NOT stamped (after retry): {error_count}")
@@ -399,15 +422,30 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
 
     progress_callback(100)
 
-    if error_count > 0:
-        lines = "\n".join(
-            f"  {order_no}  ->  Pallet {pallet_no}\n      {pdf_path}"
-            for order_no, pallet_no, pdf_path in failures)
+    # An order we could not stamp AND an order where we could not tell which
+    # PDF was the packet both end with an unstamped packet on the floor. Both
+    # get the same blocking warning, because a line in the console scrolls
+    # away and this one must not.
+    if error_count > 0 or no_packet_but_pdfs:
+        parts = []
+        if error_count > 0:
+            detail = "\n".join(
+                f"  {order_no}  ->  Pallet {pallet_no}\n      {pdf_path}"
+                for order_no, pallet_no, pdf_path in failures)
+            parts.append(
+                f"{error_count} PDF(s) could not be stamped (even after a "
+                f"retry). Stamp these by hand:\n\n{detail}")
+        if no_packet_but_pdfs:
+            detail = "\n".join(
+                f"  {order_no}  ->  Pallet {pallet_no}\n      "
+                + ", ".join(names)
+                for order_no, pallet_no, names in no_packet_but_pdfs)
+            parts.append(
+                f"{len(no_packet_but_pdfs)} order folder(s) hold PDFs but "
+                f"none of them looks like a work packet, so nothing was "
+                f"stamped there. Check these by hand:\n\n{detail}")
         sdk.show_warning(
-            params,
-            "Pallet Stamper - stamps missing",
-            f"{error_count} PDF(s) could not be stamped (even after a retry). "
-            f"Stamp these by hand:\n\n{lines}")
+            params, "Pallet Stamper - stamps missing", "\n\n".join(parts))
         log("WARNING: Completed with errors")
     else:
         log("All done successfully!")

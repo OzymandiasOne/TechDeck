@@ -24,7 +24,7 @@ from PySide6.QtCore import Qt, QTimer
 from techdeck.ui.theme_manager import get_theme_manager
 from techdeck.ui.widgets.fidget_spinner import _render_spinner_pixmap, FidgetSpinnerWindow
 
-THEMES = ["dark", "light", "blue", "cherry_blossom", "cyberpunk", "matrix"]
+THEMES = ["dark", "light", "cherry_blossom", "cyberpunk", "matrix"]
 
 
 class Preview(QWidget):

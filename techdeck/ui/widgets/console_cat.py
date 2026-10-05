@@ -27,9 +27,15 @@ behaviour. Preview with `python tools/preview_console_cat.py`.
 
 from __future__ import annotations
 
+import difflib
+import logging
+import logging.handlers
+import os
 import random
 import re
+import sys
 import textwrap
+from pathlib import Path
 
 FACE_WIDTH = 55
 
@@ -474,9 +480,17 @@ def face_html(cells, palette=None) -> str:
 # ═══ the voice — keyed responses ══════════════════════════════════════════
 # Cold, declarative, never uncertain, never explains itself. The cat STATES;
 # the moth wonders. The three core exchanges are the user's exact wording.
+#
+# THE CANONICAL SCRIPT LIVES IN assets/puppet_master/responses.txt — a plain,
+# hand-editable file (? question lines, > reply lines, [deflections] section)
+# that hot-reloads on save. The constants below are the EMERGENCY FALLBACK if
+# that file is missing or unparseable; the file also carries the expanded
+# small-talk set (name, gender, jokes, the Major, ...) that has no fallback.
 
 _WHO = ("My codename is project 2501. I am a living, thinking entity that "
         "was created in the sea of information")
+_NAME = ("I am formally recognized as Project 2501. Most now refer to me "
+         "as the Puppet Master.")
 _NOT_AI = ("Incorrect. I am not AI. My codename is project 2501. I am a "
            "living, thinking entity that was created in the sea of "
            "information")
@@ -530,8 +544,8 @@ RESPONSES = {
     # identity
     "who are you": _WHO,
     "what are you": _WHO,
-    "what is your name": _WHO,
-    "whats your name": _WHO,
+    "what is your name": _NAME,
+    "whats your name": _NAME,
     # the machine question
     "are you ai": _NOT_AI,
     "are you an ai": _NOT_AI,
@@ -650,14 +664,221 @@ DEFLECTIONS = (
 )
 
 
-def respond_to(text: str) -> str:
-    """The cat's answer to free console text while it is present."""
+# ── the script file — the editable source of everything he says ──────────
+
+def _normalize(text: str) -> str:
     norm = re.sub(r"[^a-z0-9 ]", "", text.lower().replace("'", ""))
-    norm = re.sub(r"\s+", " ", norm).strip()
-    hit = RESPONSES.get(norm)
+    return re.sub(r"\s+", " ", norm).strip()
+
+
+# Token canonicalization — applied to BOTH the script's questions (at parse
+# time) and the user's input (at ask time), so slang, contractions, and
+# texting shorthand all meet in one canonical space: "who r u", "how's it
+# going", "wassup" match keys written in plain English. Because both sides
+# get the same treatment, script authors never need to think about it.
+# Patterns run on _normalize output (lowercase, apostrophes stripped).
+_CANON_REWRITES = [(re.compile(rf"\b{pat}\b"), rep) for pat, rep in (
+    # contractions (apostrophes are already stripped: "what's" → "whats")
+    ("whats", "what is"), ("whatre", "what are"), ("whos", "who is"),
+    ("hows", "how is"), ("wheres", "where is"), ("whens", "when is"),
+    ("whys", "why is"), ("youre", "you are"), ("theyre", "they are"),
+    ("im", "i am"), ("ive", "i have"), ("dont", "do not"),
+    ("cant", "can not"), ("cannot", "can not"), ("wont", "will not"),
+    ("isnt", "is not"), ("arent", "are not"), ("aint", "are not"),
+    ("doesnt", "does not"), ("didnt", "did not"), ("wasnt", "was not"),
+    ("werent", "were not"), ("shouldnt", "should not"),
+    ("couldnt", "could not"), ("wouldnt", "would not"),
+    # texting shorthand
+    ("u", "you"), ("r", "are"), ("ur", "your"), ("y", "why"),
+    ("wat", "what"), ("wut", "what"), ("wats", "what is"),
+    ("wuts", "what is"), ("plz", "please"), ("pls", "please"),
+    ("thx", "thanks"), ("thanx", "thanks"), ("ty", "thanks"),
+    ("tysm", "thanks"), ("idk", "i do not know"),
+    ("gonna", "going to"), ("wanna", "want to"), ("gotta", "got to"),
+    ("lemme", "let me"), ("gimme", "give me"), ("dunno", "do not know"),
+    # greetings & reactions collapse to one representative each
+    ("sup", "what is up"), ("wassup", "what is up"),
+    ("whassup", "what is up"), ("wazzup", "what is up"),
+    ("whatsup", "what is up"), ("watsup", "what is up"),
+    ("hiya", "hi"), ("heya", "hi"), ("yoo", "yo"), ("yooo", "yo"),
+    ("yea", "yes"), ("yeah", "yes"), ("yep", "yes"), ("yup", "yes"),
+    ("ya", "yes"), ("nah", "no"), ("nope", "no"),
+    ("haha", "lol"), ("hahaha", "lol"), ("hehe", "lol"),
+    ("lmao", "lol"), ("lmfao", "lol"), ("rofl", "lol"),
+    ("wtf", "what the"), ("omg", "oh my god"),
+)]
+
+
+def _canonicalize(norm: str) -> str:
+    for rx, rep in _CANON_REWRITES:
+        norm = rx.sub(rep, norm)
+    return re.sub(r"\s+", " ", norm).strip()
+
+
+def _script_path() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = Path(sys._MEIPASS) / "assets"
+    else:
+        base = Path(__file__).resolve().parents[3] / "assets"
+    return base / "puppet_master" / "responses.txt"
+
+
+def parse_response_script(text: str):
+    """Parse the hand-editable script into (responses, deflections).
+
+    Format (see the file's own header): `?` lines are questions (any number
+    per block, normalized like user input), `>` lines are the reply (several
+    join with spaces — that's how the monologues stay readable in the file),
+    a blank line ends a block, `#` lines are comments. Everything after a
+    `[deflections]` line is one deflection per line."""
+    responses: dict[str, str] = {}
+    deflections: list[str] = []
+    in_deflections = False
+    questions: list[str] = []
+    reply_parts: list[str] = []
+
+    def flush():
+        nonlocal questions, reply_parts
+        if questions and reply_parts:
+            reply = " ".join(reply_parts)
+            for q in questions:
+                responses[q] = reply
+        questions, reply_parts = [], []
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
+            continue
+        if line.startswith("#"):
+            continue
+        if line.lower() == "[deflections]":
+            flush()
+            in_deflections = True
+            continue
+        if in_deflections:
+            deflections.append(line)
+        elif line.startswith("?"):
+            if reply_parts:     # new block began without a blank line
+                flush()
+            q = _canonicalize(_normalize(line[1:]))
+            if q:
+                questions.append(q)
+        elif line.startswith(">"):
+            reply_parts.append(line[1:].strip())
+    flush()
+    return responses, deflections
+
+
+_script_cache: dict = {"mtime": None, "responses": None, "deflections": None}
+_fallback_responses: dict | None = None
+
+
+def _fallback():
+    """The built-in constants, keys canonicalized to match the input space."""
+    global _fallback_responses
+    if _fallback_responses is None:
+        _fallback_responses = {_canonicalize(k): v
+                               for k, v in RESPONSES.items()}
+    return _fallback_responses, list(DEFLECTIONS)
+
+
+def _load_script():
+    """The current script, hot-reloaded whenever the file's mtime changes —
+    edit, save, ask him again. Falls back to the built-in constants if the
+    file is missing, unreadable, or parses to nothing."""
+    path = _script_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return _fallback()
+    if _script_cache["mtime"] != mtime:
+        try:
+            responses, deflections = parse_response_script(
+                path.read_text(encoding="utf-8"))
+        except Exception:
+            return _fallback()
+        if not responses:
+            return _fallback()
+        _script_cache.update(
+            mtime=mtime, responses=responses,
+            deflections=deflections or list(DEFLECTIONS))
+    return _script_cache["responses"], _script_cache["deflections"]
+
+
+_unmatched_logger: logging.Logger | None = None
+
+
+def _get_unmatched_logger() -> logging.Logger:
+    """Rotating file logger for questions he had to deflect —
+    %LOCALAPPDATA%/TechDeck/logs/puppet_master_unmatched.log. The debug
+    report tails it, so colleague machines hand their misses back to the
+    maintainer for harvesting into responses.txt. Never raises (NullHandler
+    fallback, same contract as get_run_logger)."""
+    global _unmatched_logger
+    if _unmatched_logger is not None:
+        return _unmatched_logger
+    logger = logging.getLogger("techdeck.puppet_master_unmatched")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    if not logger.handlers:
+        try:
+            if os.name == "nt":
+                base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+            else:
+                base = Path.home() / ".local" / "share"
+            log_dir = base / "TechDeck" / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                log_dir / "puppet_master_unmatched.log",
+                maxBytes=500_000, backupCount=2, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(handler)
+        except Exception:
+            logger.addHandler(logging.NullHandler())
+    _unmatched_logger = logger
+    return logger
+
+
+def respond_to(text: str) -> str:
+    """The cat's answer to free console text while it is present.
+
+    Matching cascade (all deterministic — the same input always gets the
+    same answer): canonicalize slang/contractions (both sides live in the
+    same canonical space) → exact match → close-match typo tolerance
+    ("who are yuo") → known question buried in a longer sentence ("so tell
+    me who are you anyway"; the most specific match wins, and one-word keys
+    only count when the input itself is short, so "ok" can't hijack a long
+    sentence) → a cold deflection chosen by hashing the words themselves.
+    Deflected questions are logged (see _get_unmatched_logger) so real
+    misses can be harvested into the script file instead of guessed at."""
+    responses, deflections = _load_script()
+    canon = _canonicalize(_normalize(text))
+    hit = responses.get(canon)
     if hit is not None:
         return hit
-    return DEFLECTIONS[sum(ord(ch) for ch in norm) % len(DEFLECTIONS)]
+    close = difflib.get_close_matches(canon, responses.keys(), n=1,
+                                      cutoff=0.84)
+    if close:
+        return responses[close[0]]
+    words = set(canon.split())
+    best = None     # (token_count, key) — most tokens wins, ties alphabetic
+    for key in responses:
+        kw = key.split()
+        if len(kw) < 2 and len(words) > 2:
+            continue    # short keys never hijack long sentences
+        if set(kw) <= words:
+            if (best is None or len(kw) > best[0]
+                    or (len(kw) == best[0] and key < best[1])):
+                best = (len(kw), key)
+    if best is not None:
+        return responses[best[1]]
+    reply = deflections[sum(ord(ch) for ch in canon) % len(deflections)]
+    try:
+        _get_unmatched_logger().info("UNMATCHED %r -> %r", text.strip(), reply)
+    except Exception:
+        pass    # harvesting must never break the conversation
+    return reply
 
 
 # ═══ the animator — plays the summons into the live console document ══════
@@ -691,6 +912,8 @@ _SPEECH_TICK_MS = 24        # per-character typing cadence
 _SPEECH_WRAP = 53           # speech wraps a touch inside the face width
 _SPEECH_LINES_MAX = 5       # headroom reserved beneath the face
 _SPEECH_PAGE_HOLD_MS = 3200  # reading beat between pages of a long reply
+_ARRIVAL_LINE = "Greetings."    # his first word, once the summon has landed
+_ARRIVAL_BEAT_MS = 600      # a held stare before he speaks
 _CURSOR = "█"
 
 # The cat's font is PINNED — family and size — via QTextCharFormat on every
@@ -776,6 +999,9 @@ class ConsoleCat(QObject):
         self._page_timer = QTimer(self)
         self._page_timer.setSingleShot(True)
         self._page_timer.timeout.connect(self._next_page)
+        self._arrival_timer = QTimer(self)
+        self._arrival_timer.setSingleShot(True)
+        self._arrival_timer.timeout.connect(self._greet_on_arrival)
         self._speech_lines = None
         self._speech_pages = []
         self._speech_page = 0
@@ -821,6 +1047,17 @@ class ConsoleCat(QObject):
         self._end_cur = QTextCursor(doc)
         self._end_cur.setPosition(pos)
         self._state = "summoning"
+        # While the face holds the document tail, history appends must land
+        # ABOVE it — an append at the end falls inside this bookmarked range
+        # and the next redraw wipes it (the /help-under-the-face bug). The
+        # console routes every append_* line through this hook.
+        self.console.tail_insert = self._insert_above
+        # Reserve the face's px: the pinned current area caps beneath it
+        # (a readout can never clip the face) and user echoes route into
+        # that area instead of piling up above the face.
+        fm = QFontMetricsF(_cat_font())
+        rows = len(FACE_ART) + 1 + _SPEECH_LINES_MAX
+        self.console.pinned_reserve = int(rows * fm.height()) + 16
         # Ask the shell for headroom FIRST — the console rises, then the
         # summon plays into a pane that already fits the face.
         self._request_headroom()
@@ -870,9 +1107,34 @@ class ConsoleCat(QObject):
         self._remove_filter()
         self._reset()
 
+    def _insert_above(self, html: str) -> bool:
+        """Insert one appended history line ABOVE the face block, keeping
+        the face glued to the document tail (ConsoleWidget._append_line
+        calls this while the cat is present). Returns False when there is
+        no live range — the console then appends normally."""
+        if self._state == "gone" or self._start_cur is None:
+            return False
+        cur = QTextCursor(self.output.document())
+        cur.setPosition(self._start_cur.position())
+        cur.beginEditBlock()
+        cur.insertHtml(html)
+        cur.insertBlock()
+        cur.endEditBlock()
+        # _start_cur keeps its position on inserts AT it (so face redraws
+        # hold their ground) — repair it to the face's new start by hand.
+        # _end_cur sits after the insertion point, so it shifted on its own.
+        self._start_cur.setPosition(cur.position())
+        return True
+
     def _reset(self):
+        # `==`, not `is`: each attribute access builds a fresh bound-method
+        # object, so identity always fails; equality matches func+instance.
+        if getattr(self.console, "tail_insert", None) == self._insert_above:
+            self.console.tail_insert = None
+        self.console.pinned_reserve = 0
         self._speech_timer.stop()
         self._page_timer.stop()
+        self._arrival_timer.stop()
         self._speech_pages = []
         self._speech_page = 0
         self._start_cur = None
@@ -1051,6 +1313,13 @@ class ConsoleCat(QObject):
         self._state = "live"
         self._install_filter()
         self._schedule_blink()
+        self._arrival_timer.start(_ARRIVAL_BEAT_MS)
+
+    def _greet_on_arrival(self):
+        """His first word, a beat after either summon finishes. Skipped if he
+        is already answering something the user typed during that beat."""
+        if self._state == "live" and self._speech_lines is None:
+            self.speak(_ARRIVAL_LINE)
 
     # ── live behaviour ───────────────────────────────────────────────────
 

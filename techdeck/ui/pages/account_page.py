@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QFrame, QScrollArea, QMessageBox, QTabWidget,
     QFileDialog
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Signal, Qt
 import os
 from pathlib import Path
 
@@ -34,6 +34,7 @@ class AccountPage(QWidget, ThemeAware):
     """
     My Account page - display and edit user profile information.
     """
+    badges_changed = Signal()          # a NEW! sticker may have cleared
 
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
@@ -216,6 +217,13 @@ class AccountPage(QWidget, ThemeAware):
         # A purchase on one tab changes ownership/balance the other reflects, so
         # refresh whichever tab is being shown.
         self.tabs.currentChanged.connect(self._on_tab_changed)
+        from techdeck.ui.whats_new import NewSticker
+        # the Ticket Counter tab (the Ghost to buy) and the My Stuff tab (the cartridge to find)
+        self._tab_stickers = {1: NewSticker(self, scale=2), 2: NewSticker(self, scale=2)}
+        self._tab_badge = {1: "decorations", 2: "my_stuff"}
+        self._tab_spacers = {}                                 # room in the tab under the sticker, while it shows
+        self._place_stickers()
+        self.emporium.refreshed.connect(self._on_stock_changed)   # a purchase may clear a sticker
         # Hidden tabs (the wide Emporium scene especially) must not lock the
         # window's minimum width while another tab/page is showing.
         from techdeck.ui.utils import limit_min_size_to_current_page
@@ -281,7 +289,7 @@ class AccountPage(QWidget, ThemeAware):
             }}
             QTabBar::tab {{
                 background-color: {t.surface};
-                color: {t.text_secondary};
+                color: {t.card_text or t.text_secondary};
                 font-weight: bold;
                 padding: 8px 18px;
                 margin-right: 3px;
@@ -292,12 +300,12 @@ class AccountPage(QWidget, ThemeAware):
             }}
             QTabBar::tab:selected {{
                 background-color: {t.background};
-                color: {t.accent};
+                color: {t.text};
                 border-bottom: 3px solid {t.accent};
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {t.surface_hover};
-                color: {t.text};
+                color: {t.card_text or t.text};
             }}
         """)
 
@@ -437,11 +445,51 @@ class AccountPage(QWidget, ThemeAware):
         self.settings.clear_avatar()
         self._refresh_avatar()
 
+    def _place_stickers(self):
+        """The NEW! stickers ride the tab bar: shown or hidden by whats_new, placed
+        at the tab's top-right corner."""
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QTabBar, QWidget
+        from techdeck.ui import whats_new
+        badges = whats_new.new_badges(self.settings)
+        bar = self.tabs.tabBar()
+        for index, sticker in self._tab_stickers.items():
+            want = self._tab_badge[index] in badges and self.tabs.isTabVisible(index)
+            if want and index not in self._tab_spacers:
+                spacer = QWidget(bar); spacer.setFixedSize(54, 1)     # the tab grows to make room...
+                spacer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, spacer)
+                self._tab_spacers[index] = spacer
+            elif not want and index in self._tab_spacers:
+                bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, None)   # ...and shrinks back after
+                del self._tab_spacers[index]
+            if want:
+                r = bar.tabRect(index)
+                corner = bar.mapTo(self, QPoint(r.right(), r.top()))
+                sticker.place_center(corner.x() - 32, corner.y() + 18)   # ...the sticker sits over that room, whole, hanging a little past the corner
+            sticker.setVisible(want)
+
+    def _on_stock_changed(self):
+        self._place_stickers()
+        self.badges_changed.emit()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place_stickers()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._place_stickers()
+
     def _on_tab_changed(self, _i):
         """Keep the playful tabs in sync as ownership/balance/progress change,
         and click the UFO50 tab-select sound."""
         from techdeck.core.audio_manager import get_audio_manager, SOUND_UI_TAB
         get_audio_manager().play(SOUND_UI_TAB)
+        if _i == 2:
+            self.settings.mark_my_stuff_seen()      # My Stuff opened: the sidebar's NEW! clears
+        self._place_stickers()
+        self.badges_changed.emit()
         if hasattr(self, "emporium"):
             self.emporium.refresh()
         if hasattr(self, "my_stuff"):

@@ -38,6 +38,12 @@ CATALOG = [
      "sprite": "beyblade/nightspur", "cost": 190, "kind": "spinner"},
     {"id": "game_asa_the_video_game", "name": "ASA: The Video Game", "category": "toys",
      "sprite": "cartridge_steeltube.tdart", "cost": 250, "kind": "game"},
+    # FOUND, not bought: never on the shelf ("hidden"); My Stuff shows it greyed
+    # out and inert ("found") until the table is first opened, which unlocks this
+    # same id (CommandHandler.discover_table). "gate" = absent while he is off.
+    {"id": "game_puppet_master", "name": "Puppet Master", "category": "toys",
+     "sprite": "cartridge_puppet_master.tdart", "cost": 1, "kind": "game",
+     "hidden": True, "found": True, "gate": "puppet_master"},
     # A GADGET: it doesn't get equipped, it gets CONFIGURED. Owning it unlocks
     # the kill-cam file/folder picker plus the per-app switches in My Stuff and
     # in Settings -> Apps (techdeck/core/sentry_mode.py).
@@ -107,6 +113,15 @@ CATALOG = [
      "sprite": "sPet_ItemSpider_0.png", "cost": 15, "kind": "furniture"},
     {"id": "deco_trapdoor", "name": "Trap Door", "category": "decorations",
      "sprite": "sPet_ItemTrapDoor_0.png", "cost": 30, "kind": "furniture"},
+    # The Ghost haunts the BOOKSHELF: now and then the shelf slides aside and he
+    # drifts out from behind it (garden_scene, "The Ghost"). So he is only sold
+    # to someone who owns the shelf ("requires" an item id), and only during
+    # the Halloween season ("seasonal") - once bought he stays, all year. His
+    # own still (sPet_ItemGhost_0) is EMPTY on purpose - he is invisible at
+    # rest - so the store shows the fully-out frame of his clip instead.
+    {"id": "deco_ghost", "name": "Ghost", "category": "decorations",
+     "sprite": "sPet_ItemGhostAppear_12.png", "cost": 90, "kind": "furniture",
+     "requires": "deco_books", "seasonal": "halloween"},
     # --- more furniture (yard) ---
     {"id": "deco_picnic", "name": "Picnic Blanket", "category": "decorations",
      "sprite": "sPet_ItemPicnicBlanket_0.png", "cost": 35, "kind": "furniture"},

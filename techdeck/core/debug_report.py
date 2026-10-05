@@ -48,7 +48,10 @@ blind at least once:
                         tick-guard reports) + plugin_detail.log (every line a
                         plugin printed, so a run that reported OK but logged a
                         silent in-run warning is diagnosable — the 911-Setup
-                        blank-forecast class)
+                        blank-forecast class) + puppet_master_unmatched.log
+                        (questions the console cat deflected — the harvest
+                        list for growing his script,
+                        assets/puppet_master/responses.txt)
   Live UI probe       - library/home grid geometry (the stacked-card class)
 
 Rules: read-only, never raises (every section is individually guarded), no
@@ -446,6 +449,18 @@ def _collect_logs() -> list[str]:
             lines.extend(tail)
         except OSError as exc:
             lines.append(f"plugin_detail.log unreadable: {exc}")
+    # Questions the Puppet Master had to deflect on this machine — the
+    # harvest list for expanding assets/puppet_master/responses.txt.
+    unmatched_log = log_dir / "puppet_master_unmatched.log"
+    if unmatched_log.is_file():
+        try:
+            tail = unmatched_log.read_text(
+                encoding="utf-8", errors="replace").splitlines()[-200:]
+            lines.append("")
+            lines.append(f"--- puppet_master_unmatched.log (last {len(tail)} lines) ---")
+            lines.extend(tail)
+        except OSError as exc:
+            lines.append(f"puppet_master_unmatched.log unreadable: {exc}")
     return lines
 
 

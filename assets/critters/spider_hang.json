@@ -1,0 +1,10 @@
+{
+  "kind": "spider",
+  "clip": "hang",
+  "frames": 12,
+  "size": 256,
+  "view_units": 9.2,
+  "stride_units": 1.15,
+  "px_per_unit": 27.826086956521742,
+  "loop_travel_px": 64.0
+}

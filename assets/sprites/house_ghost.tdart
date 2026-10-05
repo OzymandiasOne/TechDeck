@@ -1,0 +1,24 @@
+{
+  "format": "tdart",
+  "version": 1,
+  "palette": {"B": "#C8C8C8", "E": "#202040", "K": "#000000"},
+  "rows": [
+    "...BBBB...",
+    ".BBBBBBBB.",
+    ".BBBBBBBB.",
+    "BBEKBBKEBB",
+    "BEKKBBKKEB",
+    "BKKEBBEKKB",
+    "BKEBBBBEKB",
+    "BBBBBBBBBB",
+    "BBBBKKBBBB",
+    "BBBBKKBBBB",
+    "BBBBKKBBBB",
+    "BBBBEEBBBB",
+    "BBBBBBBBBB",
+    "BBBBBBBBBB",
+    "BBBBBBBBBB",
+    "BBBBBBBBBB",
+    "BBBBBBBBBB"
+  ]
+}

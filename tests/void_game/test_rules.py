@@ -1,0 +1,578 @@
+"""The game engine, tested without a screen."""
+import pytest
+
+from techdeck.ui.void_game import cards as C
+from techdeck.ui.void_game.rules import (HIM, LANES, SCALE_TO_WIN, YOU, Card, Game,
+                                          IllegalMove)
+
+
+def kinds(events):
+    return [e.kind for e in events]
+
+
+def fresh(draw: bool = True, **kw) -> Game:
+    """A started game. The first turn draws now, so by default the draw is
+    done (a votary) and the table is ready to play; draw=False leaves it."""
+    g = Game(seed=kw.pop("seed", 1), **kw)
+    g.start()
+    if draw and g.phase == "draw":
+        g.draw("votary")
+    return g
+
+
+def put(g: Game, card_id: str, owner: str, lane: int, incoming=False) -> Card:
+    card = g._make(card_id, owner)
+    if incoming:
+        g.incoming[lane] = card
+    else:
+        g.rows[owner][lane] = card
+    return card
+
+
+def in_hand(g: Game, card_id: str) -> Card:
+    card = g._make(card_id, YOU)
+    g.hand.append(card)
+    return card
+
+
+# ── the opening ───────────────────────────────────────────────────────────
+def test_opening_hand_is_three_from_the_deck_plus_one_votary():
+    g = fresh(draw=False)
+    assert len(g.hand) == 4
+    assert sum(c.defn.id == "votary" for c in g.hand) == 1
+    assert len(g.deck) == len(C.STARTER_DECK) - 3
+    assert g.votaries == C.VOTARY_PILE - 1
+
+
+def test_you_see_his_first_move_before_you_act():
+    g = fresh(draw=False)
+    assert any(c is not None for c in g.incoming)
+    assert all(c is None for c in g.rows[HIM])
+
+
+def test_the_first_turn_draws_too():
+    g = fresh(draw=False)
+    assert g.phase == "draw"
+    g.draw("votary")
+    assert len(g.hand) == 5 and g.phase == "play"
+
+
+def test_cannot_start_twice():
+    g = fresh()
+    with pytest.raises(IllegalMove):
+        g.start()
+
+
+# ── paying for cards ──────────────────────────────────────────────────────
+def played(g: Game) -> Game:
+    """A fresh game with the first draw done, ready to play."""
+    if g.phase == "draw":
+        g.draw("votary")
+    return g
+
+
+def test_a_free_card_needs_an_empty_lane():
+    g = played(fresh())
+    votary = next(c for c in g.hand if c.defn.id == "votary")
+    events = g.play(votary.uid, 0)
+    assert kinds(events) == ["play"]
+    assert g.rows[YOU][0] is votary
+    assert votary not in g.hand
+    with pytest.raises(IllegalMove, match="lane is taken"):
+        g.play(in_hand(g, "votary").uid, 0)
+
+
+def test_offerings_pay_for_a_card():
+    g = played(fresh())
+    put(g, "votary", YOU, 0)
+    put(g, "votary", YOU, 1)
+    hound = in_hand(g, "hound")               # costs 2
+    assert "demands two souls" in g.why_not(hound.uid, 2)
+    assert "demands two souls" in g.why_not(hound.uid, 2, [0])
+    events = g.play(hound.uid, 2, [0, 1])
+    assert kinds(events) == ["sacrifice", "die", "remnants", "sacrifice", "die", "remnants", "play"]
+    assert g.rows[YOU][0] is None and g.rows[YOU][1] is None
+    assert g.rows[YOU][2] is hound
+    assert g.remnants == 2                    # every death of yours leaves a remnant
+
+
+def test_you_can_play_into_the_lane_you_just_emptied():
+    g = played(fresh())
+    put(g, "votary", YOU, 0)
+    scarab = in_hand(g, "scarab")
+    g.play(scarab.uid, 0, [0])
+    assert g.rows[YOU][0] is scarab
+
+
+def test_the_same_offering_cannot_be_used_twice():
+    g = played(fresh())
+    put(g, "votary", YOU, 0)
+    hound = in_hand(g, "hound")
+    with pytest.raises(IllegalMove, match="same one twice"):
+        g.play(hound.uid, 1, [0, 0])
+
+
+def test_a_worthy_offering_counts_as_three():
+    g = played(fresh())
+    worthy = put(g, "votary", YOU, 0)
+    worthy.sigils = (C.WORTHY,)
+    sleeper = in_hand(g, "sleeper")           # costs 3
+    g.play(sleeper.uid, 1, [0])
+    assert g.rows[YOU][1] is sleeper
+
+
+def test_free_cards_refuse_offerings():
+    g = played(fresh())
+    put(g, "votary", YOU, 0)
+    with pytest.raises(IllegalMove, match="asks for no offering"):
+        g.play(in_hand(g, "votary").uid, 1, [0])
+
+
+def test_remnant_cards_cost_remnants_not_lives():
+    g = played(fresh())
+    monolith = in_hand(g, "monolith")         # 3 remnants
+    assert "costs 3 remnants" in g.why_not(monolith.uid, 0)
+    g.remnants = 3
+    events = g.play(monolith.uid, 0)
+    assert kinds(events) == ["remnants", "play"]
+    assert g.remnants == 0
+
+
+def test_can_afford_looks_at_the_whole_board():
+    g = played(fresh())
+    hound = in_hand(g, "hound")
+    assert not g.can_afford(hound.uid)
+    put(g, "votary", YOU, 0)
+    put(g, "votary", YOU, 3)
+    assert g.can_afford(hound.uid)
+
+
+# ── drawing ───────────────────────────────────────────────────────────────
+def test_second_turn_starts_with_one_draw_from_either_pile():
+    g = played(fresh())
+    g.ring_bell()
+    assert g.phase == "draw"
+    with pytest.raises(IllegalMove, match="Draw first"):
+        g.ring_bell()
+    before = len(g.hand)
+    g.draw("votary")
+    assert len(g.hand) == before + 1 and g.phase == "play"
+    with pytest.raises(IllegalMove, match="already drawn"):
+        g.draw("deck")
+
+
+def test_empty_piles_cannot_be_drawn_from():
+    g = played(fresh())
+    g.ring_bell()
+    g.deck.clear()
+    assert not g.can_draw("deck")
+    with pytest.raises(IllegalMove, match="empty"):
+        g.draw("deck")
+    g.votaries = 0
+    g.ring_bell()                             # nothing left to draw: allowed straight through
+
+
+# ── the bell and combat ───────────────────────────────────────────────────
+def test_an_unblocked_strike_lands_as_weight_on_the_scale():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "hound", YOU, 1)                   # 3/2
+    events = g.ring_bell()
+    assert g.scale == 3
+    strike = next(e for e in events if e.kind == "strike")
+    assert strike["direct"] and strike["power"] == 3
+
+
+def test_a_blocked_strike_wounds_the_card_in_front():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "hound", YOU, 1)
+    his = put(g, "sleeper", HIM, 1)           # 4/6
+    g.ring_bell()
+    assert his.health == 3
+    assert g.rows[YOU][1] is None             # and it hits back on his turn: 4 into a 3/2
+    assert g.scale == 0                       # the hound stood in the way, so no weight
+
+
+def test_a_killing_blow_clears_the_lane():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "hound", YOU, 1)                   # 3/2
+    put(g, "scarab", HIM, 1)                  # 1/3
+    events = g.ring_bell()
+    assert "die" in kinds(events)
+    assert g.rows[HIM][1] is None
+    assert g.remnants == 0                    # his deaths give you nothing
+
+
+def test_tipping_the_scale_ends_the_game():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "sleeper", YOU, 0)
+    put(g, "hound", YOU, 1)
+    events = g.ring_bell()
+    assert g.winner == YOU and g.phase == "over"
+    assert kinds(events)[-1] == "game_over"
+    assert g.scale >= SCALE_TO_WIN
+    with pytest.raises(IllegalMove):
+        g.ring_bell()
+
+
+def test_he_can_win_too():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "sleeper", HIM, 0)
+    put(g, "hound", HIM, 1)
+    g.ring_bell()
+    assert g.winner == HIM
+
+
+def test_his_incoming_row_advances_before_he_strikes():
+    g = fresh(plan=[[("hound", 2)], []] + [[]] * 20)
+    # the opening already committed the first plan entry into lane 2
+    coming = g.incoming[2]
+    assert coming is not None and coming.defn.id == "hound"
+    events = g.ring_bell()
+    assert "advance" in kinds(events)
+    assert g.rows[HIM][2] is coming
+    assert g.scale == -3                      # it moved up AND struck the same turn
+
+
+def test_incoming_waits_while_a_card_is_still_in_front_of_it():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    blocker = put(g, "sleeper", HIM, 2)
+    waiting = put(g, "scarab", HIM, 2, incoming=True)
+    g.ring_bell()
+    assert g.rows[HIM][2] is blocker
+    assert g.incoming[2] is waiting
+
+
+def test_he_improvises_after_the_script_runs_out():
+    g = fresh(plan=[], pool=["scarab"])
+    assert sum(c is not None for c in g.incoming) == 1
+    assert next(c for c in g.incoming if c).defn.id == "scarab"
+
+
+# ── sigils ────────────────────────────────────────────────────────────────
+def test_winged_flies_over_a_blocker():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "huginn", YOU, 0)
+    wall = put(g, "sleeper", HIM, 0)
+    events = g.ring_bell()
+    strike = next(e for e in events if e.kind == "strike" and e["card"].defn.id == "huginn")
+    assert strike["flew"] and wall.health == 6
+    assert g.scale == 1                       # its 1 landed; the wall then ate the raven
+    assert g.rows[YOU][0] is None
+
+
+def test_a_warden_stops_winged_things():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "huginn", YOU, 0)
+    wall = put(g, "monolith", HIM, 0)
+    g.ring_bell()
+    assert wall.health == 4 and g.scale == 0
+
+
+def test_venom_kills_whatever_it_wounds():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "weigher", YOU, 0)                 # 1 power
+    put(g, "sleeper", HIM, 0)                 # 6 health
+    events = g.ring_bell()
+    die = next(e for e in events if e.kind == "die")
+    assert die["cause"] == "venom"
+    assert g.rows[HIM][0] is None
+
+
+def test_three_mouths_bites_three_lanes():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "cerberus", YOU, 1)                # 2 power
+    left = put(g, "sleeper", HIM, 0)
+    right = put(g, "sleeper", HIM, 2)
+    g.ring_bell()
+    assert left.health == 4 and right.health == 4
+    assert g.scale == 2 - 8                   # middle lane was open: 2 landed; then they hit back
+
+
+def test_three_mouths_at_the_edge_only_bites_what_exists():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "cerberus", YOU, 0)
+    g.ring_bell()
+    assert g.scale == 4                       # lanes 0 and 1, nothing at -1
+
+
+def test_gaze_weakens_the_card_facing_it():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    gorgon = put(g, "gorgon", YOU, 0)         # 1/2, GAZE
+    put(g, "scarab", HIM, 0)                  # 1 power -> 0 against the gorgon
+    g.ring_bell()
+    assert gorgon.health == 2
+
+
+def test_undying_returns_to_hand_stronger():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    snake = put(g, "ouroboros", YOU, 0)       # 1/1
+    put(g, "sleeper", HIM, 0)
+    events = g.ring_bell()
+    back = next(e for e in events if e.kind == "return")["card"]
+    assert back in g.hand and back is not snake
+    assert (back.power, back.health) == (2, 2)
+    assert g.remnants == 1
+
+
+def test_undying_keeps_its_bonus_when_sacrificed_too():
+    g = played(fresh())
+    snake = put(g, "ouroboros", YOU, 0)
+    g.play(in_hand(g, "scarab").uid, 1, [0])
+    back = next(c for c in g.hand if c.defn.id == "ouroboros")
+    assert back is not snake and back.power == 2
+
+
+def test_a_red_giant_goes_supernova_then_dies_a_dead_star():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    star = put(g, "red_giant", YOU, 0)
+    assert (star.power, star.health) == (0, 2)
+    events = g.ring_bell()                    # it survives his turn...
+    grown = next(e for e in events if e.kind == "grow")["card"]
+    assert grown.defn.id == "supernova" and g.rows[YOU][0] is grown   # ...and wakes on yours
+    assert (grown.power, grown.health) == (1, 1) and grown is not star
+    g.draw("votary")
+    events = g.ring_bell()                    # one more turn
+    grown = next(e for e in events if e.kind == "grow")["card"]
+    assert grown.defn.id == "dead_star" and (grown.power, grown.health) == (4, 1)
+    g.draw("votary"); events = g.ring_bell()
+    assert not [e for e in events if e.kind == "grow"], "and that is the end of it"
+
+
+def test_his_red_giant_grows_on_his_turn():
+    g = fresh(plan=[[]] * 20)
+    g.incoming = [None] * LANES
+    put(g, "red_giant", HIM, 3)
+    g.ring_bell()                             # his turn passes with it on the board
+    assert g.rows[HIM][3].defn.id == "red_giant"
+    g.draw("votary")
+    g.ring_bell()                             # it wakes at the start of his next turn
+    assert g.rows[HIM][3].defn.id == "supernova"
+
+
+def test_the_starter_deck_is_on_the_proven_numbers():
+    """The four of the game that inspired this: a 3/2 for two, a 1/3 for one,
+    a 1/2 warden for one, a 1/1 for two remnants - and a free 0/1 pile."""
+    d = {cid: C.CARDS[cid] for cid in C.STARTER_DECK}
+    shape = sorted((c.power, c.health, c.cost, c.cost_kind, c.sigils) for c in d.values())
+    assert shape == sorted([(3, 2, 2, C.OFFER, ()), (1, 3, 1, C.OFFER, ()),
+                            (1, 2, 1, C.OFFER, (C.WARDEN,)), (1, 1, 2, C.REMNANT, ())])
+    v = C.CARDS["votary"]
+    assert (v.power, v.health, v.cost) == (0, 1, 0)
+    assert C.CARDS["red_giant"].rare and "red_giant" in C.RARE_POOL
+    assert "supernova" not in C.CHOICE_POOL and "dead_star" not in C.CHOICE_POOL
+
+
+# ── the newer sigils ──────────────────────────────────────────────────────
+def arena(**kw) -> Game:
+    """A quiet table: no script, nothing incoming, first draw done."""
+    g = fresh(plan=[[]] * 40, **kw)
+    g.incoming = [None] * LANES
+    return played(g)
+
+
+def test_nothing_strikes_the_abhorred_but_wings_pass_over():
+    g = arena()
+    put(g, "hound", YOU, 0); put(g, "huginn", YOU, 1)
+    f0 = put(g, "famine", HIM, 0); f1 = put(g, "famine", HIM, 1)
+    events = g.ring_bell()
+    assert f0.health == 1 and any(e.kind == "repelled" for e in events)
+    assert f1.health == 1 and g.scale == 1              # the raven flew over; the famines were blocked
+
+
+def test_two_mouths_bites_the_sides_never_the_front():
+    g = arena()
+    put(g, "hydra", YOU, 1)
+    front = put(g, "sleeper", HIM, 1); left = put(g, "sleeper", HIM, 0)
+    g.ring_bell()
+    assert front.health == 6 and left.health == 5
+    assert g.scale == 1 - 4                              # lane 2 was open: 1 landed; his open lane hit back
+
+
+def test_thorns_wound_whatever_strikes():
+    g = arena()
+    put(g, "thornback", YOU, 0)
+    striker = put(g, "gargoyle", HIM, 0)                # 1/2: takes 1 from the strike, 1 from the thorns
+    events = g.ring_bell()
+    assert any(e.kind == "thorns" for e in events)
+    assert striker.health == 0 and g.rows[HIM][0] is None
+
+
+def test_a_sentinel_steps_across_to_meet_an_arrival():
+    g = arena()
+    watcher = put(g, "watcher", YOU, 0)
+    put(g, "scarab", HIM, 3, incoming=True)
+    events = g.ring_bell()
+    assert any(e.kind == "guard" for e in events)
+    assert g.rows[YOU][3] is watcher and g.rows[YOU][0] is None
+
+
+def test_the_endless_gives_blood_and_stays():
+    g = arena()
+    martyr = put(g, "martyr", YOU, 0)
+    hound = in_hand(g, "hound")                          # costs 2
+    put(g, "votary", YOU, 1)
+    g.play(hound.uid, 2, [0, 1])
+    assert g.rows[YOU][0] is martyr and g.rows[YOU][1] is None
+    assert g.rows[YOU][2] is hound
+
+
+def test_spawn_puts_another_in_your_hand():
+    g = arena()
+    put(g, "votary", YOU, 0); put(g, "votary", YOU, 1)
+    locust = in_hand(g, "locust")
+    events = g.play(locust.uid, 2, [0, 1])
+    assert any(e.kind == "spawn" for e in events)
+    assert sum(c.defn.id == "locust" for c in g.hand) == 1
+
+
+def test_a_herald_lifts_its_neighbours():
+    g = arena()
+    put(g, "crowned", YOU, 1)                            # 1 power itself
+    put(g, "scarab", YOU, 0); put(g, "scarab", YOU, 2); put(g, "scarab", YOU, 3)
+    g.ring_bell()
+    assert g.scale == 5 and g.winner == YOU              # 2 + 1 + 2 tips it before lane 3 even strikes
+
+
+def test_the_undying_bonus_can_be_carried_in():
+    g = fresh(undying_bonus={"ouroboros": 2})
+    snake = g._make("ouroboros", YOU)
+    assert (snake.power, snake.health) == (3, 3)
+
+
+# ── famine: nothing left to draw ──────────────────────────────────────────
+def starve(g: Game):
+    g.deck.clear(); g.votaries = 0
+
+
+def test_with_nothing_to_draw_famine_lands_on_his_first_free_lane(seed=1):
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    put(g, "scarab", HIM, 0)
+    events = g.ring_bell()
+    fam = next(e for e in events if e.kind == "famine")
+    assert fam["lane"] == 1 and fam["count"] == 1
+    card = g.rows[HIM][1]
+    assert card.defn.id == "famine" and (card.power, card.health) == (1, 1)
+    assert g.phase == "play"                      # no draw step: straight to playing
+    assert not any(e.kind == "draw" for e in events)
+
+
+def test_each_famine_is_bigger_and_the_fifth_flies():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    for n in range(1, 6):
+        g.rows[HIM] = [None] * LANES              # clear so each lands fresh
+        g.ring_bell()
+        card = next(c for c in g.rows[HIM] if c is not None)
+        assert (card.power, card.health) == (n, n)
+        assert card.has(C.WINGED) == (n >= 5)
+        g.rows[YOU] = [None] * LANES; g.scale = 0    # keep the game from ending
+
+
+def test_a_full_row_feeds_his_leftmost_card_to_the_famine():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    for lane in range(LANES):
+        put(g, "sleeper", HIM, lane)
+    g.rows[YOU] = [put(g, "monolith", YOU, l) for l in range(LANES)]   # walls, so nobody dies to combat
+    events = g.ring_bell()
+    die = next(e for e in events if e.kind == "die")
+    assert die["lane"] == 0 and die["cause"] == "famine" and die["card"].defn.id == "sleeper"
+    assert g.rows[HIM][0].defn.id == "famine"
+
+
+def test_the_ninth_famine_drops_a_weight_on_you():
+    g = fresh(plan=[[]] * 40)
+    g.incoming = [None] * LANES
+    starve(g)
+    g.famines = 8
+    g.rows[YOU] = [put(g, "monolith", YOU, l) for l in range(LANES)]
+    events = g.ring_bell()
+    assert any(e.kind == "scale" and e["delta"] == -1 for e in events)
+    assert g.rows[HIM][0].power == 9
+
+
+# ── the whole game holds together ─────────────────────────────────────────
+def greedy_turn(g: Game):
+    """Free cards first, then the biggest card you can pay for, then ring."""
+    if g.phase == "draw":
+        fodder = any(c.defn.cost == 0 for c in g.hand)
+        want = "deck" if fodder else "votary"
+        g.draw(want if g.can_draw(want) else ("votary" if want == "deck" else "deck"))
+    played = True
+    while played and g.phase == "play":
+        played = False
+        for card in sorted(g.hand, key=lambda c: (c.defn.cost > 0, -c.power)):
+            if not g.can_afford(card.uid):
+                continue
+            d = card.defn
+            free = [i for i in range(LANES) if g.rows[YOU][i] is None]
+            sac = []
+            if d.cost_kind == C.OFFER and d.cost:
+                worth = 0
+                weakest = sorted((i for i, c in enumerate(g.rows[YOU]) if c is not None),
+                                 key=lambda i: g.rows[YOU][i].power)
+                for i in weakest:
+                    if worth < d.cost:
+                        sac.append(i)
+                        worth += g.offering_worth(g.rows[YOU][i])
+                if card.power <= sum(g.rows[YOU][i].power for i in sac):
+                    continue                  # never eat more than you gain
+            elif not free:
+                continue
+            g.play(card.uid, (free or sac)[0], sac)
+            played = True
+            break
+    g.ring_bell()
+
+
+@pytest.mark.parametrize("seed", range(25))
+def test_every_game_ends_and_someone_wins(seed):
+    g = fresh(seed=seed)
+    for _ in range(60):
+        if g.phase == "over":
+            break
+        greedy_turn(g)
+    assert g.phase == "over" and g.winner in (YOU, HIM)
+
+
+def test_the_first_game_is_winnable():
+    wins = 0
+    for seed in range(40):
+        g = fresh(seed=seed)
+        while g.phase != "over":
+            greedy_turn(g)
+        wins += g.winner == YOU
+    assert wins >= 8, f"the greedy bot won only {wins} of 40"
+
+
+def test_every_event_carries_only_plain_data():
+    """Events feed the animator. Every card in them is a live Card, every lane an int."""
+    g = fresh()
+    for _ in range(6):
+        if g.phase == "over":
+            break
+        greedy_turn(g)
+    for e in g.ring_bell() if g.phase != "over" else []:
+        for k, v in e.data.items():
+            if k.endswith("lane"):
+                assert isinstance(v, int)
+            if k in ("card", "defender", "was"):
+                assert isinstance(v, Card)

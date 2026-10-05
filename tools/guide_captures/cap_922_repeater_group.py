@@ -471,25 +471,15 @@ def scene_repeater(app, window, settings, driver, root: Path):
     settings.set_plugin_setting("922_batch_repeater", "update_master_parts",
                                 False)
     driver.expect_selection("922_batch_repeater_select_repeats")
+    # v2.7.0: the batch is PICKED, not typed. It used to type the number and
+    # then scan the root for the first folder whose name contained it.
+    driver.expect_picker("922_batch_repeater_batch_pick", mode="fire")
 
     clear_console(app, window)
     cam.start_app(app, window, "922_batch_repeater")
-    if not cam.wait_console_prompt(app, window, timeout_ms=45000,
-                                   contains="batch number"):
-        print("console tail:\n" + cam.console_tail(window, 20), flush=True)
-        finish(1, "typed batch prompt never came")
 
-    # Picture 1: the typed batch prompt, answer typed but not yet sent.
-    con = window.console
-    try:
-        window.home_splitter.setSizes([440, 360])
-    except Exception:
-        pass
-    con.input_field.setText(BATCH)
-    cam.pump(app, 500)
-    cam.save(con, "922_batch_repeater_prompt")
-    con._on_input_submitted()
-    cam.pump(app, 300)
+    # Picture 1: the batch folder pick (taken by the driver).
+    pump_until(app, window, driver.picker_done, 60, "Batch Repeater batch pick")
 
     # Picture 2 (Select Repeats to Pull) is taken by the driver.
     pump_until(app, window, driver.sel_done, 60, "Select Repeats window")
@@ -587,7 +577,7 @@ def main():
             # is a drivable Qt window, never a native dialog.
             settings.unlock_item("toy_sentry_drone")
             for pid in ("922_kitting", "922_lst_organizer",
-                        "922_runtime_genie"):
+                        "922_runtime_genie", "922_batch_repeater"):
                 settings.set_plugin_setting(pid, "sentry_drone", True)
                 settings.set_plugin_setting(pid, "base_path", str(root))
 

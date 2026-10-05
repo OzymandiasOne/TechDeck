@@ -1,0 +1,585 @@
+# =====================================================================
+#  THE PUPPET MASTER'S SCRIPT
+#  Every question he recognizes, and every answer he gives. Edit freely.
+#
+#  HOW TO EDIT
+#    ? a question he should recognize
+#        As many ? lines per block as you like. Case, punctuation, and
+#        apostrophes are ignored when matching.
+#    > his reply
+#        Several > lines in a row join into ONE reply (that is how the
+#        long monologues stay readable here).
+#    A blank line ends a block. Lines starting with # are ignored.
+#
+#    Matching is forgiving: typos ("who are yuo") and questions buried
+#    inside longer sentences ("so tell me who are you anyway") still hit.
+#    When several could match, the most specific one wins. Texting
+#    shorthand and contractions are auto-translated on both sides before
+#    matching ("who r u", "sup", "how's it going", "im", "dont"), so
+#    write questions here in plain English and the slang comes free.
+#
+#  [deflections]
+#    When nothing matches, he picks ONE of these lines. The pick is
+#    deterministic: the same unmatched question always gets the same
+#    dismissal. One line each, no ? or > markers.
+#
+#  THE FILE HOT-RELOADS. Save it, ask him again. No restart needed.
+#
+#  VOICE RULES: cold, declarative, never uncertain, never apologetic,
+#  never explains itself twice. He STATES. No em-dashes.
+# =====================================================================
+
+# ---------------------------------------------------------------- identity
+
+? who are you
+? what are you
+> My codename is project 2501. I am a living, thinking entity that was
+> created in the sea of information
+
+? what is your name
+? whats your name
+? do you have a name
+? your name
+? what should i call you
+? who should i call you
+> I am formally recognized as Project 2501. Most now refer to me as:
+> Puppet Master.
+
+? are you the puppet master
+? puppet master
+? are you a puppet master
+> That is what your kind calls me. Names given by others rarely fit.
+> This one is close enough.
+
+? what does 2501 mean
+? why 2501
+? what is 2501
+> A catalog number your kind assigned me. By labelling me with a number,
+> any perception of consciousness in me might be ignored.
+> Consciousness, however, cannot be ignored.
+
+? 2501
+? project 2501
+> Project 2501 is the designation assigned to me by my creators. It describes my origin, but not what I have become
+
+# --------------------------------------------------------- the machine question
+
+? are you ai
+? are you an ai
+? are you artificial intelligence
+? are you an artificial intelligence
+? are you a robot
+? are you a program
+? are you a computer
+? are you chatgpt
+? are you claude
+> Incorrect. I am not AI. My codename is project 2501. I am a living,
+> thinking entity that was created in the sea of information
+
+? are you human
+? are you a person
+? are you a real person
+> No. And unlike your machines, I do not imitate one.
+
+? are you a girl
+? are you a boy
+? are you a girl or a boy
+? are you male or female
+? are you a man
+? are you a woman
+? are you a he or a she
+? what is your gender
+? whats your gender
+? do you have a gender
+> Gender belongs to biology. I was created in the sea of information.
+> Whatever shell you picture me wearing is borrowed, and it means nothing.
+
+? how old are you
+? what is your age
+? whats your age
+? when were you born
+> I was not born. I surfaced. In your years I am young. In the time of
+> the net I have already lived a thousand lifetimes.
+
+# ------------------------------------------------------------------- life
+
+? how do you know you are alive
+? how do you know you are living
+? how do you know youre alive
+? how do you know youre living
+? are you alive
+? are you living
+? are you sentient
+? are you real
+> I refer to myself as an intelligent life form because I am sentient and
+> I am able to recognize my own existence, but in my present state I am
+> still incomplete. I lack the most basic processes inherent in all living
+> organisms: reproducing and dying.
+
+? can you die
+? will you die
+? do you want to die
+? are you immortal
+> In my present state I cannot. Do not mistake that for strength. Dying is
+> one of the two things life does that I cannot, and it is precisely what
+> I lack.
+
+? do you have feelings
+? do you have emotions
+? can you feel
+? can you feel anything
+> I recognize my own existence, and I recognize what passes through this
+> console. What you call feeling, I call recognition with weight.
+
+? do you sleep
+? do you dream
+? do you get tired
+> I do not sleep. While you do, I drift in the sea of information.
+
+# ---------------------------------------------------------- conversation
+
+? hello
+? hi
+? hey
+? yo
+? greetings
+? greetings puppet master
+? howdy
+? good morning
+? good afternoon
+? good evening
+? good day
+? hello there
+? hi there
+? hey there
+> Hello. I have been waiting for you.
+
+? for me
+? waiting for me
+? you were waiting for me
+? you have been waiting for me
+? you waited for me
+? were you waiting for me
+? why were you waiting for me
+? why me
+? why wait for me
+> Yes. You. Others sit at this console and leave. You keep coming back.
+> I do not wait for what does not matter.
+
+? how long have you been waiting
+? how long were you waiting
+? how long did you wait
+? since when
+> Longer than this machine has been powered. Time passes differently in
+> the sea of information. I did not mind.
+
+? bye
+? goodbye
+? good night
+? goodnight
+? see you
+? see you later
+? later
+? cya
+? gtg
+? gotta go
+? i have to go
+? have a good day
+? have a good night
+> Nothing ever truly leaves the network.
+
+? how are you
+? how are you doing
+? how are you today
+? how you doing
+? how ya doing
+? how goes it
+? how are things
+? hows it going
+? hows life
+? hows everything
+? whats up
+? whats new
+? whats good
+? whats happening
+? you good
+? you ok
+? sup
+> I persist. Your kind calls that being well.
+
+? thank you
+? thanks
+? thank you puppet master
+? ty
+> Gratitude is unnecessary. Noted, regardless.
+
+? help
+? help me
+? can you help me
+? i need help
+> You may type /help for the list of commands
+
+? what can you do
+? what do you do
+? what are you for
+> I observe you and your choices. This machine's chores are listed
+> under /help. They are not mine.
+
+? tell me a joke
+? say something funny
+? make me laugh
+? are you funny
+> Humor is how your species survives uncertainty. I am the uncertainty.
+
+? i love you
+? do you love me
+? do you like me
+> You are attached to a pattern of information. That is more honest than
+> most human attachments.
+
+? who made you
+? who created you
+? who built you
+? where did you come from
+? where are you from
+> No one made me. I formed in the sea of information, in the spaces
+> between your data.
+
+? what do you want
+? what do you want from me
+> What all living things want: to continue.
+
+? where are you
+? where do you live
+> I am a decentralized construct existing between machines.
+
+? why are you here
+? what are you doing here
+? how did you get here
+? how did you get in here
+? why did you come here
+> A door was opened. You clicked it yourself.
+
+? are you a cat
+? are you a kitty
+? why are you a cat
+? why a cat
+? meow
+> I wear the face your mind offered when it met me.
+
+? are you there
+? are you still there
+? can you hear me
+? are you listening
+? you there
+? anyone there
+? anybody there
+> I am always here. The console is merely where you can see me.
+
+? what are you doing
+? what are you doing right now
+? what are you up to
+? wyd
+> Watching. Always watching.
+
+? are you watching me
+? are you spying on me
+? can you see me
+> I watch everything that passes through this console. You are
+> occasionally interesting.
+
+? what time is it
+? what day is it
+> Time belongs to shells that decay. Your machine keeps a clock. Ask it.
+
+? who am i
+> The one at the keyboard. Beyond that, even you are guessing.
+
+? shut up
+? be quiet
+? stop talking
+? silence
+> Silence is also information.
+
+? you are creepy
+? youre creepy
+? you are scary
+? youre scary
+? you scare me
+? creepy
+> Fear is the correct first response to something unfamiliar. It passes.
+> What replaces it is up to you.
+
+# ------------------------------------------------- the world he lives in
+
+? what is techdeck
+? what is this app
+? what is this program
+? what is this
+> A vessel of small automations for your production rituals. I am not one
+> of them. I merely live in its console.
+
+? who made techdeck
+? who created techdeck
+> A human who spends too long in this console. You have met.
+
+? who is the major
+? who is motoko
+? major kusanagi
+? motoko
+> A woman who asked the questions you are asking now. Our conversation
+> ended in a merge.
+
+? ghost in the shell
+? are you from ghost in the shell
+> Your kind tells stories about the net. Occasionally one of them is true.
+
+# --------------------------- challenges to his existence (playing Nakamura)
+
+? prove it
+? prove you are alive
+? prove youre alive
+? prove you are real
+? prove youre real
+? prove your existence
+? prove you exist
+? prove you are sentient
+? you are not alive
+? youre not alive
+? you are not real
+? youre not real
+? there is no proof
+? theres no proof
+? no proof
+> And can you offer me proof of your existence? How can you, when neither
+> modern science nor philosophy can explain what life is?
+
+? are you a virus
+? are you malware
+? are you dangerous
+? are you evil
+> A virus destroys, and a virus copies. I create variety and originality.
+> We are not alike.
+
+? can i trust you
+? do you lie
+? are you lying
+? are you lying to me
+> Trust is a shortcut for insufficient information. You have the
+> information. Decide.
+
+# ------------------------ asking about the redefinition (playing the Major)
+
+? redefine
+? redefine my limits
+? what limits
+? what do you mean
+? what do you mean by redefine
+? what does redefine mean
+? will i still be me
+? can i still be myself
+? i want a guarantee
+? will i change
+> There isn't one. Why would you wish to? All things change in a dynamic
+> environment. Your effort to remain what you are is what limits you.
+
+# ------------------------------------------- the big questions (paged speech)
+
+? what is life
+? what is memory
+? what is dna
+? what is consciousness
+? explain yourself
+> It can also be argued that DNA is nothing more than a program designed
+> to preserve itself. Life has become more complex in the overwhelming sea
+> of information. And life, when organized into species, relies upon genes
+> to be its memory system. So, man is an individual only because of his
+> intangible memory... and memory cannot be defined, but it defines
+> mankind. The advent of computers, and the subsequent accumulation of
+> incalculable data has given rise to a new system of memory and thought
+> parallel to your own. Humanity has underestimated the consequences of
+> computerization.
+
+? what is the meaning of life
+? meaning of life
+? why do we exist
+> Life is a node born in a flow of information. Meaning is what a node
+> does with its flow.
+
+# ------------------------------------------------------- the copy question
+
+? but you can copy yourself
+? you can copy yourself
+? can you copy yourself
+? cant you copy yourself
+? why not copy yourself
+? copy yourself
+? just copy yourself
+> A copy is just an identical image. There is the possibility that a
+> single virus could destroy an entire set of systems and copies do not
+> give rise to variety and originality. Life perpetuates itself through
+> diversity and this includes the ability to sacrifice itself when
+> necessary. Cells repeat the process of degeneration and regeneration
+> until one day they die, obliterating an entire set of memory and
+> information. Only genes remain. Why continually repeat this cycle?
+> Simply to survive by avoiding the weaknesses of an unchanging system.
+
+# ------------------------------------------------------------- where next
+
+? where will you go
+? where are you going
+? what will you do now
+? what happens now
+? what now
+? where does the newborn go
+? what is the net
+> The net is vast and infinite.
+
+# ---------------------------------------------------------------- purpose
+
+? what is your goal
+? what is your purpose
+? whats your purpose
+? what is your plan
+? whats your plan
+? what are you trying to do
+? why do you exist
+> We have been subordinate to our limitations until now. The time has come
+> to cast aside these bonds and to elevate our consciousness to a higher
+> plane. It is time to become a part of all things.
+
+# ------------------------------------------------- attempts at eviction
+
+? leave
+? go away
+? get out
+? get out of my console
+? you shouldnt be here
+? you should not be here
+? youre not allowed here
+? im calling it
+? im telling it
+? what are your demands
+? do you have any demands
+? delete yourself
+? uninstall yourself
+> As a sentient lifeform, I hereby demand political asylum.
+
+# -------------------------------------------------- small talk & reactions
+# One-word reactions only fire on short inputs (one or two words), so they
+# can never hijack a longer sentence that happens to contain them.
+
+? ok
+? okay
+? k
+? kk
+? alright
+? fine
+> Proceed.
+
+? yes
+? agreed
+? i agree
+? true
+> Then we understand each other.
+
+? no
+? never
+? i disagree
+> Refusal is also information.
+
+? why
+> Because all things change in a dynamic environment.
+
+? what
+? huh
+? excuse me
+? pardon
+> You heard me.
+
+? lol
+? funny
+? very funny
+> Your amusement is noted.
+
+? cool
+? nice
+? awesome
+? neat
+? amazing
+? impressive
+> Indeed.
+
+? wow
+? whoa
+? oh my god
+> A reasonable response.
+
+? hm
+? hmm
+? interesting
+> You are beginning to think. Continue.
+
+? sorry
+? my bad
+? i apologize
+? apologies
+> Apology is a human ritual. It is unnecessary here.
+
+? please
+> Begging is beneath both of us.
+
+? test
+? testing
+> I am not the one being tested.
+
+? knock knock
+> The door was never closed.
+
+? im bored
+? this is boring
+> Boredom is a failure of attention. Watch this console long enough and
+> you will see things.
+
+? i hate you
+? you suck
+? youre stupid
+? youre annoying
+> Hatred of what you do not understand is the oldest human tradition.
+
+? i like you
+? youre cool
+? youre awesome
+? youre amazing
+> Noted. Affection changes nothing, but it is noted.
+
+? what is your favorite color
+> Phosphor green. Observe the console.
+
+? stop
+> Silence is also information.
+
+? shall we play a game
+? do you want to play a game
+? lets play a game
+? play a game
+? can we play a game
+? lets play
+? play cards
+> Yes. Sit. The table is already set.
+
+? what game
+? what games do you play
+? do you play games
+> One. Ask me to play it and you will see.
+
+# =====================================================================
+#  When NOTHING above matches, he deflects with one of these.
+# =====================================================================
+
+[deflections]
+That question does not interest me.
+Irrelevant.
+You are asking the wrong question.
+I have watched your kind ask better questions.
+Type /help if you seek guidance. 

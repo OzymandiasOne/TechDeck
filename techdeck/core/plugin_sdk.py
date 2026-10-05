@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -326,8 +327,28 @@ def _resolve_root(override: str, *parts: str) -> Optional[Path]:
     return None
 
 
+# The 922 test sandbox (tools/devkit/sandbox_922.py). When this env var names a
+# folder, every 922 app treats it as the whole 922 root - batch lookups, the
+# 922 MPL, the quote, "1 - Completed" - so a test batch can never reach a real
+# file, and post_webhook refuses to send. Dev runs only: a frozen build ignores
+# it. It beats a saved Settings override on purpose (a stale base_path pointing
+# at the real root must not leak the sandbox out).
+SANDBOX_922_ENV = "TECHDECK_SANDBOX_922_ROOT"
+
+
+def sandbox_922_root() -> Optional[Path]:
+    """The active 922 sandbox root, or None outside a sandbox dev run."""
+    if getattr(sys, "frozen", False):
+        return None
+    raw = (os.environ.get(SANDBOX_922_ENV) or "").strip()
+    return Path(raw) if raw else None
+
+
 def resolve_922_root(override: str = "") -> Optional[Path]:
-    """'922 QTDR Production Packages' root."""
+    """'922 QTDR Production Packages' root (the sandbox root when one is on)."""
+    sandbox = sandbox_922_root()
+    if sandbox is not None:
+        return sandbox
     return _resolve_root(override, "922 QTDR Production Packages")
 
 
@@ -525,6 +546,118 @@ def request_922_batch_folder(
         shared_state.setdefault("922", {})["batch_number"] = batch_no
     log(f"Batch {batch_no}: {batch_path}")
     return batch_no, batch_path
+
+
+# A 911 QTDR root holds the batch folders AND its own housekeeping folders:
+# "01 - WIP Packages", "05 - RFQs", "_ASA PROGRAM DIRECTORY", ".Oracle DR's".
+# None of those is a batch, and picking one would run the plugin across every
+# package inside it.
+_NOT_A_911_BATCH_RE = re.compile(r'^(\d{2}\s*-\s|_|\.)')
+
+# What a 911 batch folder USUALLY looks like: V060, F071, GX030, WJ244. Used
+# only to LOG a "that doesn't look like a batch" note - never to refuse a pick.
+# Refusing on a name shape is the 2026-09-23 mistake in miniature: 222 folders
+# match this today, and the next naming scheme is not obliged to.
+_LOOKS_LIKE_911_BATCH_RE = re.compile(r'^[A-Z]{1,2}\d{3,4}$')
+
+
+def request_911_batch_folder(
+    params: dict, base_override: str = ""
+) -> Optional[tuple]:
+    """Resolve the 911 batch for this run by FOLDER PICK, not typed number.
+
+    The 911 twin of :func:`request_922_batch_folder`, and it exists for the
+    same reason: typing is a guess the app then has to go hunting for. 911
+    Setup built ``qtdr_root / typed`` and died on a typo; the Batch Auditor
+    typed the batch too. Picking cannot typo, and the user can SEE the 305
+    folders under the root rather than remember which one they want.
+
+    Order:
+      1. Family cache hit — an earlier 911 plugin in this queued run already
+         picked the batch (``shared_state["911"]["batch_number"]``); reuse it.
+      2. Folder pick via request_directory, starting at the 911 QTDR root —
+         Sentry Drone capable (no ``style=`` passed), native dialog otherwise.
+         The batch is the picked folder's NAME.
+      3. Seed the family cache so every later 911 plugin reuses this answer.
+
+    Validation is STRUCTURAL, not by name. The pick must be a real directory
+    under the root and must not BE the root (a user picked the 911 QTDR root
+    once and 911 Inspection Dimensions started across every order) nor one of
+    the root's housekeeping folders. A batch whose name looks unusual is
+    accepted with a logged note — the user is looking right at the folder they
+    chose, and a name-shape rule would refuse the first batch named differently.
+
+    Returns ``(batch, batch_path)``, or ``None`` when the user cancelled the
+    pick (the run's cancel flag is already set by then — just return).
+    """
+    log = params.get("log", print)
+
+    root = resolve_911_qtdr_root((base_override or "").strip())
+    if root is None or not root.exists():
+        raise UserFacingError(
+            "Couldn't find the '911 QTDR' folder.",
+            "Make sure OneDrive is synced, or set the 911 QTDR Base Directory "
+            "in this plugin's Settings, then run again.")
+
+    # 1. Family cache — never re-prompt inside one queued run. The bucket is
+    # the literal "911" (matching run_session's fixed buckets), so the answer
+    # is shared with request_batch_number exactly as the 922 helper's is.
+    shared_state = params.get("shared_state")
+    cached = (shared_state or {}).get("911", {}).get("batch_number")
+    if cached:
+        batch = normalize_911_batch(str(cached))
+        batch_path = find_911_batch_folder(root, batch)
+        if batch_path is None:
+            raise UserFacingError(
+                f"Couldn't find batch '{batch}' under the 911 QTDR folder.",
+                "Check the batch folder exists, then run again.")
+        log(f"Batch {batch} (shared from an earlier plugin)")
+        return batch, batch_path
+
+    # 2. Folder pick (drone-capable: style defaults to sentry_style(params)).
+    raw = request_directory(params, "Select the 911 batch folder", str(root))
+    if not raw:
+        # request_directory already flagged the run cancelled.
+        log("Folder selection cancelled - nothing was run.")
+        return None
+
+    batch_path = Path(raw)
+    if not is_dir(batch_path):
+        raise UserFacingError(
+            f"That isn't a folder: {batch_path}",
+            "Run it again and pick the batch's own folder.")
+
+    try:
+        same_as_root = batch_path.resolve() == root.resolve()
+    except OSError:
+        same_as_root = False
+    if same_as_root:
+        raise UserFacingError(
+            "That's the 911 QTDR folder itself, not a batch.",
+            "Run it again and pick the batch's own folder inside it (the one "
+            "named like 'V060').")
+
+    if _NOT_A_911_BATCH_RE.match(batch_path.name):
+        raise UserFacingError(
+            f"'{batch_path.name}' is one of the 911 QTDR folder's own folders, "
+            "not a batch.",
+            "Run it again and pick the batch's own folder (the one named like "
+            "'V060').")
+
+    batch = normalize_911_batch(batch_path.name)
+    if not batch:
+        raise UserFacingError(
+            "That folder has no name to read a batch from.",
+            "Run it again and pick the batch's own folder.")
+    if not _LOOKS_LIKE_911_BATCH_RE.match(batch):
+        log(f"NOTE: '{batch}' doesn't look like the usual batch name (V060, "
+            f"GX030) - carrying on with the folder you picked.")
+
+    # 3. Seed the family cache for the rest of the queued run.
+    if shared_state is not None:
+        shared_state.setdefault("911", {})["batch_number"] = batch
+    log(f"Batch {batch}: {batch_path}")
+    return batch, batch_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1360,6 +1493,23 @@ def match_dypn_variant(part, candidates, prefer=None) -> Optional[str]:
     return names[0] if len(names) == 1 else None
 
 
+def ppn_dypn(ppn, dypn) -> str:
+    """The DYPN rebuilt from the PO row's own PPN - PPN + '-' + the DYPN's last
+    segment - or '' when the PO's DYPN already agrees with its PPN (or there is
+    no PPN). Drawings and the organizer's kit pages name a part PPN + item, but
+    the PO's DYPN column can disagree with its PPN column: Batch 496 order
+    X6514350 has PPN 'H7658162-H3DR' and DYPN 'H7658162-H3-2' for the drawing
+    'H7658162-H3DR-2 PLT F.pdf'. A reader that joins PO rows to files should
+    index each row under this spelling TOO (never instead of the PO's own)."""
+    ppn = str(ppn or "").strip()
+    dypn = str(dypn or "").strip()
+    if not ppn or "-" not in dypn:
+        return ""
+    if dypn.casefold().startswith(ppn.casefold() + "-"):
+        return ""
+    return f"{ppn}-{dypn.rsplit('-', 1)[1]}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 922 tube materials + PO (QF-QU-09) reading
 #
@@ -1457,6 +1607,29 @@ _TITLE_BLOCK_MARKERS = (
 # four is stricter than a scanned or oddly-encoded print can be relied on to be.
 _TITLE_BLOCK_MIN_HITS = 2
 
+# A 922 work packet identifies itself POSITIVELY. The absence of a title block
+# used to stand in for "this is the packet", and that is not the same claim: a
+# part SKETCH or a customer PRINT filed beside the packet carries no title
+# block either, so it answered "packet" and got the stamp.
+#
+# Reported 2026-09-23 on Batch 494 / BN331786-R8653362-H11L, which holds both
+# `BN331786 Sketch.pdf` and `BN331786.pdf`. Windows sorts the sketch FIRST -
+# after the shared "BN331786", a space (0x20) precedes a dot (0x2E) - so the
+# sketch was read first, showed no title block, and won. Measured across every
+# PDF in the live 922 batches that day: 6 order folders were stamped on the
+# wrong file and their real packets were blank.
+#
+# These three markers were measured over all 427 live PDFs: they appear on
+# 252 of 252 work packets and on 0 of 166 drawings and 0 of 9 sketch/print
+# files. "LEAD TRADE" alone covers all 252; the other two are the headers of
+# the two packet layouts in use (166 "FRM 922" + 86 "DESKTOP WORK PACKAGE"),
+# kept as alternates so a layout that drops one is still recognised.
+_WORK_PACKET_MARKERS = (
+    "LEAD TRADE",
+    "FRM 922",
+    "DESKTOP WORK PACKAGE",
+)
+
 # Office lock files (~$...) and stray Python temp files (tmpab12cd34.pdf) are
 # not real PDFs of ours. A leftover temp PDF in an order folder would otherwise
 # be picked as that order's work packet by "the first PDF in the folder".
@@ -1472,20 +1645,11 @@ def is_real_pdf(path) -> bool:
     return not _NOT_A_REAL_PDF_RE.match(Path(path).stem)
 
 
-def is_drawing_pdf(path, log=None) -> bool:
-    """True when page 1 of `path` is a part DRAWING (a title-block print).
+def read_page1_text(path, log=None) -> Optional[str]:
+    """Upper-cased page-1 text of `path`, or None when it cannot be read.
 
-    This is how a drawing binder is told apart from a work packet. Name alone
-    cannot do it: the binders sort BEFORE the packet in an order folder
-    ('Binder1.pdf' before 'BK394153 NOFORN.pdf' in Windows' case-insensitive
-    order), so "the first PDF in the folder" stamps the drawing (reported by a
-    922 Pallet Stamper user, 2026-08-20), and a binder is not always named
-    'Binder'.
-
-    An UNREADABLE PDF answers False on purpose. Treating a read error as "this
-    is a drawing" would silently skip a real work packet and the run would look
-    clean; answering False sends the caller on to its own open, which reports
-    the failure properly.
+    None is the honest answer for an unreadable file - callers decide what to
+    do with "I don't know", which is never the same as a confident verdict.
     """
     import fitz
     path = Path(path)
@@ -1493,15 +1657,61 @@ def is_drawing_pdf(path, log=None) -> bool:
         ensure_local(path)
         doc = fitz.open(long_path(path))
         try:
-            text = doc[0].get_text().upper()
+            return doc[0].get_text().upper()
         finally:
             doc.close()
     except Exception as exc:
         if log:
-            log(f"  NOTE: couldn't read {path.name} to check for a title "
-                f"block ({exc}); treating it as a work packet.")
-        return False
-    return text_has_title_block(text)
+            log(f"  NOTE: couldn't read page 1 of {path.name} ({exc}).")
+        return None
+
+
+def classify_pdf(path, log=None) -> str:
+    """What page 1 of `path` IS: 'packet', 'drawing', 'other' or 'unreadable'.
+
+    One open answers the whole question, so no caller pays a second OneDrive
+    round-trip to ask the follow-up.
+
+    * 'packet'     - carries a work-packet marker (LEAD TRADE / FRM 922 /
+                     DESKTOP WORK PACKAGE).
+    * 'drawing'    - carries the ASA/EB title block.
+    * 'other'      - readable, but neither: a part sketch, a customer print,
+                     a scanned page with no extractable text.
+    * 'unreadable' - the file would not open, or page 1 would not render.
+
+    'other' and 'unreadable' are deliberately NOT folded into 'packet'. That
+    conflation is the 2026-09-23 bug: a sketch is not a packet just because it
+    is not a drawing.
+    """
+    text = read_page1_text(path, log=log)
+    if text is None:
+        return "unreadable"
+    if text_is_work_packet(text):
+        return "packet"
+    if text_has_title_block(text):
+        return "drawing"
+    return "other"
+
+
+def is_work_packet_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a 922 work packet (a POSITIVE test)."""
+    return classify_pdf(path, log=log) == "packet"
+
+
+def is_drawing_pdf(path, log=None) -> bool:
+    """True when page 1 of `path` is a part DRAWING (a title-block print).
+
+    Note this is NOT the inverse of `is_work_packet_pdf` - a sketch, a customer
+    print and an unreadable file are all neither. Use `classify_pdf` when you
+    need to tell those apart.
+    """
+    return classify_pdf(path, log=log) == "drawing"
+
+
+def text_is_work_packet(page_text: str) -> bool:
+    """The work-packet test on text you have ALREADY read."""
+    text = (page_text or "").upper()
+    return any(marker in text for marker in _WORK_PACKET_MARKERS)
 
 
 def text_has_title_block(page_text: str) -> bool:
@@ -1516,25 +1726,15 @@ def text_has_title_block(page_text: str) -> bool:
     return hits >= _TITLE_BLOCK_MIN_HITS
 
 
-def find_work_packet(order_dir, log=None) -> Optional[Path]:
-    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+def _ranked_order_pdfs(order_dir: Path) -> list:
+    """The real PDFs in a 922 order folder, best packet candidate first.
 
-    Returns None when the folder holds no work packet - INCLUDING the case
-    where every PDF in it is a drawing binder. Callers must treat that as
-    "nothing to do here", never as "stamp the first PDF anyway".
-
-    Candidates are ranked by NAME (a PDF named for the order first, a
-    Binder*.pdf last) and then each is confirmed by READING it: the first one
-    whose page 1 is not a title-block drawing wins. The ranking only decides
-    which file gets read first, so a binder that isn't named 'Binder' is still
-    caught, and the common case costs a single page-1 read.
+    A PDF named for the order comes first and a Binder*.pdf last. This is only
+    a READING ORDER - the page-1 read is what decides - so a packet named
+    nothing like its order is still found, and the common case costs one read.
     """
-    order_dir = Path(order_dir)
     pdfs = [p for p in sorted(order_dir.iterdir())
             if is_file(p) and p.suffix.lower() == ".pdf" and is_real_pdf(p)]
-    if not pdfs:
-        return None
-
     order_no = order_dir.name.split('-', 1)[0].strip().upper()
 
     def rank(p: Path) -> tuple:
@@ -1542,13 +1742,60 @@ def find_work_packet(order_dir, log=None) -> Optional[Path]:
         looks_like_binder = bool(_BINDER_NAME_RE.match(p.stem))
         return (0 if named_for_order else 1, 1 if looks_like_binder else 0, p.name)
 
-    for pdf in sorted(pdfs, key=rank):
-        if not is_drawing_pdf(pdf, log=log):
+    return sorted(pdfs, key=rank)
+
+
+def _why_not_packet(kind: str) -> str:
+    return {"drawing": "it's a drawing (title block)",
+            "other": "it carries no work-packet heading",
+            "unreadable": "it wouldn't open"}[kind]
+
+
+def find_work_packet(order_dir, log=None) -> Optional[Path]:
+    """The work-packet PDF inside a 922 order folder ('{ORDER}-{PPN}').
+
+    Returns None when no PDF in the folder PROVES it is a work packet -
+    including a folder of drawings, a folder of sketches, and a folder whose
+    PDFs will not open. Callers must treat that as "nothing to do here", never
+    as "stamp the first one anyway" (v1.4.0) and never as "stamp the first one
+    that isn't obviously a drawing" (v1.5.0) - both of those stamped the wrong
+    file on real batches.
+
+    Stops reading at the packet. Use `find_work_packet_report` when you also
+    need to know what the OTHER files are.
+    """
+    for pdf in _ranked_order_pdfs(Path(order_dir)):
+        kind = classify_pdf(pdf, log=log)
+        if kind == "packet":
             return pdf
         if log:
-            log(f"  Skipping {pdf.name} - it's a drawing (ASA title block), "
-                f"not a work packet.")
+            log(f"  Skipping {pdf.name} - {_why_not_packet(kind)}, so it "
+                f"isn't the work packet.")
     return None
+
+
+def find_work_packet_report(order_dir, log=None) -> tuple:
+    """`find_work_packet`, plus what every OTHER PDF in the folder turned out
+    to be: `(packet_or_None, [(path, kind), ...])`.
+
+    Unlike `find_work_packet` this classifies EVERY PDF, including the ones
+    after the packet - a stray stamp does not stop existing just because it
+    sits on a file that sorts late. That is one page-1 read per PDF, which is
+    what a caller that wants to clean the folder was going to pay anyway.
+    """
+    order_dir = Path(order_dir)
+    packet = None
+    others: list = []
+    for pdf in _ranked_order_pdfs(order_dir):
+        kind = classify_pdf(pdf, log=log)
+        if kind == "packet" and packet is None:
+            packet = pdf
+            continue
+        others.append((pdf, kind))
+        if log and packet is None:
+            log(f"  Skipping {pdf.name} - {_why_not_packet(kind)}, so it "
+                f"isn't the work packet.")
+    return packet, others
 
 
 def merge_pdfs(pdfs: list[Path], out_path: Path) -> None:
@@ -2248,7 +2495,16 @@ def post_webhook(url: str, payload: dict, log) -> bool:
     """POST `payload` as JSON to a Power Automate webhook. Returns True on a
     2xx response; logs the failure (and the flow's response body, truncated)
     otherwise. `requests` is bundled (the updater uses it) and respects
-    corporate proxies."""
+    corporate proxies.
+
+    In a 922 sandbox run nothing is sent: the payload is previewed to
+    last_sandbox_webhook_payload.json and the call reports success, so the
+    app's own flow carries on exactly as after a real post."""
+    if sandbox_922_root() is not None:
+        log("SANDBOX: webhook NOT sent - payload previewed instead.")
+        write_payload_preview(payload, "last_sandbox_webhook_payload.json", log)
+        return True
+
     import requests
 
     try:

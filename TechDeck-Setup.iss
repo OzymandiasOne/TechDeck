@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.7 - Batch Check - 902 Batch Validator checks a received batch for missing, empty and corrupt part files and missing prints; LST Organizer PDF report for 911; scribe sheet fits the nest
+; Version 0.8.7.8 - Halloween Update - the season's theme and its fun; 922 Setup labels existing cards; FormingFinder, SSPO Invoicing Prep, MieTrak Tools, Pallet/Difficulty Stamper, Batch Repeater; every app picks its folder
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.7"
+#define MyAppVersion "0.8.7.8"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
@@ -93,6 +93,11 @@ Type: filesandordirs; Name: "{app}\plugins\dxf_offset_tool"
 ; Removed - so also purge the running copy under %LOCALAPPDATA%.
 Type: filesandordirs; Name: "{app}\plugins\911_linear_inch_cuttime"
 Type: filesandordirs; Name: "{localappdata}\TechDeck\plugins\911_linear_inch_cuttime"
+; 0.8.7.8: the Blue theme was retired - its splash GIF and pixel icon set go too
+Type: files; Name: "{app}\assets\images\blue.gif"
+Type: files; Name: "{app}\_internal\assets\images\blue.gif"
+Type: filesandordirs; Name: "{app}\assets\icons\tile icons\TechDeck pixel 32\blue"
+Type: filesandordirs; Name: "{app}\_internal\assets\icons\tile icons\TechDeck pixel 32\blue"
 
 [Dirs]
 ; Create %LOCALAPPDATA%\TechDeck directory structure with full user permissions

@@ -293,6 +293,32 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.8", "Oct 5, 2026", "Feature",
+     "A seasonal engagement release: a seasonal theme applies itself for the "
+     "month and a discovery trail (what's-new markers across the account pages) "
+     "leads people to the new engagement features, including a new in-app game. "
+     "On the production side: 922 batch setup now applies source-material labels "
+     "to Teams cards that already exist, so a re-run completes a partly labelled "
+     "board instead of skipping it, and no longer blocks on a repeat-tag warning "
+     "the operator chose to skip. 911 SSPO invoicing prep gives each partial "
+     "shipment of a nest its own invoice number and ship date, matched by "
+     "sub-group and close-out week, and leaves a nest it cannot resolve blank "
+     "and named rather than guessing; its close-out sheet is back to the "
+     "intended twenty columns with a total price per work order. The 922 "
+     "forming, kitting and nest-file tools now reconcile a PO part number that "
+     "disagrees with its drawing number, closing a gap that produced unlabelled "
+     "formed parts, wrongly stamped rod lines and false missing-tube reports. "
+     "The two 922 packet stampers stamp only a proven work packet and clean "
+     "stray stamps off sketches and prints (six of 252 orders across four "
+     "batches had been mis-stamped). Six apps that asked for a typed path or "
+     "batch number now open a folder picker, removing a class of typo failures. "
+     "MieTrak hardware codes gain a reference and a reader. A retired theme is "
+     "migrated automatically.",
+     "922 Setup, 911 SSPO Invoicing Prep, 922 FormingFinder, 922 Kitting, "
+     "922 LST Organizer, 922 Pallet Stamper, 922 Difficulty Stamper, "
+     "922 Batch Repeater, MieTrak Tools, Sheet Metal Calculators, 911 PO PDF "
+     "Extractor, 911 Sketch Extractor, 911 Remove Ticket, 911 Setup, "
+     "Batch Auditor, Puppet Master (new)"),
     ("Beta 0.8.7.7", "Sep 21, 2026", "Feature",
      "A new incoming-batch validation tool answers, on the day a 902 batch "
      "arrives, which parts are not yet ready to work: parts with no drawing "

@@ -55,6 +55,7 @@ a = Analysis(
         'techdeck.ui.widgets.chopper_picker',
         # Only imported by the game_asa_the_video_game plugin's run.py (loads at runtime).
         'techdeck.ui.widgets.steelbeams_game',
+        'techdeck.ui.void_game.window',   # the Puppet Master cartridge (plugins/game_puppet_master)
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtMultimedia',
         'PySide6.QtCharts',
         # openpyxl.drawing.image is only imported by 911_sspo_invoicing_prep's run.py

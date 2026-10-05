@@ -10,10 +10,14 @@ leaking him early (the release is spoiled) or gating him so hard that flipping
 the flag at Halloween doesn't actually wake him (the release is broken and
 nobody finds out until the day). So every test asserts BOTH states.
 
-His only three entry points:
+His only entry points:
   1. the console's startup greeting + its "redefine" summon link
   2. the /puppetmaster command
   3. the techdeck://cat/summon link route
+  4. his card game (/play, and asking him to play while he is present) -
+     the table needs him, so it is held by the same flag
+  5. the game's Library cartridge (plugins/game_puppet_master) - its
+     plugin.json names his gate, so the loader skips the folder while he is off
 
 Nothing else can reach him: ConsoleCat is a lazy singleton created only by
 those paths, and active_cat() returns None until one runs — so the free-text
@@ -36,9 +40,10 @@ def gate(monkeypatch):
 
 
 # ── the flag itself ─────────────────────────────────────────────────────────
-def test_he_ships_off():
-    """The whole point. If this ever fails on main, a release leaks him."""
-    assert constants.PUPPET_MASTER_ENABLED is False
+def test_he_ships_on_since_the_halloween_update():
+    """Flipped for 0.8.7.8 (the Halloween Update, 2026-10-05). Everything
+    below still proves BOTH states, so the flag can be pulled again if needed."""
+    assert constants.PUPPET_MASTER_ENABLED is True
 
 
 def test_the_env_override_wakes_him_for_local_testing(monkeypatch):
@@ -157,6 +162,36 @@ def test_gating_him_did_not_break_every_other_command(gate, monkeypatch):
     assert h.console.errors == []
 
 
+def test_his_table_is_held_with_him(gate, monkeypatch):
+    """/play opens the card game (ui/void_game). It is a typo while he is
+    held and works the moment the flag flips - same door, same lock."""
+    from techdeck.core.command_handler import CommandHandler
+    assert "/play" in CommandHandler._HELD_COMMANDS
+    for enabled in (False, True):
+        gate(enabled)
+        h, _ = _handler(monkeypatch)
+        opened = []
+        h._cmd_play = lambda args: opened.append("table")
+        h.commands["/play"] = h._cmd_play
+        h.handle_command("/play")
+        assert opened == (["table"] if enabled else [])
+        assert h.console.errors == ([] if enabled else ["Unknown command: /play"])
+
+
+def test_asking_to_play_only_reaches_the_table_through_him():
+    """The free-text invitation is routed inside the branch that already
+    requires him to be PRESENT in the console (active_cat), so a colleague
+    typing "shall we play a game" while he is held gets the /help nudge."""
+    from pathlib import Path
+    src = (Path(constants.__file__).resolve().parents[2]
+           / "techdeck" / "ui" / "shell.py").read_text(encoding="utf-8")
+    body = src[src.index("def _on_message_entered"):][:1200]
+    before, sep, inside = body.partition("if cat is not None:")
+    assert sep
+    assert "is_invitation" not in before
+    assert "is_invitation(message)" in inside.split("return")[0]
+
+
 def test_he_is_absent_from_help_in_both_states():
     """He was always meant to be undiscoverable — 'those who know, know'."""
     from pathlib import Path
@@ -165,6 +200,7 @@ def test_he_is_absent_from_help_in_both_states():
         encoding="utf-8")
     help_text = src[src.index("def _cmd_help"):][:2500]
     assert "/puppetmaster" not in help_text
+    assert "/play" not in help_text
 
 
 # ── entry point 3: the techdeck://cat/summon link route ─────────────────────
@@ -203,3 +239,47 @@ def test_unrelated_links_still_report_themselves_broken(monkeypatch):
     h, _ = _link_handler(False, monkeypatch)
     h.handle_internal_link("techdeck://nonsense/xyz")
     assert h.console.errors and "Unroutable" in h.console.errors[0]
+
+
+# ── entry point 5: his cartridge in the Library ─────────────────────────────
+
+def test_his_cartridge_is_gated_with_him(gate, monkeypatch):
+    """The Library cartridge (plugins/game_puppet_master) names his gate in
+    plugin.json, so the loader never discovers it while he is held - no
+    Library tile, no /moredetails row - and finds it the moment the flag flips."""
+    import json
+    from pathlib import Path
+    from techdeck.core.plugin_loader import PluginLoader
+    root = Path(constants.__file__).resolve().parents[2]
+    manifest = json.loads((root / "plugins" / "game_puppet_master" / "plugin.json").read_text(encoding="utf-8"))
+    assert manifest["gate"] == "puppet_master"
+    assert manifest["locked"] and manifest["show_locked"], "greyed in the Library until the table is found"
+    for enabled in (False, True):
+        gate(enabled)
+        loader = PluginLoader(plugins_dir=root / "plugins")
+        loader.discover_plugins()
+        assert ("game_puppet_master" in loader.plugins) is enabled
+
+
+def test_opening_the_table_discovers_the_cartridge_once(monkeypatch, tmp_path):
+    """The first time the table opens, the cartridge comes unlocked with the
+    success jingle; later openings are quiet."""
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core.settings import SettingsManager
+    from techdeck.core import audio_manager
+    played = []
+
+    class _Audio:
+        def play(self, sound_id, **kw):
+            played.append(sound_id)
+    monkeypatch.setattr(audio_manager, "get_audio_manager", lambda: _Audio())
+    h = CommandHandler.__new__(CommandHandler)
+    h.settings = SettingsManager(settings_dir=tmp_path)
+    h.console = _Console()
+    h.main_window = None
+    assert not h.settings.is_unlocked(CommandHandler.TABLE_PLUGIN_ID)
+    assert h.discover_table() is True
+    assert h.settings.is_unlocked(CommandHandler.TABLE_PLUGIN_ID)
+    assert played == [audio_manager.SOUND_SUCCESS]
+    assert h.discover_table() is False
+    assert played == [audio_manager.SOUND_SUCCESS], "the jingle plays once"

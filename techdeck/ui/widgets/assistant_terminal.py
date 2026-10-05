@@ -279,7 +279,7 @@ class TabStrip(QWidget, ThemeAware):
         sheet = f"""
             QPushButton {{
                 background-color: {palette.surface};
-                color: {palette.text_secondary};
+                color: {palette.card_text or palette.text_secondary};
                 font-weight: bold;
                 padding: 7px 16px;
                 border: none;
@@ -288,11 +288,11 @@ class TabStrip(QWidget, ThemeAware):
             }}
             QPushButton:hover:!checked {{
                 background-color: {palette.surface_hover};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
             }}
             QPushButton:checked {{
                 background-color: {palette.console_bg};
-                color: {palette.text};
+                color: {palette.console_text};
             }}
         """
         for button in self._buttons.values():
@@ -342,7 +342,7 @@ class ChipBar(QWidget, ThemeAware):
         sheet = f"""
             QPushButton {{
                 background-color: {palette.surface};
-                color: {palette.text};
+                color: {palette.card_text or palette.text};
                 border: 1px solid {palette.border};
                 border-radius: 13px;
                 padding: 5px 14px;
@@ -446,7 +446,7 @@ class CommandLine(QWidget, ThemeAware):
         self.submitted.emit(text)
 
     def eventFilter(self, obj, event):
-        if obj is self.field and event.type() == QEvent.Type.KeyPress:
+        if obj is getattr(self, 'field', None) and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Up:
                 self._recall(-1)

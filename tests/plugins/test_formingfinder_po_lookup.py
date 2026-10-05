@@ -256,3 +256,106 @@ def test_unique_dest_suffixes_repeat_filenames(ff, tmp_path):
     assert names == ["R7211262-H2-3 PLT F.pdf",
                      "R7211262-H2-3 PLT F (2).pdf",
                      "R7211262-H2-3 PLT F (3).pdf"]
+
+
+def test_dypn_that_disagrees_with_its_ppn_matches_by_ppn(ff, tmp_path):
+    # Batch 496, order X6514350: the PO's DYPN column dropped the 'DR' its PPN
+    # column carries. The drawing is 'H7658162-H3DR-2 PLT F.pdf', so the
+    # exact key missed and the Bent Plates row went out blank - and Kitting
+    # stamped FORMED on the part's 0.375 OD NICU rods.
+    mats = _MATERIALS + [("262028653-143", "OSS 0.375 OD NICU",
+                          "0.375 OD X 12.00 Length")]
+    po = _po_workbook(tmp_path, [
+        ["X6514350", "H7658162-H3DR", "H7658162-H3-2", "262028653-143", "NICU"],
+        ["X6514350", "H7658162-H3DR", "H7658162-H3-2", "262028653-11", ""],
+    ], mats)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    row = lookup[("x6514350", "h7658162-h3dr-2")]
+    assert row["SOURCE MATERIAL"] == "262028653-11"
+    assert row["PPN"] == "H7658162-H3DR"
+    assert "_ALIAS_NOTE" in row
+    # The PO's own spelling still resolves, with no alias note on it.
+    assert "_ALIAS_NOTE" not in lookup[("x6514350", "h7658162-h3-2")]
+
+
+def test_agreeing_dypn_gets_no_alias(ff, tmp_path):
+    po = _po_workbook(tmp_path, [
+        ["X3607697", "H7656366-H12", "H7656366-H12-2", "262028653-11", ""],
+        ["X3607696", "E6433278-H23", "E6433278-H23-2-1", "262028653-11", ""],
+    ], _MATERIALS)
+    lookup = ff._load_po_lookup(po, lambda *a: None)
+    assert set(lookup) == {("x3607697", "h7656366-h12-2"),
+                           ("x3607696", "e6433278-h23-2-1")}
+
+
+@pytest.mark.parametrize("ppn, dypn, alias", [
+    ("H7658162-H3DR", "H7658162-H3-2", "H7658162-H3DR-2"),
+    ("H7658162-H3DR", "H7658162-H3-4A", "H7658162-H3DR-4A"),
+    ("H7656366-H12", "H7656366-H12-2", ""),       # already agrees
+    ("E6433278-H23", "E6433278-H23-2-1", ""),     # multi-segment item
+    (None, "H7658162-H3-2", ""),                  # no PPN to build from
+])
+def test_ppn_dypn(ff, ppn, dypn, alias):
+    assert ff.sdk.ppn_dypn(ppn, dypn) == alias
+
+
+# --- Bent Plates finish: All Borders + yellow header ------------------------
+
+def _organizer(tmp_path, stale_rows=0):
+    """The organizer's Bent Plates sheet as the template ships it: A1:E1
+    merged title, headers on row 2 - plus `stale_rows` of an earlier run."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bent Plates"
+    ws.merge_cells("A1:E1")
+    for c, h in enumerate(["ORDER", "PPN", "DYPN", "SOURCE MATERIAL", "NOTES"], 1):
+        ws.cell(row=2, column=c, value=h)
+    thin = openpyxl.styles.Side(style="thin")
+    for r in range(3, 3 + stale_rows):
+        for c in range(1, 6):
+            ws.cell(row=r, column=c, value="old").border = openpyxl.styles.Border(
+                left=thin, right=thin, top=thin, bottom=thin)
+    path = tmp_path / "PO H496 Pallet & Rod Organizer.xlsx"
+    wb.save(path)
+    return path
+
+
+def _row(dypn):
+    return {"ORDER": "X1", "PPN": dypn.rsplit("-", 1)[0], "DYPN": dypn,
+            "SOURCE MATERIAL": "262028653-11", "NOTES": "BEND"}
+
+
+def _sides(cell):
+    b = cell.border
+    return tuple(s.style if s else None for s in (b.left, b.right, b.top, b.bottom))
+
+
+def test_bent_plates_gets_the_hand_finish(ff, tmp_path):
+    # What the user applied by hand to 494-496: All Borders on every filled
+    # cell, yellow on row 2's five headers.
+    path = _organizer(tmp_path)
+    ff._update_bent_plates(path, "496", [_row("H1-H12-2"), _row("H1-H12-3")],
+                           lambda *a: None)
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    for r in (2, 3, 4):
+        for c in range(1, 6):
+            assert _sides(ws.cell(r, c)) == ("thin",) * 4, ws.cell(r, c).coordinate
+    for c in range(1, 6):
+        assert ws.cell(2, c).fill.fgColor.rgb == "FFFFFF00"
+        assert ws.cell(3, c).fill.fill_type is None
+    # Merged title: an outline - cell for cell what the hand-finished Batch
+    # 494-496 sheets carry (Excel stores the top-left cell fully boxed).
+    assert _sides(ws["A1"]) == ("thin",) * 4
+    assert _sides(ws["C1"]) == (None, None, "thin", "thin")
+    assert _sides(ws["E1"]) == (None, "thin", "thin", "thin")
+    assert _sides(ws["F2"]) == (None,) * 4
+
+
+def test_rerun_with_fewer_parts_leaves_no_empty_boxes(ff, tmp_path):
+    path = _organizer(tmp_path, stale_rows=5)
+    ff._update_bent_plates(path, "496", [_row("H1-H12-2")], lambda *a: None)
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    assert _sides(ws["C3"]) == ("thin",) * 4
+    for r in range(4, 8):
+        assert ws.cell(r, 3).value is None
+        assert _sides(ws.cell(r, 3)) == (None,) * 4

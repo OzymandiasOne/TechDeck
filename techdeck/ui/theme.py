@@ -65,6 +65,24 @@ class ColorPalette:
     # selected items, etc.). Defaults to white; light-accent themes override.
     accent_text: str = "#FFFFFF"
     accent_two_text: str = "#FFFFFF"
+    # Sidebar overrides — empty falls back to surface/text/surface_hover.
+    # Lets a theme (halloween) give the nav ribbon its own identity without
+    # dragging every other surface-colored card along with it.
+    sidebar_bg: str = ""
+    sidebar_text: str = ""
+    sidebar_hover: str = ""
+    # Border for controls sitting ON surface — empty falls back to border.
+    # (halloween: purple borders read wrong on the orange controls)
+    card_border: str = ""
+    # Tile/card label override — empty falls back to text. For themes whose
+    # cards and page background need opposite text tones (halloween: light
+    # text on the purple body, dark text on the orange cards).
+    card_text: str = ""
+    # Splitter handle override (the console's resize edge) — empty falls
+    # back to divider / border_strong. Per-widget styled in shell.py, so a
+    # stylesheet override can't reach it; it needs a slot.
+    splitter_handle: str = ""
+    splitter_handle_hover: str = ""
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -183,40 +201,6 @@ THEMES: Dict[str, ColorPalette] = {
         tile_missing_border="#B87870",
     ),
 
-    "blue": ColorPalette(
-        text="#E0E7FF",
-        text_secondary="#A5B4FC",
-        background="#1E1B4B",
-        surface="#312E81",
-        surface_hover="#3730A3",
-
-        accent="#3B82F6",
-        accent_hover="#60A5FA",
-        accent_pressed="#2563EB",
-
-        accent_two="#6D28D9",
-        accent_two_hover="#7c40dd",
-        accent_two_pressed="#5E22BF",
-
-        border="#4338CA",
-        border_strong="#4F46E5",
-        divider="#2E2870",
-
-        console_bg="#1E1B4B",
-        console_text="#E0E7FF",
-
-        success="#10B981",
-        warning="#F59E0B",
-        error="#EF4444",
-        info="#60A5FA",
-
-        tile_selected="#4338CA",
-        shadow="rgba(30, 27, 75, 0.5)",
-
-        tile_missing_bg="#2E2870",
-        tile_missing_text="#6366F1",
-        tile_missing_border="#4338CA",
-    ),
 
     "cyberpunk": ColorPalette(
         text="#FFE100",
@@ -317,6 +301,108 @@ QPushButton:hover {
 }
 """,
     ),
+
+    "halloween": ColorPalette(
+        # THE TRIAD: pumpkin body, witching-purple trim, carved-dark mouth.
+        # Background/panels/sidebar stay the run-button orange; buttons,
+        # borders, and selection go deep purple; the console is the one dark
+        # panel — the lantern's cut-out mouth, glowing amber, where the
+        # Puppet Master's phosphor face stays crisp.
+        text="#E8DCF5",            # pale lavender on the purple body
+        text_secondary="#B9A6D4",  # lavender-grey secondary
+        background="#1E0F2E",      # the sidebar purple — one continuous body
+        surface="#FF7A1A",         # THE run-button orange — tiles/cards wear it
+        surface_hover="#FF9440",
+
+        accent="#4A1F7A",          # witching purple — buttons + highlights
+        accent_hover="#5D2B96",
+        accent_pressed="#38175E",
+
+        accent_two="#1F9E1F",      # poison green CTA (phosphor kin)
+        accent_two_hover="#2DBA2D",
+        accent_two_pressed="#166E16",
+
+        border="#4A1F7A",
+        border_strong="#38175E",
+        divider="#A34E07",
+
+        console_bg="#12081C",      # dark witching purple — his home
+        console_text="#FFAF5E",    # candlelight amber
+
+        success="#0B6E2F",
+        warning="#8A5300",
+        error="#A31212",
+        info="#5B21B6",
+
+        tile_selected="#CBA8F0",   # light purple selection tint
+        shadow="rgba(56, 23, 94, 0.40)",
+
+        tile_missing_bg="#F0700F",
+        tile_missing_text="#45166E",
+        tile_missing_border="#4A1F7A",
+
+        accent_text="#F2E9F8",     # near-white on the purple buttons
+        accent_two_text="#FFFFFF",
+        sidebar_bg="#1E0F2E",      # the nav ribbon goes dark witching purple
+        sidebar_text="#E8DCF5",
+        sidebar_hover="#2E1745",
+        card_text="#2A1503",       # carved-dark tile names on orange cards
+        card_border="#B34F08",     # darker-orange borders on orange controls
+        splitter_handle="#4A1F7A",       # the console's resize edge: witching purple
+        splitter_handle_hover="#5D2B96",
+        extra_stylesheet="""
+/* the resizable pane the console lives on: brighter purple */
+ConsoleWidget {
+    background-color: #3D2166;
+}
+/* the console's resize edge: black */
+QSplitter::handle {
+    background-color: #000000;
+}
+QSplitter::handle:hover {
+    background-color: #241203;
+}
+/* the command line wears the darker pumpkin */
+QLineEdit {
+    background-color: #C25708;
+    color: #2A1503;
+}
+QLineEdit:focus, QTextEdit:focus {
+    border: 2px solid #4A1F7A;
+}
+QPushButton[class="primary"] {
+    border: 1px solid #4A1F7A;
+}
+/* dark text re-asserted on ORANGE-surfaced controls (global text is light
+   for the purple body). NEVER a broad frame/label rule here: pages'
+   scroll/stack contents are purple, and a blanket rule darkened their
+   headings into the void (Settings/Account, DevKit board columns). */
+QComboBox, QComboBox QAbstractItemView {
+    color: #2A1503;
+}
+QPushButton {
+    color: #2A1503;
+}
+/* multi-line inputs match the command line (the console's own QTextEdits
+   are per-widget styled and unaffected) */
+QTextEdit {
+    background-color: #C25708;
+    color: #2A1503;
+}
+/* the DevKit header band is an orange surface with bare labels/checkables */
+#devkitHeader QLabel, #devkitHeader QCheckBox {
+    color: #2A1503;
+}
+/* lists: the base QListWidget rule is silently beaten by the later QFrame
+   family rule in every theme (both same specificity, QFrame wins by order),
+   so lists actually paint SURFACE - unnoticeable in one-tone themes, a big
+   orange slab here. Re-assert the dark list look after the QFrame rule. */
+QListWidget {
+    background-color: #12081C;
+    color: #FFAF5E;
+}
+""",
+    ),
 }
 
 # "Professional" = the light theme with the playful features hidden (for client
@@ -369,9 +455,22 @@ def delete_custom_theme(name: str, custom_dir: Path) -> None:
     THEMES.pop(name.lower(), None)
 
 
+# The built-in themes, each with its own pixel icon set on disk
+# (assets/icons/tile icons/TechDeck pixel 32/<name>/). "professional" is a
+# built-in mode of the light look, so it has no set of its own.
+PIXEL_ICON_THEMES = ("dark", "light", "cherry_blossom", "cyberpunk", "matrix")
+
+# Built-in themes with a dark background. Custom themes use the dark icon set.
+DARK_BUILTIN_THEMES = ("dark", "cyberpunk", "matrix")   # halloween is a bright pumpkin: dark icons, like light
+
+
 def is_builtin_theme(name: str) -> bool:
-    return name.lower() in ("dark", "light", "professional", "cherry_blossom",
-                            "blue", "cyberpunk", "matrix")
+    return name.lower() in PIXEL_ICON_THEMES + ("professional", "halloween")
+
+
+def icon_folder_for_theme(theme_name: str) -> str:
+    """Light icons for dark backgrounds, dark icons for light backgrounds."""
+    return "light" if theme_name in DARK_BUILTIN_THEMES else "dark"
 
 
 # ── Stylesheet generator ───────────────────────────────────────────────────────
@@ -566,12 +665,12 @@ QPushButton[class="cta"]:pressed {{
 
 /* ===== Sidebar ===== */
 Sidebar {{
-    background-color: {theme.background};
+    background-color: {theme.sidebar_bg or theme.surface};
     border-right: 1px solid {theme.console_bg};
 }}
 
 QWidget[objectName="sidebar"] {{
-    background-color: {theme.background};
+    background-color: {theme.sidebar_bg or theme.surface};
 }}
 
 ConsoleWidget {{
@@ -584,7 +683,7 @@ Sidebar > QWidget[class="separator"] {{
 
 QListWidget {{
     background-color: {theme.console_bg};
-    color: {theme.text};
+    color: {theme.console_text};
     border: none;
     outline: none;
 }}

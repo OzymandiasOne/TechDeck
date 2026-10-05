@@ -177,19 +177,41 @@ class AudioManager:
         effect.setSource(QUrl.fromLocalFile(str(path)))
         self._active.append(effect)
 
+        # A ONE-SHOT MUST FIRE EXACTLY ONCE. statusChanged is not a
+        # load-finished signal - it fires on every status transition, and an
+        # effect can return to Ready later (the audio backend re-initialises
+        # when the default output device changes, which is the very thing the
+        # fresh-effect-per-play design above exists to pick up). The old code
+        # connected a handler that called play() on ANY Ready and never
+        # disconnected it, so a click sound could fire again on its own, with
+        # nothing driving it. `started` makes the transition idempotent and the
+        # handler unhooks itself.
+        started = False
+
+        def _start() -> None:
+            nonlocal started
+            if started:
+                return
+            started = True
+            try:
+                effect.statusChanged.disconnect(_on_status)
+            except (RuntimeError, TypeError):
+                pass          # never connected (already-Ready path), or gone
+            effect.play()
+            # Release our reference a few seconds after playback starts
+            QTimer.singleShot(4000, lambda: self._release(effect))
+
         def _on_status():
-            if effect.status() == QSoundEffect.Status.Ready:
-                effect.play()
-                # Release our reference a few seconds after playback starts
-                QTimer.singleShot(4000, lambda: self._release(effect))
-            elif effect.status() not in (
+            status = effect.status()
+            if status == QSoundEffect.Status.Ready:
+                _start()
+            elif status not in (
                 QSoundEffect.Status.Null, QSoundEffect.Status.Loading
             ):
                 self._release(effect)
 
         if effect.status() == QSoundEffect.Status.Ready:
-            effect.play()
-            QTimer.singleShot(4000, lambda: self._release(effect))
+            _start()
         else:
             effect.statusChanged.connect(_on_status)
 
@@ -250,12 +272,28 @@ class AudioManager:
         effect.setLoopCount(int(QSoundEffect.Infinite.value))
         effect.setVolume(self._volume * max(0.0, min(1.0, volume_scale)))
         effect.setSource(QUrl.fromLocalFile(str(path)))
+
+        # Same one-shot rule as play(): start it once and unhook. Calling
+        # play() again on an already-looping effect restarts it from zero, so
+        # a later Ready transition used to make an ambient bed audibly jump.
+        started = False
+
+        def _on_status():
+            nonlocal started
+            if started or effect.status() != QSoundEffect.Status.Ready:
+                return
+            started = True
+            try:
+                effect.statusChanged.disconnect(_on_status)
+            except (RuntimeError, TypeError):
+                pass
+            effect.play()
+
         if effect.status() == QSoundEffect.Status.Ready:
+            started = True
             effect.play()
         else:
-            effect.statusChanged.connect(
-                lambda: effect.play()
-                if effect.status() == QSoundEffect.Status.Ready else None)
+            effect.statusChanged.connect(_on_status)
         return effect
 
     def set_enabled(self, enabled: bool) -> None:

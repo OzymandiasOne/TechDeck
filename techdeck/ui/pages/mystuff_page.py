@@ -22,9 +22,11 @@ from PySide6.QtGui import QPainter, QColor, QIcon, QPixmap, QImage
 from techdeck.ui.sprite_font import font as _sf
 from techdeck.ui.arcade_chrome import (
     EMP, _draw_bubble, _load_pixmap, _load_art, _trim_v,
-    _tile_ring, _equipped_badge,
+    _tile_ring, _equipped_badge, _greyed,
 )
 from techdeck.ui.emporium_catalog import CATALOG
+from techdeck.core.constants import gate_enabled
+from techdeck.ui import whats_new
 
 # The diagonal-stripe wall, as a SEAMLESS tile so it fills the whole page (and
 # repeats as the locker scrolls) instead of the old stretched art whose solid
@@ -160,6 +162,7 @@ class InventoryTile(QFrame):
         self.setFixedSize(self.SIZE, self.HEIGHT)
         self.setStyleSheet("InventoryTile { background: transparent; }")
 
+        self.locked = False                  # a "found" item not yet found: greyed, inert
         self._icon = self._load_icon()
 
         lay = QVBoxLayout(self)
@@ -205,6 +208,9 @@ class InventoryTile(QFrame):
             _equipped_badge(p, rect)
         p.end()
 
+    def wants_new_sticker(self) -> bool:
+        return self.item["id"] == whats_new.PUPPET_ID and whats_new.PUPPET in whats_new.new_badges(self.page.settings)
+
     def _btn_qss(self, bg, edge):
         return (f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
                 f"border-radius:5px; padding:3px 10px; }}"
@@ -235,9 +241,19 @@ class InventoryTile(QFrame):
 
     def refresh(self):
         s = self.page.settings
+        if self.parentWidget() is not None:
+            whats_new.attach_sticker(self)     # the grid's overlay draws the NEW! past the tile's corner
+        self.locked = bool(self.item.get("found")) and not s.is_unlocked(self.item["id"])
         self.name.setPixmap(_sf().render_wrapped(self.item["name"].upper(), 2,
-                                                EMP["tile_text"], max_width=self.NAME_W))
-        if self.item["kind"] == "build":
+                                                EMP["tile_dim"] if self.locked else EMP["tile_text"],
+                                                max_width=self.NAME_W))
+        if self._icon is not None:
+            self.icon.setPixmap(_greyed(self._icon) if self.locked else self._icon)
+        if self.locked:
+            self.equipped = False
+            self._set_btn("?", EMP["equip"], "#7af0a0", True)     # found, not yet understood: ask
+            self.action_btn.setCursor(Qt.CursorShape.WhatsThisCursor)
+        elif self.item["kind"] == "build":
             self.equipped = False
             self._set_btn("BUILD", EMP["owned"], "#b184e0", True)
             # Re-read the icon: this tile shows the player's build, so it has to
@@ -261,7 +277,14 @@ class InventoryTile(QFrame):
             self._set_btn("OWNED", EMP["owned"], EMP["owned"], False)
         self.update()
 
+    MYSTERY = ("This cartridge mysteriously appeared in your inventory. You don't "
+               "remember buying this... Maybe you should ask Woogy about it.")
+
     def _activate(self):
+        if self.locked:
+            from techdeck.ui.arcade_chrome import PixelDialog
+            PixelDialog.show_message(self.page, "?", self.MYSTERY)
+            return
         if self.item["kind"] == "build":
             self.page.build_beyblade()
         elif self.item["kind"] == "gadget":
@@ -334,6 +357,7 @@ class MyStuffPage(QWidget):
             self.tiles.append(tile)
             grid.addWidget(tile, i // cols, i % cols,
                            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            whats_new.attach_sticker(tile)         # now it has a parent: the grid's overlay takes it
         grid.setColumnStretch(cols, 1)
         return host
 
@@ -356,7 +380,9 @@ class MyStuffPage(QWidget):
         owned_spinners = [c for c in CATALOG
                           if c["kind"] == "spinner" and s.is_unlocked(c["id"])]
         owned_games = [c for c in CATALOG
-                       if c["kind"] == "game" and s.is_unlocked(c["id"])]
+                       if c["kind"] == "game"
+                       and (s.is_unlocked(c["id"]) or c.get("found"))
+                       and (not c.get("gate") or gate_enabled(c["gate"]))]
 
         # Fidget spinners (always: the Default option + any you own). The
         # builder tile joins them once at least one beyblade is owned, since
@@ -371,7 +397,7 @@ class MyStuffPage(QWidget):
             self._vbox.addWidget(self._hint(
                 "Buy spinners at Woogy's Emporium to add them here."))
 
-        # Games (owned only).
+        # Games (owned, plus any "found" cartridge still greyed out).
         if owned_games:
             self._vbox.addWidget(self._section_header("Games"))
             self._vbox.addWidget(self._grid(owned_games))
@@ -413,6 +439,8 @@ class MyStuffPage(QWidget):
                 "Friends are coming soon to Woogy's Emporium!"))
 
         self._vbox.addStretch(1)
+        for tile in self.tiles:                 # the grids are in the view now: stickers float on the view
+            whats_new.attach_sticker(tile)
 
     def refresh(self):
         # Ownership can change (a purchase in the Emporium), so rebuild the grids.

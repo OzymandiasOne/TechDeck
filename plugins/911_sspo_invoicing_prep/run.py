@@ -110,10 +110,35 @@ INV_SHEET = "Invoice Supplement"
 TOTAL_HEADER = "TOTAL PRICE PER WO"
 LOGO_NAME = "asa_logo.png"
 
-# Workorder Close Outs sheet: the source's columns A..Machine, verbatim, with
-# Scheduling Group forced to "Closed" (reconstructs the sheet previously hand-ripped
-# from the pricing master).
-CLOSEOUT_LAST_HEADER = "MACHINE"
+# Workorder Close Outs sheet: these 21 source columns (by header NAME), with
+# Scheduling Group forced to "Closed" (reconstructs the sheet invoicing used to
+# rip from the pricing master by hand). Widths reproduce the hand-made original.
+#
+# v2.4.1 (2026-09-22) - this WAS "every column from A through the one headed
+# Machine". That is a positional range wearing a header name, and it only ever
+# produced the right sheet while the input was already trimmed to these 20
+# columns with Machine last. Since v2.2.0 the input is a copy of the WHOLE
+# pricing master, where Machine is column 76 and the 20 wanted columns are
+# scattered across it (1,2,3,4,7,10,11,33,38,39,40,41,42,45,46,71,72,74,75,76)
+# - so the close-out sheet came out with all 76 columns, junk and #DIV/0! cells
+# included. Reported by invoicing 2026-09-22 against the 9-18 sheet; the 9-4
+# one, produced before the whole-master change reached her, is the reference.
+# Hard Rule 1 is the lesson: select BY NAME, never by position.
+CLOSEOUT_TITLE = "D911 Workorder Close Outs"
+CLOSEOUT_COLUMNS = [  # (source header, column width)
+    ("Program", 13.0), ("Batch", 15.9), ("Work Order", 13.0), ("DYPN", 13.0),
+    ("Material", 13.0), ("DYPN QTY", 13.0), ("Nest Pkg Nbr", 13.0),
+    ("SCOPE OF WORK", 13.0), ("PO", 13.0), ("Line", 13.0), ("SubGroup", 13.0),
+    ("Division", 13.0), ("Scheduling Group", 13.0), ("Firm VPD", 13.0),
+    ("Notes", 13.0), ("ASA SALES REP", 13.0), ("QUOTE DATE", 13.0),
+    ("Shape_Plate", 13.0), ("MATERIAL_TYPE", 13.0), ("Machine", 13.0),
+    # v2.4.2 (invoicing, 2026-09-22): "add column CQ (Total Price per WO) from
+    # the master feed sheet, to column U on the workorder close out sheet".
+    # It is the 21st entry, so it lands in column U. Keyed off TOTAL_HEADER -
+    # the same constant the supplement's total already looks up - so the header
+    # has one home; CQ is where it sits in today's master, not how it is found.
+    (TOTAL_HEADER, 13.0),
+]
 CLOSEOUT_STATUS_HEADER = "SCHEDULING GROUP"
 CLOSEOUT_STATUS_VALUE = "Closed"
 
@@ -145,6 +170,11 @@ FORECAST_COPY_NAME = "~ Working Forecast List (temp copy).xlsx"
 # on both sheets as of 2026-09-16) and the nest's ship date (column AT).
 INV_HEADER = "PS/INV"
 SHIP_DATE_HEADER = "SHIP DATE"
+# A nest shipped in parts is split into sub groups ("PARTIAL 1", "PARTIAL 2",
+# sometimes an order number) - the same header on the pricing master (AN) and
+# both forecast sheets (BC), per invoicing 2026-09-28. It is what ties a
+# close-out's rows to the right forecast shipment line.
+SUBGROUP_HEADER = "SUBGROUP"
 FORECAST_SCAN_COLS = 90        # header scan width: BD is column 56, keep headroom
 INV_NUMBER_CELL = "G2"
 INV_DATE_CELL = "G3"
@@ -158,6 +188,7 @@ class ForecastRow(NamedTuple):
     line: object = None
     invoice: str = ""          # PS/Inv, as typed (blank = not invoiced yet)
     ship_date: object = None   # date / datetime / None
+    subgroup: str = ""         # SubGroup (BC): "PARTIAL 1", an order no., or blank
 
 # ---- Invoice Supplement look (reproduced from the hand-made ASA sheet) ------------
 INV_HEADERS = ["PO ", "PO Line", "Batch", "Workorder", "DYPN",
@@ -290,10 +321,11 @@ def _copy_forecast(settings, out_dir, log):
 
 
 def _read_po_map(copy_path, log, cancel_event):
-    """{(BATCH, NEST): ForecastRow} from the local forecast copy.
-
-    Reads the '911 Forecast' sheet first, then 'Complete 911 QTDR' (older batches
-    roll off to it) — first sheet wins on duplicate keys. PO and Line are copied
+    """{(BATCH, NEST): [ForecastRow, ...]} from the local forecast copy - EVERY
+    forecast line for the nest, '911 Forecast' lines first, then 'Complete 911
+    QTDR' (older batches roll off to it). A nest shipped in parts has one line
+    per shipment, each with its own PS/Inv + Ship Date; `_pick_forecast_row`
+    chooses the one this run is closing out (v2.5.0). PO and Line are copied
     verbatim (Line is sometimes the text 'SSPO', not a number); PS/Inv and Ship
     Date ride along for the supplement's title block (v2.3.0) — either column
     missing on a sheet just leaves those fields blank, with one warning.
@@ -324,7 +356,8 @@ def _read_po_map(copy_path, log, cancel_event):
                     if "PO" in hmap and "LINE" in hmap and "NEST" in hmap \
                             and batch_col is not None:
                         cols = (hmap["PO"], hmap["LINE"], batch_col, hmap["NEST"],
-                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER))
+                                hmap.get(INV_HEADER), hmap.get(SHIP_DATE_HEADER),
+                                hmap.get(SUBGROUP_HEADER))
                         for label, idx in ((INV_HEADER, cols[4]),
                                            (SHIP_DATE_HEADER, cols[5])):
                             if idx is None:
@@ -335,7 +368,7 @@ def _read_po_map(copy_path, log, cancel_event):
                             f"'{sheet_name}' (looked in the first 8 rows).")
                         break
                     continue
-                i_po, i_line, i_batch, i_nest, i_inv, i_ship = cols
+                i_po, i_line, i_batch, i_nest, i_inv, i_ship, i_sub = cols
 
                 def at(idx):
                     return vals[idx] if idx is not None and idx < len(vals) else None
@@ -345,13 +378,119 @@ def _read_po_map(copy_path, log, cancel_event):
                 po = at(i_po)
                 if not batch or not NEST_RE.match(nest) or po in (None, ""):
                     continue
-                po_map.setdefault((batch, nest), ForecastRow(
+                po_map.setdefault((batch, nest), []).append(ForecastRow(
                     po=po, line=at(i_line), invoice=_as_str(at(i_inv)),
-                    ship_date=at(i_ship)))
+                    ship_date=at(i_ship), subgroup=_norm_subgroup(at(i_sub))))
     finally:
         wb.close()
     log(f"  found PO numbers for {len(po_map)} batch+nest combinations.")
     return po_map
+
+
+def _as_date(v):
+    """A forecast Ship Date as a date: datetime/date as-is, a typed m/d/yyyy
+    (or ISO) string parsed, anything else None."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    text = _as_str(v)
+    for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _norm_subgroup(v) -> str:
+    """'Partial  2 ' -> 'PARTIAL 2'; None -> ''."""
+    return " ".join(_as_str(v).upper().split())
+
+
+def _pick_forecast_row(candidates, date_range, subgroups=None):
+    """(ForecastRow or None, why) - the forecast line THIS run closes out;
+    `why` is None, or the plain reason the Invoice # was left blank.
+
+    v2.5.0 (A.T. 2026-09-25): a nest shipped in parts has one forecast line per
+    shipment, and the first line found used to win - so every later partial
+    shipment went out with the FIRST shipment's invoice number and date.
+
+    SubGroup first (invoicing, 2026-09-28): partial shipments are split with a
+    sub group ("PARTIAL 1", "PARTIAL 2"...) on BOTH the pricing master and the
+    forecast. `subgroups` = the set of SubGroup values on this nest's in-range
+    pricing rows (None when the master has no SubGroup column):
+      * one value -> only the forecast lines with that same SubGroup compete
+        (blank matches blank). A named SubGroup with no forecast line is left
+        blank, never matched to another partial's line. A BLANK one with no
+        blank forecast line falls through to every line: in the real forecast
+        the first partial is often left blank beside a "PARTIAL 2".
+      * two or more values (two partials closing out together) -> blank.
+    Whatever is left is decided by `_pick_by_date`.
+    """
+    if not candidates:
+        return None, None
+    if subgroups is not None:
+        if len(subgroups) > 1:
+            return _blank_row(candidates), (
+                f"this close-out holds {len(subgroups)} SubGroups: "
+                + ", ".join(sorted(s or "(blank)" for s in subgroups)))
+        (want,) = subgroups
+        same = [c for c in candidates if c.subgroup == want]
+        if same:
+            candidates = same
+        elif want:
+            return _blank_row(candidates), (
+                f"no forecast line has SubGroup {want}")
+    return _pick_by_date(candidates, date_range)
+
+
+def _blank_row(candidates) -> ForecastRow:
+    """PO / Line kept when every line agrees on them; invoice + date blank."""
+    po_line = {(c.po, c.line) for c in candidates}
+    po, line = next(iter(po_line)) if len(po_line) == 1 else (None, None)
+    return ForecastRow(po=po, line=line, invoice="", ship_date=None)
+
+
+def _pick_by_date(candidates, date_range):
+    """The date half of `_pick_forecast_row`, for lines SubGroup can't separate:
+
+      * one line (or several that agree on PS/Inv + Ship Date) -> that line;
+      * otherwise the shipment CLOSEST to the close-out week: inside it, else
+        the earliest one after it - nests do ship after their Firm VPD, which
+        the close-out stamps with the close-out Friday (confirmed 2026-09-28).
+        A shipment dated BEFORE the week is never taken: it was invoiced in an
+        earlier close-out, and this week's late shipment may simply not have
+        its Ship Date on the forecast yet - taking the old line would reuse its
+        invoice number, the very bug being fixed;
+      * nothing eligible, or two different invoices tied on the same date ->
+        NEVER a guess: Invoice # and date left blank (no PDF), the nest named in
+        the run summary. PO / Line still filled when every line agrees on them.
+    """
+    if not candidates:
+        return None, None
+
+    def key(c):
+        return (c.invoice, _as_date(c.ship_date))
+
+    if len({key(c) for c in candidates}) == 1:
+        return candidates[0], None
+    n = len(candidates)
+    why = f"{n} shipments on the forecast and no Ship Date during or after this range"
+    if date_range is not None:
+        start, end = date_range
+        dated = [(d, c) for c in candidates
+                 if (d := _as_date(c.ship_date)) is not None and d >= start]
+        if dated:
+            gap = min(max((d - end).days, 0) for d, _c in dated)
+            nearest = [c for d, c in dated if max((d - end).days, 0) == gap]
+            if len({key(c) for c in nearest}) == 1:
+                return nearest[0], None
+            why = (f"{n} shipments on the forecast; {len(nearest)} different "
+                   f"invoices share the closest Ship Date")
+    else:
+        why = f"{n} shipments on the forecast and no date range to choose by"
+    return _blank_row(candidates), why
 
 
 # ---------------------------------------------------------------------------------
@@ -462,38 +601,48 @@ def _copy_cell(src_c, dst_c, value=None):
 
 def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date, log):
     """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
-    out_dir: the source sheet's columns A through "Machine" (values and cell styles
-    verbatim, so the hand-ripped original is reproduced exactly) with every row's
+    out_dir: the CLOSEOUT_COLUMNS source columns (by header NAME, values and cell
+    styles verbatim, so the hand-ripped original is reproduced) with every row's
     Scheduling Group set to "Closed". Named for `report_date` (the range's end date,
     so a Monday catch-up run still stamps the close-out Friday). Returns the
     filename written."""
-    last_col = hmap.get(CLOSEOUT_LAST_HEADER)
-    if not last_col:
-        last_col = max(hmap.values())
-        log(f"  WARNING: no '{CLOSEOUT_LAST_HEADER}' column - the Close Outs sheet "
-            "will include every column instead.")
+    cols = []                               # (source col or None, header text)
+    missing = []
+    for name, _ in CLOSEOUT_COLUMNS:
+        c = hmap.get(name.strip().upper())
+        if c is None:
+            missing.append(name)
+            cols.append((None, name))
+        else:
+            cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
+    if missing:
+        log(f"  WARNING: the source has no {', '.join(missing)} column(s) - "
+            "those Close Outs columns will be blank.")
+
     status_col = hmap.get(CLOSEOUT_STATUS_HEADER)
-    if not status_col or status_col > last_col:
-        status_col = None
+    if not status_col:
         log(f"  WARNING: no '{CLOSEOUT_STATUS_HEADER}' column - no rows marked "
             f"'{CLOSEOUT_STATUS_VALUE}'.")
 
     wb = openpyxl.Workbook()
     ws = wb.active                      # stays "Sheet1", like the hand-made original
-    for j in range(1, last_col + 1):
-        letter = get_column_letter(j)
-        dim = src_ws.column_dimensions.get(letter)
-        if dim is not None and dim.width:
-            ws.column_dimensions[letter].width = dim.width
-        _copy_cell(src_ws.cell(row=hdr_row, column=j), ws.cell(row=1, column=j))
+    for j, ((c, header), (_, width)) in enumerate(zip(cols, CLOSEOUT_COLUMNS),
+                                                  start=1):
+        ws.column_dimensions[get_column_letter(j)].width = width
+        if c is None:
+            ws.cell(row=1, column=j, value=header)
+        else:
+            _copy_cell(src_ws.cell(row=hdr_row, column=c), ws.cell(row=1, column=j))
     for r_i, src_row in enumerate(valid_rows, start=2):
-        for j in range(1, last_col + 1):
-            _copy_cell(src_row[j - 1], ws.cell(row=r_i, column=j),
-                       value=CLOSEOUT_STATUS_VALUE if j == status_col else None)
+        for j, (c, _header) in enumerate(cols, start=1):
+            if c is None:
+                continue
+            _copy_cell(src_row[c - 1], ws.cell(row=r_i, column=j),
+                       value=CLOSEOUT_STATUS_VALUE if c == status_col else None)
 
     d = report_date
     fname = _safe_filename(
-        f"D911 Workorder Close Outs {d.month}-{d.day}-{d.year}.xlsx")
+        f"{CLOSEOUT_TITLE} {d.month}-{d.day}-{d.year}.xlsx")
     sdk.save_workbook(wb, out_dir / fname)
     return fname
 
@@ -745,6 +894,8 @@ class SplitResult(NamedTuple):
     calcs: list = []                  # relative paths of pricing-calc zips/copies
     missing_calcs: list = []          # "BATCH NEST (why)" - flagged, run carried on
     calc_error: Optional[str] = None  # 911 QTDR root not found: calcs skipped wholesale
+    ambiguous_invoice: list = []      # "BATCH NEST (why)": several shipments on the
+                                      # forecast, none picked -> blank
 
 
 def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
@@ -832,6 +983,7 @@ def split_workbook(src_path, out_dir, settings, log,
         i_nest = hmap["NEST PKG NBR"]
 
         i_vpd = hmap.get(VPD_HEADER)
+        i_sub = hmap.get(SUBGROUP_HEADER)          # 1-based; None = no column
         if date_range is not None and not i_vpd:
             log(f"WARNING: no '{VPD_HEADER}' column in the source - the date range "
                 "can't be applied, so every valid row is included (the pre-2.2.0 "
@@ -902,6 +1054,7 @@ def split_workbook(src_path, out_dir, settings, log,
         log(f"  wrote {matstatus_name}  (every data row: {len(all_rows)})")
 
         written, missing_po, missing_invoice, pdfs = [], [], [], []
+        ambiguous_invoice = []
         calcs, missing_calcs, calc_error = [], [], None
         qtdr_root = sdk.resolve_911_qtdr_root(str(settings.get("qtdr_root", "") or ""))
         if qtdr_root is None or not sdk.is_dir(qtdr_root):
@@ -913,7 +1066,15 @@ def split_workbook(src_path, out_dir, settings, log,
                 log("Cancelled.")
                 break
             rows = groups[(batch, nest)]
-            po_info = po_map.get((batch.upper(), nest.upper()))
+            lines = po_map.get((batch.upper(), nest.upper()), [])
+            subgroups = ({_norm_subgroup(r[i_sub - 1].value) for r in rows}
+                         if i_sub else None)
+            po_info, why = _pick_forecast_row(lines, date_range, subgroups)
+            ambiguous = why is not None
+            if ambiguous:
+                ambiguous_invoice.append(f"{batch} {nest} ({why})")
+                log(f"  WARNING: {batch} {nest}: {why} - Invoice # and date left "
+                    "blank, no PDF (won't guess which shipment this is).")
             if po_info is None:
                 missing_po.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} not found in the forecast - "
@@ -935,7 +1096,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 if exporter.export(sub_dir / fname, sub_dir / pdf_name):
                     pdfs.append(f"{sub_dir.name}\\{pdf_name}")
                     log(f"  wrote {sub_dir.name}\\{pdf_name}")
-            elif po_info is not None:
+            elif po_info is not None and not ambiguous:
                 missing_invoice.append(f"{batch} {nest}")
                 log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
                     "- Invoice # left blank, no PDF.")
@@ -974,7 +1135,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 "the range (they stay in the Material Status listing).")
         return SplitResult(written, missing_po, closeout_name, matstatus_name,
                            missing_invoice, pdfs, exporter.error,
-                           calcs, missing_calcs, calc_error)
+                           calcs, missing_calcs, calc_error, ambiguous_invoice)
     finally:
         exporter.close()
         # The forecast copy is working scratch only - always remove it, even on
@@ -1069,6 +1230,13 @@ def run(params, progress_callback, cancel_event):
                 "\n  " + "\n  ".join(result.missing_invoice)
                 + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
                   "PS/Inv in on the forecast and re-run, or print that one by hand.")
+    if result.ambiguous_invoice:
+        msg += ("\n\nThese nests shipped in parts, and the Working Forecast List "
+                "doesn't show which shipment belongs to this close-out:\n  "
+                + "\n  ".join(result.ambiguous_invoice)
+                + "\n\nTheir Invoice # and date were left blank and no PDF was "
+                  "printed, so a wrong invoice can't go out. Check the Ship Dates "
+                  "on the forecast and re-run, or fill that supplement in by hand.")
     if missing_po:
         msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
                 + "\n  ".join(missing_po)

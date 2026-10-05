@@ -301,3 +301,122 @@ def test_real_template_progress_card_matches_the_office_card():
     cards = mod._build_cards(template, "494", ["AAA-1"], {})
     payload, _ = mod._build_payload(template, "494", cards)
     assert payload["tasks"][-1]["title"] == "BATCH 494 PROGRESS"
+
+
+# ── repeat warning: skipped on purpose vs failed (v2.7.4) ────────────────────
+# C.D. 2026-09-25: she unticked Find Repeats to run ONLY the cards with
+# material labels, got a "cards going up WITHOUT repeat tags" popup, and read
+# it as "it's labelling the repeats instead of the materials". Unticked on
+# purpose = one quiet line; a stage that ran and failed = the loud popup.
+
+def _run_cards_stage(tmp_path, monkeypatch, **kwargs):
+    mod = _load()
+    batch = tmp_path / "Batch 999"
+    (batch / "BK1-R1-H1").mkdir(parents=True)
+    popups, outcomes, lines = [], [], []
+    monkeypatch.setattr(mod.sdk, "show_warning",
+                        lambda params, title, msg: popups.append(title))
+    monkeypatch.setattr(mod.sdk, "set_run_outcome",
+                        lambda params, kind, msg: outcomes.append(kind),
+                        raising=False)
+    monkeypatch.setattr(mod.sdk, "write_payload_preview",
+                        lambda payload, name, log: None)
+    import threading
+    params = {"log": lines.append, "settings": {"dry_run": True}}
+    mod._run_teams_setup(params, lambda p: None, threading.Event(),
+                         batch, "999", **kwargs)
+    return popups, outcomes, lines
+
+
+def test_unticked_find_repeats_is_quiet(tmp_path, monkeypatch):
+    popups, outcomes, lines = _run_cards_stage(
+        tmp_path, monkeypatch, repeat_folders=None, repeat_stage_skipped=True)
+    assert "922 Setup - repeat cards" not in popups
+    assert not any("Repeat detection didn't run" in l for l in lines)
+    assert any("Find Repeats was not ticked" in l for l in lines)
+
+
+def test_failed_find_repeats_still_warns_loudly(tmp_path, monkeypatch):
+    popups, outcomes, lines = _run_cards_stage(
+        tmp_path, monkeypatch, repeat_folders=None)
+    assert "922 Setup - repeat cards" in popups
+    assert outcomes, "a failed repeat stage must set a warning outcome"
+
+
+def test_run_tells_the_card_stage_when_find_repeats_was_unticked():
+    src = _RUN_PY.read_text(encoding="utf-8")
+    assert 'repeat_stage_skipped="mpl_update" not in enabled' in src
+
+
+# ── Apply labels to existing cards: pallets (flow #4) + materials (flow #5) ──
+# v2.8.0. C.D. 2026-09-25: re-running Generate Teams Cards to add material
+# labels did nothing (flow #1 skips cards that already exist). Flow #5 writes
+# ONLY the material slots, so the payload must carry only those.
+
+def _real_template():
+    return json.loads((_PLUGINS / "922_setup" / "card_template.json")
+                      .read_text(encoding="utf-8"))
+
+
+def test_material_slots_match_the_flow():
+    # Flow #5 has one Planner field per material slot, hard-coded. A new size
+    # label in card_template.json fails here until the flow learns the slot
+    # (docs/TEAMS_CARDS.md flow #5) and FLOW5_MATERIAL_SLOTS is updated.
+    mod = _load()
+    derived = mod._material_slots(_real_template()["label_map"])
+    assert derived == set(mod.FLOW5_MATERIAL_SLOTS)
+    for slot in ("category2", "category3", "category4", "category19",
+                 "category21", "category23", "category25"):
+        assert slot not in derived, f"{slot} is not a material label"
+
+
+def _pass_cards(mod, key, organizer):
+    tpl = _real_template()
+    label_map = {mod._norm_label(n): s for n, s in tpl["label_map"].items()}
+    folders = sorted(f"{order}-R1-H1" for order in organizer) + ["ZZ9-R1-H1"]
+    return mod._label_pass_cards(key, "999", folders, organizer, tpl,
+                                 label_map, mod._material_slots(tpl["label_map"]))
+
+
+_ORGANIZER = {
+    "BK1": {"pallet": "PALLET 1", "materials": ["4.0 X 4.0 X 0.50 NOM",
+                                                "2.0 X 2.0 X 0.25"]},
+    "BK2": {"pallet": "PALLET 2", "materials": []},
+}
+
+
+def test_materials_pass_sends_only_material_slots():
+    mod = _load()
+    cards, _, unlabelled, _ = _pass_cards(mod, "materials", _ORGANIZER)
+    assert cards == [{"title": "BATCH 999: BK1-R1-H1",
+                      "labels": ["category18", "category6"]}]
+    # BK2 has no materials and ZZ9 is not on the sheet: left OUT, never sent
+    # with an empty list (that would wipe the card's material labels).
+    assert unlabelled == ["BK2-R1-H1", "ZZ9-R1-H1"]
+
+
+def test_pallets_pass_sends_only_the_pallet_slot():
+    mod = _load()
+    cards, _, unlabelled, _ = _pass_cards(mod, "pallets", _ORGANIZER)
+    assert cards == [{"title": "BATCH 999: BK1-R1-H1", "labels": ["category2"]},
+                     {"title": "BATCH 999: BK2-R1-H1", "labels": ["category3"]}]
+    assert unlabelled == ["ZZ9-R1-H1"]
+
+
+def test_label_payload_carries_every_flow_contract_key():
+    # Flows #4 and #5 read plan / batch / cards[].title / cards[].labels.
+    mod = _load()
+    payload = mod._build_label_payload(
+        _real_template(), 999, [{"title": "BATCH 999: X", "labels": ["category6"]}])
+    assert payload == {"plan": "D922 PIPELINE", "batch": "999",
+                       "cards": [{"title": "BATCH 999: X",
+                                  "labels": ["category6"]}]}
+
+
+def test_existing_labels_stage_offers_both_passes():
+    mod = _load()
+    stage = next(g for g in mod._dialog_groups() if g["key"] == "pallet_labels")
+    assert [c["key"] for c in stage["children"]] == ["pallets", "materials"]
+    src = _RUN_PY.read_text(encoding="utf-8")
+    assert 'pallets=opts.get("pallets", True)' in src
+    assert 'materials=opts.get("materials", True)' in src

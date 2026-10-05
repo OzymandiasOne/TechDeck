@@ -58,7 +58,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # Century Gothic bold, under the Quality Requirements section. v1.2.0 made it
@@ -887,13 +887,24 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
         raise RuntimeError("PyMuPDF (fitz) is not available; cannot process PDFs.")
 
     # --- Resolve directory ---
+    # The Settings override still wins; the fallback used to ask the user to
+    # TYPE the whole path into the console, which nobody gets right for a
+    # ~190-char OneDrive path. It is a folder pick now, opening at the 911
+    # QTDR root.
     raw_dir = (settings.get("pdf_directory") or "").strip()
 
     if raw_dir:
         pdf_dir = Path(raw_dir)
     else:
-        raw_dir = prompt("Enter path to PDF directory:")
-        pdf_dir = Path(raw_dir.strip())
+        _start = sdk.resolve_911_qtdr_root("")
+        picked_dir = sdk.request_directory(
+            params, "Select the folder with the nest package PDFs",
+            str(_start) if _start else "")
+        if not picked_dir or cancel_event.is_set():
+            # request_directory already flagged the run cancelled.
+            log("Folder selection cancelled - nothing was run.")
+            return
+        pdf_dir = Path(picked_dir)
 
     if not sdk.exists(pdf_dir) or not sdk.is_dir(pdf_dir):
         raise sdk.UserFacingError(

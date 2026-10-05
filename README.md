@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.7 - Batch Check
+# TechDeck v0.8.7.8 - Halloween Update
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -9,74 +9,182 @@ the `.exe`.
 
 ---
 
+## What's New in v0.8.7.8 - Halloween Update
+
+Fun Halloween stuff has been added. TechDeck now switches itself to the Halloween theme for
+October (Oct 1 to Nov 2); pick any other theme in Settings if you would rather not, and it
+stays that way until next year. Have a look around My Account and My Stuff.
+
+### New app: Puppet Master (Games)
+
+A new Games cartridge has turned up in My Stuff. It is found, not bought. Working out how to
+play it is part of the fun, so nothing more is said here.
+
+### 922 Setup now puts source material labels on cards that already exist
+
+Running Generate Teams Cards again on a batch that was already carded never added the
+material labels, because cards that already exist are skipped. The "Apply pallet labels to
+existing cards" stage is now **"Apply labels to existing cards"**, with **Pallet labels** and
+**Source material labels** both selected by default. Select that stage on its own and the
+materials land on the cards already on the board. Pallet and REPEAT labels are left alone,
+and it never makes a duplicate card. Additional changes include:
+
+- If you unselect "Fill Out MPL + Find Repeats" on purpose, the "cards going up WITHOUT repeat
+  tags" popup no longer stops you. You get one line in the console instead. If that stage runs
+  and fails, it still warns loudly.
+- The master quote is now found in `2 - Planning\Batch Setup\Quote`, so the "quote workbook is
+  missing" warning is gone.
+- The "order has no work packet" warning now uses the stricter packet check below.
+
+### 911 SSPO Invoicing Prep: partial shipments now get their own invoice number
+
+A nest shipped in parts was getting the first shipment's invoice number and ship date on
+every supplement. Each partial now gets its own. It matches the **SubGroup** first (PARTIAL 1,
+PARTIAL 2 and so on, the same on the pricing master and the forecast), then takes the
+shipment closest to the close-out week: one inside the week, otherwise the earliest one after
+it. It never reuses a shipment from before the week. If it cannot tell (a tie, or nothing
+eligible), the Invoice # and date are left blank, no PDF is made, and the nest is named in
+the finish popup, so keep the SubGroups filled in on both sheets for a split nest.
+
+- The Workorder Close Outs sheet had come out with all 76 columns of the pricing master, junk
+  and #DIV/0! included, which was an oversight on my part. It is back to the right 20 columns.
+- The Close Outs sheet now has **Total Price per WO** in column U.
+
+### 922 FormingFinder, 922 Kitting and 922 LST Organizer now handle a PO part number that disagrees with its PPN
+
+Sometimes the PO says `H7658162-H3-2` and the drawing says `H7658162-H3DR-2`. That formed part
+came out on Bent Plates with no PPN and no SOURCE MATERIAL, Kitting then stamped FORMED on
+every kit line with that part number (rods included), and LST Organizer listed the tube as
+missing and needing review at once. All three now match it. If a formed part still cannot be
+matched, FormingFinder warns you to fill PPN and SOURCE MATERIAL on Bent Plates before
+running Kitting, and Kitting never stamps a rod FORMED.
+
+Bent Plates now comes out finished, with thin borders on every filled cell and the yellow
+header row, so nobody formats it by hand after a run, and a rerun with fewer parts leaves no
+empty boxes.
+
+### 922 Pallet Stamper and 922 Difficulty Stamper now stamp the work packet only
+
+The red stamp sometimes landed on the part sketch or the customer print, and the real packet
+stayed blank (6 of 252 order folders across four batches). A file is now stamped only if its
+first page proves it is a work packet. Pallet Stamper also cleans a stray stamp an old run
+left on a sketch or print. If a folder holds PDFs but none looks like a work packet, or a PDF
+cannot be read, a popup lists those orders to check by hand. Nothing is skipped silently.
+
+### 922 Batch Repeater finds the master quote
+
+Every run had been logging "the quote workbook is missing" and typing new MASTER PARTS rows
+from tube serials only. The quote is now found in `2 - Planning\Batch Setup\Quote`, and rows
+typed wrong while it was "missing" are corrected on the next normal run.
+
+### Every app now picks its folder instead of asking you to type a path
+
+**911 PO PDF Extractor, 911 Sketch Extractor, 911 Remove Ticket, 911 Setup, 922 Batch
+Repeater** and **Batch Auditor** used to ask for a pasted path or a typed batch number, and a
+typo failed the run with "not found" or quietly grabbed the wrong batch. A folder window now
+opens where the folder usually is and you pick it; closing the window cancels the run cleanly.
+Remove Ticket only asks if no folder is saved in Settings, and still asks you to type the
+batch number because it prints that on the page. Batch Auditor's 911/922 is a button choice
+now. One behaviour change, on purpose: 922 Batch Repeater no longer creates a new batch
+folder; 922 Setup's folder step is the only place that happens.
+
+### MieTrak Tools now explains hardware codes
+
+**Code Reference** and **Code Reader** are tabs at the top right of the Hardware Code
+Generator: how a code is built, which fields each hardware type needs, the full option lists
+(imperial and metric, with a filter), and a reader you paste a MieTrak code into to get it
+read back piece by piece, with any piece it does not recognise flagged. The generator shows
+"what this code says" under its result. Switching tabs or tools no longer wipes the code you
+were building.
+
+### Sheet Metal Calculators
+
+Numbers you type into a calculator are still there after you click another calculator and
+come back. Before, the form reset to its defaults.
+
+### The Blue theme is gone
+
+Anyone who had Blue selected opens to Dark and needs to do nothing. A custom theme you made
+and named "blue" is kept.
+
+### From your feedback
+
+- 922 Setup labelling the repeats instead of the source materials: both causes fixed, above.
+- 911 SSPO Invoicing Prep returning the first invoice number for every partial shipment:
+  fixed, above.
+
+---
+
 ## What's New in v0.8.7.7 - Batch Check
 
 ### New app: 902 Batch Validator
 
-**What it does:** you point it at a 902 batch the day it arrives and it tells you which
-parts are not ready to work on, before anyone starts.
+**What it does:** use this on a 902 batch and it tells you which parts are missing files
+or have corrupted data.
 
-- It reads the part list off EB's own `B#### 902 OFFLOAD TO ASA` workbook, or the
-  pricing workbook if that one is there yet. Either works, so you can run it the day the
-  batch lands.
-- It opens every DXF and IGES in the batch and checks there is really a part in it. EB
-  sends each part as a pair, so the two are checked separately.
-- It reads the prints in the WPDD folder. The part number is drawn on the page rather
-  than typed, so it reads it the same way 911 Inspection Dimensions reads a drawing. A
-  90 page book takes about two minutes.
-- Four things put a part on the list: no DXF was sent, the DXF is empty or damaged, the
-  IGES is corrupt or holds no part outline, or no print was sent.
+It reads the part list off EB's Offload to ASA workbook (or the pricing workbook if
+present), so you can run it the day the batch lands. Then it opens every DXF and IGES to
+check there's actual geometry in the file, and finally it reads the prints in the WPDD
+folder. The part number on the prints has weird formatting the system struggles with, so
+it uses our system from the Inspection Dimensions app to parse the data. A 90 page book
+takes about two minutes.
+
+- A part lands on the flagged list for one of four reasons: no DXF was sent, the DXF is
+  empty or damaged, the IGES is corrupt or holds no part outline, or no print was sent.
+- EB sends each part as a DXF and an IGES pair, so the two are checked separately.
 - It only reads the batch. Nothing is moved, renamed or changed, so it is safe to run
   before or after 902 DXF Prep.
 
 **What you get at the end:** one file in the batch folder, `{batch} - BATCH VALIDATION
 REPORT.pdf`. The first page is the counts, then every part on the list with Issue Y or N
 and what is wrong in plain words. The next page breaks the problems down by kind, and
-lists the print pages it could not tie to a part so you can check those by eye. The parts
-with an issue are printed in the console too, so the list can go straight into a message
+lists the print pages it could not tie to a part so you can check those by eye. The
+flagged parts are printed in the console too, so the list can go straight into a message
 to EB.
 
-**How to run it:** it is under 902 in the Library. Pick the batch folder, or the folder
-with the part files in it. Both work.
+**How to run it:** run this on either the batch folder or the folder with the part files
+in it. Both work.
 
-### 911 LST Organizer writes a report you can read
+### 911 LST Organizer final report has been overhauled to match 922 LST Organizer
 
-The pull report is now one color-coded PDF, the same as the 922 LST Organizer's, instead
-of a text file. Missing parts in red, nests that could not be found in red, revision
-letter swaps in blue, then the pull list grouped by nest. The popup at the end names the
-parts with no .lst file instead of pointing you at the report, and the last line in the
-console opens the report when you click it. The 922 one got that clickable line too.
+The pull report is now one color-coded PDF, the same as the 922 one, instead of a text
+file. Missing parts and nests it could not find in red, revision letter swaps in blue,
+then the pull list grouped by nest. The popup at the end names the parts with no .lst
+file, and the last line in the console opens the report when you click it. The 922 one
+got that clickable line too.
 
-### 911 Setup: the scribe verification sheet
+### 911 Setup: Scribe verification sheet now fits the nest
 
-- **It fits the nest now.** Both of the SACO templates ship that sheet with room for 24
-  parts, so on a bigger nest the parts past the 24th never showed up at all. The table is
-  now as long as the nest is. A six part nest prints six lines.
-- **The parts are in the same order as the nest package summary**, which is the order QA
+Previously both SACO templates' sheet contained room for 24 parts, which was an oversight
+on my part. So on a bigger nest everything past the 24th part never appeared. The table
+now expands to the correct length of the nest. So a 26 part nest now actually prints 26
+lines. Additional changes include:
+
+- **Parts are now in the same order as the nest package summary**, which is the order QA
   walks them in at final inspection. The inspection sheets follow the same order.
 - **Where the nest package and the BATCH LIST disagree on a quantity, the package's
-  number is the one written**, highlighted yellow, with both numbers named in the run
+  number is now the one written**, highlighted yellow, with both numbers named in the run
   summary. It used to keep the BATCH LIST number.
-- **On a plate run the MIL SPEC column follows the stock.** Carbon plate is N/A. For
-  non-ferrous plate each part gets its own MIL spec, read off the labeling block at the
-  bottom of that part's PART SKETCH page. If a part has no spec printed, the cell is left
-  blank and the console names the part. It never guesses one.
-- **The whole NEST tab is centered**, not just the top of it.
+- **On a plate run the MIL SPEC column now follows the stock.** Carbon plate is N/A.
+  Non-ferrous plate gets each part's own MIL spec, read off the labeling block at the
+  bottom of that part's PART SKETCH page. A part with no spec printed is left blank and
+  the console names it.
+- **The whole NEST tab is centered now**, not just the top of it.
 
 ### 902 DXF Prep
 
-It works on a batch the day it arrives: the part list can come from EB's own
-`B#### 902 OFFLOAD TO ASA` workbook, before the pricing workbook exists. It also
-recognises EB's longer file names now (the `_R_AS_1F01_of_1_FLAT-PATTERN#1` kind), which
-were being moved to the EXTRA folder as unrecognised.
+It now works on a batch the day it arrives: the part list can come from EB's Offload to
+ASA workbook, before the pricing workbook exists. It also recognises EB's longer file
+names now (the `_R_AS_1F01_of_1_FLAT-PATTERN#1` kind), which were being moved to the
+EXTRA folder as unrecognised.
 
 ### Fixes
 
-- **911 Setup: the quantity check never ran on plate nests.** It compared each part's
-  quantity against the nest package for shape work only, because a plate work order is
-  written differently (`3X24-814` rather than `XX700969`). On one plate nest that meant 4
-  of 34 parts were actually checked. All of them are checked now. For the record, across
-  682 parts in 14 batches every quantity agrees with its package.
+- **911 Setup was not checking part quantities on plate nests.** It compared each part
+  against the nest package for shape work only, because a plate work order is written
+  differently (`3X24-814` rather than `XX700969`). On one plate nest that meant 4 of 34
+  parts were actually checked. All of them are checked now. For the record, across 682
+  parts in 14 batches every quantity agrees with its package.
 
 ---
 

@@ -6,9 +6,14 @@ BEFORE 'BK394153 NOFORN.pdf', so the old "first PDF in the folder" rule put the
 red Batch/Pallet stamp on the drawing the floor reads and left the packet blank
 (reported by a user 2026-08-20; found on 6 binders in Batches 486 and 489).
 
-The packet is now identified by READING page 1 — a drawing carries the
-title-block boilerplate, a packet never does — and a stray stamp already sitting
-on a drawing is taken back off.
+Then 2026-09-23, on Batch 494 / BN331786-R8653362-H11L: the folder held
+`BN331786 Sketch.pdf` AND `BN331786.pdf`, the sketch sorted first (a space
+precedes a dot), and "the first PDF that is not a drawing" stamped the sketch.
+A sketch is not a drawing, but it is not a packet either — the absence of a
+title block was never the same claim as "this is the packet".
+
+The packet is now identified POSITIVELY by READING page 1 for its own heading,
+and a stray stamp already sitting on any non-packet is taken back off.
 """
 
 import importlib.util
@@ -107,7 +112,10 @@ def test_a_stray_stamp_is_taken_back_off_the_binder(ps, tmp_path):
     _make_pdf(packet, _PACKET_TEXT)
     assert _stamp_count(binder) == 1        # what a pre-fix run left behind
 
-    removed = ps.unstamp_drawings(order, packet, print)
+    import techdeck.core.plugin_sdk as sdk
+    found, others = sdk.find_work_packet_report(order)
+    assert found == packet
+    removed = ps.unstamp_non_packets(others, True, print)
 
     assert removed == 1
     assert _stamp_count(binder) == 0
@@ -122,7 +130,9 @@ def test_cleanup_leaves_a_clean_binder_alone(ps, tmp_path):
     _make_pdf(packet, _PACKET_TEXT)
     before = binder.read_bytes()
 
-    assert ps.unstamp_drawings(order, packet, print) == 0
+    import techdeck.core.plugin_sdk as sdk
+    _, others = sdk.find_work_packet_report(order)
+    assert ps.unstamp_non_packets(others, True, print) == 0
     assert binder.read_bytes() == before    # never rewritten with nothing to do
 
 
@@ -133,8 +143,9 @@ def test_cleanup_never_touches_the_work_packets_own_stamp(ps, tmp_path):
     _make_pdf(packet, _PACKET_TEXT, stamp="Batch 489 Pallet 2")
 
     import techdeck.core.plugin_sdk as sdk
-    found = sdk.find_work_packet(order)
-    assert ps.unstamp_drawings(order, found, print) == 0
+    found, others = sdk.find_work_packet_report(order)
+    assert found == packet
+    assert ps.unstamp_non_packets(others, True, print) == 0
     assert _stamp_count(packet) == 1
 
 
@@ -144,5 +155,68 @@ def test_cleanup_runs_even_when_the_folder_has_no_packet(ps, tmp_path):
     binder = order / "Binder1.pdf"
     _make_pdf(binder, _DRAWING_TEXT, stamp="Batch 489 Pallet 2")
 
-    assert ps.unstamp_drawings(order, None, print) == 1
+    import techdeck.core.plugin_sdk as sdk
+    found, others = sdk.find_work_packet_report(order)
+    assert found is None
+    assert ps.unstamp_non_packets(others, False, print) == 1
     assert _stamp_count(binder) == 0
+
+
+# ── the sketch beside the packet (reported 2026-09-23, Batch 494) ────────────
+# A part sketch / customer print gets filed in the order folder next to the
+# packet and is named for the SAME order, so it sorts first: after the shared
+# "BN331786", a space (0x20) precedes a dot (0x2E). It carries no title block,
+# so "not a drawing" called it the packet and it took the red stamp while the
+# real packet stayed blank — on 6 live order folders.
+
+_SKETCH_TEXT = ["FLAT PATTERN", "BEND ALLOWANCE", "SHEET 1 OF 9"]
+
+
+def test_the_sketch_sorting_first_does_not_win(ps, tmp_path):
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    sketch = order / "BN331786 Sketch.pdf"
+    packet = order / "BN331786.pdf"
+    _make_pdf(sketch, _SKETCH_TEXT)
+    _make_pdf(packet, _PACKET_TEXT)
+    # the exact Windows ordering that caused it
+    assert sorted(p.name for p in order.iterdir())[0] == "BN331786 Sketch.pdf"
+
+    import techdeck.core.plugin_sdk as sdk
+    assert sdk.find_work_packet(order).name == "BN331786.pdf"
+
+
+def test_a_stray_stamp_is_taken_back_off_the_sketch(ps, tmp_path):
+    """Heals the 6 order folders the pre-fix runs already mis-stamped."""
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    sketch = order / "BN331786 Sketch.pdf"
+    packet = order / "BN331786.pdf"
+    _make_pdf(sketch, _SKETCH_TEXT, stamp="Batch 494 Pallet 3")
+    _make_pdf(packet, _PACKET_TEXT)
+    assert _stamp_count(sketch) == 1
+
+    import techdeck.core.plugin_sdk as sdk
+    found, others = sdk.find_work_packet_report(order)
+    assert found == packet
+    assert ps.unstamp_non_packets(others, True, print) == 1
+    assert _stamp_count(sketch) == 0
+
+
+def test_no_packet_found_never_strips_a_non_drawing(ps, tmp_path):
+    """The other direction of the same mistake.
+
+    With no packet identified we do not KNOW the stamp is stray — the packet
+    may be there in a layout we do not recognise. Only a confirmed drawing is
+    cleaned, so a real packet can never be stripped by a guess.
+    """
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    mystery = order / "BN331786.pdf"
+    _make_pdf(mystery, _SKETCH_TEXT, stamp="Batch 494 Pallet 3")
+
+    import techdeck.core.plugin_sdk as sdk
+    found, others = sdk.find_work_packet_report(order)
+    assert found is None
+    assert ps.unstamp_non_packets(others, False, print) == 0
+    assert _stamp_count(mystery) == 1

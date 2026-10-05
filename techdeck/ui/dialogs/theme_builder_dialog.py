@@ -18,6 +18,7 @@ from techdeck.ui.theme import (
     save_custom_theme, is_builtin_theme, get_current_palette,
 )
 from techdeck.ui.utils import make_tinted_svg_copy
+from techdeck.ui.theme import icon_folder_for_theme
 
 
 # Field groups: (group_label, [(palette_field_name, display_label), ...])
@@ -212,7 +213,7 @@ class ThemeBuilderDialog(QDialog):
 
         _dlg_theme_name = self._settings.get_theme()
         _dlg_theme = get_current_palette(_dlg_theme_name)
-        _dlg_icon_folder = "light" if _dlg_theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _dlg_icon_folder = icon_folder_for_theme(_dlg_theme_name)
         _dlg_icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / _dlg_icon_folder
         _dlg_arrow = make_tinted_svg_copy(_dlg_icons_dir / "chevron-down.svg", _dlg_theme.text)
         _dlg_combo_css = f"""

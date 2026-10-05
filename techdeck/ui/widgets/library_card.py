@@ -35,7 +35,7 @@ class PluginInfoDialog(QDialog):
         title_font.setPointSize(13)
         title_font.setWeight(QFont.Weight.DemiBold)
         title.setFont(title_font)
-        title.setStyleSheet(f"color: {theme.text}; background: transparent;")
+        title.setStyleSheet(f"color: {theme.card_text or theme.text}; background: transparent;")
 
         body = QLabel(description)
         body.setWordWrap(True)
@@ -73,18 +73,21 @@ class LibraryPluginCard(QFrame, ThemeAware):
 
     toggled = Signal(bool)
 
-    def __init__(self, plugin, plugin_desc: str, tile_id: str, theme, is_selected: bool = False, parent=None):
+    def __init__(self, plugin, plugin_desc: str, tile_id: str, theme, is_selected: bool = False, parent=None,
+                 locked: bool = False):
         super().__init__(parent)
         self.tile_id = tile_id
         self.theme = theme
-        self._is_checked = is_selected
+        self._is_checked = is_selected and not locked
         self._plugin = plugin
+        self._locked = locked              # greyed out, not clickable: a cartridge not yet discovered
         self._plugin_name = getattr(plugin, "name", tile_id)
         # Full (untruncated) description for the info popup.
         self._full_desc = getattr(plugin, "description", "") or "No description provided."
 
         self.setFixedSize(TILE_W, TILE_H)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        if not locked:
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         # Main layout: centered icon over the app name (Windows-Settings style).
         layout = QVBoxLayout(self)
@@ -94,7 +97,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(TILE_ICON_BOX, TILE_ICON_BOX)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.icon_label.setPixmap(plugin_icon_pixmap(plugin, TILE_ICON))
+        self.icon_label.setPixmap(self._icon_pixmap())
         # Transparent so the tile's (selected/hover) background shows through —
         # without this the box picks up a dark fill that clashes when selected.
         self.icon_label.setStyleSheet("background: transparent;")
@@ -111,7 +114,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         name_font.setPointSize(9)
         name_font.setWeight(QFont.Weight.Medium)
         self.name_label.setFont(name_font)
-        self.name_label.setStyleSheet(f"color: {theme.text}; background-color: transparent;")
+        self.name_label.setStyleSheet(f"color: {self._name_color()}; background-color: transparent;")
 
         layout.addWidget(self.icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.name_label, 1)
@@ -130,6 +133,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         # consumes its own mouse press, clicking it does NOT toggle the tile's
         # selection. (No hover tooltip — the description lives behind this button.)
         self.info_btn = QPushButton("i", self)
+        self.info_btn.setVisible(not locked)        # a locked cartridge keeps its secret
         self.info_btn.setFixedSize(18, 18)
         self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.info_btn.setToolTip("About this app")
@@ -146,9 +150,24 @@ class LibraryPluginCard(QFrame, ThemeAware):
         """Called automatically when theme changes."""
         self.theme = self.get_current_palette()
         self._update_card_style()
-        self.name_label.setStyleSheet(f"color: {self.theme.text}; background-color: transparent;")
-        self.icon_label.setPixmap(plugin_icon_pixmap(self._plugin, TILE_ICON))
+        self.name_label.setStyleSheet(f"color: {self.theme.card_text or self.theme.text}; background-color: transparent;")
+        self.icon_label.setPixmap(self._icon_pixmap())
         self._style_family_badge()
+
+    def is_locked(self) -> bool:
+        return self._locked
+
+    def _icon_pixmap(self):
+        pm = plugin_icon_pixmap(self._plugin, TILE_ICON)
+        if self._locked:
+            from techdeck.ui.arcade_chrome import _greyed
+            pm = _greyed(pm)                   # the store's "not yours" look
+        return pm
+
+    def _name_color(self) -> str:
+        if self._locked:
+            return self.theme.text_secondary or self.theme.card_text or self.theme.text
+        return self.theme.card_text or self.theme.text
 
     def _style_family_badge(self):
         """Same look as Home's badge: text-only, colored with the theme accent.
@@ -156,8 +175,9 @@ class LibraryPluginCard(QFrame, ThemeAware):
         if self._family not in _FAMILY_BADGE_COLORS:
             self.family_badge.setVisible(False)
             return
+        badge_color = (self.theme.text_secondary or self.theme.accent) if self._locked else self.theme.accent
         self.family_badge.setStyleSheet(
-            f"QLabel {{ background-color: transparent; color: {self.theme.accent}; "
+            f"QLabel {{ background-color: transparent; color: {badge_color}; "
             f"font-size: 8pt; font-weight: bold; border-radius: 5px; padding: 0px 4px; }}"
         )
         self.family_badge.adjustSize()
@@ -187,7 +207,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         if hasattr(self, "info_btn"):
             self.info_btn.setStyleSheet(f"""
                 QPushButton {{
-                    color: {self.theme.text_secondary};
+                    color: {self.theme.card_text or self.theme.text_secondary};
                     background: transparent;
                     border: none;
                     padding: 0px;
@@ -205,6 +225,8 @@ class LibraryPluginCard(QFrame, ThemeAware):
 
     def mousePressEvent(self, event):
         """Handle mouse press - toggle the pure-highlight selection."""
+        if self._locked:
+            return                             # not yours yet: nothing happens
         if event.button() == Qt.MouseButton.LeftButton:
             self._is_checked = not self._is_checked
             self._update_card_style()

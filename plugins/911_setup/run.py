@@ -1949,18 +1949,27 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     # Step 1 -- Prompt user for batch number, then resolve batch folder
     # ------------------------------------------------------------------ #
+    # The batch is PICKED, not typed. Typing built `qtdr_root / typed` and a
+    # typo died on "Batch folder not found" with no hint which of the 305
+    # folders under the root was meant. The pick cannot typo, starts in the
+    # right place, and seeds the 911 family cache so a queued run of several
+    # 911 apps asks once. A caller that supplies `batch_number` (headless/CLI,
+    # and 911 Teams Cards handing off) still skips the prompt entirely.
     console = params.get("console")
-    if console and hasattr(console, "request_input"):
-        raw = sdk.request_batch_number(params, "Enter Batch Number (e.g. V060, V086):")
-    else:
-        raw = params.get("batch_number", "")
-
-    batch_number = raw.strip().upper()
-    if not batch_number:
-        raise ValueError("No batch number provided. Please enter a batch number.")
-
+    supplied = (params.get("batch_number") or "").strip()
     qtdr_root = _base_qtdr(qtdr_override)
-    batch_folder = qtdr_root / batch_number
+
+    if supplied:
+        batch_number = sdk.normalize_911_batch(supplied)
+        batch_folder = (sdk.find_911_batch_folder(qtdr_root, batch_number)
+                        or (qtdr_root / batch_number))
+    elif console and hasattr(console, "request_input"):
+        picked = sdk.request_911_batch_folder(params, qtdr_override)
+        if picked is None or cancel_event.is_set():
+            return  # user cancelled - the helper already flagged the run
+        batch_number, batch_folder = picked
+    else:
+        raise ValueError("No batch number provided. Please enter a batch number.")
 
     log(f"Batch number : {batch_number}")
     log(f"QTDR root    : {qtdr_root}")

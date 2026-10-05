@@ -274,3 +274,4 @@ def test_face_html_emits_tier_colors_and_rows():
     assert html.count("\n") == len(FACE_ART) - 1
     for color in (PHOSPHOR["dim"], PHOSPHOR["bright"], PHOSPHOR["peak"]):
         assert color in html
+

@@ -1,0 +1,26 @@
+{
+  "id": "game_puppet_master",
+  "name": "Puppet Master",
+  "description": "His table. A card game played across a board in the dark, with him for company. Found, not bought.",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "Games",
+  "details": {
+    "setup": [
+      "None. The cartridge sits greyed out in the Library until you find the table another way; then it is yours."
+    ],
+    "how_it_works": [
+      "A road of stops with three doors each: tables, card choices, a fire, a stone. Two candles.",
+      "At a table: draw, play, offer the lesser things to the greater, ring the bell. Tip his scale."
+    ],
+    "output": [
+      "It's a game - no work files. Your place on the road is kept between sessions."
+    ]
+  },
+  "icon": "icon.tdart",
+  "requires_admin": false,
+  "requires_main_thread": true,
+  "locked": true,
+  "show_locked": true,
+  "gate": "puppet_master"
+}

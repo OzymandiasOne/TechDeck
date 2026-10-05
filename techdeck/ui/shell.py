@@ -6,6 +6,7 @@ PHASE 2 FIX: Removed console height persistence - users drag to preferred height
 """
 
 import logging
+import os
 import time
 import random
 from pathlib import Path
@@ -242,8 +243,25 @@ class MainWindow(QMainWindow):
         # Create main layout
         self._setup_ui()
         
-        # Start update checker after UI is ready (delayed by 3 seconds)
-        QTimer.singleShot(3000, self.update_checker.start)
+        # Start update checker after UI is ready (delayed by 3 seconds).
+        # TECHDECK_NO_UPDATE_CHECK=1 skips it: a dev branch behind the shipped
+        # version otherwise gets the pop-up on every launch (found playtesting).
+        if not os.environ.get("TECHDECK_NO_UPDATE_CHECK"):
+            QTimer.singleShot(3000, self.update_checker.start)
+
+        # Halloween dressing: corner cobwebs + one scurrying crawly at a time
+        # (widgets/halloween_decor.py). Gated inside on season + theme, and
+        # never allowed to break startup.
+        self.halloween_decor = None
+        try:
+            from techdeck.ui.widgets.halloween_decor import HalloweenDecor
+            self.halloween_decor = HalloweenDecor(self, settings=self.settings)
+            self.halloween_decor.refresh()
+            # each tab wears its own cobweb (Home keeps its pair)
+            self.page_stack.currentChanged.connect(self._sync_decor_page)
+            self._sync_decor_page(self.page_stack.currentIndex())
+        except Exception:
+            logger.exception("halloween decor failed to start")
 
         # After a crash/freeze, offer a debug report once on the next start
         # (well after the fade-in so startup feel is untouched).
@@ -260,11 +278,33 @@ class MainWindow(QMainWindow):
         self._fadein.setEndValue(1.0)
         self._fadein.setEasingCurve(QEasingCurve.Type.OutCubic)
 
+    _DECOR_PAGES = {0: "home", 1: "library", 2: "settings", 3: "account",
+                    4: "assistant"}
+
+    def _sync_decor_page(self, index: int):
+        """Tell the Halloween dressing which tab is showing."""
+        decor = getattr(self, "halloween_decor", None)
+        if decor is None:
+            return
+        name = self._DECOR_PAGES.get(index)
+        if name is None and index == getattr(self, "_devkit_page_index", -1):
+            name = "devkit"
+        try:
+            decor.set_page(name or f"page{index}")
+        except Exception:
+            logger.exception("halloween decor page sync failed")
+
     def start_fadein(self):
         """Begin the startup fade-in animation. Called by __main__.py once
         the splash has closed, so the fade is the FIRST thing the user sees
         in place of the splash (rather than competing with it)."""
         self._fadein.start()
+        # The Puppet Master's invitation types itself out under a dimmed app.
+        # A no-op for the plain greeting; never allowed to break startup.
+        try:
+            self.console.play_greeting_intro(self)
+        except Exception:
+            pass
     
     def _setup_ui(self):
         """Set up the main UI layout."""
@@ -278,6 +318,7 @@ class MainWindow(QMainWindow):
         # ===== Sidebar =====
         self.sidebar = Sidebar(settings_manager=self.settings)
         self.sidebar.page_changed.connect(self._on_page_changed)
+        self.sidebar.refresh_new_badges(self.settings)
         main_layout.addWidget(self.sidebar)
         self._step("sidebar built")
         QApplication.processEvents()
@@ -420,6 +461,7 @@ class MainWindow(QMainWindow):
 
         # Account page
         self.account_page = AccountPage(self.settings)
+        self.account_page.badges_changed.connect(lambda: self.sidebar.refresh_new_badges(self.settings))
         self._step("account page built")
         QApplication.processEvents()
 
@@ -824,7 +866,11 @@ class MainWindow(QMainWindow):
         cat = self.command_handler.active_cat()
         if cat is not None:
             from techdeck.ui.widgets.console_cat import respond_to
+            from techdeck.ui.void_game.invite import is_invitation
             cat.speak(respond_to(message))
+            if is_invitation(message):
+                # "Shall we play a game?" He answers, then the table opens.
+                QTimer.singleShot(2200, self.command_handler.open_table)
             return
         self.console.append_system(
             "Commands start with a slash — type /help to see everything "
@@ -857,6 +903,13 @@ class MainWindow(QMainWindow):
         self._restyle_home_splitter()
         self._restyle_console_controls()
         self.btn_run.setStyleSheet(self._run_button_style(theme_manager.get_current_palette()))
+        # Leaving the halloween theme is the off switch for the cobwebs and
+        # crawlies; coming back to it turns them on again.
+        if getattr(self, "halloween_decor", None) is not None:
+            try:
+                self.halloween_decor.refresh()
+            except Exception:
+                logger.exception("halloween decor refresh failed")
 
     @staticmethod
     def _run_button_style(theme) -> str:
@@ -889,11 +942,11 @@ class MainWindow(QMainWindow):
                 background-color: {theme.background};
             }}
             QSplitter::handle {{
-                background-color: {theme.divider};
+                background-color: {theme.splitter_handle or theme.divider};
                 height: 2px;
             }}
             QSplitter::handle:hover {{
-                background-color: {theme.border_strong};
+                background-color: {theme.splitter_handle_hover or theme.border_strong};
             }}
         """
         # Clear first + force polish so Qt actually repaints the handle.

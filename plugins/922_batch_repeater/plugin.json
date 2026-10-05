@@ -1,18 +1,18 @@
 {
   "id": "922_batch_repeater",
   "name": "922 Batch Repeater",
-  "description": "Copy repeat orders from previous 922 batches - prompts for batch number when run. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Can also label each repeat's Teams card with the REPEAT label and move it to the batch's MODEL CHECK bucket - normally 922 Setup already does that when it creates the cards, so this is the second pass for a batch carded before the MPL was filled in.",
-  "version": "2.6.0",
+  "description": "Copy repeat orders from previous 922 batches - you pick the batch folder when it runs. Also maintains the 922 MPL workbook: writes the new batch's PO column into the PO 321+ sheet and updates the MASTER PARTS catalog (repeat counts, batch history, alternate part names). Can also label each repeat's Teams card with the REPEAT label and move it to the batch's MODEL CHECK bucket - normally 922 Setup already does that when it creates the cards, so this is the second pass for a batch carded before the MPL was filled in.",
+  "version": "2.7.1",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
     "setup": [
-      "Sync the '922 QTDR Production Packages' folder. The new batch's order folders should already exist (922 Setup's folder step).",
+      "Sync the '922 QTDR Production Packages' folder. The batch's folder must already exist (922 Setup's folder step) - you pick it from a list when the app runs.",
       "Keep '922 MPL.xlsx' in place - the app reads the PO matrix from it and also updates it.",
       "For card tagging, the D922 Planner and the repeat-tagger flow need to be set up."
     ],
     "how_it_works": [
-      "Enter the batch. The app finds which orders were made in a prior batch (repeats) and lets you pick which to pull.",
+      "Pick the batch folder. The app finds which orders were made in a prior batch (repeats) and lets you pick which to pull.",
       "It copies each repeat's order folder into REPEAT BATCHES and distributes that repeat's CAD prints and binder into the matching current order folders.",
       "It tags each repeat's Teams card REPEAT and moves it to MODEL CHECK, and folds the batch into the 922 Master Parts List.",
       "It then checks each repeat folder for its CAD-AND-SHOP-PRINTS folder and the .lst tube files in the 7000 folders beneath it - looking only, nothing is pulled - so a repeat whose source never had them is caught now instead of at the end of the batch."

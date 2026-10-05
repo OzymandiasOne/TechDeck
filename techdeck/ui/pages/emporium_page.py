@@ -26,7 +26,7 @@ import random
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QScrollArea,
 )
-from PySide6.QtCore import Qt, QRect, QTimer, QPoint
+from PySide6.QtCore import Signal, Qt, QRect, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QPolygon
 
 from techdeck.ui.sprite_font import font as _sf
@@ -43,6 +43,7 @@ from techdeck.ui.widgets.store_tiles import CategoryBox, ShopWindow, StoreTile
 
 class EmporiumPage(QWidget):
     """The redemption-counter scene + the catalog grid, with arcade animation."""
+    refreshed = Signal()               # stock or balance changed (a purchase, a claim)
 
     DEFAULT_DIALOGUE = "WOOGY: WHAT'LL IT BE, FELLAS?"
 
@@ -108,6 +109,8 @@ class EmporiumPage(QWidget):
         self._bg = _load_pixmap("emporium_background.tdart", 128)
         self._counter = _load_pixmap("emporium_counter.tdart", 128)
         self._woogy = _load_pixmap("woogy.tdart", 230)
+        self._woogy_rect = QRect()         # where he was last painted: a hit area for asking him
+        self.setMouseTracking(True)
         self._cabinet = _load_pixmap("arcade_cabinet.tdart", 64)
         # 9-slice word-bubble panels (editable .tdart in assets/sprites/)
         self._bubbles = {
@@ -244,6 +247,9 @@ class EmporiumPage(QWidget):
         self.balance_lbl.setPixmap(bal)
         for t in self.tiles:
             t.refresh()
+        for box in getattr(self, "cat_buttons", {}).values():
+            box.update()                        # a category's NEW! may have cleared
+        self.refreshed.emit()                   # the Account page re-places its tab stickers
 
     # ---- categories (each opens a floating window over the scene) -------------
     def _category_icon(self, cat_id):
@@ -318,8 +324,18 @@ class EmporiumPage(QWidget):
         items that 'require' a milestone (owl/monkey need a fully grown tree)."""
         if self.settings.is_unlocked(item["id"]):
             return True
-        if item.get("requires") == "tree_full":
+        if item.get("seasonal") == "halloween":
+            # seasonal stock: on the shelf only while the season is on
+            from techdeck.core.constants import halloween_active
+            if not halloween_active(settings=self.settings):
+                return False
+        requires = item.get("requires")
+        if requires == "tree_full":
             return self.settings.get_tree_stage() >= self.settings.TREE_STAGES
+        if requires:
+            # any other value is an ITEM id that must be owned first (the Ghost
+            # needs the Bookshelf he hides behind)
+            return self.settings.is_unlocked(requires)
         return True
 
     def _populate_grid(self):
@@ -337,6 +353,8 @@ class EmporiumPage(QWidget):
             self.grid.addWidget(t, i // cols, i % cols,
                                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             t.show()
+            from techdeck.ui import whats_new
+            whats_new.attach_sticker(t)            # parented now: the shelf's overlay takes it
         self.grid.setColumnStretch(cols, 1)
         self.grid_host.setVisible(bool(matching))
         self._coming_soon.setVisible(not matching)
@@ -369,7 +387,25 @@ class EmporiumPage(QWidget):
             self._set_banner_bright(bright)
         self.update()
 
+    CURSED_ANSWER = ("WOOGY WANT NOTHING TO DO WITH THAT CURSED THING. "
+                     "IF FRIEND REALLY WANT TO PLAY IT... ASK THE PUPPET MASTER.")
+
+    def _woogy_has_an_answer(self) -> bool:
+        """He has something to say about the cartridge until it has been played."""
+        from techdeck.ui import whats_new
+        return whats_new.PUPPET in whats_new.new_badges(self.settings)
+
+    def mouseMoveEvent(self, e):
+        over = self._woogy_has_an_answer() and self._woogy_rect.contains(e.position().toPoint())
+        self.setCursor(Qt.CursorShape.WhatsThisCursor if over else Qt.CursorShape.ArrowCursor)
+        super().mouseMoveEvent(e)
+
     def mousePressEvent(self, e):
+        # Ask Woogy about the cartridge that appeared in My Stuff.
+        if self._woogy_has_an_answer() and self._woogy_rect.contains(e.position().toPoint()):
+            self._set_dialogue(self.CURSED_ANSWER)
+            self.update()
+            return
         # Click the bubble to fast-forward the typewriter, then to page through
         # the rest of Woogy's comment.
         if self._dialogue_rect().contains(e.position().toPoint()):
@@ -452,7 +488,8 @@ class EmporiumPage(QWidget):
             wpm = self._scaled_woogy(h)
             ww, wh = wpm.width(), wpm.height()
             y = h - int(h * 0.30) - wh + 30
-            p.drawPixmap(sx + (sw - ww) // 2, max(y, int(h * 0.32)), wpm)
+            self._woogy_rect = QRect(sx + (sw - ww) // 2, max(y, int(h * 0.32)), ww, wh)
+            p.drawPixmap(self._woogy_rect.topLeft(), wpm)
         if self._counter is not None:
             ch = int(h * 0.30)
             p.drawPixmap(QRect(sx, h - ch, sw, ch), self._counter)

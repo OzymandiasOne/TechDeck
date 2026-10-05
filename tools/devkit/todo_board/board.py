@@ -751,7 +751,8 @@ class TodoBoard(QWidget, ThemeAware):
         self._style_status()
         btn_qss = (
             f"QPushButton {{ background-color: {self._pal.surface}; "
-            f"color: {self._pal.text}; border: 1px solid {self._pal.border}; "
+            f"color: {self._pal.card_text or self._pal.text}; "
+            f"border: 1px solid {self._pal.card_border or self._pal.border}; "
             f"border-radius: 6px; padding: 5px 12px; }}"
             f"QPushButton:hover {{ border-color: {self._pal.accent}; "
             f"color: {self._pal.accent}; }}")
@@ -759,7 +760,7 @@ class TodoBoard(QWidget, ThemeAware):
         self._clear_btn.setStyleSheet(btn_qss)
         self._refresh_btn.setStyleSheet(btn_qss)
         self._triage_toggle.setStyleSheet(
-            f"QCheckBox {{ color: {self._pal.text_secondary}; "
+            f"QCheckBox {{ color: {self._pal.card_text or self._pal.text_secondary}; "
             f"font-size: 9pt; background: transparent; }}"
             f"QCheckBox:hover {{ color: {self._pal.accent}; }}")
         # Re-render columns/cards in the new palette.

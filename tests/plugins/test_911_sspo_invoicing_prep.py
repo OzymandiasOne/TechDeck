@@ -40,10 +40,10 @@ def _pricing_workbook(path: Path, rows):
     wb = Workbook()
     ws = wb.active
     ws.append(PRICING_HEADERS)
-    for batch, nest, wo, total in rows:
+    for batch, nest, wo, total, *sub in rows:      # optional 5th: SubGroup
         ws.append([batch, wo, f"H{wo}", "HSS", 2, nest, total,
-                   datetime(2026, 9, 4), "V807", "Open", "911", "CUT", "A",
-                   "SOPO", "", "OK"])
+                   datetime(2026, 9, 4), "V807", "Open", "911", "CUT",
+                   sub[0] if sub else None, "SOPO", "", "OK"])
     wb.save(path)
 
 
@@ -61,13 +61,15 @@ def _forecast_workbook(path: Path, active_rows, complete_rows, with_inv=True):
         hdr = [""] * 56
         hdr[0], hdr[1], hdr[2], hdr[6] = "PO", "Line", batch_header, "Nest"
         hdr[45] = "Ship Date"
+        hdr[54] = "SubGroup"                       # BC, as on the real forecast
         if with_inv:
             hdr[55] = "PS/Inv"
         sheet.append(hdr)
-        for po, line, batch, nest, ship, inv in rows:
+        for po, line, batch, nest, ship, inv, *sub in rows:   # optional 7th: SubGroup
             r = [None] * 56
             r[0], r[1], r[2], r[6] = po, line, batch, nest
             r[45], r[55] = ship, inv
+            r[54] = sub[0] if sub else None
             sheet.append(r)
 
     fill(wb["911 Forecast"], "Batch /DR", active_rows)
@@ -148,10 +150,12 @@ def test_lookup_carries_invoice_and_ship_date_from_both_sheets(mod, tmp_path):
         complete_rows=[("1000129724", 11, "V094", "503891", datetime(2026, 8, 20), "55420"),
                        ("1000129724", 14, "S038", "P08348", datetime(2025, 1, 1), "OLD")])
     m = mod._read_po_map(p, lambda *_: None, None)
-    assert m[("S038", "P08348")] == mod.ForecastRow(
-        "1000129724", 14, "55501", datetime(2026, 9, 3))   # active sheet wins
-    assert m[("V094", "503891")].invoice == "55420"
-    assert m[("V094", "503891")].ship_date == datetime(2026, 8, 20)
+    # v2.5.0: every line is kept, active sheet first - the picker chooses.
+    assert m[("S038", "P08348")] == [
+        mod.ForecastRow("1000129724", 14, "55501", datetime(2026, 9, 3)),
+        mod.ForecastRow("1000129724", 14, "OLD", datetime(2025, 1, 1))]
+    assert m[("V094", "503891")][0].invoice == "55420"
+    assert m[("V094", "503891")][0].ship_date == datetime(2026, 8, 20)
 
 
 def test_lookup_without_the_column_warns_once_and_leaves_blank(mod, tmp_path):
@@ -161,9 +165,143 @@ def test_lookup_without_the_column_warns_once_and_leaves_blank(mod, tmp_path):
         with_inv=False)
     logs = []
     m = mod._read_po_map(p, logs.append, None)
-    row = m[("S038", "P08348")]
+    row = m[("S038", "P08348")][0]
     assert row.invoice == "" and row.po == "1000129724"
     assert sum(mod.INV_HEADER in l for l in logs) == 2    # one warning per sheet
+
+
+# ---------------------------------------------------------------------------------
+# Partial shipments (v2.5.0, A.T. 2026-09-25): one forecast line per shipment.
+# The first line used to win, so later shipments got the FIRST invoice number.
+# ---------------------------------------------------------------------------------
+RANGE = (date(2026, 9, 1), date(2026, 9, 7))       # run_split's close-out range
+FIRST = ("1000129724", 14, "S038", "P08348", datetime(2026, 8, 21), "55400")
+SECOND = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "55501")
+
+
+def test_partial_shipment_takes_the_line_shipping_in_range(mod, run_split):
+    result, out, exporter, _ = run_split(
+        active_rows=[FIRST, SECOND], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "55501"                      # not the first line's 55400
+    assert ws["G3"].value == datetime(2026, 9, 4)
+    assert [c[1].name for c in exporter.calls] == ["ASA Invoice No. 55501 Supplement.pdf"]
+    assert result.ambiguous_invoice == []
+
+
+def test_late_shipment_after_the_week_is_still_found(mod, run_split):
+    # Nests do ship after their Firm VPD (confirmed 2026-09-28): the closest
+    # shipment AFTER the close-out week wins, and last month's never does.
+    late = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 9), "55600")
+    later = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 25), "55700")
+    result, out, exporter, _ = run_split(
+        active_rows=[FIRST, later, late], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "55600" and ws["G3"].value == datetime(2026, 9, 9)
+    assert result.ambiguous_invoice == []
+
+
+def test_an_earlier_weeks_shipment_is_never_reused(mod, run_split):
+    # This week's shipment has no Ship Date on the forecast yet. Taking the
+    # earlier line would reuse its invoice number - the original bug.
+    not_yet = ("1000129724", 14, "S038", "P08348", None, None)
+    result, out, exporter, logs = run_split(
+        active_rows=[FIRST, not_yet], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10)])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value is None and ws["G3"].value is None     # never a guess
+    assert ws["A" + str(mod.INV_DATA_START)].value == "1000129724"  # PO still filled
+    assert exporter.calls == []
+    assert result.ambiguous_invoice == [
+        "S038 P08348 (2 shipments on the forecast and no Ship Date during or "
+        "after this range)"]
+    assert result.missing_invoice == []                  # listed once, not twice
+
+
+def test_two_invoices_on_the_closest_date_is_a_tie(mod):
+    a = mod.ForecastRow("PO", 1, "1", date(2026, 9, 2))
+    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 5))   # both inside the week
+    row, why = mod._pick_forecast_row([a, b], RANGE)
+    assert why and row.invoice == "" and row.po == "PO"
+
+
+def test_repeated_identical_lines_are_not_ambiguous(mod):
+    a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 9, 4))
+    row, why = mod._pick_forecast_row([a, a._replace()], RANGE)
+    assert why is None and row.invoice == "55501"
+
+
+def test_single_line_is_used_whatever_its_ship_date(mod):
+    # One forecast line = the nest's only shipment: nothing to choose between.
+    a = mod.ForecastRow("PO", 1, "55501", datetime(2026, 12, 1))
+    assert mod._pick_forecast_row([a], RANGE) == (a, None)
+
+
+def test_typed_ship_date_text_is_understood(mod):
+    a = mod.ForecastRow("PO", 1, "1", "8/21/2026")
+    b = mod.ForecastRow("PO", 1, "2", "09/04/2026")
+    row, why = mod._pick_forecast_row([a, b], RANGE)
+    assert why is None and row.invoice == "2"
+
+
+# SubGroup first (invoicing 2026-09-28): partials are split "PARTIAL 1",
+# "PARTIAL 2"... on the pricing master (AN) AND the forecast (BC).
+P1 = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "52671", "PARTIAL 1")
+P2 = ("1000129724", 14, "S038", "P08348", datetime(2026, 9, 4), "54502", "PARTIAL 2")
+
+
+def test_subgroup_splits_two_partials_that_shipped_the_same_day(mod, run_split):
+    # The real V087 P08091 case: two invoices, same Ship Date - dates can't
+    # tell them apart, the SubGroup can.
+    result, out, exporter, _ = run_split(
+        active_rows=[P1, P2], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10, "Partial  2")])  # case/space-blind
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value == "54502"
+    assert result.ambiguous_invoice == []
+
+
+def test_a_named_subgroup_is_never_matched_to_another_partial(mod, run_split):
+    result, out, exporter, _ = run_split(
+        active_rows=[P1, P2], complete_rows=[],
+        pricing_rows=[("S038", "P08348", 26308, 10, "PARTIAL 3")])
+    ws = _supplement(out, "S038", "P08348", mod)
+    assert ws["G2"].value is None and exporter.calls == []
+    assert result.ambiguous_invoice == [
+        "S038 P08348 (no forecast line has SubGroup PARTIAL 3)"]
+
+
+def test_blank_subgroup_takes_the_blank_forecast_line(mod):
+    # Real forecast pattern: the first partial left blank beside a "PARTIAL 2".
+    first = mod.ForecastRow("PO", 1, "55293", date(2026, 9, 4), "")
+    second = mod.ForecastRow("PO", 1, "56077", date(2026, 9, 5), "PARTIAL 2")
+    row, why = mod._pick_forecast_row([first, second], RANGE, {""})
+    assert why is None and row.invoice == "55293"
+
+
+def test_blank_subgroup_with_no_blank_line_falls_back_to_dates(mod):
+    a = mod.ForecastRow("PO", 1, "1", date(2026, 8, 21), "BK555410")
+    b = mod.ForecastRow("PO", 1, "2", date(2026, 9, 4), "BK555740")
+    row, why = mod._pick_forecast_row([a, b], RANGE, {""})
+    assert why is None and row.invoice == "2"
+
+
+def test_two_subgroups_in_one_close_out_are_left_blank(mod):
+    row, why = mod._pick_forecast_row(
+        [mod.ForecastRow(*P1[:2], P1[5], P1[4], P1[6]),
+         mod.ForecastRow(*P2[:2], P2[5], P2[4], P2[6])],
+        RANGE, {"PARTIAL 1", "PARTIAL 2"})
+    assert row.invoice == "" and why == (
+        "this close-out holds 2 SubGroups: PARTIAL 1, PARTIAL 2")
+
+
+def test_forecast_subgroup_is_read_by_name(mod, tmp_path):
+    p = tmp_path / "wf.xlsx"
+    _forecast_workbook(p, [P1, P2], [])
+    m = mod._read_po_map(p, lambda *_: None, None)
+    assert [r.subgroup for r in m[("S038", "P08348")]] == ["PARTIAL 1", "PARTIAL 2"]
 
 
 # ---------------------------------------------------------------------------------
@@ -345,3 +483,105 @@ def test_real_exporter_reports_missing_excel_without_raising(mod, monkeypatch, t
     assert "pywin32" in ex.error
     assert sum("no supplement PDFs" in l for l in logs) == 1      # warned once
     ex.close()
+
+
+# ── Workorder Close Outs: the columns are chosen BY NAME ────────────────────
+# v2.4.1 (invoicing, 2026-09-22). The sheet used to be "every column from A
+# through the one headed Machine" - a positional range wearing a header name.
+# That produced the right 20 columns only while the input was a sheet already
+# trimmed to them. Since v2.2.0 the input is a copy of the WHOLE pricing
+# master, where Machine is column 76 and the wanted columns are scattered, so
+# the close-out sheet came out with all 76 columns and the master's #DIV/0!
+# cells in it. The positions below are the real ones from her 9-18 sheet.
+
+_REAL_POSITIONS = {  # header -> its column in the real pricing master
+    "Program": 1, "Batch": 2, "Work Order": 3, "DYPN": 4, "Material": 7,
+    "DYPN QTY": 10, "Nest Pkg Nbr": 11, "SCOPE OF WORK ": 33, "PO": 38,
+    "Line": 39, "SubGroup": 40, "Division": 41, "Scheduling Group": 42,
+    "Firm VPD": 45, "Notes": 46, "ASA SALES REP": 71, "QUOTE DATE": 72,
+    "Shape_Plate": 74, "MATERIAL_TYPE": 75, "Machine": 76,
+    "Total Price per WO": 95,        # column CQ, well past Machine
+}
+
+
+def _master(drop=None):
+    """A pricing master shaped like the real one: 76 columns, the wanted ones
+    scattered, junk and a formula error in between."""
+    wb = Workbook()
+    ws = wb.active
+    for j in range(1, 101):
+        ws.cell(row=1, column=j, value=f"Filler {j}")
+    for name, col in _REAL_POSITIONS.items():
+        if name != drop:
+            ws.cell(row=1, column=col, value=name)
+    for r in (2, 3):
+        for j in range(1, 101):
+            ws.cell(row=r, column=j, value=f"v{r}c{j}")
+        ws.cell(row=r, column=42, value="Open")          # Scheduling Group
+        ws.cell(row=r, column=65, value="#DIV/0!")       # junk the sheet must not carry
+    return ws
+
+
+def _hmap(ws):
+    return {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
+
+
+def _run_closeouts(mod, ws, tmp_path, log=None):
+    name = mod._write_closeouts(
+        ws, 1, _hmap(ws), [tuple(r) for r in ws.iter_rows(min_row=2)],
+        tmp_path, date(2026, 9, 18), log or (lambda *_: None))
+    return load_workbook(tmp_path / name).active, name
+
+
+def test_close_outs_take_only_the_named_columns_from_a_full_master(mod, tmp_path):
+    ws, name = _run_closeouts(mod, _master(), tmp_path)
+    # the header text is copied from the source cell, so it carries the
+    # master's own casing - the list entries are lookup keys, not display text
+    headers = [str(c.value).strip().upper() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip().upper() for h, _ in mod.CLOSEOUT_COLUMNS]
+    assert ws.max_column == 21, "the whole master was copied again"
+    assert not any(isinstance(c.value, str) and c.value.startswith("#")
+                   for row in ws.iter_rows() for c in row)
+    assert name == "D911 Workorder Close Outs 9-18-2026.xlsx"
+
+
+def test_close_outs_pull_each_column_from_its_real_position(mod, tmp_path):
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    # DYPN QTY lives at master column 10, Machine at 76 - the values must follow
+    out = {str(ws.cell(1, j).value).strip().upper(): ws.cell(2, j).value
+           for j in range(1, ws.max_column + 1)}
+    assert out["DYPN QTY"] == "v2c10"
+    assert out["SCOPE OF WORK"] == "v2c33"
+    assert out["MACHINE"] == "v2c76"
+    assert out["PROGRAM"] == "v2c1"
+    # invoicing's 2026-09-22 ask: master column CQ, as close-out column U
+    assert out["TOTAL PRICE PER WO"] == "v2c95"
+
+
+def test_total_price_per_wo_is_column_U(mod, tmp_path):
+    """Invoicing asked for master column CQ at close-out column U (the 21st)."""
+    from openpyxl.utils import get_column_letter
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    j = next(j for j in range(1, ws.max_column + 1)
+             if str(ws.cell(1, j).value).strip().upper() == "TOTAL PRICE PER WO")
+    assert get_column_letter(j) == "U"
+    assert ws.cell(2, j).value == "v2c95"
+
+
+def test_close_outs_force_scheduling_group_to_closed(mod, tmp_path):
+    ws, _ = _run_closeouts(mod, _master(), tmp_path)
+    col = next(j for j in range(1, ws.max_column + 1)
+               if str(ws.cell(1, j).value).strip().upper() == "SCHEDULING GROUP")
+    assert [ws.cell(r, col).value for r in (2, 3)] == ["Closed", "Closed"]
+
+
+def test_a_missing_column_warns_and_blanks_it_without_shifting_the_rest(mod, tmp_path):
+    logged = []
+    ws, _ = _run_closeouts(mod, _master(drop="Notes"), tmp_path, logged.append)
+    headers = [str(c.value).strip().upper() for c in ws[1] if c.value is not None]
+    assert headers == [h.strip().upper() for h, _ in mod.CLOSEOUT_COLUMNS]  # still 21, in order
+    col = headers.index("NOTES") + 1
+    assert ws.cell(2, col).value is None
+    assert any("Notes" in ln for ln in logged)
+    # the column after it is still the right one, not shifted left
+    assert str(ws.cell(1, col + 1).value).strip().upper() == "ASA SALES REP"

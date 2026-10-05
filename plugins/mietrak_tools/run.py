@@ -2,22 +2,32 @@
 MieTrak Tools - a TechDeck GUI plugin that hosts a LIBRARY of small MieTrak
 helpers behind a picker, one window for all of them.
 
-Each tool is a QWidget subclass registered in the TOOLS list at the bottom of
-this file. Adding a tool = one class + one registry entry; the window
-(MieTrakTools) renders the left-hand picker and swaps the right-hand panel
-when the selection changes. The engine mirrors Sheet Metal Calculators.
+Each tool is registered in the TOOLS list at the bottom of this file as one or
+more VIEWS - QWidget classes. One view renders plain; two or more get a tab
+per view at the top right of the tool's title row. The window (MieTrakTools)
+builds every tool and every view ONCE and switches QStackedWidgets, so nothing
+the user has typed is lost by looking somewhere else. The engine mirrors Sheet
+Metal Calculators.
 
-Tool 1 - Hardware Code Generator: a native port of a colleague's standalone
+Hardware Code Generator: a native port of a colleague's standalone
 ``ASA_Hardware_Code_Generator.exe`` (PyInstaller + tkinter, 2025). The code
 tables and the assembly rule are copied verbatim from that program so the part
 numbers it produced keep matching MieTrak's. Pure logic lives in
-``build_hardware_code`` so it is testable without Qt.
+``build_hardware_code`` so it is testable without Qt. Its three views:
+  * Generator      - build a code from dropdowns
+  * Code Reference - how a code is built, and every option list behind a filter
+  * Code Reader    - paste a code, get it read back piece by piece
+The reference and reader render through pure functions returning rich text
+(``anatomy_html``/``decode_html``/``tables_html``), likewise testable headless.
 """
+
+import html as _html_mod
+from collections import namedtuple
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QComboBox, QPushButton, QFormLayout, QFrame, QScrollArea,
-    QApplication,
+    QLineEdit, QStackedWidget, QButtonGroup, QApplication,
 )
 from PySide6.QtCore import Qt
 
@@ -93,6 +103,38 @@ QFrame#toolCard QPushButton:disabled {{ background-color: {BRAND_LINE}; color: {
 QFrame#toolCard QScrollBar:vertical {{ background: {BRAND_EGGSHELL}; width: 10px; border: none; }}
 QFrame#toolCard QScrollBar::handle:vertical {{ background: {BRAND_LINE}; border-radius: 5px; min-height: 24px; }}
 QFrame#toolCard QScrollBar::add-line:vertical, QFrame#toolCard QScrollBar::sub-line:vertical {{ height: 0; }}
+
+/* View tabs - a tool with several views shows one per view, top right of
+   its title row. Underlined, so they never read as the segmented toggle. */
+QFrame#toolCard QPushButton#viewTab {{ background-color: transparent; color: {BRAND_GRAY};
+                                      border: none; border-bottom: 3px solid transparent;
+                                      border-radius: 0; padding: 6px 2px 4px 2px;
+                                      margin-left: 18px; font-weight: bold; }}
+QFrame#toolCard QPushButton#viewTab:hover {{ color: {BRAND_NAVY};
+                                            border-bottom: 3px solid {BRAND_LINE}; }}
+QFrame#toolCard QPushButton#viewTab:checked {{ color: {BRAND_RED};
+                                              border-bottom: 3px solid {BRAND_RED}; }}
+
+/* Code Reader's code box and Code Reference's filter box */
+QFrame#toolCard QLineEdit {{ background-color: {BRAND_WHITE}; color: {BRAND_NAVY};
+                             border: 1px solid {BRAND_LINE}; border-radius: 4px;
+                             padding: 7px 10px; }}
+QFrame#toolCard QLineEdit:focus {{ border: 1px solid {BRAND_RED}; }}
+QFrame#toolCard QLineEdit#codeInput {{ font-family: Consolas, monospace;
+                                       font-size: 11pt; font-weight: bold; }}
+
+/* Code Reference: imperial|metric, styled as one segmented control */
+QFrame#toolCard QPushButton#segLeft, QFrame#toolCard QPushButton#segRight {{
+    background-color: {BRAND_WHITE}; color: {BRAND_NAVY};
+    border: 1px solid {BRAND_LINE}; font-weight: normal; padding: 7px 18px; }}
+QFrame#toolCard QPushButton#segLeft {{ border-top-right-radius: 0;
+                                       border-bottom-right-radius: 0; }}
+QFrame#toolCard QPushButton#segRight {{ border-left: none; border-top-left-radius: 0;
+                                        border-bottom-left-radius: 0; }}
+QFrame#toolCard QPushButton#segLeft:hover, QFrame#toolCard QPushButton#segRight:hover {{
+    border-color: {BRAND_NAVY}; }}
+QFrame#toolCard QPushButton#segLeft:checked, QFrame#toolCard QPushButton#segRight:checked {{
+    background-color: {BRAND_NAVY}; color: {BRAND_WHITE}; font-weight: bold; }}
 """
 
 # Module-level reference prevents the window from being garbage collected when
@@ -250,6 +292,354 @@ def build_hardware_code(material_code: str, hardware_code: str, *,
 
 
 # ============================================================================
+# Reverse lookup + the reference sheet - the Code Reference tool's brain
+# ============================================================================
+# The generator answers "what is the code for this part?". Everything below
+# answers the two questions a user actually turns up with: "what IS this code
+# I am looking at?" and "what are my choices?". Kept pure and HTML-only so it
+# is unit-testable without Qt, and so the panel is one QLabel per block - a
+# keystroke in the filter box rebuilds a string instead of syncing a table
+# widget.
+
+ROLE_TABLES = {"thread": THREAD_OPTIONS, "length": LENGTH_OPTIONS,
+               "screw": SCREW_OPTIONS}
+ROLE_TITLES = {"thread": "Thread size and pitch", "length": "Length",
+               "screw": "Screw size it fits"}
+
+# hardware_fields_needed(), written out for a person.
+NEEDS_ROWS = (
+    ("Cap screw, set screw, stud", "Thread size, then length."),
+    ("Nut - acorn, heavy hex, hex", "Thread size only. A nut has no length."),
+    ("Washer - flat, lock", "The screw size it fits. No thread, no length."),
+)
+
+# How the thread and length codes are spelled, in the user's own terms. The
+# letter IS the diameter, and it is the same alphabet the length column uses
+# (see LENGTH_OPTIONS), so learning it once covers both suffixes.
+READING_ROWS = (
+    ("1024", "Small screws (#6, #8, #10): the screw number, then the threads "
+             "per inch. 10-24 becomes 1024."),
+    ("E18", "Bigger screws: the size letter, then the threads per inch. "
+            "E is 5/16, so E18 is 5/16-18."),
+    ("M20250", "Metric threads: drop the x and the dot. M20x2.50 becomes M20250."),
+    ("C", "Length uses the same size letters on their own. C is 3/16 inch, "
+          "1D is 1-1/4 inch, 2 is 2 inches."),
+    ("40", "Metric length is just the millimetres. 40 is 40 mm."),
+)
+
+F16_NOTE = (
+    "Two threads share the code <b>F16</b>: <b>1/4-20</b> and <b>3/8-16</b>. "
+    "That is how the original hardware code program spelled it, and it is kept "
+    "the same so codes match what is already in MieTrak. Check with the "
+    "hardware buyer before you enter a 1/4-20."
+)
+
+CodeSegment = namedtuple("CodeSegment", "code role title meanings")
+
+
+def with_units(pairs, role, system):
+    """Spell the unit out on labels that are bare numbers in the tables.
+
+    The generator can leave imperial lengths as "2" because the System row
+    is right there on screen saying inches. A reference sheet has no such
+    context, and "2" next to metric "40mm" reads as a mistake.
+    """
+    if system != "IMPERIAL" or role not in ("length", "screw"):
+        return list(pairs)
+    # A washer screw size may be a gauge (#4, #6); only the fractions are inches.
+    return [(label if label.startswith("#") else label + '"', value)
+            for label, value in pairs]
+
+
+def _labels_for(pairs, code):
+    """Every human label in ``pairs`` that maps to ``code``.
+
+    A LIST, not a string: the inherited 1/4-20 -> F16 quirk makes one code mean
+    two different threads, and a reference has to be able to say so.
+    """
+    return [label for label, value in pairs if value == code]
+
+
+def decode_hardware_code(code: str):
+    """Read a MieTrak hardware code back out in plain English.
+
+    Returns ``(segments, system, problem)``:
+      * ``segments`` - a CodeSegment per piece, left to right. ``meanings`` is
+        empty for a piece that is in no table.
+      * ``system``   - "IMPERIAL"/"METRIC", whichever table set explains more of
+        the code, or "" when neither explains any of it.
+      * ``problem``  - "" when the code is complete and understood, else one
+        plain-English sentence.
+
+    Never raises. A user pastes whatever MieTrak shows them, typos included, so
+    a piece we cannot place is reported as unknown rather than failing the whole
+    decode - the point is to show them WHICH piece is wrong.
+    """
+    raw = (code or "").strip().upper()
+    if not raw:
+        return [], "", ""
+    parts = [p.strip() for p in raw.split("-")]
+    head = parts[0]
+    if not head.startswith("HW"):
+        return [], "", "Every hardware code starts with HW."
+
+    material = head[2:]
+    hardware = parts[1] if len(parts) > 1 else ""
+    extras = list(parts[2:])
+
+    segments = [
+        CodeSegment("HW", "prefix", "Prefix", ["Hardware"]),
+        CodeSegment(material, "material", "Material and coating",
+                    _labels_for(MATERIAL_OPTIONS, material)),
+        CodeSegment(hardware, "hardware", "Hardware type",
+                    _labels_for(HARDWARE_OPTIONS, hardware)),
+    ]
+
+    known_type = bool(_labels_for(HARDWARE_OPTIONS, hardware))
+    # An unrecognised type still gets read on the common shape, so the user sees
+    # the rest of the code decoded and the bad piece flagged.
+    roles = hardware_fields_needed(hardware) if known_type else ("thread", "length")
+
+    def _hits(system):
+        return sum(1 for role, piece in zip(roles, extras)
+                   if _labels_for(ROLE_TABLES[role][system], piece))
+
+    scores = {s: _hits(s) for s in SYSTEMS}
+    system = max(SYSTEMS, key=lambda s: scores[s])
+    if not scores[system]:
+        system = ""
+
+    for i, piece in enumerate(extras):
+        if i < len(roles):
+            role = roles[i]
+            used = system or "IMPERIAL"
+            table = with_units(ROLE_TABLES[role][used], role, used)
+            segments.append(CodeSegment(piece, role, ROLE_TITLES[role],
+                                        _labels_for(table, piece)))
+        else:
+            segments.append(CodeSegment(piece, "extra", "Extra piece", []))
+
+    if not material:
+        problem = "Nothing between HW and the first hyphen - the material is missing."
+    elif not hardware:
+        problem = "No hardware type after the material."
+    elif not known_type:
+        problem = "%s is not a hardware type in the list." % hardware
+    elif len(extras) < len(roles):
+        missing = ", ".join(ROLE_TITLES[r].lower() for r in roles[len(extras):])
+        problem = "This type also needs: %s." % missing
+    elif len(extras) > len(roles):
+        problem = ("There are %d more pieces than this type uses."
+                   % (len(extras) - len(roles)))
+    else:
+        unknown = [s.code for s in segments if not s.meanings]
+        problem = ("Not in the lists: " + ", ".join(unknown) + ".") if unknown else ""
+    return segments, system, problem
+
+
+# -- rich-text rendering -----------------------------------------------------
+# Qt's QLabel understands enough HTML4 table markup to lay the sheet out in
+# columns, which costs a fraction of what a QTableWidget grid would and
+# re-renders on every filter keystroke for free.
+
+_ROW_SHADE = "#F2EDE6"      # the eggshell card one step down, for zebra rows
+_SPACER = '<table cellpadding="4"><tr><td></td></tr></table>'
+
+
+def _esc(text) -> str:
+    return _html_mod.escape(str(text))
+
+
+def _bar_html(title: str) -> str:
+    """A navy section header bar."""
+    return ('<table width="100%%" cellspacing="0" cellpadding="6"><tr>'
+            '<td bgcolor="%s"><font color="%s" size="4"><b>%s</b></font>'
+            '</td></tr></table>' % (BRAND_NAVY, BRAND_WHITE, _esc(title)))
+
+
+def _note_html(body_html: str) -> str:
+    """A soft callout for a caveat. ``body_html`` is author-written markup."""
+    return ('<table width="100%%" cellspacing="0" cellpadding="8"><tr>'
+            '<td bgcolor="#FDF3E3"><font color="%s" size="2">'
+            '<font color="%s"><b>Heads up</b></font> &nbsp;%s</font>'
+            '</td></tr></table>' % (BRAND_TEXT, BRAND_ORANGE, body_html))
+
+
+def _problem_html(text: str) -> str:
+    return ('<table width="100%%" cellspacing="0" cellpadding="8"><tr>'
+            '<td bgcolor="%s"><font color="%s"><b>%s</b></font></td></tr></table>'
+            % (BRAND_PINK, BRAND_RED_DEEP, _esc(text)))
+
+
+def _pair_table_html(pairs, columns=2, code_color=None, mono=True) -> str:
+    """Zebra-striped ``code -> meaning`` rows laid out in ``columns`` columns.
+
+    ``mono=False`` for a left column that is prose rather than a code - the
+    fixed-pitch face is a signal that the cell is something you TYPE.
+    """
+    code_color = code_color or BRAND_RED
+    face = ' face="Consolas"' if mono else ""
+    # The pair widths must SUM to the column's share, or the rightmost column
+    # stops short of the edge and the sheet reads as misaligned.
+    share = 100 // columns
+    code_w = max(8, int(share * 0.38))
+    mean_w = share - code_w
+    out = ['<table width="100%" cellspacing="0" cellpadding="5">']
+    for i in range(0, len(pairs), columns):
+        chunk = pairs[i:i + columns]
+        shade = BRAND_WHITE if (i // columns) % 2 == 0 else _ROW_SHADE
+        cells = ""
+        for label, value in chunk:
+            cells += ('<td bgcolor="%s" width="%d%%"><font%s '
+                      'color="%s"><b>%s</b></font></td>'
+                      '<td bgcolor="%s" width="%d%%"><font color="%s">%s</font></td>'
+                      % (shade, code_w, face, code_color, _esc(value),
+                         shade, mean_w, BRAND_TEXT, _esc(label)))
+        for _ in range(columns - len(chunk)):   # pad so the stripe runs full width
+            cells += ('<td bgcolor="%s" width="%d%%"></td>'
+                      '<td bgcolor="%s" width="%d%%"></td>'
+                      % (shade, code_w, shade, mean_w))
+        out.append("<tr>%s</tr>" % cells)
+    out.append("</table>")
+    return "".join(out)
+
+
+def _section_html(title, pairs, columns=2, note="") -> str:
+    """A titled block, or "" when the filter left it with no rows."""
+    if not pairs:
+        return ""
+    return (_bar_html(title) + _pair_table_html(pairs, columns)
+            + (_note_html(note) if note else "") + _SPACER)
+
+
+def anatomy_html() -> str:
+    """The shape of a code, with one worked example read piece by piece."""
+    pieces = (
+        ("HW", "Always HW", "hardware"),
+        ("188", "Material", "18-8 stainless"),
+        ("SETSCR", "Type", "set screw"),
+        ("1024", "Thread", "10-24"),
+        ("C", "Length", "3/16 inch"),
+    )
+    chips = roles = notes = ""
+    width = int(100 / len(pieces))
+    for code, role, meaning in pieces:
+        chips += ('<td width="%d%%" align="center" bgcolor="%s">'
+                  '<font face="Consolas" color="%s" size="5"><b>%s</b></font></td>'
+                  % (width, BRAND_NAVY, BRAND_WHITE, _esc(code)))
+        roles += ('<td width="%d%%" align="center"><font color="%s" size="3">'
+                  '<b>%s</b></font></td>' % (width, BRAND_RED, _esc(role)))
+        notes += ('<td width="%d%%" align="center"><font color="%s" size="2">%s'
+                  '</font></td>' % (width, BRAND_GRAY, _esc(meaning)))
+    return (_bar_html("How a hardware code is built")
+            + '<p><font color="%s">Every code reads left to right: <b>HW</b>, '
+              'the material, the hardware type, then the rows that type needs - '
+              'joined with hyphens.</font></p>' % BRAND_TEXT
+            + '<table width="100%" cellspacing="5" cellpadding="6">'
+            + "<tr>%s</tr><tr>%s</tr><tr>%s</tr></table>" % (chips, roles, notes)
+            + _SPACER
+            + _bar_html("Which rows each type needs")
+            + _pair_table_html([(meaning, kind) for kind, meaning in NEEDS_ROWS],
+                               columns=1, code_color=BRAND_NAVY, mono=False)
+            + _SPACER
+            + _bar_html("Reading the last two pieces")
+            + _pair_table_html([(meaning, code) for code, meaning in READING_ROWS],
+                               columns=1)
+            + _SPACER)
+
+
+def decode_html(code: str) -> str:
+    """The plain-English read-out for a code the user pasted in."""
+    if not (code or "").strip():
+        return ('<font color="%s">Each piece of the code shows here as you '
+                'type.</font>' % BRAND_GRAY)
+    segments, system, problem = decode_hardware_code(code)
+    if not segments:
+        return _problem_html(problem or "That does not look like a hardware code.")
+    joiner = ' <font color="%s">or</font> ' % BRAND_GRAY
+    rows = []
+    for seg in segments:
+        if seg.meanings:
+            meaning = joiner.join(_esc(m) for m in seg.meanings)
+            color = BRAND_TEXT
+        else:
+            meaning, color = "not in any list", BRAND_RED
+        shade = BRAND_WHITE if len(rows) % 2 == 0 else _ROW_SHADE
+        rows.append('<tr><td bgcolor="%s" width="20%%"><font face="Consolas" '
+                    'color="%s"><b>%s</b></font></td>'
+                    '<td bgcolor="%s" width="32%%"><font color="%s" size="2">%s'
+                    '</font></td>'
+                    '<td bgcolor="%s"><font color="%s">%s</font></td></tr>'
+                    % (shade, BRAND_RED, _esc(seg.code) or "&nbsp;",
+                       shade, BRAND_GRAY, _esc(seg.title),
+                       shade, color, meaning))
+    out = ('<table width="100%%" cellspacing="0" cellpadding="6">%s</table>'
+           % "".join(rows))
+    if system:
+        out += ('<p><font color="%s" size="2">Read against the <b>%s</b> lists.'
+                '</font></p>' % (BRAND_GRAY, system.lower()))
+    if problem:
+        out += _problem_html(problem)
+    return out
+
+
+def tables_html(system="IMPERIAL", query="") -> str:
+    """Every option list for ``system``, narrowed to rows matching ``query``."""
+    needle = (query or "").strip().lower()
+
+    def keep(pairs):
+        if not needle:
+            return list(pairs)
+        return [(label, value) for label, value in pairs
+                if needle in label.lower() or needle in value.lower()]
+
+    word = system.lower()
+    blocks = [
+        _section_html("Material and coating", keep(MATERIAL_OPTIONS), 2),
+        _section_html("Hardware type", keep(HARDWARE_OPTIONS), 2),
+        _section_html("Thread size and pitch - %s" % word,
+                      keep(THREAD_OPTIONS[system]), 3,
+                      note=F16_NOTE if system == "IMPERIAL" else ""),
+        _section_html("Length - %s" % word,
+                      keep(with_units(LENGTH_OPTIONS[system], "length", system)), 4),
+        _section_html("Screw size a washer fits - %s" % word,
+                      keep(with_units(SCREW_OPTIONS[system], "screw", system)), 3),
+    ]
+    body = "".join(b for b in blocks if b)
+    if not body:
+        return ('<font color="%s">Nothing in the %s lists matches "%s".</font>'
+                % (BRAND_GRAY, word, _esc(query)))
+    return body
+
+
+def breakdown_html(code: str) -> str:
+    """The live "what this code says" strip under the generated code.
+
+    The generator's own teaching moment: the user watches the code they just
+    built get read back to them, so the scheme is learned by using it.
+    """
+    segments, _system, _problem = decode_hardware_code(code)
+    if not segments:
+        return ""
+    rows = []
+    for seg in segments:
+        if seg.code == "HW":
+            continue                     # the prefix teaches nothing here
+        meaning = " or ".join(seg.meanings) if seg.meanings else "-"
+        rows.append('<tr><td width="18%%"><font face="Consolas" color="%s"><b>%s'
+                    '</b></font></td>'
+                    '<td width="30%%"><font color="%s" size="2">%s</font></td>'
+                    '<td><font color="%s">%s</font></td></tr>'
+                    % (BRAND_RED, _esc(seg.code), BRAND_GRAY, _esc(seg.title),
+                       BRAND_TEXT, _esc(meaning)))
+    return ('<p><font color="%s" size="2"><b>WHAT THIS CODE SAYS</b></font></p>'
+            '<table width="100%%" cellspacing="0" cellpadding="3">%s</table>'
+            '<p><font color="%s" size="2">How codes are built and every option: '
+            'the <b>Code Reference</b> tab, top right.</font></p>'
+            % (BRAND_GRAY, "".join(rows), BRAND_GRAY))
+
+
+# ============================================================================
 # The engine
 # ============================================================================
 
@@ -269,8 +659,30 @@ def run(params: dict, progress_callback, cancel_event):
     log(f"MieTrak Tools window opened ({len(TOOLS)} tool(s)).")
 
 
+# Room between a view's content and the card's scroll bar. The bar sits in
+# the card's thin right margin so it reads as the card's edge, and this gutter
+# keeps the dropdowns from running into it (user's call, 2026-09-23 - the
+# combos used to butt straight up against the bar).
+GUTTER = 14
+
+
+def _rich_label(text: str = "") -> QLabel:
+    """A selectable, wrapping rich-text label - one per rendered block."""
+    lab = QLabel(text)
+    lab.setWordWrap(True)
+    lab.setTextFormat(Qt.RichText)
+    lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    return lab
+
+
 class MieTrakTools(PluginWindow):
-    """Left: a picker list of tools. Right: the selected tool's panel."""
+    """Left: a picker list of tools. Right: the selected tool's page.
+
+    Every tool page - and every view inside one - is built ONCE and kept in a
+    QStackedWidget; picking a tool or a tab only changes which page shows. The
+    first version rebuilt the panel on every pick, so a half-built code was
+    wiped the moment the user went to check what it meant (2026-09-23).
+    """
 
     def __init__(self, on_success=None):
         super().__init__("mietrak_tools", "MieTrak Tools")
@@ -278,7 +690,8 @@ class MieTrakTools(PluginWindow):
         self._pal = _Brand          # brand colors, not the theme palette
         self.setStyleSheet(BRAND_QSS)
         self.setMinimumSize(760, 560)
-        self._active = None
+        self.views = {}             # tool id -> {view name: view widget}
+        self.tabs = {}              # tool id -> {view name: tab button}
         self._build_ui()
 
     def _build_ui(self):
@@ -294,55 +707,107 @@ class MieTrakTools(PluginWindow):
             item = QListWidgetItem(tool["name"])
             item.setData(Qt.UserRole, tool["id"])
             self._list.addItem(item)
-        self._list.currentRowChanged.connect(self._on_pick)
         row.addWidget(self._list)
 
-        self._panel = QWidget()
-        self._panel_layout = QVBoxLayout(self._panel)
-        self._panel_layout.setContentsMargins(0, 0, 0, 0)
-        self._panel_layout.setSpacing(12)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(self._panel)
-
-        # The white card the tool sits on; the red behind it reads as a frame.
+        # The eggshell card the tool sits on; the red behind it reads as a
+        # frame. Its right margin is thin because the scroll bar lives there.
         card = QFrame()
         card.setObjectName("toolCard")
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 18, 20, 18)
-        card_layout.addWidget(scroll)
+        card_layout.setContentsMargins(20, 18, 6, 18)
+        self._pages = QStackedWidget()
+        for tool in TOOLS:
+            self._pages.addWidget(self._build_tool_page(tool))
+        card_layout.addWidget(self._pages)
         row.addWidget(card, 1)
 
         self._main_layout.addWidget(root)
 
+        self._list.currentRowChanged.connect(self._on_pick)
         if TOOLS:
             self._list.setCurrentRow(0)
 
     def _on_pick(self, index: int):
-        if index < 0 or index >= len(TOOLS):
-            return
-        while self._panel_layout.count():
-            item = self._panel_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        tool = TOOLS[index]
+        if 0 <= index < self._pages.count():
+            self._pages.setCurrentIndex(index)
 
+    def _build_tool_page(self, tool: dict) -> QWidget:
+        """Title row (a tab per view at its right), the current view's
+        description, then the views - each in its own scroll area."""
+        views = tool.get("views") or [{
+            "name": tool["name"],
+            "description": tool.get("description", ""),
+            "widget": tool["widget"],
+        }]
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(6)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, GUTTER, 0)
         title = QLabel(tool["name"])
         title.setStyleSheet(f"font-size: 16pt; font-weight: bold; color: {BRAND_NAVY};")
-        self._panel_layout.addWidget(title)
-        if tool.get("description"):
-            desc = QLabel(tool["description"])
-            desc.setWordWrap(True)
-            if self._pal:
-                desc.setStyleSheet(f"color: {self._pal.text_secondary};")
-            self._panel_layout.addWidget(desc)
+        head.addWidget(title)
+        head.addStretch(1)
+        col.addLayout(head)
 
-        self._active = tool["widget"](palette=self._pal, on_success=self._on_success)
-        self._panel_layout.addWidget(self._active)
-        self._panel_layout.addStretch(1)
+        desc = QLabel()
+        desc.setWordWrap(True)
+        desc.setContentsMargins(0, 0, GUTTER, 6)
+        desc.setStyleSheet(f"color: {self._pal.text_secondary};")
+        col.addWidget(desc)
+
+        stack = QStackedWidget()
+        group = QButtonGroup(page)
+        self.views[tool["id"]] = {}
+        self.tabs[tool["id"]] = {}
+        for i, view in enumerate(views):
+            widget = view["widget"](palette=self._pal, on_success=self._on_success)
+            self.views[tool["id"]][view["name"]] = widget
+            stack.addWidget(self._scrolling(widget))
+            if len(views) > 1:
+                tab = QPushButton(view["name"])
+                tab.setObjectName("viewTab")
+                tab.setCheckable(True)
+                tab.setCursor(Qt.PointingHandCursor)
+                group.addButton(tab, i)
+                head.addWidget(tab, 0, Qt.AlignBottom)
+                self.tabs[tool["id"]][view["name"]] = tab
+        col.addWidget(stack, 1)
+
+        def show_view(i: int):
+            stack.setCurrentIndex(i)
+            text = views[i].get("description", "")
+            desc.setText(text)
+            desc.setVisible(bool(text))
+            button = group.button(i)
+            if button is not None:
+                button.setChecked(True)
+
+        group.idClicked.connect(show_view)
+        show_view(0)
+        return page
+
+    @staticmethod
+    def _scrolling(widget: QWidget) -> QScrollArea:
+        """Wrap one view in its own scroll area, with the GUTTER on its right.
+
+        One scroll area per view - never one around the stack: a
+        QStackedWidget is as tall as its tallest page, so a shared scroll area
+        would make the short Generator scroll through Code Reference's length.
+        """
+        inner = QWidget()
+        col = QVBoxLayout(inner)
+        col.setContentsMargins(0, 0, GUTTER, 0)
+        col.setSpacing(0)
+        col.addWidget(widget)
+        col.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(inner)
+        return scroll
 
 
 # ============================================================================
@@ -436,6 +901,15 @@ class HardwareCodeGenerator(QWidget):
         self._result.hide()
         layout.addWidget(self._result)
 
+        # Reads the code back out as it is built - the scheme gets learned by
+        # using the tool, and it points at the Code Reference tool for the rest.
+        self._breakdown = QLabel("")
+        self._breakdown.setWordWrap(True)
+        self._breakdown.setTextFormat(Qt.RichText)
+        self._breakdown.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._breakdown.hide()
+        layout.addWidget(self._breakdown)
+
         buttons = QHBoxLayout()
         self._copy_btn = QPushButton("Copy Code")
         self._copy_btn.clicked.connect(self._copy)
@@ -484,12 +958,15 @@ class HardwareCodeGenerator(QWidget):
             code = self.current_code()
         except HardwareCodeError:
             self._result.hide()
+            self._breakdown.hide()
             self._copy_btn.setEnabled(False)
             self._hint.show()
             return
         self._hint.hide()
         self._result.setText(code)
         self._result.show()
+        self._breakdown.setText(breakdown_html(code))
+        self._breakdown.show()
         self._copy_btn.setEnabled(True)
 
     def _copy(self):
@@ -513,17 +990,134 @@ class HardwareCodeGenerator(QWidget):
 
 
 # ============================================================================
-# Registry - add a tool here (a QWidget class taking palette= and on_success=)
+# Hardware Code Generator - its Code Reference and Code Reader views
 # ============================================================================
+
+class HardwareCodeReference(QWidget):
+    """How a code is built, and every option each piece can be.
+
+    The anatomy first (with the last two suffixes spelled out - the pieces
+    people ask about most), then the full option lists behind an imperial /
+    metric switch and a filter box. Each block is one rich-text QLabel, so a
+    keystroke in the filter rebuilds a string rather than a grid of widgets.
+    """
+
+    def __init__(self, palette=None, on_success=None, parent=None):
+        super().__init__(parent)
+        self._pal = palette
+        self._system = SYSTEMS[0]
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        layout.addWidget(_rich_label(anatomy_html()))
+        layout.addWidget(_rich_label(_bar_html("Every option, by code")))
+
+        bar = QHBoxLayout()
+        bar.setSpacing(0)
+        self._sys_buttons = {}
+        for i, system in enumerate(SYSTEMS):
+            btn = QPushButton(system.capitalize())
+            btn.setObjectName("segLeft" if i == 0 else "segRight")
+            btn.setCheckable(True)
+            btn.setChecked(system == self._system)
+            btn.clicked.connect(lambda _checked=False, s=system: self._set_system(s))
+            bar.addWidget(btn)
+            self._sys_buttons[system] = btn
+        bar.addSpacing(12)
+        self._filter = QLineEdit()
+        self._filter.setPlaceholderText("Filter the lists - try 3/8, stainless, washer")
+        self._filter.setClearButtonEnabled(True)
+        self._filter.textChanged.connect(self._render_tables)
+        bar.addWidget(self._filter, 1)
+        layout.addLayout(bar)
+
+        self._tables = _rich_label()
+        layout.addWidget(self._tables)
+        self._render_tables()
+
+    def _set_system(self, system: str):
+        self._system = system
+        for name, btn in self._sys_buttons.items():
+            # A checkable button toggles itself on click; force the pair to read
+            # as one segmented control instead of two independent toggles.
+            btn.setChecked(name == system)
+        self._render_tables()
+
+    def _render_tables(self, *_):
+        self._tables.setText(tables_html(self._system, self._filter.text()))
+
+
+class HardwareCodeReader(QWidget):
+    """Paste a code, get it read back piece by piece.
+
+    The Generator in reverse, for a code the user did not build - one already
+    in MieTrak, on a traveler, on a PO. Reads as they type; a piece it cannot
+    place is flagged in red and the rest of the code still reads.
+    """
+
+    def __init__(self, palette=None, on_success=None, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        self.code_in = QLineEdit()
+        self.code_in.setObjectName("codeInput")
+        self.code_in.setPlaceholderText("Paste a code, e.g. HW188-SETSCR-1024-C")
+        self.code_in.setClearButtonEnabled(True)
+        layout.addWidget(self.code_in)
+
+        self._decoded = _rich_label(decode_html(""))
+        layout.addWidget(self._decoded)
+        self.code_in.textChanged.connect(self._on_text)
+
+    def _on_text(self, text: str):
+        self._decoded.setText(decode_html(text))
+
+
+# ============================================================================
+# Registry - add a tool here
+# ============================================================================
+# A tool is {"id", "name", "views": [...]}, each view {"name", "description",
+# "widget"}: a QWidget class taking palette= and on_success=. One view = no
+# tabs; two or more = a tab per view at the top right of the title row, with
+# the description line following the tab. {"id", "name", "description",
+# "widget"} is shorthand for a one-view tool.
 
 TOOLS = [
     {
         "id": "hardware_code_generator",
         "name": "Hardware Code Generator",
-        "description": (
-            "Builds the MieTrak part number for a piece of hardware from its "
-            "material, type, thread, and length. Copy it straight into MieTrak."
-        ),
-        "widget": HardwareCodeGenerator,
+        "views": [
+            {
+                "name": "Generator",
+                "description": (
+                    "Builds the MieTrak part number for a piece of hardware from "
+                    "its material, type, thread, and length. Copy it straight "
+                    "into MieTrak."
+                ),
+                "widget": HardwareCodeGenerator,
+            },
+            {
+                "name": "Code Reference",
+                "description": (
+                    "How a hardware code is built, and every option each piece "
+                    "of it can be."
+                ),
+                "widget": HardwareCodeReference,
+            },
+            {
+                "name": "Code Reader",
+                "description": (
+                    "Paste a hardware code from MieTrak and it is read back to "
+                    "you piece by piece."
+                ),
+                "widget": HardwareCodeReader,
+            },
+        ],
     },
 ]

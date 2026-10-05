@@ -10,7 +10,9 @@ import threading
 from typing import Callable
 from pathlib import Path
 from techdeck.core.settings import SettingsManager
-from techdeck.core.constants import APP_VERSION, puppet_master_enabled
+from techdeck.core.constants import (
+    APP_VERSION, halloween_active, puppet_master_enabled,
+)
 from techdeck.core.flavor import generate_haiku, generate_musing
 from techdeck.core.audio_manager import (
     get_audio_manager, SOUND_CARD_DEAL, SOUND_CARD_DEALER_FINAL, SOUND_RAVE_MUSIC,
@@ -69,6 +71,7 @@ class CommandHandler:
         self._rogue_player = None  # kept alive here to prevent GC
         self._spinner = None       # /fidget window; /clear closes it
         self._cat = None           # the Cheshire Cat; lazy (see _console_cat)
+        self._seance = None        # the /seance ritual, while one is running
         self._admin_mode = False   # /admin toggles; gates _ADMIN_COMMANDS
 
         # Command registry. Theme switching deliberately is NOT here —
@@ -94,6 +97,9 @@ class CommandHandler:
             '/roguemode': self._cmd_roguemode,
             '/friend': self._cmd_moth,
             '/puppetmaster': self._cmd_puppetmaster,
+            '/play': self._cmd_play,
+            '/seance': self._cmd_seance,
+            '/crawl': self._cmd_crawl,
             '/admin': self._cmd_admin,
             '/tickets': self._cmd_tickets,
             '/reset': self._cmd_reset,
@@ -109,7 +115,23 @@ class CommandHandler:
     # was already absent from /help ("those who know, know") — this makes the
     # command itself dormant too, until constants.PUPPET_MASTER_ENABLED flips
     # for Halloween 2026.
-    _HELD_COMMANDS = {'/puppetmaster'}
+    _HELD_COMMANDS = {'/puppetmaster', '/play'}
+
+    # Commands that only exist DURING the Halloween season (constants.
+    # halloween_active — which also folds in the professional-theme
+    # suppression). Out of season they behave exactly like a typo, so the
+    # app has no seasonal residue in the other eleven months.
+    _SEASONAL_COMMANDS = {'/seance', '/crawl'}
+
+    # Commands that exist ONLY when running from source (python -m techdeck).
+    # In the installed exe they behave exactly like a typo. /crawl is a test
+    # lever for the Halloween crawlies: colleagues must never be able to
+    # summon one - the whole point is that it catches them off guard.
+    _DEV_ONLY_COMMANDS = {'/crawl'}
+
+    @staticmethod
+    def _is_dev_run() -> bool:
+        return not getattr(sys, "frozen", False)
     _ADMIN_HELP = (
         "  /tickets [N | set N] - Show/grant/set Woogy's Emporium tickets\n"
         "  /reset store     - Clear all Emporium purchases"
@@ -122,7 +144,10 @@ class CommandHandler:
 
         if cmd in self.commands and not (
                 cmd in self._ADMIN_COMMANDS and not self._admin_mode) and not (
-                cmd in self._HELD_COMMANDS and not puppet_master_enabled()):
+                cmd in self._HELD_COMMANDS and not puppet_master_enabled()) \
+                and not (cmd in self._SEASONAL_COMMANDS
+                         and not halloween_active(settings=self.settings))                 and not (cmd in self._DEV_ONLY_COMMANDS
+                         and not self._is_dev_run()):
             self.commands[cmd](args)
         else:
             self.console.append_error(f"Unknown command: {cmd}")
@@ -152,6 +177,14 @@ class CommandHandler:
             # a stale console document (a session open across a flag flip).
             if not puppet_master_enabled():
                 return
+            # The invitation has served its purpose. Everything above him
+            # goes with it - the line itself, and anything typed meanwhile -
+            # so he arrives into an empty console.
+            if hasattr(self.console, "wipe_history"):
+                self.console.wipe_history()
+            elif hasattr(self.console, "remove_history_line"):
+                self.console.remove_history_line(
+                    "I can help redefine those limits")
             self._console_cat().summon("materialize")
         else:
             self.console.append_error(f"Unroutable link: {url}")
@@ -178,6 +211,67 @@ class CommandHandler:
         if cat.is_present:
             return
         cat.summon("matrix")
+
+    def _cmd_play(self, args: str):
+        """Sit down at his table (ui/void_game). Held with him: absent from
+        /help and a typo until the flag flips. The other way in is asking him
+        outright while he is in the console - see open_table().
+        Source runs only: `/play <where>` jumps straight to an event
+        (tutorial / fresh / road / pick / rare / fire / altar / boss / forge),
+        skipping the tutorial and the saved place; in the exe the word is ignored."""
+        where = args.strip().lower() if self._is_dev_run() else ""
+        self.open_table(jump=where or None)
+
+    TABLE_PLUGIN_ID = "game_puppet_master"     # the Library cartridge for his table
+
+    def open_table(self, jump: str | None = None):
+        self.discover_table()
+        from techdeck.ui.void_game.window import open_table
+        open_table(parent=self.main_window, jump=jump)
+
+    def discover_table(self) -> bool:
+        """The first time the table opens, its cartridge in the Library comes
+        unlocked (it sat there greyed out) with the success jingle. Returns
+        True when that just happened."""
+        if self.settings.is_unlocked(self.TABLE_PLUGIN_ID):
+            return False
+        self.settings.unlock_item(self.TABLE_PLUGIN_ID)
+        try:
+            from techdeck.core.audio_manager import get_audio_manager, SOUND_SUCCESS
+            get_audio_manager().play(SOUND_SUCCESS)
+        except Exception:
+            pass
+        page = getattr(self.main_window, "library_page", None)
+        if page is not None:
+            try:
+                page.refresh()
+            except Exception:
+                pass
+        self._refresh_emporium()                  # My Stuff lights its cartridge up too
+        try:
+            self.main_window.sidebar.refresh_new_badges(self.settings)
+            self.main_window.account_page._place_stickers()
+        except Exception:
+            pass
+        return True
+
+    def _cmd_seance(self, args: str):
+        """Call something up. TechDeck itself is disturbed — the window
+        shudders, the lights fail — and then a shape resolves inside the
+        console and climbs OUT of it into the app (widgets/seance.py).
+
+        Nothing to do with the Puppet Master: he is not what answers a
+        seance, so this is gated on the season alone. Halloween only
+        (_SEASONAL_COMMANDS → halloween_active) and absent from /help."""
+        if self._seance is not None and self._seance.is_running:
+            return
+        from techdeck.ui.widgets.seance import SeanceRitual
+        self._seance = SeanceRitual(self.console, host=self.main_window)
+        try:
+            self._seance.start()
+        except Exception:
+            # A toy must never take the console down with it.
+            self._stop_seance()
 
     # ------------------------------------------------------------------ #
     #  Core commands
@@ -216,33 +310,29 @@ class CommandHandler:
             "  Theme switching lives in Settings → Personalization → Theme.\n"
             "  Kits, apps, and docs live in the Home and Library pages."
         )
-        # Record where the appended block will start so we can scroll the
-        # viewport there after appending. The console auto-scrolls to bottom
-        # on every append, which lands the user at the END of the help text —
-        # disorienting because they want to read from "Available commands:"
-        # downward.
-        output = getattr(self.console, "output", None)
-        pre_pos = output.document().characterCount() - 1 if output is not None else None
-        cat = self.active_cat()
-        if cat is not None:
+        # The readout renders in the pinned current-output area at the bottom
+        # of the console (present_current) — never appended to the history
+        # document, where it used to land inside the Puppet Master's
+        # bookmarked tail range and get wiped by his next redraw. It reads
+        # top-down from "Available commands:", scrolls on its own when it
+        # overflows (with the "read more" pill), and /clear empties it.
+        present = getattr(self.console, "present_current", None)
+        if present is None:                   # headless/mock console
+            self.console.append_system(help_text)
+            return
+        escaped = self.console._escape_html(help_text)
+        if self.active_cat() is not None:
             # The Puppet Master delivers the readout himself: his phosphor
             # color, no "System:" tag — while he is in the console, /help is
             # him speaking.
             from techdeck.ui.widgets.console_cat import PHOSPHOR
-            self.console.append_markup(help_text, color=PHOSPHOR["mid"])
+            present(f'<span style="color: {PHOSPHOR["mid"]};">{escaped}</span>')
         else:
-            self.console.append_system(help_text)
-        if output is not None and pre_pos is not None:
-            from PySide6.QtGui import QTextCursor
-            anchor = QTextCursor(output.document())
-            anchor.setPosition(pre_pos)
-            rect = output.cursorRect(anchor)
-            sb = output.verticalScrollBar()
-            sb.setValue(sb.value() + rect.top())
-            # Anchoring at the top hides the rest of the list below the fold —
-            # show a floating "read more" pill so that's discoverable.
-            if sb.value() < sb.maximum():
-                self.console.show_read_more_hint()
+            # No face in the history above — the readout may take (nearly)
+            # the full console, Claude-Code style.
+            present(
+                '<span style="color: #10B981; font-weight: bold;">System:'
+                f'</span> {escaped}', full=True)
 
     def _cmd_clear(self, args: str):
         if self._cat is not None and self._cat.is_present:
@@ -709,6 +799,30 @@ class CommandHandler:
     #  Session teardown — invoked by /clear and the Clear button
     # ------------------------------------------------------------------ #
 
+    def _cmd_crawl(self, args: str):
+        """Send a creepy crawly across the window NOW instead of waiting for
+        the clock (widgets/halloween_decor.py). `/crawl` picks one;
+        `/crawl <kind>` names it (only kinds whose Blender frames exist in
+        assets/critters/); `/crawl dangle` drops a spider on a thread. One at
+        a time - a second call while one is out does nothing. DEV RUNS ONLY
+        (_DEV_ONLY_COMMANDS): in the installed app it is an unknown command.
+        Halloween only and absent from /help."""
+        decor = getattr(self.main_window, "halloween_decor", None)
+        if decor is None or not decor.is_active():
+            self.console.append_system(
+                "Nothing stirs. (Crawlies only come out in the Halloween theme.)")
+            return
+        want = args.strip().lower()
+        if want == "dangle":
+            decor.spawn("spider", dangle=True)
+        elif want:
+            if decor.spawn(want, dangle=False) is None and decor.current() is None:
+                from techdeck.ui.widgets.halloween_decor import available_kinds
+                kinds = ", ".join(f"/crawl {k}" for k in available_kinds())
+                self.console.append_system(f"Try: {kinds}, /crawl dangle")
+        else:
+            decor.spawn()
+
     def stop_session_effects(self):
         """End easter-egg sessions on /clear or the Clear button: fold blackjack,
         end /rave, dismiss /friend, and put the fidget spinner away. The Steel
@@ -717,10 +831,23 @@ class CommandHandler:
         self._stop_rave(announce=False)
         self._stop_moth()
         self._stop_spinner()
+        self._stop_seance()
+        decor = getattr(self.main_window, "halloween_decor", None)
+        if decor is not None:
+            decor.clear()       # the crawly leaves; the cobwebs stay
         if self._cat is not None:
             # The document is being wiped with the /clear — reset, don't
             # try to excise a range from a vanishing document.
             self._cat.stop()
+
+    def _stop_seance(self):
+        """Banish the /seance apparition if one is up (used by /clear)."""
+        if self._seance is not None:
+            try:
+                self._seance.dismiss()
+            except Exception:
+                pass
+            self._seance = None
 
     def _stop_spinner(self):
         """Close the /fidget spinner window if one is open (used by /clear)."""

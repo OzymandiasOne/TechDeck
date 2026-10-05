@@ -97,3 +97,33 @@ def test_discovery_skips_folder_missing_run_py(tmp_path):
 
     loader = PluginLoader(tmp_path)
     assert [p.id for p in loader.discover_plugins()] == ["complete"]
+
+
+# ------------------------------------------------- gated plugins
+
+def _write_plugin(root, pid, **extra):
+    d = root / pid
+    d.mkdir(parents=True)
+    (d / "plugin.json").write_text(json.dumps({"id": pid, "name": pid, "family": "Games", **extra}),
+                                   encoding="utf-8")
+    (d / "run.py").write_text("def run(params, progress_callback, cancel_event):\n    pass\n", encoding="utf-8")
+
+
+def test_a_gated_plugin_is_not_discovered_while_its_gate_is_shut(monkeypatch, tmp_path):
+    """`gate` in plugin.json names a feature flag; while it is off the plugin
+    does not exist as far as the app knows - no Library tile, no /moredetails
+    row, nothing to leak. An unknown gate name is shut too."""
+    from techdeck.core import constants
+    _write_plugin(tmp_path, "game_gated", gate="puppet_master")
+    _write_plugin(tmp_path, "game_typo", gate="pupet_master")
+    _write_plugin(tmp_path, "game_open")
+    monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
+    for on in (False, True):
+        monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", on)
+        loader = PluginLoader(plugins_dir=tmp_path)
+        loader.discover_plugins()
+        assert ("game_gated" in loader.plugins) is on
+        assert "game_typo" not in loader.plugins
+        assert "game_open" in loader.plugins
+    p = loader.plugins["game_gated"]
+    assert p.gate == "puppet_master" and p.show_locked is False
