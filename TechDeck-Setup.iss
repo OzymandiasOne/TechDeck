@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.7 - Batch Check - 902 Batch Validator checks a received batch for missing, empty and corrupt part files and missing prints; LST Organizer PDF report for 911; scribe sheet fits the nest
+; Version 0.8.7.8 - Halloween Update - the season's theme and its fun; 922 Setup labels existing cards; FormingFinder, SSPO Invoicing Prep, MieTrak Tools, Pallet/Difficulty Stamper, Batch Repeater; every app picks its folder
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.7"
+#define MyAppVersion "0.8.7.8"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

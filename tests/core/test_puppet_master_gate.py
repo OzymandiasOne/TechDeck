@@ -40,9 +40,10 @@ def gate(monkeypatch):
 
 
 # ── the flag itself ─────────────────────────────────────────────────────────
-def test_he_ships_off():
-    """The whole point. If this ever fails on main, a release leaks him."""
-    assert constants.PUPPET_MASTER_ENABLED is False
+def test_he_ships_on_since_the_halloween_update():
+    """Flipped for 0.8.7.8 (the Halloween Update, 2026-10-05). Everything
+    below still proves BOTH states, so the flag can be pulled again if needed."""
+    assert constants.PUPPET_MASTER_ENABLED is True
 
 
 def test_the_env_override_wakes_him_for_local_testing(monkeypatch):

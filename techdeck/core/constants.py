@@ -31,7 +31,7 @@ import os as _os
 #
 # Set TECHDECK_PUPPET_MASTER=1 in the environment to wake him locally without
 # editing code — that is how to demo or test him before the flag flips.
-PUPPET_MASTER_ENABLED = False
+PUPPET_MASTER_ENABLED = True    # flipped for the Halloween Update (0.8.7.8, 2026-10-05)
 
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -104,7 +104,7 @@ def halloween_active(settings=None) -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.7"  # Batch Check - 902 Batch Validator checks a received batch for missing, empty and corrupt part files and missing prints; LST Organizer PDF report for 911; scribe sheet fits the nest
+APP_VERSION = "0.8.7.8"  # Halloween Update - the season's theme and its fun; 922 Setup labels existing cards; FormingFinder, SSPO Invoicing Prep, MieTrak Tools, Pallet/Difficulty Stamper, Batch Repeater; every app picks its folder
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 
