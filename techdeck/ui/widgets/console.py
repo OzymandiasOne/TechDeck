@@ -274,7 +274,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         input_layout.setSpacing(8)
         
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("Type a command (/help) or message...")
+        self.input_field.setPlaceholderText("Say hello...")
         self.input_field.returnPressed.connect(self._on_input_submitted)
         
         self.send_btn = QPushButton("Send")
@@ -453,7 +453,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         
         # Reset waiting state
         self.waiting_for_input = False
-        self.input_field.setPlaceholderText("Type a command (/help) or message...")
+        self.input_field.setPlaceholderText("Say hello...")
         self.input_field.setStyleSheet("")  # Reset any custom styling
         
         # Signal that input was provided
@@ -531,7 +531,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         self._input_aborted = True
         self._input_aborted_reason = reason
         self.input_prompt = ""
-        self.input_field.setPlaceholderText("Type a command (/help) or message...")
+        self.input_field.setPlaceholderText("Say hello...")
         self.input_field.setStyleSheet("")
         if self.input_event is not None:
             self.input_event.set()

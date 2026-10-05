@@ -217,11 +217,7 @@ class AccountPage(QWidget, ThemeAware):
         # A purchase on one tab changes ownership/balance the other reflects, so
         # refresh whichever tab is being shown.
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        from PySide6.QtWidgets import QTabBar
-        from techdeck.ui.whats_new import NewSticker
-        self._tab_stickers = {2: NewSticker(self.tabs.tabBar(), scale=1)}   # the My Stuff tab
-        for index, sticker in self._tab_stickers.items():                   # the tab's own side slot
-            self.tabs.tabBar().setTabButton(index, QTabBar.ButtonPosition.RightSide, sticker)
+        self._tab_stickers = {2: None}       # the My Stuff tab: a NewSticker in its side slot, while it shows
         self._place_stickers()
         # Hidden tabs (the wide Emporium scene especially) must not lock the
         # window's minimum width while another tab/page is showing.
@@ -447,10 +443,21 @@ class AccountPage(QWidget, ThemeAware):
     def _place_stickers(self):
         """The NEW! stickers ride the tab bar: shown or hidden by whats_new, placed
         at the tab's top-right corner."""
+        from PySide6.QtWidgets import QTabBar
         from techdeck.ui import whats_new
+        from techdeck.ui.whats_new import NewSticker
         badges = whats_new.new_badges(self.settings)
-        for index, sticker in self._tab_stickers.items():
-            sticker.setVisible(whats_new.MY_STUFF in badges and self.tabs.isTabVisible(index))
+        bar = self.tabs.tabBar()
+        for index in list(self._tab_stickers):
+            want = whats_new.MY_STUFF in badges and self.tabs.isTabVisible(index)
+            have = self._tab_stickers[index]
+            if want and have is None:
+                sticker = NewSticker(bar, scale=1); sticker.show()
+                bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, sticker)   # the slot takes width only now
+                self._tab_stickers[index] = sticker
+            elif not want and have is not None:
+                bar.setTabButton(index, QTabBar.ButtonPosition.RightSide, None)      # the slot (and its width) goes
+                self._tab_stickers[index] = None
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
