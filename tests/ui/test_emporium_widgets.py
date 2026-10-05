@@ -211,7 +211,7 @@ def test_my_stuff_shows_a_found_cartridge_greyed_until_found(qapp, tmp_path, mon
     s = SettingsManager(settings_dir=tmp_path)
     page = MyStuffPage(s)
     tile = next(t for t in page.tiles if t.item["id"] == "game_puppet_master")
-    assert tile.locked and not tile.action_btn.isEnabled()
+    assert tile.locked and tile.action_btn.isEnabled()        # the "?" button: it asks, it does not launch
     img = tile.icon.pixmap().toImage()
     opaque = [img.pixelColor(x, y) for x in range(img.width()) for y in range(img.height())
               if img.pixelColor(x, y).alpha() > 0]

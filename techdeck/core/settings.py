@@ -690,6 +690,16 @@ class SettingsManager:
         presentations."""
         return self.get_theme() == "professional"
 
+    def has_seen_my_stuff(self) -> bool:
+        """The NEW! sticker on My Account clears once My Stuff has been opened."""
+        return bool(self.data.get("settings", {}).get("seen_my_stuff", False))
+
+    def mark_my_stuff_seen(self) -> None:
+        if self.has_seen_my_stuff():
+            return
+        self.data.setdefault("settings", {})["seen_my_stuff"] = True
+        self.save()
+
     def get_dev_mode_enabled(self) -> bool:
         """Persisted state of the Home dev-mode toggle. Only source builds read
         this (techdeck.ui.dev_mode gates on is_dev_build) — a frozen exe never

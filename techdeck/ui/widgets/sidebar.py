@@ -11,7 +11,7 @@ left panel"; it also stays available in Settings → Help & Feedback).
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 )
-from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
+from PySide6.QtCore import QEvent, Signal, Qt, QPropertyAnimation, QEasingCurve, QSize, QByteArray
 from PySide6.QtGui import QIcon, QPixmap, QPainter
 from PySide6.QtSvg import QSvgRenderer
 import logging
@@ -300,6 +300,10 @@ class Sidebar(QWidget, ThemeAware):
         account_btn.clicked.connect(lambda checked: self._on_nav_clicked("account"))
         self.nav_buttons.append(account_btn)
         nav_layout.addWidget(account_btn)
+        from techdeck.ui.whats_new import NewSticker
+        self.account_btn = account_btn
+        self._account_sticker = NewSticker(account_btn, scale=1)
+        account_btn.installEventFilter(self)
 
         # ===== Submit Feedback (accent-styled action button) =====
         self.feedback_btn = NavButton(
@@ -498,6 +502,22 @@ class Sidebar(QWidget, ThemeAware):
         from techdeck.ui.dialogs.feedback_dialog import FeedbackDialog
         dlg = FeedbackDialog(parent=self.window(), settings=self.settings)
         dlg.exec()
+
+    def refresh_new_badges(self, settings):
+        """Show or hide the NEW! on My Account (whats_new decides)."""
+        from techdeck.ui import whats_new
+        want = whats_new.ACCOUNT in whats_new.new_badges(settings)
+        self._place_account_sticker()
+        self._account_sticker.setVisible(want)
+
+    def _place_account_sticker(self):
+        b = self.account_btn
+        self._account_sticker.place(b.width() - 6, 4)
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, "account_btn", None) and event.type() == QEvent.Type.Resize:
+            self._place_account_sticker()
+        return super().eventFilter(obj, event)
 
     def set_current_page(self, page_id: str):
         """Programmatically set current page (no click sound — not user-initiated)."""

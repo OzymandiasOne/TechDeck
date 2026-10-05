@@ -318,6 +318,7 @@ class MainWindow(QMainWindow):
         # ===== Sidebar =====
         self.sidebar = Sidebar(settings_manager=self.settings)
         self.sidebar.page_changed.connect(self._on_page_changed)
+        self.sidebar.refresh_new_badges(self.settings)
         main_layout.addWidget(self.sidebar)
         self._step("sidebar built")
         QApplication.processEvents()
@@ -460,6 +461,7 @@ class MainWindow(QMainWindow):
 
         # Account page
         self.account_page = AccountPage(self.settings)
+        self.account_page.badges_changed.connect(lambda: self.sidebar.refresh_new_badges(self.settings))
         self._step("account page built")
         QApplication.processEvents()
 

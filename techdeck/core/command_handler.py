@@ -248,6 +248,11 @@ class CommandHandler:
             except Exception:
                 pass
         self._refresh_emporium()                  # My Stuff lights its cartridge up too
+        try:
+            self.main_window.sidebar.refresh_new_badges(self.settings)
+            self.main_window.account_page._place_stickers()
+        except Exception:
+            pass
         return True
 
     def _cmd_seance(self, args: str):

@@ -26,6 +26,7 @@ from techdeck.ui.arcade_chrome import (
 )
 from techdeck.ui.emporium_catalog import CATALOG
 from techdeck.core.constants import gate_enabled
+from techdeck.ui import whats_new
 
 # The diagonal-stripe wall, as a SEAMLESS tile so it fills the whole page (and
 # repeats as the locker scrolls) instead of the old stretched art whose solid
@@ -205,6 +206,8 @@ class InventoryTile(QFrame):
         _tile_ring(p, rect, EMP["ring"])     # the ring now frames every tile
         if self.equipped:                    # equipped -> gold star badge
             _equipped_badge(p, rect)
+        if self.item["id"] == whats_new.PUPPET_ID and whats_new.PUPPET in whats_new.new_badges(self.page.settings):
+            whats_new.draw_new_sticker(p, rect.right() + 2, rect.top() - 4)
         p.end()
 
     def _btn_qss(self, bg, edge):
@@ -245,8 +248,8 @@ class InventoryTile(QFrame):
             self.icon.setPixmap(_greyed(self._icon) if self.locked else self._icon)
         if self.locked:
             self.equipped = False
-            self._set_btn("LOCKED", EMP["owned"], EMP["owned"], False)
-            self.action_btn.setCursor(Qt.CursorShape.ArrowCursor)
+            self._set_btn("?", EMP["equip"], "#7af0a0", True)     # found, not yet understood: ask
+            self.action_btn.setCursor(Qt.CursorShape.WhatsThisCursor)
         elif self.item["kind"] == "build":
             self.equipped = False
             self._set_btn("BUILD", EMP["owned"], "#b184e0", True)
@@ -271,9 +274,14 @@ class InventoryTile(QFrame):
             self._set_btn("OWNED", EMP["owned"], EMP["owned"], False)
         self.update()
 
+    MYSTERY = ("This cartridge mysteriously appeared in your inventory. You don't "
+               "remember buying this... Maybe you should ask Woogy about it.")
+
     def _activate(self):
         if self.locked:
-            return                             # not found yet: nothing happens
+            from techdeck.ui.arcade_chrome import PixelDialog
+            PixelDialog.show_message(self.page, "?", self.MYSTERY)
+            return
         if self.item["kind"] == "build":
             self.page.build_beyblade()
         elif self.item["kind"] == "gadget":
