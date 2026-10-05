@@ -50,13 +50,16 @@ def main(argv=None) -> int:
     ap.add_argument("--write", action="store_true", help="apply the plan (default: dry run)")
     ap.add_argument("--withdrawn", action="append", default=[], metavar="'TIMESTAMP|USER'",
                     help="also archive this still-open row, as Withdrawn (repeatable)")
+    ap.add_argument("--complete", action="append", default=[], metavar="'TIMESTAMP|USER'",
+                    help="also archive this still-open row, as Complete (repeatable)")
     args = ap.parse_args(argv)
 
     live = telemetry_workbook_path()
     if live is None:
         print("Telemetry workbook not found (set TECHDECK_TELEMETRY_XLSX).")
         return 2
-    withdrawn = {tuple(w.split("|", 1)) for w in args.withdrawn}
+    overrides = {tuple(w.split("|", 1)): WITHDRAWN_STATUS for w in args.withdrawn}
+    overrides.update({tuple(c.split("|", 1)): "Complete" for c in args.complete})
     print(f"Workbook: {live}")
 
     import win32com.client as win32
@@ -76,8 +79,8 @@ def main(argv=None) -> int:
             ts, user, status = (_text(cells.Cells(1, c).Value) for c in (1, 2, 7))
             if not ts:
                 print(f"  keep  row {i}: blank (carries the Key formula)")
-            elif (ts, user) in withdrawn:
-                plan.append((i, WITHDRAWN_STATUS))
+            elif (ts, user) in overrides:
+                plan.append((i, overrides[(ts, user)]))
             elif status == "Complete":
                 plan.append((i, "Complete"))
             else:
@@ -86,9 +89,9 @@ def main(argv=None) -> int:
             cells = table.ListRows(i).Range
             print(f"  MOVE  row {i}: {_text(cells.Cells(1, 1).Value)} "
                   f"{_text(cells.Cells(1, 2).Value)} -> Archive as '{st}'")
-        missing = withdrawn - {(_text(table.ListRows(i).Range.Cells(1, 1).Value),
-                                _text(table.ListRows(i).Range.Cells(1, 2).Value))
-                               for i, _st in plan}
+        missing = set(overrides) - {(_text(table.ListRows(i).Range.Cells(1, 1).Value),
+                                     _text(table.ListRows(i).Range.Cells(1, 2).Value))
+                                    for i, _st in plan}
         if missing:
             print(f"  NOT FOUND (nothing done for these): {sorted(missing)}")
 
