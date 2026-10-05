@@ -114,7 +114,7 @@ class NewOverlay(QWidget):
             try:
                 if t.isVisible() and t.wants_new_sticker():
                     g = t.geometry()
-                    draw_new_sticker(p, g.right() + 8, g.top() + 2, 2)
+                    draw_new_sticker(p, g.right() + 18, g.top() - 2, 2, tilt=22.0)   # off the corner, clear of the button
             except RuntimeError:
                 continue                                  # a tile Qt has already deleted
         p.end()
