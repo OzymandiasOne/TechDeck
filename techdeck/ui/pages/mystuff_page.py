@@ -206,9 +206,10 @@ class InventoryTile(QFrame):
         _tile_ring(p, rect, EMP["ring"])     # the ring now frames every tile
         if self.equipped:                    # equipped -> gold star badge
             _equipped_badge(p, rect)
-        if self.item["id"] == whats_new.PUPPET_ID and whats_new.PUPPET in whats_new.new_badges(self.page.settings):
-            whats_new.draw_new_sticker(p, rect.right() + 2, rect.top() - 4)
         p.end()
+
+    def wants_new_sticker(self) -> bool:
+        return self.item["id"] == whats_new.PUPPET_ID and whats_new.PUPPET in whats_new.new_badges(self.page.settings)
 
     def _btn_qss(self, bg, edge):
         return (f"QPushButton {{ background:{bg}; border:2px solid {edge}; "
@@ -240,6 +241,8 @@ class InventoryTile(QFrame):
 
     def refresh(self):
         s = self.page.settings
+        if self.parentWidget() is not None:
+            whats_new.attach_sticker(self)     # the grid's overlay draws the NEW! past the tile's corner
         self.locked = bool(self.item.get("found")) and not s.is_unlocked(self.item["id"])
         self.name.setPixmap(_sf().render_wrapped(self.item["name"].upper(), 2,
                                                 EMP["tile_dim"] if self.locked else EMP["tile_text"],
@@ -354,6 +357,7 @@ class MyStuffPage(QWidget):
             self.tiles.append(tile)
             grid.addWidget(tile, i // cols, i % cols,
                            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            whats_new.attach_sticker(tile)         # now it has a parent: the grid's overlay takes it
         grid.setColumnStretch(cols, 1)
         return host
 

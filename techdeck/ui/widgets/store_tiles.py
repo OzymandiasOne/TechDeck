@@ -79,9 +79,6 @@ class StoreTile(QFrame):
         rect = self.rect().adjusted(0, 0, -5, -5)
         _draw_bubble(p, rect, self.page._bubbles["tile"], shadow=EMP["shadow"])
         _tile_ring(p, rect, EMP["ring"])
-        from techdeck.ui import whats_new
-        if self.item["id"] == whats_new.GHOST_ID and whats_new.GHOST in whats_new.new_badges(self.page.settings):
-            whats_new.draw_new_sticker(p, rect.right() + 2, rect.top() - 4)
         if self.equipped:
             _equipped_badge(p, rect)
         p.end()
@@ -108,7 +105,14 @@ class StoreTile(QFrame):
             return s.get_equipped_background() == self.item["sprite"]
         return False
 
+    def wants_new_sticker(self) -> bool:
+        from techdeck.ui import whats_new
+        return self.item["id"] == whats_new.GHOST_ID and whats_new.GHOST in whats_new.new_badges(self.page.settings)
+
     def refresh(self):
+        from techdeck.ui import whats_new
+        if self.parentWidget() is not None:
+            whats_new.attach_sticker(self)     # the shelf's overlay draws the NEW! past the tile's corner
         s = self.page.settings
         self.owned = s.is_unlocked(self.item["id"])
         self.equipped = self.owned and self._is_equipped(s)
@@ -195,7 +199,7 @@ class CategoryBox(QFrame):
         p.drawPixmap(rect.x() + (rect.width() - name.width()) // 2, name_y, name)
         from techdeck.ui import whats_new
         if self.cat_id == "decorations" and whats_new.DECORATIONS in whats_new.new_badges(self.page.settings):
-            whats_new.draw_new_sticker(p, rect.right() + 2, rect.top() - 4)
+            whats_new.draw_new_sticker(p, rect.right() - 4, rect.top() + 4)
         p.end()
 
     def mousePressEvent(self, e):

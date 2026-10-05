@@ -303,7 +303,7 @@ class Sidebar(QWidget, ThemeAware):
         nav_layout.addWidget(account_btn)
         from techdeck.ui.whats_new import NewSticker
         self.account_btn = account_btn
-        self._account_sticker = NewSticker(account_btn, scale=1)
+        self._account_sticker = NewSticker(self, scale=1)
         account_btn.installEventFilter(self)
 
         # ===== Submit Feedback (accent-styled action button) =====
@@ -512,11 +512,13 @@ class Sidebar(QWidget, ThemeAware):
         self._account_sticker.setVisible(want)
 
     def _place_account_sticker(self):
+        from PySide6.QtCore import QPoint
         b = self.account_btn
-        self._account_sticker.place(b.width() - 6, 4)
+        corner = b.mapTo(self, QPoint(b.width(), 0))
+        self._account_sticker.place(min(corner.x(), self.width()) - 4, corner.y() - 14)   # on the entry's corner, above the text
 
     def eventFilter(self, obj, event):
-        if obj is getattr(self, "account_btn", None) and event.type() == QEvent.Type.Resize:
+        if obj is getattr(self, "account_btn", None) and event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
             self._place_account_sticker()
         return super().eventFilter(obj, event)
 

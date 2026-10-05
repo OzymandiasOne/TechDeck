@@ -15,7 +15,7 @@ for widgets that are not custom-painted (a tab bar, a sidebar button).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -41,8 +41,9 @@ def new_badges(settings) -> set[str]:
     return out
 
 
-def draw_new_sticker(p: QPainter, right: float, top: float, scale: int = 2, tilt: float = -9.0):
-    """A tilted red pixel box reading NEW!, its top-right corner near (right, top)."""
+def draw_new_sticker(p: QPainter, right: float, top: float, scale: int = 2, tilt: float = 9.0):
+    """A red pixel box reading NEW!, tilted high-left to low-right, its top-right
+    corner near (right, top)."""
     from techdeck.ui.arcade_chrome import EMP
     from techdeck.ui.sprite_font import font as _sf
     txt = _sf().render("NEW!", scale, "#ffffff")
@@ -67,7 +68,7 @@ class NewSticker(QWidget):
     def __init__(self, parent, scale: int = 2):
         super().__init__(parent)
         self.scale = scale
-        self.W, self.H = 34 * scale + 14, 14 * scale + 10
+        self.W, self.H = 34 * scale + 18, 14 * scale + 18   # room for the tilt
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFixedSize(self.W, self.H)
         self.hide()
@@ -78,5 +79,55 @@ class NewSticker(QWidget):
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        draw_new_sticker(p, self.W - 4, 4, self.scale)
+        draw_new_sticker(p, self.W - 8, 6, self.scale)
         p.end()
+
+
+class NewOverlay(QWidget):
+    """Stickers for the tiles of one grid, drawn ABOVE them so a sticker can hang
+    off a tile's corner instead of being clipped inside it. One per grid widget;
+    tiles register with `attach_sticker` and answer `wants_new_sticker()`."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.tiles: list = []
+        parent.installEventFilter(self)
+        self.setGeometry(parent.rect())
+        self.show()
+
+    def watch(self, tile):
+        if tile not in self.tiles:
+            self.tiles.append(tile)
+        self.raise_()
+        self.update()
+
+    def eventFilter(self, obj, event):
+        if obj is self.parentWidget() and event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            self.setGeometry(obj.rect())
+            self.raise_()
+        return False
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        for t in self.tiles:
+            try:
+                if t.isVisible() and t.wants_new_sticker():
+                    g = t.geometry()
+                    draw_new_sticker(p, g.right() + 8, g.top() + 2, 2)
+            except RuntimeError:
+                continue                                  # a tile Qt has already deleted
+        p.end()
+
+
+def attach_sticker(tile):
+    """Give a tile's grid an overlay (once) and register the tile on it."""
+    parent = tile.parentWidget()
+    if parent is None:
+        return None
+    overlay = getattr(parent, "_new_overlay", None)
+    if overlay is None:
+        overlay = NewOverlay(parent)
+        parent._new_overlay = overlay
+    overlay.watch(tile)
+    return overlay

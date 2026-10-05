@@ -349,6 +349,8 @@ class EmporiumPage(QWidget):
             self.grid.addWidget(t, i // cols, i % cols,
                                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             t.show()
+            from techdeck.ui import whats_new
+            whats_new.attach_sticker(t)            # parented now: the shelf's overlay takes it
         self.grid.setColumnStretch(cols, 1)
         self.grid_host.setVisible(bool(matching))
         self._coming_soon.setVisible(not matching)
