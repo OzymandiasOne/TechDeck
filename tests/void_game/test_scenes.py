@@ -15,9 +15,7 @@ def table(qapp, tmp_path, monkeypatch):
     w = VoidTable(seed=3)
     w.timer.stop()
     yield w
-    w.close()
-    w.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    w.close()            # no app-wide DeferredDelete flush: it ran other suites' stale deletes too (crashed the full run, 2026-10-05)
 
 
 def press(w, key, text=""):
@@ -237,7 +235,7 @@ def test_quitting_mid_road_brings_you_back_to_the_same_doors(table, tmp_path):
         assert [c.to_dict() for c in again.run.deck] == deck
         assert again.run.memory["runs"] == runs, "the same run, not a new one"
     finally:
-        again.close(); again.deleteLater()
+        again.close()
 
 
 def test_the_run_slot_is_cleared_when_you_die(table, tmp_path):
@@ -392,4 +390,4 @@ def test_dev_jumps_open_straight_at_an_event(qapp, tmp_path, monkeypatch):
             if where == "boss":
                 assert w.run.stop and w.run.stop.kind == "boss"
         finally:
-            w.close(); w.deleteLater()
+            w.close()

@@ -13,9 +13,7 @@ def table(qapp, tmp_path, monkeypatch):
     w = VoidTable(seed=3)
     w.timer.stop()
     yield w
-    w.close()
-    w.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    w.close()            # no app-wide DeferredDelete flush: it ran other suites' stale deletes too (crashed the full run, 2026-10-05)
 
 
 def settle(w: VoidTable, limit: int = 900):
@@ -201,8 +199,7 @@ def test_the_clock_keeps_going_with_the_lines_file_missing(qapp, tmp_path):
         settle(w)
         assert w.caption == "" and not w.captions
     finally:
-        w.close(); w.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        w.close()
 
 
 # ── dialogue and views (his playtest feedback) ────────────────────────────
