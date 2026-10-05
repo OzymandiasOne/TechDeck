@@ -15,9 +15,9 @@ for widgets that are not custom-painted (a tab bar, a sidebar button).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QRectF, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QWidget
 
 from techdeck.core.constants import halloween_active, puppet_master_enabled
 
@@ -84,16 +84,21 @@ class NewSticker(QWidget):
 
 
 class NewOverlay(QWidget):
-    """Stickers for the tiles of one grid, drawn ABOVE them so a sticker can hang
-    off a tile's corner instead of being clipped inside it. One per grid widget;
-    tiles register with `attach_sticker` and answer `wants_new_sticker()`."""
+    """Stickers for the tiles under one HOST - the scroll view's viewport (or the
+    page), not the tile grid - drawn a layer above everything in it, so a
+    sticker can hang off a tile's corner and only ever clips at the view's edge.
+    Tiles register with `attach_sticker` and answer `wants_new_sticker()`."""
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, host):
+        super().__init__(host)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.tiles: list = []
-        parent.installEventFilter(self)
-        self.setGeometry(parent.rect())
+        host.installEventFilter(self)
+        self.setGeometry(host.rect())
+        area = host.parentWidget()
+        if isinstance(area, QAbstractScrollArea) and area.viewport() is host:
+            area.verticalScrollBar().valueChanged.connect(lambda _v: self.update())
+            area.horizontalScrollBar().valueChanged.connect(lambda _v: self.update())
         self.show()
 
     def watch(self, tile):
@@ -109,25 +114,38 @@ class NewOverlay(QWidget):
         return False
 
     def paintEvent(self, _e):
+        host = self.parentWidget()
         p = QPainter(self)
         for t in self.tiles:
             try:
-                if t.isVisible() and t.wants_new_sticker():
-                    g = t.geometry()
-                    draw_new_sticker(p, g.right() + 18, g.top() - 2, 2, tilt=22.0)   # off the corner, clear of the button
+                if not t.isVisible() or not t.wants_new_sticker():
+                    continue
+                g = QRect(t.mapTo(host, QPoint(0, 0)), t.size())
+                draw_new_sticker(p, g.right() + 18, g.top() - 2, 2, tilt=22.0)   # off the corner, clear of the button
             except RuntimeError:
                 continue                                  # a tile Qt has already deleted
         p.end()
 
 
+def _sticker_host(widget):
+    """The scroll view's viewport the widget sits in, else its top-most ancestor."""
+    w = widget.parentWidget()
+    while w is not None:
+        par = w.parentWidget()
+        if par is None or (isinstance(par, QAbstractScrollArea) and par.viewport() is w):
+            return w
+        w = par
+    return None
+
+
 def attach_sticker(tile):
-    """Give a tile's grid an overlay (once) and register the tile on it."""
-    parent = tile.parentWidget()
-    if parent is None:
+    """Give the tile's view an overlay (once) and register the tile on it."""
+    host = _sticker_host(tile)
+    if host is None:
         return None
-    overlay = getattr(parent, "_new_overlay", None)
+    overlay = getattr(host, "_new_overlay", None)
     if overlay is None:
-        overlay = NewOverlay(parent)
-        parent._new_overlay = overlay
+        overlay = NewOverlay(host)
+        host._new_overlay = overlay
     overlay.watch(tile)
     return overlay
