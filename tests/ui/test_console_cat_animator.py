@@ -673,7 +673,8 @@ def test_startup_line_no_longer_repeats_the_input_bars_help_hint(
                         staticmethod(lambda: True))
     console = ConsoleWidget()
     assert "/help" not in console.output.toPlainText()
-    assert "/help" in console.input_field.placeholderText()
+    # The bar's hint is his now ("Say hello..." - 0.8.7.8); /help stays a command, not a prompt.
+    assert console.input_field.placeholderText() == "Say hello..."
 
 
 # ── the echo feed under the face ─────────────────────────────────────────
