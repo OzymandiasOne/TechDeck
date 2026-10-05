@@ -40,7 +40,7 @@ except ModuleNotFoundError:
 
 
 # ===== CONSTANTS =====
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 # Month name to number mapping
 MONTH_MAP = {
@@ -529,20 +529,25 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     log("Starting 911 PO PDF Extractor v2.3.0...")
     progress_callback(0)
     
-    # === PROMPT 1: FOLDER PATH ===
+    # === PROMPT 1: PICK THE FOLDER ===
+    # It used to ask the user to TYPE the whole path into the console. Nobody
+    # types a OneDrive path correctly - they are ~190 chars before the batch
+    # folder - so this is a folder pick, opening at the 911 QTDR root.
     log("Input required from user...")
-    folder_input = get_console_input(params, "Enter folder path containing PO packet PDFs")
-    
-    folder = Path(folder_input.strip()).expanduser().resolve()
-    if not sdk.exists(folder):
-        raise sdk.UserFacingError(
-            f"That folder doesn't exist: {folder}",
-            "Check the path and pick the correct folder, then run again.")
+    _start = sdk.resolve_911_qtdr_root("")
+    raw_folder = sdk.request_directory(
+        params, "Select the folder with the PO packet PDFs", str(_start) if _start else "")
+    if not raw_folder or cancel_event.is_set():
+        # request_directory already flagged the run cancelled.
+        log("Folder selection cancelled - nothing was run.")
+        return
+
+    folder = Path(raw_folder).expanduser()
     if not sdk.is_dir(folder):
         raise sdk.UserFacingError(
-            f"That's a file, not a folder: {folder}",
-            "Pick the folder that holds the PO PDFs, then run again.")
-    
+            f"That isn't a folder: {folder}",
+            "Run it again and pick the folder that holds the PDFs.")
+
     log(f"Folder: {folder}")
     progress_callback(5)
     

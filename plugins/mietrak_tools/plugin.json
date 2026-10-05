@@ -1,8 +1,8 @@
 {
   "id": "mietrak_tools",
   "name": "MieTrak Tools",
-  "description": "A library of small MieTrak helpers behind a picker. Starts with the Hardware Code Generator.",
-  "version": "1.1.0",
+  "description": "A library of small MieTrak helpers behind a picker. Starts with the Hardware Code Generator, which also explains and reads back its codes.",
+  "version": "1.3.0",
   "author": "Anthony Sieben",
   "family": "General",
   "details": {
@@ -12,7 +12,9 @@
     "how_it_works": [
       "Pick a tool from the left list; its form shows on the right.",
       "Hardware Code Generator: choose the system (imperial or metric), the material and coating, and the hardware type. The rows you still need appear: thread size for screws, studs and nuts; length for screws and studs; screw size for washers.",
-      "The part number builds itself as you pick. Press Copy Code to put it on the clipboard, then paste it into MieTrak."
+      "The part number builds itself as you pick, and under it the code is read back to you piece by piece so you learn what each part means. Press Copy Code to put it on the clipboard, then paste it into MieTrak.",
+      "Three tabs sit at the top right of the Hardware Code Generator. Generator builds a code. Code Reference shows how a code is built, which rows each hardware type needs, how to read the thread and length codes, and every option list with a filter box and an imperial/metric switch. Code Reader spells out any code you paste into it.",
+      "Switching tabs keeps what you picked, so you can check what a code means and come back to it."
     ],
     "output": [
       "The MieTrak hardware code on screen and on the clipboard - nothing is saved to a file."

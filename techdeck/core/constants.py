@@ -104,7 +104,7 @@ def halloween_active(settings=None) -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.6"  # Paperwork Complete - invoice number + PDF + pricing calcs in Invoicing Prep; sketch graphics + MATL on every part sketch; 922 Setup defaults + PROGRESS card in HOLD
+APP_VERSION = "0.8.7.7"  # Batch Check - 902 Batch Validator checks a received batch for missing, empty and corrupt part files and missing prints; LST Organizer PDF report for 911; scribe sheet fits the nest
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

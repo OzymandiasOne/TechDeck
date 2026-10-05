@@ -24,7 +24,7 @@ from PySide6.QtCore import Qt, QPoint
 from techdeck.ui.theme_manager import get_theme_manager
 from techdeck.ui.widgets.moth_widget import SpeechBubble
 
-THEMES = ["light", "dark", "blue", "cherry_blossom", "cyberpunk", "matrix"]
+THEMES = ["light", "dark", "cherry_blossom", "cyberpunk", "matrix"]
 CORNERS = ["bl", "br", "tl", "tr"]
 SAMPLE = "steel meets the laser\nsparks dance on the cutting bed\nproduction hums on"
 

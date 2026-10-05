@@ -43,7 +43,6 @@ THEME_PALETTES = {
     "dark":           _pal("dgrey", "lavender", "blue", "orange", "lgrey", "white"),
     "light":          _pal("black", "dgrey", "brown", "orange", "lgrey"),
     "cherry_blossom": _pal("black", "brown", "dpurple", "pink", "peach", "white"),
-    "blue":           _pal("lavender", "blue", "lgrey", "white", "orange"),
     "cyberpunk":      _pal("dpurple", "red", "pink", "blue", "yellow", "white"),
     "matrix":         _pal("dgreen", "green", "dgrey", "lgrey", "white"),
 }
@@ -75,14 +74,11 @@ THEME_ICON_SWAPS = {
 # theme's lightest tier (which the 922 folder keeps) onto the slot that renders
 # pink #FF77A8 in cyberpunk -- the tier the calculator's buttons and the
 # magnifier's glass land on, taken per theme from those same icons (third-
-# darkest palette color). blue theme: the two anchors disagree (buttons orange,
-# glass lgrey); orange matches the palette rank and stays distinct from the
-# 922 folder's white body.
+# darkest palette color).
 ICON_SUBSTITUTIONS = {
     ("dark", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("light", "sym_opened_folder_911"):          {"#C2C3C7": "#5F574F"},
     ("cherry_blossom", "sym_opened_folder_911"): {"#FFF1E8": "#AB5236"},
-    ("blue", "sym_opened_folder_911"):           {"#FFF1E8": "#FFA300"},
     ("cyberpunk", "sym_opened_folder_911"):      {"#FFF1E8": "#FF77A8"},
     ("matrix", "sym_opened_folder_911"):         {"#9BFFB0": "#00E436"},
     # caution (922 Difficulty Stamper): the luminance-rank recolor sends the
@@ -94,7 +90,6 @@ ICON_SUBSTITUTIONS = {
     ("dark", "caution"):                         {"#FFF1E8": "#FFA300"},
     ("light", "caution"):                        {"#C2C3C7": "#FFA300"},
     ("cherry_blossom", "caution"):               {"#FFF1E8": "#FFCCAA"},
-    ("blue", "caution"):                         {"#FFF1E8": "#FFA300"},
     ("cyberpunk", "caution"):                    {"#FFF1E8": "#FFEC27"},
 }
 
@@ -856,6 +851,52 @@ _QR_TONES = {"a": "#064678", "g": "#589BD4"}
 
 def qr(d):                  # qr code generator
     _draw_grid(d, _QR_GRID, _QR_TONES)
+
+
+_BATCH_VALIDATOR_GRID = [
+    "................................",
+    "................................",
+    "......bbbbbbbbbbbbbbbbbbbbbb....",
+    "......bbbbbbbbbbbbbbbbbbbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwaaaawwwwwwwwwwbbbb....",
+    "..wwwwwwwwaaaawwwwwwwwwwbbbb....",
+    "..wwaawwaaaawwwwbbbbbbwwbbbb....",
+    "..wwaawwaaaawwwwbbbbbbwwbbbb....",
+    "..wwaaaaaawwwwwwwwwwwwwwbbbb....",
+    "..wwaaaaaawwwwwwwwwwwwwwbbbb....",
+    "..wwwwaawwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwaawwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwwwrrwwwwwwbbbbbbwwbbbb....",
+    "..wwwwwwrrwwwwwwbbbbbbwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwwwrrrrrrwwwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwrrrrwwrrrrwwwwwwwwwwbbbb....",
+    "..wwwwwwwwwwwwwwwwwwwwww........",
+    "..wwwwwwwwwwwwwwwwwwwwww........",
+    "................................",
+    "................................",
+]
+_BATCH_VALIDATOR_TONES = {"a": "#064678", "r": "#E41E2F", "b": "#589BD4", "w": "#E6E5E5"}
+
+def batch_validator(d):     # 902 batch validator
+    # Tournament winner v19 (tools/pixel_playground/batch_validator/variants.py,
+    # maintainer's pick 2026-09-21): a pass row and a fail row on a sheet, a
+    # second sheet behind = a BATCH. The X is pack red because its luminance
+    # sits BETWEEN navy and mid blue - an orange X ranks third and recolors to
+    # pale grey on white in dark / matrix. Keep both marks the two
+    # darkest tones if this is ever repainted.
+    _draw_grid(d, _BATCH_VALIDATOR_GRID, _BATCH_VALIDATOR_TONES)
 
 
 _SYM_BINOCULARS_GRID = [
@@ -2169,6 +2210,7 @@ ICONS = {
     "copy": copy,
     "badge": badge,
     "qr": qr,
+    "batch_validator": batch_validator,
     "caution": caution,
     "inspection_dims": inspection_dims,
 }

@@ -15,7 +15,7 @@ def test_preview_themes_exclude_professional():
     themes = _preview_themes()
     assert "professional" not in themes
     assert {"dark", "matrix"} <= set(themes)
-    assert len(themes) == 6
+    assert len(themes) == 5
 
 
 def test_recolor_tones_returns_valid_hex_for_every_theme():
@@ -52,7 +52,7 @@ def test_studio_builds_all_three_modes(qapp):
     # Tile Icon starts at 32x32 and renders a preview tile per theme.
     icon = s.stack.widget(1)
     assert icon.canvas.grid_size() == (32, 32)
-    assert len(icon._preview_labels) == 6
+    assert len(icon._preview_labels) == 5
 
 
 def test_sprite_mode_has_layers_tile_icon_does_not(qapp):

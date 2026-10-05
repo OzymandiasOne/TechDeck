@@ -35,6 +35,9 @@ _PLUGIN_ID_RENAMES = {
     "po_packet_extractor": "911_po_pdf_extractor",
     "run_time_estimator": "922_runtime_genie",
     "911_repeater": "911_batch_repeater",  # id now matches its folder
+    # Renamed the day it was built (2026-09-21), before any release - the
+    # prints check made it a BATCH validator. It did load in dev runs.
+    "902_part_validator": "902_batch_validator",
     # Chain entries point at the FINAL id: tile/unlock migration is a single
     # dict lookup (no chaining), so an old->intermediate entry would leave a
     # stale tile for one launch.
@@ -356,6 +359,9 @@ class SettingsManager:
         if self.data.get("settings", {}).get("theme") == "salmon":
             self.data["settings"]["theme"] = "cherry_blossom"
 
+        # The built-in Blue theme was retired in 0.8.7.8 -> Dark
+        self._migrate_retired_blue_theme()
+
         # Repair total_runs frozen by the pre-singleton settings race
         self._backfill_total_runs()
 
@@ -648,6 +654,19 @@ class SettingsManager:
 
     # ========== App Settings ==========
     
+    def _migrate_retired_blue_theme(self) -> None:
+        """Blue was retired in 0.8.7.8. A custom theme named "blue" is kept."""
+        settings = self.data.get("settings", {})
+        if settings.get("theme") != "blue":
+            return
+        try:
+            custom = self.get_custom_themes_dir() / "blue.json"
+            if custom.is_file():
+                return
+        except OSError:
+            pass
+        settings["theme"] = "dark"
+
     def get_theme(self) -> str:
         """Get current theme name.
 

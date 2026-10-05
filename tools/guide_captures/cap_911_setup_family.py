@@ -5,7 +5,14 @@ Dev tool, run from the repo root (one app per process):
     python -u tools/guide_captures/cap_911_setup_family.py check    # fixture self-test, no GUI
     python -u tools/guide_captures/cap_911_setup_family.py setup    # 911 Setup, full flow
     python -u tools/guide_captures/cap_911_setup_family.py cards    # 911 Teams Cards picker
-    python -u tools/guide_captures/cap_911_setup_family.py ticket   # 911 Remove Ticket prompt
+    python -u tools/guide_captures/cap_911_setup_family.py ticket   # Remove Ticket: pick + prompt
+    python -u tools/guide_captures/cap_911_setup_family.py sketch   # Sketch Extractor folder pick
+    python -u tools/guide_captures/cap_911_setup_family.py po       # PO Extractor folder pick
+
+The folder picks are photographed with the Sentry Drone armed: a native folder
+dialog is a separate OS window that an offscreen capture run can neither grab
+nor drive, while the drone's picker is a Qt widget. Every folder-pick caption in
+the guide says so. Shared driver: guide_captures/_picker.py.
 
 Uses the camera library (tools/capture_guide_screens.py): sandboxed fresh
 profile, hidden main window. App-created dialogs flash on the real screen
@@ -34,6 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, r"C:\Dev\TechDeck\tools")
 import capture_guide_screens as cam  # noqa: E402  (sandboxes LOCALAPPDATA on import)
+import guide_captures._picker as picker  # noqa: E402
 
 REPO = Path(r"C:\Dev\TechDeck")
 
@@ -370,6 +378,11 @@ def run_setup():
         "schedule_path": str(SCHEDULE),
         "card_dry_run": True,   # belt and braces; the cards stage stays off
     })
+    # v2.4.0: the batch is a folder PICK. A native dialog cannot be grabbed or
+    # driven from a capture run, so the drone is armed and the pick opens as a
+    # Qt window - the same reason every other folder-pick picture in the guide
+    # is the drone version.
+    picker.arm_drone(settings, ["911_setup"])
 
     from PySide6.QtCore import Qt, QTimer
 
@@ -398,15 +411,15 @@ def run_setup():
                 st.update(phase="batch", stable=0)
 
         elif phase == "batch":
-            prompt = (getattr(con, "input_prompt", "") or "").lower()
-            if con.waiting_for_input and "batch number" in prompt:
-                st["stable"] += 1
-                if st["stable"] >= 2:
-                    cam.save(con, "911_setup_batch_prompt")
-                    _copy_shot("911_setup_batch_prompt", "run_console_prompt")
-                    con.input_field.setText(BATCH)
-                    con._on_input_submitted()
-                    st.update(phase="nest", stable=0)
+            pick = st.get("pick")
+            if pick is None:
+                pick = st["pick"] = picker.ChopperPick(
+                    "select the 911 batch folder", BATCH,
+                    shots=["911_setup_batch_pick"],
+                    sidebar_url=str(QTDR))
+            pick.tick()
+            if pick.done:
+                st.update(phase="nest", stable=0)
 
         elif phase == "nest":
             dlg = _find_dialog(window, "NestSelectionDialog")
@@ -533,23 +546,57 @@ def run_cards():
 
 
 def run_ticket():
-    """911 Remove Ticket: the console at its first typed prompt (the PDF
-    folder path). Nothing is answered; the process hard-exits after the shot."""
+    """911 Remove Ticket: the folder PICK, then the PDF-selection prompt.
+
+    v1.5.0 replaced the app's typed "Enter path to PDF directory:" with a
+    folder pick, so the old first-prompt shot is gone. Two pictures come out of
+    this run instead:
+
+      911_remove_ticket_folder_pick - the pick (drone-armed so it is a Qt
+          window a capture run can drive; a native dialog is a separate OS
+          window and cannot be grabbed offscreen).
+      run_console_prompt - chapter 02's generic "an app is waiting on you"
+          picture. It used to be copied from 911 Setup's typed batch prompt,
+          which is now a pick too; this app's "which PDFs?" question is a real
+          remaining typed prompt and makes the better example anyway.
+    """
     build_fixtures()
     app, window, settings = cam.boot()
+    picker.arm_drone(settings, ["911_remove_ticket"])
 
     from PySide6.QtCore import QTimer
 
-    _safety = _arm_safety(60)  # noqa: F841
-    st = {"stable": 0}
+    _safety = _arm_safety(90)  # noqa: F841
+    st = {"phase": "pick", "stable": 0, "pick": None}
 
     def step():
         con = window.console
+
+        if st["phase"] == "pick":
+            if st["pick"] is None:
+                st["pick"] = picker.ChopperPick(
+                    "select the folder with the nest package pdfs",
+                    "NEST PACKAGES",
+                    shots=["911_remove_ticket_folder_pick"],
+                    sidebar_url=str(QTDR / BATCH),
+                    directory=str(QTDR / BATCH))
+            st["pick"].tick()
+            if st["pick"].done:
+                st.update(phase="prompt", stable=0)
+            return
+
+        # The PDF-selection prompt: a real typed console question.
         prompt = (getattr(con, "input_prompt", "") or "").lower()
-        if con.waiting_for_input and "pdf directory" in prompt:
+        if con.waiting_for_input and "number(s) to process" in prompt:
             st["stable"] += 1
             if st["stable"] >= 2:
+                try:
+                    window.home_splitter.setSizes([300, 500])
+                except Exception:
+                    pass
+                cam.pump(app, 400)
                 cam.save(con, "911_remove_ticket_prompt")
+                _copy_shot("911_remove_ticket_prompt", "run_console_prompt")
                 print("TICKET CAPTURE DONE")
                 sys.stdout.flush()
                 os._exit(0)
@@ -569,6 +616,67 @@ def run_ticket():
     app.exec()
 
 
+def _run_folder_pick_only(plugin_id: str, title_sub: str, shot: str):
+    """Boot, start `plugin_id`, photograph its folder pick, back out.
+
+    Both extractors used to open with a typed "Enter folder path containing
+    PDFs" prompt (v2.4.0 made it a pick), and that old console shot was each
+    chapter's only picture. The pick is CANCELLED once photographed: the
+    picture is the whole point of the run, and cancelling leaves the fixture
+    untouched.
+    """
+    build_fixtures()
+    app, window, settings = cam.boot()
+    # The run queue is profile tiles INTERSECT selected tiles, so the app has
+    # to be in the sandbox profile's kit before start_app can launch it.
+    tiles = settings.get_profile_tiles()
+    if plugin_id not in tiles:
+        settings.set_profile_tiles(tiles + [plugin_id])
+    picker.arm_drone(settings, [plugin_id])
+
+    from PySide6.QtCore import QTimer
+
+    _safety = _arm_safety(90)  # noqa: F841
+    st = {"pick": None}
+
+    def step():
+        if st["pick"] is None:
+            st["pick"] = picker.ChopperPick(
+                title_sub, "NEST PACKAGES", shots=[shot], mode="cancel",
+                sidebar_url=str(QTDR / BATCH), directory=str(QTDR / BATCH))
+        st["pick"].tick()
+        if st["pick"].done:
+            print(f"{plugin_id.upper()} CAPTURE DONE")
+            sys.stdout.flush()
+            os._exit(0)
+
+    def tick():
+        try:
+            step()
+        except Exception:
+            traceback.print_exc()
+            sys.stdout.flush()
+            os._exit(2)
+
+    timer = QTimer()
+    timer.timeout.connect(tick)
+    timer.start(220)
+    cam.start_app(app, window, plugin_id)
+    app.exec()
+
+
+def run_sketch():
+    _run_folder_pick_only("911_sketch_extractor",
+                          "select the folder with the pdfs",
+                          "911_sketch_extractor_folder_pick")
+
+
+def run_po():
+    _run_folder_pick_only("911_po_pdf_extractor",
+                          "select the folder with the po packet pdfs",
+                          "911_po_pdf_extractor_folder_pick")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "check":
@@ -579,8 +687,13 @@ def main():
         run_cards()
     elif mode == "ticket":
         run_ticket()
+    elif mode == "sketch":
+        run_sketch()
+    elif mode == "po":
+        run_po()
     else:
-        sys.exit("usage: cap_911_setup_family.py check|setup|cards|ticket")
+        sys.exit("usage: cap_911_setup_family.py "
+                 "check|setup|cards|ticket|sketch|po")
     sys.stdout.flush()
     os._exit(0)
 

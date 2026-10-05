@@ -19,6 +19,7 @@ from PySide6.QtGui import QFont, QIcon
 
 from techdeck.ui.theme import get_current_palette
 from techdeck.ui.utils import make_tinted_svg_copy
+from techdeck.ui.theme import icon_folder_for_theme
 
 LOOP_ALL  = "loop_all"
 LOOP_ONE  = "loop_one"
@@ -99,7 +100,7 @@ class RogueModePlayer(QDialog):
             if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
             else Path(__file__).resolve().parents[3] / "assets" / "icons"
         )
-        _ifolder = "light" if _tn in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _ifolder = icon_folder_for_theme(_tn)
 
         def _media_icon(name: str) -> QIcon:
             tinted = make_tinted_svg_copy(_idir / "light" / name, _tp.text)

@@ -2,7 +2,7 @@
   "id": "911_remove_ticket",
   "name": "911 Remove Ticket",
   "description": "Removes PART SKETCH pages from nest package PDFs, saving output as '{name} Move Ticket Omit.pdf' in a Move Ticket Omit subfolder. Stamps the first page with BATCH: / NEST: (red Century Gothic, under Quality Requirements), a colour-coded SIMPLE / MEDIUM / DIFFICULT difficulty label read from the EB 922 Schedule, and fills the blank Material Type cell from the removed move tickets. Originals are untouched. A PART SKETCH page whose drawing didn't render ('resource not reachable') is filled from the batch's own WPDD SKETCHES folder - every view - and those .jpgs are copied into the nest folder's Sketches subfolder. The material designator (HSS, OSS, CRES316...) is also written into the empty MATL: cell of every PART SKETCH so Saco can scribe from the print.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {
@@ -35,6 +35,15 @@
         "placeholder": "C:\\...",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
       }
     ]
   }

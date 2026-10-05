@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.6 - Paperwork Complete
+# TechDeck v0.8.7.7 - Batch Check
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -9,7 +9,100 @@ the `.exe`.
 
 ---
 
+## What's New in v0.8.7.7 - Batch Check
+
+### New app: 902 Batch Validator
+
+**What it does:** use this on a 902 batch and it tells you which parts are missing files
+or have corrupted data.
+
+It reads the part list off EB's Offload to ASA workbook (or the pricing workbook if
+present), so you can run it the day the batch lands. Then it opens every DXF and IGES to
+check there's actual geometry in the file, and finally it reads the prints in the WPDD
+folder. The part number on the prints has weird formatting the system struggles with, so
+it uses our system from the Inspection Dimensions app to parse the data. A 90 page book
+takes about two minutes.
+
+- A part lands on the flagged list for one of four reasons: no DXF was sent, the DXF is
+  empty or damaged, the IGES is corrupt or holds no part outline, or no print was sent.
+- EB sends each part as a DXF and an IGES pair, so the two are checked separately.
+- It only reads the batch. Nothing is moved, renamed or changed, so it is safe to run
+  before or after 902 DXF Prep.
+
+**What you get at the end:** one file in the batch folder, `{batch} - BATCH VALIDATION
+REPORT.pdf`. The first page is the counts, then every part on the list with Issue Y or N
+and what is wrong in plain words. The next page breaks the problems down by kind, and
+lists the print pages it could not tie to a part so you can check those by eye. The
+flagged parts are printed in the console too, so the list can go straight into a message
+to EB.
+
+**How to run it:** run this on either the batch folder or the folder with the part files
+in it. Both work.
+
+### 911 LST Organizer final report has been overhauled to match 922 LST Organizer
+
+The pull report is now one color-coded PDF, the same as the 922 one, instead of a text
+file. Missing parts and nests it could not find in red, revision letter swaps in blue,
+then the pull list grouped by nest. The popup at the end names the parts with no .lst
+file, and the last line in the console opens the report when you click it. The 922 one
+got that clickable line too.
+
+### 911 Setup: Scribe verification sheet now fits the nest
+
+Previously both SACO templates' sheet contained room for 24 parts, which was an oversight
+on my part. So on a bigger nest everything past the 24th part never appeared. The table
+now expands to the correct length of the nest. So a 26 part nest now actually prints 26
+lines. Additional changes include:
+
+- **Parts are now in the same order as the nest package summary**, which is the order QA
+  walks them in at final inspection. The inspection sheets follow the same order.
+- **Where the nest package and the BATCH LIST disagree on a quantity, the package's
+  number is now the one written**, highlighted yellow, with both numbers named in the run
+  summary. It used to keep the BATCH LIST number.
+- **On a plate run the MIL SPEC column now follows the stock.** Carbon plate is N/A.
+  Non-ferrous plate gets each part's own MIL spec, read off the labeling block at the
+  bottom of that part's PART SKETCH page. A part with no spec printed is left blank and
+  the console names it.
+- **The whole NEST tab is centered now**, not just the top of it.
+
+### 902 DXF Prep
+
+It now works on a batch the day it arrives: the part list can come from EB's Offload to
+ASA workbook, before the pricing workbook exists. It also recognises EB's longer file
+names now (the `_R_AS_1F01_of_1_FLAT-PATTERN#1` kind), which were being moved to the
+EXTRA folder as unrecognised.
+
+### Fixes
+
+- **911 Setup was not checking part quantities on plate nests.** It compared each part
+  against the nest package for shape work only, because a plate work order is written
+  differently (`3X24-814` rather than `XX700969`). On one plate nest that meant 4 of 34
+  parts were actually checked. All of them are checked now. For the record, across 682
+  parts in 14 batches every quantity agrees with its package.
+
+---
+
 ## What's New in v0.8.7.6 - Paperwork Complete
+
+### New app: MieTrak Tools
+
+**What it does:** you pick a small MieTrak helper from a list, make your choices from
+dropdowns, and get the code you need, ready to paste into MieTrak.
+
+- The first tool is the **Hardware Code Generator**. Pick the material, the hardware
+  type, the thread and the length (or the screw size, for a washer), and it builds the
+  hardware part number. A 1/2-13 by 2 inch zinc plated grade 5 hex head cap screw comes
+  out as `HWZP5-HHCS-H13-2`.
+- It covers cap screws, nuts, washers, studs and set screws, imperial and metric.
+- The codes are spelled exactly the way the standalone hardware code program spelled
+  them, so they match what is already in MieTrak.
+- It writes no files and touches no batch. **Copy Code** puts the code on the clipboard.
+
+**How to run it:** it is under General in the Library. More MieTrak helpers will be
+added to the same window over time.
+
+*(MieTrak Tools shipped in 0.8.7.6 but was left out of that release's announcements.
+This entry was added afterwards.)*
 
 ### 911 SSPO Invoicing Prep fills in the invoice and prints it
 
@@ -45,6 +138,13 @@ where the Mie Trak invoice goes.
   checked.** Clear them on a run that should skip them.
 - **The BATCH PROGRESS card goes in the batch's HOLD bucket**, on its own, instead
   of sitting among the order cards.
+
+### Fixes
+
+- **922 LST Organizer: tubes reported missing that were right there.** On Batch 491
+  the PO spelled 9 of the 38 standard tubes without the hyphen before the sheet
+  (`R8652362H11G-4A`) while the files on disk had it (`R8652362-H11G-4A`), so each one
+  was listed as missing and as needing review. Both spellings now match.
 
 ---
 
@@ -1129,6 +1229,7 @@ Explorer and on pinned shortcuts.
 
 | Plugin | Description |
 |---|---|
+| 902 Batch Validator | Checks a 902 batch's part files against the PO before work starts - parts with no DXF, DXFs with no geometry, corrupt IGES files, and parts with no print (read off the scanned prints) - and writes one color-coded PDF report |
 | 902 DXF Prep | Batch DXF cleanup and prep for Boost 902 part files - IGES CONVERT folder + QTY sheet, renames/sorts exported DXFs for AutoCAD review, then recombines and reconciles against the PO spreadsheet |
 | 911 Setup | Full 911 QTDR batch setup - nest folders, templates, forecast data, PDFs, inspection sheets and Move Ticket Omit stamping - behind a checklist of what to run that remembers your selection between sessions |
 | 911 Teams Cards | Posts one Teams modeling card per 911 nest the EB 922 Schedule marks NEED TEAMS/SETUP, into the MODELING bucket of the SOPO D911 PIPELINE plan with its difficulty, its saw-cut or tube-laser machine and its scheduled due date, then moves each nest's status along the schedule as its card goes out. Pick which nests you want cards for - all ticked by default - and the rest stay queued for next time. Needs no batch number |

@@ -5,8 +5,9 @@ calculators behind a picker.
 Each calculator is a declarative spec: a list of input fields + a compute()
 function. Adding a new calculator is a single entry in the CALCULATORS list at
 the bottom of this file - no UI code required. The engine (SheetMetalCalculators
-window) builds the form, wires validation, and shows the result for whichever
-calculator is selected.
+window) builds every calculator's form once, wires validation, and shows the
+result; picking a calculator only switches which form is showing, so inputs
+survive the user looking at another one.
 
 The first calculator (flat_length) is a straight port of the HTML/JS
 "Flat Length Calculator" - same bend-allowance math, native + themed.
@@ -17,7 +18,7 @@ import math
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QLabel, QLineEdit, QComboBox, QPushButton, QFormLayout, QFrame,
-    QScrollArea, QSizePolicy,
+    QScrollArea, QSizePolicy, QStackedWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -78,22 +79,21 @@ def _palette():
 
 class SheetMetalCalculators(PluginWindow):
     """Left: a picker list of calculators. Right: the selected calculator's
-    form + result. Rebuilds the right panel whenever the selection changes."""
+    form + result.
+
+    Every calculator's form is built ONCE and kept in a QStackedWidget; a pick
+    only changes which one shows. The first version rebuilt the panel on every
+    pick, so typed-in inputs vanished the moment the user clicked another
+    calculator and came back (fixed 2026-09-23 alongside the same bug in
+    MieTrak Tools, which shares this engine shape).
+    """
 
     def __init__(self, on_success=None):
         super().__init__("sheet_metal_calculators", "Sheet Metal Calculators")
         self._on_success = on_success
         self._pal = _palette()
         self.setMinimumSize(760, 560)
-
-        # Per-form runtime state, rebuilt on each calculator selection.
-        self._fields = {}          # key -> (spec, widget)
-        self._dynamic_labels = []  # (field_spec, QLabel) pairs to refresh live
-        self._visibility_rows = []  # (field_spec, row_index) pairs to show/hide live
-        self._form = None          # the active QFormLayout (for setRowVisible)
-        self._result_box = None
-        self._error_label = None
-
+        self.forms = []             # one _CalcForm per CALCULATORS entry, same order
         self._build_ui()
 
     # -- layout ------------------------------------------------------------
@@ -110,68 +110,68 @@ class SheetMetalCalculators(PluginWindow):
             item = QListWidgetItem(calc["name"])
             item.setData(Qt.UserRole, calc["id"])
             self._list.addItem(item)
-        self._list.currentRowChanged.connect(self._on_pick)
         row.addWidget(self._list)
 
-        # Right: the form panel, inside a scroll area for small screens.
-        self._panel = QWidget()
-        self._panel_layout = QVBoxLayout(self._panel)
-        self._panel_layout.setContentsMargins(0, 0, 0, 0)
-        self._panel_layout.setSpacing(12)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setWidget(self._panel)
-        row.addWidget(scroll, 1)
+        # Right: one scroll area per form, stacked. Never one scroll area around
+        # the stack - a QStackedWidget is as tall as its tallest page, so every
+        # short form would scroll through the longest one's empty space.
+        self._stack = QStackedWidget()
+        for calc in CALCULATORS:
+            form = _CalcForm(calc, palette=self._pal, on_success=self._on_success)
+            self.forms.append(form)
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.NoFrame)
+            scroll.setWidget(form)
+            self._stack.addWidget(scroll)
+        row.addWidget(self._stack, 1)
 
         self._main_layout.addWidget(root)
 
+        self._list.currentRowChanged.connect(self._on_pick)
         if CALCULATORS:
             self._list.setCurrentRow(0)
 
-    def _clear_panel(self):
-        self._fields = {}
-        self._dynamic_labels = []
-        self._visibility_rows = []
-        self._form = None
-        self._result_box = None
-        self._error_label = None
-        self._clear_layout(self._panel_layout)
-
-    def _clear_layout(self, layout):
-        """Recursively remove every widget AND nested layout (the QFormLayout is
-        added via addLayout, so it's a layout item, not a widget item - a plain
-        widget-only sweep leaves its rows alive and they stack on the next form)."""
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-            child = item.layout()
-            if child is not None:
-                self._clear_layout(child)
-                child.deleteLater()
-
     def _on_pick(self, index: int):
-        if index < 0 or index >= len(CALCULATORS):
-            return
-        self._build_form(CALCULATORS[index])
+        if 0 <= index < self._stack.count():
+            self._stack.setCurrentIndex(index)
 
-    def _build_form(self, calc: dict):
-        self._clear_panel()
-        self._active = calc
+
+class _CalcForm(QWidget):
+    """One calculator: its title, description, form, and result - with all of
+    that calculator's runtime state, so it survives the user looking away."""
+
+    # Room between the fields and the scroll bar, so a long form's inputs never
+    # butt up against it (same call as MieTrak Tools, 2026-09-23).
+    GUTTER = 14
+
+    def __init__(self, calc: dict, palette=None, on_success=None, parent=None):
+        super().__init__(parent)
+        self._calc = calc
+        self._pal = palette
+        self._on_success = on_success
+        self._fields = {}          # key -> (spec, widget)
+        self._dynamic_labels = []  # (field_spec, QLabel) pairs to refresh live
+        self._visibility_rows = []  # (field_spec, row_index) pairs to show/hide live
+        self._form = None          # the QFormLayout (for setRowVisible)
+        self._build()
+
+    def _build(self):
+        calc = self._calc
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, self.GUTTER, 0)
+        layout.setSpacing(12)
 
         title = QLabel(calc["name"])
         title.setStyleSheet("font-size: 16pt; font-weight: bold;")
-        self._panel_layout.addWidget(title)
+        layout.addWidget(title)
 
         if calc.get("description"):
             desc = QLabel(calc["description"])
             desc.setWordWrap(True)
             if self._pal:
                 desc.setStyleSheet(f"color: {self._pal.text_secondary};")
-            self._panel_layout.addWidget(desc)
+            layout.addWidget(desc)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignLeft)
@@ -191,18 +191,18 @@ class SheetMetalCalculators(PluginWindow):
             form.addRow(label, widget)
 
         self._form = form
-        self._panel_layout.addLayout(form)
+        layout.addLayout(form)
 
         calc_btn = QPushButton(calc.get("button_text", "Calculate"))
         calc_btn.clicked.connect(self._calculate)
-        self._panel_layout.addWidget(calc_btn)
+        layout.addWidget(calc_btn)
 
         # Error line (hidden until there's something to say).
         self._error_label = QLabel("")
         self._error_label.setWordWrap(True)
         self._error_label.setStyleSheet("color: #E24A4A; font-weight: bold;")
         self._error_label.hide()
-        self._panel_layout.addWidget(self._error_label)
+        layout.addWidget(self._error_label)
 
         # Result box (hidden until a successful calc).
         self._result_box = QLabel("")
@@ -215,9 +215,9 @@ class SheetMetalCalculators(PluginWindow):
             " border-radius: 4px; padding: 14px; font-size: 14pt; font-weight: bold;"
         )
         self._result_box.hide()
-        self._panel_layout.addWidget(self._result_box)
+        layout.addWidget(self._result_box)
 
-        self._panel_layout.addStretch(1)
+        layout.addStretch(1)
         self._on_input_change()
 
     def _make_widget(self, spec: dict) -> QWidget:
@@ -303,7 +303,7 @@ class SheetMetalCalculators(PluginWindow):
         self._result_box.hide()
         values = self._current_values()
         try:
-            result = self._active["compute"](values)
+            result = self._calc["compute"](values)
         except CalcError as e:
             self._error_label.setText(str(e))
             self._error_label.show()
@@ -313,10 +313,10 @@ class SheetMetalCalculators(PluginWindow):
             self._error_label.show()
             return
 
-        decimals = self._active.get("decimals", 3)
+        decimals = self._calc.get("decimals", 3)
         text = result if isinstance(result, str) else f"{result:,.{decimals}f}"
-        unit = self._active.get("result_unit", "")
-        label = self._active.get("result_label", "Result")
+        unit = self._calc.get("result_unit", "")
+        label = self._calc.get("result_label", "Result")
         body = f"{text}{(' ' + unit) if unit else ''}"
         # A calc that computes its own multi-line result string sets a falsy
         # result_label to suppress the "Label: " prefix (e.g. Bend Deduction).

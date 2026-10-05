@@ -31,6 +31,14 @@ seeds that same family cache (Hard Rule 10). The report's missing-tubes table
 shows each tube's SOURCE MATERIAL description instead of the where-to-look
 path hint (the material is what you take to the floor).
 
+v3.3.2 - the report layout moved into the SDK (sdk.ReportPdf) so the 911 LST
+Organizer and 902 Batch Validator draw the same report; the run now ends with a
+clickable console line that opens the report (sdk.link_output).
+
+v3.3.3 - a PO row whose DYPN disagrees with its own PPN (Batch 496: PPN
+H7658162-H3DR, DYPN H7658162-H3-4A) is also matched under PPN + item, the
+spelling the drawings use (sdk.ppn_dypn).
+
 Oversized tubes (>0.375" NOM) never have `.lst` files - they're only counted on
 the report so the target (standard tubes) reconciles cleanly.
 """
@@ -50,9 +58,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-import fitz  # PyMuPDF - the report is drawn as a color-coded PDF
-
-VERSION = "3.3.1"
+VERSION = "3.3.3"
 
 NEEDS_REVIEW_FOLDER = "Needs Review"
 
@@ -113,6 +119,23 @@ def _scan_headers(ws, required: List[str], max_rows: int = 25) -> Tuple[int, Dic
     raise ValueError(f"headers {sorted(want)} not found in first {max_rows} rows")
 
 
+class _PoMap(dict):
+    """normalized PO DYPN -> (order, serial), plus `aliases`: the PPN + item
+    spelling of any row whose DYPN disagrees with its PPN -> that row's key."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.aliases: Dict[str, str] = {}
+
+
+def _po_spelling(part: str, mapping) -> str:
+    """`part` as the PO spells it: itself when the PO has it, else the PO key
+    it aliases (see _PoMap), else unchanged."""
+    if part in mapping:
+        return part
+    return getattr(mapping, "aliases", {}).get(part, part)
+
+
 def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optional[str]]],
                                             Dict[str, str]]:
     """(dypn_map, serial_desc) from a QF-QU-09 workbook.
@@ -125,8 +148,9 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
             raise ValueError("workbook has no 'PO' sheet")
         po_ws = wb[smap["po"]]
         hdr, cols = _scan_headers(po_ws, ["ORDER", "DYPN", "SOURCE MATERIAL"])
-        dypn_map: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+        dypn_map = _PoMap()
         respelled: List[Tuple[str, str]] = []
+        aliases: List[Tuple[str, str]] = []
         for row in po_ws.iter_rows(min_row=hdr + 1, values_only=True):
             dypn = _cell(row, cols["DYPN"])
             if not dypn:
@@ -136,6 +160,22 @@ def _read_po(xlsx: Path, log=None) -> Tuple[Dict[str, Tuple[Optional[str], Optio
                 respelled.append((dypn, key))
             dypn_map[key] = (
                 _cell(row, cols["ORDER"]), _cell(row, cols["SOURCE MATERIAL"]))
+            # Also file it under PPN + item: the drawings are named that way
+            # even when the PO's DYPN column disagrees with its PPN column
+            # (Batch 496: PPN H7658162-H3DR, DYPN H7658162-H3-4A).
+            if "PPN" in cols:
+                alias = sdk.ppn_dypn(_cell(row, cols["PPN"]), dypn)
+                if alias:
+                    aliases.append((_normalize_part(alias), key))
+        # Aliases never overwrite a real PO spelling and never go INTO the
+        # map (the "expected" list walks it); _po_spelling() translates a
+        # drawing's name back to the PO's own key at lookup time.
+        for alias, key in aliases:
+            if alias not in dypn_map:
+                dypn_map.aliases.setdefault(alias, key)
+        if dypn_map.aliases and log:
+            log(f"  {len(dypn_map.aliases)} PO DYPN(s) disagree with their PPN "
+                f"- also matching them by PPN + item number.")
         if respelled and log:
             raw, key = respelled[0]
             log(f"  {len(respelled)} PO DYPN(s) respelled to the standard form "
@@ -264,7 +304,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
     results: List[Pulled] = []
     deferred: List[Pulled] = []
     for order_name, src in files:
-        part = _normalize_part(src.stem)
+        part = _po_spelling(_normalize_part(src.stem), master_map)
         hit = _lookup(part, master_map)
         how = "exact"
         if not hit:
@@ -280,6 +320,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
                 order_cache[order_name] = omap
                 for k, v in odesc.items():
                     serial_desc.setdefault(k, v)
+            part = _po_spelling(part, order_cache[order_name])
             hit = _lookup(part, order_cache[order_name])
             how = "order-po"
         if hit:
@@ -340,77 +381,16 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
 
 # ── report ──────────────────────────────────────────────────────────────────
 
-# colors (RGB 0-1)
-_C_BAND = (0.12, 0.31, 0.37)     # dark teal header band
-_C_WHITE = (1, 1, 1)
-_C_GREY = (0.46, 0.46, 0.46)
-_C_INK = (0.10, 0.10, 0.12)
-_C_MISS_BG, _C_MISS_TX = (0.97, 0.85, 0.85), (0.60, 0.00, 0.00)
-_C_REV_BG, _C_REV_TX = (0.99, 0.91, 0.82), (0.70, 0.37, 0.02)
-_C_OK_BG, _C_OK_TX = (0.85, 0.93, 0.82), (0.15, 0.31, 0.07)
-_C_EXTRA_BG, _C_EXTRA_TX = (0.82, 0.90, 0.96), (0.10, 0.32, 0.55)
-_C_TGT_BG = (1.0, 0.95, 0.74)
-_C_GRP_BG = (0.86, 0.89, 0.96)
-_C_ZEBRA = (0.96, 0.96, 0.97)
-
-_PW, _PH, _M = 612, 792, 42
-
-
-class _Pdf:
-    """Tiny top-down PDF layout helper over PyMuPDF with auto page breaks."""
-
-    def __init__(self):
-        self.doc = fitz.open()
-        self._page()
-
-    def _page(self):
-        self.p = self.doc.new_page(width=_PW, height=_PH)
-        self.y = _M
-
-    def _fits(self, h):
-        if self.y + h > _PH - _M:
-            self._page()
-
-    @staticmethod
-    def _font(bold):
-        return "hebo" if bold else "helv"
-
-    def _clip(self, s, w, size, bold=False):
-        s = "" if s is None else str(s)
-        fn = self._font(bold)
-        if fitz.get_text_length(s, fontname=fn, fontsize=size) <= w - 6:
-            return s
-        while s and fitz.get_text_length(s + "..", fontname=fn, fontsize=size) > w - 6:
-            s = s[:-1]
-        return s + ".."
-
-    def gap(self, h):
-        self.y += h
-
-    def text(self, s, size: float = 9, bold=False, color=_C_INK, dx=0):
-        self._fits(size + 4)
-        self.y += size
-        self.p.insert_text((_M + dx, self.y), s, fontsize=size,
-                           fontname=self._font(bold), color=color)
-        self.y += 4
-
-    def row(self, cells, widths, size=8.5, h=15, bold=False,
-            fill=None, tcolor=_C_INK):
-        self._fits(h)
-        x0 = _M
-        if fill is not None:
-            self.p.draw_rect(fitz.Rect(x0, self.y, x0 + sum(widths), self.y + h),
-                             fill=fill, width=0)
-        x, base = x0, self.y + h - 4.5
-        for c, w in zip(cells, widths):
-            self.p.insert_text((x + 3, base), self._clip(c, w, size, bold),
-                               fontsize=size, fontname=self._font(bold), color=tcolor)
-            x += w
-        self.y += h
-
-    def save(self, path):
-        self.doc.save(sdk.long_path(path), garbage=3, deflate=True)
-        self.doc.close()
+# The color-coded report layout lives in the SDK (sdk.ReportPdf) since
+# 2026-09-21 - 911 LST Organizer and 902 Batch Validator draw the same report.
+_RC = sdk.REPORT_COLORS
+_C_BAND, _C_WHITE, _C_GREY, _C_INK = _RC["band"], _RC["white"], _RC["grey"], _RC["ink"]
+_C_MISS_BG, _C_MISS_TX = _RC["miss_bg"], _RC["miss_tx"]
+_C_REV_BG, _C_REV_TX = _RC["rev_bg"], _RC["rev_tx"]
+_C_OK_BG, _C_OK_TX = _RC["ok_bg"], _RC["ok_tx"]
+_C_EXTRA_BG, _C_EXTRA_TX = _RC["extra_bg"], _RC["extra_tx"]
+_C_TGT_BG, _C_GRP_BG, _C_ZEBRA = _RC["target_bg"], _RC["group_bg"], _RC["zebra"]
+_Pdf = sdk.ReportPdf
 
 
 def _write_report(path: Path, batch_no: str, master_po: Optional[Path],
@@ -649,11 +629,12 @@ def run(params: dict, progress_callback, cancel_event) -> None:
 
     # ── Phase 5: report ──
     report = lst_dir / f"LST Report - Batch {batch_no}.pdf"
+    report_ok = False
     try:
         _write_report(report, batch_no, master_po,
                       [d.name for d in order_dirs], pulled, expected, len(gathered),
                       serial_desc)
-        log(f"Report: {report}")
+        report_ok = True
     except Exception as e:
         log(f"WARNING: could not write report: {e}")
     progress_callback(95)
@@ -701,6 +682,13 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             lines += [f"  - {p.src.name}  [{_order_num(p.order)}]  = {p.part}" for p in extra[:12]]
         sdk.show_warning(params, f"922 LST - Batch {batch_no}", "\n".join(lines))
 
+    # The run ends on a clickable line that opens the report (v3.3.2).
+    if report_ok:
+        if hasattr(sdk, "link_output"):
+            sdk.link_output(params, f"Open the LST report for Batch {batch_no}",
+                            report, prefix="[REPORT]")
+        else:
+            log(f"Report: {report}")
     progress_callback(100)
 
 

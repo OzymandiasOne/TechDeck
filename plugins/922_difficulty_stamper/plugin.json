@@ -2,7 +2,7 @@
   "id": "922_difficulty_stamper",
   "name": "922 Difficulty Stamper",
   "description": "Scans a 922 batch's part drawings for the DriveWorks DIFFICULT label and stamps DIFFICULT on that order's work packet. The label stays on the drawings. Re-running keeps packets honest: an order that is no longer difficult has its stamp removed.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {

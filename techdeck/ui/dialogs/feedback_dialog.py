@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt
 from techdeck.core.feedback_writer import submit_feedback
 from techdeck.core.feedback_features import get_feature_options
 from techdeck.ui.utils import make_tinted_svg_copy
+from techdeck.ui.theme import icon_folder_for_theme
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class FeedbackDialog(QDialog):
         _tm = get_theme_manager()
         self.theme = _tm.get_current_palette()
         _theme_name = _tm.get_current_theme()
-        _icon_folder = "light" if _theme_name in ["dark", "blue", "cyberpunk", "matrix"] else "dark"
+        _icon_folder = icon_folder_for_theme(_theme_name)
         _icons_dir = (
             Path(sys._MEIPASS) / "assets" / "icons" / _icon_folder
             if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")

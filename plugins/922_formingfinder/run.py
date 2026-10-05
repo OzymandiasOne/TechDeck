@@ -30,7 +30,7 @@ from typing import Optional
 
 import fitz
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.styles import Border, Font, PatternFill, Side
 
 try:
     from techdeck.core import plugin_sdk as sdk
@@ -47,6 +47,10 @@ _DEG_WORD_RE = re.compile(r'\d+\s*°')
 _NUMERIC_WORD_RE = re.compile(r'^\d+\.?\d*$')
 
 PURPLE_HEX = "FF7030A0"
+HEADER_FILL_HEX = "FFFFFF00"   # Bent Plates row 2: plain yellow
+
+_THIN = Side(style="thin")
+_ALL_BORDERS = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
 
 
 # DYPN helpers -----------------------------------------------------------------
@@ -346,6 +350,26 @@ def _load_po_lookup(po_path: Path, log) -> dict:
                 f"this part's kit page.")
         lookup[key] = chosen
 
+    # Alias every entry under the DYPN its drawing is actually NAMED with.
+    # The drawing (and the organizer's kit pages) build the DYPN as PPN +
+    # item, but the PO's own DYPN column can disagree with its PPN column
+    # (Batch 496: PPN 'H7658162-H3DR', DYPN 'H7658162-H3-2', drawing
+    # 'H7658162-H3DR-2 PLT F.pdf'). The exact key missed, the Bent Plates
+    # row went out with no PPN / SOURCE MATERIAL, and 922 Kitting - with no
+    # source to check - stamped FORMED on the part's rods too.
+    for (order_key, _dypn_key), chosen in list(lookup.items()):
+        alias = sdk.ppn_dypn(chosen.get('PPN'), chosen['DYPN'])
+        if not alias:
+            continue
+        alias_key = (order_key, alias.casefold())
+        if alias_key in lookup:
+            continue
+        aliased = dict(chosen)
+        aliased['_ALIAS_NOTE'] = (
+            f"{alias}: the PO lists this part as {chosen['DYPN']} (PPN "
+            f"{chosen['PPN']}); matched it by PPN + item number")
+        lookup[alias_key] = aliased
+
     return lookup
 
 
@@ -589,6 +613,8 @@ def _update_bent_plates(
         raise RuntimeError(f"Bent Plates header row missing columns: {missing}")
 
     # Clear existing data rows from row 3 down across all known header columns
+    # - values AND borders, so a rerun with fewer parts leaves no empty
+    # bordered rows behind.
     last_col = max(headers.values())
     clear_to = max(ws.max_row, 3)
     for r in range(3, clear_to + 1):
@@ -596,6 +622,7 @@ def _update_bent_plates(
             cell = ws.cell(row=r, column=c)
             if cell.value is not None:
                 cell.value = None
+            cell.border = Border()
 
     purple_font = Font(color=PURPLE_HEX)
     for i, row in enumerate(rows_data):
@@ -610,8 +637,43 @@ def _update_bent_plates(
     # Row 1 title (merged cell; write to top-left)
     ws.cell(row=1, column=1, value=f"BATCH {batch_no}: FORMED PARTS")
 
+    _format_bent_plates(ws, headers, last_row=2 + len(rows_data))
+
     sdk.save_workbook(wb, organizer_path)
     wb.close()
+
+
+def _format_bent_plates(ws, headers: dict[str, int], last_row: int) -> None:
+    """The finish the user used to apply by hand after every run: All Borders
+    on every filled cell (title row, header row, data rows) and a yellow fill
+    on the header row.
+
+    Row 1's title is a MERGED range, and openpyxl draws a merged range's
+    border from its edge cells, not the top-left one alone - so each cell of
+    the range gets only its outer sides (what Excel's All Borders produces on
+    a merged cell). Setting the top-left cell alone draws one small box."""
+    first_col = min(headers.values())
+    last_col = max(headers.values())
+    fill = PatternFill(fill_type="solid", start_color=HEADER_FILL_HEX,
+                       end_color=HEADER_FILL_HEX)
+
+    title = next((m for m in ws.merged_cells.ranges
+                  if m.min_row == 1 and m.min_col == first_col), None)
+    if title is not None:
+        for c in range(title.min_col, title.max_col + 1):
+            ws.cell(row=1, column=c).border = Border(
+                top=_THIN, bottom=_THIN,
+                left=_THIN if c == title.min_col else None,
+                right=_THIN if c == title.max_col else None)
+    else:
+        ws.cell(row=1, column=first_col).border = _ALL_BORDERS
+
+    for r in range(2, last_row + 1):
+        for c in range(first_col, last_col + 1):
+            cell = ws.cell(row=r, column=c)
+            cell.border = _ALL_BORDERS
+            if r == 2:
+                cell.fill = fill
 
 
 # Plugin entry -----------------------------------------------------------------
@@ -785,6 +847,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             log(f"  {meta['_PICK_NOTE']}")
         if meta.get('_PICK_WARN'):
             log(f"  {meta['_PICK_WARN']}")
+        if meta.get('_ALIAS_NOTE'):
+            log(f"  {meta['_ALIAS_NOTE']}")
+        if po_lookup and not meta.get('SOURCE MATERIAL'):
+            log(f"  WARNING: {f['dypn']} (order {order or '?'}) has no PO "
+                f"match - its Bent Plates PPN and SOURCE MATERIAL will be "
+                f"blank, and 922 Kitting can't tell its plate from its rod. "
+                f"Fill both in on Bent Plates before running 922 Kitting.")
         rows_data.append({
             'ORDER': meta.get('ORDER') or (order or None),
             'PPN': meta.get('PPN'),

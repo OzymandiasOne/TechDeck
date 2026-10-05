@@ -138,6 +138,28 @@ v1.8.0 changes
     checklist, label slots and the machine rules all live in the sibling
     card_template.json; the flow recipe is docs/TEAMS_CARDS.md (flow #3).
 
+v2.3.0 changes (floor feedback 2026-09-18 -- the SCRIBE VERIFICATION sheet)
+  - The sheet's table FITS the part count. Both SACO templates ship it fixed
+    at rows 1-25, so part 25 onward never appeared (7 of 98 recent nests run
+    past 24 parts, up to 37). `_fit_scribe_table` grows it (formulas + styles
+    carried down) or shrinks it, table ref and autofilter together.
+  - Parts are listed in the NEST PACKET's order (`_order_rows_like_packet`),
+    which is how QA walks them at final inspection. The BATCH LIST order
+    differed on 52 of 98 recent nests. Rows the packet does not list are kept,
+    after the listed ones. The inspection sheets follow, since they read NEST.
+  - On a QTY mismatch the PACKET's quantity is written (still yellow, both
+    numbers logged). It used to keep the BATCH LIST value.
+  - FIXED: the packet-summary parser only knew shape work orders ('XX700969'),
+    so on PLATE nests ('3X24-814') the QTY check silently never ran for most
+    rows (L022 5CDBBM: 4 of 34). With the plate shape added, 682 of 682 rows
+    across 14 batches verify - and all 682 agree with the packet.
+  - PLATE: MIL SPEC follows the packet's FERROUS flag - carbon ('F') is N/A,
+    non-ferrous ('N' / 'A') gets each part's OWN spec, read off the 'FOR
+    LABELING INFORMATION ONLY' block at the foot of that part's PART SKETCH page
+    (it used to get the move ticket's single spec on every row); a part with no
+    spec printed is left blank, and so is a packet with no flag at all - when
+    the app cannot tell, it does not guess.
+
 v2.1.0 changes (coworker feedback 2026-09-03 -- PLATE batches)
   - New "PLATE batch" toggle in the master window, default OFF (= SHAPE) and
     deliberately NOT remembered between runs (remember: False): plate-vs-
@@ -174,7 +196,7 @@ from copy import copy
 
 from openpyxl.cell.cell import MergedCell
 from openpyxl.styles import PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
 
 try:
     from techdeck.core import plugin_sdk as sdk
@@ -368,7 +390,16 @@ def _get_unique_nests_from_batch_list(batch_list_path: Path) -> list:
 # ---------------------------------------------------------------------------
 
 _SUMMARY_REF_RE = re.compile(r'^\d{1,4}$')
-_SUMMARY_WO_RE = re.compile(r'^[A-Z]{1,2}\d{5,8}$', re.IGNORECASE)
+# A work order. Measured over 755 summary rows in 128 recent packets, there are
+# exactly three shapes: 'XX700969' and 'X4604973' on shape batches, and
+# '3X24-814' on PLATE batches. The pattern was shape-only until v2.3.0, so on a
+# plate nest every '3X24-###' row failed the window test and the QTY check
+# silently never ran for it (L022 5CDBBM: 4 of 34 rows read). Kept TIGHT on
+# purpose: REF is '00' on every row of a shape packet, so nothing but these
+# patterns stops a window that slipped two lines from reading a part number as
+# a work order.
+_SUMMARY_WO_RE = re.compile(r'^(?:[A-Z]{1,2}\d{5,8}|\d[A-Z]\d{1,3}-\d{2,5})$',
+                            re.IGNORECASE)
 _SUMMARY_PART_RE = re.compile(r'^[A-Z0-9][A-Z0-9.\-]{3,}$', re.IGNORECASE)
 
 
@@ -385,8 +416,10 @@ def _parse_packet_summary_qtys(pdf_path: Path) -> dict:
     Parse the SUMMARY OF NEST table(s) in a nest packet PDF.
 
     Returns {(PART NUMBER, WORK ORDER): qty} (keys uppercased, qty summed
-    across duplicate rows). The table renders as a flat line sequence --
-    REF / PART NUMBER / QTY / WORK ORDER / SK headers, then per part:
+    across duplicate rows) IN THE PACKET'S OWN ORDER - dicts keep insertion
+    order, and v2.3.0 sorts the nest's rows by it. The table renders as a flat
+    line sequence -- REF / PART NUMBER / QTY / WORK ORDER / SK headers, then
+    per part:
       <ref int> <part number> <qty int> <work order> [sk]
     -- so rows are recovered by sliding a 4-line window over the page text
     and keeping windows that match that shape.
@@ -609,6 +642,30 @@ def _get_batch_rows_for_nest(batch_list_path: Path, nest_number: str,
     return rows
 
 
+def _order_rows_like_packet(batch_rows: list, pmap: dict) -> tuple:
+    """
+    (rows, moved): the nest's BATCH LIST rows re-ordered to match the packet's
+    SUMMARY OF NEST (v2.3.0, floor feedback 2026-09-18 - QA walks the parts in
+    packet order at final inspection, and the SCRIBE VERIFICATION sheet and the
+    inspection sheets both follow NEST order). Measured before building: the
+    BATCH LIST order differed from the packet on 20 of 35 recent nests.
+
+    A row the packet summary does not list keeps its BATCH LIST place among the
+    other unlisted rows and goes AFTER the listed ones - never dropped. With no
+    packet summary at all the rows come back untouched. `moved` is True when
+    the order actually changed.
+    """
+    if not pmap or not batch_rows:
+        return batch_rows, False
+    rank = {key: n for n, key in enumerate(pmap)}
+    def _key(item):
+        idx, (wo, dypn, *_rest) = item
+        k = (str(dypn).strip().upper(), str(wo).strip().upper())
+        return (0, rank[k], idx) if k in rank else (1, 0, idx)
+    ordered = [row for _i, row in sorted(enumerate(batch_rows), key=_key)]
+    return ordered, ordered != list(batch_rows)
+
+
 def _paste_batch_rows_into_nest(nest_ws, batch_rows: list):
     """
     Paste batch_rows into NEST sheet cols F-K (6-11) starting at row 4.
@@ -632,10 +689,13 @@ def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
     Compare each pasted batch row's qty against the nest packet's
     SUMMARY OF NEST quantities (pmap, keyed (DYPN, WORK ORDER) upper).
 
-    A row whose qty disagrees with the packet keeps the BATCH LIST value
-    but gets its DYPN QTY cell (NEST col I) filled yellow plus a console
-    warning. A row absent from a non-empty packet summary is reported as
-    unverifiable. Both are appended to the run-level mismatches /
+    A row whose qty disagrees with the packet gets THE PACKET'S qty written
+    into its DYPN QTY cell (NEST col I), filled yellow, plus a console warning
+    naming both numbers (v2.3.0, floor feedback 2026-09-18: QA checks the
+    scribe sheet against the nest package, so the package is the number that
+    has to be on it; until then the BATCH LIST value was kept). A row absent
+    from a non-empty packet summary keeps the BATCH LIST qty and is reported
+    as unverifiable. Both are appended to the run-level mismatches /
     unverified lists that feed the end-of-run summary block.
     """
     for i, (wo, dypn, _mat, qty, _nestval, _scope) in enumerate(batch_rows):
@@ -648,10 +708,11 @@ def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
                     f"summary -- qty {qty} could NOT be verified.")
         elif _as_int(qty) != pdf_qty:
             mismatches.append((nest, dypn, wo, qty, pdf_qty))
-            nest_ws.cell(4 + i, 9).fill = _QTY_MISMATCH_FILL  # col I = DYPN QTY
+            nest_ws.cell(4 + i, 9).value = pdf_qty             # col I = DYPN QTY
+            nest_ws.cell(4 + i, 9).fill = _QTY_MISMATCH_FILL
             log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: BATCH LIST says "
-                f"{qty}, nest packet says {pdf_qty} -- qty cell highlighted "
-                f"yellow in {workbook_name}.")
+                f"{qty}, nest packet says {pdf_qty} -- the packet's {pdf_qty} "
+                f"was written, highlighted yellow in {workbook_name}.")
 
 
 def _center_nest_sheet(nest_ws, num_parts: int = 0) -> int:
@@ -827,6 +888,69 @@ def _paste_forecast_into_nest(nest_ws, forecast_rows: list):
         nest_ws.cell(dest_row, 3).value = c
 
 
+def _fit_scribe_table(wb, num_parts: int, log) -> int:
+    """
+    Make the SCRIBE VERIFICATION table exactly `num_parts` rows long (v2.3.0,
+    floor feedback 2026-09-18: "it seems to be fixed to 25 rows and on larger
+    batches there are not enough lines"). Returns the data-row count it set.
+
+    Both SACO templates - shape AND plate - ship the sheet as an Excel table
+    `A1:?25` (24 part rows) of formulas mirroring NEST rows 4-27; part 25
+    onward simply never appeared (4 of 35 recent nests have more than 24
+    parts, up to 37). Growing: each new row is the row above it with every
+    NEST row reference moved down one, styles copied. Shrinking: the spare
+    formula rows are cleared, so a 6-part nest prints as 6 lines, not 24.
+
+    The table ref and its autofilter move together (Excel repairs - loudly -
+    a table whose two refs disagree). Everything is located by reading the
+    sheet: the table is whichever one starts at row 1, columns come from its
+    own ref - nothing is hardcoded to a template revision. Never raises.
+    """
+    try:
+        ws = wb["SCRIBE VERIFICATION"] if "SCRIBE VERIFICATION" in wb.sheetnames else None
+        if ws is None or num_parts < 1:
+            return 0
+        table = next((t for t in ws.tables.values()
+                      if range_boundaries(t.ref)[1] == 1), None)
+        if table is None:
+            log("  WARNING: No table on the SCRIBE VERIFICATION sheet -- left as is.")
+            return 0
+        min_col, _r1, max_col, old_last = range_boundaries(table.ref)
+        new_last = 1 + num_parts
+        if new_last == old_last:
+            return num_parts
+
+        for row in range(old_last + 1, new_last + 1):          # grow
+            for col in range(min_col, max_col + 1):
+                src, dst = ws.cell(row - 1, col), ws.cell(row, col)
+                val = src.value
+                if isinstance(val, str) and val.startswith("="):
+                    # NEST!I27 -> NEST!I28; absolute rows ($) are left alone
+                    val = re.sub(r"(NEST!\$?[A-Z]{1,3})(\d+)",
+                                 lambda m: f"{m.group(1)}{int(m.group(2)) + 1}", val)
+                    dst.value = val
+                # a literal (the plate sheet's hand-typed PART ID / trace) is not copied
+                if src.has_style:
+                    dst._style = copy(src._style)
+            if ws.row_dimensions[row - 1].height is not None:
+                ws.row_dimensions[row].height = ws.row_dimensions[row - 1].height
+        for row in range(new_last + 1, old_last + 1):           # shrink
+            for col in range(min_col, max_col + 1):
+                ws.cell(row, col).value = None
+
+        ref = (f"{get_column_letter(min_col)}1:"
+               f"{get_column_letter(max_col)}{new_last}")
+        table.ref = ref
+        if table.autoFilter is not None:
+            table.autoFilter.ref = ref
+        log(f"  SCRIBE VERIFICATION table fitted to {num_parts} part row(s) "
+            f"(was {old_last - 1}).")
+        return num_parts
+    except Exception as e:                                       # never cost the run
+        log(f"  WARNING: Could not resize the SCRIBE VERIFICATION table: {e}")
+        return 0
+
+
 def _fill_scribe_trace(wb, forecast_rows: list, num_parts: int, log):
     """
     PLATE mode only: write the forecast's TRACE/MIC value into the SCRIBE
@@ -977,18 +1101,114 @@ def _effective_mil_spec(mil_spec, ferrous, plate: bool):
     """
     The MIL spec value that goes to NEST D4.
 
-    PLATE mode: ferrous (carbon) plate does not use a MIL spec on the nest
-    sheet -- the packet's own MOVE TICKET 'FERROUS: F' flag decides, so 'F'
-    yields the literal 'N/A' (coworker feedback 2026-09-03). Non-ferrous plate
-    ('N' -- stainless/alloys -- and 'A' -- aluminum) keeps the real spec.
-    A missing FERROUS flag keeps the real spec too: better to show a spec a
-    human can strike out than to silently hide one that was required.
+    PLATE mode: the packet's own MOVE TICKET 'FERROUS:' flag decides.
+      'F' (carbon)            -> the literal 'N/A' (coworker feedback 2026-09-03)
+      'N' / 'A' (non-ferrous) -> None HERE, because the value is not one per
+          nest: stainless, aluminum, copper nickel etc. DO need a MIL spec, and
+          `_fill_part_mil_specs` writes each part row's own, read off that
+          part's PART SKETCH labeling block (maintainer 2026-09-21). A part
+          with no spec printed stays blank. v2.1.0-v2.2.1 wrote the MOVE
+          TICKET's single spec down every row.
+      flag missing            -> BLANK too (maintainer's rule, 2026-09-21: "can
+          we tell ferrous from non-ferrous? if not, have the column blank").
+          It is the rare case - 212 of 212 recent packets carry the flag
+          (F 195, N 14, A 3, matching the material every time) - but when the
+          app cannot tell, it must not guess a value someone has to catch.
 
     SHAPE mode: always the real spec, exactly as before.
     """
-    if plate and ferrous and str(ferrous).strip().upper() == "F":
-        return "N/A"
-    return mil_spec
+    if not plate:
+        return mil_spec
+    flag = str(ferrous).strip().upper() if ferrous else ""
+    return "N/A" if flag == "F" else None
+
+
+# Lines that can follow the labeling block's PART value without being a MIL spec.
+_LABEL_NOT_A_SPEC = {"NC PROG", "HULL", "PART", "MIL-SPEC", "FINAL-INSP:",
+                     "NOT TO SCALE", "FOR LABELING INFORMATION ONLY", "PART SKETCH"}
+_PAGE_COUNTER_RE = re.compile(r"^\d+\s*/\s*\d+$")
+
+
+def _parse_sketch_mil_specs(pdf_path: Path) -> dict:
+    """
+    {PART NUMBER (upper): (mil_spec, fer)} read off every PART SKETCH page of a
+    nest packet (v2.3.0, maintainer 2026-09-21).
+
+    Each part's sketch page ends in a 'FOR LABELING INFORMATION ONLY' block -
+    four barcodes headed NC PROG / HULL / PART / MIL-SPEC with the value
+    printed under each. It is the spec that goes on THAT part's label, so it is
+    the per-part source for the MIL SPEC column; the MOVE TICKET field the app
+    used until now is one value for the whole nest. The text layer gives the
+    four headers, then the values in the same order:
+        NC PROG, HULL, PART, MIL-SPEC, H4146707-1.A.01, FJ, H4146707-1, ASTM-B221
+    The spec is taken as the line right AFTER the one equal to the page's own
+    PART: value - not "the fourth value" - so a part with no HULL or no spec
+    printed can never shift another field into the spec.
+
+    `fer` is the page's own FER: flag (F / N / A). Measured on 212 recent
+    packets: all 1,253 real parts carry the block (the 99 sketch pages without
+    one are note-only pages with no PART: on them), and no packet's parts
+    disagreed with each other or with the move ticket.
+    """
+    out = {}
+    if not PYMUPDF_AVAILABLE:
+        return out
+    sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download first (Hard Rule 6)
+    doc = fitz.open(sdk.long_path(pdf_path))
+    try:
+        for page in doc:
+            lines = [ln.strip() for ln in page.get_text().splitlines() if ln.strip()]
+            if "PART SKETCH" not in lines or "MIL-SPEC" not in lines:
+                continue
+            part = next((ln.split(":", 1)[1].strip() for ln in lines
+                         if ln.upper().startswith("PART:")), "")
+            if not part:
+                continue
+            fer = next((ln.split(":", 1)[1].strip().upper() for ln in lines
+                        if ln.upper().startswith("FER:")), "")
+            after = lines[lines.index("MIL-SPEC") + 1:]
+            spec = ""
+            if part in after:
+                at = after.index(part)
+                nxt = after[at + 1: at + 2]
+                if (nxt and nxt[0].upper() not in _LABEL_NOT_A_SPEC
+                        and not _PAGE_COUNTER_RE.match(nxt[0])
+                        and not nxt[0].upper().startswith("PART:")):
+                    spec = nxt[0]
+            key = part.upper()
+            if key not in out or (spec and not out[key][0]):
+                out[key] = (spec, fer)
+    finally:
+        doc.close()
+    return out
+
+
+def _fill_part_mil_specs(nest_ws, batch_rows: list, sketch_specs: dict, log) -> tuple:
+    """
+    PLATE + non-ferrous: write each part row's MIL SPEC (NEST col D) from that
+    part's own PART SKETCH labeling block. Returns (filled, blank_parts).
+
+    A part whose sketch page gave no spec is left BLANK - named in the log so
+    it is filled in by hand, never given a neighbour's value. Every row is
+    written, so a re-run over an older workbook cannot keep a stale spec.
+    """
+    filled, blank = 0, []
+    for i, (_wo, dypn, *_rest) in enumerate(batch_rows):
+        key = str(dypn).strip().upper()
+        spec = (sketch_specs.get(key) or ("", ""))[0]
+        nest_ws.cell(4 + i, 4).value = spec or None
+        if spec:
+            filled += 1
+        else:
+            blank.append(str(dypn))
+    if filled:
+        log(f"  MIL Spec -> col D: {filled} part row(s) filled from their PART "
+            f"SKETCH labeling block.")
+    if blank:
+        log(f"  WARNING: No MIL-SPEC on the PART SKETCH page for {len(blank)} part(s) "
+            f"-- left BLANK to fill in by hand: {', '.join(blank[:8])}"
+            + (" ..." if len(blank) > 8 else ""))
+    return filled, blank
 
 
 def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
@@ -1729,18 +1949,27 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     # Step 1 -- Prompt user for batch number, then resolve batch folder
     # ------------------------------------------------------------------ #
+    # The batch is PICKED, not typed. Typing built `qtdr_root / typed` and a
+    # typo died on "Batch folder not found" with no hint which of the 305
+    # folders under the root was meant. The pick cannot typo, starts in the
+    # right place, and seeds the 911 family cache so a queued run of several
+    # 911 apps asks once. A caller that supplies `batch_number` (headless/CLI,
+    # and 911 Teams Cards handing off) still skips the prompt entirely.
     console = params.get("console")
-    if console and hasattr(console, "request_input"):
-        raw = sdk.request_batch_number(params, "Enter Batch Number (e.g. V060, V086):")
-    else:
-        raw = params.get("batch_number", "")
-
-    batch_number = raw.strip().upper()
-    if not batch_number:
-        raise ValueError("No batch number provided. Please enter a batch number.")
-
+    supplied = (params.get("batch_number") or "").strip()
     qtdr_root = _base_qtdr(qtdr_override)
-    batch_folder = qtdr_root / batch_number
+
+    if supplied:
+        batch_number = sdk.normalize_911_batch(supplied)
+        batch_folder = (sdk.find_911_batch_folder(qtdr_root, batch_number)
+                        or (qtdr_root / batch_number))
+    elif console and hasattr(console, "request_input"):
+        picked = sdk.request_911_batch_folder(params, qtdr_override)
+        if picked is None or cancel_event.is_set():
+            return  # user cancelled - the helper already flagged the run
+        batch_number, batch_folder = picked
+    else:
+        raise ValueError("No batch number provided. Please enter a batch number.")
 
     log(f"Batch number : {batch_number}")
     log(f"QTDR root    : {qtdr_root}")
@@ -2042,16 +2271,20 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 log(f"  FERROUS: {ferrous} (carbon plate) -> MIL Spec D4 set "
                     f"to N/A (packet said {mil_spec or 'nothing'}).")
             elif plate and ferrous:
-                log(f"  FERROUS: {ferrous} (non-ferrous plate) -> real MIL "
-                    f"spec kept.")
+                log(f"  FERROUS: {ferrous} (non-ferrous plate) -> MIL Spec comes "
+                    f"from each part's PART SKETCH page (move ticket said "
+                    f"{mil_spec or 'nothing'}).")
             elif plate:
-                log("  WARNING: No FERROUS flag in the nest packet -- keeping "
-                    "the packet's MIL spec; strike it out by hand if this is "
-                    "carbon plate.")
+                log("  WARNING: No FERROUS flag in the nest packet -- cannot tell "
+                    "carbon from non-ferrous, so MIL Spec is left BLANK to be "
+                    f"filled in by hand (packet said {mil_spec or 'nothing'}).")
 
+            mil_left_blank = plate and effective_mil is None
             if effective_mil:
                 nest_ws.cell(4, 4).value = effective_mil   # D4
                 log(f"  MIL Spec -> D4: {effective_mil}")
+            elif mil_left_blank:
+                nest_ws.cell(4, 4).value = None            # a re-run must not keep an old spec
             else:
                 log(f"  WARNING: MIL spec not found in nest packet.")
 
@@ -2074,6 +2307,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 log(f"  WARNING: No batch rows found for nest {nest}.")
             else:
                 log(f"  Found {len(batch_rows)} batch rows.")
+                batch_rows, moved = _order_rows_like_packet(
+                    batch_rows, packet_qtys.get(nest) or {})
+                if moved:
+                    log("  Parts ordered to match the nest packet's SUMMARY OF NEST.")
                 _paste_batch_rows_into_nest(nest_ws, batch_rows)
 
                 # Residual QTY check: even the verified column can disagree
@@ -2089,6 +2326,24 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             if num_parts > 1:
                 _fill_nest_part_rows(nest_ws, num_parts)
                 log(f"  Filled MIL spec / material / forecast down {num_parts} part rows.")
+            if mil_left_blank:
+                # The fill-down only fills BLANK cells, so on a re-run over an
+                # older workbook the part rows would keep the spec it wrote then.
+                for r in range(4, 4 + max(num_parts, 1)):
+                    nest_ws.cell(r, 4).value = None
+            if mil_left_blank and ferrous and batch_rows:
+                # Non-ferrous plate: each part's own spec, off its sketch page.
+                nest_pdf = _find_nest_pdf(nest_packages_folder, nest)
+                try:
+                    sketch_specs = _parse_sketch_mil_specs(nest_pdf) if nest_pdf else {}
+                except Exception as e:
+                    log(f"  WARNING: Could not read the PART SKETCH pages of "
+                        f"{nest} for MIL specs: {e}")
+                    sketch_specs = {}
+                _fill_part_mil_specs(nest_ws, batch_rows, sketch_specs, log)
+
+            # -- SCRIBE VERIFICATION table: exactly one row per part ----------
+            _fit_scribe_table(wb, num_parts, log)
 
             # -- PLATE only: forecast TRACE/MIC -> SCRIBE 'UNIQUE - TRACE' ----
             # The plate template ships the column empty (never the shape
@@ -2199,8 +2454,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"\n{'!'*50}")
         log("QTY VERIFICATION -- MANUAL REVIEW NEEDED:")
         for nest, dypn, wo, qty, pdf_qty in qty_mismatches:
-            log(f"  MISMATCH    {nest}  {dypn} / {wo}: workbook has {qty}, "
-                f"nest packet says {pdf_qty} (cell highlighted yellow)")
+            log(f"  MISMATCH    {nest}  {dypn} / {wo}: BATCH LIST says {qty}, "
+                f"nest packet says {pdf_qty} -- workbook has the packet's "
+                f"{pdf_qty} (cell highlighted yellow)")
         for nest, dypn, wo, qty in qty_unverified:
             log(f"  UNVERIFIED  {nest}  {dypn} / {wo}: qty {qty} not found "
                 f"in the packet summary")

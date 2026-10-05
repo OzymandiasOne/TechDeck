@@ -329,12 +329,18 @@ def test_is_drawing_pdf_tells_a_title_block_from_a_work_packet(tmp_path):
     assert plugin_sdk.is_drawing_pdf(packet) is False
 
 
-def test_is_drawing_pdf_calls_an_unreadable_file_a_packet(tmp_path):
-    """A read error must NOT read as 'this is a drawing' - that would silently
-    skip a real work packet and the run would still look clean."""
+def test_an_unreadable_file_is_neither_a_drawing_nor_a_packet(tmp_path):
+    """'I could not read it' is its own answer.
+
+    It used to collapse into "not a drawing", which `find_work_packet` then
+    read as "so it is the packet" - and a file we cannot read is the last one
+    that should take a stamp.
+    """
     broken = tmp_path / "BK394153.pdf"
     broken.write_bytes(b"not a pdf at all")
+    assert plugin_sdk.classify_pdf(broken) == "unreadable"
     assert plugin_sdk.is_drawing_pdf(broken) is False
+    assert plugin_sdk.is_work_packet_pdf(broken) is False
 
 
 def test_find_work_packet_skips_the_drawing_binder(tmp_path):
@@ -390,3 +396,77 @@ def test_find_work_packet_on_an_empty_folder(tmp_path):
     order = tmp_path / "BK394153-R7924463-H9"
     order.mkdir()
     assert plugin_sdk.find_work_packet(order) is None
+
+
+# ── a sketch is not a drawing, and it is not a packet either ─────────────────
+# Reported 2026-09-23 on Batch 494 / BN331786-R8653362-H11L. The order folder
+# held `BN331786 Sketch.pdf` and `BN331786.pdf`; both are named for the order,
+# so the tie broke on the filename - and a space (0x20) sorts before a dot
+# (0x2E), putting the sketch first. It showed no title block, "not a drawing"
+# meant "packet", and it took the red stamp while the real packet stayed blank.
+# Measured that day: 6 of 252 live order folders were stamped on the wrong file.
+#
+# The rule since: a packet must PROVE it is one. Those markers appear on 252 of
+# 252 live work packets and on 0 of 166 drawings and 0 of 9 sketches/prints.
+
+_SKETCH_TEXT = ["FLAT PATTERN", "BEND ALLOWANCE", "SHEET 1 OF 9"]
+
+
+def test_classify_pdf_names_all_four_kinds(tmp_path):
+    _make_pdf(tmp_path / "d.pdf", _DRAWING_TEXT)
+    _make_pdf(tmp_path / "p.pdf", _PACKET_TEXT)
+    _make_pdf(tmp_path / "s.pdf", _SKETCH_TEXT)
+    (tmp_path / "x.pdf").write_bytes(b"nope")
+
+    assert plugin_sdk.classify_pdf(tmp_path / "d.pdf") == "drawing"
+    assert plugin_sdk.classify_pdf(tmp_path / "p.pdf") == "packet"
+    assert plugin_sdk.classify_pdf(tmp_path / "s.pdf") == "other"
+    assert plugin_sdk.classify_pdf(tmp_path / "x.pdf") == "unreadable"
+
+
+def test_find_work_packet_skips_the_sketch_that_sorts_first(tmp_path):
+    """The reported bug, exactly as the live folder was laid out."""
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    _make_pdf(order / "BN331786 Sketch.pdf", _SKETCH_TEXT)
+    _make_pdf(order / "BN331786.pdf", _PACKET_TEXT)
+    _make_pdf(order / "Binder8.pdf", _DRAWING_TEXT)
+    # the ordering that caused it - the sketch really does come first
+    assert sorted(p.name for p in order.iterdir())[0] == "BN331786 Sketch.pdf"
+
+    assert plugin_sdk.find_work_packet(order).name == "BN331786.pdf"
+
+
+def test_find_work_packet_returns_none_when_nothing_proves_it_is_a_packet(tmp_path):
+    """A folder of sketches has no packet - and must not nominate one."""
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    _make_pdf(order / "BN331786 Sketch.pdf", _SKETCH_TEXT)
+    _make_pdf(order / "BN331786 Prints.pdf", _SKETCH_TEXT)
+
+    assert plugin_sdk.find_work_packet(order) is None
+
+
+def test_report_classifies_every_pdf_including_after_the_packet(tmp_path):
+    """The packet sorts FIRST here, so a lazy scan would never look at the
+    binder - and would never find the stray stamp sitting on it."""
+    order = tmp_path / "BN331786-R8653362-H11L"
+    order.mkdir()
+    _make_pdf(order / "BN331786.pdf", _PACKET_TEXT)
+    _make_pdf(order / "Binder8.pdf", _DRAWING_TEXT)
+    _make_pdf(order / "zzz sketch.pdf", _SKETCH_TEXT)
+
+    packet, others = plugin_sdk.find_work_packet_report(order)
+    assert packet.name == "BN331786.pdf"
+    assert dict((p.name, k) for p, k in others) == {
+        "Binder8.pdf": "drawing", "zzz sketch.pdf": "other"}
+
+
+def test_both_packet_layouts_are_recognised(tmp_path):
+    """86 of the 252 live packets are the 'DESKTOP WORK PACKAGE' layout rather
+    than the 'FRM 922' one."""
+    _make_pdf(tmp_path / "a.pdf", ["GENERAL DYNAMICS - ELECTRIC BOAT",
+                                   "DESKTOP WORK PACKAGE"])
+    _make_pdf(tmp_path / "b.pdf", ["QA FRM 922", "MOVE TO LOCATION"])
+    assert plugin_sdk.classify_pdf(tmp_path / "a.pdf") == "packet"
+    assert plugin_sdk.classify_pdf(tmp_path / "b.pdf") == "packet"

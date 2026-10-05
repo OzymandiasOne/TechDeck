@@ -19,7 +19,7 @@ Shots produced (docs/user_guide/images/):
   911_sspo_invoicing_prep_done.png           - the end-of-run summary popup
   911_sspo_award_review_done.png             - console DONE block
   911_lst_organizer_summary.png              - console pull summary
-  911_lst_organizer_attention.png            - the "attention needed" popup
+  911_lst_organizer_attention.png            - the popup naming the missing parts
 
 All data is FAKE (practice batches under C:\Temp\TechDeck Practice - never a
 real batch, person, or production path). The apps' first interaction is a
@@ -526,7 +526,7 @@ def flow_lst():
     _window.console.clear_btn.click()
     yield (_ticks(2), 10, "console cleared")
     _start("911_lst_organizer")
-    box = yield (_find_window("QMessageBox", "attention needed"),
+    box = yield (_find_window("QMessageBox", "911 LST -"),
                  40, "attention popup")
     yield (_ticks(3), 10, "popup settle")
     cam.save(box, "911_lst_organizer_attention")
