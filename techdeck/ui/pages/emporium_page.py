@@ -26,7 +26,7 @@ import random
 from PySide6.QtWidgets import (
     QWidget, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QFrame, QScrollArea,
 )
-from PySide6.QtCore import Qt, QRect, QTimer, QPoint
+from PySide6.QtCore import Signal, Qt, QRect, QTimer, QPoint
 from PySide6.QtGui import QPainter, QColor, QPolygon
 
 from techdeck.ui.sprite_font import font as _sf
@@ -43,6 +43,7 @@ from techdeck.ui.widgets.store_tiles import CategoryBox, ShopWindow, StoreTile
 
 class EmporiumPage(QWidget):
     """The redemption-counter scene + the catalog grid, with arcade animation."""
+    refreshed = Signal()               # stock or balance changed (a purchase, a claim)
 
     DEFAULT_DIALOGUE = "WOOGY: WHAT'LL IT BE, FELLAS?"
 
@@ -246,6 +247,9 @@ class EmporiumPage(QWidget):
         self.balance_lbl.setPixmap(bal)
         for t in self.tiles:
             t.refresh()
+        for box in getattr(self, "cat_buttons", {}).values():
+            box.update()                        # a category's NEW! may have cleared
+        self.refreshed.emit()                   # the Account page re-places its tab stickers
 
     # ---- categories (each opens a floating window over the scene) -------------
     def _category_icon(self, cat_id):

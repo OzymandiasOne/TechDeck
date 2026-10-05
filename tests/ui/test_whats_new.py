@@ -75,3 +75,45 @@ def test_opening_my_stuff_marks_it_seen(qapp, tmp_path, monkeypatch):
     assert not s.has_seen_my_stuff()
     page.tabs.setCurrentIndex(2)
     assert s.has_seen_my_stuff() and fired
+
+
+def test_every_sticker_clears_through_the_real_pages(qapp, tmp_path, monkeypatch):
+    """Open My Stuff -> the sidebar's clears. Buy the Ghost -> the Ticket Counter
+    tab's, the Decorations box's and the Ghost's clear. Discover the table ->
+    the My Stuff tab's and the cartridge's clear. All through the pages."""
+    _on(monkeypatch)
+    from techdeck.ui import arcade_chrome
+    from techdeck.ui.pages.account_page import AccountPage
+    from techdeck.ui.widgets.sidebar import Sidebar
+    from techdeck.core.command_handler import CommandHandler
+    from techdeck.core import audio_manager
+    monkeypatch.setattr(arcade_chrome.PixelDialog, "show_message",
+                        classmethod(lambda cls, parent, title, body, ok_label="OK": None))
+    monkeypatch.setattr(audio_manager, "get_audio_manager", lambda: type("A", (), {"play": lambda *a, **k: None})())
+    s = SettingsManager(settings_dir=tmp_path)
+    s.unlock_item("deco_books"); s.add_tickets(500)
+    acc = AccountPage(s)
+    side = Sidebar(settings_manager=s); side.refresh_new_badges(s)
+    acc.badges_changed.connect(lambda: side.refresh_new_badges(s))
+    tabs, boxes = acc._tab_stickers, acc.emporium.cat_buttons
+    ghost = next(t for t in acc.emporium.tiles if t.item["id"] == wn.GHOST_ID)
+    cartridge = lambda: next(t for t in acc.my_stuff.tiles if t.item["id"] == wn.PUPPET_ID)
+    acc._place_stickers()
+    assert side._account_sticker.isVisibleTo(side) and tabs[1].isVisibleTo(acc) and tabs[2].isVisibleTo(acc)
+    assert ghost.wants_new_sticker() and cartridge().wants_new_sticker()
+
+    acc.tabs.setCurrentIndex(2)                                   # 1. open My Stuff
+    assert not side._account_sticker.isVisibleTo(side)
+    assert tabs[1].isVisibleTo(acc) and tabs[2].isVisibleTo(acc), "the items' own tabs keep theirs"
+
+    acc.emporium.handle_tile_action(ghost.item)                   # 2. buy the Ghost
+    assert s.is_unlocked(wn.GHOST_ID)
+    assert not tabs[1].isVisibleTo(acc) and not ghost.wants_new_sticker()
+    assert wn.DECORATIONS not in wn.new_badges(s)
+    assert tabs[2].isVisibleTo(acc) and cartridge().wants_new_sticker()
+
+    h = CommandHandler.__new__(CommandHandler)                    # 3. the table opens for the first time
+    h.settings, h.console, h.main_window = s, None, type("MW", (), {"account_page": acc, "sidebar": side, "library_page": None})()
+    assert h.discover_table() is True
+    assert not tabs[2].isVisibleTo(acc) and not cartridge().wants_new_sticker()
+    assert wn.new_badges(s) == set()

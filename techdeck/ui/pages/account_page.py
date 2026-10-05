@@ -223,6 +223,7 @@ class AccountPage(QWidget, ThemeAware):
         self._tab_badge = {1: "decorations", 2: "my_stuff"}
         self._tab_spacers = {}                                 # room in the tab under the sticker, while it shows
         self._place_stickers()
+        self.emporium.refreshed.connect(self._on_stock_changed)   # a purchase may clear a sticker
         # Hidden tabs (the wide Emporium scene especially) must not lock the
         # window's minimum width while another tab/page is showing.
         from techdeck.ui.utils import limit_min_size_to_current_page
@@ -467,6 +468,10 @@ class AccountPage(QWidget, ThemeAware):
                 corner = bar.mapTo(self, QPoint(r.right(), r.top()))
                 sticker.place_center(corner.x() - 32, corner.y() + 18)   # ...the sticker sits over that room, whole, hanging a little past the corner
             sticker.setVisible(want)
+
+    def _on_stock_changed(self):
+        self._place_stickers()
+        self.badges_changed.emit()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
