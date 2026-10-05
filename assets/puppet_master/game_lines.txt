@@ -51,8 +51,9 @@
 #    play_big           you played something costing 3 or more
 #    play_{card id}     you played that card (votary, scarab, hound, huginn,
 #                       weigher, gorgon, ouroboros, cerberus, sleeper,
-#                       monolith, dead_star, mote, hydra, thornback, watcher,
-#                       martyr, locust, wraith, crowned, seraph, leviathan)
+#                       monolith, red_giant, mote, hydra, thornback, watcher,
+#                       martyr, locust, wraith, crowned, seraph, leviathan,
+#                       gargoyle, shade; supernova / dead_star only grow, never played)
 #    commit_{card id}   he slid that card into his incoming row
 #                       ({n} = how many of your cards it could strike from there)
 #    hit_him            your strike landed on the scale ({n} = the weight; {weights} = weight/weights)
@@ -127,7 +128,7 @@ play_ouroboros | amused | It's end is a beginning.
 play_cerberus | pleased | Three mouths. One hunger.
 play_sleeper | grave | You woke it. That was your choice.
 play_monolith | grave | It was here before the ground was.
-play_dead_star | calm | The light you see left it long ago.
+play_red_giant | calm | The light you see left it long ago.
 play_mote | amused | A spark. Careful. They spread.
 play_hydra | curious | Two mouths, and neither for what stands in front.
 play_thornback | calm | Touch it and learn.
@@ -144,7 +145,7 @@ commit_gorgon | calm | Do not look at it. That is the trick.
 commit_weigher | grave | Mine weighs too.
 commit_cerberus | pleased | Three mouths. Choose which of yours it eats.
 commit_sleeper | grave | Now you have my attention.
-commit_dead_star | calm | I will wait. I am good at it.
+commit_red_giant | calm | I will wait. I am good at it.
 commit_leviathan | grave | I was saving this.
 commit_seraph | grave | Look up.
 commit_crowned | pleased | A court of my own.

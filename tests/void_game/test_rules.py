@@ -176,11 +176,11 @@ def test_empty_piles_cannot_be_drawn_from():
 def test_an_unblocked_strike_lands_as_weight_on_the_scale():
     g = fresh(plan=[[]] * 20)
     g.incoming = [None] * LANES
-    put(g, "hound", YOU, 1)
+    put(g, "hound", YOU, 1)                   # 3/2
     events = g.ring_bell()
-    assert g.scale == 2
+    assert g.scale == 3
     strike = next(e for e in events if e.kind == "strike")
-    assert strike["direct"] and strike["power"] == 2
+    assert strike["direct"] and strike["power"] == 3
 
 
 def test_a_blocked_strike_wounds_the_card_in_front():
@@ -189,16 +189,16 @@ def test_a_blocked_strike_wounds_the_card_in_front():
     put(g, "hound", YOU, 1)
     his = put(g, "sleeper", HIM, 1)           # 4/6
     g.ring_bell()
-    assert his.health == 4
-    assert g.rows[YOU][1] is None             # and it hits back on his turn: 4 into a 2/2
+    assert his.health == 3
+    assert g.rows[YOU][1] is None             # and it hits back on his turn: 4 into a 3/2
     assert g.scale == 0                       # the hound stood in the way, so no weight
 
 
 def test_a_killing_blow_clears_the_lane():
     g = fresh(plan=[[]] * 20)
     g.incoming = [None] * LANES
-    put(g, "hound", YOU, 1)
-    put(g, "scarab", HIM, 1)                  # 1/2
+    put(g, "hound", YOU, 1)                   # 3/2
+    put(g, "scarab", HIM, 1)                  # 1/3
     events = g.ring_bell()
     assert "die" in kinds(events)
     assert g.rows[HIM][1] is None
@@ -235,7 +235,7 @@ def test_his_incoming_row_advances_before_he_strikes():
     events = g.ring_bell()
     assert "advance" in kinds(events)
     assert g.rows[HIM][2] is coming
-    assert g.scale == -2                      # it moved up AND struck the same turn
+    assert g.scale == -3                      # it moved up AND struck the same turn
 
 
 def test_incoming_waits_while_a_card_is_still_in_front_of_it():
@@ -335,25 +335,45 @@ def test_undying_keeps_its_bonus_when_sacrificed_too():
     assert back is not snake and back.power == 2
 
 
-def test_a_dead_star_becomes_a_nova_after_a_turn():
+def test_a_red_giant_goes_supernova_then_dies_a_dead_star():
     g = fresh(plan=[[]] * 20)
     g.incoming = [None] * LANES
-    star = put(g, "dead_star", YOU, 0)
+    star = put(g, "red_giant", YOU, 0)
+    assert (star.power, star.health) == (0, 2)
     events = g.ring_bell()                    # it survives his turn...
     grown = next(e for e in events if e.kind == "grow")["card"]
-    assert grown.defn.id == "nova" and g.rows[YOU][0] is grown   # ...and wakes on yours
-    assert grown is not star
+    assert grown.defn.id == "supernova" and g.rows[YOU][0] is grown   # ...and wakes on yours
+    assert (grown.power, grown.health) == (1, 1) and grown is not star
+    g.draw("votary")
+    events = g.ring_bell()                    # one more turn
+    grown = next(e for e in events if e.kind == "grow")["card"]
+    assert grown.defn.id == "dead_star" and (grown.power, grown.health) == (4, 1)
+    g.draw("votary"); events = g.ring_bell()
+    assert not [e for e in events if e.kind == "grow"], "and that is the end of it"
 
 
-def test_his_dead_star_grows_on_his_turn():
+def test_his_red_giant_grows_on_his_turn():
     g = fresh(plan=[[]] * 20)
     g.incoming = [None] * LANES
-    put(g, "dead_star", HIM, 3)
+    put(g, "red_giant", HIM, 3)
     g.ring_bell()                             # his turn passes with it on the board
-    assert g.rows[HIM][3].defn.id == "dead_star"
+    assert g.rows[HIM][3].defn.id == "red_giant"
     g.draw("votary")
     g.ring_bell()                             # it wakes at the start of his next turn
-    assert g.rows[HIM][3].defn.id == "nova"
+    assert g.rows[HIM][3].defn.id == "supernova"
+
+
+def test_the_starter_deck_is_on_the_proven_numbers():
+    """The four of the game that inspired this: a 3/2 for two, a 1/3 for one,
+    a 1/2 warden for one, a 1/1 for two remnants - and a free 0/1 pile."""
+    d = {cid: C.CARDS[cid] for cid in C.STARTER_DECK}
+    shape = sorted((c.power, c.health, c.cost, c.cost_kind, c.sigils) for c in d.values())
+    assert shape == sorted([(3, 2, 2, C.OFFER, ()), (1, 3, 1, C.OFFER, ()),
+                            (1, 2, 1, C.OFFER, (C.WARDEN,)), (1, 1, 2, C.REMNANT, ())])
+    v = C.CARDS["votary"]
+    assert (v.power, v.health, v.cost) == (0, 1, 0)
+    assert C.CARDS["red_giant"].rare and "red_giant" in C.RARE_POOL
+    assert "supernova" not in C.CHOICE_POOL and "dead_star" not in C.CHOICE_POOL
 
 
 # ── the newer sigils ──────────────────────────────────────────────────────
@@ -385,7 +405,7 @@ def test_two_mouths_bites_the_sides_never_the_front():
 def test_thorns_wound_whatever_strikes():
     g = arena()
     put(g, "thornback", YOU, 0)
-    striker = put(g, "scarab", HIM, 0)                  # 1/2: takes 1 from the strike, 1 from the thorns
+    striker = put(g, "gargoyle", HIM, 0)                # 1/2: takes 1 from the strike, 1 from the thorns
     events = g.ring_bell()
     assert any(e.kind == "thorns" for e in events)
     assert striker.health == 0 and g.rows[HIM][0] is None

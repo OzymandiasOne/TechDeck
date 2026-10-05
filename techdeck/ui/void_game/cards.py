@@ -68,8 +68,10 @@ class CardDef:
 _ALL = [
     CardDef("votary", "VOTARY", 0, 1, note="It came willingly. They always do."),
     CardDef("mote", "MOTE", 1, 1, sigils=(WINGED,), note="A spark that got away."),
-    CardDef("scarab", "SCARAB", 1, 2, 1, note="It rolls the sun. It does not ask why."),
-    CardDef("hound", "HOUND", 2, 2, 2, note="It has your scent now."),
+    CardDef("scarab", "SCARAB", 1, 3, 1, note="It rolls the sun. It does not ask why."),
+    CardDef("hound", "HOUND", 3, 2, 2, note="It has your scent now."),
+    CardDef("gargoyle", "GARGOYLE", 1, 2, 1, sigils=(WARDEN,), note="It waits on the ledge. Nothing flies past it."),
+    CardDef("shade", "SHADE", 1, 1, 2, REMNANT, note="It plays dead. It is very good at it."),
     CardDef("huginn", "HUGINN", 1, 1, 1, sigils=(WINGED,), note="Thought, on black wings."),
     CardDef("weigher", "THE WEIGHER", 1, 1, 2, sigils=(VENOM,),
             note="He weighs the heart. It is always too heavy."),
@@ -87,9 +89,10 @@ _ALL = [
     CardDef("sleeper", "THE SLEEPER", 4, 6, 3, note="It is not dead. It is waiting for the stars."),
     CardDef("monolith", "MONOLITH", 0, 5, 3, REMNANT, sigils=(WARDEN,),
             note="It was here before the ground was."),
-    CardDef("dead_star", "DEAD STAR", 0, 2, 1, sigils=(GROWS,), grows_into="nova",
+    CardDef("red_giant", "RED GIANT", 0, 2, 1, sigils=(GROWS,), grows_into="supernova", rare=True,
             note="The light you see left it long ago."),
-    CardDef("nova", "NOVA", 4, 1, 1, note="Oh. There it is."),
+    CardDef("supernova", "SUPERNOVA", 1, 1, 1, sigils=(GROWS,), grows_into="dead_star", note="Oh. There it is."),
+    CardDef("dead_star", "DEAD STAR", 4, 1, 1, note="The light you see left it long ago."),
     CardDef("crowned", "THE CROWNED", 1, 2, 4, REMNANT, sigils=(HERALD,),
             note="Those beside it stand taller."),
     # rare: seen at the rarer stops, and in his hand near the end
@@ -103,13 +106,14 @@ CARDS: dict[str, CardDef] = {c.id: c for c in _ALL}
 
 # What can be offered at a stop on the road. Not the votary, not the famine,
 # not what only grows out of something else.
-_NEVER_OFFERED = {"votary", "famine", "nova"}
+_NEVER_OFFERED = {"votary", "famine", "supernova", "dead_star"}   # the last two only grow out of the red giant
 CHOICE_POOL = [c.id for c in _ALL if c.id not in _NEVER_OFFERED and not c.rare]
 RARE_POOL = [c.id for c in _ALL if c.rare]
 
-# What you sit down with: six cards, a curve from cheap to vast (the game that
-# inspired this starts you with four). The votaries are the rest.
-STARTER_DECK = ["hound", "scarab", "huginn", "thornback", "weigher", "dead_star"]
+# What you sit down with: the four of the game that inspired this, on its proven
+# numbers - a 3/2 for two, a 1/3 for one, a 1/2 warden for one, a 1/1 for two
+# remnants. The votaries are the rest.
+STARTER_DECK = ["hound", "scarab", "gargoyle", "shade"]
 VOTARY_PILE = 10
 
 # His first game. Each turn: the cards he slides into his INCOMING row. A lane of
@@ -125,16 +129,16 @@ FIRST_GAME_PLAN = [
     [("weigher", None)],
     [("hound", None)],
     [("cerberus", None)],
-    [("dead_star", None)],
+    [("thornback", None)],
     [("sleeper", None)],
 ]
-HIS_POOL = ["scarab", "hound", "huginn", "gorgon", "weigher", "dead_star"]
+HIS_POOL = ["scarab", "hound", "huginn", "gorgon", "weigher", "thornback"]
 
 # What he draws from as the road goes on. Each tier adds to the last.
 HIS_TIERS = [
     ["votary", "scarab", "huginn", "hound", "mote"],
-    ["gorgon", "weigher", "hydra", "thornback", "watcher", "locust", "dead_star"],
-    ["cerberus", "sleeper", "wraith", "martyr"],
+    ["gorgon", "weigher", "hydra", "thornback", "watcher", "locust", "gargoyle", "shade"],
+    ["cerberus", "sleeper", "wraith", "martyr", "red_giant"],
     ["leviathan", "seraph", "crowned"],
 ]
 HIS_PET = "hound"            # the one he minds losing

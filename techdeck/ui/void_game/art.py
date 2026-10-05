@@ -193,7 +193,29 @@ def scarab(p):
         _line(p, [(38 + sgn * 5, 35), (38 + sgn * 9, 55)], D, 0.9)
 
 
-def dead_star(p):
+def gargoyle(p):
+    # a squat thing crouched on a ledge, wings folded high, ears pricked
+    _poly(p, [(10, 61), (66, 61), (66, 56), (10, 56)], D)                       # the ledge
+    _poly(p, [(14, 56), (22, 30), (30, 22), (46, 22), (54, 30), (62, 56)], F)   # haunches
+    _poly(p, [(18, 44), (8, 16), (24, 30)], F); _poly(p, [(58, 44), (68, 16), (52, 30)], F)   # folded wings
+    _ell(p, 38, 20, 11, 10, F)                                                 # head
+    _poly(p, [(29, 13), (25, 1), (34, 10)], F); _poly(p, [(47, 13), (51, 1), (42, 10)], F)   # ears
+    _ell(p, 33, 19, 2.2, 1.6, E); _ell(p, 43, 19, 2.2, 1.6, E)                 # eyes
+    _line(p, [(31, 27), (38, 30), (45, 27)], D, 1.3)                           # the grin
+    _line(p, [(24, 56), (26, 46), (32, 56)], D, 1.0); _line(p, [(52, 56), (50, 46), (44, 56)], D, 1.0)   # legs
+
+
+def shade(p):
+    # a hooded wisp, hands folded, trailing to nothing
+    _poly(p, [(38, 4), (24, 18), (20, 40), (26, 61), (32, 50), (38, 61), (44, 50), (50, 61), (56, 40), (52, 18)], F)
+    _ell(p, 38, 20, 8, 9, D)                                                   # the hood's dark
+    _ell(p, 35, 19, 1.6, 1.6, M); _ell(p, 41, 19, 1.6, 1.6, M)                 # two faint points
+    _line(p, [(30, 38), (38, 42), (46, 38)], D, 1.2)                           # folded hands
+    for x, y in ((12, 52), (64, 48), (16, 30), (62, 30)):
+        _ell(p, x, y, 0.8, 0.8, M)
+
+
+def red_giant(p):
     for k in range(16):
         a = math.radians(k * 22.5)
         r0, r1 = 23, 29 if k % 2 else 26
@@ -205,7 +227,7 @@ def dead_star(p):
         _ell(p, x, y, 0.9, 0.9, M)
 
 
-def nova(p):
+def supernova(p):
     # the same star, a moment later
     for k in range(24):
         a = math.radians(k * 15 + 4)
@@ -215,6 +237,18 @@ def nova(p):
     _ell(p, 38, 31, 13, 13, H); _ell(p, 38, 31, 9, 9, QColor("#FFB08A")); _ell(p, 38, 31, 5, 5, E)
     for x, y in ((6, 6), (70, 9), (72, 54), (5, 50), (63, 58), (12, 58)):
         _ell(p, x, y, 1.3, 1.3, H)
+
+
+def dead_star(p):
+    # what is left: a small dense cinder, a faint ring where the light was
+    for k in range(12):
+        a = math.radians(k * 30 + 7)
+        _line(p, [(38 + 25 * math.cos(a), 31 + 25 * math.sin(a)), (38 + 28 * math.cos(a), 31 + 28 * math.sin(a))], D, 1.0)
+    _ell(p, 38, 31, 22, 22, D)
+    _ell(p, 38, 31, 9, 9, F); _ell(p, 38, 31, 6.5, 6.5, D); _ell(p, 38, 31, 3, 3, E)
+    _line(p, [(33, 27), (37, 31), (34, 35)], F, 1.1); _line(p, [(40, 28), (43, 32)], F, 1.0)   # cracked through
+    for x, y in ((9, 9), (66, 12), (70, 50), (7, 47), (60, 57)):
+        _ell(p, x, y, 0.7, 0.7, M)
 
 
 def famine(p):
@@ -362,7 +396,8 @@ def deathcard(p):
 
 PORTRAITS = {"votary": votary, "scarab": scarab, "hound": hound, "huginn": huginn, "weigher": weigher,
              "gorgon": gorgon, "ouroboros": ouroboros, "cerberus": cerberus, "sleeper": sleeper,
-             "monolith": monolith, "dead_star": dead_star, "nova": nova, "famine": famine,
+             "monolith": monolith, "red_giant": red_giant, "supernova": supernova, "dead_star": dead_star,
+             "gargoyle": gargoyle, "shade": shade, "famine": famine,
              "mote": mote, "hydra": hydra, "thornback": thornback, "watcher": watcher, "martyr": martyr,
              "locust": locust, "wraith": wraith, "crowned": crowned, "seraph": seraph, "leviathan": leviathan,
              "deathcard": deathcard}

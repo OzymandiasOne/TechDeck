@@ -96,14 +96,14 @@ def test_the_altar_moves_sigils_and_takes_the_giver():
     run = Run(seed=8)
     run.offer(); run.choose(0); finish(run, make_you_win=True)
     run.offers = [run._stop("altar")]; run.choose(0)
-    giver = next(i for i, c in enumerate(run.deck) if c.id == "huginn")
+    giver = next(i for i, c in enumerate(run.deck) if c.id == "gargoyle")
     taker = next(i for i, c in enumerate(run.deck) if c.id == "hound")
     n = len(run.deck)
     got = run.altar(giver, taker)
-    assert C.WINGED in got.sigils and len(run.deck) == n - 1
+    assert C.WARDEN in got.sigils and len(run.deck) == n - 1
     g = run.new_game()
     card = g._make_entry(got.as_entry())
-    assert card.has(C.WINGED)
+    assert card.has(C.WARDEN)
 
 
 def test_a_dead_player_forges_a_deathcard_that_later_runs_remember():
@@ -112,11 +112,11 @@ def test_a_dead_player_forges_a_deathcard_that_later_runs_remember():
     run.offer(); run.choose(0)
     assert finish(run, make_you_win=False) == "dead"
     cost_i = next(i for i, c in enumerate(run.deck) if c.id == "hound")      # 2 offerings
-    stats_i = next(i for i, c in enumerate(run.deck) if c.id == "scarab")    # 1/2
-    sig_i = next(i for i, c in enumerate(run.deck) if c.id == "huginn")      # winged
+    stats_i = next(i for i, c in enumerate(run.deck) if c.id == "scarab")    # 1/3
+    sig_i = next(i for i, c in enumerate(run.deck) if c.id == "gargoyle")    # warden
     d = run.forge_deathcard("Anthony", cost_i, stats_i, sig_i)
-    assert d.deathcard and d.name == "ANTHONY" and (d.power, d.health, d.cost) == (1, 2, 2)
-    assert C.WINGED in d.sigils and d.id in C.CARDS
+    assert d.deathcard and d.name == "ANTHONY" and (d.power, d.health, d.cost) == (1, 3, 2)
+    assert C.WARDEN in d.sigils and d.id in C.CARDS
     mem = run.memory
     assert len(mem["deathcards"]) == 1
     later = Run(seed=10, memory=mem)

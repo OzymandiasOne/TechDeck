@@ -128,7 +128,12 @@ def test_an_illegal_click_becomes_a_hint_not_a_crash(table):
     ready(table)
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
-    big = next(c for c in table.game.hand if c.defn.cost >= 2)
+    def blood_card():
+        return next((c for c in table.game.hand if c.defn.cost >= 2 and c.defn.cost_kind == "offer"), None)
+    while blood_card() is None:                              # a four-card deck: the hound may still be in it
+        press(table, Qt.Key_Tab); settle(table); quiet(table)
+        press(table, Qt.Key_E); settle(table); quiet(table)
+    big = blood_card()
     poly = next(p for k, p in table.hits if k == ("card", big.uid))
     r = poly.boundingRect()
     pt = QPointF(r.left() + 12, r.center().y())            # the fan overlaps: aim at the card's own sliver
