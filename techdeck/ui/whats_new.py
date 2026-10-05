@@ -44,6 +44,12 @@ def new_badges(settings) -> set[str]:
 def draw_new_sticker(p: QPainter, right: float, top: float, scale: int = 2, tilt: float = 9.0):
     """A red pixel box reading NEW!, tilted high-left to low-right, its top-right
     corner near (right, top)."""
+    w, h = sticker_box(scale)
+    draw_new_sticker_centered(p, right - w * 0.55, top + h * 0.55, scale, tilt)
+
+
+def draw_new_sticker_centered(p: QPainter, cx: float, cy: float, scale: int = 2, tilt: float = 9.0):
+    """The same sticker, its centre at (cx, cy)."""
     from techdeck.ui.arcade_chrome import EMP
     from techdeck.ui.sprite_font import font as _sf
     txt = _sf().render("NEW!", scale, "#ffffff")
@@ -51,7 +57,7 @@ def draw_new_sticker(p: QPainter, right: float, top: float, scale: int = 2, tilt
     w, h = txt.width() + 2 * pad_x, txt.height() + 2 * pad_y
     p.save()
     p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-    p.translate(right - w * 0.55, top + h * 0.55)
+    p.translate(cx, cy)
     p.rotate(tilt)
     box = QRectF(-w / 2, -h / 2, w, h)
     p.fillRect(box.translated(scale, scale), QColor(10, 6, 15, 180))       # the drop shadow
@@ -62,24 +68,36 @@ def draw_new_sticker(p: QPainter, right: float, top: float, scale: int = 2, tilt
     p.restore()
 
 
-class NewSticker(QWidget):
-    """An overlay that wears the sticker at its own top-right; parents place it."""
+def sticker_box(scale: int = 2) -> tuple[int, int]:
+    """The unrotated box's size for this scale (from the real text width)."""
+    from techdeck.ui.sprite_font import font as _sf
+    txt = _sf().render("NEW!", scale, "#ffffff")
+    return txt.width() + 10 * scale, txt.height() + 6 * scale
 
-    def __init__(self, parent, scale: int = 2):
+
+class NewSticker(QWidget):
+    """An overlay that wears the sticker, centred, with room for its tilt;
+    parents place it by its centre."""
+
+    def __init__(self, parent, scale: int = 2, tilt: float = 9.0):
         super().__init__(parent)
-        self.scale = scale
-        self.W, self.H = 34 * scale + 24, 14 * scale + 30   # room for the tilt
+        import math
+        self.scale, self.tilt = scale, tilt
+        w, h = sticker_box(scale)
+        c, s_ = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+        self.W = int(w * c + h * s_) + 12                  # the rotated box, plus a margin all round
+        self.H = int(h * c + w * s_) + 12
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setFixedSize(self.W, self.H)
         self.hide()
 
-    def place(self, right: int, top: int):
-        self.move(right - self.W, top)
+    def place_center(self, cx: int, cy: int):
+        self.move(cx - self.W // 2, cy - self.H // 2)
         self.raise_()
 
     def paintEvent(self, _e):
         p = QPainter(self)
-        draw_new_sticker(p, self.W - 10, 12, self.scale)
+        draw_new_sticker_centered(p, self.W / 2, self.H / 2, self.scale, self.tilt)
         p.end()
 
 

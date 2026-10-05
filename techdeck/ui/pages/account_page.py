@@ -465,7 +465,7 @@ class AccountPage(QWidget, ThemeAware):
             if want:
                 r = bar.tabRect(index)
                 corner = bar.mapTo(self, QPoint(r.right(), r.top()))
-                sticker.place(corner.x() + 20, max(0, corner.y() - 2))   # ...the sticker covers that room and hangs off the corner
+                sticker.place_center(corner.x() - 32, corner.y() + 18)   # ...the sticker sits over that room, whole, hanging a little past the corner
             sticker.setVisible(want)
 
     def resizeEvent(self, e):

@@ -515,7 +515,7 @@ class Sidebar(QWidget, ThemeAware):
         from PySide6.QtCore import QPoint
         b = self.account_btn
         corner = b.mapTo(self, QPoint(b.width(), 0))
-        self._account_sticker.place(min(corner.x(), self.width()) - 4, corner.y() - 14)   # on the entry's corner, above the text
+        self._account_sticker.place_center(min(corner.x(), self.width()) - 30, corner.y() + 2)   # on the entry's corner, above the text
 
     def eventFilter(self, obj, event):
         if obj is getattr(self, "account_btn", None) and event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
