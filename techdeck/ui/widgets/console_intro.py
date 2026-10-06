@@ -19,6 +19,8 @@ from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QColor, QPainter, QRegion, QTextCursor
 from PySide6.QtWidgets import QApplication, QWidget
 
+from techdeck.core.qt_signals import safe_disconnect
+
 
 # Text the greeting block is found by. Present in the full line and nowhere
 # else in a fresh console.
@@ -177,10 +179,7 @@ class ConsoleIntro(QObject):
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
-        try:
-            self._console.cleared.disconnect(self._on_cleared)
-        except (RuntimeError, TypeError):
-            pass
+        safe_disconnect(self._console.cleared, self._on_cleared)
 
     # -- skip on any input -------------------------------------------------
     def eventFilter(self, obj, event):

@@ -11,6 +11,8 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QUrl, QTimer, QObject, Slot, QMetaObject, Qt, Q_ARG
 from PySide6.QtMultimedia import QSoundEffect
 
+from techdeck.core.qt_signals import safe_disconnect
+
 # ── Sound ID constants ──────────────────────────────────────────────────────
 SOUND_SUCCESS = "success"
 SOUND_ERROR = "error"
@@ -187,16 +189,15 @@ class AudioManager:
         # nothing driving it. `started` makes the transition idempotent and the
         # handler unhooks itself.
         started = False
+        connected = False
 
         def _start() -> None:
             nonlocal started
             if started:
                 return
             started = True
-            try:
-                effect.statusChanged.disconnect(_on_status)
-            except (RuntimeError, TypeError):
-                pass          # never connected (already-Ready path), or gone
+            if connected:
+                safe_disconnect(effect.statusChanged, _on_status)
             effect.play()
             # Release our reference a few seconds after playback starts
             QTimer.singleShot(4000, lambda: self._release(effect))
@@ -214,6 +215,7 @@ class AudioManager:
             _start()
         else:
             effect.statusChanged.connect(_on_status)
+            connected = True
 
     def safe_play(self, sound_id: str) -> None:
         """Thread-safe play: marshals the call to the main Qt thread via queued connection."""
@@ -283,10 +285,7 @@ class AudioManager:
             if started or effect.status() != QSoundEffect.Status.Ready:
                 return
             started = True
-            try:
-                effect.statusChanged.disconnect(_on_status)
-            except (RuntimeError, TypeError):
-                pass
+            safe_disconnect(effect.statusChanged, _on_status)
             effect.play()
 
         if effect.status() == QSoundEffect.Status.Ready:

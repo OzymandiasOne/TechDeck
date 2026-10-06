@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
+from techdeck.core.qt_signals import safe_disconnect
+
 logger = logging.getLogger(__name__)
 
 
@@ -238,12 +240,11 @@ class UpdateDialog(QDialog):
 
         # Disconnect old downloader if it exists
         if self.downloader is not None:
-            try:
-                self.downloader.progress_updated.disconnect()
-                self.downloader.download_complete.disconnect()
-                self.downloader.download_failed.disconnect()
-            except RuntimeError:
-                pass
+            # Each one independently: chained inside a single try, a signal
+            # with nothing attached skipped every disconnect after it.
+            safe_disconnect(self.downloader.progress_updated)
+            safe_disconnect(self.downloader.download_complete)
+            safe_disconnect(self.downloader.download_failed)
             self.downloader = None
 
         from techdeck.core.update_downloader import UpdateDownloader

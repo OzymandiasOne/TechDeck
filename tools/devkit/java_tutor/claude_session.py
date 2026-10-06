@@ -39,6 +39,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
+from techdeck.core.qt_signals import safe_disconnect
+
 # Long-path-safe filesystem checks (Hard Rule 14). A raw .is_dir() answers
 # False for a folder that exists once the path passes 260 characters.
 try:
@@ -367,13 +369,13 @@ class ClaudeSession(QObject):
         proc, self._proc = self._proc, None
         if proc is None:
             return
-        try:
-            proc.readyReadStandardOutput.disconnect()
-            proc.readyReadStandardError.disconnect()
-            proc.finished.disconnect()
-            proc.errorOccurred.disconnect()
-        except (RuntimeError, TypeError):
-            pass
+        # Each one independently: chained inside a single try, an unconnected
+        # signal early in the list skipped the rest -- and `finished` is the
+        # one whose slot nulls out the replacement process.
+        safe_disconnect(proc.readyReadStandardOutput)
+        safe_disconnect(proc.readyReadStandardError)
+        safe_disconnect(proc.finished)
+        safe_disconnect(proc.errorOccurred)
         try:
             proc.kill()
         except RuntimeError:

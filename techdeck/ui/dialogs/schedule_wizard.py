@@ -30,6 +30,8 @@ from PySide6.QtCore import Qt, QDate, QTime, Signal
 from PySide6.QtGui import QFont
 
 from techdeck.core.assistant import nlp
+
+from techdeck.core.qt_signals import safe_disconnect
 from techdeck.core.assistant.models import (
     PRIORITIES, PRIORITY_LABELS, Schedule, SchedulePrefs, TaskItem,
     fmt_duration, parse_hhmm,
@@ -574,32 +576,20 @@ class ScheduleWizard(QDialog, ThemeAware):
         for row in range(self.table.rowCount()):
             priority = self.table.cellWidget(row, COL_PRIORITY)
             if priority is not None:
-                try:
-                    priority.currentIndexChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(priority.currentIndexChanged)
                 priority.currentIndexChanged.connect(
                     lambda _i, r=row: self._pull_row(r))
             estimate = self.table.cellWidget(row, COL_ESTIMATE)
             if estimate is not None:
-                try:
-                    estimate.valueChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(estimate.valueChanged)
                 estimate.valueChanged.connect(lambda _v, r=row: self._pull_row(r))
             due = self.table.cellWidget(row, COL_DUE)
             if due is not None:
-                try:
-                    due.editingFinished.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(due.editingFinished)
                 due.editingFinished.connect(lambda r=row: self._normalize_due(r))
             more = self.table.cellWidget(row, COL_MORE)
             if more is not None:
-                try:
-                    more.clicked.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(more.clicked)
                 more.clicked.connect(lambda _c=False, r=row: self._open_details(r))
 
     def _tick_all(self, checked: bool):
