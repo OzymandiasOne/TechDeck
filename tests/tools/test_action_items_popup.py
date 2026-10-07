@@ -202,3 +202,49 @@ def test_a_grouped_finding_is_one_job_however_many_rows_hit_it():
     # The ⚠ run line counts the same jobs the dialog does.
     assert PluginExecutor._run_outcome_from(params) == (
         sdk.RUN_OUTCOME_WARNING, "2 things need your attention")
+
+
+def test_the_executor_shows_the_dialog_through_the_console():
+    """The seam that matters: the executor hands the console ONE formatted dialog,
+    and a console that blows up does not turn a finished run into a failed one."""
+    from techdeck.core import plugin_sdk as sdk
+    from techdeck.core.plugin_executor import PluginExecutor
+
+    shown = []
+
+    class FakeConsole:
+        def show_warning(self, title, text):
+            shown.append((title, text))
+
+    logs = []
+    params = {"log": logs.append, "console": FakeConsole()}
+    sdk.flag_action(params, "Fill PPN on Bent Plates row 6", "order FK411600")
+    sdk.flag_action(params, "N1: no MIL-SPEC", group="Some nests have no MIL-SPEC")
+    sdk.flag_action(params, "N2: no MIL-SPEC", group="Some nests have no MIL-SPEC")
+
+    PluginExecutor._show_action_items(params, "922 FormingFinder", logs.append)
+    assert len(shown) == 1
+    title, body = shown[0]
+    assert title == "922 FormingFinder - 2 things need your attention"
+    assert "Fill PPN on Bent Plates row 6" in body
+    assert "Some nests have no MIL-SPEC" in body
+    assert "N2: no MIL-SPEC" in body
+
+    # Nothing to say -> no dialog at all.
+    shown.clear()
+    PluginExecutor._show_action_items({"log": logs.append, "console": FakeConsole()},
+                                      "922 Kitting", logs.append)
+    assert shown == []
+
+    # A console that raises must not sink the run, and must not lose the text:
+    # sdk.show_warning falls back to the log, so the items still reach the user.
+    class BrokenConsole:
+        def show_warning(self, title, text):
+            raise RuntimeError("no GUI here")
+
+    fallback = []
+    broken = {"log": fallback.append, "console": BrokenConsole()}
+    sdk.flag_action(broken, "Something to do")
+    PluginExecutor._show_action_items(broken, "922 Setup", fallback.append)
+    assert any("Something to do" in line and "922 Setup" in line
+               for line in fallback), fallback
