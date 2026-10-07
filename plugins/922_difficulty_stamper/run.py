@@ -107,7 +107,7 @@ def inspect_drawing(pdf_path: Path, log) -> Optional[Tuple[bool, bool]]:
         sdk.ensure_local(pdf_path)  # OneDrive placeholder -> download (Hard Rule 13)
         doc = fitz.open(sdk.long_path(pdf_path))
     except Exception as e:
-        log(f"WARNING: Could not read {pdf_path.name}: {e}")
+        log(f"  Could not read {pdf_path.name}: {e}")
         return None
 
     try:
@@ -115,7 +115,7 @@ def inspect_drawing(pdf_path: Path, log) -> Optional[Tuple[bool, bool]]:
         visible = any(_label_rects(page) for page in doc)
         return visible, marker
     except Exception as e:
-        log(f"WARNING: Could not read {pdf_path.name}: {e}")
+        log(f"  Could not read {pdf_path.name}: {e}")
         return None
     finally:
         doc.close()
@@ -384,33 +384,27 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     log("=" * 50)
     progress_callback(100)
 
-    # Anything the user has to act on gets a popup - a console line scrolls past.
-    problems = []
+    # Anything the user has to act on is an action item: the executor raises them
+    # all in one dialog as the run ends. A console line scrolls past.
     if failures:
-        problems.append(
-            "These work packets could not be stamped (even after a retry). "
-            "Stamp them by hand:\n" +
-            "\n".join(f"  {o}\n      {p}" for o, p in failures))
+        sdk.flag_action(
+            params,
+            f"{len(failures)} work packet(s) could not be stamped, even after a "
+            f"retry - stamp them DIFFICULT by hand.",
+            "; ".join(f"{o} ({p})" for o, p in failures))
     if unreadable:
-        problems.append(
-            "These part drawings could not be read, so they were not checked "
-            "for the DIFFICULT label:\n" +
-            "\n".join(f"  {n}" for n in unreadable))
+        sdk.flag_action(
+            params,
+            f"{len(unreadable)} part drawing(s) could not be read, so they were "
+            f"never checked for the DIFFICULT label - check them by hand.",
+            "; ".join(unreadable))
     if no_packet:
-        problems.append(
-            "These orders have no work-packet PDF to stamp:\n" +
-            "\n".join(f"  {n}" for n in no_packet))
+        sdk.flag_action(
+            params,
+            f"{len(no_packet)} order(s) have no work-packet PDF to stamp.",
+            "; ".join(no_packet))
 
-    if problems:
-        sdk.show_warning(params, "Difficulty Stamper - needs a look",
-                         "\n\n".join(problems))
-        if hasattr(sdk, "set_run_outcome"):
-            sdk.set_run_outcome(
-                params, sdk.RUN_OUTCOME_WARNING,
-                f"{len(failures)} unstamped, {len(unreadable)} unreadable "
-                f"drawing(s), {len(no_packet)} order(s) with no packet")
-        log("WARNING: Completed, but some items need a look")
-    else:
+    if not sdk.action_items(params):
         log("All done successfully!")
 
 

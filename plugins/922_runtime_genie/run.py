@@ -97,7 +97,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     lst_stems = _collect_lst_stems(lst_dir)
     log(f"LST reference files: {len(lst_stems)}")
     if not lst_stems:
-        log("WARNING: No .lst files found in LST folder - all PDFs will be skipped.")
+        sdk.flag_action(
+            params,
+            f"There are no .lst files in Batch {batch_no}'s LST folder, so every "
+            f"PDF is skipped and the estimate comes out at zero - run 922 LST "
+            f"Organizer first.",
+            str(lst_dir))
     progress_callback(10)
 
     # ── Order folders ──────────────────────────────────────────────────────────
@@ -121,6 +126,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     matched_count = 0
     skipped_no_match = 0
     skipped_no_time = 0
+    ambiguous: list[str] = []      # 7000 folders holding more than one PDF
+    unreadable: list[str] = []     # PDFs with no machine time in them
 
     for i, order_dir in enumerate(order_dirs):
         if cancel_event.is_set():
@@ -144,7 +151,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
             if len(pdfs) > 1:
                 names = ", ".join(p.name for p in pdfs)
-                log(f"  WARNING: {len(pdfs)} PDFs in {folder_7000} - using first alphabetically: {pdfs[0].name} (others: {names})")
+                ambiguous.append(f"{folder_7000.name}: took {sorted(pdfs)[0].name} "
+                                 f"of {names}")
+                log(f"  {len(pdfs)} PDFs in {folder_7000} - using first "
+                    f"alphabetically: {sorted(pdfs)[0].name} (others: {names})")
 
             pdf = sorted(pdfs)[0]
 
@@ -155,7 +165,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             minutes, err = _extract_machine_time(pdf)
             if minutes is None:
                 skipped_no_time += 1
-                log(f"  WARNING: Could not extract machine time from {pdf.name} - {err}")
+                unreadable.append(f"{pdf.name} ({err})")
+                log(f"  No machine time in {pdf.name} - {err}")
                 continue
 
             log(f"  {pdf.stem}: {minutes} min")
@@ -200,6 +211,23 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         log(f"Skipped (no time in PDF) : {skipped_no_time}")
     log(f"\nOutput: {out_path}")
     log("=" * 50)
+
+    # The estimate is only as complete as the PDFs it could read, so anything
+    # left out of the total is something the user has to decide about.
+    if ambiguous:
+        sdk.flag_action(
+            params,
+            f"{len(ambiguous)} 7000 folder(s) hold more than one PDF, so the "
+            f"first one alphabetically was timed - check the right nest was "
+            f"counted.",
+            "; ".join(ambiguous[:12]))
+    if unreadable:
+        sdk.flag_action(
+            params,
+            f"{len(unreadable)} PDF(s) had no machine time in them and are NOT "
+            f"in this estimate, so the real run time is higher than "
+            f"{final_hours:.2f} hours.",
+            "; ".join(unreadable[:12]))
 
 
 # ── Standalone test harness ────────────────────────────────────────────────────
