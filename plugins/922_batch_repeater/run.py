@@ -25,7 +25,7 @@ into this batch's brand-new order folders, so if the SOURCE never had its
 the LST Organizer reports the tubes missing at the END of the batch. Only
 tube parts have a 7000 folder, so "no 7000 folder" is information, not a
 finding; a missing CAD folder and an empty 7000 folder are, and they end the
-run in a blocking sdk.show_warning.
+end the run as action items.
 
 v2.4.0: the repeater now MAINTAINS the 922 MPL workbook instead of only
 reading it. Before the repeat search, in one open/save of 922 MPL.xlsx:
@@ -144,7 +144,7 @@ def find_batch_root(source_po: int, base_path: Path, completed_root: Path,
     return None
 
 
-def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
+def _audit_repeat_shop_prints(repeat_root: Path, log, params: dict, cancel_event
                               ) -> Tuple[int, int, list]:
     """Check every folder in REPEAT BATCHES for the shop-print tube files the
     922 LST Organizer will later look for.
@@ -173,7 +173,11 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
         folders = sorted((d for d in repeat_root.iterdir() if sdk.is_dir(d)),
                          key=lambda d: d.name.lower())
     except (FileNotFoundError, PermissionError) as e:
-        log(f"WARNING: could not read REPEAT BATCHES: {e}")
+        sdk.flag_action(
+            params,
+            "The REPEAT BATCHES sheet could not be read, so no repeat was "
+            "checked for its shop prints - check that sheet in the quote.",
+            str(e))
         return 0, 0, problems
 
     for folder in folders:
@@ -203,7 +207,7 @@ def _audit_repeat_shop_prints(repeat_root: Path, log, cancel_event
     return checked, total_lsts, problems
 
 
-def _load_922_setup_template(log) -> dict:
+def _load_922_setup_template(log, params: dict) -> dict:
     """Read the sibling 922 Setup plugin's card_template.json (label_map,
     title format, plan name). Both plugins live side by side in the plugins
     dir - repo AND %LOCALAPPDATA% installs - so the Planner card contract
@@ -215,8 +219,12 @@ def _load_922_setup_template(log) -> dict:
         with open(tpl, "r", encoding="utf-8") as fh:
             return json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        log(f"WARNING: could not read 922 Setup's card_template.json ({exc}) - "
-            f"using built-in defaults.")
+        sdk.flag_action(
+            params,
+            "922 Setup's card_template.json could not be read, so the built-in "
+            "card defaults were used - check the REPEAT cards' bucket and colour "
+            "in Teams.",
+            str(exc))
         return {}
 
 
@@ -243,7 +251,7 @@ def _order_matches_folder(order: str, folder_name: str) -> bool:
     return dypn_of(folder_name) == key or folder_name.strip().lower() == key
 
 
-def _resolve_po_sheet(xls, preferred: str, log) -> str:
+def _resolve_po_sheet(xls, preferred: str, log, params: dict) -> str:
     """Pick the MPL sheet: the preferred name if present, else the sheet whose
     first rows hold the most 'PO ###' headers (so a rename doesn't break us)."""
     for s in xls.sheet_names:
@@ -257,7 +265,10 @@ def _resolve_po_sheet(xls, preferred: str, log) -> str:
         if n > best_n:
             best, best_n = s, n
     if best:
-        log(f"WARNING: sheet '{preferred}' not found; using '{best}' ({best_n} PO columns).")
+        sdk.flag_action(
+            params,
+            f"The MPL has no '{preferred}' sheet, so '{best}' was used instead "
+            f"({best_n} PO columns) - check the repeats came off the right sheet.")
     return best or preferred
 
 
@@ -272,11 +283,12 @@ def _find_po_header_row(raw) -> int:
     return best_i if best_n >= 3 else 2
 
 
-def _read_mpl_po_columns(path: Path, preferred_sheet: str, log) -> Tuple[Any, Dict[int, str]]:
+def _read_mpl_po_columns(path: Path, preferred_sheet: str, log,
+                         params: dict) -> Tuple[Any, Dict[int, str]]:
     """(dataframe, {po_num: column_name}) from the MPL PO sheet, with the sheet
     and header row resolved rather than hardcoded."""
     xls = sdk.open_excel_resilient(path, log=log)  # placeholder hydrate + locked-open message
-    sheet = _resolve_po_sheet(xls, preferred_sheet, log)
+    sheet = _resolve_po_sheet(xls, preferred_sheet, log, params)
     raw = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=8)
     hdr = _find_po_header_row(raw)
     df = pd.read_excel(xls, sheet_name=sheet, header=hdr)
@@ -326,7 +338,8 @@ def find_repeat_orders(df, po_columns: Dict[int, str], new_po_num: int,
     return repeats
 
 
-def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log) -> bool:
+def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log,
+                            params: dict) -> bool:
     """Write the batch's 'PO {n}' column into the PO 321+ matrix sheet of an
     open MPL workbook. The sheet + header row are found by scanning for
     'PO ###' header cells (Hard Rule 2). A missing column is created after the
@@ -347,7 +360,10 @@ def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log) -> bool:
             if len(cols) > len(best_cols):
                 best_ws, best_row, best_cols = ws, r_i, cols
     if best_ws is None or len(best_cols) < 3:
-        log("WARNING: couldn't find the PO matrix sheet - PO column not written.")
+        sdk.flag_action(
+            params,
+            f"The MPL's PO matrix sheet was not found, so the "
+            f"'PO {new_po_num}' column was NOT written - add it by hand.")
         return False
 
     changed = False
@@ -393,15 +409,18 @@ def _write_po_matrix_column(wb, new_po_num: int, ppn_list, log) -> bool:
 
 
 def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
-                               log) -> bool:
+                               log, params: dict) -> bool:
     """Fold the batch's PO rows into the MASTER PARTS catalog sheet of an open
     MPL workbook via the shared merge engine. Orders whose PPN already records
     this batch are skipped (idempotent re-runs). Returns True if the sheet was
     rewritten."""
     import datetime as _dt
     if mp.MASTER_SHEET_NAME not in wb.sheetnames:
-        log(f"WARNING: no '{mp.MASTER_SHEET_NAME}' sheet in the MPL - run the "
-            "initial build (tools/mpl_build_master.py) first; skipped.")
+        sdk.flag_action(
+            params,
+            f"The MPL has no '{mp.MASTER_SHEET_NAME}' sheet, so this batch was "
+            f"NOT recorded in the parts catalog - the initial build "
+            f"(tools/mpl_build_master.py) has to run once first.")
         return False
     cat = mp.read_master_sheet(wb[mp.MASTER_SHEET_NAME])
     today = _dt.date.today().isoformat()
@@ -422,18 +441,24 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
         return False
     cat.finalize_times_made()
     if not sdk.is_file(quote_path):
-        log(f"WARNING: the quote workbook is missing - expected it at "
-            f"{quote_path} - existing part types kept, new parts typed "
-            "from tube serials only.")
+        sdk.flag_action(
+            params,
+            "The quote workbook is missing, so this batch's NEW parts were typed "
+            "from their tube serials alone - check their part types in MASTER "
+            "PARTS.",
+            f"expected it at {quote_path}")
         cat.apply_part_types({}, only_untyped=True)
     else:
         try:
             pricing = mp.load_pricing_map(quote_path, log=log)
             cat.apply_part_types(pricing)
         except Exception as exc:
-            log(f"WARNING: couldn't read the Quote MATERIAL PRICING sheet ({exc})"
-                " - existing part types kept, new parts typed from tube serials "
-                "only.")
+            sdk.flag_action(
+                params,
+                "The quote's MATERIAL PRICING sheet could not be read, so this "
+                "batch's NEW parts were typed from their tube serials alone - "
+                "check their part types in MASTER PARTS.",
+                str(exc))
             cat.apply_part_types({}, only_untyped=True)
     for w in cat.warnings:
         log(f"  note: {w}")
@@ -447,7 +472,7 @@ def _update_master_parts_sheet(wb, new_po_num: int, po_rows, quote_path,
     return True
 
 
-def _batch_folder_ppns(batch_folder: Path, log) -> list:
+def _batch_folder_ppns(batch_folder: Path, log, params: dict) -> list:
     """PPNs read off the batch root's ORDER FOLDER NAMES ('{WO}-{PPN}' - the
     text after the first dash), skipping the Documentation folder and REPEAT
     BATCHES. These fill the PO 321+ column (user-specified source: the
@@ -468,23 +493,30 @@ def _batch_folder_ppns(batch_folder: Path, log) -> list:
                 seen.add(ppn.lower())
                 ppns.append(ppn)
     except OSError as e:
-        log(f"WARNING: could not scan the batch folder for order folders: {e}")
+        sdk.flag_action(
+            params,
+            "The batch folder could not be scanned for order folders, so the "
+            "MPL's PO column could not be filled - add it by hand.",
+            str(e))
     return ppns
 
 
 def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
                        new_po_num: int, batch_folder: Path, do_matrix: bool,
-                       do_master: bool, dry_run: bool, log) -> int:
+                       do_master: bool, dry_run: bool, log, params: dict) -> int:
     """v2.4.0 stage: maintain the MPL in ONE open/save. The PO 321+ column is
     filled from the batch's ORDER FOLDER NAMES; the MASTER PARTS catalog from
     the batch's own PO workbook (which has the DYPN/material/qty detail the
     folder names don't). Either half can proceed without the other. Returns
     the error count (0 or 1) - a locked/unreadable MPL is a warning, never a
     run-killer, so repeat pulling still happens."""
-    ppn_list = _batch_folder_ppns(batch_folder, log) if do_matrix else []
+    ppn_list = _batch_folder_ppns(batch_folder, log, params) if do_matrix else []
     if do_matrix and not ppn_list:
-        log("WARNING: no order folders in the batch root yet - the PO column "
-            "can't be filled from them this run.")
+        sdk.flag_action(
+            params,
+            f"There are no order folders in the batch root yet, so the MPL's "
+            f"'PO {new_po_num}' column was left empty - run 922 Setup's folder "
+            f"stage first, then run this again.")
 
     po_rows = []
     if do_master:
@@ -496,8 +528,10 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
                                   "workbook in the batch's Documentation or "
                                   "order folders",
             }
-            log(f"WARNING: MASTER PARTS update skipped - "
-                f"{reasons.get(res['status'], res.get('error', res['status']))}.")
+            sdk.flag_action(
+                params,
+                "This batch was NOT recorded in the MPL's MASTER PARTS sheet.",
+                str(reasons.get(res['status'], res.get('error', res['status']))))
         else:
             for w in res["warnings"]:
                 log(f"  note: {w}")
@@ -510,16 +544,20 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
     try:
         wb = sdk.load_workbook_resilient(spreadsheet_path, log=log)
     except sdk.UserFacingError as exc:
-        log(f"WARNING: {exc.problem} MPL update skipped - repeat pulling "
-            "continues.")
+        sdk.flag_action(
+            params,
+            "The MPL was not updated for this batch, so it is not recorded "
+            "there - the repeats were still pulled.",
+            str(exc.problem))
         return 1
     try:
         changed = False
         if do_matrix and ppn_list:
-            changed |= _write_po_matrix_column(wb, new_po_num, ppn_list, log)
+            changed |= _write_po_matrix_column(wb, new_po_num, ppn_list, log,
+                                              params)
         if do_master and po_rows:
             changed |= _update_master_parts_sheet(
-                wb, new_po_num, po_rows, quote_path, log)
+                wb, new_po_num, po_rows, quote_path, log, params)
         if not changed:
             return 0
         if dry_run:
@@ -529,9 +567,11 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
         log("MPL saved.")
         return 0
     except PermissionError:
-        log(f"WARNING: '{spreadsheet_path.name}' is open in another program "
-            "(usually Excel) - MPL changes NOT saved. Close it and re-run to "
-            "record this batch; repeat pulling continues.")
+        sdk.flag_action(
+            params,
+            f"'{spreadsheet_path.name}' is open in another program (usually "
+            f"Excel), so the MPL changes were NOT saved - close it and run this "
+            f"again to record the batch. The repeats were still pulled.")
         return 1
     finally:
         wb.close()
@@ -629,7 +669,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         mpl_errors = _update_mpl_sheets(
             spreadsheet_path, mp.quote_path(base_path), new_po_num, new_po_folder,
             do_mpl_matrix, do_master_parts,
-            bool(settings.get('dry_run', False)), log)
+            bool(settings.get('dry_run', False)), log, params)
         log("")
     else:
         log("MPL updates switched OFF.")
@@ -639,7 +679,8 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     log("Reading Excel spreadsheet...")
     try:
         sdk.ensure_local(spreadsheet_path, log)  # OneDrive placeholder -> download first (Hard Rule 13)
-        df, po_columns = _read_mpl_po_columns(spreadsheet_path, SHEET_NAME, log)
+        df, po_columns = _read_mpl_po_columns(spreadsheet_path, SHEET_NAME, log,
+                                              params)
     except Exception as e:
         log(f"ERROR: Error reading spreadsheet: {e}")
         raise RuntimeError(f"Error reading spreadsheet: {e}")
@@ -762,7 +803,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     for idx, (order, source_po) in enumerate(orders_to_copy.items()):
         if cancel_event.is_set():
             log("")
-            log("WARNING: Cancelled by user")
+            log("Cancelled by user")
             log(f"Copied {copied_count} of {total_orders}")
             return
         
@@ -775,7 +816,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         batch_root = find_batch_root(source_po, base_path, completed_root, cancel_event)
         
         if not batch_root:
-            log(f"WARNING: Batch {source_po} not found for {order}")
+            log(f"  Batch {source_po} not found for {order}")
             not_found_count += 1
             continue
         
@@ -792,7 +833,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             continue
         
         if not found_folder:
-            log(f"WARNING: '{order}' not found in Batch {source_po}")
+            log(f"  '{order}' not found in Batch {source_po}")
             not_found_count += 1
             continue
         
@@ -818,7 +859,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         log("")
         log("Checking repeat folders for CAD-AND-SHOP-PRINTS / 7000 .lst files...")
         checked, total_lsts, lst_problems = _audit_repeat_shop_prints(
-            repeat_batch_folder, log, cancel_event)
+            repeat_batch_folder, log, params, cancel_event)
         log(f"Shop prints: {total_lsts} .lst file(s) across {checked} repeat "
             f"folder(s); {len(lst_problems)} need attention.")
 
@@ -856,11 +897,15 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
                 if dypn:
                     root_by_dypn.setdefault(dypn, []).append(entry_path)
         except (FileNotFoundError, PermissionError) as e:
-            log(f"WARNING: Could not scan batch root for matches: {e}")
+            sdk.flag_action(
+            params,
+            "The batch root could not be scanned, so no repeat was matched this "
+            "run - nothing was copied.",
+            str(e))
 
         for i, repeat_folder in enumerate(copied_repeats):
             if cancel_event.is_set():
-                log("WARNING: Cancelled by user")
+                log("Cancelled by user")
                 break
 
             dypn = dypn_of(repeat_folder.name)
@@ -921,11 +966,11 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     if do_tag and repeat_roots and not cancel_event.is_set():
         log("")
         log("Labeling repeat cards in Teams (REPEAT label + MODEL CHECK bucket)...")
-        template = _load_922_setup_template(log)
+        template = _load_922_setup_template(log, params)
         repeat_slot = (template.get("label_map") or {}).get("REPEAT")
         if not repeat_slot:
             repeat_slot = "category19"
-            log("WARNING: no REPEAT entry in 922 Setup's label_map - "
+            log("  No REPEAT entry in 922 Setup's label_map - "
                 "assuming category19 (Teal).")
         title_fmt = template.get("title_format", "BATCH {batch}: {folder}")
         repeat_bucket = (template.get("repeat_bucket_format")
@@ -981,19 +1026,28 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     # reports the tubes missing), so raise it now rather than let it scroll by
     # inside a 4-stage 922 Setup run.
     if lst_problems:
-        sdk.show_warning(
-            params, "922 Batch Repeater - repeat shop prints",
-            "These repeat folders are missing the tube .lst files the 922 LST "
-            "Organizer will look for. Their CAD prints get distributed into "
-            "this batch's order folders as-is, so the tubes will read as "
-            "missing at the end of the batch unless the source is fixed:\n\n"
-            + "\n".join(f"  - {name}: {why}" for name, why in lst_problems))
+        sdk.flag_action(
+            params,
+            f"{len(lst_problems)} repeat folder(s) have no tube .lst files, and "
+            f"their CAD prints were distributed as-is - the 922 LST Organizer "
+            f"will report those tubes missing at the end of the batch unless the "
+            f"SOURCE batch is fixed.",
+            "; ".join(f"{name}: {why}" for name, why in lst_problems))
 
     progress_callback(100)
     
-    if error_count > 0 or not_found_count > 0:
-        log("WARNING: Completed with warnings")
-    else:
+    if error_count > 0:
+        sdk.flag_action(
+            params,
+            f"{error_count} repeat(s) hit an error while being copied - the "
+            f"console above names each one; copy them by hand.")
+    if not_found_count > 0:
+        sdk.flag_action(
+            params,
+            f"{not_found_count} repeat(s) could not be found in their source "
+            f"batch, so nothing was copied for them - check the REPEAT BATCHES "
+            f"sheet names the right batch and order.")
+    if not sdk.action_items(params):
         log("All done successfully!")
 
 

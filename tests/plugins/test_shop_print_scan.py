@@ -12,6 +12,10 @@ from pathlib import Path
 
 import pytest
 
+# The audit raises action items through sdk.flag_action(params, ...); these
+# tests only care about what it RETURNS.
+NO_PARAMS = {"log": lambda *a, **k: None}
+
 from techdeck.core import plugin_sdk as sdk
 
 PLUGINS = Path(__file__).resolve().parents[2] / "plugins"
@@ -196,7 +200,7 @@ def test_the_audit_flags_only_the_actionable_findings(repeater, tmp_path):
     lines = []
 
     checked, total, problems = repeater._audit_repeat_shop_prints(
-        rb, lines.append, threading.Event())
+        rb, lines.append, NO_PARAMS, threading.Event())
 
     assert checked == 4
     assert total == 3                                # 2 + 0 + 0 + 1
@@ -214,14 +218,15 @@ def test_the_audit_is_clean_when_every_repeat_has_its_files(repeater, tmp_path):
     _order(rb, "X2484747-H8651461-H4", ["H8651461-H4-4"])
 
     checked, total, problems = repeater._audit_repeat_shop_prints(
-        rb, lambda *_a: None, threading.Event())
+        rb, lambda *_a: None, NO_PARAMS, threading.Event())
 
     assert (checked, total, problems) == (2, 2, [])
 
 
 def test_the_audit_survives_a_missing_repeat_batches_folder(repeater, tmp_path):
     checked, total, problems = repeater._audit_repeat_shop_prints(
-        tmp_path / "REPEAT BATCHES", lambda *_a: None, threading.Event())
+        tmp_path / "REPEAT BATCHES", lambda *_a: None, NO_PARAMS,
+        threading.Event())
 
     assert (checked, total, problems) == (0, 0, [])
 
@@ -233,5 +238,5 @@ def test_the_audit_honours_cancel(repeater, tmp_path):
     ev.set()
 
     with pytest.raises(BaseException) as exc:
-        repeater._audit_repeat_shop_prints(rb, lambda *_a: None, ev)
+        repeater._audit_repeat_shop_prints(rb, lambda *_a: None, NO_PARAMS, ev)
     assert type(exc.value).__name__ == "PluginCancelled"
