@@ -190,5 +190,6 @@ def test_table_fit_is_idempotent_and_never_raises(su):
     bare = openpyxl.Workbook()                                   # no SCRIBE sheet at all
     assert su._fit_scribe_table(bare, 5, lambda *_: None) == 0
     bare.create_sheet("SCRIBE VERIFICATION")                     # a sheet with no table
-    warned = []
-    assert su._fit_scribe_table(bare, 5, warned.append) == 0 and warned
+    params = {"log": lambda *_: None}
+    assert su._fit_scribe_table(bare, 5, lambda *_: None, params) == 0
+    assert su.sdk.action_items(params)        # the sheet was left as it is

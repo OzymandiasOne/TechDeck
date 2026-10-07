@@ -1160,7 +1160,7 @@ def set_ticket_units(params: dict, units: int) -> None:
 ACTION_ITEMS_KEY = "action_items"
 
 
-def flag_action(params: dict, item: str, detail: str = "") -> None:
+def flag_action(params, item: str, detail: str = "", group: str = "") -> None:
     """Record ONE thing the USER must do by hand before this run's output can be
     trusted, and log it. TechDeck pops every item recorded during the run in a
     single blocking dialog as the run ends, and reports the run as WARNING
@@ -1180,6 +1180,13 @@ def flag_action(params: dict, item: str, detail: str = "") -> None:
     run; 15 blocking dialogs is not a user interface). Call it as many times as
     you need, including inside a loop.
 
+    `group` is for a finding that repeats per row on a run that walks many rows -
+    911 Setup over twenty nests, where "no MIL-SPEC in the nest packet" is ONE job
+    however many nests hit it. Calls sharing a group collapse into one numbered
+    entry: the group text is the headline, and each call's `item` becomes a line
+    under it. Without a group, every call is its own entry. Grouping is what six
+    apps used to hand-roll by collecting a list and popping it at the end.
+
     Informational lines are NOT action items. "Skipped the rod row because its
     Raw Material is not a formed source" is the app working correctly - that is
     `log()`. An action item means the output is wrong or incomplete until a
@@ -1198,39 +1205,69 @@ def flag_action(params: dict, item: str, detail: str = "") -> None:
     if not text:
         return
     extra = str(detail or "").strip()
+    line = f"ACTION NEEDED: {text}" + (f" ({extra})" if extra else "")
+    # `params` missing or not a mapping: a helper called outside a run (a unit
+    # test, a standalone harness). Say it, lose it, and never sink the caller.
+    if not isinstance(params, dict):
+        print(line)
+        return
     try:
         items = params.setdefault(ACTION_ITEMS_KEY, [])
-        items.append({"item": text, "detail": extra})
+        items.append({"item": text, "detail": extra,
+                      "group": str(group or "").strip()})
     except (AttributeError, TypeError):
         pass    # a params mapping that cannot hold the key must not sink the run
-    log = params.get("log", print)
-    log(f"ACTION NEEDED: {text}" + (f" ({extra})" if extra else ""))
+    params.get("log", print)(line)
 
 
 def action_items(params: dict) -> list:
-    """The action items recorded so far, as {'item', 'detail'} dicts. The
-    executor reads this to build the ending popup; a plugin may read it to
-    branch on whether anything needs attention (`if sdk.action_items(params):`)."""
+    """The action items recorded so far, as {'item', 'detail', 'group'} dicts -
+    one per flag_action call, BEFORE grouping. The executor reads this to build
+    the ending popup; a plugin may read it to branch on whether anything needs
+    attention (`if sdk.action_items(params):`)."""
     raw = params.get(ACTION_ITEMS_KEY)
     return list(raw) if isinstance(raw, list) else []
 
 
+def _grouped_action_items(items) -> list:
+    """`items` as the dialog shows them: [(headline, [line, ...])], with calls
+    that share a `group` collapsed into one entry, in first-seen order. One job
+    per entry, so a per-nest finding across twenty nests is one job."""
+    out: list = []
+    by_group: dict = {}
+    for entry in items or []:
+        if isinstance(entry, dict):
+            text = str(entry.get("item", ""))
+            detail = str(entry.get("detail", ""))
+            group = str(entry.get("group", ""))
+        else:
+            text, detail, group = str(entry), "", ""
+        line = text + (f" ({detail})" if detail else "")
+        if not group:
+            out.append((text, [detail] if detail else []))
+            continue
+        bucket = by_group.get(group)
+        if bucket is None:
+            bucket = []
+            by_group[group] = bucket
+            out.append((group, bucket))
+        bucket.append(line)
+    return out
+
+
 def format_action_items(items, plugin_name: str = "") -> tuple:
     """(title, body) for the ending action-item dialog. Shared by the executor
-    and the tests so the wording has one home."""
-    items = list(items or [])
-    n = len(items)
+    and the tests so the wording has one home. The COUNT is of jobs after
+    grouping, not of flag_action calls - that is what the user has to do."""
+    entries = _grouped_action_items(items)
+    n = len(entries)
     head = f"{plugin_name} - " if plugin_name else ""
     title = (f"{head}1 thing needs your attention" if n == 1
              else f"{head}{n} things need your attention")
     lines = []
-    for i, entry in enumerate(items, 1):
-        if isinstance(entry, dict):
-            text, detail = str(entry.get("item", "")), str(entry.get("detail", ""))
-        else:
-            text, detail = str(entry), ""
+    for i, (text, details) in enumerate(entries, 1):
         lines.append(f"{i}. {text}")
-        if detail:
+        for detail in details:
             lines.append(f"     {detail}")
     return title, "\n".join(lines)
 

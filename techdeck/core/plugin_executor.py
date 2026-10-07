@@ -251,7 +251,9 @@ class PluginExecutor:
                 return status, str(raw.get("message", "") or "")
         items = sdk.action_items(plugin_params)
         if items:
-            n = len(items)
+            # Count JOBS, not flag_action calls, so the ⚠ line and the dialog's
+            # own title never disagree about how much there is to do.
+            n = len(sdk._grouped_action_items(items))
             phrase = ("1 thing needs your attention" if n == 1
                       else f"{n} things need your attention")
             return sdk.RUN_OUTCOME_WARNING, phrase

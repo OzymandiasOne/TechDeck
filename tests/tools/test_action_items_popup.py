@@ -144,7 +144,7 @@ def test_flag_action_records_logs_and_formats():
     items = sdk.action_items(params)
     assert len(items) == 2
     assert items[0] == {"item": "Fill PPN on Bent Plates row 6",
-                        "detail": "order FK411600"}
+                        "detail": "order FK411600", "group": ""}
     # It still reaches the console, so the run log keeps the whole story.
     assert any("Fill PPN" in line for line in lines)
 
@@ -175,3 +175,30 @@ def test_action_item_makes_the_run_report_a_warning():
     sdk.set_run_outcome(params, sdk.RUN_OUTCOME_PARTIAL, "two of three orders")
     assert PluginExecutor._run_outcome_from(params) == ("partial",
                                                         "two of three orders")
+
+
+def test_a_grouped_finding_is_one_job_however_many_rows_hit_it():
+    """911 Setup walks twenty nests; "no MIL-SPEC in the packet" is ONE job."""
+    from techdeck.core import plugin_sdk as sdk
+    from techdeck.core.plugin_executor import PluginExecutor
+
+    params = {"log": lambda *_: None}
+    for nest in ("N1", "N2", "N3"):
+        sdk.flag_action(params, f"{nest}: no MIL-SPEC on the PART SKETCH page",
+                        group="Some nests have no MIL-SPEC - fill those in by hand")
+    sdk.flag_action(params, "The scribe doc is missing")
+
+    # Every call is still recorded, ungrouped, for a plugin that wants to count.
+    assert len(sdk.action_items(params)) == 4
+
+    title, body = sdk.format_action_items(sdk.action_items(params), "911 Setup")
+    assert title == "911 Setup - 2 things need your attention"
+    lines = body.splitlines()
+    assert lines[0] == "1. Some nests have no MIL-SPEC - fill those in by hand"
+    assert lines[1].strip() == "N1: no MIL-SPEC on the PART SKETCH page"
+    assert lines[3].strip() == "N3: no MIL-SPEC on the PART SKETCH page"
+    assert lines[4] == "2. The scribe doc is missing"
+
+    # The ⚠ run line counts the same jobs the dialog does.
+    assert PluginExecutor._run_outcome_from(params) == (
+        sdk.RUN_OUTCOME_WARNING, "2 things need your attention")
