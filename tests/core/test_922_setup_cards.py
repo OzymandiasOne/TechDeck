@@ -307,15 +307,13 @@ def test_real_template_progress_card_matches_the_office_card():
 # C.D. 2026-09-25: she unticked Find Repeats to run ONLY the cards with
 # material labels, got a "cards going up WITHOUT repeat tags" popup, and read
 # it as "it's labelling the repeats instead of the materials". Unticked on
-# purpose = one quiet line; a stage that ran and failed = the loud popup.
+# purpose = one quiet line; a stage that ran and failed = a loud action item.
 
 def _run_cards_stage(tmp_path, monkeypatch, **kwargs):
     mod = _load()
     batch = tmp_path / "Batch 999"
     (batch / "BK1-R1-H1").mkdir(parents=True)
-    popups, outcomes, lines = [], [], []
-    monkeypatch.setattr(mod.sdk, "show_warning",
-                        lambda params, title, msg: popups.append(title))
+    outcomes, lines = [], []
     monkeypatch.setattr(mod.sdk, "set_run_outcome",
                         lambda params, kind, msg: outcomes.append(kind),
                         raising=False)
@@ -325,22 +323,23 @@ def _run_cards_stage(tmp_path, monkeypatch, **kwargs):
     params = {"log": lines.append, "settings": {"dry_run": True}}
     mod._run_teams_setup(params, lambda p: None, threading.Event(),
                          batch, "999", **kwargs)
-    return popups, outcomes, lines
+    # Action items ARE the popup now - the executor raises one dialog from them.
+    items = [i["item"] for i in mod.sdk.action_items(params)]
+    return items, outcomes, lines
 
 
 def test_unticked_find_repeats_is_quiet(tmp_path, monkeypatch):
-    popups, outcomes, lines = _run_cards_stage(
+    items, outcomes, lines = _run_cards_stage(
         tmp_path, monkeypatch, repeat_folders=None, repeat_stage_skipped=True)
-    assert "922 Setup - repeat cards" not in popups
+    assert not any("WITHOUT repeat tags" in i for i in items), items
     assert not any("Repeat detection didn't run" in l for l in lines)
     assert any("Find Repeats was not ticked" in l for l in lines)
 
 
-def test_failed_find_repeats_still_warns_loudly(tmp_path, monkeypatch):
-    popups, outcomes, lines = _run_cards_stage(
+def test_failed_find_repeats_still_raises_an_action_item(tmp_path, monkeypatch):
+    items, outcomes, lines = _run_cards_stage(
         tmp_path, monkeypatch, repeat_folders=None)
-    assert "922 Setup - repeat cards" in popups
-    assert outcomes, "a failed repeat stage must set a warning outcome"
+    assert any("WITHOUT repeat tags" in i for i in items), items
 
 
 def test_run_tells_the_card_stage_when_find_repeats_was_unticked():

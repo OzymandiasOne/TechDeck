@@ -1207,9 +1207,11 @@ def flag_action(params, item: str, detail: str = "", group: str = "") -> None:
     extra = str(detail or "").strip()
     line = f"ACTION NEEDED: {text}" + (f" ({extra})" if extra else "")
     # `params` missing or not a mapping: a helper called outside a run (a unit
-    # test, a standalone harness). Say it, lose it, and never sink the caller.
+    # test, a standalone harness). Record it where it can still be read - print()
+    # is a silent no-op in the windowed build - and never sink the caller.
     if not isinstance(params, dict):
-        print(line)
+        import logging
+        logging.getLogger(__name__).warning("%s", line)
         return
     try:
         items = params.setdefault(ACTION_ITEMS_KEY, [])
