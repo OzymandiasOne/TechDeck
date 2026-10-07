@@ -1186,6 +1186,13 @@ def flag_action(params: dict, item: str, detail: str = "") -> None:
     person intervenes.
 
     Headless (no console) it still logs, so a standalone run loses nothing.
+
+    NOT for a GUI plugin's own window (``requires_main_thread``). The dialog goes
+    up when run() RETURNS, and a GUI plugin returns as soon as its window is on
+    screen - anything flagged while the user works in it afterwards would never be
+    shown. Those findings belong in the window's own log, where the user is
+    already looking (922 Customer DXF Analysis's below-minimum measurements).
+    A GUI plugin may still flag what it finds BEFORE run() returns.
     """
     text = str(item or "").strip()
     if not text:
