@@ -519,7 +519,7 @@ def restore_missing_sketches(doc, batch_folder, nest: str, log,
     res.sketch_folder = find_sketch_folder(batch_folder)
     if res.sketch_folder is None:
         res.unmatched = [dypn for _, dypn, _ in broken]
-        log(f"  WARNING: {len(broken)} PART SKETCH page(s) have no graphic and "
+        log(f"  {len(broken)} PART SKETCH page(s) have no graphic and "
             f"{batch_folder.name} has no WPDD SKETCHES folder to fill them from.")
         return res
     index = index_sketch_files(res.sketch_folder)
@@ -531,7 +531,7 @@ def restore_missing_sketches(doc, batch_folder, nest: str, log,
         views = _sketch_views_for(up, dypn, index)
         if not views:
             res.unmatched.append(dypn)
-            log(f"  WARNING: page {idx + 1} PART SKETCH {dypn}: graphic missing and "
+            log(f"  Page {idx + 1} PART SKETCH {dypn}: graphic missing and "
                 f"no {dypn} sketch in {res.sketch_folder.name}.")
             continue
         page = doc[idx]
@@ -572,7 +572,7 @@ def restore_missing_sketches(doc, batch_folder, nest: str, log,
                 sdk.copy_resilient(jpg, dest, log=log)
                 res.copied += 1
             except (OSError, RuntimeError) as exc:
-                log(f"  WARNING: could not copy {jpg.name} into {SKETCHES_SUBDIR}: {exc}")
+                log(f"  Could not copy {jpg.name} into {SKETCHES_SUBDIR}: {exc}")
         if res.copied:
             log(f"  copied {res.copied} sketch .jpg(s) into {nest_dir.name}\\{SKETCHES_SUBDIR}")
     elif used:
@@ -783,7 +783,10 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
 
         total = len(doc)
         if len(remove_pages) >= total:
-            log(f"  WARNING: All {total} pages would be removed - nothing to write for {pdf_path.name}")
+            log(f"  All {total} pages would be removed - nothing to write "
+                f"for {pdf_path.name}")
+            warnings.append(f"every one of its {total} pages is a MOVE TICKET, "
+                            f"so no stamped packet was written at all")
             return False, warnings
 
         material = " / ".join(sorted(materials))
@@ -1008,7 +1011,7 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
             else:
                 skipped += 1
             for w in warnings:
-                log(f"  WARNING: {w}")
+                log(f"  ! {w}")
                 attention.append(f"{pdf_path.name}: {w}")
         except Exception as e:
             log(f"  UNEXPECTED ERROR: {e}")
@@ -1025,19 +1028,25 @@ def run(params: dict, progress_callback: callable, cancel_event: threading.Event
     # the omission has to be surfaced somewhere the user cannot scroll past.
     if want_difficulty and (diff_problem or unrated):
         if diff_problem:
-            body = diff_problem
+            sdk.flag_action(
+                params,
+                f"No packet got a difficulty label - {diff_problem}")
         else:
-            shown = "\n".join(f"  - {n}" for n in unrated[:25])
-            body = (f"{len(unrated)} of {total} packet(s) were stamped WITHOUT a "
-                    f"difficulty label because the nest has no rating colour on "
-                    f"the EB 922 Schedule (CURRENT PIPELINE, column E), is marked "
-                    f"N/A, or is not listed:\n\n{shown}"
-                    + ("\n  ..." if len(unrated) > 25 else "")
-                    + "\n\nEverything else on those packets stamped normally.")
-        sdk.show_warning(params, "Difficulty label - not stamped", body)
+            shown = list(unrated[:25])
+            if len(unrated) > 25:
+                shown.append("...")
+            sdk.flag_action(
+                params,
+                f"{len(unrated)} of {total} packet(s) were stamped WITHOUT a "
+                f"difficulty label because the nest has no rating colour on the "
+                f"EB 922 Schedule (CURRENT PIPELINE, column E), is marked N/A, or "
+                f"is not listed - rate them and stamp those labels by hand. "
+                f"Everything else on those packets stamped normally.",
+                "; ".join(shown))
 
     if attention:
-        sdk.show_warning(
-            params, "Move Ticket Omit - check these",
-            "Some stamps need a manual look:\n\n" + "\n".join(attention[:20])
-            + ("\n..." if len(attention) > 20 else ""))
+        sdk.flag_action(
+            params,
+            f"{len(attention)} stamp(s) need a manual look.",
+            "; ".join(attention[:20])
+            + (" ..." if len(attention) > 20 else ""))

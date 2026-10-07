@@ -29,8 +29,8 @@ real 911 workflow 2026-07-07):
    1D diagram and the .lst export); the substitution is logged and marked
    'OK as <part>' on the report rather than applied silently.
 5. Nests that exist nowhere on disk, and parts with no .lst, are reported in
-   the console + report AND raised as a blocking popup (sdk.show_warning) so
-   they can't scroll past unseen.
+   the console + report AND raised as action items (sdk.flag_action) so they
+   can't scroll past unseen.
 
 v2.3.0 (2026-09-21) - caught up with the 922 LST Organizer: the pull report
 is now ONE color-coded PDF ('LST Report - {batch} {nest}.pdf', drawn by the
@@ -481,7 +481,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         sdk.raise_if_cancelled(cancel_event)
         hit = resolve_nest_folder(root, batch, src_nest, nest_cache, cancel_event)
         if hit is None:
-            log(f"  WARNING: nest {src_nest} not found in any batch folder "
+            log(f"  Nest {src_nest} not found in any batch folder "
                 f"({len(parts)} part(s) skipped).")
             unresolved[src_nest] = parts
         else:
@@ -551,7 +551,11 @@ def run(params: dict, progress_callback, cancel_event) -> None:
                           rows, unresolved, copied_count, issues)
             report_ok = True
         except Exception as e:
-            log(f"WARNING: could not write the PDF report: {e}")
+            sdk.flag_action(
+                params,
+                "The LST report PDF could not be written - the parts were still "
+                "pulled, but there is no report to hand on.",
+                str(e))
     progress_callback(90)
 
     # ── Console summary ────────────────────────────────────────────────────────
@@ -588,24 +592,26 @@ def run(params: dict, progress_callback, cancel_event) -> None:
             bits.append(f"{len(issues)} file(s) could not be copied")
         sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING, "; ".join(bits))
 
-    # Blocking popup for anything the user must not miss - it NAMES the parts
+    # Action items for anything the user must not miss - they NAME the parts
     # (v2.3.0), so nobody has to open the report to learn what to chase.
-    if unresolved or missing:
-        lines: List[str] = []
-        if missing:
-            lines.append(f"{len(missing)} part(s) have no .lst file:")
-            lines += [f"  - {part}  (nest {n}, batch {b})"
-                      for part, n, b, _f, _v in missing[:12]]
-            if len(missing) > 12:
-                lines.append(f"  ...and {len(missing) - 12} more (see the report)")
-        if unresolved:
-            if lines:
-                lines.append("")
-            lines.append("These nests were not found in any batch folder "
-                         "(their parts were NOT pulled):")
-            lines += [f"  - {n}: {', '.join(ps)}"
-                      for n, ps in sorted(unresolved.items())]
-        sdk.show_warning(params, f"911 LST - {batch} {nest}", "\n".join(lines))
+    if missing:
+        shown = [f"{part} (nest {n}, batch {b})"
+                 for part, n, b, _f, _v in missing[:12]]
+        if len(missing) > 12:
+            shown.append(f"...and {len(missing) - 12} more (see the report)")
+        sdk.flag_action(
+            params,
+            f"{len(missing)} part(s) in {batch} {nest} have no .lst file - cut "
+            f"them, or check the 1D diagram names them the way the .lst export "
+            f"does.",
+            "; ".join(shown))
+    if unresolved:
+        sdk.flag_action(
+            params,
+            f"{len(unresolved)} nest(s) were not found in any batch folder, so "
+            f"their parts were NOT pulled - check the nest numbers.",
+            "; ".join(f"{n}: {', '.join(ps)}"
+                      for n, ps in sorted(unresolved.items())))
 
     if report_ok:
         sdk.link_output(params, f"Open the LST report for {batch} {nest}",

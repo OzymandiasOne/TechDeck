@@ -317,7 +317,8 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Tuple]:
 
 
 # ===== VALIDATION FUNCTIONS =====
-def validate_and_create_reports(output_folder: Path, output_name: str, ws: Worksheet, log) -> None:
+def validate_and_create_reports(output_folder: Path, output_name: str,
+                                ws: Worksheet, log, params: dict) -> None:
     """
     Create validation reports for missing data:
     1. Excel file with missing cell information
@@ -363,7 +364,11 @@ def validate_and_create_reports(output_folder: Path, output_name: str, ws: Works
     # Log summary
     total_missing = sum(missing_counts.values())
     if total_missing > 0:
-        log(f"WARNING: Found {total_missing} missing cells across {len(missing_data)} locations")
+        sdk.flag_action(
+            params,
+            f"{total_missing} cell(s) are blank across {len(missing_data)} "
+            f"location(s) - fill them in from the validation report before using "
+            f"the output.")
         log(f"Validation reports created:")
         log(f"   - {missing_xlsx_path.name}")
         log(f"   - {analysis_txt_path.name}")
@@ -534,7 +539,9 @@ def append_rows(xlsx_path: Path, rows: List[Tuple], log) -> Tuple[int, Worksheet
 
 
 # ===== PDF EXTRACTION =====
-def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path], all_rows: List[Tuple], log) -> Optional[Path]:
+def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path],
+                            all_rows: List[Tuple], log,
+                            params: dict) -> Optional[Path]:
     """Extract PART SKETCH pages to combined PDF in output folder."""
     pdf_writer = PdfWriter()
     pdf_output = output_folder / "extracted_drawings.pdf"
@@ -563,7 +570,11 @@ def extract_drawings_to_pdf(output_folder: Path, pdfs: List[Path], all_rows: Lis
                 pdf_writer.write(f)
             return pdf_output
     except Exception as e:
-        log(f"WARNING: Could not create drawings PDF: {e}")
+        sdk.flag_action(
+            params,
+            "The drawings PDF could not be created, so there is nothing to hand "
+            "on - the Excel rows were still written.",
+            str(e))
     
     return None
 
@@ -654,7 +665,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     for idx, pdf in enumerate(pdfs):
         if cancel_event.is_set():
-            log("WARNING: Cancelled by user")
+            log("Cancelled by user")
             return
         
         try:
@@ -663,7 +674,11 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
             all_rows.extend(rows)
             log(f"   Found {len(rows)} PART SKETCH page(s)")
         except Exception as e:
-            log(f"   WARNING: Error: {e}")
+            sdk.flag_action(
+                params,
+                f"{pdf.name} could not be read, so none of its PART SKETCH pages "
+                f"are in the output - extract them by hand.",
+                str(e))
         
         progress = 20 + int((idx + 1) / total * 60)
         progress_callback(progress)
@@ -686,16 +701,21 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     # === CREATE VALIDATION REPORTS ===
     log("Creating validation reports...")
     try:
-        validate_and_create_reports(output_folder, output_name, ws, log)
+        validate_and_create_reports(output_folder, output_name, ws, log, params)
     except Exception as e:
-        log(f"WARNING: Warning: Could not create validation reports: {e}")
+        sdk.flag_action(
+            params,
+            "The validation reports could not be created, so nothing checked the "
+            "output for blank cells - look it over by hand.",
+            str(e))
     
     progress_callback(90)
     
     # === EXTRACT DRAWINGS ===
     if extract_drawings:
         log("Extracting drawings to PDF...")
-        pdf_output = extract_drawings_to_pdf(output_folder, pdfs, all_rows, log)
+        pdf_output = extract_drawings_to_pdf(output_folder, pdfs, all_rows, log,
+                                             params)
         if pdf_output:
             log(f"Drawings saved: {pdf_output.name}")
     

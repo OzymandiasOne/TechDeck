@@ -598,9 +598,11 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
 
     if unresolved:
         log("")
-        log("WARNING: %d nest(s) had no MATL / DESC in the forecast"
+        sdk.flag_action(
+            params,
+            "%d nest(s) had no MATL / DESC in the forecast - they are on the "
+            "'Unresolved' sheet; fill them in and delete that sheet."
             % len(unresolved))
-        log("   Listed on the 'Unresolved' sheet - delete it once they're filled in.")
 
     console = params.get("console")
     if console is not None and hasattr(console, "append_link"):

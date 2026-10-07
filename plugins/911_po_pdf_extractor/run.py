@@ -295,7 +295,7 @@ def extract_line_data(doc: fitz.Document, line_no: int, line_pages: List[int],
     return record
 
 
-def extract_from_pdf(pdf_path: Path, log) -> List[Dict]:
+def extract_from_pdf(pdf_path: Path, log, params: dict) -> List[Dict]:
     """Extract all PO data from a PDF."""
     doc = None
     try:
@@ -314,7 +314,10 @@ def extract_from_pdf(pdf_path: Path, log) -> List[Dict]:
         order_no, line_index = build_line_index(doc, log)
         
         if not order_no:
-            log(f"   WARNING: No order number found in {pdf_path.name}")
+            sdk.flag_action(
+            params,
+            f"No order number was found in {pdf_path.name}, so its lines have no "
+            f"order against them - add it by hand.")
             return []
         
         # Extract Ship To address once
@@ -612,16 +615,20 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     for idx, pdf in enumerate(pdfs):
         if cancel_event.is_set():
-            log("WARNING: Cancelled by user")
+            log("Cancelled by user")
             return
         
         try:
             log(f"   Processing: {pdf.name}")
-            records = extract_from_pdf(pdf, log)
+            records = extract_from_pdf(pdf, log, params)
             all_records.extend(records)
             log(f"   Extracted {len(records)} record(s)")
         except Exception as e:
-            log(f"   WARNING: Error: {e}")
+            sdk.flag_action(
+                params,
+                f"{pdf.name} could not be read, so none of its lines are in the "
+                f"output - extract them by hand.",
+                str(e))
         
         progress = 15 + int((idx + 1) / total * 60)
         progress_callback(progress)
@@ -631,7 +638,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     progress_callback(75)
     
     if not all_records:
-        log("WARNING: No records extracted")
+        sdk.flag_action(
+            params,
+            "No PO lines were extracted from any of the PDFs, so nothing was "
+            "written - check the PDFs are the POs you meant.")
         progress_callback(100)
         return
     
@@ -658,10 +668,17 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     
     if missing_items or missing_lines_per_po:
         if missing_items:
-            log(f"WARNING: Found {len(missing_items)} PO(s) with missing cell data")
+            sdk.flag_action(
+                params,
+                f"{len(missing_items)} PO(s) have blank cells - fill them in from "
+                f"the validation report before using the output.")
         if missing_lines_per_po:
             total_missing_lines = sum(len(lines) for lines in missing_lines_per_po.values())
-            log(f"WARNING: Found {total_missing_lines} missing LINE number(s) across {len(missing_lines_per_po)} PO(s)")
+            sdk.flag_action(
+                params,
+                f"{total_missing_lines} LINE number(s) are missing across "
+                f"{len(missing_lines_per_po)} PO(s), so lines were skipped - the "
+                f"validation report names them.")
         
         log("")
         log("Generating validation reports...")

@@ -419,13 +419,20 @@ def run(params, progress_callback, cancel_event):
         excel_path = _find_nest_excel(nest_dir, batch_number, nest_name)
 
         if excel_path is None:
-            log(f"  [{nest_name}] WARNING: No 911 BATCH Excel found - skipping")
+            sdk.flag_action(
+                params,
+                f"Nest {nest_name} has no 911 BATCH Excel, so none of its parts "
+                f"were repeated - find the Excel and run this again.")
             continue
 
         try:
             dypns = _read_dypns(excel_path, log)
         except Exception as exc:
-            log(f"  [{nest_name}] WARNING: Could not read Excel ({exc}) - skipping")
+            sdk.flag_action(
+                params,
+                f"Nest {nest_name}'s 911 BATCH Excel could not be read, so none "
+                f"of its parts were repeated.",
+                str(exc))
             continue
 
         if not dypns:
