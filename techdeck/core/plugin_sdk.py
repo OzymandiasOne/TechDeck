@@ -1146,6 +1146,88 @@ def set_ticket_units(params: dict, units: int) -> None:
         pass
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Action items — the ONE way a plugin tells the user "go do something"
+#
+# A console line scrolls past. Every app used to hand-roll its own ending
+# popup, so whether a problem reached the user depended on which app found it:
+# 922 FormingFinder logged Batch 499's unmatched part and nothing popped, so
+# the blank PPN / SOURCE MATERIAL went unnoticed until the kitting paperwork
+# shipped without its FORMED tag. flag_action() makes the popup structural —
+# the EXECUTOR shows it at the end of the run, so a plugin cannot forget it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ACTION_ITEMS_KEY = "action_items"
+
+
+def flag_action(params: dict, item: str, detail: str = "") -> None:
+    """Record ONE thing the USER must do by hand before this run's output can be
+    trusted, and log it. TechDeck pops every item recorded during the run in a
+    single blocking dialog as the run ends, and reports the run as WARNING
+    instead of a clean ✅.
+
+    This is the only correct way to raise an action item. Never hand-write a
+    `log("WARNING: ...")` line and never hand-roll an ending `show_warning` —
+    gated by `tests/tools/test_action_items_popup.py`.
+
+    `item` is the imperative, in the user's words: what is wrong and what to do
+    about it ("Batch Plates row for H6512163-H17-2 has no PPN or SOURCE
+    MATERIAL - fill both in before running 922 Kitting"). `detail` is optional
+    extra context shown indented under it.
+
+    ONE popup per run, at the END - never mid-run. A 15-minute unattended run
+    must not stop and wait on a human (922 Kitting raises up to 15 items in a
+    run; 15 blocking dialogs is not a user interface). Call it as many times as
+    you need, including inside a loop.
+
+    Informational lines are NOT action items. "Skipped the rod row because its
+    Raw Material is not a formed source" is the app working correctly - that is
+    `log()`. An action item means the output is wrong or incomplete until a
+    person intervenes.
+
+    Headless (no console) it still logs, so a standalone run loses nothing.
+    """
+    text = str(item or "").strip()
+    if not text:
+        return
+    extra = str(detail or "").strip()
+    try:
+        items = params.setdefault(ACTION_ITEMS_KEY, [])
+        items.append({"item": text, "detail": extra})
+    except (AttributeError, TypeError):
+        pass    # a params mapping that cannot hold the key must not sink the run
+    log = params.get("log", print)
+    log(f"ACTION NEEDED: {text}" + (f" ({extra})" if extra else ""))
+
+
+def action_items(params: dict) -> list:
+    """The action items recorded so far, as {'item', 'detail'} dicts. The
+    executor reads this to build the ending popup; a plugin may read it to
+    branch on whether anything needs attention (`if sdk.action_items(params):`)."""
+    raw = params.get(ACTION_ITEMS_KEY)
+    return list(raw) if isinstance(raw, list) else []
+
+
+def format_action_items(items, plugin_name: str = "") -> tuple:
+    """(title, body) for the ending action-item dialog. Shared by the executor
+    and the tests so the wording has one home."""
+    items = list(items or [])
+    n = len(items)
+    head = f"{plugin_name} - " if plugin_name else ""
+    title = (f"{head}1 thing needs your attention" if n == 1
+             else f"{head}{n} things need your attention")
+    lines = []
+    for i, entry in enumerate(items, 1):
+        if isinstance(entry, dict):
+            text, detail = str(entry.get("item", "")), str(entry.get("detail", ""))
+        else:
+            text, detail = str(entry), ""
+        lines.append(f"{i}. {text}")
+        if detail:
+            lines.append(f"     {detail}")
+    return title, "\n".join(lines)
+
+
 # Run outcomes a plugin may report via set_run_outcome. Absence of a report
 # (the default) is treated as a clean success — so existing plugins that simply
 # return are unaffected.

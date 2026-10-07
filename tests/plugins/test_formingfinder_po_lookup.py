@@ -115,7 +115,7 @@ def test_conflicting_descriptions_warn_instead_of_guessing(ff, tmp_path):
     lookup = ff._load_po_lookup(po, lambda *a: None)
     row = lookup[("x1", "p-1-2")]
     assert row["SOURCE MATERIAL"] == "262028653-18"  # not the rod
-    assert "verify the FORMED tag" in row["_PICK_WARN"]
+    assert "check the FORMED tag" in row["_PICK_WARN"]
 
 
 def test_two_plates_warn_instead_of_guessing(ff, tmp_path):

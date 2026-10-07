@@ -942,15 +942,21 @@ class ConsoleWidget(QWidget, ThemeAware):
         """Show a modal warning popup and BLOCK until the user acknowledges it.
         Same worker-thread contract as request_selection/request_directory —
         use for warnings that must not scroll past unseen (via
-        sdk.show_warning, which adds the headless fallback)."""
+        sdk.show_warning, which adds the headless fallback).
+
+        A GUI plugin (``requires_main_thread``) runs ON the GUI thread, and so
+        does the executor's ending action-item dialog for it; there the modal box
+        is shown directly. The BlockingQueuedConnection below is what cannot be
+        used from the GUI thread — it would wait on the very event loop that has
+        to deliver it, and deadlock. This used to raise instead, which silently
+        cost GUI plugins their action-item popup."""
         from PySide6.QtCore import QThread
 
-        if QThread.currentThread() == self.thread():
-            raise RuntimeError(
-                "show_warning() cannot be called from main GUI thread"
-            )
-
         self._warn_args = (str(title), str(text))
+
+        if QThread.currentThread() == self.thread():
+            self._warning_gui()
+            return
 
         # Hold the inactivity watchdog while the dialog is up (see plugin_executor).
         self.waiting_for_input = True
