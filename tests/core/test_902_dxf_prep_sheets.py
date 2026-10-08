@@ -57,8 +57,7 @@ def test_po_tab_with_space_beats_hidden_forming_sheet(tmp_path, plugin):
                          ("R4140922-1M", 1), ("R4140933-16M", 1)])
 
     path = _write(tmp_path, "4130 PRICING.xlsx", build)
-    batch, rows = plugin._load_po_rows(path, log=lambda m: None,
-                                        params={"log": lambda m: None})
+    batch, rows = plugin._load_po_rows(path, log=lambda m: None)
     assert batch == "4130"
     assert [d for d, _ in rows] == ["R4111921-42", "R4138924-154",
                                     "R4140922-1M", "R4140933-16M"]
@@ -72,8 +71,7 @@ def test_po_tab_separator_variants_all_match(tmp_path, plugin, tab):
         _po_headers(wb.create_sheet(tab), [("R4111921-42", 1)])
 
     path = _write(tmp_path, f"{tab.replace(' ', '_')}.xlsx", build)
-    batch, rows = plugin._load_po_rows(path, log=lambda m: None,
-                                        params={"log": lambda m: None})
+    batch, rows = plugin._load_po_rows(path, log=lambda m: None)
     assert batch == "4131"
     assert len(rows) == 1
 
@@ -132,11 +130,7 @@ def test_fallback_scan_skips_hidden_sheets_and_warns(tmp_path, plugin):
 
     path = _write(tmp_path, "no_po_tab.xlsx", build)
     logs = []
-    params = {"log": logs.append}
-    batch, rows = plugin._load_po_rows(path, log=logs.append, params=params)
+    batch, rows = plugin._load_po_rows(path, log=logs.append)
     assert batch is None                       # no PO tab -> no batch from name
     assert [d for d, _ in rows] == ["R4111921-42"]
-    # A guessed sheet is an action item: the user has to confirm it was the right
-    # one, because a hidden staging tab's headers match too.
-    items = [i["item"] for i in plugin.sdk.action_items(params)]
-    assert any("order list" in i for i in items), items
+    assert any("WARNING" in m and "order list" in m for m in logs)

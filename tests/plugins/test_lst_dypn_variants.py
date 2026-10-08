@@ -146,8 +146,7 @@ def _resolve(lst922, files, master_map, tmp_path):
     pairs = [(order, tmp_path / name) for order, name in files]
     return lst922._resolve(pairs, master_map, {TUBE: "2.0 X 2.0 X 0.188 NOM",
                                                TUBE2: "2.5 X 2.5 X 0.25 NOM"},
-                           tmp_path, log=lambda *a, **k: None,
-                           params={"log": lambda *a, **k: None})
+                           tmp_path, log=lambda *a, **k: None)
 
 
 def test_batch_485_lettered_file_fills_the_unlettered_po_line(lst922, tmp_path):

@@ -298,28 +298,21 @@ def _ask_date_range(parent=None):
 # ---------------------------------------------------------------------------------
 # PO / PO Line lookup from the Working Forecast List
 # ---------------------------------------------------------------------------------
-def _copy_forecast(settings, out_dir, log, params):
+def _copy_forecast(settings, out_dir, log):
     """Copy the Working Forecast List into out_dir so the live file is never read
     directly. Returns the copy's Path, or None (with a logged warning) if the
     forecast can't be located — the split still runs, PO/Line just stay blank."""
     override = str(settings.get("forecast_dir", "") or "").strip()
     fdir = sdk.resolve_forecast_dir(override)
     if fdir is None:
-        sdk.flag_action(
-            params,
-            "The 'Forecast and Inventory Reports' folder could not be found, so "
-            "every PO / PO Line column is blank - set the folder in this app's "
-            "Settings and run again.")
+        log("WARNING: could not locate the 'Forecast and Inventory Reports' folder - "
+            "PO / PO Line will be left blank. Set it in this app's Settings.")
         return None
     fname = str(settings.get("forecast_filename", "") or "").strip() or DEFAULT_FORECAST_FILENAME
     src = Path(fdir) / fname
     if not sdk.exists(src):
-        sdk.flag_action(
-            params,
-            "The Working Forecast List workbook was not found, so every PO / PO "
-            "Line column is blank - fill them in by hand, or fix the folder in "
-            "Settings and run again.",
-            f"looked at {src}")
+        log(f"WARNING: forecast workbook not found at {src} - "
+            "PO / PO Line will be left blank.")
         return None
     dest = out_dir / FORECAST_COPY_NAME
     log(f"Copying {src.name} into the output folder (the live file is never opened)...")
@@ -327,7 +320,7 @@ def _copy_forecast(settings, out_dir, log, params):
     return dest
 
 
-def _read_po_map(copy_path, log, cancel_event, params):
+def _read_po_map(copy_path, log, cancel_event):
     """{(BATCH, NEST): [ForecastRow, ...]} from the local forecast copy - EVERY
     forecast line for the nest, '911 Forecast' lines first, then 'Complete 911
     QTDR' (older batches roll off to it). A nest shipped in parts has one line
@@ -345,11 +338,7 @@ def _read_po_map(copy_path, log, cancel_event, params):
     try:
         for sheet_name in FORECAST_SHEETS:
             if sheet_name not in wb.sheetnames:
-                sdk.flag_action(
-            params,
-            f"The forecast has no '{sheet_name}' sheet, so nothing could be "
-            f"looked up on it - PO / PO Line and the invoice fields it feeds are "
-            f"left blank.")
+                log(f"WARNING: sheet '{sheet_name}' not found in the forecast.")
                 continue
             ws = wb[sheet_name]
             cols = None  # (po, line, batch, nest, inv, ship) 0-based; set at header row
@@ -372,17 +361,11 @@ def _read_po_map(copy_path, log, cancel_event, params):
                         for label, idx in ((INV_HEADER, cols[4]),
                                            (SHIP_DATE_HEADER, cols[5])):
                             if idx is None:
-                                sdk.flag_action(
-                                    params,
-                                    f"'{sheet_name}' has no '{label}' column, so "
-                                    f"that field stays blank on every supplement "
-                                    f"- fill it in by hand.")
+                                log(f"WARNING: no '{label}' column on '{sheet_name}' "
+                                    "- that field stays blank on the supplement.")
                     if i >= 8 and cols is None:
-                        sdk.flag_action(
-                            params,
-                            f"No PO/Line/Batch/Nest header row was found on "
-                            f"'{sheet_name}' (looked in the first 8 rows), so "
-                            f"nothing was read from it.")
+                        log(f"WARNING: no PO/Line/Batch/Nest header row found in "
+                            f"'{sheet_name}' (looked in the first 8 rows).")
                         break
                     continue
                 i_po, i_line, i_batch, i_nest, i_inv, i_ship, i_sub = cols
@@ -616,8 +599,7 @@ def _copy_cell(src_c, dst_c, value=None):
     dst_c.number_format = src_c.number_format
 
 
-def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date,
-                     log, params):
+def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date, log):
     """Write the 'D911 Workorder Close Outs {m-d-yyyy}.xlsx' workbook at the top of
     out_dir: the CLOSEOUT_COLUMNS source columns (by header NAME, values and cell
     styles verbatim, so the hand-ripped original is reproduced) with every row's
@@ -634,18 +616,13 @@ def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date,
         else:
             cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
     if missing:
-        sdk.flag_action(
-            params,
-            f"The source has no {', '.join(missing)} column(s), so those Close "
-            f"Outs columns are blank - fill them in by hand, or add them to the "
-            f"pricing master.")
+        log(f"  WARNING: the source has no {', '.join(missing)} column(s) - "
+            "those Close Outs columns will be blank.")
 
     status_col = hmap.get(CLOSEOUT_STATUS_HEADER)
     if not status_col:
-        sdk.flag_action(
-            params,
-            f"The source has no '{CLOSEOUT_STATUS_HEADER}' column, so no row was "
-            f"marked '{CLOSEOUT_STATUS_VALUE}' - mark them by hand.")
+        log(f"  WARNING: no '{CLOSEOUT_STATUS_HEADER}' column - no rows marked "
+            f"'{CLOSEOUT_STATUS_VALUE}'.")
 
     wb = openpyxl.Workbook()
     ws = wb.active                      # stays "Sheet1", like the hand-made original
@@ -671,7 +648,7 @@ def _write_closeouts(src_ws, hdr_row, hmap, valid_rows, out_dir, report_date,
 
 
 def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date,
-                           log, cancel_event, params):
+                           log, cancel_event):
     """Write the 'D911 Workorder Material Status {m-d-yyyy}.xlsx' listing at the top
     of out_dir: the MATSTATUS_COLUMNS source columns (by header name), EVERY data
     row — deliberately NOT filtered by the close-out date range or the nest regex,
@@ -682,10 +659,8 @@ def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date
     for name, _ in MATSTATUS_COLUMNS:
         c = hmap.get(name.upper())
         if c is None:
-            sdk.flag_action(
-                params,
-                f"The source has no '{name}' column, so that Material Status "
-                f"column is blank - fill it in by hand.")
+            log(f"  WARNING: no '{name}' column in the source - that Material "
+                "Status column will be blank.")
             cols.append((None, name))
         else:
             cols.append((c, src_ws.cell(row=hdr_row, column=c).value))
@@ -710,11 +685,9 @@ def _write_material_status(src_ws, hdr_row, hmap, all_rows, out_dir, report_date
             if src_c.number_format and src_c.number_format != "General":
                 dst.number_format = src_c.number_format
     if error_cells:
-        sdk.flag_action(
-            params,
-            f"{error_cells} cell(s) in the source carry an Excel formula error "
-            f"(#VALUE! and the like) and were copied as they are - fix them in "
-            f"the pricing master.")
+        log(f"  WARNING: {error_cells} cell(s) in the source carry an Excel "
+            "formula error (#VALUE! etc.) - they're copied as-is; fix them in "
+            "the pricing master.")
 
     d = report_date
     fname = _safe_filename(
@@ -753,7 +726,7 @@ class _SupplementPdfExporter:
             import win32com.client as win32
         except ImportError:
             self.error = "Excel automation (pywin32) is not available"
-            self._log(f"  {self.error} - no supplement PDFs this run.")
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
             return False
         try:
             pythoncom.CoInitialize()
@@ -764,7 +737,7 @@ class _SupplementPdfExporter:
             return True
         except Exception as exc:
             self.error = f"Excel could not be started ({exc})"
-            self._log(f"  {self.error} - no supplement PDFs this run.")
+            self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
             return False
 
     def export(self, xlsx_path: Path, pdf_path: Path) -> bool:
@@ -779,7 +752,7 @@ class _SupplementPdfExporter:
                 raise RuntimeError("Excel reported success but no PDF appeared")
             return True
         except Exception as exc:
-            self._log(f"  Could not print {xlsx_path.name} to PDF: {exc}")
+            self._log(f"  WARNING: could not print {xlsx_path.name} to PDF: {exc}")
             return False
         finally:
             if wb is not None:
@@ -925,8 +898,7 @@ class SplitResult(NamedTuple):
                                       # forecast, none picked -> blank
 
 
-def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log,
-                  params):
+def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log):
     """Build one output workbook from scratch for a single Batch+Nest group."""
     wb = openpyxl.Workbook()
 
@@ -954,10 +926,7 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log,
         tot.number_format = '"$"#,##0.00'
         tot.font = Font(bold=True)
     else:
-        sdk.flag_action(
-            params,
-            f"The source has no '{TOTAL_HEADER}' column, so the total on tab 1 "
-            f"was left off every back-up workbook - add it by hand.")
+        log(f"  WARNING: no '{TOTAL_HEADER}' column - skipped the tab-1 total.")
 
     # ---- Tab 2: Invoice Supplement, built from scratch ---------------------------
     _build_supplement(wb, hmap, rows, po_info, logo_path)
@@ -966,7 +935,7 @@ def _write_output(headers, hmap, rows, po_info, logo_path, out_path, log,
 
 def split_workbook(src_path, out_dir, settings, log,
                    progress_callback=None, cancel_event=None, date_range=None,
-                   pdf_exporter=None, params=None):
+                   pdf_exporter=None):
     """Split src_path into one from-scratch workbook per (Batch, Nest), each in its
     own "{BATCH} {NEST} Invoicing Docs" subfolder, plus the Workorder Close Outs
     and Workorder Material Status workbooks at the top of out_dir.
@@ -984,15 +953,7 @@ def split_workbook(src_path, out_dir, settings, log,
     supplement PDFs written, pdf_error = why NO PDFs could be made (Excel
     unavailable), else None.
 
-    `pdf_exporter` is injectable for tests; default drives Excel through COM.
-
-    `params` carries the run, so every helper below can raise its own action item
-    (sdk.flag_action) - a blank column or an unapplied date range is something the
-    user has to fix by hand, and TechDeck pops the list as the run ends. A test
-    that calls this directly may leave it out; the items then just go to the log.
-    """
-    if params is None:
-        params = {"log": log}
+    `pdf_exporter` is injectable for tests; default drives Excel through COM."""
     src_path = Path(src_path)
     out_dir = Path(out_dir)
     logo_path = Path(__file__).resolve().parent / LOGO_NAME
@@ -1001,11 +962,10 @@ def split_workbook(src_path, out_dir, settings, log,
     forecast_copy = None
     exporter = pdf_exporter if pdf_exporter is not None else _SupplementPdfExporter(log)
     try:
-        forecast_copy = _copy_forecast(settings, out_dir, log, params)
+        forecast_copy = _copy_forecast(settings, out_dir, log)
         if progress_callback:
             progress_callback(8)
-        po_map = (_read_po_map(forecast_copy, log, cancel_event, params)
-                  if forecast_copy else {})
+        po_map = _read_po_map(forecast_copy, log, cancel_event) if forecast_copy else {}
         if cancel_event is not None and cancel_event.is_set():
             log("Cancelled.")
             return SplitResult([], [], None, None)
@@ -1025,11 +985,9 @@ def split_workbook(src_path, out_dir, settings, log,
         i_vpd = hmap.get(VPD_HEADER)
         i_sub = hmap.get(SUBGROUP_HEADER)          # 1-based; None = no column
         if date_range is not None and not i_vpd:
-            sdk.flag_action(
-                params,
-                f"The source has no '{VPD_HEADER}' column, so the date range you "
-                f"picked was NOT applied - every valid row is in, and the list "
-                f"has to be trimmed by hand.")
+            log(f"WARNING: no '{VPD_HEADER}' column in the source - the date range "
+                "can't be applied, so every valid row is included (the pre-2.2.0 "
+                "hand-trimmed flow).")
             date_range = None
         if date_range is not None:
             log(f"Close-out range: {date_range[0]:%m/%d/%Y} through "
@@ -1081,7 +1039,7 @@ def split_workbook(src_path, out_dir, settings, log,
 
         report_date = date_range[1] if date_range is not None else date.today()
         closeout_name = _write_closeouts(ws, hdr_row, hmap, valid_rows, out_dir,
-                                         report_date, log, params)
+                                         report_date, log)
         in_range = f" in range (of {out_of_range + len(valid_rows)} valid)" \
             if date_range is not None else ""
         log(f"  wrote {closeout_name}  ({len(valid_rows)} rows{in_range}, "
@@ -1089,7 +1047,7 @@ def split_workbook(src_path, out_dir, settings, log,
 
         matstatus_name = _write_material_status(ws, hdr_row, hmap, all_rows,
                                                 out_dir, report_date, log,
-                                                cancel_event, params)
+                                                cancel_event)
         if matstatus_name is None:
             log("Cancelled.")
             return SplitResult([], [], None, None)
@@ -1102,7 +1060,7 @@ def split_workbook(src_path, out_dir, settings, log,
         if qtdr_root is None or not sdk.is_dir(qtdr_root):
             calc_error = ("the 911 QTDR folder was not found"
                           + (f" at {qtdr_root}" if qtdr_root else ""))
-            log(f"{calc_error} - no pricing calcs will be collected.")
+            log(f"WARNING: {calc_error} - no pricing calcs will be collected.")
         for gi, (batch, nest) in enumerate(order):
             if cancel_event is not None and cancel_event.is_set():
                 log("Cancelled.")
@@ -1115,17 +1073,17 @@ def split_workbook(src_path, out_dir, settings, log,
             ambiguous = why is not None
             if ambiguous:
                 ambiguous_invoice.append(f"{batch} {nest} ({why})")
-                log(f"  {batch} {nest}: {why} - Invoice # and date left "
+                log(f"  WARNING: {batch} {nest}: {why} - Invoice # and date left "
                     "blank, no PDF (won't guess which shipment this is).")
             if po_info is None:
                 missing_po.append(f"{batch} {nest}")
-                log(f"  {batch} {nest} not found in the forecast - "
+                log(f"  WARNING: {batch} {nest} not found in the forecast - "
                     "PO / PO Line left blank.")
             sub_dir = out_dir / _safe_filename(f"{batch} {nest} Invoicing Docs")
             sdk.ensure_dir(sub_dir)
             fname = _safe_filename(f"{batch} {nest} Pricing Back Up.xlsx")
             _write_output(headers, hmap, rows, po_info, logo_path,
-                          sub_dir / fname, log, params)
+                          sub_dir / fname, log)
             rel = f"{sub_dir.name}\\{fname}"
             written.append((rel, len(rows)))
             log(f"  wrote {rel}  ({len(rows)} row{'s' if len(rows) != 1 else ''})")
@@ -1140,7 +1098,7 @@ def split_workbook(src_path, out_dir, settings, log,
                     log(f"  wrote {sub_dir.name}\\{pdf_name}")
             elif po_info is not None and not ambiguous:
                 missing_invoice.append(f"{batch} {nest}")
-                log(f"  {batch} {nest} has no PS/Inv on the forecast "
+                log(f"  WARNING: {batch} {nest} has no PS/Inv on the forecast "
                     "- Invoice # left blank, no PDF.")
 
             # v2.4.0: the nest's pricing calcs (shape folder zipped / plate
@@ -1150,7 +1108,7 @@ def split_workbook(src_path, out_dir, settings, log,
                 if nest_dir is None:
                     missing_calcs.append(f"{batch} {nest} (no {batch}\\{nest} folder "
                                          "under 911 QTDR)")
-                    log(f"  {batch} {nest}: nest folder not found under "
+                    log(f"  WARNING: {batch} {nest}: nest folder not found under "
                         f"{qtdr_root.name} - no pricing calcs collected.")
                 else:
                     try:
@@ -1158,14 +1116,14 @@ def split_workbook(src_path, out_dir, settings, log,
                                                        log, cancel_event)
                     except (OSError, RuntimeError) as exc:
                         found = []
-                        log(f"  {batch} {nest}: could not collect pricing "
+                        log(f"  WARNING: {batch} {nest}: could not collect pricing "
                             f"calcs: {exc}")
                     if found:
                         calcs.extend(found)
                     else:
                         missing_calcs.append(f"{batch} {nest} (no calc folder or "
                                              "LINEAR INCH CALC workbook in the nest folder)")
-                        log(f"  {batch} {nest}: no pricing calcs in "
+                        log(f"  WARNING: {batch} {nest}: no pricing calcs in "
                             f"{nest_dir.name} - flagged.")
             if progress_callback:
                 progress_callback(15 + int(80 * (gi + 1) / len(order)))
@@ -1187,12 +1145,8 @@ def split_workbook(src_path, out_dir, settings, log,
                 forecast_copy.unlink()
                 log("Removed the temporary forecast copy.")
             except OSError as e:
-                sdk.flag_action(
-                    params,
-                    f"The temporary forecast copy ({forecast_copy.name}) could "
-                    f"not be deleted - delete it by hand so it does not sit next "
-                    f"to the real output files.",
-                    str(e))
+                log(f"WARNING: could not delete the temporary forecast copy "
+                    f"({forecast_copy.name}): {e} - delete it by hand.")
 
 
 # ---------------------------------------------------------------------------------
@@ -1223,7 +1177,7 @@ def run(params, progress_callback, cancel_event):
 
     try:
         result = split_workbook(src, out_dir, settings, log, progress_callback,
-                                cancel_event, date_range, params=params)
+                                cancel_event, date_range)
     except Exception as e:
         log(f"ERROR: {e}")
         QMessageBox.critical(None, "911 SSPO Invoicing Prep",
@@ -1259,52 +1213,36 @@ def run(params, progress_callback, cancel_event):
         msg += (f"\n\nPricing calcs: {len(result.calcs)} dropped into the Invoicing "
                 "Docs folders (shape calc folders zipped, plate LINEAR INCH CALC "
                 "workbooks copied).")
-    # What WORKED stays in this box. Everything that needs a hand is an action
-    # item, so it lands in TechDeck's own ending dialog with every other app's -
-    # one list of jobs rather than a wall of good and bad news mixed together.
-    QMessageBox.information(None, "911 SSPO Invoicing Prep", msg)
     if result.calc_error:
-        sdk.flag_action(
-            params,
-            "No pricing calcs were collected at all - set the 911 QTDR folder in "
-            "this app's Settings if it lives somewhere unusual.",
-            str(result.calc_error))
+        msg += (f"\n\nNo pricing calcs were collected: {result.calc_error}. Set the "
+                "911 QTDR folder in this app's settings if it lives somewhere unusual.")
     if result.missing_calcs:
-        sdk.flag_action(
-            params,
-            f"{len(result.missing_calcs)} nest(s) have no pricing calcs - verify "
-            f"them by hand and add your note. Everything else for those nests was "
-            f"written.",
-            "; ".join(result.missing_calcs))
+        msg += ("\n\nNo pricing calcs found for:\n  "
+                + "\n  ".join(result.missing_calcs)
+                + "\n\nEverything else for those nests was written - verify their "
+                  "calcs by hand and add your note.")
     if result.pdf_error:
-        sdk.flag_action(
-            params,
-            "No Invoice Supplement PDFs were made - the workbooks are all there, "
-            "so print those sheets by hand, or run again on a machine with Excel.",
-            str(result.pdf_error))
+        msg += (f"\n\nNo supplement PDFs were made: {result.pdf_error}. The "
+                "workbooks are all there - print the Invoice Supplement sheets "
+                "by hand, or run again on a machine with Excel.")
     if result.missing_invoice:
-        sdk.flag_action(
-            params,
-            f"{len(result.missing_invoice)} nest(s) have no invoice number "
-            f"(PS/Inv) on the Working Forecast List, so their Invoice # was left "
-            f"blank and no PDF was printed - fill PS/Inv in and run again, or "
-            f"print those by hand.",
-            "; ".join(result.missing_invoice))
+        msg += ("\n\nNo invoice number (PS/Inv) in the Working Forecast List yet for:"
+                "\n  " + "\n  ".join(result.missing_invoice)
+                + "\n\nTheir Invoice # was left blank and no PDF was printed. Fill "
+                  "PS/Inv in on the forecast and re-run, or print that one by hand.")
     if result.ambiguous_invoice:
-        sdk.flag_action(
-            params,
-            f"{len(result.ambiguous_invoice)} nest(s) shipped in parts and the "
-            f"Working Forecast List does not show which shipment this close-out "
-            f"is, so their Invoice # and date were left blank and no PDF printed "
-            f"- check the Ship Dates and run again, or fill those in by hand.",
-            "; ".join(result.ambiguous_invoice))
+        msg += ("\n\nThese nests shipped in parts, and the Working Forecast List "
+                "doesn't show which shipment belongs to this close-out:\n  "
+                + "\n  ".join(result.ambiguous_invoice)
+                + "\n\nTheir Invoice # and date were left blank and no PDF was "
+                  "printed, so a wrong invoice can't go out. Check the Ship Dates "
+                  "on the forecast and re-run, or fill that supplement in by hand.")
     if missing_po:
-        sdk.flag_action(
-            params,
-            f"{len(missing_po)} nest(s) have no PO on the Working Forecast List, "
-            f"so their PO / PO Line columns were left blank - fill them in by "
-            f"hand, or fix the forecast and run again.",
-            "; ".join(missing_po))
+        msg += ("\n\nNo PO found in the Working Forecast List for:\n  "
+                + "\n  ".join(missing_po)
+                + "\n\nTheir PO / PO Line columns were left blank - fill them in "
+                  "by hand or fix the forecast and re-run.")
+    QMessageBox.information(None, "911 SSPO Invoicing Prep", msg)
     try:
         os.startfile(str(out_dir))                 # open the results folder in Explorer
     except Exception:

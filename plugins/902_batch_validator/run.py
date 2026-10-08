@@ -565,7 +565,7 @@ def read_prints(folders: List[Path], parts: List[str], log, cancel_event,
                             read = _ocr_lines(page, width_px, side)
                         except Exception as e:      # reader will not start
                             problem = str(e) or e.__class__.__name__
-                            log(f"  The drawing reader could not start "
+                            log(f"  WARNING: the drawing reader could not start "
                                 f"({problem}) - print pages cannot be read.")
                             break
                         part, how = match_print(read, parts)
@@ -1046,7 +1046,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         prints = []
         prints_note = ("No 'WPDD' prints folder was found in the batch folder, so "
                        "every part is listed as having no print.")
-        sdk.flag_action(params, prints_note)
+        log(f"  WARNING: {prints_note}")
     else:
         log(f"Reading the prints in {', '.join(f.name for f in folders)} "
             "(a scanned page takes a second or two)...")
@@ -1112,15 +1112,12 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         log("Parts with an issue (copy this list to send to EB):")
         for p in sorted(issues, key=lambda p: p.dypn):
             log(f"  {p.dypn}  -  {p.wrong}")
-        shown = [f"{p.dypn}: {p.wrong}"
-                 for p in sorted(issues, key=lambda p: p.dypn)[:15]]
+        lines = [f"{len(issues)} of {len(parts)} part(s) have an issue:", ""]
+        lines += [f"  - {p.dypn}: {p.wrong}"
+                  for p in sorted(issues, key=lambda p: p.dypn)[:15]]
         if len(issues) > 15:
-            shown.append(f"...and {len(issues) - 15} more (see the report)")
-        sdk.flag_action(
-            params,
-            f"{len(issues)} of {len(parts)} part(s) have an issue - send the "
-            f"list in the report to EB.",
-            "; ".join(shown))
+            lines.append(f"  ...and {len(issues) - 15} more (see the report)")
+        sdk.show_warning(params, f"902 Batch Validator - {label}", "\n".join(lines))
     else:
         log(f"READY - all {len(parts)} part(s) have a good file"
             + (" and a print." if prints is not None else "."))

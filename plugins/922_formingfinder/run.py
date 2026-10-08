@@ -344,10 +344,10 @@ def _load_po_lookup(po_path: Path, log) -> dict:
             non_rod = [r for r in rows if _kind(r) != "rod"]
             chosen = (formable or non_rod or rows)[0]
             chosen['_PICK_WARN'] = (
-                f"{chosen['DYPN']} has {len(rows)} source materials on the PO "
-                f"and none of them is unambiguously the plate or the flat bar, "
-                f"so {chosen['SOURCE MATERIAL']} was used - check the FORMED "
-                f"tag on this part's kit page.")
+                f"WARNING: {chosen['DYPN']} has {len(rows)} source materials "
+                f"on the PO and none is unambiguously the plate or flat bar - "
+                f"using {chosen['SOURCE MATERIAL']}; verify the FORMED tag on "
+                f"this part's kit page.")
         lookup[key] = chosen
 
     # Alias every entry under the DYPN its drawing is actually NAMED with.
@@ -726,12 +726,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         po_lookup = _load_po_lookup(po_path, log)
         log(f"  PO (order, DYPN) pairs indexed: {len(po_lookup)}")
     else:
-        sdk.flag_action(
-            params,
-            "No PO workbook (QF-QU-09) in this batch's Documentation folder, so "
-            "every Bent Plates row goes out with no PPN and no SOURCE MATERIAL "
-            "- fill them in by hand before running 922 Kitting.",
-            "parts were still found by filename and by drawing layout")
+        log("WARNING: PO workbook (QF-QU-09) not found. Skipping Method 2 and PO metadata lookup.")
         po_lookup = {}
 
     # Orders the PO knows about - used to read the ORDER off a discovered PDF's
@@ -851,18 +846,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         if meta.get('_PICK_NOTE'):
             log(f"  {meta['_PICK_NOTE']}")
         if meta.get('_PICK_WARN'):
-            sdk.flag_action(params, meta['_PICK_WARN'])
+            log(f"  {meta['_PICK_WARN']}")
         if meta.get('_ALIAS_NOTE'):
             log(f"  {meta['_ALIAS_NOTE']}")
         if po_lookup and not meta.get('SOURCE MATERIAL'):
-            sdk.flag_action(
-                params,
-                f"{f['dypn']} is not on the PO, so its Bent Plates row has no "
-                f"PPN and no SOURCE MATERIAL - fill both in before running 922 "
-                f"Kitting, which cannot tell this part's plate from its rod "
-                f"without them.",
-                f"order {order or '?'}; the drawings and the PO may number this "
-                f"order's items differently")
+            log(f"  WARNING: {f['dypn']} (order {order or '?'}) has no PO "
+                f"match - its Bent Plates PPN and SOURCE MATERIAL will be "
+                f"blank, and 922 Kitting can't tell its plate from its rod. "
+                f"Fill both in on Bent Plates before running 922 Kitting.")
         rows_data.append({
             'ORDER': meta.get('ORDER') or (order or None),
             'PPN': meta.get('PPN'),

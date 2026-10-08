@@ -117,7 +117,7 @@ def _find_pricing_workbook(batch_folder: Path, log) -> Path | None:
     return pick
 
 
-def _load_po_rows(pricing_path: Path, log, params: dict):
+def _load_po_rows(pricing_path: Path, log):
     """Read the PO sheet: returns (batch_number|None, rows) where rows are
     (dypn_upper, qty) in sheet order. Prefers a sheet named PO-#### ; falls
     back to the first sheet containing DYPN + QTY ORDERED headers."""
@@ -170,11 +170,9 @@ def _load_po_rows(pricing_path: Path, log, params: dict):
                 log(f"  (skipped {len(skipped)} non-part row(s) on '{name}', "
                     f"e.g. {skipped[0][:40]!r})")
             if not po_sheets:
-                sdk.flag_action(
-                    params,
-                    f"{pricing_path.name} has no PO-#### sheet, so '{name}' was "
-                    f"used instead (the first visible sheet with DYPN + QTY "
-                    f"ORDERED headers) - check that is the right sheet.")
+                log(f"  WARNING: no PO-#### sheet in {pricing_path.name} - "
+                    f"using '{name}' (first visible sheet with DYPN + QTY "
+                    f"ORDERED headers). Verify this is the right sheet!")
             log(f"  PO sheet '{name}': {len(rows)} part rows, "
                 f"{len({d for d, _ in rows})} distinct DYPNs")
             return batch, rows
@@ -219,14 +217,11 @@ def _resolve_batch_context(params, cancel_event, log):
         pricing = _find_pricing_workbook(work_folder.parent, log)
     batch, po_rows = (None, [])
     if pricing is None:
-        sdk.flag_action(
-            params,
-            "No PO/pricing workbook (.xlsm/.xlsx) was found in the folder you "
-            "picked or its parent, so there are no quantities to work from - put "
-            "the workbook in place and run this again.")
+        log("WARNING: no PO/pricing workbook (.xlsm/.xlsx) found in the selected "
+            "folder or its parent.")
     else:
         log(f"PO spreadsheet: {pricing.name}")
-        batch, po_rows = _load_po_rows(pricing, log, params)
+        batch, po_rows = _load_po_rows(pricing, log)
     batch_root = pricing.parent if pricing is not None else work_folder
     if batch_root != work_folder:
         log(f"Batch folder (outputs go here): {batch_root}")
@@ -285,8 +280,7 @@ def _loose_dxfs(dxf_folder: Path) -> list[Path]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
-                po_rows, log, progress_callback, cancel_event,
-                params: dict) -> bool:
+                po_rows, log, progress_callback, cancel_event) -> bool:
     # 1) BATCH# - IGES CONVERT: copy any .igs sitting in the selected folder
     #    (mixed EB folders hold IGES + uncleaned DXFs side by side). No IGES
     #    present is fine - a SigmaNest DXF export folder has none, and the QTY
@@ -319,10 +313,7 @@ def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
 
     # 2) QTY workbook (written to the batch folder, next to the PO spreadsheet)
     if not po_rows:
-        sdk.flag_action(
-            params,
-            "No PO rows could be read, so the QTY workbook was NOT built - check "
-            "the pricing workbook's PO sheet.")
+        log("WARNING: no PO rows read - QTY workbook not built.")
         return True
     qty_path = batch_root / f"{batch} QTY.xlsx"
     if sdk.exists(qty_path):
@@ -398,8 +389,7 @@ def _write_qty_workbook(qty_path: Path, po_rows, log) -> None:
 # Mode 2 - Rename + Sort
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event,
-                      params: dict) -> bool:
+def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event) -> bool:
     existing_numbered = [d for d in dxf_folder.iterdir()
                          if sdk.is_dir(d) and d.name.isdigit()]
     if existing_numbered:
@@ -437,7 +427,7 @@ def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event,
 
     log(f"Renamed {renamed}, already clean {unchanged}.")
     for msg in problems:
-        sdk.flag_action(params, msg)
+        log(f"  WARNING: {msg}")
 
     # Split into numbered folders of 25 for the AutoCAD pass.
     files = _loose_dxfs(dxf_folder)
@@ -462,8 +452,7 @@ def _mode_rename_sort(dxf_folder: Path, log, progress_callback, cancel_event,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
-                           po_rows, log, progress_callback, cancel_event,
-                           params: dict) -> bool:
+                           po_rows, log, progress_callback, cancel_event) -> bool:
     # 1) Recombine: pull files out of numbered subfolders, drop empty ones.
     numbered = sorted((d for d in dxf_folder.iterdir()
                        if sdk.is_dir(d) and d.name.isdigit()),
@@ -476,20 +465,15 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
                 return False
             dest = dxf_folder / p.name
             if sdk.exists(dest):
-                sdk.flag_action(
-                    params,
-                    f"{p.name} is in both {d.name} and the main folder, so it "
-                    f"was left in {d.name} - decide which one is right.")
+                log(f"  WARNING: {p.name} exists in both {d.name}\\ and the main "
+                    f"folder - left in {d.name}\\.")
                 continue
             p.rename(dest)
             moved += 1
         try:
             d.rmdir()
         except OSError:
-            sdk.flag_action(
-                params,
-                f"Folder {d.name} was not empty after the merge, so it was left "
-                f"in place - look at what is still in it.")
+            log(f"  WARNING: folder {d.name}\\ not empty after merge - left in place.")
     if numbered:
         log(f"Recombined {moved} file(s) from {len(numbered)} numbered folder(s).")
     else:
@@ -514,10 +498,8 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
         part = clean_stem(p.stem).upper()
         if _PART_RE.match(part):
             if part in by_part:
-                sdk.flag_action(
-                    params,
-                    f"{part} has two files - {by_part[part].name} and {p.name} "
-                    f"- so one of them is wrong; delete the spare.")
+                log(f"  WARNING: duplicate files for {part}: "
+                    f"{by_part[part].name} and {p.name}")
             by_part.setdefault(part, p)
         else:
             unrecognized.append(p)
@@ -561,10 +543,7 @@ def _mode_recombine_verify(batch_root: Path, dxf_folder: Path, batch: str,
             continue
         target = p.with_name(want)
         if sdk.exists(target):
-            sdk.flag_action(
-                params,
-                f"{want} already exists, so {p.name} was left as it is - rename "
-                f"one of them by hand.")
+            log(f"  WARNING: {want} already exists - left {p.name} alone.")
             continue
         p.rename(target)
         prefixed += 1
@@ -694,7 +673,7 @@ def run(params: dict, progress_callback, cancel_event):
 
         if step == 1:
             ok = _mode_setup(work_folder, batch_root, batch, po_rows,
-                             log, scaled, cancel_event, params)
+                             log, scaled, cancel_event)
         else:
             dxf_folder = _find_dxf_folder(work_folder, batch, log)
             if dxf_folder is None:
@@ -702,14 +681,12 @@ def run(params: dict, progress_callback, cancel_event):
             elif step == 2:
                 if dxf_folder != work_folder:
                     log(f"DXF folder: {dxf_folder}")
-                ok = _mode_rename_sort(dxf_folder, log, scaled, cancel_event,
-                                       params)
+                ok = _mode_rename_sort(dxf_folder, log, scaled, cancel_event)
             else:
                 if dxf_folder != work_folder:
                     log(f"DXF folder: {dxf_folder}")
                 ok = _mode_recombine_verify(batch_root, dxf_folder, batch,
-                                            po_rows, log, scaled, cancel_event,
-                                            params)
+                                            po_rows, log, scaled, cancel_event)
 
         if cancel_event.is_set():
             return

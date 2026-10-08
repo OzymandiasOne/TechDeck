@@ -464,8 +464,7 @@ def _find_header_col_prefix(ws, prefix: str, header_row: int):
 
 
 def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
-                          nests: list, log, cancel_event=None,
-                          params=None) -> tuple:
+                          nests: list, log, cancel_event=None) -> tuple:
     """
     Decide which BATCH LIST column truly holds the DYPN quantities by
     scoring the column labeled 'DYPN QTY' and the one labeled
@@ -495,35 +494,21 @@ def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
         sdk.raise_if_cancelled(cancel_event)
         pdf = _find_nest_pdf(nest_packages_folder, nest)
         if pdf is None:
-            sdk.flag_action(
-                params,
-                f"No packet PDF for nest {nest} -- skipping it in QTY verification.",
-                group="Some nests had no packet PDF, so their DYPN quantities were "
-                      "never verified - check those by hand")
+            log(f"  WARNING: No packet PDF for nest {nest} -- skipping it in QTY verification.")
             continue
         try:
             qmap = _parse_packet_summary_qtys(pdf)
         except Exception as e:
-            sdk.flag_action(
-                params,
-                f"Could not parse {pdf.name} for quantities: {e}",
-                group="Some nest packets could not be read for quantities, so those "
-                      "were never verified - check them by hand")
+            log(f"  WARNING: Could not parse {pdf.name} for quantities: {e}")
             continue
         if qmap:
             packet_qtys[nest] = qmap
         else:
-            sdk.flag_action(
-                params,
-                f"No SUMMARY OF NEST quantities found in {pdf.name}.",
-                group="Some nest packets could not be read for quantities, so those "
-                      "were never verified - check them by hand")
+            log(f"  WARNING: No SUMMARY OF NEST quantities found in {pdf.name}.")
 
     if col_labeled is None or None in (col_dypn, col_wo, col_nest) or not packet_qtys:
         wb.close()
-        sdk.flag_action(
-            params,
-            "Could not verify the DYPN QTY column against the nest "
+        log("  WARNING: Could not verify the DYPN QTY column against the nest "
             "packets -- using the column labeled 'DYPN QTY' as-is.")
         return col_labeled, None, packet_qtys
 
@@ -548,9 +533,7 @@ def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
     wb.close()
 
     if compared == 0:
-        sdk.flag_action(
-            params,
-            "No BATCH LIST rows could be matched to the nest packets "
+        log("  WARNING: No BATCH LIST rows could be matched to the nest packets "
             "(DYPN/Work Order mismatch?) -- using the column labeled 'DYPN QTY' as-is.")
         return col_labeled, None, packet_qtys
 
@@ -563,17 +546,14 @@ def _resolve_dypn_qty_col(batch_list_path: Path, nest_packages_folder: Path,
         return col_mat, col_labeled, packet_qtys
 
     if match_labeled == 0:
-        sdk.flag_action(
-            params,
-            "NEITHER column matches the packet quantities -- "
+        log("  WARNING: NEITHER column matches the packet quantities -- "
             "using the column labeled 'DYPN QTY'; verify the paperwork by hand.")
     else:
         log("  Verified: the column labeled 'DYPN QTY' holds the true quantities.")
     return col_labeled, None, packet_qtys
 
 
-def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log,
-                             params=None):
+def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log):
     """
     Swap the two row-3 header cells in the BATCH LIST file so 'DYPN QTY'
     sits over the column that actually matches the nest packets. A locked
@@ -592,15 +572,11 @@ def _swap_batch_list_headers(batch_list_path: Path, col_a: int, col_b: int, log,
             f"(cols {get_column_letter(col_a)}/{get_column_letter(col_b)}).")
         return True
     except PermissionError:
-        sdk.flag_action(
-            params,
-            "BATCH LIST is open or locked -- headers NOT swapped. "
+        log("  WARNING: BATCH LIST is open or locked -- headers NOT swapped. "
             "Close it and re-run, or swap the two headers by hand.")
         return False
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"Could not swap BATCH LIST headers: {e}")
+        log(f"  WARNING: Could not swap BATCH LIST headers: {e}")
         return False
 
 
@@ -708,20 +684,19 @@ _QTY_MISMATCH_FILL = PatternFill("solid", fgColor="FFFF00")
 
 def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
                          workbook_name: str, log, mismatches: list,
-                         unverified: list, params=None):
+                         unverified: list):
     """
     Compare each pasted batch row's qty against the nest packet's
     SUMMARY OF NEST quantities (pmap, keyed (DYPN, WORK ORDER) upper).
 
     A row whose qty disagrees with the packet gets THE PACKET'S qty written
-    into its DYPN QTY cell (NEST col I), filled yellow, plus a console line
+    into its DYPN QTY cell (NEST col I), filled yellow, plus a console warning
     naming both numbers (v2.3.0, floor feedback 2026-09-18: QA checks the
     scribe sheet against the nest package, so the package is the number that
     has to be on it; until then the BATCH LIST value was kept). A row absent
     from a non-empty packet summary keeps the BATCH LIST qty and is reported
     as unverifiable. Both are appended to the run-level mismatches /
-    unverified lists, which feed the end-of-run summary block AND one action
-    item each - this is paperwork QA cross-checks, so it has to pop.
+    unverified lists that feed the end-of-run summary block.
     """
     for i, (wo, dypn, _mat, qty, _nestval, _scope) in enumerate(batch_rows):
         pdf_qty = pmap.get((str(dypn).strip().upper(),
@@ -729,13 +704,13 @@ def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
         if pdf_qty is None:
             if pmap:
                 unverified.append((nest, dypn, wo, qty))
-                log(f"  {dypn} / {wo} is not in the nest packet "
+                log(f"  WARNING: {dypn} / {wo} is not in the nest packet "
                     f"summary -- qty {qty} could NOT be verified.")
         elif _as_int(qty) != pdf_qty:
             mismatches.append((nest, dypn, wo, qty, pdf_qty))
             nest_ws.cell(4 + i, 9).value = pdf_qty             # col I = DYPN QTY
             nest_ws.cell(4 + i, 9).fill = _QTY_MISMATCH_FILL
-            log(f"  QTY MISMATCH for {dypn} / {wo}: BATCH LIST says "
+            log(f"  WARNING: QTY MISMATCH for {dypn} / {wo}: BATCH LIST says "
                 f"{qty}, nest packet says {pdf_qty} -- the packet's {pdf_qty} "
                 f"was written, highlighted yellow in {workbook_name}.")
 
@@ -913,7 +888,7 @@ def _paste_forecast_into_nest(nest_ws, forecast_rows: list):
         nest_ws.cell(dest_row, 3).value = c
 
 
-def _fit_scribe_table(wb, num_parts: int, log, params=None) -> int:
+def _fit_scribe_table(wb, num_parts: int, log) -> int:
     """
     Make the SCRIBE VERIFICATION table exactly `num_parts` rows long (v2.3.0,
     floor feedback 2026-09-18: "it seems to be fixed to 25 rows and on larger
@@ -938,11 +913,7 @@ def _fit_scribe_table(wb, num_parts: int, log, params=None) -> int:
         table = next((t for t in ws.tables.values()
                       if range_boundaries(t.ref)[1] == 1), None)
         if table is None:
-            sdk.flag_action(
-                params,
-                "No table on the SCRIBE VERIFICATION sheet -- left as is.",
-                group="Some nests' SCRIBE VERIFICATION table was left as it is - check "
-                      "those sheets")
+            log("  WARNING: No table on the SCRIBE VERIFICATION sheet -- left as is.")
             return 0
         min_col, _r1, max_col, old_last = range_boundaries(table.ref)
         new_last = 1 + num_parts
@@ -976,16 +947,11 @@ def _fit_scribe_table(wb, num_parts: int, log, params=None) -> int:
             f"(was {old_last - 1}).")
         return num_parts
     except Exception as e:                                       # never cost the run
-        sdk.flag_action(
-            params,
-            f"Could not resize the SCRIBE VERIFICATION table: {e}",
-            group="Some nests' SCRIBE VERIFICATION table could not be resized - check "
-                  "those sheets")
+        log(f"  WARNING: Could not resize the SCRIBE VERIFICATION table: {e}")
         return 0
 
 
-def _fill_scribe_trace(wb, forecast_rows: list, num_parts: int, log,
-                       params=None):
+def _fill_scribe_trace(wb, forecast_rows: list, num_parts: int, log):
     """
     PLATE mode only: write the forecast's TRACE/MIC value into the SCRIBE
     VERIFICATION sheet's 'UNIQUE - TRACE' column, one value per part row.
@@ -1002,20 +968,12 @@ def _fill_scribe_trace(wb, forecast_rows: list, num_parts: int, log,
     """
     ws = wb["SCRIBE VERIFICATION"] if "SCRIBE VERIFICATION" in wb.sheetnames else None
     if ws is None:
-        sdk.flag_action(
-            params,
-            "No SCRIBE VERIFICATION sheet -- trace not written.",
-            group="Some nests got no SCRIBE trace written - fill UNIQUE - TRACE in by "
-                  "hand")
+        log("  WARNING: No SCRIBE VERIFICATION sheet -- trace not written.")
         return
     trace_col = _find_header_col(ws, "UNIQUE - TRACE", header_row=1)
     if trace_col is None:
-        sdk.flag_action(
-            params,
-            "No 'UNIQUE - TRACE' column on the SCRIBE VERIFICATION "
-            "sheet -- trace not written.",
-            group="Some nests got no SCRIBE trace written - fill UNIQUE - TRACE in by "
-                  "hand")
+        log("  WARNING: No 'UNIQUE - TRACE' column on the SCRIBE VERIFICATION "
+            "sheet -- trace not written.")
         return
 
     traces = [t for (_a, _b, _c, t) in forecast_rows]
@@ -1225,8 +1183,7 @@ def _parse_sketch_mil_specs(pdf_path: Path) -> dict:
     return out
 
 
-def _fill_part_mil_specs(nest_ws, batch_rows: list, sketch_specs: dict, log,
-                         params=None) -> tuple:
+def _fill_part_mil_specs(nest_ws, batch_rows: list, sketch_specs: dict, log) -> tuple:
     """
     PLATE + non-ferrous: write each part row's MIL SPEC (NEST col D) from that
     part's own PART SKETCH labeling block. Returns (filled, blank_parts).
@@ -1248,18 +1205,13 @@ def _fill_part_mil_specs(nest_ws, batch_rows: list, sketch_specs: dict, log,
         log(f"  MIL Spec -> col D: {filled} part row(s) filled from their PART "
             f"SKETCH labeling block.")
     if blank:
-        sdk.flag_action(
-            params,
-            f"No MIL-SPEC on the PART SKETCH page for {len(blank)} part(s) "
+        log(f"  WARNING: No MIL-SPEC on the PART SKETCH page for {len(blank)} part(s) "
             f"-- left BLANK to fill in by hand: {', '.join(blank[:8])}"
-            + (" ..." if len(blank) > 8 else ""),
-            group="Some parts have no MIL-SPEC on their PART SKETCH page and were left "
-                  "BLANK - fill those in by hand")
+            + (" ..." if len(blank) > 8 else ""))
     return filled, blank
 
 
-def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log,
-                           params=None) -> tuple:
+def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log) -> tuple:
     """
     Read (mil_spec, matl_type, ferrous) from THIS nest's own packet PDF in
     NEST PACKAGES (the one whose filename contains the nest number). Scoping
@@ -1267,29 +1219,19 @@ def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log,
     nest's MIL spec.
     """
     if not sdk.exists(nest_packages_folder):
-        sdk.flag_action(
-            params,
-            f"NEST PACKAGES folder not found: {nest_packages_folder}",
-            group="Some nests have no packet PDF in NEST PACKAGES, so their MIL spec "
-                  "and material were left blank")
+        log(f"  WARNING: NEST PACKAGES folder not found: {nest_packages_folder}")
         return None, None, None
 
     nest_pdf = _find_nest_pdf(nest_packages_folder, nest_number)
     if nest_pdf is None:
-        sdk.flag_action(
-            params,
-            f"No packet PDF containing '{nest_number}' found in NEST PACKAGES.")
+        log(f"  WARNING: No packet PDF containing '{nest_number}' found in NEST PACKAGES.")
         return None, None, None
 
     log(f"  Parsing packet PDF: {nest_pdf.name}")
     try:
         return _extract_pdf_data(nest_pdf)
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"Could not parse {nest_pdf.name}: {e}",
-            group="Some nest packets could not be read, so their MIL spec and material "
-                  "were left blank")
+        log(f"  WARNING: Could not parse {nest_pdf.name}: {e}")
         return None, None, None
 
 
@@ -1300,7 +1242,7 @@ def _get_pdf_data_for_nest(nest_packages_folder: Path, nest_number: str, log,
 _omit_stamps = None
 
 
-def _load_omit_stamp_helpers(log, params=None):
+def _load_omit_stamp_helpers(log):
     """
     Import the sibling 911_remove_ticket plugin, the single home of the
     cover-stamp helpers (batch/nest text box + Material Type fill). Both
@@ -1313,9 +1255,7 @@ def _load_omit_stamp_helpers(log, params=None):
     try:
         _omit_stamps = sdk.load_sibling("911_remove_ticket", __file__)
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"911 Remove Ticket helpers unavailable ({e}) - omit PDFs will not be stamped.")
+        log(f"  WARNING: 911 Remove Ticket helpers unavailable ({e}) - omit PDFs will not be stamped.")
         _omit_stamps = False
     return _omit_stamps or None
 
@@ -1323,8 +1263,7 @@ def _load_omit_stamp_helpers(log, params=None):
 def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
                             dest_path: Path, log, batch: str = "",
                             material_hint: str = "", difficulty=None,
-                            batch_folder: Path | None = None,
-                            params=None) -> bool:
+                            batch_folder: Path | None = None) -> bool:
     """
     Build the MOVE TICKET OMIT PDF for a nest.
 
@@ -1341,19 +1280,13 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
     Returns True if the output PDF was written successfully.
     """
     if not sdk.exists(nest_packages_folder):
-        sdk.flag_action(
-            params,
-            "NEST PACKAGES folder not found -- skipping drawings.",
-            group="Some nests have no packet PDF in NEST PACKAGES, so no drawings were "
-                  "pulled for them")
+        log("  WARNING: NEST PACKAGES folder not found -- skipping drawings.")
         return False
 
     matching_pdf = _find_nest_pdf(nest_packages_folder, nest_number)
 
     if matching_pdf is None:
-        sdk.flag_action(
-            params,
-            f"No PDF containing '{nest_number}' found in NEST PACKAGES.")
+        log(f"  WARNING: No PDF containing '{nest_number}' found in NEST PACKAGES.")
         return False
 
     log(f"  Found nest PDF: {matching_pdf.name}")
@@ -1364,7 +1297,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         doc = fitz.open(sdk.long_path(matching_pdf))
         total_pages = len(doc)
 
-        stamps = _load_omit_stamp_helpers(log, params)
+        stamps = _load_omit_stamp_helpers(log)
         if stamps:
             remove_pages, materials = stamps._scan_document(doc)
         else:
@@ -1376,12 +1309,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
                     remove_pages.add(i)
 
         if len(remove_pages) >= total_pages:
-            sdk.flag_action(
-                params,
-                f"{nest_number}: all {total_pages} pages are MOVE TICKET pages, "
-                f"so nothing was written.",
-                group="Some nests are nothing but MOVE TICKET pages, so no drawings "
-                      "file was written for them")
+            log(f"  WARNING: All {total_pages} pages are MOVE TICKET pages - nothing to write for {nest_number}.")
             return False
 
         if remove_pages:
@@ -1391,21 +1319,14 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
             material = " / ".join(sorted(materials)) or (material_hint or "")
             for w in stamps._stamp_first_page(doc[0], batch, nest_number, material,
                                               log, difficulty):
-                sdk.flag_action(
-                    params,
-                    f"{w}",
-                    group="Some sketch pages' MATL: cell was too small for the "
-                          "material, so it did not go on - write it in by hand")
+                log(f"  WARNING: {w}")
             # v2.2.0: the same designator into every sketch's empty MATL: cell
             # (single home: 911_remove_ticket v1.4.0).
             if hasattr(stamps, "fill_sketch_material"):
                 matl = stamps.fill_sketch_material(doc, material, log)
                 if matl.did_not_fit:
-                    sdk.flag_action(
-                        params,
-                        f"material {material!r} did not fit the MATL: cell "
-                        f"on {matl.did_not_fit} sketch page(s)",
-                        group="Some stamps need a manual look")
+                    log(f"  WARNING: material {material!r} did not fit the MATL: cell "
+                        f"on {matl.did_not_fit} sketch page(s)")
 
         # v2.2.0: PART SKETCH pages whose graphic did not render are filled from
         # THIS batch's WPDD SKETCHES folder (single home: 911_remove_ticket), and
@@ -1415,12 +1336,8 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
             sk = stamps.restore_missing_sketches(doc, batch_folder, nest_number, log)
             added = sk.pages_added
             if sk.unmatched:
-                sdk.flag_action(
-                    params,
-                    "PART SKETCH graphic missing and no sketch on file for: "
-                    + ", ".join(sk.unmatched),
-                    group="Some PART SKETCH pages have no graphic and no sketch on file "
-                          "- add those by hand")
+                log("  WARNING: PART SKETCH graphic missing and no sketch on file for: "
+                    + ", ".join(sk.unmatched))
 
         # Atomic temp+replace write (Hard Rule 5). close=False: doc was opened
         # from the source PDF, not dest_path, and the finally below closes it.
@@ -1431,11 +1348,7 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         return True
 
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"Could not write drawings PDF: {e}",
-            group="Some nests' drawings PDF could not be written - pull those drawings "
-                  "by hand")
+        log(f"  WARNING: Could not write drawings PDF: {e}")
         return False
     finally:
         if doc is not None:
@@ -1534,8 +1447,7 @@ def _get_dypn_rows(nest_ws) -> list:
 # the openpyxl load/save round-trip intact.
 # ---------------------------------------------------------------------------
 
-def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log,
-                                       params=None):
+def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
     """
     Copy the INSPECTION SHEET tab once per NEST part row. parts is the
     list of (full_dypn, work_order, qty) triples from _get_dypn_rows.
@@ -1654,7 +1566,7 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log,
             if count_after != count_before + 1:
                 # Fallback: Copy()-with-no-args creates a new workbook;
                 # move that sheet back into our workbook.
-                log(f"  in-place Copy did not grow sheet count "
+                log(f"  WARNING: in-place Copy did not grow sheet count "
                     f"({count_before} -> {count_after}); trying Copy()+Move fallback")
                 try:
                     template.Copy()
@@ -1690,12 +1602,8 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log,
 
             n_slots = min(qty, len(SLOT_ROWS))
             if qty > len(SLOT_ROWS):
-                sdk.flag_action(
-                    params,
-                    f"{full_dypn} qty {qty} exceeds the form's "
-                    f"{len(SLOT_ROWS)} sample slots - filling {len(SLOT_ROWS)}.",
-                    group="Some parts have more quantity than the inspection form has "
-                          "sample slots - the extra ones need a second form")
+                log(f"  WARNING: {full_dypn} qty {qty} exceeds the form's "
+                    f"{len(SLOT_ROWS)} sample slots - filling {len(SLOT_ROWS)}.")
 
             for slot in range(n_slots):
                 r = SLOT_ROWS[slot]
@@ -1839,7 +1747,7 @@ def _find_template_911(template_dir: Path, plate: bool = False) -> Path:
 _teams_cards = None
 
 
-def _load_teams_cards(log, params=None):
+def _load_teams_cards(log):
     """The sibling 911_teams_cards module, or None with one logged warning."""
     global _teams_cards
     if _teams_cards is not None:
@@ -1847,9 +1755,7 @@ def _load_teams_cards(log, params=None):
     try:
         _teams_cards = sdk.load_sibling("911_teams_cards", __file__)
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"the 911 Teams Cards app is unavailable ({e}) - no "
+        log(f"  WARNING: the 911 Teams Cards app is unavailable ({e}) - no "
             f"cards can be created and the schedule cannot be updated.")
         _teams_cards = False
     return _teams_cards or None
@@ -2024,7 +1930,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # ------------------------------------------------------------------ #
     batch_stages = do_folders or do_nest_data or do_inspection or do_stamping
     if do_cards:
-        cards_mod = _load_teams_cards(log, params)
+        cards_mod = _load_teams_cards(log)
         if cards_mod is None:
             log("  Skipping Teams cards - run the '911 Teams Cards' app "
                 "directly, or reinstall TechDeck to restore it.")
@@ -2166,10 +2072,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     log("Verifying DYPN QTY column against the nest packet PDFs...")
     qty_col, swap_with, packet_qtys = _resolve_dypn_qty_col(
-        batch_list_path, nest_packages_folder, all_nests, log, cancel_event,
-        params)
+        batch_list_path, nest_packages_folder, all_nests, log, cancel_event)
     if swap_with is not None:
-        _swap_batch_list_headers(batch_list_path, qty_col, swap_with, log, params)
+        _swap_batch_list_headers(batch_list_path, qty_col, swap_with, log)
 
     # ------------------------------------------------------------------ #
     # Step 3 -- Create nest subfolders
@@ -2184,9 +2089,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log("[skipped] Nest Folder Setup unchecked.")
         missing = [n for n in nest_numbers if not sdk.is_dir(batch_folder / n)]
         if missing:
-            sdk.flag_action(
-                params,
-                f"{len(missing)} nest folder(s) do not exist and were "
+            log(f"  WARNING: {len(missing)} nest folder(s) do not exist and were "
                 f"NOT created: {', '.join(missing[:10])}"
                 + (" ..." if len(missing) > 10 else ""))
 
@@ -2210,9 +2113,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             nest_excel_paths[nest] = dest_path
         absent = [n for n, p in nest_excel_paths.items() if not sdk.exists(p)]
         if absent:
-            sdk.flag_action(
-                params,
-                f"no existing nest workbook for {len(absent)} nest(s): "
+            log(f"  WARNING: no existing nest workbook for {len(absent)} nest(s): "
                 f"{', '.join(absent[:10])}" + (" ..." if len(absent) > 10 else ""))
     else:
         log(f"Copying 911 {'PLATE ' if plate else ''}BATCH template...")
@@ -2235,9 +2136,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         scribe_src = template_dir / scribe_name
         scribe_available = sdk.exists(scribe_src)
         if not scribe_available:
-            sdk.flag_action(
-                params,
-                f"Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
+            log(f"  WARNING: Scribe doc not found ({scribe_src.name}) -- skipping for all nests.")
 
         for nest in nest_numbers:
             # The workbook keeps the same name in both modes: sibling apps
@@ -2267,11 +2166,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                             shutil.copy2(sdk.long_path(scribe_src), sdk.long_path(scribe_dest))
                             log(f"  Scribe doc -> {nest}\\{_SCRIBE_SUBFOLDER}")
                     except Exception as e:
-                        sdk.flag_action(
-                            params,
-                            f"Could not copy scribe doc into {nest}: {e}",
-                            group="Some nests did not get the scribe doc copied in - "
-                                  "copy those by hand")
+                        log(f"  WARNING: Could not copy scribe doc into {nest}: {e}")
 
     progress_callback(20)
     if cancel_event.is_set():
@@ -2320,16 +2215,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     diff_map, diff_problem, unrated_nests = {}, "", []
     _stamps = None
     if do_stamping and stamp_difficulty:
-        _stamps = _load_omit_stamp_helpers(log, params)
+        _stamps = _load_omit_stamp_helpers(log)
         if _stamps is not None and hasattr(_stamps, "_load_difficulty_map"):
             diff_map, diff_problem = _stamps._load_difficulty_map(params, log)
         else:
             diff_problem = ("The 911 Remove Ticket helpers could not be loaded, "
                             "so no difficulty labels were stamped.")
         if diff_problem:
-            sdk.flag_action(
-                params,
-                f"{diff_problem.splitlines()[0]}")
+            log(f"  WARNING: {diff_problem.splitlines()[0]}")
     for nest_idx, nest in enumerate(nest_numbers):
         if cancel_event.is_set():
             break
@@ -2350,8 +2243,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         if not do_nest_data:
             log("  [skipped] Nest Workbook Data unchecked.")
             if do_stamping:
-                _, matl_type, _ = _get_pdf_data_for_nest(nest_packages_folder,
-                                                         nest, log, params)
+                _, matl_type, _ = _get_pdf_data_for_nest(nest_packages_folder, nest, log)
         else:
             # -- Step 5: Forecast data -> NEST cols A-C, starting row 4 ------
             log(f"  [Step 5] Extracting forecast rows for {nest}...")
@@ -2359,13 +2251,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 forecast_ws, forecast_hdr, forecast_nest_col, forecast_out_cols, nest)
             if not forecast_rows:
                 missing_forecast.append(nest)
-                sdk.flag_action(
-                    params,
-                    f"No forecast rows found for nest {nest} in the "
+                log(f"  WARNING: No forecast rows found for nest {nest} in the "
                     f"'{forecast_ws.title}' sheet (column "
-                    f"{get_column_letter(forecast_nest_col)}).",
-                    group="Some nests have no rows in the forecast sheet, so their "
-                          "forecast fields are blank")
+                    f"{get_column_letter(forecast_nest_col)}).")
             else:
                 log(f"  Found {len(forecast_rows)} forecast rows.")
                 _paste_forecast_into_nest(nest_ws, forecast_rows)
@@ -2373,7 +2261,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             # -- Step 6: PDF -> MIL-S spec (D4) + MATL (E4) ------------------
             log(f"  [Step 6] Reading MIL SPEC / MATERIAL from nest packet...")
             mil_spec, matl_type, ferrous = _get_pdf_data_for_nest(
-                nest_packages_folder, nest, log, params)
+                nest_packages_folder, nest, log)
 
             # PLATE mode: the packet's own FERROUS flag decides -- 'F'
             # (carbon steel) plate takes the literal 'N/A' instead of the
@@ -2387,13 +2275,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                     f"from each part's PART SKETCH page (move ticket said "
                     f"{mil_spec or 'nothing'}).")
             elif plate:
-                sdk.flag_action(
-                    params,
-                    "No FERROUS flag in the nest packet -- cannot tell "
+                log("  WARNING: No FERROUS flag in the nest packet -- cannot tell "
                     "carbon from non-ferrous, so MIL Spec is left BLANK to be "
-                    f"filled in by hand (packet said {mil_spec or 'nothing'}).",
-                    group="Some nest packets have no FERROUS flag, so their MIL Spec "
-                          "was left BLANK - fill those in by hand")
+                    f"filled in by hand (packet said {mil_spec or 'nothing'}).")
 
             mil_left_blank = plate and effective_mil is None
             if effective_mil:
@@ -2402,21 +2286,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             elif mil_left_blank:
                 nest_ws.cell(4, 4).value = None            # a re-run must not keep an old spec
             else:
-                sdk.flag_action(
-                    params,
-                    f"MIL spec not found in nest packet.",
-                    group="Some nest packets have no MIL spec in them - fill those in "
-                          "by hand")
+                log(f"  WARNING: MIL spec not found in nest packet.")
 
             if matl_type:
                 nest_ws.cell(4, 5).value = matl_type  # E4
                 log(f"  Material -> E4: {matl_type}")
             else:
-                sdk.flag_action(
-                    params,
-                    f"MATERIAL not found in nest packet (left blank).",
-                    group="Some nest packets have no MATERIAL in them - fill those in "
-                          "by hand")
+                log(f"  WARNING: MATERIAL not found in nest packet (left blank).")
 
             # -- Step 7: BATCH LIST -> NEST cols F-K, starting row 4 ---------
             log(f"  [Step 7] Extracting batch rows for {nest}...")
@@ -2424,18 +2300,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 batch_rows = _get_batch_rows_for_nest(batch_list_path, nest,
                                                       qty_col_override=qty_col)
             except ValueError as e:
-                sdk.flag_action(
-                    params,
-                    f"{e} -- skipping batch data for {nest}",
-                    group="Some nests' batch data was skipped - check those workbooks")
+                log(f"  WARNING: {e} -- skipping batch data for {nest}")
                 batch_rows = []
 
             if not batch_rows:
-                sdk.flag_action(
-                    params,
-                    f"No batch rows found for nest {nest}.",
-                    group="Some nests have no rows on the BATCH LIST - check those nest "
-                          "numbers")
+                log(f"  WARNING: No batch rows found for nest {nest}.")
             else:
                 log(f"  Found {len(batch_rows)} batch rows.")
                 batch_rows, moved = _order_rows_like_packet(
@@ -2450,7 +2319,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 _flag_qty_mismatches(nest_ws, batch_rows,
                                      packet_qtys.get(nest) or {}, nest,
                                      nest_excel.name, log,
-                                     qty_mismatches, qty_unverified, params)
+                                     qty_mismatches, qty_unverified)
 
             # -- Fill A-E down for every part row (SCRIBE mirrors NEST) -------
             num_parts = len(batch_rows)
@@ -2468,25 +2337,20 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 try:
                     sketch_specs = _parse_sketch_mil_specs(nest_pdf) if nest_pdf else {}
                 except Exception as e:
-                    sdk.flag_action(
-                        params,
-                        f"Could not read the PART SKETCH pages of "
-                        f"{nest} for MIL specs: {e}",
-                        group="Some nests' PART SKETCH pages could not be read for MIL "
-                              "specs - fill those in by hand")
+                    log(f"  WARNING: Could not read the PART SKETCH pages of "
+                        f"{nest} for MIL specs: {e}")
                     sketch_specs = {}
-                _fill_part_mil_specs(nest_ws, batch_rows, sketch_specs, log,
-                                     params)
+                _fill_part_mil_specs(nest_ws, batch_rows, sketch_specs, log)
 
             # -- SCRIBE VERIFICATION table: exactly one row per part ----------
-            _fit_scribe_table(wb, num_parts, log, params)
+            _fit_scribe_table(wb, num_parts, log)
 
             # -- PLATE only: forecast TRACE/MIC -> SCRIBE 'UNIQUE - TRACE' ----
             # The plate template ships the column empty (never the shape
             # template's hardcoded "N/A"); fill it from the forecast so it is
             # not overlooked, and leave it blank when the forecast is blank.
             if plate:
-                _fill_scribe_trace(wb, forecast_rows, num_parts, log, params)
+                _fill_scribe_trace(wb, forecast_rows, num_parts, log)
 
             # -- Center the whole NEST tab (the templates only center a patch) --
             _center_nest_sheet(nest_ws, num_parts)
@@ -2495,11 +2359,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
         part_rows = _get_dypn_rows(nest_ws)
         if not part_rows:
-            sdk.flag_action(
-                params,
-                f"No DYPN values found in NEST col G.",
-                group="Some nests have no DYPN values in NEST column G - check those "
-                      "workbooks")
+            log(f"  WARNING: No DYPN values found in NEST col G.")
         else:
             log(f"  Found {len(part_rows)} DYPN rows.")
 
@@ -2515,8 +2375,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         if part_rows and do_inspection:
             log(f"  Building {len(part_rows)} inspection sheet(s) via Excel...")
             try:
-                _build_inspection_sheets_via_excel(nest_excel, part_rows, log,
-                                                  params)
+                _build_inspection_sheets_via_excel(nest_excel, part_rows, log)
             except Exception as e:
                 log(f"  ERROR: Excel COM inspection sheet build failed: {e}")
                 raise
@@ -2538,8 +2397,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                     unrated_nests.append(str(nest))
             _extract_nest_drawings(nest_packages_folder, nest, drawings_dest, log,
                                    batch=batch_number, material_hint=matl_type or "",
-                                   difficulty=difficulty, batch_folder=batch_folder,
-                                   params=params)
+                                   difficulty=difficulty, batch_folder=batch_folder)
         else:
             log("  [skipped] PDF Stamping unchecked.")
 
@@ -2553,26 +2411,21 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     # ------------------------------------------------------------------ #
     # Difficulty disclaimer -- nothing is printed on a packet whose nest has
-    # no rating, so the omission is an action item the user has to dismiss
+    # no rating, so the omission is surfaced in a popup the user must dismiss
     # rather than a log line that scrolls past (C.D. 2026-07-31).
     # ------------------------------------------------------------------ #
     if do_stamping and stamp_difficulty and (diff_problem or unrated_nests):
         if diff_problem:
-            sdk.flag_action(
-                params,
-                f"No packet got a difficulty label - {diff_problem}")
+            body = diff_problem
         else:
-            shown = list(unrated_nests[:25])
-            if len(unrated_nests) > 25:
-                shown.append("...")
-            sdk.flag_action(
-                params,
-                f"{len(unrated_nests)} of {total_nests} nest(s) were stamped "
-                f"WITHOUT a difficulty label because the nest has no rating "
-                f"colour on the EB 922 Schedule (CURRENT PIPELINE, column E), is "
-                f"marked N/A, or is not listed - rate them and stamp those labels "
-                f"by hand. Everything else on those packets stamped normally.",
-                ", ".join(shown))
+            shown = "\n".join(f"  - {n}" for n in unrated_nests[:25])
+            body = (f"{len(unrated_nests)} of {total_nests} nest(s) were stamped "
+                    f"WITHOUT a difficulty label because the nest has no rating "
+                    f"colour on the EB 922 Schedule (CURRENT PIPELINE, column E), "
+                    f"is marked N/A, or is not listed:\n\n{shown}"
+                    + ("\n  ..." if len(unrated_nests) > 25 else "")
+                    + "\n\nEverything else on those packets stamped normally.")
+        sdk.show_warning(params, "Difficulty label - not stamped", body)
 
     # ------------------------------------------------------------------ #
     # Forecast-coverage summary -- a missing forecast row leaves NEST cols
@@ -2592,13 +2445,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             "re-run 911 Setup. (If these nests have not been added to the "
             "forecast yet, add them there first.)")
         log(f"{'!'*50}")
-        sdk.flag_action(
-            params,
-            f"{len(missing_forecast)} of {total_nests} nest(s) are not in the "
-            f"Working Forecast List, so their NEST columns A-C are BLANK - the "
-            f"console says how to fix the sync, or add those nests to the "
-            f"forecast, then run 911 Setup again.",
-            ", ".join(missing_forecast))
 
     # ------------------------------------------------------------------ #
     # QTY verification summary -- repeated at the end so warnings that
@@ -2617,23 +2463,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log("Cross-check these against page 2 of the nest packet PDF "
             "before releasing paperwork.")
         log(f"{'!'*50}")
-        if qty_mismatches:
-            sdk.flag_action(
-                params,
-                f"{len(qty_mismatches)} part(s) disagree between the BATCH LIST "
-                f"and the nest packet - the packet's quantity was written and the "
-                f"cell highlighted yellow; cross-check them against page 2 of the "
-                f"packet before you release the paperwork.",
-                "; ".join(f"{n} {d}/{w}: list {q}, packet {pq}"
-                          for n, d, w, q, pq in qty_mismatches[:20]))
-        if qty_unverified:
-            sdk.flag_action(
-                params,
-                f"{len(qty_unverified)} part(s) are not in their nest packet's "
-                f"summary, so their quantity was never verified - check them "
-                f"against page 2 of the packet by hand.",
-                "; ".join(f"{n} {d}/{w}: qty {q}"
-                          for n, d, w, q in qty_unverified[:20]))
     elif packet_qtys:
         log("\nAll part quantities verified against the nest packet PDFs.")
 
@@ -2651,7 +2480,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # rather than skipping the card stop entirely.
     # ------------------------------------------------------------------ #
     if do_folders and do_nest_data:
-        cards_mod = _load_teams_cards(log, params)
+        cards_mod = _load_teams_cards(log)
         _sched_template = None
         if cards_mod is not None:
             try:

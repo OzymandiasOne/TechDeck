@@ -153,15 +153,12 @@ def test_blank_forecast_trace_stays_blank_for_manual_entry(su):
 
 
 def test_trace_write_survives_a_workbook_without_the_column(su):
-    """An older/edited template: raise an action item and skip, never crash the
-    batch run. The trace is not written, so the user has to fill it in."""
+    """An older/edited template: warn and skip, never crash the batch run."""
     wb = openpyxl.Workbook()
     wb.active.title = "SCRIBE VERIFICATION"      # headerless sheet
     logs = []
-    params = {"log": logs.append}
-    su._fill_scribe_trace(wb, [("a", "b", "c", "T1")], 1, logs.append, params)
-    items = [i["item"] for i in su.sdk.action_items(params)]
-    assert any("UNIQUE - TRACE" in i for i in items), items
+    su._fill_scribe_trace(wb, [("a", "b", "c", "T1")], 1, logs.append)
+    assert any("UNIQUE - TRACE" in m for m in logs)
 
 
 # ── forecast reader carries the trace column through ────────────────────────
@@ -256,11 +253,9 @@ def test_part_rows_get_their_own_spec_and_unknown_parts_stay_blank(su):
             ("X2", "h5532004-15-4", "NICU", 1, "503856", "CUT"),   # case-tolerant
             ("X3", "H9999999-9", "AL", 1, "503856", "CUT")]        # no sketch page
     logged = []
-    params = {"log": logged.append}
     filled, blank = su._fill_part_mil_specs(
         ws, rows, {"H4146707-1": ("ASTM-B221", "A"), "H5532004-15-4": ("QQ-N-281", "N")},
-        logged.append, params)
+        logged.append)
     assert (filled, blank) == (2, ["H9999999-9"])
     assert [ws.cell(r, 4).value for r in (4, 5, 6)] == ["ASTM-B221", "QQ-N-281", None]
-    items = [i["item"] for i in su.sdk.action_items(params)]
-    assert any("H9999999-9" in i and "BLANK" in i for i in items), items
+    assert any("H9999999-9" in ln and "BLANK" in ln for ln in logged)

@@ -230,18 +230,14 @@ def _norm(v) -> str:
     return str(v).strip().casefold()
 
 
-def _collect_bent_plates(wb, log, params: dict) -> dict[str, set[str]]:
+def _collect_bent_plates(wb, log) -> dict[str, set[str]]:
     """Map each formed-plate DYPN to the set of SOURCE MATERIAL codes recorded
     for it on the Bent Plates sheet. The source material is what distinguishes
     the formed plate from a rod that shares the same DYPN."""
     try:
         ws = wb.Worksheets(BENT_PLATES_SHEET)
     except Exception:
-        sdk.flag_action(
-            params,
-            f"There is no '{BENT_PLATES_SHEET}' sheet in the organizer, so NO "
-            f"part got a FORMED tag - run 922 FormingFinder first, then run this "
-            f"again.")
+        log(f"  WARNING: '{BENT_PLATES_SHEET}' sheet not found; no FORMED detection")
         return {}
 
     header_row = 2
@@ -258,17 +254,11 @@ def _collect_bent_plates(wb, log, params: dict) -> dict[str, set[str]]:
         elif name == "SOURCE MATERIAL":
             src_col = c
     if dypn_col is None:
-        sdk.flag_action(
-            params,
-            f"The '{BENT_PLATES_SHEET}' sheet has no DYPN column, so NO part got "
-            f"a FORMED tag - check its row-2 headers and run this again.")
+        log("  WARNING: DYPN column not found in Bent Plates header; no FORMED detection")
         return {}
     if src_col is None:
-        sdk.flag_action(
-            params,
-            f"The '{BENT_PLATES_SHEET}' sheet has no SOURCE MATERIAL column, so "
-            f"FORMED was matched on the part number alone - check every FORMED "
-            f"tag, because a part's rod can carry the same number as its plate.")
+        log("  WARNING: SOURCE MATERIAL column not found in Bent Plates header; "
+            "falling back to DYPN-only FORMED matching")
 
     bent: dict[str, set[str]] = {}
     last_row = max(int(ws.UsedRange.Rows.Count), 3)
@@ -285,7 +275,7 @@ def _collect_bent_plates(wb, log, params: dict) -> dict[str, set[str]]:
 
 # FORMED edits ----------------------------------------------------------------
 
-def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log, params: dict,
+def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log,
                         part_rows=PART_ROWS,
                         col_triples=STANDARD_COLS) -> list[tuple[str, str]]:
     if not bent_plates:
@@ -332,11 +322,7 @@ def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log, params: dict,
                 edits.append((desc_addr, original))
                 log(f"    FORMED match: {dypn_val} at {desc_addr}")
             except Exception as exc:
-                sdk.flag_action(
-                    params,
-                    f"{dypn_val} is a formed part but its FORMED tag could not be "
-                    f"written at {desc_addr} - add it by hand.",
-                    str(exc))
+                log(f"    WARNING: could not modify {desc_addr} for {dypn_val}: {exc}")
     return edits
 
 
@@ -345,33 +331,25 @@ def _revert_edits(ws, edits: list[tuple[str, str]], log) -> None:
         try:
             ws.Range(addr).Formula = original
         except Exception as exc:
-            log(f"    Could not revert {addr}: {exc}")
+            log(f"    WARNING: could not revert {addr}: {exc}")
 
 
 # Oversize orders -------------------------------------------------------------
 
-def _part_counts_by_order(wb, log, params: dict) -> dict[str, int]:
+def _part_counts_by_order(wb, log) -> dict[str, int]:
     """{normalised order number: how many parts the PO lists for it}. Read in
     ONE COM call from the same 'PO Info Drop' window the kit page's own array
     formulas index into, so a count here can never disagree with what prints."""
     try:
         ws = wb.Worksheets(PO_INFO_SHEET)
     except Exception:
-        sdk.flag_action(
-            params,
-            f"There is no '{PO_INFO_SHEET}' sheet, so an order with more than "
-            f"{STANDARD_CAPACITY} parts could print with its extra parts cut off "
-            f"and nothing would say so - check the long orders by eye.")
+        log(f"  WARNING: '{PO_INFO_SHEET}' sheet not found; cannot detect orders "
+            f"that overflow the {STANDARD_CAPACITY}-row checklist")
         return {}
     try:
         vals = ws.Range(PO_INFO_ORDER_RANGE).Value
     except Exception as exc:
-        sdk.flag_action(
-            params,
-            f"'{PO_INFO_SHEET}' could not be read, so an order with more than "
-            f"{STANDARD_CAPACITY} parts could print with its extra parts cut off "
-            f"- check the long orders by eye.",
-            str(exc))
+        log(f"  WARNING: could not read {PO_INFO_SHEET}!{PO_INFO_ORDER_RANGE}: {exc}")
         return {}
     counts: dict[str, int] = {}
     for row in (vals or ()):
@@ -381,7 +359,7 @@ def _part_counts_by_order(wb, log, params: dict) -> dict[str, int]:
     return counts
 
 
-def _order_index_map(ws, log, params: dict) -> dict[int, str]:
+def _order_index_map(ws, log) -> dict[int, str]:
     """{D21 driver value: order number}, read from the index table the kit
     page's own C21 VLOOKUP uses - index in column B, order in column C, under
     the 'Order Numbers on PO' heading. The heading's row differs between the
@@ -389,12 +367,7 @@ def _order_index_map(ws, log, params: dict) -> dict[int, str]:
     try:
         col_c = ws.Range("C1:C120").Value
     except Exception as exc:
-        sdk.flag_action(
-            params,
-            f"The order index table could not be read, so an order with more "
-            f"than {STANDARD_CAPACITY} parts could print with its extra parts "
-            f"cut off - check the long orders by eye.",
-            str(exc))
+        log(f"  WARNING: could not read the order index table: {exc}")
         return {}
     header_row = None
     for i, row in enumerate(col_c or (), start=1):
@@ -403,21 +376,13 @@ def _order_index_map(ws, log, params: dict) -> dict[int, str]:
             header_row = i
             break
     if header_row is None:
-        sdk.flag_action(
-            params,
-            f"The order index table was not found, so an order with more than "
-            f"{STANDARD_CAPACITY} parts could print with its extra parts cut off "
-            f"- check the long orders by eye.")
+        log("  WARNING: order index table not found; cannot detect orders that "
+            f"overflow the {STANDARD_CAPACITY}-row checklist")
         return {}
     try:
         vals = ws.Range(f"B{header_row + 1}:C{header_row + 200}").Value
     except Exception as exc:
-        sdk.flag_action(
-            params,
-            f"The order index table could not be read, so an order with more "
-            f"than {STANDARD_CAPACITY} parts could print with its extra parts "
-            f"cut off - check the long orders by eye.",
-            str(exc))
+        log(f"  WARNING: could not read the order index table: {exc}")
         return {}
     out: dict[int, str] = {}
     for row in (vals or ()):
@@ -431,13 +396,13 @@ def _order_index_map(ws, log, params: dict) -> dict[int, str]:
     return out
 
 
-def _find_oversize_orders(wb, ws_kit, log, params: dict) -> dict[int, tuple[str, int]]:
+def _find_oversize_orders(wb, ws_kit, log) -> dict[int, tuple[str, int]]:
     """{driver value: (order number, part count)} for every order with more
     parts than the standard checklist has rows to show them in."""
-    counts = _part_counts_by_order(wb, log, params)
+    counts = _part_counts_by_order(wb, log)
     if not counts:
         return {}
-    index_map = _order_index_map(ws_kit, log, params)
+    index_map = _order_index_map(ws_kit, log)
     oversize: dict[int, tuple[str, int]] = {}
     for idx, order in index_map.items():
         count = counts.get(_norm(order), 0)
@@ -460,13 +425,13 @@ def _force_single_page(ws, log) -> dict:
         try:
             saved[attr] = getattr(ps, attr)
         except Exception as exc:
-            log(f"  Could not read PageSetup.{attr}: {exc}")
+            log(f"  WARNING: could not read PageSetup.{attr}: {exc}")
     try:
         ps.Zoom = False
         ps.FitToPagesWide = 1
         ps.FitToPagesTall = 1
     except Exception as exc:
-        log(f"  Could not force a single page: {exc}")
+        log(f"  WARNING: could not force a single page: {exc}")
     return saved
 
 
@@ -480,11 +445,11 @@ def _restore_page_setup(ws, saved: dict, log) -> None:
         try:
             setattr(ps, attr, saved[attr])
         except Exception as exc:
-            log(f"  Could not restore PageSetup.{attr}: {exc}")
+            log(f"  WARNING: could not restore PageSetup.{attr}: {exc}")
 
 
 def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
-                           cancel_event, log, params: dict) -> dict[int, Path]:
+                           cancel_event, log) -> dict[int, Path]:
     """One 'Larger Bin Label' page per oversize order, colored and FORMED-
     tagged exactly like the standard page. Returns {driver value: pdf}."""
     d21 = ws_big.Range(LARGER_DRIVER_CELL)
@@ -496,7 +461,7 @@ def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
             d21.Value = idx
             excel.CalculateFull()
             edits = _apply_formed_edits(
-                ws_big, bent_plates, log, params, LARGER_PART_ROWS, LARGER_COLS)
+                ws_big, bent_plates, log, LARGER_PART_ROWS, LARGER_COLS)
             try:
                 if edits:
                     excel.CalculateFull()
@@ -519,8 +484,7 @@ def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
 
 
 def _merge_kit_pages(pdf_paths: list[Path], iterations: list[int],
-                     larger_pages: dict[int, Path], dest: Path, log,
-                     params: dict) -> None:
+                     larger_pages: dict[int, Path], dest: Path, log) -> None:
     """Merge the per-iteration 2-page exports into the final kitting PDF,
     SUBSTITUTING the larger bin label page for any order that overflowed - the
     order keeps its place in the print order, it just prints all its parts."""
@@ -542,12 +506,8 @@ def _merge_kit_pages(pdf_paths: list[Path], iterations: list[int],
                     elif side < src.page_count:
                         merged.insert_pdf(src, from_page=side, to_page=side)
                     else:
-                        sdk.flag_action(
-                            params,
-                            f"Order {order_index} has no page in {src_path.name} "
-                            f"(it holds {src.page_count}), so that order is "
-                            f"MISSING from the kitting PDF - print its page by "
-                            f"hand.")
+                        log(f"  WARNING: {src_path.name} has {src.page_count} "
+                            f"page(s); order {order_index} has no page to merge")
             finally:
                 src.close()
         merged.save(sdk.long_path(dest))
@@ -633,7 +593,7 @@ def _resolve_missing_source_material(
 ) -> None:
     """Halt on missing source material unless the user chooses to proceed.
     Raises UserFacingError to stop; returns normally to proceed anyway."""
-    log(f"{len(missing)} kit line(s) have a part but NO source material:")
+    log(f"WARNING: {len(missing)} kit line(s) have a part but NO source material:")
     for o, r, d in missing:
         log(f"  Order {o}, row {r}: {d}")
 
@@ -741,7 +701,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         try:
             excel.Calculation = _XL_CALC_AUTOMATIC
         except Exception as exc:
-            log(f"  Could not set Calculation=Automatic ({exc}); continuing")
+            log(f"  WARNING: could not set Calculation=Automatic ({exc}); continuing")
 
         try:
             ws_kit = wb.Worksheets(SHEET_NAME)
@@ -759,11 +719,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         try:
             ws_big = wb.Worksheets(LARGER_SHEET_NAME)
         except Exception:
-            sdk.flag_action(
-                params,
-                f"The organizer has no '{LARGER_SHEET_NAME}' sheet, so any order "
-                f"with more than {STANDARD_CAPACITY} parts printed TRUNCATED - "
-                f"list those parts by hand.")
+            log(f"  WARNING: '{LARGER_SHEET_NAME}' sheet not found - an order "
+                f"with more than {STANDARD_CAPACITY} parts would print "
+                "truncated")
         if ws_big is not None:
             _apply_color_scheme(ws_big, scheme,
                                 LARGER_PRIMARY_CELLS, LARGER_SECONDARY_CELLS)
@@ -773,25 +731,22 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             log("Cancelled.")
             return
 
-        bent_plates = _collect_bent_plates(wb, log, params)
+        bent_plates = _collect_bent_plates(wb, log)
         log(f"Bent Plates DYPNs indexed: {len(bent_plates)}")
 
         # Which orders have more parts than the standard checklist can print?
         oversize: dict[int, tuple[str, int]] = {}
         if ws_big is not None:
-            oversize = _find_oversize_orders(wb, ws_kit, log, params)
+            oversize = _find_oversize_orders(wb, ws_kit, log)
             if oversize:
                 for idx, (order, count) in sorted(oversize.items()):
                     log(f"  Order {idx} ({order}) has {count} parts - more than "
                         f"the {STANDARD_CAPACITY}-row checklist; will print on "
                         f"'{LARGER_SHEET_NAME}'")
                     if count > LARGER_CAPACITY:
-                        sdk.flag_action(
-                            params,
-                            f"Order {order} has {count} parts but even "
-                            f"'{LARGER_SHEET_NAME}' only shows "
-                            f"{LARGER_CAPACITY}, so {count - LARGER_CAPACITY} "
-                            f"are cut off its page - list them by hand.")
+                        log(f"    WARNING: '{LARGER_SHEET_NAME}' only shows "
+                            f"{LARGER_CAPACITY} parts - {count - LARGER_CAPACITY} "
+                            "would still be cut off")
                         if hasattr(sdk, "set_run_outcome"):
                             sdk.set_run_outcome(
                                 params, sdk.RUN_OUTCOME_WARNING,
@@ -861,8 +816,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 ws_kit.PageSetup.PrintArea = original_print_area
 
             # Full kit export (with FORMED detection)
-            in_progress_edits = _apply_formed_edits(ws_kit, bent_plates, log,
-                                                   params)
+            in_progress_edits = _apply_formed_edits(ws_kit, bent_plates, log)
             try:
                 if in_progress_edits:
                     excel.CalculateFull()
@@ -898,12 +852,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                     ws_big.Visible = _XL_SHEET_VISIBLE
                 larger_pages = _render_oversize_pages(
                     excel, ws_big, oversize, bent_plates, pdf_dir,
-                    cancel_event, log, params)
+                    cancel_event, log)
             finally:
                 try:
                     ws_big.Visible = original_visible
                 except Exception as exc:
-                    log(f"  Could not restore '{LARGER_SHEET_NAME}' "
+                    log(f"  WARNING: could not restore '{LARGER_SHEET_NAME}' "
                         f"visibility: {exc}")
         progress_callback(88)
 
@@ -921,8 +875,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         log(f"Merging {len(pdf_paths)} full PDF(s) into {final_pdf.name}"
             + (f" ({len(larger_pages)} order(s) on the larger bin label)"
                if larger_pages else "") + "...")
-        _merge_kit_pages(pdf_paths, iterations, larger_pages, final_pdf, log,
-                         params)
+        _merge_kit_pages(pdf_paths, iterations, larger_pages, final_pdf, log)
         progress_callback(94)
 
         # Merge labels-only PDFs

@@ -125,8 +125,7 @@ def run_split(mod, tmp_path, qtdr):
              "qtdr_root": str(qtdr if qtdr_root is None else qtdr_root)},
             logs.append,
             date_range=(date(2026, 9, 1), date(2026, 9, 7)),
-            pdf_exporter=exporter,
-            params={"log": logs.append})
+            pdf_exporter=exporter)
         return result, out, exporter, logs
     return _run
 
@@ -150,7 +149,7 @@ def test_lookup_carries_invoice_and_ship_date_from_both_sheets(mod, tmp_path):
         active_rows=[("1000129724", 14, "S038", "P08348", datetime(2026, 9, 3), "55501")],
         complete_rows=[("1000129724", 11, "V094", "503891", datetime(2026, 8, 20), "55420"),
                        ("1000129724", 14, "S038", "P08348", datetime(2025, 1, 1), "OLD")])
-    m = mod._read_po_map(p, lambda *_: None, None, {"log": lambda *_: None})
+    m = mod._read_po_map(p, lambda *_: None, None)
     # v2.5.0: every line is kept, active sheet first - the picker chooses.
     assert m[("S038", "P08348")] == [
         mod.ForecastRow("1000129724", 14, "55501", datetime(2026, 9, 3)),
@@ -165,7 +164,7 @@ def test_lookup_without_the_column_warns_once_and_leaves_blank(mod, tmp_path):
         p, [("1000129724", 14, "S038", "P08348", datetime(2026, 9, 3), None)], [],
         with_inv=False)
     logs = []
-    m = mod._read_po_map(p, logs.append, None, {"log": logs.append})
+    m = mod._read_po_map(p, logs.append, None)
     row = m[("S038", "P08348")][0]
     assert row.invoice == "" and row.po == "1000129724"
     assert sum(mod.INV_HEADER in l for l in logs) == 2    # one warning per sheet
@@ -301,7 +300,7 @@ def test_two_subgroups_in_one_close_out_are_left_blank(mod):
 def test_forecast_subgroup_is_read_by_name(mod, tmp_path):
     p = tmp_path / "wf.xlsx"
     _forecast_workbook(p, [P1, P2], [])
-    m = mod._read_po_map(p, lambda *_: None, None, {"log": lambda *_: None})
+    m = mod._read_po_map(p, lambda *_: None, None)
     assert [r.subgroup for r in m[("S038", "P08348")]] == ["PARTIAL 1", "PARTIAL 2"]
 
 
@@ -527,11 +526,10 @@ def _hmap(ws):
     return {str(c.value).strip().upper(): c.column for c in ws[1] if c.value}
 
 
-def _run_closeouts(mod, ws, tmp_path, log=None, params=None):
+def _run_closeouts(mod, ws, tmp_path, log=None):
     name = mod._write_closeouts(
         ws, 1, _hmap(ws), [tuple(r) for r in ws.iter_rows(min_row=2)],
-        tmp_path, date(2026, 9, 18), log or (lambda *_: None),
-        params if params is not None else {"log": lambda *_: None})
+        tmp_path, date(2026, 9, 18), log or (lambda *_: None))
     return load_workbook(tmp_path / name).active, name
 
 
@@ -577,18 +575,13 @@ def test_close_outs_force_scheduling_group_to_closed(mod, tmp_path):
     assert [ws.cell(r, col).value for r in (2, 3)] == ["Closed", "Closed"]
 
 
-def test_a_missing_column_is_flagged_and_blanked_without_shifting_the_rest(mod, tmp_path):
-    """A column the source does not have leaves a blank on the Close Outs sheet,
-    so it is an action item (it pops), not a line that scrolls past."""
+def test_a_missing_column_warns_and_blanks_it_without_shifting_the_rest(mod, tmp_path):
     logged = []
-    params = {"log": logged.append}
-    ws, _ = _run_closeouts(mod, _master(drop="Notes"), tmp_path, logged.append,
-                           params)
+    ws, _ = _run_closeouts(mod, _master(drop="Notes"), tmp_path, logged.append)
     headers = [str(c.value).strip().upper() for c in ws[1] if c.value is not None]
     assert headers == [h.strip().upper() for h, _ in mod.CLOSEOUT_COLUMNS]  # still 21, in order
     col = headers.index("NOTES") + 1
     assert ws.cell(2, col).value is None
-    items = [i["item"] for i in mod.sdk.action_items(params)]
-    assert any("Notes" in i for i in items), items
+    assert any("Notes" in ln for ln in logged)
     # the column after it is still the right one, not shifted left
     assert str(ws.cell(1, col + 1).value).strip().upper() == "ASA SALES REP"

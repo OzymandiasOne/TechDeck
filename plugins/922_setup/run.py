@@ -688,7 +688,8 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
         _label_stage_problem(
             params,
             f"No {what}-label webhook is configured, so Batch {batch}'s "
-            f"cards were NOT given {what} labels (previewed only).")
+            f"cards were NOT given {what} labels (previewed only).",
+            popup=False)
         return False
 
     if dry_run:
@@ -707,7 +708,8 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
         _label_stage_problem(
             params,
             f"The {what}-label post failed - Batch {batch}'s cards were not "
-            f"given {what} labels. See the errors above.")
+            f"given {what} labels. See the errors above.",
+            popup=False)
         return False
 
     log(f"DONE. Requested {what} labels for {len(cards)} card(s) in Batch "
@@ -716,7 +718,8 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
         _label_stage_problem(
             params,
             f"{len(unlabelled)} order(s) have no {what} label on the Pallet "
-            f"Organizer sheet - their cards were left alone.")
+            f"Organizer sheet - their cards were left alone.",
+            popup=False)
     return True
 
 
@@ -732,20 +735,22 @@ def _build_label_payload(template: dict, batch: str, cards: list[dict]
     }
 
 
-def _label_stage_problem(params: dict, message: str) -> None:
+def _label_stage_problem(params: dict, message: str, popup: bool = True,
+                         title: str = "922 Setup - pallet labels") -> None:
     """Surface a stage problem without killing the rest of the run.
 
-    One action item, so the stage that was silently skipped reaches the user in
-    the dialog the executor raises as the run ends, and the run never finishes on
-    a bare green tick. Shared by the pallet-label, MPL, and card stages.
-
-    There is no quieter variant any more, and no per-stage title: a stage whose
-    work did not happen is an action item whatever caused it. The three cases that
-    used to pass ``popup=False`` (no webhook configured, the post failed, orders
-    with no label on the organizer) all end with cards that need labelling by
-    hand, which is exactly what the dialog is for.
+    A blocking popup for the causes the user can fix right now (no organizer,
+    nothing assigned, MPL unreadable), and a warning run outcome always - so
+    the run never ends on a bare green tick when something was silently
+    skipped. Shared by the pallet-label, MPL, and card stages.
     """
-    sdk.flag_action(params, message)
+    log = params.get("log", print)
+    log("")
+    log(f"WARNING: {message}")
+    if popup:
+        sdk.show_warning(params, title, message)
+    if hasattr(sdk, "set_run_outcome"):
+        sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING, message)
 
 
 def _pick_batch_folder(params: dict, cancel_event):
@@ -890,13 +895,13 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
             "stage was unchecked or failed), so these cards are going up "
             "WITHOUT repeat tags. Run the Batch Repeater's 'Label REPEAT "
             "cards in Teams' pass later to tag and move any repeats.",
-            )
+            title="922 Setup - repeat cards")
         repeat_folders = set()
     repeat_slot = label_map.get(_norm_label("REPEAT"))
     if not repeat_slot:
         repeat_slot = "category19"
         if repeat_folders:
-            log("  No REPEAT entry in card_template.json's label_map - "
+            log("WARNING: no REPEAT entry in card_template.json's label_map - "
                 "assuming category19 (Teal).")
 
     cards = _build_cards(template, batch, folders, folder_labels,
@@ -924,10 +929,12 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         log("  (no progress_card block in card_template.json - "
             "no BATCH PROGRESS card this run)")
 
-    # One item per label warning: each is its own thing to go and fix on the
-    # Pallet Organizer, so they read as a list in the ending dialog.
-    for w in warnings:
-        sdk.flag_action(params, w)
+    if warnings:
+        log("\nLabel warnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "922 Setup - label warnings",
+                         "\n\n".join(warnings))
     progress_callback(60)
 
     if cancel_event.is_set():
@@ -1153,8 +1160,12 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
                         + " - drop them in the batch's 'Work Packets' folder "
                         "and run again.")
 
-    for w in warnings:
-        sdk.flag_action(params, w)
+    if warnings:
+        log("\nFolder setup warnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "922 Setup - folder setup warnings",
+                         "\n\n".join(warnings))
     progress_callback(100)
     log(f"Batch Folder Setup DONE - {len(pairs)} order folder(s) ready.")
     return True
@@ -1192,6 +1203,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
     so the remaining stages still run.
     """
     log = params.get("log", print)
+    title = "922 Setup - MPL + repeats"
     state = shared_state.setdefault("922", {})
     state["mpl_update_done"] = False
 
@@ -1207,7 +1219,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
             "The 922 Batch Repeater plugin could not be loaded, so the MPL "
             "was not updated and repeats were not detected. Cards will go up "
             "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
-            "later.")
+            "later.", title=title)
         return False
 
     # The MPL lives where the Repeater says it does — its settings, its
@@ -1225,7 +1237,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
             f"The MPL workbook was not found at '{spreadsheet_path}', so it "
             "was not updated and repeats were not detected. Cards will go up "
             "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
-            "later.")
+            "later.", title=title)
         return False
     progress_callback(10)
 
@@ -1254,7 +1266,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
             "No order folders were found in the batch, so repeats could not "
             "be detected (did Batch Folder Setup run?). Cards will go up "
             "untagged - run the Batch Repeater's 'Label REPEAT cards' pass "
-            "later.")
+            "later.", title=title)
         return False
     try:
         df, po_columns = rep._read_mpl_po_columns(
@@ -1264,7 +1276,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
             params,
             f"Could not read the MPL's PO sheet ({exc}), so repeats were not "
             "detected. Cards will go up untagged - run the Batch Repeater's "
-            "'Label REPEAT cards' pass later.")
+            "'Label REPEAT cards' pass later.", title=title)
         return False
     repeat_orders = rep.find_repeat_orders(df, po_columns, int(batch), ppns)
     progress_callback(85)
@@ -1519,11 +1531,8 @@ def run(params: dict, progress_callback, cancel_event):
         if done:
             stages_done += 1
         elif len(enabled) > 1:
-            sdk.flag_action(
-                params,
-                f"Generate Teams Cards did not finish, so Batch {batch}'s cards "
-                f"are not all up - the other stages still ran.",
-                "the console above says what stopped it")
+            log("\nWARNING: Generate Teams Cards did not complete (see above). "
+                "Continuing with the remaining stages.")
         progress_callback(hi)
 
     # --- Stage 1b: Apply labels to existing cards ---------------------------

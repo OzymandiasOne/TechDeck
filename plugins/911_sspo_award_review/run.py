@@ -1242,7 +1242,7 @@ def find_batch_list(cui_folder: Path, log=None) -> Optional[Path]:
         return None
     deep.sort(key=lambda f: (len(f.parts), str(f).upper()))
     if len(deep) > 1 and log:
-        log(f"  {len(deep)} BATCH LIST workbooks found under "
+        log(f"  WARNING: {len(deep)} BATCH LIST workbooks found under "
             f"'{cui_folder.name}' - it looks like a wrapper of several "
             f"batches, not one order. Using {deep[0].name}; check the ROOT "
             f"you selected.")
@@ -2035,14 +2035,14 @@ def run(params: dict, progress_callback, cancel_event):
         batch_list = find_batch_list(cui, log=log) if cui else None
 
         if batch_list is None:
-            log(f"  No BATCH LIST workbook found for {order} -- skipping.")
+            log(f"  WARNING: No BATCH LIST workbook found for {order} -- skipping.")
             flags_summary.append(f"{order}: no batch list")
             continue
         log(f"  Batch list: {batch_list.name}")
         if pdf_folder:
             log(f"  PDF folder: {pdf_folder.name}")
         else:
-            log(f"  No PDF folder with packets found for {order}.")
+            log(f"  WARNING: No PDF folder with packets found for {order}.")
 
         # Exact per-part cut length from the order's IGES DXFs, keyed by work
         # order (matches the batch list's 'Work Order' column). Absent for
@@ -2055,8 +2055,7 @@ def run(params: dict, progress_callback, cancel_event):
 
         headers, rows = load_batch_rows(batch_list)
         if not rows:
-            log(f"  No data rows in {batch_list.name}.")
-            flags_summary.append(f"{order}: no data rows in {batch_list.name}")
+            log(f"  WARNING: No data rows in {batch_list.name}.")
             continue
         for h in headers:
             if h.upper() not in header_seen:
@@ -2086,8 +2085,7 @@ def run(params: dict, progress_callback, cancel_event):
                 nest_pdf_data[ns] = parse_nest_pdf(pdf)
             except Exception as e:
                 nest_pdf_data[ns] = None
-                log(f"  Could not parse {pdf.name}: {e}")
-                flags_summary.append(f"{order}/{ns}: {pdf.name} unreadable")
+                log(f"  WARNING: could not parse {pdf.name}: {e}")
 
         # Flag PDFs present but not referenced by the batch list.
         if pdf_folder:
@@ -2421,14 +2419,6 @@ def run(params: dict, progress_callback, cancel_event):
             log(f"    - {f}")
         if len(flags_summary) > 25:
             log(f"    ... and {len(flags_summary) - 25} more")
-        shown = list(flags_summary[:25])
-        if len(flags_summary) > 25:
-            shown.append(f"...and {len(flags_summary) - 25} more")
-        sdk.flag_action(
-            params,
-            f"{len(flags_summary)} thing(s) in this award need a look before the "
-            f"review goes out.",
-            "; ".join(shown))
     log("=" * 60)
 
 

@@ -43,7 +43,7 @@ def _load_omit_stamp_helpers(log):
     try:
         _omit_stamps = sdk.load_sibling("911_remove_ticket", __file__)
     except Exception as e:
-        log(f"  911 Remove Ticket helpers unavailable ({e}) - the "
+        log(f"  WARNING: 911 Remove Ticket helpers unavailable ({e}) - the "
             f"schedule's difficulty colours cannot be read.")
         _omit_stamps = False
     return _omit_stamps or None
@@ -780,9 +780,7 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
     rows, problem = _read_schedule_rows(params, template, log, cancel_event)
     if problem:
         log(f"ERROR: {problem}")
-        sdk.flag_action(
-            params,
-            f"No Teams cards were created at all - {problem}")
+        sdk.show_warning(params, "911 Teams Cards - nothing created", problem)
         return False
     if not rows:
         log(f"No rows on '{_SCHED_SHEET}' are DEPT. "
@@ -822,7 +820,10 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
     if not rows:
         log("Every queued nest was skipped - nothing to card.")
         for w in warnings:
-            sdk.flag_action(params, w)
+            log(f"  ! {w}")
+        if warnings:
+            sdk.show_warning(params, "911 Teams Cards - warnings",
+                             "\n\n".join(warnings))
         _pct(1.0)
         return True
 
@@ -914,8 +915,12 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
     if not cards:
         log("\nNothing new to card - every queued nest either has no source "
             "material yet or already has its card.")
-        for w in warnings:
-            sdk.flag_action(params, w)
+        if warnings:
+            log("\nWarnings:")
+            for w in warnings:
+                log(f"  ! {w}")
+            sdk.show_warning(params, "911 Teams Cards - warnings",
+                             "\n\n".join(warnings))
         _pct(1.0)
         return True
 
@@ -955,8 +960,12 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         prog = "" if "Program" in card["checklist"] else "  (no Program)"
         log(f"  - {card['title']}   [{bits}]  due {due}{prog}")
 
-    for w in warnings:
-        sdk.flag_action(params, w)
+    if warnings:
+        log("\nWarnings:")
+        for w in warnings:
+            log(f"  ! {w}")
+        sdk.show_warning(params, "911 Teams Cards - warnings",
+                         "\n\n".join(warnings))
     _pct(0.8)
     if cancel_event.is_set():
         return False

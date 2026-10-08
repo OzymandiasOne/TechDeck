@@ -287,7 +287,7 @@ def _material_label(serial: Optional[str], serial_desc: Dict[str, str]) -> str:
 
 
 def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
-             batch_path: Path, log, params: dict) -> Tuple[List[Pulled], Dict[str, Tuple], Dict[str, str]]:
+             batch_path: Path, log) -> Tuple[List[Pulled], Dict[str, Tuple], Dict[str, str]]:
     """Resolve every gathered file to a material. Returns (pulled, expected_tubes,
     serial_desc) where expected_tubes maps PO DYPN -> (order, serial, class) for
     every tube in the master PO (the target list)."""
@@ -316,12 +316,7 @@ def _resolve(files: List[Tuple[str, Path]], master_map, serial_desc,
                     try:
                         omap, odesc = _read_po(po, log)
                     except Exception as e:
-                        sdk.flag_action(
-                            params,
-                            f"Order {order_name}'s own PO ({po.name}) could not "
-                            f"be read, so its parts were matched against the "
-                            f"master PO alone - check that order's filing.",
-                            str(e))
+                        log(f"  WARNING: could not read order PO {po.name}: {e}")
                 order_cache[order_name] = omap
                 for k, v in odesc.items():
                     serial_desc.setdefault(k, v)
@@ -613,7 +608,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
     # ── Phase 3: resolve ──
     log("Matching files to materials...")
     pulled, expected, serial_desc = _resolve(
-        gathered, master_map, serial_desc, batch_path, log, params)
+        gathered, master_map, serial_desc, batch_path, log)
     resolved = [p for p in pulled if p.resolved]
     review = [p for p in pulled if not p.resolved]
     progress_callback(75)
@@ -629,11 +624,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
                 _retry(shutil.move, sdk.long_path(p.src),
                        sdk.long_path(_unique(target_dir / p.src.name)))
             except Exception as e:
-                sdk.flag_action(
-                    params,
-                    f"{p.src.name} could not be moved into its material folder "
-                    f"- file it by hand.",
-                    str(e))
+                log(f"  WARNING: could not file {p.src.name}: {e}")
     progress_callback(88)
 
     # ── Phase 5: report ──
@@ -645,11 +636,7 @@ def run(params: dict, progress_callback, cancel_event) -> None:
                       serial_desc)
         report_ok = True
     except Exception as e:
-        sdk.flag_action(
-            params,
-            f"The LST report for Batch {batch_no} could not be written - the "
-            f"files were still filed, but there is no report to hand on.",
-            str(e))
+        log(f"WARNING: could not write report: {e}")
     progress_callback(95)
 
     # ── console summary ──
@@ -678,31 +665,22 @@ def run(params: dict, progress_callback, cancel_event) -> None:
         for p in by_letter:
             log(f"  - PO {p.part}  <-  {p.src.name}")
 
-    # Each of the three is its own action item, so the ending dialog the
-    # executor raises reads as a list of jobs rather than one wall of text.
-    if missing:
-        shown = [f"{d} - {_material_label(expected[d][1], serial_desc)}"
-                 for d in sorted(missing)[:12]]
-        if len(missing) > 12:
-            shown.append(f"...and {len(missing) - 12} more")
-        sdk.flag_action(
-            params,
-            f"{len(missing)} standard tube(s) have no .lst file in Batch "
-            f"{batch_no} - go and cut them, or check the PO line is right.",
-            "; ".join(shown))
-    if review:
-        sdk.flag_action(
-            params,
-            f"{len(review)} file(s) could not be filed and are waiting in "
-            f"'{NEEDS_REVIEW_FOLDER}' - look at each one and file it by hand.",
-            "; ".join(f"{p.src.name}: {p.reason}" for p in review[:12]))
-    if extra:
-        sdk.flag_action(
-            params,
-            f"{len(extra)} file(s) were filed but are NOT on Batch {batch_no}'s "
-            f"PO - check whether the PO is missing a line.",
-            "; ".join(f"{p.src.name} [{_order_num(p.order)}] = {p.part}"
-                      for p in extra[:12]))
+    if missing or review or extra:
+        lines = []
+        if missing:
+            lines.append(f"{len(missing)} standard tube(s) missing:")
+            lines += [f"  - {d}  -  {_material_label(expected[d][1], serial_desc)}"
+                      for d in sorted(missing)[:12]]
+            if len(missing) > 12:
+                lines.append(f"  ...and {len(missing) - 12} more")
+        if review:
+            lines.append(f"\n{len(review)} file(s) need review (moved to '{NEEDS_REVIEW_FOLDER}'):")
+            lines += [f"  - {p.src.name}: {p.reason}" for p in review[:12]]
+        if extra:
+            lines.append(f"\n{len(extra)} extra file(s) filed but NOT in the batch PO "
+                         "(verify the PO isn't missing a line):")
+            lines += [f"  - {p.src.name}  [{_order_num(p.order)}]  = {p.part}" for p in extra[:12]]
+        sdk.show_warning(params, f"922 LST - Batch {batch_no}", "\n".join(lines))
 
     # The run ends on a clickable line that opens the report (v3.3.2).
     if report_ok:

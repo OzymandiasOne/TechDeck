@@ -1568,12 +1568,7 @@ def _log_offset_stats(log, src, dest, stats, edge_offset):
     for f in stats.get("failed", []):
         log(f"    FAILED (left unchanged): {f}")
     for m in stats.get("below_min", []):
-        # Not an sdk.flag_action item: this is a GUI plugin whose window keeps
-        # working long after run() returns, and the executor raises the ending
-        # action-item dialog at that return - anything flagged later would never
-        # be shown. The finding belongs in this window's own log, where the user
-        # is looking while they work.
-        log(f"    BELOW MINIMUM: an interior feature measures {m:.4f}\" - under "
+        log(f"    WARNING: an interior feature measures {m:.4f}\" - below "
             f"the customer's 1/2-thickness minimum.")
     for w in stats["warnings"]:
         log(f"    NOTE: {w}")

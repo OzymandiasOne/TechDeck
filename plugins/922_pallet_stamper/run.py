@@ -313,7 +313,6 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     stamped_count = 0
     skipped_count = 0
     unstamped_count = 0   # stray stamps taken back off non-packets
-    no_pallet: list[str] = []   # orders the Pallet Organizer never assigned
     no_packet_but_pdfs: list = []  # (order, pallet, [unidentified pdfs])
     failures: list = []  # (order_no, pallet_no, pdf_path) - retried after the main pass
 
@@ -323,7 +322,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     for idx, sub in enumerate(subfolders):
         if cancel_event.is_set():
             log("")
-            log("Cancelled by user")
+            log("WARNING: Cancelled by user")
             log(f"Stamped {stamped_count} of {idx}")
             return
 
@@ -336,8 +335,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         pallet_no = order_to_pallet.get(order_no)
 
         if pallet_no is None:
-            no_pallet.append(order_no)
-            log(f"  No pallet assignment for order {order_no}")
+            log(f"WARNING: No pallet assignment for order {order_no}")
             skipped_count += 1
             continue
 
@@ -353,7 +351,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         unstamped_count += unstamp_non_packets(others, packet is not None, log)
 
         if packet is None:
-            log(f"  No work-packet PDF found in {sub.name}")
+            log(f"WARNING: No work-packet PDF found in {sub.name}")
             skipped_count += 1
             # A folder of drawings genuinely has no packet - routine. A folder
             # holding PDFs we could not identify is a different story: the
@@ -425,33 +423,31 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
     progress_callback(100)
 
     # An order we could not stamp AND an order where we could not tell which
-    # PDF was the packet both end with an unstamped packet on the floor, so both
-    # are action items - the executor pops them as the run ends, because a line
-    # in the console scrolls away and these must not.
-    if no_pallet:
-        sdk.flag_action(
-            params,
-            f"{len(no_pallet)} order(s) have no pallet on the Pallet Organizer, "
-            f"so their packets went out unstamped - assign them and run this "
-            f"again.",
-            ", ".join(no_pallet))
-    if error_count > 0:
-        sdk.flag_action(
-            params,
-            f"{error_count} PDF(s) could not be stamped, even after a retry - "
-            f"stamp them by hand.",
-            "; ".join(f"{order_no} -> Pallet {pallet_no} ({pdf_path})"
-                      for order_no, pallet_no, pdf_path in failures))
-    if no_packet_but_pdfs:
-        sdk.flag_action(
-            params,
-            f"{len(no_packet_but_pdfs)} order folder(s) hold PDFs but none of "
-            f"them looks like a work packet, so nothing was stamped there - "
-            f"check them by hand.",
-            "; ".join(f"{order_no} -> Pallet {pallet_no} ({', '.join(names)})"
-                      for order_no, pallet_no, names in no_packet_but_pdfs))
-
-    if not sdk.action_items(params):
+    # PDF was the packet both end with an unstamped packet on the floor. Both
+    # get the same blocking warning, because a line in the console scrolls
+    # away and this one must not.
+    if error_count > 0 or no_packet_but_pdfs:
+        parts = []
+        if error_count > 0:
+            detail = "\n".join(
+                f"  {order_no}  ->  Pallet {pallet_no}\n      {pdf_path}"
+                for order_no, pallet_no, pdf_path in failures)
+            parts.append(
+                f"{error_count} PDF(s) could not be stamped (even after a "
+                f"retry). Stamp these by hand:\n\n{detail}")
+        if no_packet_but_pdfs:
+            detail = "\n".join(
+                f"  {order_no}  ->  Pallet {pallet_no}\n      "
+                + ", ".join(names)
+                for order_no, pallet_no, names in no_packet_but_pdfs)
+            parts.append(
+                f"{len(no_packet_but_pdfs)} order folder(s) hold PDFs but "
+                f"none of them looks like a work packet, so nothing was "
+                f"stamped there. Check these by hand:\n\n{detail}")
+        sdk.show_warning(
+            params, "Pallet Stamper - stamps missing", "\n\n".join(parts))
+        log("WARNING: Completed with errors")
+    else:
         log("All done successfully!")
 
 

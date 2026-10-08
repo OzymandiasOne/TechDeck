@@ -236,47 +236,14 @@ class PluginExecutor:
     def _run_outcome_from(plugin_params: dict):
         """The (status, message) a plugin reported via sdk.set_run_outcome, or
         (None, "") if it reported nothing / junk. Only 'warning'/'partial' are
-        honoured — any other value collapses to a clean success.
-
-        An unanswered action item (sdk.flag_action) is itself a warning: a run
-        that needs the user to go and fix something by hand did not finish
-        clean, so it never reports a blank ✅. An explicit set_run_outcome still
-        wins — the plugin knows more about its own run than the count does."""
-        from techdeck.core import plugin_sdk as sdk
-
+        honoured — any other value collapses to a clean success."""
         raw = plugin_params.get("run_outcome")
-        if isinstance(raw, dict):
-            status = str(raw.get("status", "")).strip().lower()
-            if status in ("warning", "partial"):
-                return status, str(raw.get("message", "") or "")
-        items = sdk.action_items(plugin_params)
-        if items:
-            # Count JOBS, not flag_action calls, so the ⚠ line and the dialog's
-            # own title never disagree about how much there is to do.
-            n = len(sdk._grouped_action_items(items))
-            phrase = ("1 thing needs your attention" if n == 1
-                      else f"{n} things need your attention")
-            return sdk.RUN_OUTCOME_WARNING, phrase
-        return None, ""
-
-    @staticmethod
-    def _show_action_items(plugin_params: dict, plugin_name: str, safe_log) -> None:
-        """Raise the ONE ending dialog listing every sdk.flag_action item.
-
-        Runs on the plugin's worker thread, which is what console.show_warning
-        requires, and only after the plugin returned — a 15-minute unattended
-        run must never stop mid-way waiting on a human. Never raises: a dialog
-        that fails must not turn finished work into a failed run."""
-        from techdeck.core import plugin_sdk as sdk
-
-        try:
-            items = sdk.action_items(plugin_params)
-            if not items:
-                return
-            title, body = sdk.format_action_items(items, plugin_name)
-            sdk.show_warning(plugin_params, title, body)
-        except Exception as exc:
-            safe_log(f"Could not show the action-item dialog: {exc}")
+        if not isinstance(raw, dict):
+            return None, ""
+        status = str(raw.get("status", "")).strip().lower()
+        if status not in ("warning", "partial"):
+            return None, ""
+        return status, str(raw.get("message", "") or "")
     
     def execute_plugin(
         self,
@@ -711,20 +678,6 @@ class PluginExecutor:
                     "WARNING" if outcome_status is not None else "OK",
                     plugin_id, execution_time, run_token,
                 )
-                # Action items (sdk.flag_action) are shown HERE, not by the
-                # plugin: one blocking dialog listing everything the user must do
-                # by hand. Making it the executor's job is the point — every app
-                # used to hand-roll its own ending popup, so whether a problem
-                # reached the user depended on which app found it (Batch 499's
-                # unmatched formed part only ever reached the console, and the
-                # kitting paperwork shipped without its FORMED tag).
-                #
-                # AFTER progress hits 100, so the run reads as finished behind the
-                # dialog instead of looking stuck at 85% while a modal waits — but
-                # still before completion_callback, which is what starts the next
-                # queued plugin, and on this worker thread, which is what
-                # console.show_warning requires.
-                self._show_action_items(plugin_params, plugin.name, safe_log)
                 try:
                     from techdeck.core.usage_tracker import record_run
                     record_run(plugin_id, plugin.name,
