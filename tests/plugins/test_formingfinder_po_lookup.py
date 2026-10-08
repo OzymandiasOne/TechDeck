@@ -413,7 +413,9 @@ def test_ppn_is_the_dypn_minus_its_last_segment(ff):
     assert ff.sdk.split_dypn("H7658162-H3DR-2")[0] == "H7658162-H3DR"
 
 
-def test_the_orders_own_po_resolves_the_source_material(ff, tmp_path):
+def test_the_master_po_resolves_the_source_material(ff, tmp_path):
+    """The master PO is the authority - it is what the user maintains and what
+    every other app reads."""
     batch = _batch_tree(tmp_path, _B499_ORDER_PO)
     row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
                                    _as_po_rows(_B499_MASTER_PO), {}, {},
@@ -421,7 +423,19 @@ def test_the_orders_own_po_resolves_the_source_material(ff, tmp_path):
     assert row is not None, "the bar's source material is findable"
     assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
     assert "H6512163-H17-1" in note and "not a tube" in note
-    assert "order FK411600's own PO" in note
+    assert "the batch PO" in note
+
+
+def test_a_stale_order_folder_copy_gives_the_same_answer(ff, tmp_path):
+    """The order folder's workbook holds the WHOLE batch PO as it stood when the
+    folder was built, so an older one carries rows the master has had corrected
+    out. The non-tube filter makes that harmless: the numbering only ever shifts
+    on the rows being discarded, so both copies leave the same one row."""
+    batch = _batch_tree(tmp_path, _B499_ORDER_PO)        # the stale -3A/-3B copy
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
+                                   [], {}, {}, lambda *a: None)
+    assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
+    assert "order FK411600's folder" in note
 
 
 def test_a_tube_serial_can_never_be_the_formed_part(ff, tmp_path):
@@ -434,13 +448,16 @@ def test_a_tube_serial_can_never_be_the_formed_part(ff, tmp_path):
     assert ff._row_kind({"SOURCE MATERIAL": "262028652-A231"}, {}) != "tube"
 
 
-def test_the_master_po_is_the_fallback_when_the_order_has_no_workbook(ff, tmp_path):
-    (tmp_path / "FK411600-H6512163-H17").mkdir(parents=True)   # no .xlsx in it
-    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", tmp_path,
+def test_the_order_folder_is_only_read_when_the_master_has_no_rows(ff, tmp_path):
+    """A stale copy must never override the master - it is a last resort."""
+    batch = _batch_tree(tmp_path, [
+        ["FK411600", "H6512163-H17", "H6512163-H17-9", "WRONG-9", ""],
+    ])
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
                                    _as_po_rows(_B499_MASTER_PO), {}, {},
                                    lambda *a: None)
     assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
-    assert "the batch PO" in note
+    assert "the batch PO" in note, "the master won, not the folder copy"
 
 
 def test_two_formable_rows_is_a_coin_flip_so_it_refuses(ff, tmp_path):

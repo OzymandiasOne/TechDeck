@@ -350,38 +350,42 @@ def _resolve_by_ppn(dypn: str, order: str, batch_path: Path, master_rows: list,
     PPN is the part of the name both sides always agree on (DYPN minus its last
     segment, true on 173 of 173 rows of Batch 499's PO), so fall back to it:
 
-      * the ORDER's own PO workbook first - it is per-order and current, where
-        the batch master PO is a snapshot that goes stale (Batch 499's master had
-        FL332457's tubes as -3/-4 against the order's own -4/-5);
-      * then the master PO, for a part whose order folder has no workbook.
+      * the BATCH master PO first. It is the authority - it is the file the user
+        maintains and the one every other app reads.
+      * then the order folder's own workbook, only when the master has no row for
+        that PPN at all. Those copies are NOT per-order POs: each one holds the
+        whole batch PO as it stood when the order folder was built, so an older
+        one carries rows the master has since had corrected out of it (Batch
+        499's `H7931062-H13.xlsx` still lists an `H7931062-H3-3` that was deleted
+        from the master on purpose). Useful as a last resort, never an override.
 
     Then drop every row that cannot BE a formed part - a tube or a rod - and
-    accept the answer only if exactly ONE row is left. Batch 499's
-    H6512163-H17 leaves just '-1' (262028652-A231) once its two 218002191 tube
-    rows go, which is the right source material. Two left is a coin flip, and a
-    coin flip here puts FORMED on the wrong kit row, so that returns no row and
-    the caller raises it for the user instead.
+    accept the answer only if exactly ONE row is left. That filter is what makes
+    the staleness harmless here: Batch 499's H6512163-H17 leaves just '-1'
+    (262028652-A231) in BOTH copies once the two 218002191 tube rows go, because
+    the numbering only ever shifts on the rows being discarded. Two rows left is
+    a coin flip, and a coin flip here puts FORMED on the wrong kit row, so that
+    returns no row and the caller raises it for the user instead.
     """
     ppn = sdk.split_dypn(dypn)[0]
     if not ppn:
         return None, ""
 
-    rows, where = [], ""
-    if order:
+    rows = [r for r in master_rows if sdk.split_dypn(r['DYPN'])[0] == ppn]
+    where = "the batch PO"
+    if not rows and order:
         if order not in order_cache:
             od = _order_dir(batch_path, order)
             po = _find_order_po(od) if od else None
             order_cache[order] = _read_po_sheet(po, log) if po else ([], {})
             if po:
-                log(f"  read order {order}'s own PO: {po.name}")
+                log(f"  the batch PO has no {ppn} rows; read {po.name} from "
+                    f"order {order}'s folder")
         own_rows, own_descs = order_cache[order]
         rows = [r for r in own_rows if sdk.split_dypn(r['DYPN'])[0] == ppn]
         if rows:
-            where = f"order {order}'s own PO"
+            where = f"the PO copy in order {order}'s folder"
             descs = {**descs, **own_descs}
-    if not rows:
-        rows = [r for r in master_rows if sdk.split_dypn(r['DYPN'])[0] == ppn]
-        where = "the batch PO"
     if not rows:
         return None, ""
 
