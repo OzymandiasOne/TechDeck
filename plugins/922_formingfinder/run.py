@@ -229,7 +229,177 @@ def _load_material_descs(wb, log) -> dict[str, str]:
     return out
 
 
-def _load_po_lookup(po_path: Path, log) -> dict:
+def _read_po_sheet(po_path: Path, log) -> tuple[list[dict], dict]:
+    """(rows, serial -> description) off a QF-QU-09-shaped 'PO' sheet.
+
+    Shared by the BATCH master PO and an ORDER's own PO workbook, which carry the
+    same sheet in the same shape - and which can DISAGREE: Batch 499's master PO
+    numbered order FL332457's tubes -3/-4 while the order's own PO, the organizer,
+    the CAD folders and the .lst files all said -4/-5. Reading both through one
+    function is what lets the caller prefer the order's copy.
+
+    Returns ([], {}) with a log line when the sheet or its header row is missing -
+    never raises, because a readable-but-odd PO must not sink the run.
+    """
+    # Resilient load: on a fresh Files-On-Demand sync the PO workbook can be a
+    # cloud-only placeholder - a plain load_workbook dies in zipfile with
+    # OSError [Errno 22] even though the file exists (bit NRAPINI-LT, Batch 481).
+    wb = sdk.load_workbook_resilient(po_path, log=log, data_only=True)
+    try:
+        if 'PO' not in wb.sheetnames:
+            log(f"  {po_path.name}: no 'PO' sheet.")
+            return [], {}
+        ws = wb['PO']
+
+        # Locate the header row by scanning for cells named ORDER + DYPN.
+        header_row, headers = None, {}
+        for r in range(1, min(ws.max_row, 30) + 1):
+            row_map = {v.strip().upper(): c
+                       for c in range(1, ws.max_column + 1)
+                       for v in (ws.cell(row=r, column=c).value,)
+                       if isinstance(v, str)}
+            if 'DYPN' in row_map and 'ORDER' in row_map:
+                header_row, headers = r, row_map
+                break
+        if header_row is None:
+            log(f"  {po_path.name}: could not locate the header row.")
+            return [], {}
+
+        missing = [h for h in ('ORDER', 'PPN', 'DYPN', 'NOTES', 'SOURCE MATERIAL')
+                   if h not in headers]
+        if missing:
+            log(f"  {po_path.name}: missing header columns: {missing}")
+
+        def cell_val(r: int, name: str):
+            col = headers.get(name)
+            return None if col is None else ws.cell(row=r, column=col).value
+
+        rows = []
+        for r in range(header_row + 1, ws.max_row + 1):
+            dypn = cell_val(r, 'DYPN')
+            if not dypn:
+                continue
+            rows.append({
+                'ORDER': cell_val(r, 'ORDER'),
+                'PPN': cell_val(r, 'PPN'),
+                'DYPN': str(dypn).strip(),
+                'NOTES': cell_val(r, 'NOTES'),
+                'SOURCE MATERIAL': cell_val(r, 'SOURCE MATERIAL'),
+            })
+        return rows, _load_material_descs(wb, log)
+    finally:
+        wb.close()
+
+
+def _serial(value) -> str:
+    """A SOURCE MATERIAL cell as the text the serial sets are keyed by. openpyxl
+    hands back a numeric serial as int or float, and '218002191.0' matches
+    nothing."""
+    if value in (None, ''):
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    return str(value).strip()
+
+
+def _row_kind(row: dict, descs: dict) -> str:
+    """'plate' / 'bar' / 'rod' / 'tube' / 'unknown' for one PO row.
+
+    The SERIAL decides a tube, not the description: a formed plate or flat bar is
+    never cut from tube stock, and the serial sets are already the single source
+    of truth (sdk.ALL_TUBE_MATERIALS, shared with 922 LST Organizer and Batch
+    Auditor). That matters because a PO workbook need not carry a SOURCE MATERIAL
+    sheet at all - Batch 499's has an empty BOM, so every description is '' and
+    the description-based test can only answer 'unknown'.
+    """
+    serial = _serial(row.get('SOURCE MATERIAL'))
+    if not serial:
+        return "unknown"
+    if serial in sdk.ALL_TUBE_MATERIALS:
+        return "tube"
+    return _material_kind(descs.get(serial.casefold(), ""))
+
+
+def _order_dir(batch_path: Path, order: str) -> Optional[Path]:
+    """The batch's top-level folder for `order`, or None. Folders are named
+    '{ORDER}-{PPN}' (FK411600-H6512163-H17), so the order number is the part
+    before the first hyphen - the same convention _order_for_pdf reads."""
+    want = str(order).strip().casefold()
+    if not want:
+        return None
+    for d in sorted(p for p in batch_path.iterdir() if sdk.is_dir(p)):
+        if d.name.split('-', 1)[0].strip().casefold() == want:
+            return d
+    return None
+
+
+def _find_order_po(order_dir: Path) -> Optional[Path]:
+    """The order folder's own PO workbook, or None. Named after the part number
+    ('H6512163-H17.xlsx'), so take the one .xlsx at the top of the folder."""
+    matches = [p for p in order_dir.glob("*.xlsx") if not p.name.startswith("~")]
+    return sorted(matches)[0] if matches else None
+
+
+def _resolve_by_ppn(dypn: str, order: str, batch_path: Path, master_rows: list,
+                    descs: dict, order_cache: dict, log) -> tuple:
+    """(row, note) for a formed part whose exact (order, DYPN) is not on the PO.
+
+    The drawing's item number and the PO's can disagree - Batch 499's CAD named
+    the formed bar 'H6512163-H17-2 BAR.pdf' while every PO called the same piece
+    '-1', because the master PO's tube items sat one number behind the CAD. The
+    PPN is the part of the name both sides always agree on (DYPN minus its last
+    segment, true on 173 of 173 rows of Batch 499's PO), so fall back to it:
+
+      * the ORDER's own PO workbook first - it is per-order and current, where
+        the batch master PO is a snapshot that goes stale (Batch 499's master had
+        FL332457's tubes as -3/-4 against the order's own -4/-5);
+      * then the master PO, for a part whose order folder has no workbook.
+
+    Then drop every row that cannot BE a formed part - a tube or a rod - and
+    accept the answer only if exactly ONE row is left. Batch 499's
+    H6512163-H17 leaves just '-1' (262028652-A231) once its two 218002191 tube
+    rows go, which is the right source material. Two left is a coin flip, and a
+    coin flip here puts FORMED on the wrong kit row, so that returns no row and
+    the caller raises it for the user instead.
+    """
+    ppn = sdk.split_dypn(dypn)[0]
+    if not ppn:
+        return None, ""
+
+    rows, where = [], ""
+    if order:
+        if order not in order_cache:
+            od = _order_dir(batch_path, order)
+            po = _find_order_po(od) if od else None
+            order_cache[order] = _read_po_sheet(po, log) if po else ([], {})
+            if po:
+                log(f"  read order {order}'s own PO: {po.name}")
+        own_rows, own_descs = order_cache[order]
+        rows = [r for r in own_rows if sdk.split_dypn(r['DYPN'])[0] == ppn]
+        if rows:
+            where = f"order {order}'s own PO"
+            descs = {**descs, **own_descs}
+    if not rows:
+        rows = [r for r in master_rows if sdk.split_dypn(r['DYPN'])[0] == ppn]
+        where = "the batch PO"
+    if not rows:
+        return None, ""
+
+    formable = [r for r in rows if _row_kind(r, descs) not in ("tube", "rod")]
+    if len(formable) != 1:
+        return None, ""
+    chosen = dict(formable[0])
+    dropped = ", ".join(f"{r['DYPN']} ({_serial(r['SOURCE MATERIAL'])})"
+                        for r in rows if r is not formable[0])
+    return chosen, (
+        f"{dypn} is not on the PO under that number; {where} lists this piece as "
+        f"{chosen['DYPN']}, the only one of PPN {ppn}'s rows that is not a tube "
+        f"or a rod"
+        + (f" (ignored {dropped})" if dropped else "")
+        + f" - using SOURCE MATERIAL {_serial(chosen['SOURCE MATERIAL'])}")
+
+
+def _load_po_lookup(po_path: Path, log, po_rows=None, descs=None) -> dict:
     """Return {(order_casefold, dypn_casefold): row metadata} for Bent Plates.
 
     Keyed by ORDER *and* DYPN because one batch can run the same part for two
@@ -248,72 +418,23 @@ def _load_po_lookup(po_path: Path, log) -> dict:
          Kitting 485 pages 30/35 (2026-08-05);
       3. anything not rod-like; else the first row, each with a warning.
     """
-    # Resilient load: on a fresh Files-On-Demand sync the PO workbook can be a
-    # cloud-only placeholder — a plain load_workbook dies in zipfile with
-    # OSError [Errno 22] even though the file exists (bit NRAPINI-LT, Batch 481).
-    wb = sdk.load_workbook_resilient(po_path, log=log, data_only=True)
-    if 'PO' not in wb.sheetnames:
-        log("PO workbook: 'PO' sheet not found.")
-        wb.close()
+    if po_rows is None:
+        po_rows, descs = _read_po_sheet(po_path, log)
+    if not po_rows:
         return {}
-    ws = wb['PO']
-
-    # Locate header row by scanning for cells named ORDER + DYPN
-    header_row = None
-    headers: dict[str, int] = {}
-    for r in range(1, min(ws.max_row, 30) + 1):
-        row_map: dict[str, int] = {}
-        for c in range(1, ws.max_column + 1):
-            v = ws.cell(row=r, column=c).value
-            if isinstance(v, str):
-                row_map[v.strip().upper()] = c
-        if 'DYPN' in row_map and 'ORDER' in row_map:
-            header_row = r
-            headers = row_map
-            break
-
-    if header_row is None:
-        log("PO workbook: could not locate header row.")
-        wb.close()
-        return {}
-
-    required = ['ORDER', 'PPN', 'DYPN', 'NOTES', 'SOURCE MATERIAL']
-    missing = [h for h in required if h not in headers]
-    if missing:
-        log(f"PO workbook: missing header columns: {missing}")
-
-    def cell_val(r: int, name: str):
-        col = headers.get(name)
-        if col is None:
-            return None
-        return ws.cell(row=r, column=col).value
-
-    descs = _load_material_descs(wb, log)
+    descs = descs or {}
 
     # Collect EVERY row per (ORDER, DYPN) - first-wins loses the plate/rod
     # distinction, and dropping ORDER loses the second order entirely.
     rows_by_key: dict[tuple[str, str], list[dict]] = {}
-    for r in range(header_row + 1, ws.max_row + 1):
-        dypn = cell_val(r, 'DYPN')
-        if not dypn:
-            continue
-        order = cell_val(r, 'ORDER')
+    for row in po_rows:
+        order = row['ORDER']
         key = (str(order).strip().casefold() if order not in (None, '') else '',
-               str(dypn).strip().casefold())
-        rows_by_key.setdefault(key, []).append({
-            'ORDER': order,
-            'PPN': cell_val(r, 'PPN'),
-            'DYPN': str(dypn).strip(),
-            'NOTES': cell_val(r, 'NOTES'),
-            'SOURCE MATERIAL': cell_val(r, 'SOURCE MATERIAL'),
-        })
-    wb.close()
+               row['DYPN'].casefold())
+        rows_by_key.setdefault(key, []).append(dict(row))
 
     def _kind(row: dict) -> str:
-        sm = row.get('SOURCE MATERIAL')
-        if sm in (None, ''):
-            return "unknown"
-        return _material_kind(descs.get(str(sm).strip().casefold(), ""))
+        return _row_kind(row, descs)
 
     lookup: dict[tuple[str, str], dict] = {}
     for key, rows in rows_by_key.items():
@@ -612,6 +733,26 @@ def _update_bent_plates(
         wb.close()
         raise RuntimeError(f"Bent Plates header row missing columns: {missing}")
 
+    # What is on the sheet already, keyed by (ORDER, DYPN). The rewrite below
+    # clears every row, so anything the USER typed in by hand - the SOURCE
+    # MATERIAL this app could not find - would be wiped by the next run and the
+    # row would silently go back to blank. Read it first and keep it.
+    def _txt(cell_value) -> str:
+        return "" if cell_value is None else str(cell_value).strip()
+
+    existing: dict[tuple[str, str], dict] = {}
+    for r in range(3, max(ws.max_row, 3) + 1):
+        dypn = _txt(ws.cell(row=r, column=headers['DYPN']).value)
+        if not dypn:
+            continue
+        key = (_txt(ws.cell(row=r, column=headers['ORDER']).value).casefold(),
+               dypn.casefold())
+        existing.setdefault(key, {
+            'PPN': ws.cell(row=r, column=headers['PPN']).value,
+            'SOURCE MATERIAL': ws.cell(row=r,
+                                       column=headers['SOURCE MATERIAL']).value,
+        })
+
     # Clear existing data rows from row 3 down across all known header columns
     # - values AND borders, so a rerun with fewer parts leaves no empty
     # bordered rows behind.
@@ -627,6 +768,17 @@ def _update_bent_plates(
     purple_font = Font(color=PURPLE_HEX)
     for i, row in enumerate(rows_data):
         r = 3 + i
+        was = existing.get((_txt(row.get('ORDER')).casefold(),
+                            _txt(row.get('DYPN')).casefold()), {})
+        kept = []
+        for field in ('PPN', 'SOURCE MATERIAL'):
+            if _txt(row.get(field)) or not _txt(was.get(field)):
+                continue
+            row = {**row, field: was[field]}      # a hand-typed value stands
+            kept.append(f"{field} {_txt(was[field])}")
+        if kept:
+            log(f"  kept what was already on Bent Plates for "
+                f"{row.get('DYPN')}: {', '.join(kept)}")
         ws.cell(row=r, column=headers['ORDER'], value=row.get('ORDER'))
         ws.cell(row=r, column=headers['PPN'], value=row.get('PPN'))
         ws.cell(row=r, column=headers['DYPN'], value=row.get('DYPN'))
@@ -721,9 +873,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # PO workbook lookup (drives Method 2 and Bent Plates metadata)
     po_path = _find_po_workbook(doc_folder, batch_no)
+    master_rows: list[dict] = []
+    master_descs: dict = {}
     if po_path:
         log(f"PO workbook: {po_path.name}")
-        po_lookup = _load_po_lookup(po_path, log)
+        master_rows, master_descs = _read_po_sheet(po_path, log)
+        po_lookup = _load_po_lookup(po_path, log, master_rows, master_descs)
         log(f"  PO (order, DYPN) pairs indexed: {len(po_lookup)}")
     else:
         log("WARNING: PO workbook (QF-QU-09) not found. Skipping Method 2 and PO metadata lookup.")
@@ -834,6 +989,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
 
     # Build Bent Plates row data (sorted by SOURCE MATERIAL)
     rows_data: list[dict] = []
+    order_po_cache: dict = {}
     for f in sorted_for_copy:
         order = f.get('order') or ''
         meta = po_lookup.get((order.casefold(), f['dypn'].casefold()))
@@ -849,14 +1005,34 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             log(f"  {meta['_PICK_WARN']}")
         if meta.get('_ALIAS_NOTE'):
             log(f"  {meta['_ALIAS_NOTE']}")
+
+        # Still no source material: the drawing's item number and the PO's can
+        # disagree, so try the PPN - the order's own PO first (see
+        # _resolve_by_ppn). This is the Batch 499 case.
         if po_lookup and not meta.get('SOURCE MATERIAL'):
-            log(f"  WARNING: {f['dypn']} (order {order or '?'}) has no PO "
-                f"match - its Bent Plates PPN and SOURCE MATERIAL will be "
-                f"blank, and 922 Kitting can't tell its plate from its rod. "
-                f"Fill both in on Bent Plates before running 922 Kitting.")
+            found, note = _resolve_by_ppn(f['dypn'], order, batch_path,
+                                          master_rows, master_descs,
+                                          order_po_cache, log)
+            if found:
+                log(f"  {note}")
+                meta = {**found, **{k: v for k, v in meta.items()
+                                    if v not in (None, '')}}
+                meta['SOURCE MATERIAL'] = found.get('SOURCE MATERIAL')
+
+        # PPN is never blank when the DYPN is filled: it is the DYPN minus its
+        # last segment, which both the drawing and the PO always agree on (true
+        # on all 173 rows of Batch 499's PO). Only the SOURCE MATERIAL needs the
+        # PO, so only it can be left for the user.
+        ppn = meta.get('PPN') or sdk.split_dypn(f['dypn'])[0] or None
+
+        if po_lookup and not meta.get('SOURCE MATERIAL'):
+            log(f"  WARNING: no SOURCE MATERIAL found for {f['dypn']} (order "
+                f"{order or '?'}) - fill it in on Bent Plates before running "
+                f"922 Kitting, which cannot tell this part's plate from its rod "
+                f"without it. PPN {ppn} was filled in from the part number.")
         rows_data.append({
             'ORDER': meta.get('ORDER') or (order or None),
-            'PPN': meta.get('PPN'),
+            'PPN': ppn,
             'DYPN': f['dypn'],
             'SOURCE MATERIAL': meta.get('SOURCE MATERIAL'),
             'NOTES': _bent_suffix(f['dypn']),
