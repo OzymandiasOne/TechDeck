@@ -15,6 +15,9 @@ import re
 import threading
 import time
 
+from techdeck.ui.dialog_front import (bring_to_front, exec_in_front,
+                                      front_parent_for_native_dialog,
+                                      message_box)
 from techdeck.ui.widgets.dashboard import DashboardView
 from techdeck.ui.theme_aware import ThemeAware
 
@@ -602,7 +605,7 @@ class ConsoleWidget(QWidget, ThemeAware):
 
         batch_number, all_nests, existing = self._nest_sel_args
         dlg = NestSelectionDialog(batch_number, all_nests, existing, parent=self.window())
-        if dlg.exec():
+        if exec_in_front(dlg):
             self._nest_sel_result = dlg.selected_nests()
         else:
             self._nest_sel_result = None
@@ -646,7 +649,7 @@ class ConsoleWidget(QWidget, ThemeAware):
 
         items, done_items, kwargs = self._sel_args
         dlg = SelectionDialog(items, done_items, parent=self.window(), **kwargs)
-        if dlg.exec():
+        if exec_in_front(dlg):
             self._sel_result = dlg.selected()
         else:
             self._sel_result = None
@@ -690,7 +693,7 @@ class ConsoleWidget(QWidget, ThemeAware):
 
         groups, kwargs = self._gt_args
         dlg = GroupedToggleDialog(groups, parent=self.window(), **kwargs)
-        if dlg.exec():
+        if exec_in_front(dlg):
             self._gt_result = dlg.result_map()
         else:
             self._gt_result = None
@@ -768,6 +771,7 @@ class ConsoleWidget(QWidget, ThemeAware):
                 return
             except Exception:
                 pass  # any failure: fall through to the native dialog
+        front_parent_for_native_dialog(self.window())
         path = QFileDialog.getExistingDirectory(self.window(), title, start_dir)
         self._dir_result = path or None
 
@@ -821,6 +825,7 @@ class ConsoleWidget(QWidget, ThemeAware):
                 return
             except Exception:
                 pass  # any failure: fall through to the native dialog
+        front_parent_for_native_dialog(self.window())
         path, _selected = QFileDialog.getOpenFileName(
             self.window(), title, start_dir, name_filter)
         self._file_result = path or None
@@ -871,6 +876,7 @@ class ConsoleWidget(QWidget, ThemeAware):
                    for o in options]
         box.addButton(QMessageBox.StandardButton.Cancel)
         box.setDefaultButton(buttons[0])
+        bring_to_front(box)
         box.exec()
         clicked = box.clickedButton()
         for opt, btn in zip(options, buttons):
@@ -975,7 +981,7 @@ class ConsoleWidget(QWidget, ThemeAware):
         from PySide6.QtWidgets import QMessageBox
 
         title, text = self._warn_args
-        QMessageBox.warning(self.window(), title, text)
+        message_box(self.window(), QMessageBox.Icon.Warning, title, text)
 
     def _append_line(self, html: str):
         """Append one line to the history output.

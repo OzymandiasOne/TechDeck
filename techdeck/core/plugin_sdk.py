@@ -832,6 +832,14 @@ def _pick_gui(params: dict, title: str, start_dir: str, parent,
                 return picked or _user_cancelled(params)
         except Exception:
             pass   # fall through to the native dialog
+    # The native Windows picker is not a Qt window and cannot be given Qt window
+    # flags, so lift its OWNER first - a picker opens in front of the window that
+    # owns it. See techdeck/ui/dialog_front.py for why that is the best handle.
+    try:
+        from techdeck.ui.dialog_front import front_parent_for_native_dialog
+        front_parent_for_native_dialog(parent)
+    except Exception:
+        pass    # headless, or an older TechDeck: the picker still opens
     if name_filter is None:
         return (QFileDialog.getExistingDirectory(parent, title, start_dir)
                 or _user_cancelled(params))

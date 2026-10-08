@@ -52,6 +52,12 @@ a = Analysis(
         # pick_directory_gui/pick_file_gui -> chopper_picker for GUI plugins).
         # Both are inside function bodies, so force them in.
         'techdeck.core.sentry_mode',
+        # Dialogs come up in FRONT of whatever app the user is in. console.py
+        # imports this at module level, so the graph already reaches it - named
+        # here because plugin_sdk and 911 SSPO Invoicing Prep import it inside
+        # function bodies too, and a future reader who drops the console import
+        # would otherwise take the frozen exe down with it.
+        'techdeck.ui.dialog_front',
         'techdeck.ui.widgets.chopper_picker',
         # Only imported by the game_asa_the_video_game plugin's run.py (loads at runtime).
         'techdeck.ui.widgets.steelbeams_game',

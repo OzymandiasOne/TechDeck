@@ -15,6 +15,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
+from techdeck.ui.dialog_front import bring_to_front
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QTreeWidget, QTreeWidgetItem,
@@ -171,6 +172,10 @@ class SelectionDialog(QDialog):
         layout.addLayout(button_row)
 
         self._update_count()
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     # --- check-state sync ----------------------------------------------------
 

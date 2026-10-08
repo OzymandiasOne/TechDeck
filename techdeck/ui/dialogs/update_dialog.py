@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
+from techdeck.ui.dialog_front import bring_to_front
 from techdeck.core.qt_signals import safe_disconnect
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,10 @@ class UpdateDialog(QDialog):
         self.layout().activate()
         self.setMinimumHeight(self.layout().minimumSize().height())
         self.resize(self.sizeHint())
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     def _setup_ui(self):
         """Create UI elements."""

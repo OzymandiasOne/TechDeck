@@ -1152,6 +1152,24 @@ def split_workbook(src_path, out_dir, settings, log,
 # ---------------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------------
+
+def _front_box(icon, title: str, text: str) -> None:
+    """A message box that comes up IN FRONT of whatever the user is in.
+
+    Both boxes this app shows land at the end of a long run, which is exactly
+    when the user has gone back to Excel - and Windows will not hand a background
+    process the foreground, so a plain QMessageBox can open behind it with nothing
+    but a taskbar flash. Degrades to the plain box if the helper is unavailable
+    (an older TechDeck), because saying it late beats not saying it.
+    """
+    from PySide6.QtWidgets import QMessageBox
+    try:
+        from techdeck.ui.dialog_front import message_box
+        message_box(None, icon, title, text)
+    except Exception:
+        QMessageBox(icon, str(title), str(text)).exec()
+
+
 def run(params, progress_callback, cancel_event):
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
@@ -1180,8 +1198,8 @@ def run(params, progress_callback, cancel_event):
                                 cancel_event, date_range)
     except Exception as e:
         log(f"ERROR: {e}")
-        QMessageBox.critical(None, "911 SSPO Invoicing Prep",
-                             f"Could not split the file:\n\n{e}")
+        _front_box(QMessageBox.Icon.Critical, "911 SSPO Invoicing Prep",
+                   f"Could not split the file:\n\n{e}")
         return
 
     written, missing_po = result.written, result.missing_po
@@ -1242,7 +1260,7 @@ def run(params, progress_callback, cancel_event):
                 + "\n  ".join(missing_po)
                 + "\n\nTheir PO / PO Line columns were left blank - fill them in "
                   "by hand or fix the forecast and re-run.")
-    QMessageBox.information(None, "911 SSPO Invoicing Prep", msg)
+    _front_box(QMessageBox.Icon.Information, "911 SSPO Invoicing Prep", msg)
     try:
         os.startfile(str(out_dir))                 # open the results folder in Explorer
     except Exception:
