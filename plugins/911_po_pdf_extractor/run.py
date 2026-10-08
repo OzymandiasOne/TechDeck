@@ -631,7 +631,10 @@ def run(params: Dict[str, Any], progress_callback, cancel_event: threading.Event
     progress_callback(75)
     
     if not all_records:
-        log("WARNING: No records extracted")
+        sdk.flag_action(
+            params,
+            "No PO lines were extracted from any of the PDFs, so nothing was "
+            "written at all - check the PDFs are the POs you meant.")
         progress_callback(100)
         return
     

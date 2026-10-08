@@ -994,6 +994,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     # Build Bent Plates row data (sorted by SOURCE MATERIAL)
     rows_data: list[dict] = []
     order_po_cache: dict = {}
+    no_source: list[str] = []     # rows 922 Kitting cannot act on (action item)
     for f in sorted_for_copy:
         order = f.get('order') or ''
         meta = po_lookup.get((order.casefold(), f['dypn'].casefold()))
@@ -1030,10 +1031,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         ppn = meta.get('PPN') or sdk.split_dypn(f['dypn'])[0] or None
 
         if po_lookup and not meta.get('SOURCE MATERIAL'):
-            log(f"  WARNING: no SOURCE MATERIAL found for {f['dypn']} (order "
-                f"{order or '?'}) - fill it in on Bent Plates before running "
-                f"922 Kitting, which cannot tell this part's plate from its rod "
-                f"without it. PPN {ppn} was filled in from the part number.")
+            # An ACTION ITEM, not just a log line: 922 Kitting reads this row as
+            # a contract and stamps FORMED off its SOURCE MATERIAL, so a blank
+            # one makes the NEXT app wrong. Batch 499 shipped a formed part with
+            # no FORMED tag because this only ever reached the console.
+            no_source.append(f"{f['dypn']} (order {order or '?'})")
+            log(f"  no SOURCE MATERIAL found for {f['dypn']} (order "
+                f"{order or '?'}); PPN {ppn} was filled in from the part number")
         rows_data.append({
             'ORDER': meta.get('ORDER') or (order or None),
             'PPN': ppn,
@@ -1050,6 +1054,15 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             return (1, '', dypn, order)
         return (0, str(sm), dypn, order)
     rows_data.sort(key=_sort_key)
+
+    # ONE item for every row Kitting cannot act on, not one per part.
+    if no_source:
+        sdk.flag_action(
+            params,
+            f"{len(no_source)} Bent Plates row(s) have no SOURCE MATERIAL - fill "
+            f"it in before running 922 Kitting, which stamps FORMED off that "
+            f"column and cannot tell the part's plate from its rod without it.",
+            "\n".join(no_source))
 
     organizer_path = _find_organizer_workbook(doc_folder, batch_no)
     if not organizer_path:

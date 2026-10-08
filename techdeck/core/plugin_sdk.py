@@ -1146,6 +1146,112 @@ def set_ticket_units(params: dict, units: int) -> None:
         pass
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Action items — the ONE way a plugin stops the user and makes them look
+#
+# Narrow on purpose. An action item is for a run that FAILED, a stage that
+# produced NOTHING usable, or output the NEXT app will act on wrongly. It is NOT
+# for "ran fine, one thing was missing": 922 LST Organizer naming a tube it could
+# not find is the app working correctly, and that is `log()`.
+#
+# The line matters because the first attempt at this got it wrong - 145 items
+# across 21 plugins, most of them "ran fine, but". Popping everything teaches the
+# user to dismiss the dialog without reading it, which costs more than it buys.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ACTION_ITEMS_KEY = "action_items"
+
+# How many lines one item may put in the DIALOG. A QMessageBox does not scroll,
+# so a body taller than the screen is clipped - and the clipped part is silently
+# lost, which is the very failure this exists to stop. The console keeps
+# everything, so the dialog can afford to be a summary.
+DIALOG_LINES_PER_ITEM = 6
+
+
+def flag_action(params, item: str, detail: str = "") -> None:
+    """Record ONE thing the user must go and do, and log it. TechDeck pops every
+    item from the run in a single blocking dialog as the run ends, and reports the
+    run as ⚠ instead of a clean ✅.
+
+    Raising the dialog is the EXECUTOR's job, not a plugin's - which is the point.
+    Before this, thirteen apps hand-rolled their own ending popup and eight popped
+    nothing, so whether a problem reached the user depended on which app found it.
+
+    Use it ONLY for:
+      * the run failed, or a whole stage produced nothing usable (no PO workbook,
+        so no quantities at all; 922 MPL.xlsx open in Excel, so nothing saved);
+      * output the NEXT app reads as a contract and will act on wrongly - Batch
+        499's Bent Plates row with no SOURCE MATERIAL, off which 922 Kitting
+        stamps FORMED.
+
+    NOT for a finding the run correctly reports: a tube with no .lst, a packet
+    with no MIL-SPEC, a page-setup that would not restore. Those are `log()`.
+    A run that is WAITING on the user already pops - that is the `request_*`
+    prompt itself.
+
+    `item` is the imperative in the user's words: what is wrong AND what to do.
+    `detail` is optional context, shown indented beneath it. A plugin that finds
+    several of one thing collects them and raises ONE item, so the dialog reads
+    as a list of jobs.
+
+    One dialog, at the END - never mid-run: a long unattended run must not stop
+    and wait on a human. NOT for a GUI plugin's own window either, since the
+    dialog goes up when run() RETURNS and a GUI plugin returns as soon as its
+    window is on screen; those findings belong in the window's own log.
+
+    Headless, or called outside a run, it still says its piece in the log.
+    """
+    text = str(item or "").strip()
+    if not text:
+        return
+    extra = str(detail or "").strip()
+    line = f"ACTION NEEDED: {text}" + (f" ({extra})" if extra else "")
+    if not isinstance(params, dict):
+        # A helper called from a unit test or a standalone harness. print() is a
+        # silent no-op in the windowed build, so use the log.
+        import logging
+        logging.getLogger(__name__).warning("%s", line)
+        return
+    try:
+        params.setdefault(ACTION_ITEMS_KEY, []).append(
+            {"item": text, "detail": extra})
+    except (AttributeError, TypeError):
+        pass    # a params mapping that cannot hold the key must not sink the run
+    params.get("log", print)(line)
+
+
+def action_items(params) -> list:
+    """The items recorded so far, as {'item', 'detail'} dicts. The executor reads
+    this to build the ending dialog; a plugin may read it to branch on whether
+    anything needs attention (`if sdk.action_items(params):`)."""
+    raw = params.get(ACTION_ITEMS_KEY) if isinstance(params, dict) else None
+    return list(raw) if isinstance(raw, list) else []
+
+
+def format_action_items(items, plugin_name: str = "") -> tuple:
+    """(title, body) for the ending dialog. Shared by the executor and the tests
+    so the wording has one home."""
+    items = list(items or [])
+    n = len(items)
+    head = f"{plugin_name} - " if plugin_name else ""
+    title = (f"{head}1 thing needs your attention" if n == 1
+             else f"{head}{n} things need your attention")
+    lines = []
+    for i, entry in enumerate(items, 1):
+        if isinstance(entry, dict):
+            text, detail = str(entry.get("item", "")), str(entry.get("detail", ""))
+        else:
+            text, detail = str(entry), ""
+        lines.append(f"{i}. {text}")
+        if detail:
+            shown = detail.splitlines()[:DIALOG_LINES_PER_ITEM]
+            for part in shown:
+                lines.append(f"     {part}")
+            if len(detail.splitlines()) > len(shown):
+                lines.append("     ...(the console lists them all)")
+    return title, "\n".join(lines)
+
+
 # Run outcomes a plugin may report via set_run_outcome. Absence of a report
 # (the default) is treated as a clean success — so existing plugins that simply
 # return are unaffected.

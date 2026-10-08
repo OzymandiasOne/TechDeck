@@ -230,14 +230,18 @@ def _norm(v) -> str:
     return str(v).strip().casefold()
 
 
-def _collect_bent_plates(wb, log) -> dict[str, set[str]]:
+def _collect_bent_plates(wb, log, params) -> dict[str, set[str]]:
     """Map each formed-plate DYPN to the set of SOURCE MATERIAL codes recorded
     for it on the Bent Plates sheet. The source material is what distinguishes
     the formed plate from a rod that shares the same DYPN."""
     try:
         ws = wb.Worksheets(BENT_PLATES_SHEET)
     except Exception:
-        log(f"  WARNING: '{BENT_PLATES_SHEET}' sheet not found; no FORMED detection")
+        sdk.flag_action(
+            params,
+            f"There is no '{BENT_PLATES_SHEET}' sheet in the organizer, so NOT "
+            f"ONE part got a FORMED tag - run 922 FormingFinder first, then run "
+            f"this again.")
         return {}
 
     header_row = 2
@@ -254,7 +258,11 @@ def _collect_bent_plates(wb, log) -> dict[str, set[str]]:
         elif name == "SOURCE MATERIAL":
             src_col = c
     if dypn_col is None:
-        log("  WARNING: DYPN column not found in Bent Plates header; no FORMED detection")
+        sdk.flag_action(
+            params,
+            f"The '{BENT_PLATES_SHEET}' sheet has no DYPN column, so NOT ONE "
+            f"part got a FORMED tag - check its row-2 headers and run this "
+            f"again.")
         return {}
     if src_col is None:
         log("  WARNING: SOURCE MATERIAL column not found in Bent Plates header; "
@@ -275,7 +283,7 @@ def _collect_bent_plates(wb, log) -> dict[str, set[str]]:
 
 # FORMED edits ----------------------------------------------------------------
 
-def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log,
+def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log, params,
                         part_rows=PART_ROWS,
                         col_triples=STANDARD_COLS) -> list[tuple[str, str]]:
     if not bent_plates:
@@ -322,7 +330,12 @@ def _apply_formed_edits(ws, bent_plates: dict[str, set[str]], log,
                 edits.append((desc_addr, original))
                 log(f"    FORMED match: {dypn_val} at {desc_addr}")
             except Exception as exc:
-                log(f"    WARNING: could not modify {desc_addr} for {dypn_val}: {exc}")
+                sdk.flag_action(
+                    params,
+                    f"{dypn_val} is a formed part but its FORMED tag could not "
+                    f"be written at {desc_addr} - add it by hand before the kit "
+                    f"paperwork goes out.",
+                    str(exc))
     return edits
 
 
@@ -449,7 +462,7 @@ def _restore_page_setup(ws, saved: dict, log) -> None:
 
 
 def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
-                           cancel_event, log) -> dict[int, Path]:
+                           cancel_event, log, params) -> dict[int, Path]:
     """One 'Larger Bin Label' page per oversize order, colored and FORMED-
     tagged exactly like the standard page. Returns {driver value: pdf}."""
     d21 = ws_big.Range(LARGER_DRIVER_CELL)
@@ -461,7 +474,7 @@ def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
             d21.Value = idx
             excel.CalculateFull()
             edits = _apply_formed_edits(
-                ws_big, bent_plates, log, LARGER_PART_ROWS, LARGER_COLS)
+                ws_big, bent_plates, log, params, LARGER_PART_ROWS, LARGER_COLS)
             try:
                 if edits:
                     excel.CalculateFull()
@@ -731,7 +744,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             log("Cancelled.")
             return
 
-        bent_plates = _collect_bent_plates(wb, log)
+        bent_plates = _collect_bent_plates(wb, log, params)
         log(f"Bent Plates DYPNs indexed: {len(bent_plates)}")
 
         # Which orders have more parts than the standard checklist can print?
@@ -816,7 +829,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                 ws_kit.PageSetup.PrintArea = original_print_area
 
             # Full kit export (with FORMED detection)
-            in_progress_edits = _apply_formed_edits(ws_kit, bent_plates, log)
+            in_progress_edits = _apply_formed_edits(ws_kit, bent_plates, log,
+                                                   params)
             try:
                 if in_progress_edits:
                     excel.CalculateFull()
@@ -852,7 +866,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
                     ws_big.Visible = _XL_SHEET_VISIBLE
                 larger_pages = _render_oversize_pages(
                     excel, ws_big, oversize, bent_plates, pdf_dir,
-                    cancel_event, log)
+                    cancel_event, log, params)
             finally:
                 try:
                     ws_big.Visible = original_visible

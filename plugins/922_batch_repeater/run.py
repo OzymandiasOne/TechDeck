@@ -474,7 +474,7 @@ def _batch_folder_ppns(batch_folder: Path, log) -> list:
 
 def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
                        new_po_num: int, batch_folder: Path, do_matrix: bool,
-                       do_master: bool, dry_run: bool, log) -> int:
+                       do_master: bool, dry_run: bool, log, params) -> int:
     """v2.4.0 stage: maintain the MPL in ONE open/save. The PO 321+ column is
     filled from the batch's ORDER FOLDER NAMES; the MASTER PARTS catalog from
     the batch's own PO workbook (which has the DYPN/material/qty detail the
@@ -529,9 +529,12 @@ def _update_mpl_sheets(spreadsheet_path: Path, quote_path: Path,
         log("MPL saved.")
         return 0
     except PermissionError:
-        log(f"WARNING: '{spreadsheet_path.name}' is open in another program "
-            "(usually Excel) - MPL changes NOT saved. Close it and re-run to "
-            "record this batch; repeat pulling continues.")
+        sdk.flag_action(
+            params,
+            f"'{spreadsheet_path.name}' is open in another program (usually "
+            f"Excel), so the MPL changes were NOT saved and this batch is not "
+            f"recorded in it - close the file and run this again. The repeats "
+            f"were still pulled.")
         return 1
     finally:
         wb.close()
@@ -629,7 +632,7 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
         mpl_errors = _update_mpl_sheets(
             spreadsheet_path, mp.quote_path(base_path), new_po_num, new_po_folder,
             do_mpl_matrix, do_master_parts,
-            bool(settings.get('dry_run', False)), log)
+            bool(settings.get('dry_run', False)), log, params)
         log("")
     else:
         log("MPL updates switched OFF.")
