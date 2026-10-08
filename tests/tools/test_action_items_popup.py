@@ -248,3 +248,47 @@ def test_the_executor_shows_the_dialog_through_the_console():
     PluginExecutor._show_action_items(broken, "922 Setup", fallback.append)
     assert any("Something to do" in line and "922 Setup" in line
                for line in fallback), fallback
+
+
+def test_the_dialog_stays_a_size_a_screen_can_hold():
+    """A QMessageBox does not scroll, so a body taller than the screen is clipped -
+    and the clipped part is silently lost, which is the failure this whole feature
+    exists to stop. The console keeps every line; the dialog is a summary."""
+    from techdeck.core import plugin_sdk as sdk
+
+    params = {"log": lambda *_: None}
+    for n in range(1, 21):
+        sdk.flag_action(params, f"N{500 + n}: no MIL-SPEC on the PART SKETCH page",
+                        group="Some nests have no MIL-SPEC")
+    title, body = sdk.format_action_items(sdk.action_items(params), "911 Setup")
+
+    assert title == "911 Setup - 1 thing needs your attention"   # one job, 20 nests
+    lines = body.splitlines()
+    assert len(lines) == 1 + sdk.DIALOG_LINES_PER_ITEM + 1       # head + N + "more"
+    assert lines[-1].strip() == (
+        f"...and {20 - sdk.DIALOG_LINES_PER_ITEM} more (the console lists them all)")
+
+    # Every call still reached the console, so nothing is actually lost.
+    logs = []
+    params = {"log": logs.append}
+    for n in range(1, 21):
+        sdk.flag_action(params, f"N{500 + n}: no MIL-SPEC", group="Some nests")
+    assert sum("no MIL-SPEC" in line for line in logs) == 20
+
+
+def test_the_dialog_comes_up_after_the_run_reads_as_finished():
+    """Ordering: progress 100 and the run-log line land BEFORE the modal, so the
+    run does not look stuck at 85% behind it - and the dialog still comes before
+    completion_callback, which is what starts the next queued plugin."""
+    import inspect
+
+    from techdeck.core.plugin_executor import PluginExecutor
+
+    src = inspect.getsource(PluginExecutor._run_plugin_body)
+    i_progress = src.index("safe_progress(100)")
+    i_dialog = src.index("self._show_action_items(")
+    i_complete = src.index("completion_callback(")
+    assert i_progress < i_dialog < i_complete, (
+        "the action-item dialog must sit between progress 100 and the completion "
+        "callback"
+    )

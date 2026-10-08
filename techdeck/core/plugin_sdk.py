@@ -1257,6 +1257,13 @@ def _grouped_action_items(items) -> list:
     return out
 
 
+# How many lines a single entry may contribute to the DIALOG. A QMessageBox does
+# not scroll, so a body taller than the screen is clipped - and the clipped part
+# is silently lost, which is the whole failure this feature exists to stop. The
+# console keeps every line, so the dialog can afford to be a summary.
+DIALOG_LINES_PER_ITEM = 6
+
+
 def format_action_items(items, plugin_name: str = "") -> tuple:
     """(title, body) for the ending action-item dialog. Shared by the executor
     and the tests so the wording has one home. The COUNT is of jobs after
@@ -1269,8 +1276,11 @@ def format_action_items(items, plugin_name: str = "") -> tuple:
     lines = []
     for i, (text, details) in enumerate(entries, 1):
         lines.append(f"{i}. {text}")
-        for detail in details:
+        for detail in details[:DIALOG_LINES_PER_ITEM]:
             lines.append(f"     {detail}")
+        if len(details) > DIALOG_LINES_PER_ITEM:
+            lines.append(f"     ...and {len(details) - DIALOG_LINES_PER_ITEM} more "
+                         f"(the console lists them all)")
     return title, "\n".join(lines)
 
 

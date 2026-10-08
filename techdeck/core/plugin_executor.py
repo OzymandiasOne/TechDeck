@@ -692,15 +692,6 @@ class PluginExecutor:
                     execution_time, run_token,
                 )
             else:
-                # Action items (sdk.flag_action) are shown HERE, not by the
-                # plugin: one blocking dialog listing everything the user must
-                # do by hand, raised once as the run ends. Making it the
-                # executor's job is the point — every app used to hand-roll its
-                # own ending popup, so whether a problem reached the user
-                # depended on which app found it (Batch 499's unmatched formed
-                # part only ever reached the console, and the kitting paperwork
-                # shipped without its FORMED tag).
-                self._show_action_items(plugin_params, plugin.name, safe_log)
                 outcome_status, outcome_msg = self._run_outcome_from(plugin_params)
                 with self._lock:
                     if outcome_status is not None:
@@ -720,6 +711,20 @@ class PluginExecutor:
                     "WARNING" if outcome_status is not None else "OK",
                     plugin_id, execution_time, run_token,
                 )
+                # Action items (sdk.flag_action) are shown HERE, not by the
+                # plugin: one blocking dialog listing everything the user must do
+                # by hand. Making it the executor's job is the point — every app
+                # used to hand-roll its own ending popup, so whether a problem
+                # reached the user depended on which app found it (Batch 499's
+                # unmatched formed part only ever reached the console, and the
+                # kitting paperwork shipped without its FORMED tag).
+                #
+                # AFTER progress hits 100, so the run reads as finished behind the
+                # dialog instead of looking stuck at 85% while a modal waits — but
+                # still before completion_callback, which is what starts the next
+                # queued plugin, and on this worker thread, which is what
+                # console.show_warning requires.
+                self._show_action_items(plugin_params, plugin.name, safe_log)
                 try:
                     from techdeck.core.usage_tracker import record_run
                     record_run(plugin_id, plugin.name,
