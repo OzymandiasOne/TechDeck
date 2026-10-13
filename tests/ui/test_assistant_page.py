@@ -470,7 +470,7 @@ def test_personal_notes_sits_apart_on_the_right(page):
             for i in range(strip._left.count())]
     right = [strip._right.itemAt(i).widget().text()
              for i in range(strip._right.count())]
-    assert left == ["Terminal", "Schedule", "Tasks"]
+    assert left == ["Terminal", "Schedule", "Tasks", "Time"]
     assert right == ["Personal Notes"]
 
 

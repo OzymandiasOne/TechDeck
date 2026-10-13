@@ -12,21 +12,23 @@ always the thing most worth starting.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QFrame, QCheckBox, QComboBox, QLineEdit, QMessageBox, QSizePolicy, QMenu,
+    QInputDialog,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 
 from techdeck.core.assistant.models import (
-    BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
+    BLOCK_BREAK, BLOCK_BUSY, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
     PRIORITY_LABELS, Schedule, TaskItem, fmt_day, fmt_duration, fmt_time,
 )
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 from techdeck.ui.dialogs.task_edit_dialog import TaskEditDialog
 
 # Priority → accent colour for the little chips. Fixed hues rather than palette
@@ -37,6 +39,10 @@ PRIORITY_COLORS = {
     "medium": "#3B82F6",
     "low": "#6B7280",
 }
+
+# Parked-on-somebody-else amber. Same reasoning as the priority hues: "waiting"
+# has to mean the same thing on every theme, so it is a fixed colour.
+WAITING_COLOR = "#F59E0B"
 
 
 def _card(parent=None) -> QFrame:
@@ -74,8 +80,13 @@ class _Scroller(QScrollArea):
 class SchedulePanel(QWidget, ThemeAware):
     """Shows the saved plan. Emits ``rebuild_requested`` for the page to act on."""
 
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
+
     rebuild_requested = Signal()
     export_requested = Signal(str)          # 'md' | 'ics' | 'txt'
+    blocks_requested = Signal()             # open the meetings editor
     changed = Signal()
 
     def __init__(self, store: AssistantStore, parent=None):
@@ -106,6 +117,13 @@ class SchedulePanel(QWidget, ThemeAware):
         self.history.setToolTip("Look back at an earlier plan")
         self.history.currentIndexChanged.connect(self._on_history_pick)
         header.addWidget(self.history)
+
+        self.blocks_btn = QPushButton("Meetings")
+        self.blocks_btn.setToolTip(
+            "Meetings and blocked-out time the planner has to work around")
+        self.blocks_btn.setMinimumHeight(30)
+        self.blocks_btn.clicked.connect(self.blocks_requested.emit)
+        header.addWidget(self.blocks_btn)
 
         self.rebuild_btn = QPushButton("Rebuild")
         self.rebuild_btn.setToolTip("Open the builder again")
@@ -210,6 +228,8 @@ class SchedulePanel(QWidget, ThemeAware):
         stats = schedule.stats or {}
         bits = [f"{stats.get('tasks_placed', 0)} tasks",
                 f"{fmt_duration(stats.get('work_minutes', 0))} of work"]
+        if stats.get("committed_minutes"):
+            bits.append(f"{fmt_duration(stats['committed_minutes'])} booked")
         if stats.get("utilization"):
             bits.append(f"{stats['utilization']}% of the day booked")
         if stats.get("buffer_pct"):
@@ -221,13 +241,21 @@ class SchedulePanel(QWidget, ThemeAware):
 
         for day_plan in schedule.days:
             planned = [b for b in day_plan.blocks
-                       if b.kind in (BLOCK_TASK, BLOCK_FIXED)]
+                       if b.kind in (BLOCK_TASK, BLOCK_FIXED, BLOCK_BUSY)]
             if not planned:
                 continue
             self.scroller.box.addWidget(self._day_card(day_plan, palette))
 
-        if schedule.unscheduled:
-            self.scroller.box.addWidget(self._overflow_card(schedule, palette))
+        # "Didn't fit" and "waiting on someone" are different problems, so they
+        # get different cards: one is a squeeze you can fix by moving work, the
+        # other is somebody else's turn and nothing you do to the plan helps.
+        didnt_fit = [i for i in schedule.unscheduled if not i.get("waiting")]
+        parked = [i for i in schedule.unscheduled if i.get("waiting")]
+        if didnt_fit:
+            self.scroller.box.addWidget(
+                self._overflow_card(didnt_fit, palette))
+        if parked:
+            self.scroller.box.addWidget(self._waiting_card(parked, palette))
 
         self.scroller.box.addStretch()
 
@@ -252,7 +280,11 @@ class SchedulePanel(QWidget, ThemeAware):
             f"background: transparent;")
         box.addWidget(heading)
 
-        total = QLabel(f"{fmt_duration(day_plan.work_minutes())} planned")
+        total_text = f"{fmt_duration(day_plan.work_minutes())} planned"
+        booked = day_plan.committed_minutes()
+        if booked:
+            total_text += f"  \u00b7  {fmt_duration(booked)} already booked"
+        total = QLabel(total_text)
         total.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 11px; "
             f"background: transparent; margin-bottom: 6px;")
@@ -286,7 +318,17 @@ class SchedulePanel(QWidget, ThemeAware):
         is_work = block.kind in (BLOCK_TASK, BLOCK_FIXED)
         task = self.store.get_task(block.task_id) if block.task_id else None
 
-        if is_work and task is not None:
+        if block.kind == BLOCK_BUSY:
+            # Not your work, so there is nothing to tick. A marker keeps the
+            # row aligned with the checkboxes above and below it.
+            spacer = QLabel("\u25a0")
+            spacer.setFixedWidth(18)
+            spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            spacer.setStyleSheet(
+                f"color: {palette.accent_two or palette.text_secondary}; "
+                f"background: transparent;")
+            layout.addWidget(spacer)
+        elif is_work and task is not None:
             check = QCheckBox()
             check.setChecked(task.done)
             check.setToolTip("Mark done")
@@ -304,13 +346,18 @@ class SchedulePanel(QWidget, ThemeAware):
         title = block.title
         if block.kind == BLOCK_FIXED:
             title = f"📌 {title}"
+        if block.kind == BLOCK_BUSY and block.note:
+            title += f"   \u00b7 {block.note.splitlines()[0][:60]}"
         if block.part and block.part_count > 1:
             title += f"   (part {block.part} of {block.part_count})"
 
         label = QLabel(title)
         label.setWordWrap(True)
         colour = palette.text if is_work else palette.text_secondary
-        weight = "600" if block.kind == BLOCK_FIXED else "normal"
+        if block.kind == BLOCK_BUSY:
+            colour = palette.text
+        weight = ("600" if block.kind in (BLOCK_FIXED, BLOCK_BUSY)
+                  else "normal")
         extra = ""
         if task is not None and task.done:
             extra = "text-decoration: line-through;"
@@ -344,7 +391,41 @@ class SchedulePanel(QWidget, ThemeAware):
 
         return row
 
-    def _overflow_card(self, schedule: Schedule, palette) -> QWidget:
+    def _waiting_card(self, items, palette) -> QWidget:
+        """Work the plan skipped because somebody else has it.
+
+        Shown rather than dropped: a task parked on a colleague is the single
+        easiest thing to lose track of, precisely because nothing on the
+        agenda ever mentions it again.
+        """
+        card = _card()
+        box = QVBoxLayout(card)
+        box.setContentsMargins(16, 14, 16, 14)
+        box.setSpacing(6)
+
+        heading = QLabel("Not planned \u2014 you're waiting on someone")
+        heading.setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {WAITING_COLOR}; "
+            f"background: transparent;")
+        box.addWidget(heading)
+
+        note = QLabel("These come back into the plan the moment you take them "
+                      "off whoever has them.")
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            f"color: {palette.text_secondary}; font-size: 11px; "
+            f"background: transparent; margin-bottom: 4px;")
+        box.addWidget(note)
+
+        for item in items:
+            row = QLabel(f"\u23f8 {item.get('title', '')} "
+                         f"({item.get('reason', 'waiting')})")
+            row.setWordWrap(True)
+            row.setStyleSheet(f"color: {palette.text}; background: transparent;")
+            box.addWidget(row)
+        return card
+
+    def _overflow_card(self, items, palette) -> QWidget:
         card = _card()
         box = QVBoxLayout(card)
         box.setContentsMargins(16, 14, 16, 14)
@@ -364,7 +445,7 @@ class SchedulePanel(QWidget, ThemeAware):
             f"background: transparent; margin-bottom: 4px;")
         box.addWidget(note)
 
-        for item in schedule.unscheduled:
+        for item in items:
             row = QLabel(f"• {item.get('title', '')}: {item.get('reason', '')}")
             row.setWordWrap(True)
             row.setStyleSheet(f"color: {palette.text}; background: transparent;")
@@ -391,15 +472,25 @@ class SchedulePanel(QWidget, ThemeAware):
 class TasksPanel(QWidget, ThemeAware):
     """The backlog. Quick-add at the top, ranked list below."""
 
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
+
     changed = Signal()
     schedule_requested = Signal()
 
-    FILTERS = [("open", "Open"), ("all", "All"), ("done", "Done")]
+    FILTERS = [("open", "Open"), ("waiting", "Waiting on someone"),
+               ("all", "All"), ("done", "Done")]
 
     def __init__(self, store: AssistantStore, parent=None):
         super().__init__(parent)
         self.store = store
         self._filter = "open"
+        self._search = ""
+        # Which tasks have their steps unfolded. Session-only and keyed by id:
+        # a backlog where every project is expanded by default is a wall, and
+        # a remembered expansion is a preference nobody asked to set.
+        self._expanded: set[str] = set()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -436,6 +527,17 @@ class TasksPanel(QWidget, ThemeAware):
         self.filter_box.setMinimumHeight(28)
         self.filter_box.currentIndexChanged.connect(self._on_filter)
         filter_row.addWidget(self.filter_box)
+
+        # Searching the backlog, asked for 2026-10-09. Live rather than
+        # behind a button: by the time you have typed three letters the list
+        # is short enough to read, and there is nothing to press.
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search tasks…")
+        self.search.setClearButtonEnabled(True)
+        self.search.setMinimumHeight(28)
+        self.search.setMaximumWidth(260)
+        self.search.textChanged.connect(self._on_search)
+        filter_row.addWidget(self.search)
 
         self.summary = QLabel("")
         filter_row.addWidget(self.summary, 1)
@@ -476,10 +578,23 @@ class TasksPanel(QWidget, ThemeAware):
     def _visible_tasks(self) -> List[TaskItem]:
         if self._filter == "open":
             tasks = self.store.open_tasks()
+        elif self._filter == "waiting":
+            tasks = self.store.waiting_tasks()
         elif self._filter == "done":
             tasks = [t for t in self.store.tasks if t.done]
         else:
             tasks = list(self.store.tasks)
+        # The search runs over the title, the notes, the links AND the steps,
+        # because "I know I wrote that PO number down" has to find it wherever
+        # it was written. Applied after the filter so the two compose.
+        needle = self._search.strip().lower()
+        if needle:
+            def mentions(task: TaskItem) -> bool:
+                parts = [task.title, task.notes, task.waiting_on]
+                parts.extend(task.links)
+                parts.extend(step.text for step in task.checklist)
+                return any(needle in (part or "").lower() for part in parts)
+            tasks = [t for t in tasks if mentions(t)]
         today = date.today()
         # Open work is ranked by cost-of-delay (same order the scheduler uses);
         # finished work reads best newest-first.
@@ -501,11 +616,23 @@ class TasksPanel(QWidget, ThemeAware):
         summary = (f"{len(open_tasks)} open · {fmt_duration(total)} of work")
         if overdue:
             summary += f" · {overdue} overdue"
+        parked = len([t for t in open_tasks if t.waiting])
+        if parked:
+            summary += f" · {parked} waiting"
+        running = self.store.running_task()
+        if running is not None:
+            summary += (f" · ▶ {fmt_duration(running.logged_minutes())} on "
+                        f"{running.label()[:24]}")
         self.summary.setText(summary)
 
         if not tasks:
-            empty = QLabel("Nothing here.\n\nAdd something above, or just type "
-                           "it into the terminal.")
+            if self._search.strip():
+                message = (f"Nothing matches “{self._search.strip()}”.\n\n"
+                           f"Try fewer words, or switch the filter to All.")
+            else:
+                message = ("Nothing here.\n\nAdd something above, or just "
+                           "type it into the terminal.")
+            empty = QLabel(message)
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty.setWordWrap(True)
             empty.setStyleSheet(f"color: {palette.text_secondary}; padding: 40px;")
@@ -518,11 +645,32 @@ class TasksPanel(QWidget, ThemeAware):
         self.scroller.box.addStretch()
 
     def _task_row(self, task: TaskItem, palette) -> QWidget:
+        """One backlog card: the task, then its steps if they are unfolded.
+
+        The card is a column so the steps can live INSIDE it rather than as a
+        separate card underneath: a step belongs to its task, and two cards
+        read as two jobs.
+        """
         card = _card()
         card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        box = QHBoxLayout(card)
-        box.setContentsMargins(12, 8, 10, 8)
+        column = QVBoxLayout(card)
+        column.setContentsMargins(12, 8, 10, 8)
+        column.setSpacing(6)
+
+        top = QWidget()
+        top.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        top.setStyleSheet("background: transparent;")
+        box = QHBoxLayout(top)
+        box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(10)
+        column.addWidget(top)
+
+        # Right-click is the quiet route to the state changes that would
+        # otherwise need a button each. Everything here is also reachable from
+        # Edit and from the terminal, so nothing lives ONLY in a menu.
+        card.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        card.customContextMenuRequested.connect(
+            lambda point, t=task, host=card: self._row_menu(t, host, point))
 
         check = QCheckBox()
         check.setChecked(task.done)
@@ -564,6 +712,29 @@ class TasksPanel(QWidget, ThemeAware):
         if task.links:
             meta.addWidget(self._chip(f"🔗 {len(task.links)}",
                                       palette.text_secondary))
+        if task.waiting:
+            meta.addWidget(self._chip(f"⏸ {task.waiting_label()}",
+                                      WAITING_COLOR))
+        logged = task.logged_minutes()
+        if logged:
+            # Logged time sits beside the estimate and nothing else happens:
+            # no ratio, no verdict. A task that ran long is information.
+            meta.addWidget(self._chip(f"{fmt_duration(logged)} logged",
+                                      palette.accent if task.is_running
+                                      else palette.text_secondary))
+        done_steps, total_steps = task.checklist_progress()
+        if total_steps:
+            open_now = task.id in self._expanded
+            steps_chip = self._chip(
+                f"{'▾' if open_now else '▸'} {done_steps}/{total_steps} steps",
+                palette.accent if open_now else palette.text_secondary)
+            steps_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            steps_chip.setToolTip("Show the steps")
+            # A clickable QLabel rather than a button: a button here would be a
+            # fifth control on a row that is meant to read as one line.
+            steps_chip.mousePressEvent = (
+                lambda _event, tid=task.id: self._toggle_steps(tid))
+            meta.addWidget(steps_chip)
         meta.addStretch()
         middle.addLayout(meta)
 
@@ -574,7 +745,31 @@ class TasksPanel(QWidget, ThemeAware):
                 f"background: transparent;")
             middle.addWidget(note)
 
+        next_step = task.next_step()
+        if next_step is not None and task.id not in self._expanded:
+            # Folded away, the one line worth surfacing is what comes next.
+            peek = QLabel(f"next: {next_step.label()[:90]}")
+            peek.setStyleSheet(
+                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"background: transparent;")
+            middle.addWidget(peek)
+
         box.addLayout(middle, 1)
+
+        if not task.done:
+            clock = QPushButton("■" if task.is_running else "▶")
+            clock.setFixedSize(26, 26)
+            clock.setCursor(Qt.CursorShape.PointingHandCursor)
+            clock.setToolTip("Stop the clock" if task.is_running
+                             else "Start the clock on this")
+            accent = palette.accent if task.is_running else palette.text_secondary
+            clock.setStyleSheet(
+                f"QPushButton {{ border: none; background: transparent; "
+                f"color: {accent}; font-size: 13px; }}"
+                f"QPushButton:hover {{ color: {palette.accent}; }}")
+            clock.clicked.connect(
+                lambda _c=False, t=task: self._toggle_clock(t))
+            box.addWidget(clock, 0, Qt.AlignmentFlag.AlignTop)
 
         edit = QPushButton("Edit")
         edit.setFixedHeight(26)
@@ -590,7 +785,67 @@ class TasksPanel(QWidget, ThemeAware):
             f"QPushButton:hover {{ color: #EF4444; }}")
         remove.clicked.connect(lambda _c=False, t=task: self._delete(t))
         box.addWidget(remove, 0, Qt.AlignmentFlag.AlignTop)
+
+        if total_steps and task.id in self._expanded:
+            column.addWidget(self._steps_block(task, palette))
         return card
+
+    def _steps_block(self, task: TaskItem, palette) -> QWidget:
+        """The unfolded checklist. Ticking is one click, here; AUTHORING the
+        steps is typing, in the task dialog. Each job in the place it fits."""
+        host = QWidget()
+        host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        host.setStyleSheet("background: transparent;")
+        box = QVBoxLayout(host)
+        box.setContentsMargins(34, 2, 0, 2)
+        box.setSpacing(2)
+
+        today = date.today()
+        for step in task.checklist:
+            row = QWidget()
+            row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            row.setStyleSheet("background: transparent;")
+            line = QHBoxLayout(row)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(8)
+
+            tick = QCheckBox()
+            tick.setChecked(step.done)
+            tick.toggled.connect(
+                lambda checked, tid=task.id, sid=step.id:
+                self._set_step_done(tid, sid, checked))
+            line.addWidget(tick)
+
+            text = QLabel(step.label())
+            text.setWordWrap(True)
+            style = (f"color: {palette.text_secondary}; font-size: 12px; "
+                     f"background: transparent;")
+            if step.done:
+                style += " text-decoration: line-through;"
+            text.setStyleSheet(style)
+            line.addWidget(text, 1)
+
+            if step.estimate_min:
+                line.addWidget(self._chip(fmt_duration(step.estimate_min),
+                                          palette.text_secondary))
+            due = step.deadline_date()
+            if due:
+                late = due < today and not step.done
+                line.addWidget(self._chip(
+                    ("overdue · " if late else "by ") + due.strftime("%b %d"),
+                    "#EF4444" if late else palette.text_secondary))
+            box.addWidget(row)
+
+        rolled = task.checklist_minutes()
+        if rolled:
+            foot = QLabel(f"{fmt_duration(rolled)} across the steps · "
+                          f"the task is booked for "
+                          f"{fmt_duration(task.estimate_min)}")
+            foot.setStyleSheet(
+                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"background: transparent;")
+            box.addWidget(foot)
+        return host
 
     @staticmethod
     def _chip(text: str, color: str) -> QLabel:
@@ -605,6 +860,68 @@ class TasksPanel(QWidget, ThemeAware):
     def _on_filter(self, _index: int):
         self._filter = self.filter_box.currentData() or "open"
         self.refresh()
+
+    def _on_search(self, text: str):
+        self._search = text or ""
+        self.refresh()
+
+    def _toggle_steps(self, task_id: str):
+        if task_id in self._expanded:
+            self._expanded.discard(task_id)
+        else:
+            self._expanded.add(task_id)
+        self.refresh()
+
+    def _set_step_done(self, task_id: str, step_id: str, done: bool):
+        self.store.set_step_done(task_id, step_id, done)
+        self.refresh()
+        self.changed.emit()
+
+    def _toggle_clock(self, task: TaskItem):
+        """▶/■ on a row. Starting one stops whatever else was running, which
+        the store enforces; this just tells the user it happened."""
+        if task.is_running:
+            self.store.clock_out(task.id)
+        else:
+            self.store.clock_in(task.id)
+        self.refresh()
+        self.changed.emit()
+
+    def _row_menu(self, task: TaskItem, host: QWidget, point):
+        menu = QMenu(self)
+        if task.is_running:
+            menu.addAction("Stop the clock",
+                           lambda t=task: self._toggle_clock(t))
+        elif not task.done:
+            menu.addAction("Start the clock",
+                           lambda t=task: self._toggle_clock(t))
+        if task.waiting:
+            menu.addAction("Take it back off them",
+                           lambda t=task: self._set_waiting(t, False))
+        else:
+            menu.addAction("Waiting on someone…",
+                           lambda t=task: self._set_waiting(t, True))
+        menu.addSeparator()
+        menu.addAction("Edit…", lambda t=task: self._edit(t))
+        menu.addAction("Delete", lambda t=task: self._delete(t))
+        menu.exec(host.mapToGlobal(point))
+
+    def _set_waiting(self, task: TaskItem, waiting: bool):
+        """Park or unpark a task. Asking WHO is optional: the flag alone is
+        the useful part, and a forced prompt would make people skip it."""
+        who = ""
+        if waiting:
+            who, accepted = QInputDialog.getText(
+                self, "Waiting on someone",
+                f"Who or what is “{task.label()}” waiting on?\n"
+                f"(Leave it blank if you'd rather not say.)",
+                text=task.waiting_on)
+            if not accepted:
+                return
+            who = (who or "").strip()
+        self.store.set_waiting(task.id, waiting, who)
+        self.refresh()
+        self.changed.emit()
 
     def _quick_add(self):
         text = self.quick_add.text().strip()

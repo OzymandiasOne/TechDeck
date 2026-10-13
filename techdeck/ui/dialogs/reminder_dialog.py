@@ -23,10 +23,15 @@ from techdeck.core.assistant.models import parse_hhmm
 from techdeck.core.assistant.notifier import NotifyPrefs
 from techdeck.ui.notifier import DesktopNotifier
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 
 class ReminderDialog(QDialog, ThemeAware):
     """Edit :class:`NotifyPrefs`. Read the result with :meth:`result_prefs`."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     def __init__(self, prefs: NotifyPrefs, parent=None):
         super().__init__(parent)
@@ -143,7 +148,11 @@ class ReminderDialog(QDialog, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        self.setStyleSheet(f"QDialog {{ background: {palette.background}; }}")
+        # Top-level window: not a child of the Assistant page, so it
+        # inherits nothing and carries the scoped sheet itself.
+        self.setStyleSheet(
+            self.scope_stylesheet()
+            + f"QDialog {{ background: {palette.background}; }}")
         for label in (self.caveat, self.status):
             label.setStyleSheet(
                 f"color: {palette.text_secondary}; font-size: 11px;")

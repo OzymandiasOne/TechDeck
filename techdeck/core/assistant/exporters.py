@@ -16,13 +16,20 @@ from datetime import datetime
 from typing import Iterable, List, Optional
 
 from techdeck.core.assistant.models import (
-    BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
+    BLOCK_BREAK, BLOCK_BUSY, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
     Note, Schedule, TaskItem, fmt_day, fmt_duration,
 )
 from techdeck.core.assistant.scheduler import summarize
 
 __all__ = ["to_markdown", "to_text", "to_ics", "notes_to_markdown",
-           "tasks_to_markdown", "safe_filename"]
+           "tasks_to_markdown", "time_log_to_csv", "safe_filename"]
+
+
+def time_log_to_csv(tasks: Iterable[TaskItem], range_key: str = "all") -> str:
+    """The clocked-time log as CSV. Lives in ``timelog``; re-exported here so
+    callers have one import for "give me the file contents"."""
+    from techdeck.core.assistant.timelog import to_csv
+    return to_csv(list(tasks), range_key)
 
 
 def to_text(schedule: Schedule) -> str:
@@ -40,7 +47,7 @@ def to_markdown(schedule: Schedule) -> str:
 
     for day_plan in schedule.days:
         planned = [b for b in day_plan.blocks
-                   if b.kind in (BLOCK_TASK, BLOCK_FIXED)]
+                   if b.kind in (BLOCK_TASK, BLOCK_FIXED, BLOCK_BUSY)]
         if not planned:
             continue
         day_date = day_plan.date_obj()
@@ -50,6 +57,7 @@ def to_markdown(schedule: Schedule) -> str:
         lines.append("|---|---|---|")
         for block in day_plan.blocks:
             icon = {BLOCK_TASK: "☐", BLOCK_FIXED: "📌",
+                    BLOCK_BUSY: "📅",
                     BLOCK_LUNCH: "🍽", BLOCK_BREAK: "☕"}.get(block.kind, "☐")
             title = block.title
             if block.part and block.part_count > 1:
@@ -107,6 +115,11 @@ def to_ics(schedule: Schedule, include_breaks: bool = False,
     plan is "07:00 wherever you are", and floating times import into Outlook as
     local without needing a VTIMEZONE block that would have to be right about
     US DST rules to be worth having.
+
+    **Meetings (``BLOCK_BUSY``) are deliberately left out.** They were typed in
+    here precisely because they are already on the real calendar; writing them
+    back would import a second copy of every standing meeting the user owns.
+    They still appear in the markdown and text exports, which nothing imports.
     """
     now = datetime.now()
     lines: List[str] = [
@@ -173,7 +186,21 @@ def tasks_to_markdown(tasks: Iterable[TaskItem], title: str = "Tasks") -> str:
         bits = [f"{fmt_duration(task.estimate_min)}", task.priority]
         if task.deadline:
             bits.append(f"due {task.deadline}")
+        logged = task.logged_minutes()
+        if logged:
+            bits.append(f"{fmt_duration(logged)} logged")
+        if task.waiting:
+            bits.append(task.waiting_label())
         lines.append(f"- [{box}] {task.label()}  *({' · '.join(bits)})*")
+        for step in task.checklist:
+            step_box = "x" if step.done else " "
+            extra = []
+            if step.estimate_min:
+                extra.append(fmt_duration(step.estimate_min))
+            if step.deadline:
+                extra.append(f"due {step.deadline}")
+            tail = f"  *({' · '.join(extra)})*" if extra else ""
+            lines.append(f"    - [{step_box}] {step.label()}{tail}")
         for link in task.links:
             lines.append(f"    - <{link}>")
         for note_line in (task.notes or "").splitlines():

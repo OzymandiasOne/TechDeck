@@ -29,14 +29,15 @@ from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from techdeck.core.assistant.models import (
-    BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
-    DaySchedule, Schedule, ScheduleBlock, SchedulePrefs, TaskItem,
+    BLOCK_BREAK, BLOCK_BUSY, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK, GRID_MIN,
+    Commitment, DaySchedule, Schedule, ScheduleBlock, SchedulePrefs, TaskItem,
     fmt_day, fmt_duration,
 )
 
 # Everything snaps to this grid. A plan full of 07:13–08:41 blocks reads as
-# machine output and gets ignored; 5-minute boundaries read as a plan.
-GRID = 5
+# machine output and gets ignored; 5-minute boundaries read as a plan. Defined
+# in models.py so both halves clamp against one number.
+GRID = GRID_MIN
 
 
 def _snap_up(minutes: float) -> int:
@@ -80,6 +81,10 @@ class ScheduleRequest:
     prefs: SchedulePrefs
     label: str = ""
     now: Optional[datetime] = None
+    # Meetings and other people's claims on the day. Not tasks: they are
+    # placed exactly, never moved, never ticked, and the packer simply does
+    # not get to use that time.
+    commitments: Sequence[Commitment] = ()
     # Optional hard clamp on the first day, for "plan my afternoon".
     first_day_start: Optional[time] = None
     last_day_end: Optional[time] = None
@@ -90,6 +95,13 @@ def padded_minutes(task: TaskItem, prefs: SchedulePrefs) -> int:
     the optimism buffer, snapped to the grid."""
     raw = max(GRID, int(task.estimate_min or 0))
     return max(GRID, _snap_up(raw * (1.0 + prefs.buffer_pct / 100.0)))
+
+
+def _commitments_on(commitments: Sequence[Commitment],
+                    day: date) -> List[Commitment]:
+    """Every commitment claiming part of ``day``, in start order."""
+    hits = [c for c in (commitments or []) if c.occurs_on(day)]
+    return sorted(hits, key=lambda c: c.start_time())
 
 
 # ── Day windows ──────────────────────────────────────────────────────────────
@@ -169,6 +181,18 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
 
     active = [t for t in req.tasks if not t.done and t.label()]
 
+    # Work that is parked on somebody else is not planned. Booking an hour for
+    # a job you cannot start is how a plan loses the user's trust by 9am. It is
+    # still REPORTED, though, under the reason it was skipped, nothing on this
+    # page is ever silently dropped.
+    waiting = [t for t in active if t.waiting]
+    active = [t for t in active if not t.waiting]
+    for task in waiting:
+        schedule.unscheduled.append(
+            {"task_id": task.id, "title": task.label(),
+             "reason": task.waiting_label(), "waiting": True,
+             "priority": task.priority, "deadline": task.deadline})
+
     # --- 1. appointments: immovable, placed before anything else ------------
     fixed_by_day: Dict[date, List[Tuple[int, int, TaskItem]]] = {d: [] for d in days}
     for task in active:
@@ -216,6 +240,16 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
             blocks.append(ScheduleBlock(
                 start=_at(day, l_start).isoformat(), end=_at(day, l_end).isoformat(),
                 kind=BLOCK_LUNCH, title="Lunch"))
+
+        for commitment in _commitments_on(req.commitments, day):
+            begin = _mins(commitment.start_time())
+            finish = begin + max(GRID, _snap_up(commitment.minutes))
+            busy.append((begin, finish))
+            blocks.append(ScheduleBlock(
+                start=_at(day, begin).isoformat(),
+                end=_at(day, finish).isoformat(),
+                kind=BLOCK_BUSY, title=commitment.label(),
+                note=commitment.notes))
 
         for begin, finish, task in fixed_by_day.get(day, []):
             busy.append((begin, finish))
@@ -412,6 +446,7 @@ def _add_deadline_warnings(schedule: Schedule, tasks: Sequence[TaskItem],
 
 def _stats(schedule: Schedule, days: List[date], prefs: SchedulePrefs) -> Dict[str, Any]:
     work = sum(b.minutes() for b in schedule.task_blocks())
+    committed = sum(b.minutes() for b in schedule.busy_blocks())
     breaks = sum(b.minutes() for b in schedule.all_blocks()
                  if b.kind in (BLOCK_BREAK, BLOCK_LUNCH))
     capacity = 0
@@ -426,10 +461,17 @@ def _stats(schedule: Schedule, days: List[date], prefs: SchedulePrefs) -> Dict[s
     task_ids = {b.task_id for b in schedule.task_blocks() if b.task_id}
     return {
         "work_minutes": work,
+        "committed_minutes": committed,
         "break_minutes": breaks,
         "days": len(days),
         "tasks_placed": len(task_ids),
-        "tasks_unplaced": len(schedule.unscheduled),
+        # "Didn't fit" and "waiting on someone" are different problems and
+        # must not be added together: one is a planning squeeze, the other is
+        # somebody else's turn.
+        "tasks_unplaced": sum(1 for i in schedule.unscheduled
+                              if not i.get("waiting")),
+        "tasks_waiting": sum(1 for i in schedule.unscheduled
+                             if i.get("waiting")),
         "utilization": round(100.0 * work / capacity, 1) if capacity else 0.0,
         "buffer_pct": prefs.buffer_pct,
     }
@@ -492,27 +534,39 @@ def summarize(schedule: Schedule) -> str:
     stats = schedule.stats or {}
     lines = [f"{schedule.range_label}: {stats.get('tasks_placed', 0)} task(s), "
              f"{fmt_duration(stats.get('work_minutes', 0))} of planned work"]
+    if stats.get("committed_minutes"):
+        lines[0] += (f", plus {fmt_duration(stats['committed_minutes'])} "
+                     f"of meetings")
     if stats.get("buffer_pct"):
         lines[0] += f" (estimates padded {stats['buffer_pct']}%)"
     for day_plan in schedule.days:
         day_date = day_plan.date_obj()
-        planned = [b for b in day_plan.blocks if b.kind in (BLOCK_TASK, BLOCK_FIXED)]
+        planned = [b for b in day_plan.blocks
+                   if b.kind in (BLOCK_TASK, BLOCK_FIXED, BLOCK_BUSY)]
         if not planned:
             continue
         lines.append("")
         lines.append(fmt_day(day_date) if day_date else day_plan.day)
         for block in day_plan.blocks:
             marker = {BLOCK_TASK: "•", BLOCK_FIXED: "◆",
+                      BLOCK_BUSY: "■",
                       BLOCK_LUNCH: "·", BLOCK_BREAK: "·"}.get(block.kind, "•")
             suffix = ""
             if block.part and block.part_count > 1:
                 suffix = f"  (part {block.part} of {block.part_count})"
             lines.append(f"  {block.time_range():<20} {marker} {block.title}{suffix}")
-    if schedule.unscheduled:
+    parked = [i for i in schedule.unscheduled if i.get("waiting")]
+    didnt_fit = [i for i in schedule.unscheduled if not i.get("waiting")]
+    if didnt_fit:
         lines.append("")
         lines.append("Didn't fit:")
-        for item in schedule.unscheduled:
+        for item in didnt_fit:
             lines.append(f"  {item['title']}: {item['reason']}")
+    if parked:
+        lines.append("")
+        lines.append("Not planned, you're waiting on someone:")
+        for item in parked:
+            lines.append(f"  {item['title']} ({item['reason']})")
     if schedule.warnings:
         lines.append("")
         for warning in schedule.warnings:

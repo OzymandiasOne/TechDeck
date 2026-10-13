@@ -8,24 +8,30 @@ exactly one editing surface no matter where you found it.
 
 from __future__ import annotations
 
-from datetime import datetime, date, time
-from typing import Optional
+from datetime import datetime, date
+from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QTextEdit,
     QComboBox, QSpinBox, QCheckBox, QDateEdit, QTimeEdit, QPushButton, QLabel,
-    QDialogButtonBox, QGroupBox,
+    QDialogButtonBox, QGroupBox, QMessageBox,
 )
 from PySide6.QtCore import Qt, QDate, QTime
 
 from techdeck.core.assistant.models import (
-    PRIORITIES, PRIORITY_LABELS, TaskItem, fmt_duration,
+    PRIORITIES, PRIORITY_LABELS, ChecklistItem, TaskItem, fmt_duration,
+    now_iso,
 )
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 
 class TaskEditDialog(QDialog, ThemeAware):
     """Returns the edited TaskItem via :meth:`result_task` after ``exec()``."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     def __init__(self, task: Optional[TaskItem] = None, parent=None,
                  title: str = "Task"):
@@ -129,7 +135,63 @@ class TaskEditDialog(QDialog, ThemeAware):
         self.one_sitting.setChecked(not self._task.splittable)
         when_form.addRow(self.one_sitting)
 
+        # Parked on somebody else. A waiting task is deliberately NOT
+        # scheduled, so the checkbox says what it costs, and naming the person
+        # stays optional: a forced prompt is a reason to skip the flag.
+        waiting_row = QHBoxLayout()
+        self.waiting = QCheckBox("Waiting on someone else")
+        self.waiting.setToolTip(
+            "It won't be scheduled until you take it back off them. "
+            "You'll get a nudge if it sits too long.")
+        self.waiting.setChecked(self._task.waiting)
+        self.waiting_on = QLineEdit(self._task.waiting_on)
+        self.waiting_on.setPlaceholderText("who or what (optional)")
+        self.waiting_on.setMinimumHeight(30)
+        self.waiting_on.setEnabled(self.waiting.isChecked())
+        self.waiting.toggled.connect(self.waiting_on.setEnabled)
+        waiting_row.addWidget(self.waiting)
+        waiting_row.addWidget(self.waiting_on, 1)
+        when_form.addRow(waiting_row)
+
         outer.addWidget(when_box)
+
+        # --- steps ----------------------------------------------------------
+        # Authored as TEXT, one step per line, parsed with the same grammar as
+        # a task line. That keeps a long project's checklist as fast to write
+        # as it is to say, and gives per-step times and dates for free instead
+        # of a grid of spinboxes. Ticking steps off happens on the Tasks tab,
+        # one click each, which is the job this box would be bad at.
+        steps_box = QGroupBox("Steps")
+        steps_layout = QVBoxLayout(steps_box)
+        steps_layout.setSpacing(6)
+
+        self.steps_hint = QLabel(
+            "One per line. Each can carry its own time and date: "
+            "“order the tube 20m due friday”. Start a line with x to mark it "
+            "done. Tick them off on the Tasks tab.")
+        self.steps_hint.setWordWrap(True)
+        steps_layout.addWidget(self.steps_hint)
+
+        self.steps = QTextEdit()
+        self.steps.setAcceptRichText(False)
+        self.steps.setPlaceholderText(
+            "x pull the drawings 15m\nbuild the kit sheet 45m due friday\n"
+            "walk it to QA 10m")
+        self.steps.setPlainText(self._steps_to_text(self._task))
+        self.steps.setMaximumHeight(110)
+        steps_layout.addWidget(self.steps)
+
+        roll_row = QHBoxLayout()
+        self.roll_btn = QPushButton("Use the steps' total as the estimate")
+        self.roll_btn.setMinimumHeight(28)
+        self.roll_btn.setToolTip(
+            "Adds up the times on the steps and puts it in “Time needed”")
+        self.roll_btn.clicked.connect(self._roll_up_estimate)
+        roll_row.addWidget(self.roll_btn)
+        roll_row.addStretch()
+        steps_layout.addLayout(roll_row)
+
+        outer.addWidget(steps_box)
 
         # --- notes + links ---------------------------------------------------
         self.notes = QTextEdit()
@@ -160,9 +222,88 @@ class TaskEditDialog(QDialog, ThemeAware):
         self.setup_theme_awareness()
         self.title_field.setFocus()
 
+    # ── steps as text ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _steps_to_text(task: TaskItem) -> str:
+        """Round-trip the checklist back to the shape it was typed in.
+
+        A done step comes back with its ``x `` marker, and a step's own time
+        and date are re-appended in the inline form the parser reads, so
+        editing the box never quietly drops what the step already knew.
+        """
+        lines = []
+        for step in task.checklist:
+            bits = [step.text.strip()]
+            if step.estimate_min:
+                bits.append(f"{step.estimate_min}m")
+            if step.deadline:
+                bits.append(f"due {step.deadline}")
+            prefix = "x " if step.done else ""
+            lines.append(prefix + " ".join(bit for bit in bits if bit))
+        return "\n".join(lines)
+
+    def _parse_steps(self) -> List[ChecklistItem]:
+        """Read the box back into steps, keeping each one's identity.
+
+        Matching by TEXT rather than by position: a step that keeps its words
+        keeps its id, its done stamp and the reminders already sent about it,
+        even when the line above it was deleted.
+        """
+        from techdeck.core.assistant import nlp
+
+        existing = {step.text.strip().lower(): step
+                    for step in self._task.checklist}
+        out: List[ChecklistItem] = []
+        for raw in self.steps.toPlainText().splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            done = False
+            # "x ", "X ", "[x] " and "- [x] " all mean the same thing, because
+            # all four are things people type.
+            for marker in ("- [x] ", "[x] ", "x ", "X "):
+                if line.lower().startswith(marker.lower()):
+                    done = True
+                    line = line[len(marker):].strip()
+                    break
+            parsed = nlp.parse_task_line(line)
+            text = (parsed.get("title") or "").strip()
+            if not text:
+                continue
+            step = existing.get(text.lower())
+            if step is None:
+                step = ChecklistItem(text=text)
+            step.text = text
+            step.estimate_min = int(parsed.get("estimate_min") or 0)
+            step.deadline = parsed.get("deadline")
+            if done and not step.done:
+                step.done_at = now_iso()
+            elif not done:
+                step.done_at = None
+            step.done = done
+            out.append(step)
+        return out
+
+    def _roll_up_estimate(self):
+        """Put the steps' total into Time needed. Explicit, on a button: a
+        silently derived estimate would make the next plan a stranger."""
+        total = sum(step.estimate_min for step in self._parse_steps())
+        if total <= 0:
+            QMessageBox.information(
+                self, "No times on the steps",
+                "Add a time to at least one step first — "
+                "“pull the drawings 15m”.")
+            return
+        self.estimate.setValue(max(5, min(self.estimate.maximum(), total)))
+
     def apply_theme(self):
         palette = self.get_current_palette()
-        self.setStyleSheet(f"QDialog {{ background: {palette.background}; }}")
+        # Top-level window: not a child of the Assistant page, so it
+        # inherits nothing and carries the scoped sheet itself.
+        self.setStyleSheet(
+            self.scope_stylesheet()
+            + f"QDialog {{ background: {palette.background}; }}")
         self.estimate_hint.setStyleSheet(f"color: {palette.text_secondary};")
 
     def _update_estimate_hint(self, minutes: int):
@@ -180,6 +321,19 @@ class TaskEditDialog(QDialog, ThemeAware):
         task.priority = self.priority.currentData() or "medium"
         task.estimate_min = int(self.estimate.value())
         task.splittable = not self.one_sitting.isChecked()
+        task.checklist = self._parse_steps()
+
+        # waiting_since is stamped only when the flag GOES on, so re-saving
+        # the task (or correcting who you are waiting on) does not restart the
+        # clock the follow-up nudge counts from.
+        waiting = self.waiting.isChecked()
+        if waiting and not task.waiting:
+            task.waiting_since = now_iso()
+        elif not waiting:
+            task.waiting_since = None
+        task.waiting = waiting
+        task.waiting_on = (self.waiting_on.text().strip() if waiting else "")
+
         task.notes = self.notes.toPlainText().strip()
         task.links = [line.strip() for line in
                       self.links.toPlainText().splitlines() if line.strip()]

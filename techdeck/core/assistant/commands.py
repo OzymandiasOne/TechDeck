@@ -16,10 +16,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from techdeck.core.assistant import nlp
 from techdeck.core.assistant.goblin import Goblin, looks_actionable
 from techdeck.core.assistant.models import (
-    BLOCK_BREAK, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
-    ChatMessage, Note, PRIORITIES, Schedule, TaskItem,
+    BLOCK_BREAK, BLOCK_BUSY, BLOCK_FIXED, BLOCK_LUNCH, BLOCK_TASK,
+    ChatMessage, ChecklistItem, Note, PRIORITIES, Schedule, TaskItem,
     fmt_day, fmt_duration, fmt_time,
 )
+from techdeck.core.assistant import timelog
 from techdeck.core.assistant.scheduler import (
     ScheduleRequest, build_schedule, resolve_range, summarize,
 )
@@ -40,6 +41,11 @@ ACT_REFRESH = "refresh"
 ACT_EDIT_NOTE = "edit_note"  # payload: {"note_id": ...}
 ACT_PREFS = "prefs"
 ACT_REMINDERS = "reminders"   # payload: {"open": bool} to open the settings
+ACT_BLOCKS = "blocks"         # open the meetings/time-blocks editor
+# payload: {"name": "<theme>"|""}. The brain has no settings object by design,
+# so a theme change is handed to the page, which owns one.
+ACT_THEME = "theme"
+ACT_TIME_CSV = "time_csv"     # payload: {"range": "<timelog range key>"}
 
 
 @dataclass
@@ -86,13 +92,18 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /schedule [today|tomorrow|week]   build a plan (opens the builder)
   /replan                           rebuild the last plan from today's tasks
   /task <line>                      add a task explicitly
-  /tasks                            list open tasks
+  /tasks [text]                     list open tasks, or just the matching ones
   /done <text>                      tick one off      /undone <text> to reopen
   /rm <text>                        delete a task
   /note [title]                     start a note      /notes  to list them
   /today  /agenda [n]               what's planned
   /find <text>                      search notes + tasks
   /export md|ics|txt                save the plan (ics imports into Outlook)
+  /blocks                           meetings + standing time blocks
+  /wait <text> [on <who>]           park a task on someone else
+  /unwait <text>                    take it back off them
+  /clockin <text>  /clockout        the clock    /time [today|week|month]
+  /theme [name|off]                 this page's own colours
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
   /remind [on|off|<minutes>]        desktop reminders before each block
@@ -151,9 +162,15 @@ Type /help for the full command list.
 class AssistantBrain:
     """Interprets terminal input against an :class:`AssistantStore`."""
 
-    def __init__(self, store: AssistantStore, professional: bool = False):
+    def __init__(self, store: AssistantStore, professional: bool = False,
+                 themes: Optional[List[str]] = None):
         self.store = store
         self.professional = professional
+        # The theme names /theme will accept. Injected by the page rather than
+        # imported: core/ stays free of any ui/ import, so the whole command
+        # surface still tests without a QApplication. Empty means "don't
+        # validate", and the page is then the one that reports a bad name.
+        self.themes = list(themes or [])
         # The thing that answers when the user just wants to talk.
         self.goblin = Goblin(professional=professional)
         # The last free-text line, so a bare `/task` (or the page's "make that
@@ -195,6 +212,14 @@ class AssistantBrain:
             "hours": self._cmd_hours, "prefs": self._cmd_hours,
             "set": self._cmd_set,
             "purge": self._cmd_purge,
+            "blocks": self._cmd_blocks, "meetings": self._cmd_blocks,
+            "wait": self._cmd_wait, "waiting": self._cmd_waiting,
+            "unwait": self._cmd_unwait,
+            "clockin": self._cmd_clock_in, "start": self._cmd_clock_in,
+            "clockout": self._cmd_clock_out, "stop": self._cmd_clock_out,
+            "time": self._cmd_time, "timelog": self._cmd_time,
+            "steps": self._cmd_steps, "step": self._cmd_step,
+            "theme": self._cmd_theme,
             "clear": self._cmd_clear,
             "remind": self._cmd_remind, "reminders": self._cmd_remind,
             "notify": self._cmd_remind,
@@ -305,7 +330,8 @@ class AssistantBrain:
 
         schedule = build_schedule(ScheduleRequest(
             tasks=tasks, start_day=start, end_day=end,
-            prefs=self.store.prefs, now=now))
+            prefs=self.store.prefs, now=now,
+            commitments=self.store.commitments))
         self.store.add_schedule(schedule)
         reply = Reply(action=ACT_GOTO, payload={"tab": "schedule"}, dirty=True)
         reply.say(f"Replanned from right now ({fmt_time(now)}).")
@@ -420,16 +446,27 @@ class AssistantBrain:
             bits.append("one sitting")
         if task.links:
             bits.append(f"{len(task.links)} link(s)")
+        if task.waiting:
+            bits.append(task.waiting_label())
+        done_steps, total_steps = task.checklist_progress()
+        if total_steps:
+            bits.append(f"{done_steps}/{total_steps} steps")
         return " · ".join(bits)
 
     def _cmd_tasks(self, args: str, now: datetime) -> Reply:
-        tasks = self.store.open_tasks()
+        needle = args.strip()
+        tasks = (self.store.find_tasks_text(needle) if needle
+                 else self.store.open_tasks())
         if not tasks:
+            if needle:
+                return Reply().say(f"No open task mentions “{needle}”.")
             return Reply().say("Nothing open. Enjoy it while it lasts.")
         today = now.date()
         tasks.sort(key=lambda t: (-t.score(today), t.created_at))
-        lines = [f"{len(tasks)} open task{'s' if len(tasks) != 1 else ''}, "
-                 f"most worth doing first:"]
+        head = (f"{len(tasks)} open task{'s' if len(tasks) != 1 else ''}"
+                + (f" mentioning “{needle}”:" if needle
+                   else ", most worth doing first:"))
+        lines = [head]
         for task in tasks:
             flag = ""
             due = task.deadline_date()
@@ -437,7 +474,16 @@ class AssistantBrain:
                 flag = "  ⚠ due"
             elif due:
                 flag = f"  · due {due.isoformat()}"
-            lines.append(f"  ☐ {task.label()}"
+            if task.waiting:
+                flag += f"  · {task.waiting_label()}"
+            done_steps, total_steps = task.checklist_progress()
+            if total_steps:
+                flag += f"  · {done_steps}/{total_steps} steps"
+            logged = task.logged_minutes(now)
+            if logged:
+                flag += f"  · {fmt_duration(logged)} logged"
+            box = "▶" if task.is_running else "☐"
+            lines.append(f"  {box} {task.label()}"
                          f"   [{task.priority}, {fmt_duration(task.estimate_min)}]{flag}")
         total = sum(t.estimate_min for t in tasks)
         lines.append(f"  {fmt_duration(total)} of work on the books.")
@@ -488,6 +534,250 @@ class AssistantBrain:
             return Reply().say("Nothing finished to clear out.")
         return Reply(dirty=True).say(
             f"Cleared {removed} finished task{'s' if removed != 1 else ''}.")
+
+    # -- waiting on somebody -------------------------------------------------
+
+    def _cmd_wait(self, args: str, now: datetime) -> Reply:
+        """`/wait order the tube on Dan` parks a task on somebody else.
+
+        The ` on <who>` tail is optional and is split off the END of the line,
+        so a task whose own name contains "on" ("turn the lights on") survives.
+        """
+        text = args.strip()
+        if not text:
+            return Reply().error(
+                "Which one? /wait order the 4130 tube on Dan")
+        who = ""
+        lowered = text.lower()
+        marker = lowered.rfind(" on ")
+        if marker > 0:
+            candidate = text[marker + 4:].strip()
+            # Only treat it as the person if what follows is short enough to be
+            # a name, not the rest of a sentence.
+            if candidate and len(candidate.split()) <= 4:
+                who, text = candidate, text[:marker].strip()
+        task = self._one_task(text)
+        if isinstance(task, Reply):
+            return task
+        self.store.set_waiting(task.id, True, who)
+        tail = f" on {who}" if who else ""
+        reply = Reply(dirty=True).say(f"Parked: {task.label()}{tail}.")
+        reply.system("   It won't be scheduled until you take it back off "
+                     "them. /unwait when they come through.")
+        return reply
+
+    def _cmd_unwait(self, args: str, now: datetime) -> Reply:
+        if not args.strip():
+            return Reply().error("Which one? /unwait order the tube")
+        task = self._one_task(args, include_done=False)
+        if isinstance(task, Reply):
+            return task
+        if not task.waiting:
+            return Reply().say(f"{task.label()} wasn't waiting on anybody.")
+        self.store.set_waiting(task.id, False)
+        return Reply(dirty=True).say(
+            f"Back on you: {task.label()}. It'll be planned again.")
+
+    def _cmd_waiting(self, args: str, now: datetime) -> Reply:
+        parked = self.store.waiting_tasks()
+        if not parked:
+            return Reply().say("Nothing parked on anybody else.")
+        today = now.date()
+        parked.sort(key=lambda t: -t.waiting_days(today))
+        lines = [f"{len(parked)} thing{'s' if len(parked) != 1 else ''} "
+                 f"you're waiting on:"]
+        for task in parked:
+            days = task.waiting_days(today)
+            age = ("since today" if days == 0 else
+                   "1 day" if days == 1 else f"{days} days")
+            who = (task.waiting_on or "").strip() or "someone"
+            lines.append(f"  ⏸ {task.label()}   [{who}, {age}]")
+        return Reply().result("\n".join(lines))
+
+    # -- the clock -----------------------------------------------------------
+
+    def _cmd_clock_in(self, args: str, now: datetime) -> Reply:
+        if not args.strip():
+            running = self.store.running_task()
+            if running is not None:
+                return Reply().say(
+                    f"Already on the clock: {running.label()} "
+                    f"({fmt_duration(running.logged_minutes(now))} so far).")
+            return Reply().error("On what? /clockin fix the PO sheet")
+        task = self._one_task(args)
+        if isinstance(task, Reply):
+            return task
+        previous = self.store.running_task()
+        self.store.clock_in(task.id, now)
+        reply = Reply(dirty=True).say(
+            f"Clock running on {task.label()} from {fmt_time(now)}.")
+        if previous is not None and previous.id != task.id:
+            reply.system(f"   Clocked out of {previous.label()} "
+                         f"({fmt_duration(previous.logged_minutes(now))} "
+                         f"logged).")
+        return reply
+
+    def _cmd_clock_out(self, args: str, now: datetime) -> Reply:
+        running = self.store.running_task()
+        if running is None:
+            return Reply().say("The clock isn't running.")
+        session = running.running_session()
+        minutes = session.minutes(now) if session else 0
+        self.store.clock_out(running.id, now)
+        total = running.logged_minutes(now)
+        reply = Reply(dirty=True).say(
+            f"Clocked out of {running.label()}: {fmt_duration(minutes)}.")
+        if total > minutes:
+            reply.system(f"   {fmt_duration(total)} on it all told.")
+        return reply
+
+    def _cmd_time(self, args: str, now: datetime) -> Reply:
+        """Where the time went. Defaults to this week, which is the span
+        people can still remember well enough to argue with."""
+        key = (args.strip().lower().replace(" ", "_") or "week")
+        aliases = {"this_week": "week", "thisweek": "week",
+                   "lastweek": "last_week", "this_month": "month",
+                   "everything": "all", "total": "all"}
+        key = aliases.get(key, key)
+        if key not in {k for k, _ in timelog.RANGE_CHOICES}:
+            allowed = " | ".join(k for k, _ in timelog.RANGE_CHOICES)
+            return Reply().error(f"Ranges: {allowed}")
+        reply = Reply(action=ACT_GOTO, payload={"tab": "time"})
+        reply.result(timelog.digest(self.store.tasks, key, now))
+        running = self.store.running_task()
+        if running is not None:
+            reply.system(f"   ▶ Still running: {running.label()}")
+        return reply
+
+    # -- steps inside a task -------------------------------------------------
+
+    def _cmd_steps(self, args: str, now: datetime) -> Reply:
+        """`/steps <task>` lists one task's checklist."""
+        if not args.strip():
+            return Reply().error("Which task? /steps weld shop rollout")
+        task = self._one_task(args, include_done=True)
+        if isinstance(task, Reply):
+            return task
+        if not task.checklist:
+            return Reply().say(
+                f"{task.label()} has no steps yet. "
+                f"Add them with /step {task.label()} | <the step>")
+        done, total = task.checklist_progress()
+        lines = [f"{task.label()} — {done}/{total} steps:"]
+        for step in task.checklist:
+            box = "☑" if step.done else "☐"
+            bits = []
+            if step.estimate_min:
+                bits.append(fmt_duration(step.estimate_min))
+            if step.deadline:
+                bits.append(f"due {step.deadline}")
+            tail = f"   [{', '.join(bits)}]" if bits else ""
+            lines.append(f"  {box} {step.label()}{tail}")
+        rolled = task.checklist_minutes()
+        if rolled:
+            lines.append(f"  {fmt_duration(rolled)} across the steps "
+                         f"(the task itself is booked for "
+                         f"{fmt_duration(task.estimate_min)}).")
+        return Reply().result("\n".join(lines))
+
+    def _cmd_step(self, args: str, now: datetime) -> Reply:
+        """`/step <task> | <step line>` adds one step, parsed like a task."""
+        if "|" not in args:
+            return Reply().error(
+                "Use: /step <task> | <the step> 30m due friday")
+        head, tail = args.split("|", 1)
+        task = self._one_task(head, include_done=True)
+        if isinstance(task, Reply):
+            return task
+        parsed = nlp.parse_task_line(tail.strip(), now)
+        text = (parsed.get("title") or "").strip()
+        if not text:
+            return Reply().error("I couldn't find a step in that.")
+        step = ChecklistItem(
+            text=text,
+            estimate_min=int(parsed.get("estimate_min") or 0),
+            deadline=parsed.get("deadline"))
+        self.store.add_step(task.id, step)
+        done, total = task.checklist_progress()
+        reply = Reply(dirty=True).say(
+            f"Added step to {task.label()}: {step.label()}")
+        reply.system(f"   {done}/{total} steps done.")
+        return reply
+
+    # -- this page's own colours ---------------------------------------------
+
+    def _cmd_theme(self, args: str, now: datetime) -> Reply:
+        """`/theme <name>` pins this page's colours; `/theme off` releases it.
+
+        Handed to the page as an action rather than written here: the brain has
+        no settings object, and giving it one would make the whole command
+        surface need a running app to test.
+        """
+        word = args.strip().lower().replace(" ", "_").replace("-", "_")
+        if word in ("off", "none", "app", "clear", "follow"):
+            return Reply(action=ACT_THEME, payload={"name": ""}).say(
+                "This page follows the app theme again.")
+        names = list(self.themes)
+        if not word:
+            reply = Reply().say(
+                "Give me a theme name and this page wears it, "
+                "or /theme off to follow the app.")
+            if names:
+                reply.system("   " + " · ".join(names))
+            return reply
+        if names and word not in names:
+            close = _closest(word, names)
+            reply = Reply().error(f"No theme called “{word}”.")
+            if close:
+                reply.system(f"Did you mean {close}?")
+            else:
+                reply.system("   " + " · ".join(names))
+            return reply
+        return Reply(action=ACT_THEME, payload={"name": word}).say(
+            f"This page is {word.replace('_', ' ')} now. "
+            f"Everything else is untouched.")
+
+    # -- meetings and standing blocks ----------------------------------------
+
+    def _cmd_blocks(self, args: str, now: datetime) -> Reply:
+        """List the standing claims on the day, and open the editor."""
+        items = self.store.sorted_commitments()
+        reply = Reply(action=ACT_BLOCKS)
+        if not items:
+            reply.say("No meetings or blocked-out time yet. Opening the "
+                      "editor, anything you add here is time I won't plan "
+                      "work into.")
+            return reply
+        lines = [f"{len(items)} block{'s' if len(items) != 1 else ''} "
+                 f"on your day:"]
+        for item in items:
+            mark = "" if item.active else "   (off)"
+            lines.append(f"  ■ {item.label()}   [{item.when_label()}]{mark}")
+        reply.result("\n".join(lines))
+        return reply
+
+    # -- resolving a task from typed text ------------------------------------
+
+    def _one_task(self, needle: str, include_done: bool = False):
+        """One task, or a Reply explaining why not.
+
+        Every command that takes a task by name goes through here, so "that
+        matches four things" reads the same everywhere instead of each command
+        inventing its own wording.
+        """
+        text = (needle or "").strip()
+        if not text:
+            return Reply().error("Which task?")
+        matches = self.store.find_tasks(text, include_done=include_done)
+        if not matches:
+            return Reply().error(f"No task matching “{text}”.")
+        if len(matches) > 1:
+            reply = Reply().say(f"That matches {len(matches)} tasks, "
+                                f"be a bit more specific:")
+            for task in matches[:8]:
+                reply.system(f"   • {task.label()}")
+            return reply
+        return matches[0]
 
     # -- notes ---------------------------------------------------------------
 

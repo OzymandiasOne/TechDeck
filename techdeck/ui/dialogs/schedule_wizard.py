@@ -42,6 +42,7 @@ from techdeck.core.assistant.scheduler import (
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.dialogs.task_edit_dialog import TaskEditDialog
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 COL_TASK, COL_PRIORITY, COL_ESTIMATE, COL_DUE, COL_MORE = range(5)
 
@@ -99,6 +100,10 @@ class PasteTasksDialog(QDialog):
 
 class ScheduleWizard(QDialog, ThemeAware):
     """Collects the answers, builds the plan, saves it on accept."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     STEP_TITLES = ["What are we planning?", "What's on your plate?",
                    "Here's the plan"]
@@ -681,7 +686,11 @@ class ScheduleWizard(QDialog, ThemeAware):
 
         self._schedule = build_schedule(ScheduleRequest(
             tasks=tasks, start_day=start_day, end_day=end_day, prefs=prefs,
-            label=label, first_day_start=first_start))
+            label=label, first_day_start=first_start,
+            # Meetings and blocked-out time. Passed every time rather than
+            # offered as an option: a plan built over the top of a standing
+            # meeting is wrong, not customised.
+            commitments=self.store.commitments))
         self.store.add_schedule(self._schedule)
         self._render_review()
         return True
@@ -694,8 +703,13 @@ class ScheduleWizard(QDialog, ThemeAware):
         stats = schedule.stats or {}
         bits = [f"{stats.get('tasks_placed', 0)} tasks placed",
                 f"{fmt_duration(stats.get('work_minutes', 0))} of work"]
+        if stats.get("committed_minutes"):
+            bits.append(f"{fmt_duration(stats['committed_minutes'])} "
+                        f"already booked")
         if stats.get("tasks_unplaced"):
             bits.append(f"{stats['tasks_unplaced']} didn't fit")
+        if stats.get("tasks_waiting"):
+            bits.append(f"{stats['tasks_waiting']} waiting on someone")
         headline = "  ·  ".join(bits)
         colour = palette.warning if schedule.warnings else palette.text_secondary
         self.review_summary.setText(headline)
@@ -740,7 +754,11 @@ class ScheduleWizard(QDialog, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        self.setStyleSheet(f"QDialog {{ background: {palette.background}; }}")
+        # Top-level window: not a child of the Assistant page, so it
+        # inherits nothing and carries the scoped sheet itself.
+        self.setStyleSheet(
+            self.scope_stylesheet()
+            + f"QDialog {{ background: {palette.background}; }}")
         self.step_label.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 12px;")
         if hasattr(self, "review_view"):

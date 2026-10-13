@@ -21,14 +21,16 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 from techdeck.core.assistant.models import (
-    ChatMessage, Note, TaskItem, Schedule, SchedulePrefs, now_iso,
+    MAX_OPEN_SESSION_MIN, MIN_SESSION_MIN,
+    ChatMessage, ChecklistItem, Commitment, Note, TaskItem, Schedule,
+    SchedulePrefs, WorkSession, now_iso,
 )
 from techdeck.core.assistant.notifier import NotifyPrefs, prune_sent
 
@@ -61,6 +63,7 @@ class AssistantStore:
 
         self.notes: List[Note] = []
         self.tasks: List[TaskItem] = []
+        self.commitments: List[Commitment] = []
         self.schedules: List[Schedule] = []
         self.prefs = SchedulePrefs()
         self.notify = NotifyPrefs()
@@ -85,11 +88,15 @@ class AssistantStore:
                 data = {}
         self.notes = [Note.from_dict(d) for d in data.get("notes", []) or []]
         self.tasks = [TaskItem.from_dict(d) for d in data.get("tasks", []) or []]
+        self.commitments = [Commitment.from_dict(d)
+                            for d in data.get("commitments", []) or []]
         self.schedules = [Schedule.from_dict(d) for d in data.get("schedules", []) or []]
         self.prefs = SchedulePrefs.from_dict(data.get("prefs", {}) or {})
         self.notify = NotifyPrefs.from_dict(data.get("notify", {}) or {})
         self.meta = dict(data.get("meta", {}) or {})
         self._migrate()
+        # A clock left running when the app closed must not claim the night.
+        self.close_stale_sessions()
 
     def _migrate(self) -> None:
         """One-shot cleanups, keyed off a stamp in ``meta`` so each runs once.
@@ -121,6 +128,7 @@ class AssistantStore:
             "notify": self.notify.to_dict(),
             "notes": [n.to_dict() for n in self.notes],
             "tasks": [t.to_dict() for t in self.tasks],
+            "commitments": [c.to_dict() for c in self.commitments],
             "schedules": [s.to_dict() for s in self.schedules[:MAX_SCHEDULES]],
             "meta": self.meta,
         }
@@ -254,6 +262,228 @@ class AssistantStore:
             self.tasks = kept
             self.save()
         return removed
+
+    def find_tasks_text(self, needle: str, include_done: bool = False
+                        ) -> List[TaskItem]:
+        """Every task whose title, notes, links or STEPS mention ``needle``.
+
+        Wider than ``find_tasks`` on purpose: that one resolves a command
+        argument to one task, this one powers the Tasks tab's search box,
+        where "I know I wrote the PO number down somewhere" has to find it
+        wherever it was written.
+        """
+        needle = (needle or "").strip().lower()
+        pool = self.tasks if include_done else self.open_tasks()
+        if not needle:
+            return list(pool)
+        out = []
+        for task in pool:
+            haystack = [task.title, task.notes, task.waiting_on]
+            haystack.extend(task.links)
+            haystack.extend(step.text for step in task.checklist)
+            if any(needle in (part or "").lower() for part in haystack):
+                out.append(task)
+        return out
+
+    def waiting_tasks(self) -> List[TaskItem]:
+        return [t for t in self.tasks if not t.done and t.waiting]
+
+    def set_waiting(self, task_id: str, waiting: bool = True,
+                    on: str = "") -> Optional[TaskItem]:
+        """Park a task on somebody else, or take it back off them.
+
+        ``waiting_since`` is stamped only when the flag goes ON and was not
+        already on, so re-saving the task (or editing who you are waiting on)
+        does not restart the clock the follow-up nudge counts from.
+        """
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        if waiting:
+            if not task.waiting:
+                task.waiting_since = now_iso()
+            task.waiting = True
+            if on:
+                task.waiting_on = on.strip()
+        else:
+            task.waiting = False
+            task.waiting_on = ""
+            task.waiting_since = None
+        self.update_task(task)
+        return task
+
+    # ── checklist steps ───────────────────────────────
+
+    def add_step(self, task_id: str, step: ChecklistItem) -> Optional[TaskItem]:
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        task.checklist.append(step)
+        self.update_task(task)
+        return task
+
+    def set_step_done(self, task_id: str, step_id: str,
+                      done: bool = True) -> Optional[TaskItem]:
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        step = task.get_step(step_id)
+        if step is None:
+            return None
+        step.done = done
+        step.done_at = now_iso() if done else None
+        self.update_task(task)
+        return task
+
+    def delete_step(self, task_id: str, step_id: str) -> Optional[TaskItem]:
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        before = len(task.checklist)
+        task.checklist = [s for s in task.checklist if s.id != step_id]
+        if len(task.checklist) != before:
+            self.update_task(task)
+        return task
+
+    # ── the clock ─────────────────────────────────────
+
+    def running_task(self) -> Optional[TaskItem]:
+        """The one task currently clocked in, if any."""
+        return next((t for t in self.tasks if t.is_running), None)
+
+    def clock_in(self, task_id: str, now: Optional[datetime] = None
+                 ) -> Optional[TaskItem]:
+        """Start the clock on a task.
+
+        **Only one task is ever running.** Clocking in somewhere else clocks
+        out of wherever you were, because a person cannot be in two places and
+        a time log that says otherwise is worse than no time log at all.
+        """
+        now = now or datetime.now()
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        for other in self.tasks:
+            if other.id != task_id and other.is_running:
+                self._close_session(other, now)
+        if task.is_running:
+            return task                  # already on the clock; a no-op
+        task.sessions.append(
+            WorkSession(start=now.replace(microsecond=0).isoformat()))
+        self.update_task(task)
+        return task
+
+    def clock_out(self, task_id: Optional[str] = None,
+                  now: Optional[datetime] = None) -> Optional[TaskItem]:
+        """Stop the clock. With no id, stops whatever is running."""
+        now = now or datetime.now()
+        task = self.get_task(task_id) if task_id else self.running_task()
+        if task is None:
+            return None
+        if self._close_session(task, now):
+            self.update_task(task)
+        return task
+
+    def _close_session(self, task: TaskItem, now: datetime,
+                       note: str = "") -> bool:
+        """End ``task``'s open session. A session under a minute long is
+        dropped rather than logged: that is a mis-click, not work."""
+        session = task.running_session()
+        if session is None:
+            return False
+        if session.minutes(now) < MIN_SESSION_MIN:
+            task.sessions = [s for s in task.sessions if s.id != session.id]
+            return True
+        session.end = now.replace(microsecond=0).isoformat()
+        if note:
+            session.note = note
+        return True
+
+    def log_time(self, task_id: str, minutes: int,
+                 when: Optional[datetime] = None,
+                 note: str = "") -> Optional[TaskItem]:
+        """Add time by hand, for the stretch you forgot to clock."""
+        minutes = max(MIN_SESSION_MIN, int(minutes))
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+        end = (when or datetime.now()).replace(microsecond=0)
+        start = end - timedelta(minutes=minutes)
+        task.sessions.append(WorkSession(
+            start=start.isoformat(), end=end.isoformat(), note=note))
+        self.update_task(task)
+        return task
+
+    def close_stale_sessions(self, now: Optional[datetime] = None) -> int:
+        """Close any clock left running from an earlier day.
+
+        TechDeck gets closed with the clock still going, and the honest answer
+        to "how long was that?" is not "sixteen hours". A session that started
+        on an earlier day is capped at ``MAX_OPEN_SESSION_MIN`` and marked, so
+        the number reads as the guess it is instead of a silent lie.
+        """
+        now = now or datetime.now()
+        closed = 0
+        for task in self.tasks:
+            session = task.running_session()
+            if session is None:
+                continue
+            start = session.start_dt()
+            if start is None:
+                task.sessions = [s for s in task.sessions if s.id != session.id]
+                closed += 1
+                continue
+            if start.date() >= now.date():
+                continue                 # today's clock is the user's business
+            session.end = (start + timedelta(
+                minutes=MAX_OPEN_SESSION_MIN)).isoformat()
+            session.note = ((session.note + " ") if session.note
+                            else "") + "(auto-closed)"
+            closed += 1
+        if closed:
+            self.save()
+        return closed
+
+    # ── commitments (meetings and other claims on the day) ───────────────
+
+    def add_commitment(self, commitment: Commitment) -> Commitment:
+        self.commitments.append(commitment)
+        self.save()
+        return commitment
+
+    def update_commitment(self, commitment: Commitment) -> None:
+        for i, existing in enumerate(self.commitments):
+            if existing.id == commitment.id:
+                self.commitments[i] = commitment
+                break
+        else:
+            self.commitments.append(commitment)
+        self.save()
+
+    def delete_commitment(self, commitment_id: str) -> bool:
+        before = len(self.commitments)
+        self.commitments = [c for c in self.commitments if c.id != commitment_id]
+        if len(self.commitments) != before:
+            self.save()
+            return True
+        return False
+
+    def get_commitment(self, commitment_id: str) -> Optional[Commitment]:
+        return next((c for c in self.commitments if c.id == commitment_id), None)
+
+    def commitments_on(self, when: date) -> List[Commitment]:
+        """Everything claiming part of ``when``, in start order."""
+        hits = [c for c in self.commitments if c.occurs_on(when)]
+        return sorted(hits, key=lambda c: c.start_time())
+
+    def sorted_commitments(self) -> List[Commitment]:
+        """Weekly standing items first (they shape every week), then one-offs
+        by date, each group in start-time order."""
+        weekly = sorted([c for c in self.commitments if c.weekly],
+                        key=lambda c: (min(c.weekdays), c.start_time()))
+        once = sorted([c for c in self.commitments if not c.weekly],
+                      key=lambda c: (c.day or "9999", c.start_time()))
+        return weekly + once
 
     # ── schedules ────────────────────────────────────────────────────────────
 

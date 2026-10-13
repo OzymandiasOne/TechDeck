@@ -12,11 +12,13 @@ Modules:
     nlp, rule-based parsing of dates, durations, priorities, intents
     scheduler, the time-blocking engine (deadline-bucketed WSJF packing)
     exporters, schedule → markdown / plain text / .ics
+    timelog, the clocked-time report (where the week actually went)
     commands, the terminal's slash commands + free-text dispatch
 """
 
 from techdeck.core.assistant.models import (  # noqa: F401
-    ChatMessage, Note, TaskItem, ScheduleBlock, DaySchedule, Schedule,
-    SchedulePrefs, PRIORITIES, PRIORITY_LABELS,
+    ChatMessage, ChecklistItem, Commitment, Note, TaskItem, ScheduleBlock,
+    DaySchedule, Schedule, SchedulePrefs, WorkSession,
+    PRIORITIES, PRIORITY_LABELS,
 )
 from techdeck.core.assistant.store import AssistantStore  # noqa: F401
