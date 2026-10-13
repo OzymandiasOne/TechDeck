@@ -27,7 +27,7 @@ from techdeck.core.assistant.models import (
     PRIORITY_LABELS, Schedule, TaskItem, fmt_day, fmt_duration, fmt_time,
 )
 from techdeck.core.assistant.store import AssistantStore
-from techdeck.ui.theme import mix, readable_on
+from techdeck.ui.theme import readable_on
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
@@ -47,6 +47,13 @@ PRIORITY_COLORS = {
 WAITING_COLOR = "#F59E0B"
 
 
+# Left/top/right/bottom padding of a tab's header row. The left and right
+# numbers put its text and its last button on the same vertical lines as the
+# cards below it: the scroller insets those by 2 and 8, and a card pads its
+# own contents by 16.
+HEADER_MARGINS = (18, 2, 8, 2)
+
+
 def _card(parent=None) -> QFrame:
     frame = QFrame(parent)
     frame.setObjectName("assistantCard")
@@ -57,10 +64,11 @@ def _card(parent=None) -> QFrame:
 def _header_card(parent=None) -> QFrame:
     """The toolbar strip at the top of a tab.
 
-    Its own object name so it can be a quiet step away from the content cards
-    under it. With both on `surface` the page was one unbroken slab of colour
-    and the controls read as part of the agenda, which is the opposite of what
-    a toolbar is for.
+    It keeps an object name of its own, but it is NOT painted: the page
+    background runs behind it, unbroken, down to the content cards. Giving it
+    a fill made a full-width coloured band across the top of every tab - a
+    seam where the page should simply continue. The cards are the only things
+    that get a surface; the toolbar just sits on the page.
     """
     frame = QFrame(parent)
     frame.setObjectName("assistantHeader")
@@ -77,9 +85,8 @@ def card_qss(palette) -> str:
             border-radius: 10px;
         }}
         QFrame#assistantHeader {{
-            background-color: {mix(palette.surface, palette.on_card, 0.12)};
-            border: 1px solid {palette.card_border or palette.border};
-            border-radius: 10px;
+            background: transparent;
+            border: none;
         }}
     """
 
@@ -131,13 +138,12 @@ class SchedulePanel(QWidget, ThemeAware):
         outer.setSpacing(10)
 
         # --- header ----------------------------------------------------------
-        # In a card of its own, like everything else on the page. It used to
-        # be a bare row on the panel: square corners, text against the panel
-        # edge and the Export button flush with the right-hand side, which
-        # read as a strip jammed into the corner rather than a toolbar.
+        # Unpainted, so the page runs behind it. Its margins are what keep the
+        # Export button off the window edge, and they line its text and its
+        # last button up with the edges of the cards below.
         header_card = _header_card()
         header = QHBoxLayout(header_card)
-        header.setContentsMargins(16, 12, 16, 12)
+        header.setContentsMargins(*HEADER_MARGINS)
         header.setSpacing(10)
 
         titles = QVBoxLayout()
@@ -186,12 +192,13 @@ class SchedulePanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        # The header sits on a card now, so its text takes the card's tones.
+        # The header sits on the PAGE, not on a card, so it takes the page's
+        # tones. A two-tone theme has opposite colours for the two surfaces.
         self.range_label.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {palette.on_card}; "
+            f"font-size: 16px; font-weight: bold; color: {palette.text}; "
             f"background: transparent;")
         self.stats_label.setStyleSheet(
-            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"color: {palette.text_secondary}; font-size: 12px; "
             f"background: transparent;")
         self.setStyleSheet(card_qss(palette))
         self.refresh(keep_history=True)
@@ -572,13 +579,12 @@ class TasksPanel(QWidget, ThemeAware):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(10)
 
-        # --- quick add + filters, in one header card -------------------------
-        # Both rows live on a card, matching the Schedule tab and the task
-        # cards below: a bare row on the panel reads as a strip wedged into
-        # the corner, with its last button flush against the window edge.
+        # --- quick add + filters, in one header row --------------------------
+        # Unpainted, like the other tabs: the page runs behind it, and the
+        # margins keep its last button off the window edge.
         header_card = _header_card()
         header_box = QVBoxLayout(header_card)
-        header_box.setContentsMargins(16, 12, 16, 12)
+        header_box.setContentsMargins(*HEADER_MARGINS)
         header_box.setSpacing(8)
 
         add_row = QHBoxLayout()
@@ -647,9 +653,10 @@ class TasksPanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        # The summary sits on the header card, so it takes the card's tones.
+        # The summary sits on the page, not on a card, so it takes the page's
+        # tones.
         self.summary.setStyleSheet(
-            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"color: {palette.text_secondary}; font-size: 12px; "
             f"background: transparent;")
         self.setStyleSheet(card_qss(palette))
         self.refresh()

@@ -47,7 +47,7 @@ BAR_MAX_PX = 260
 # Both card kinds come from the Schedule/Tasks module so the three tabs cannot
 # drift apart.
 from techdeck.ui.widgets.assistant_schedule import (  # noqa: E402
-    _card, _header_card, card_qss,
+    HEADER_MARGINS, _card, _header_card, card_qss,
 )
 
 
@@ -71,12 +71,11 @@ class TimePanel(QWidget, ThemeAware):
         outer.setSpacing(10)
 
         # --- header ----------------------------------------------------------
-        # On a card, matching the Schedule and Tasks tabs: a bare row on the
-        # panel has square corners and puts its last button against the
-        # window edge.
+        # Unpainted, matching the Schedule and Tasks tabs: the page runs
+        # behind it and the margins keep its last button off the window edge.
         header_card = _header_card()
         header = QHBoxLayout(header_card)
-        header.setContentsMargins(16, 12, 16, 12)
+        header.setContentsMargins(*HEADER_MARGINS)
         header.setSpacing(10)
         titles = QVBoxLayout()
         titles.setSpacing(2)
@@ -130,12 +129,13 @@ class TimePanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        # Header text sits on the header card, so it takes the card's tones.
+        # Header text sits on the page, not on a card, so it takes the
+        # page's tones.
         self.headline.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {palette.on_card}; "
+            f"font-size: 16px; font-weight: bold; color: {palette.text}; "
             f"background: transparent;")
         self.sub.setStyleSheet(
-            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"color: {palette.text_secondary}; font-size: 12px; "
             f"background: transparent;")
         self.setStyleSheet(card_qss(palette))
         self.refresh()
