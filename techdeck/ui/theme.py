@@ -970,6 +970,33 @@ def contrast_ratio(one: str, two: str) -> float:
 MIN_READABLE_CONTRAST = 3.0
 
 
+def mix(base: str, towards: str, amount: float = 0.12) -> str:
+    """Blend ``base`` a little way towards ``towards``. Returns #rrggbb.
+
+    For making one surface a quiet step away from another - a toolbar against
+    the content under it - without inventing a new palette entry that every
+    theme (including the user's custom ones) would then have to define.
+    """
+    amount = max(0.0, min(1.0, amount))
+
+    def channels(colour: str):
+        text = (colour or "").strip().lstrip("#")
+        if len(text) == 3:
+            text = "".join(c * 2 for c in text)
+        if len(text) != 6:
+            return None
+        try:
+            return [int(text[i:i + 2], 16) for i in (0, 2, 4)]
+        except ValueError:
+            return None
+
+    first, second = channels(base), channels(towards)
+    if first is None or second is None:
+        return base
+    blended = [round(a + (b - a) * amount) for a, b in zip(first, second)]
+    return "#" + "".join(f"{value:02X}" for value in blended)
+
+
 def is_light(colour: str) -> bool:
     """Is this colour light enough to need dark text (and dark tints) on it?"""
     return _luminance(colour) > 0.45

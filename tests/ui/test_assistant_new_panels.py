@@ -367,12 +367,25 @@ def test_the_task_row_shows_all_three_of_its_buttons(store, qapp):
         assert button.property("iconOnly") == "true" or button.text() == "Edit"
 
 
-def test_every_assistant_header_sits_on_a_card(store, qapp):
+def test_every_assistant_header_sits_on_its_own_card(store, qapp):
     """A bare row on the panel has square corners and puts its last button
-    flush against the window edge."""
+    flush against the window edge. The header card is its OWN kind, a quiet
+    step away from the content cards: with both on `surface` the page was one
+    unbroken slab and the controls read as part of the agenda."""
     from PySide6.QtWidgets import QFrame
 
     for panel in (SchedulePanel(store), TasksPanel(store), TimePanel(store)):
         first = panel.layout().itemAt(0).widget()
         assert isinstance(first, QFrame), type(panel).__name__
-        assert first.objectName() == "assistantCard", type(panel).__name__
+        assert first.objectName() == "assistantHeader", type(panel).__name__
+
+
+def test_the_header_card_is_a_different_tone_from_the_content(qapp):
+    from techdeck.ui.theme import THEMES, mix
+    from techdeck.ui.widgets.assistant_schedule import card_qss
+
+    for name, palette in THEMES.items():
+        header = mix(palette.surface, palette.on_card, 0.12)
+        assert header.lower() != palette.surface.lower(), name
+        sheet = card_qss(palette)
+        assert "QFrame#assistantHeader" in sheet and header in sheet, name

@@ -27,7 +27,7 @@ from techdeck.core.assistant.models import (
     PRIORITY_LABELS, Schedule, TaskItem, fmt_day, fmt_duration, fmt_time,
 )
 from techdeck.core.assistant.store import AssistantStore
-from techdeck.ui.theme import readable_on
+from techdeck.ui.theme import mix, readable_on
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
@@ -52,6 +52,36 @@ def _card(parent=None) -> QFrame:
     frame.setObjectName("assistantCard")
     frame.setFrameShape(QFrame.Shape.NoFrame)
     return frame
+
+
+def _header_card(parent=None) -> QFrame:
+    """The toolbar strip at the top of a tab.
+
+    Its own object name so it can be a quiet step away from the content cards
+    under it. With both on `surface` the page was one unbroken slab of colour
+    and the controls read as part of the agenda, which is the opposite of what
+    a toolbar is for.
+    """
+    frame = QFrame(parent)
+    frame.setObjectName("assistantHeader")
+    frame.setFrameShape(QFrame.Shape.NoFrame)
+    return frame
+
+
+def card_qss(palette) -> str:
+    """The shared look of both card kinds. One definition, three tabs."""
+    return f"""
+        QFrame#assistantCard {{
+            background-color: {palette.surface};
+            border: 1px solid {palette.card_border or palette.border};
+            border-radius: 10px;
+        }}
+        QFrame#assistantHeader {{
+            background-color: {mix(palette.surface, palette.on_card, 0.12)};
+            border: 1px solid {palette.card_border or palette.border};
+            border-radius: 10px;
+        }}
+    """
 
 
 class _Scroller(QScrollArea):
@@ -105,7 +135,7 @@ class SchedulePanel(QWidget, ThemeAware):
         # be a bare row on the panel: square corners, text against the panel
         # edge and the Export button flush with the right-hand side, which
         # read as a strip jammed into the corner rather than a toolbar.
-        header_card = _card()
+        header_card = _header_card()
         header = QHBoxLayout(header_card)
         header.setContentsMargins(16, 12, 16, 12)
         header.setSpacing(10)
@@ -163,13 +193,7 @@ class SchedulePanel(QWidget, ThemeAware):
         self.stats_label.setStyleSheet(
             f"color: {palette.on_card_secondary}; font-size: 12px; "
             f"background: transparent;")
-        self.setStyleSheet(f"""
-            QFrame#assistantCard {{
-                background-color: {palette.surface};
-                border: 1px solid {palette.border};
-                border-radius: 10px;
-            }}
-        """)
+        self.setStyleSheet(card_qss(palette))
         self.refresh(keep_history=True)
 
     # -- data ----------------------------------------------------------------
@@ -324,6 +348,12 @@ class SchedulePanel(QWidget, ThemeAware):
         mono.setStyleHint(QFont.StyleHint.Monospace)
         time_label.setFont(mono)
         time_label.setFixedWidth(140)
+        # Right-aligned so every row's time ends against the tick column
+        # instead of trailing off into a ragged gap. The times vary in width
+        # ("7:00 AM-8:30 AM" vs "11:30 AM-12:00 PM") and left-aligning them
+        # left the eye nothing to follow down the page.
+        time_label.setAlignment(Qt.AlignmentFlag.AlignRight
+                                | Qt.AlignmentFlag.AlignVCenter)
         time_label.setStyleSheet(
             f"color: {palette.on_card_secondary}; background: transparent;")
         layout.addWidget(time_label)
@@ -337,9 +367,12 @@ class SchedulePanel(QWidget, ThemeAware):
             spacer = QLabel("\u25a0")
             spacer.setFixedWidth(18)
             spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # The card's own quiet tone, not accent_two: that is a CTA colour
+            # (poison green on halloween) and a meeting is the opposite of a
+            # call to action. The filled square against lunch's dot, plus the
+            # bold title, is all the distinction the row needs.
             spacer.setStyleSheet(
-                f"color: {palette.accent_two or palette.on_card_secondary}; "
-                f"background: transparent;")
+                f"color: {palette.on_card_secondary}; background: transparent;")
             layout.addWidget(spacer)
         elif is_work and task is not None:
             check = QCheckBox()
@@ -361,11 +394,16 @@ class SchedulePanel(QWidget, ThemeAware):
             title = f"📌 {title}"
         if block.kind == BLOCK_BUSY and block.note:
             title += f"   \u00b7 {block.note.splitlines()[0][:60]}"
-        if block.part and block.part_count > 1:
-            title += f"   (part {block.part} of {block.part_count})"
 
         label = QLabel(title)
-        label.setWordWrap(True)
+        # One line per block. A wrapped QLabel reports a deliberately narrow
+        # sizeHint, which broke "911 scribe sheets for L022" across two lines
+        # in a row with half the card still empty beside it. An agenda is read
+        # by scanning down the times, so a row that is sometimes two lines
+        # tall is worse than a long name being cut - and the full name is one
+        # hover away.
+        label.setWordWrap(False)
+        label.setToolTip(block.title)
         colour = palette.on_card if is_work else palette.on_card_secondary
         if block.kind == BLOCK_BUSY:
             colour = palette.on_card
@@ -377,10 +415,28 @@ class SchedulePanel(QWidget, ThemeAware):
             colour = palette.on_card_secondary
         label.setStyleSheet(f"color: {colour}; font-weight: {weight}; "
                             f"background: transparent; {extra}")
-        layout.addWidget(label, 1)
+        # Maximum, not Preferred: the title takes the width it needs and no
+        # more, so "part 2 of 3" and the "now" pill sit against it instead of
+        # being flung to the right-hand edge - but it can still shrink and
+        # wrap when the window is narrow. With plain stretch it grew to fill
+        # the row and wrapped a title that had plenty of room.
+        label.setSizePolicy(QSizePolicy.Policy.Maximum,
+                            QSizePolicy.Policy.Preferred)
+        layout.addWidget(label, 0)
+
+        # "part 2 of 3" qualifies the title, it is not part of it. As its own
+        # quiet label it stops competing with the name of the job.
+        if block.part and block.part_count > 1:
+            part = QLabel(f"part {block.part} of {block.part_count}")
+            part.setStyleSheet(
+                f"color: {palette.on_card_secondary}; font-size: 11px; "
+                f"background: transparent;")
+            layout.addWidget(part, 0)
 
         # "You are here", the single most useful thing an agenda can tell you
-        # when you glance at it mid-morning.
+        # when you glance at it mid-morning. It sits NEXT TO the block it is
+        # about: floated out at the right-hand edge it read as a badge on the
+        # card rather than on the row.
         start, end = block.start_dt(), block.end_dt()
         if start and end and start <= now < end:
             marker = QLabel("now")
@@ -388,7 +444,9 @@ class SchedulePanel(QWidget, ThemeAware):
                 f"color: {palette.accent_text}; background: {palette.accent}; "
                 f"border-radius: 7px; padding: 1px 8px; font-size: 10px; "
                 f"font-weight: bold;")
-            layout.addWidget(marker)
+            layout.addWidget(marker, 0)
+
+        layout.addStretch(1)
 
         if task is not None and (task.notes or task.links):
             info = QPushButton("⋯")
@@ -518,7 +576,7 @@ class TasksPanel(QWidget, ThemeAware):
         # Both rows live on a card, matching the Schedule tab and the task
         # cards below: a bare row on the panel reads as a strip wedged into
         # the corner, with its last button flush against the window edge.
-        header_card = _card()
+        header_card = _header_card()
         header_box = QVBoxLayout(header_card)
         header_box.setContentsMargins(16, 12, 16, 12)
         header_box.setSpacing(8)
@@ -593,13 +651,7 @@ class TasksPanel(QWidget, ThemeAware):
         self.summary.setStyleSheet(
             f"color: {palette.on_card_secondary}; font-size: 12px; "
             f"background: transparent;")
-        self.setStyleSheet(f"""
-            QFrame#assistantCard {{
-                background-color: {palette.surface};
-                border: 1px solid {palette.border};
-                border-radius: 10px;
-            }}
-        """)
+        self.setStyleSheet(card_qss(palette))
         self.refresh()
 
     # -- data ----------------------------------------------------------------

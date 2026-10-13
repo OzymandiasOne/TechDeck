@@ -44,11 +44,11 @@ from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 BAR_MAX_PX = 260
 
 
-def _card(parent=None) -> QFrame:
-    frame = QFrame(parent)
-    frame.setObjectName("assistantCard")
-    frame.setFrameShape(QFrame.Shape.NoFrame)
-    return frame
+# Both card kinds come from the Schedule/Tasks module so the three tabs cannot
+# drift apart.
+from techdeck.ui.widgets.assistant_schedule import (  # noqa: E402
+    _card, _header_card, card_qss,
+)
 
 
 class TimePanel(QWidget, ThemeAware):
@@ -74,7 +74,7 @@ class TimePanel(QWidget, ThemeAware):
         # On a card, matching the Schedule and Tasks tabs: a bare row on the
         # panel has square corners and puts its last button against the
         # window edge.
-        header_card = _card()
+        header_card = _header_card()
         header = QHBoxLayout(header_card)
         header.setContentsMargins(16, 12, 16, 12)
         header.setSpacing(10)
@@ -137,13 +137,7 @@ class TimePanel(QWidget, ThemeAware):
         self.sub.setStyleSheet(
             f"color: {palette.on_card_secondary}; font-size: 12px; "
             f"background: transparent;")
-        self.setStyleSheet(f"""
-            QFrame#assistantCard {{
-                background-color: {palette.surface};
-                border: 1px solid {palette.border};
-                border-radius: 10px;
-            }}
-        """)
+        self.setStyleSheet(card_qss(palette))
         self.refresh()
 
     # ── data ─────────────────────────────────────────────────────────────────
