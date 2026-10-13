@@ -367,10 +367,10 @@ def test_the_task_row_shows_all_three_of_its_buttons(store, qapp):
         assert button.property("iconOnly") == "true" or button.text() == "Edit"
 
 
-def test_every_assistant_header_is_the_same_row(store, qapp):
-    """All three tabs open with the same header row, inset the same way, so
-    they cannot drift apart. Its margins are the only thing keeping the last
-    button off the window edge, now that the row has no fill of its own."""
+def test_every_assistant_header_sits_on_its_own_card(store, qapp):
+    """All three tabs open with the same header card, padded the same way, so
+    they cannot drift apart. A bare row on the panel has square corners and
+    puts its last button flush against the window edge."""
     from PySide6.QtWidgets import QFrame
 
     from techdeck.ui.widgets.assistant_schedule import HEADER_MARGINS
@@ -385,17 +385,12 @@ def test_every_assistant_header_is_the_same_row(store, qapp):
         assert margins.right() > 0, type(panel).__name__
 
 
-def test_the_header_row_is_not_painted(qapp):
-    """A fill of its own made a full-width coloured band across the top of
-    every tab: a seam where the page should just carry on behind the row,
-    down to the cards. Only the cards get a surface."""
-    from techdeck.ui.theme import THEMES
+def test_the_header_card_is_a_different_tone_from_the_content(qapp):
+    from techdeck.ui.theme import THEMES, mix
     from techdeck.ui.widgets.assistant_schedule import card_qss
 
     for name, palette in THEMES.items():
+        header = mix(palette.surface, palette.on_card, 0.12)
+        assert header.lower() != palette.surface.lower(), name
         sheet = card_qss(palette)
-        assert "QFrame#assistantHeader" in sheet, name
-        block = sheet.split("QFrame#assistantHeader", 1)[1].split("}", 1)[0]
-        assert "transparent" in block, name
-        assert "border: none" in block, name
-        assert palette.surface.lower() not in block.lower(), name
+        assert "QFrame#assistantHeader" in sheet and header in sheet, name

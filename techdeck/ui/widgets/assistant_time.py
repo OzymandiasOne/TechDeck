@@ -49,6 +49,7 @@ BAR_MAX_PX = 260
 from techdeck.ui.widgets.assistant_schedule import (  # noqa: E402
     HEADER_MARGINS, _card, _header_card, card_qss,
 )
+from techdeck.ui.utils import paint_own_background  # noqa: E402
 
 
 class TimePanel(QWidget, ThemeAware):
@@ -66,13 +67,20 @@ class TimePanel(QWidget, ThemeAware):
         self.store = store
         self._range = "week"
 
+        # The tab paints the page colour itself. Behind it is the stacked
+        # host, which the stylesheet paints `surface` - and on a two-tone
+        # theme that orange bled through every gap between the cards.
+        self.setObjectName("assistantTabPanel")
+        paint_own_background(self)
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(10)
 
         # --- header ----------------------------------------------------------
-        # Unpainted, matching the Schedule and Tasks tabs: the page runs
-        # behind it and the margins keep its last button off the window edge.
+        # On a card, matching the Schedule and Tasks tabs: a bare row on the
+        # panel has square corners and puts its last button against the
+        # window edge.
         header_card = _header_card()
         header = QHBoxLayout(header_card)
         header.setContentsMargins(*HEADER_MARGINS)
@@ -129,13 +137,12 @@ class TimePanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        # Header text sits on the page, not on a card, so it takes the
-        # page's tones.
+        # Header text sits on the header card, so it takes the card's tones.
         self.headline.setStyleSheet(
-            f"font-size: 16px; font-weight: bold; color: {palette.text}; "
+            f"font-size: 16px; font-weight: bold; color: {palette.on_card}; "
             f"background: transparent;")
         self.sub.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 12px; "
+            f"color: {palette.on_card_secondary}; font-size: 12px; "
             f"background: transparent;")
         self.setStyleSheet(card_qss(palette))
         self.refresh()

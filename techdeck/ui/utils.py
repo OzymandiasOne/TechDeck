@@ -98,3 +98,23 @@ def mark_icon_button(button, size: int = 0) -> None:
     if style is not None:
         style.unpolish(button)
         style.polish(button)
+
+
+def paint_own_background(widget) -> None:
+    """Make a plain ``QWidget`` actually paint the background its stylesheet
+    gives it.
+
+    A ``QWidget`` that is not a ``QFrame`` ignores ``background-color`` unless
+    ``WA_StyledBackground`` is set, so it stays transparent and shows whatever
+    is behind it. Behind a page is usually a ``QStackedWidget`` - which IS
+    QFrame-family, and so is painted ``surface`` by the stylesheet's ``QFrame``
+    rule (that rule comes LAST at equal specificity, beating the earlier
+    ``QStackedWidget`` one). On a one-tone theme surface and background look
+    alike and nobody notices; on a two-tone theme the host's orange bleeds
+    through every gap in the page above it.
+
+    Call this on any QWidget you give a background in a stylesheet.
+    """
+    from PySide6.QtCore import Qt as _Qt
+
+    widget.setAttribute(_Qt.WidgetAttribute.WA_StyledBackground, True)
