@@ -102,6 +102,8 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /blocks                           meetings + standing time blocks
   /wait <text> [on <who>]           park a task on someone else
   /unwait <text>                    take it back off them
+  /waiting                          everything you're waiting on
+  /step <task> | <line> 20m         add a step    /steps <task>  to list them
   /clockin <text>  /clockout        the clock    /time [today|week|month]
   /log <text> 45m                   book time you forgot to clock
   /theme [name|off]                 this page's own colours
@@ -109,6 +111,7 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /purge                            clear out finished tasks
   /remind [on|off|<minutes>]        desktop reminders before each block
   /about                            what this page is, in short
+  /help                             this list
   /clear                            wipe the terminal (this one really does delete it)
 
 Estimates: 45m · 1h30 · 2 hours.  Priority: urgent · high · low · p1-p4.
@@ -191,12 +194,15 @@ class AssistantBrain:
 
     # ── slash commands ───────────────────────────────────────────────────────
 
-    def _command(self, raw: str, now: datetime) -> Reply:
-        parts = raw[1:].split(None, 1)
-        name = (parts[0] if parts else "").lower()
-        args = parts[1].strip() if len(parts) > 1 else ""
+    def _handlers(self) -> dict:
+        """Every slash command, by name. Aliases point at the same method.
 
-        handlers = {
+        A method rather than an inline literal so a test can read it: the gate
+        in tests/core/test_assistant_help_covers_commands.py checks that every
+        handler here is reachable from HELP_TEXT. Four commands had shipped
+        without a line in /help before that gate existed.
+        """
+        return {
             "help": self._cmd_help, "?": self._cmd_help,
             "about": self._cmd_about, "whatisthis": self._cmd_about,
             "explain": self._cmd_about,
@@ -226,6 +232,13 @@ class AssistantBrain:
             "remind": self._cmd_remind, "reminders": self._cmd_remind,
             "notify": self._cmd_remind,
         }
+
+    def _command(self, raw: str, now: datetime) -> Reply:
+        parts = raw[1:].split(None, 1)
+        name = (parts[0] if parts else "").lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
+
+        handlers = self._handlers()
         handler = handlers.get(name)
         if handler is None:
             reply = Reply().error(f"No command called /{name}.")
@@ -276,6 +289,7 @@ class AssistantBrain:
             f"  warning        {notify.lead_minutes} min before a block",
             f"  morning plan   {'yes at ' + notify.digest_at if notify.daily_digest else 'no'}",
             f"  overdue        {'yes' if notify.overdue else 'no'}",
+            f"  waiting on     {('after ' + str(notify.waiting_after_days) + ' days') if notify.waiting_followup else 'no'}",
             f"  quiet hours    {'outside your working day' if notify.quiet_outside_hours else 'never quiet'}",
             "",
             "These only arrive while TechDeck is open. For reminders that",

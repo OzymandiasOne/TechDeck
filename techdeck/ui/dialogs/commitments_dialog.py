@@ -190,6 +190,12 @@ class CommitmentsDialog(QDialog, ThemeAware):
         self.footer.setWordWrap(True)
         outer.addWidget(self.footer)
 
+        # Close only, and BOTH signals accept, on purpose. Qt's Close button
+        # emits `rejected`, but there is nothing here to cancel: Add / Save /
+        # Remove each write to the store the moment they are pressed, so by
+        # the time this box is reached every change is already committed and
+        # the caller ignores the result code. The only thing Esc discards is a
+        # block you typed and never added, which is what Esc should do.
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.accept)
         buttons.accepted.connect(self.accept)

@@ -91,6 +91,25 @@ class ReminderDialog(QDialog, ThemeAware):
         self.overdue.setChecked(self._prefs.overdue)
         form.addRow("", self.overdue)
 
+        # The follow-up nudge for a task parked on somebody else. It has
+        # always worked; it just had no switch, and result_prefs() left both
+        # fields out - so saving this dialog quietly reset them to the
+        # defaults. A setting with no control is a setting nobody can trust.
+        waiting_row = QHBoxLayout()
+        self.waiting = QCheckBox("Nudge me about anything I've been waiting on for")
+        self.waiting.setChecked(self._prefs.waiting_followup)
+        self.waiting_days = QSpinBox()
+        self.waiting_days.setRange(1, 60)
+        self.waiting_days.setSuffix(" days")
+        self.waiting_days.setValue(self._prefs.waiting_after_days)
+        self.waiting_days.setMinimumHeight(30)
+        self.waiting_days.setEnabled(self.waiting.isChecked())
+        self.waiting.toggled.connect(self.waiting_days.setEnabled)
+        waiting_row.addWidget(self.waiting)
+        waiting_row.addWidget(self.waiting_days)
+        waiting_row.addStretch()
+        form.addRow("", waiting_row)
+
         self.quiet = QCheckBox("Stay quiet outside my working hours")
         self.quiet.setChecked(self._prefs.quiet_outside_hours)
         self.quiet.setToolTip(
@@ -164,5 +183,7 @@ class ReminderDialog(QDialog, ThemeAware):
             "daily_digest": self.digest.isChecked(),
             "digest_at": self.digest_at.time().toString("HH:mm"),
             "overdue": self.overdue.isChecked(),
+            "waiting_followup": self.waiting.isChecked(),
+            "waiting_after_days": self.waiting_days.value(),
             "quiet_outside_hours": self.quiet.isChecked(),
         })
