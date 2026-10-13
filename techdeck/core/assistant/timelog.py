@@ -137,6 +137,7 @@ def build_report(tasks: Sequence[TaskItem], key: str = "week",
     for task in tasks:
         minutes = 0
         count = 0
+        running_here = False
         for session in task.sessions:
             day = session.day()
             if day is None:
@@ -145,12 +146,19 @@ def build_report(tasks: Sequence[TaskItem], key: str = "week",
                     start <= day <= end):
                 continue
             length = session.minutes(now)
-            if length <= 0:
+            # A clock started seconds ago is worth 0 minutes but is NOT
+            # nothing: the row has to appear the moment it starts, or the
+            # page says "nothing clocked" while the chip says it is running,
+            # and the person reasonably concludes the clock is broken.
+            if length <= 0 and not session.running:
                 continue
+            running_here = running_here or session.running
             minutes += length
             count += 1
             per_day[day] = per_day.get(day, 0) + length
-        if minutes <= 0:
+        # `running_here`, not `task.is_running`: a clock running today must
+        # not make the task appear in last week's report.
+        if minutes <= 0 and not running_here:
             continue
         report.rows.append(TaskTotal(
             task_id=task.id, title=task.label(), minutes=minutes,

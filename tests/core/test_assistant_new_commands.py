@@ -247,3 +247,42 @@ def test_help_mentions_the_new_commands(brain):
     text = _text(brain.handle("/help", NOW))
     for command in ("/blocks", "/wait", "/clockin", "/time", "/theme"):
         assert command in text
+
+
+# ── logging time by hand ─────────────────────────────────────────────────────
+
+def test_log_books_time_you_forgot_to_clock(brain, store):
+    task = store.add_task(TaskItem(title="Fix the PO sheet"))
+    reply = brain.handle("/log fix the po sheet 45m", NOW)
+    assert store.get_task(task.id).logged_minutes() == 45
+    assert "45m" in _text(reply) and reply.dirty
+
+
+def test_log_reads_the_duration_off_the_end_only(brain, store):
+    """A task name is allowed to contain numbers - "order 4130 tube",
+    "911 setup". Reading a duration from the middle would rename the task the
+    user meant."""
+    task = store.add_task(TaskItem(title="Order 4130 tube"))
+    brain.handle("/log order 4130 tube 1h30", NOW)
+    assert store.get_task(task.id).logged_minutes() == 90
+
+
+def test_log_without_a_length_says_so(brain, store):
+    store.add_task(TaskItem(title="Fix the PO sheet"))
+    reply = brain.handle("/log fix the po sheet", NOW)
+    assert "length on the end" in _text(reply)
+    assert not reply.dirty
+
+
+def test_log_with_nothing_at_all_explains_itself(brain):
+    assert "/log" in _text(brain.handle("/log", NOW))
+
+
+def test_log_on_an_unknown_task_does_not_invent_one(brain, store):
+    reply = brain.handle("/log something that is not there 20m", NOW)
+    assert "No task matching" in _text(reply)
+    assert store.tasks == []
+
+
+def test_help_mentions_logging_by_hand(brain):
+    assert "/log" in _text(brain.handle("/help", NOW))

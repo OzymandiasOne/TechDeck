@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.utils import mark_icon_button
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +235,7 @@ class Sidebar(QWidget, ThemeAware):
 
         self.toggle_btn = QPushButton()
         self.toggle_btn.setFixedSize(34, 34)
+        mark_icon_button(self.toggle_btn)   # padding:0, or the glyph has no room
         self.toggle_btn.setToolTip("Collapse sidebar")
         self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.toggle_btn.setIconSize(QSize(16, 16))

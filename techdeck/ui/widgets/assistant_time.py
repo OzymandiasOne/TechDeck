@@ -34,6 +34,7 @@ from PySide6.QtGui import QFont
 from techdeck.core.assistant import timelog
 from techdeck.core.assistant.models import fmt_duration
 from techdeck.core.assistant.store import AssistantStore
+from techdeck.ui.theme import subtle_tint
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
@@ -70,7 +71,12 @@ class TimePanel(QWidget, ThemeAware):
         outer.setSpacing(10)
 
         # --- header ----------------------------------------------------------
-        header = QHBoxLayout()
+        # On a card, matching the Schedule and Tasks tabs: a bare row on the
+        # panel has square corners and puts its last button against the
+        # window edge.
+        header_card = _card()
+        header = QHBoxLayout(header_card)
+        header.setContentsMargins(16, 12, 16, 12)
         header.setSpacing(10)
         titles = QVBoxLayout()
         titles.setSpacing(2)
@@ -104,7 +110,7 @@ class TimePanel(QWidget, ThemeAware):
         self.export_btn.clicked.connect(
             lambda: self.export_requested.emit(self._range))
         header.addWidget(self.export_btn)
-        outer.addLayout(header)
+        outer.addWidget(header_card)
 
         self.scroller = QScrollArea()
         self.scroller.setWidgetResizable(True)
@@ -124,8 +130,13 @@ class TimePanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
+        # Header text sits on the header card, so it takes the card's tones.
+        self.headline.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {palette.on_card}; "
+            f"background: transparent;")
         self.sub.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 12px;")
+            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"background: transparent;")
         self.setStyleSheet(f"""
             QFrame#assistantCard {{
                 background-color: {palette.surface};
@@ -194,7 +205,7 @@ class TimePanel(QWidget, ThemeAware):
 
         heading = QLabel("What it went on")
         heading.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {palette.text}; "
+            f"font-size: 13px; font-weight: bold; color: {palette.on_card}; "
             f"background: transparent;")
         box.addWidget(heading)
 
@@ -216,7 +227,7 @@ class TimePanel(QWidget, ThemeAware):
         top.setSpacing(8)
         title = QLabel(row.title)
         title.setWordWrap(True)
-        colour = palette.text_secondary if row.done else palette.text
+        colour = palette.on_card_secondary if row.done else palette.on_card
         title.setStyleSheet(f"color: {colour}; background: transparent;")
         top.addWidget(title, 1)
 
@@ -233,7 +244,7 @@ class TimePanel(QWidget, ThemeAware):
         mono.setStyleHint(QFont.StyleHint.Monospace)
         amount.setFont(mono)
         amount.setStyleSheet(
-            f"color: {palette.text}; background: transparent; "
+            f"color: {palette.on_card}; background: transparent; "
             f"font-weight: 600;")
         top.addWidget(amount)
         layout.addLayout(top)
@@ -250,7 +261,7 @@ class TimePanel(QWidget, ThemeAware):
                 note += f" · over by {fmt_duration(row.minutes - row.estimate_min)}"
             caption = QLabel(note)
             caption.setStyleSheet(
-                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"color: {palette.on_card_secondary}; font-size: 11px; "
                 f"background: transparent;")
             bar_row.addWidget(caption)
         bar_row.addStretch()
@@ -259,12 +270,18 @@ class TimePanel(QWidget, ThemeAware):
 
     def _bar(self, minutes: int, biggest: int, palette) -> QWidget:
         """A share-of-the-biggest bar. Fixed-width filled frame rather than a
-        QProgressBar, which would imply a target to reach."""
+        QProgressBar, which would imply a target to reach.
+
+        The track is a tint derived from the card's text, NOT ``palette.border``:
+        halloween's `border` and `accent` are the same purple, so a bordered
+        track and an accent fill were the same colour and every bar read as
+        100% full whatever the number beside it said.
+        """
         track = QFrame()
         track.setFixedHeight(6)
         track.setFixedWidth(BAR_MAX_PX)
         track.setStyleSheet(
-            f"background: {palette.border}; border-radius: 3px;")
+            f"background: {subtle_tint(palette.on_card)}; border-radius: 3px;")
         fill = QFrame(track)
         share = (minutes / biggest) if biggest else 0.0
         fill.setGeometry(0, 0, max(3, int(BAR_MAX_PX * share)), 6)
@@ -282,7 +299,7 @@ class TimePanel(QWidget, ThemeAware):
 
         heading = QLabel("Day by day")
         heading.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {palette.text}; "
+            f"font-size: 13px; font-weight: bold; color: {palette.on_card}; "
             f"background: transparent;")
         box.addWidget(heading)
 
@@ -302,14 +319,14 @@ class TimePanel(QWidget, ThemeAware):
             label.setFont(mono)
             label.setFixedWidth(110)
             label.setStyleSheet(
-                f"color: {palette.text_secondary}; background: transparent;")
+                f"color: {palette.on_card_secondary}; background: transparent;")
             line.addWidget(label)
             line.addWidget(self._bar(minutes, biggest, palette))
 
             amount = QLabel(fmt_duration(minutes))
             amount.setFont(mono)
             amount.setStyleSheet(
-                f"color: {palette.text}; background: transparent;")
+                f"color: {palette.on_card}; background: transparent;")
             line.addWidget(amount)
             line.addStretch()
             box.addWidget(row)

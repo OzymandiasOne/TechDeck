@@ -242,7 +242,12 @@ def build_schedule(req: ScheduleRequest) -> Schedule:
                 kind=BLOCK_LUNCH, title="Lunch"))
 
         for commitment in _commitments_on(req.commitments, day):
-            begin = _mins(commitment.start_time())
+            # Snapped OUTWARDS: start down, end up. Everything on this page
+            # lives on a 5-minute grid, and a meeting typed as 9:04 would
+            # otherwise produce a 9:04-9:34 row in a plan where nothing else
+            # is off-grid. Rounding outwards also errs on the safe side -
+            # it protects a little more of the meeting, never less.
+            begin = _snap_down(_mins(commitment.start_time()))
             finish = begin + max(GRID, _snap_up(commitment.minutes))
             busy.append((begin, finish))
             blocks.append(ScheduleBlock(

@@ -74,3 +74,27 @@ def make_tinted_svg_copy(src_svg_path: Path, color_hex: str) -> str:
     out_path.write_text(svg, encoding="utf-8")
 
     return out_path.as_posix()
+
+
+def mark_icon_button(button, size: int = 0) -> None:
+    """Give an icon-only button room for its glyph.
+
+    The app stylesheet gives every ``QPushButton`` ``padding: 8px 16px``. On a
+    button with a small FIXED size that padding is bigger than the button: the
+    content rect goes negative and Qt draws **nothing** - no glyph, no error,
+    no clue. It cost the Assistant its clock and delete buttons (2026-10-13),
+    and the same trap is waiting for every other 26x26 square in the app.
+
+    Marking a button sets the ``iconOnly`` property the generated stylesheet
+    keys a ``padding: 0`` rule on, and optionally fixes its size in the same
+    call. Call it for any button whose whole content is one glyph.
+    """
+    button.setProperty("iconOnly", "true")
+    if size:
+        button.setFixedSize(size, size)
+    # The property is read when the sheet is applied, so a button marked after
+    # it was first polished needs re-polishing or the rule never lands.
+    style = button.style()
+    if style is not None:
+        style.unpolish(button)
+        style.polish(button)

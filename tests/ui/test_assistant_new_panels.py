@@ -276,3 +276,103 @@ def test_a_meeting_shows_on_the_agenda_without_a_tick_box(store, qapp):
     row = panel._block_row(busy[0], panel.get_current_palette(),
                            datetime.now())
     assert not row.findChildren(QCheckBox)
+
+
+# ── the looks, after the 2026-10-13 pass ─────────────────────────────────────
+
+def test_the_dialog_snaps_a_meeting_to_the_five_minute_grid(store, qapp):
+    """The spinner steps by a minute, so 9:04 is one stray press away, and a
+    plan full of 9:04-9:34 rows reads as machine output."""
+    from PySide6.QtCore import QTime
+
+    from techdeck.ui.dialogs.commitments_dialog import CommitmentsDialog
+
+    dialog = CommitmentsDialog(store)
+    dialog._new()
+    dialog.title_field.setText("Standup")
+    dialog.start.setTime(QTime(9, 4))
+    dialog.day_checks[2].setChecked(True)
+    dialog._save_current()
+
+    assert store.commitments[0].start == "09:05"
+
+
+def test_the_dialog_rolls_an_almost_midnight_snap(store, qapp):
+    from PySide6.QtCore import QTime
+
+    from techdeck.ui.dialogs.commitments_dialog import CommitmentsDialog
+
+    dialog = CommitmentsDialog(store)
+    dialog._new()
+    dialog.title_field.setText("Late one")
+    dialog.start.setTime(QTime(23, 59))
+    dialog.day_checks[2].setChecked(True)
+    dialog._save_current()
+
+    assert store.commitments[0].start == "00:00"
+
+
+def test_a_step_keeps_its_chips_beside_it(store, qapp):
+    """They drifted to the far right edge, where they read as belonging to
+    the card rather than to the step.
+
+    Asserted on the LAYOUT rather than on pixels: a widget inside a scroll
+    area has no real geometry until the panel is shown, and the thing that
+    actually went wrong was the order and the stretch, not the arithmetic.
+    """
+    from PySide6.QtWidgets import QLabel
+
+    task = store.add_task(TaskItem(title="Rollout", checklist=[
+        ChecklistItem(text="pull the drawings", estimate_min=15,
+                      deadline="2026-10-16")]))
+    panel = TasksPanel(store)
+    panel._toggle_steps(task.id)
+    panel.refresh()
+
+    card = panel.scroller.box.itemAt(0).widget()
+    steps = card.layout().itemAt(1).widget()          # the unfolded block
+    row = steps.layout().itemAt(0).widget()           # the first step
+    line = row.layout()
+
+    texts = []
+    for index in range(line.count()):
+        item = line.itemAt(index)
+        widget = item.widget()
+        if widget is None:
+            texts.append("<stretch>")
+        elif isinstance(widget, QLabel):
+            texts.append(widget.text())
+        else:
+            texts.append(type(widget).__name__)
+
+    # tick, the step's words, then ITS chips, and only then the stretch that
+    # pushes the leftovers away.
+    assert texts == ["QCheckBox", "pull the drawings", "15m", "by Oct 16",
+                     "<stretch>"]
+
+
+def test_the_task_row_shows_all_three_of_its_buttons(store, qapp):
+    """The clock and the delete button were being drawn with no room for
+    their glyph and vanished entirely."""
+    from PySide6.QtWidgets import QPushButton
+
+    store.add_task(TaskItem(title="Fix the PO sheet"))
+    panel = TasksPanel(store)
+    panel.refresh()
+
+    card = panel.scroller.box.itemAt(0).widget()
+    buttons = card.findChildren(QPushButton)
+    assert len(buttons) == 3
+    for button in buttons:
+        assert button.property("iconOnly") == "true" or button.text() == "Edit"
+
+
+def test_every_assistant_header_sits_on_a_card(store, qapp):
+    """A bare row on the panel has square corners and puts its last button
+    flush against the window edge."""
+    from PySide6.QtWidgets import QFrame
+
+    for panel in (SchedulePanel(store), TasksPanel(store), TimePanel(store)):
+        first = panel.layout().itemAt(0).widget()
+        assert isinstance(first, QFrame), type(panel).__name__
+        assert first.objectName() == "assistantCard", type(panel).__name__

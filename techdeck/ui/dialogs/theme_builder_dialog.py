@@ -17,7 +17,7 @@ from techdeck.ui.theme import (
     THEMES, ColorPalette, palette_to_dict, palette_from_dict,
     save_custom_theme, is_builtin_theme, get_current_palette,
 )
-from techdeck.ui.utils import make_tinted_svg_copy
+from techdeck.ui.utils import make_tinted_svg_copy, mark_icon_button
 from techdeck.ui.theme import icon_folder_for_theme
 
 
@@ -83,6 +83,9 @@ class _ColorButton(QPushButton):
         super().__init__(parent)
         self._color = color
         self.setFixedSize(36, 28)
+        # A pure swatch: no glyph to squeeze, but it takes the same route as
+        # every other small fixed-size button so the gate needs no exceptions.
+        mark_icon_button(self)
         self._refresh()
         self.clicked.connect(self._pick_color)
 

@@ -10,6 +10,7 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QFont
 
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.plugin_icon import plugin_icon_pixmap
 from techdeck.ui.widgets.plugin_card import (
     TILE_W, TILE_H, TILE_ICON, TILE_ICON_BOX,
@@ -135,6 +136,7 @@ class LibraryPluginCard(QFrame, ThemeAware):
         self.info_btn = QPushButton("i", self)
         self.info_btn.setVisible(not locked)        # a locked cartridge keeps its secret
         self.info_btn.setFixedSize(18, 18)
+        mark_icon_button(self.info_btn)   # padding:0, or the glyph has no room
         self.info_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.info_btn.setToolTip("About this app")
         self.info_btn.move(TILE_W - 22, 5)

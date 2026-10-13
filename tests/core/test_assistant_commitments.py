@@ -156,3 +156,37 @@ def test_standing_blocks_sort_before_one_offs(tmp_path):
     store.add_commitment(Commitment(title="Once", day="2026-10-14"))
     store.add_commitment(Commitment(title="Weekly", weekdays=[4]))
     assert [c.title for c in store.sorted_commitments()] == ["Weekly", "Once"]
+
+
+# ── the 5-minute grid ────────────────────────────────────────────────────────
+
+def test_a_meeting_off_the_grid_is_snapped_outwards(prefs):
+    """Everything on this page lives on a 5-minute grid. A meeting typed as
+    9:04 (one stray press of the spinner) would otherwise put a lone
+    9:04-9:34 row in a plan where nothing else is off-grid.
+
+    Outwards, not nearest: it protects a little more of the meeting, never
+    less, so work can never be planned into its first minutes.
+    """
+    schedule = _plan([TaskItem(title="Job", estimate_min=30)],
+                     [Commitment(title="Standup", start="09:04", minutes=22,
+                                 weekdays=[2])], prefs)
+    busy = schedule.busy_blocks()[0]
+    start, end = busy.start_dt(), busy.end_dt()
+    assert start and end
+    assert (start.hour, start.minute) == (9, 0)
+    assert start.minute % 5 == 0 and end.minute % 5 == 0
+    assert busy.minutes() >= 22
+
+
+def test_no_block_in_a_plan_is_ever_off_the_grid(prefs):
+    schedule = _plan([TaskItem(title="Job", estimate_min=95)],
+                     [Commitment(title="Standup", start="09:04", minutes=7,
+                                 weekdays=[2]),
+                      Commitment(title="Review", start="13:03", minutes=48,
+                                 weekdays=[2])], prefs)
+    for block in schedule.all_blocks():
+        start, end = block.start_dt(), block.end_dt()
+        assert start and end
+        assert start.minute % 5 == 0, f"{block.title} starts at {block.start}"
+        assert end.minute % 5 == 0, f"{block.title} ends at {block.end}"

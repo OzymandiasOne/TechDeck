@@ -28,8 +28,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTime, QDate
 
 from techdeck.core.assistant.models import (
-    Commitment, WEEKDAY_LABELS, fmt_duration,
+    GRID_MIN, Commitment, WEEKDAY_LABELS, fmt_duration,
 )
+
+
+def _snap_to_grid(minute: int) -> int:
+    """Nearest 5-minute mark. 60 is a real answer and the caller rolls it."""
+    return int(round(minute / GRID_MIN) * GRID_MIN)
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
@@ -327,7 +332,13 @@ class CommitmentsDialog(QDialog, ThemeAware):
         commitment = self._editing or Commitment()
         commitment.title = title
         qtime = self.start.time()
-        commitment.start = f"{qtime.hour():02d}:{qtime.minute():02d}"
+        # Snap to the 5-minute grid the rest of the Assistant lives on. The
+        # spinner's arrows step by a minute, so 9:04 is one stray press away,
+        # and a plan full of 9:04-9:34 rows reads as machine output.
+        hour, minute = qtime.hour(), _snap_to_grid(qtime.minute())
+        if minute == 60:
+            hour, minute = (hour + 1) % 24, 0
+        commitment.start = f"{hour:02d}:{minute:02d}"
         commitment.minutes = int(self.length.value())
         commitment.notes = self.notes_field.text().strip()
         commitment.active = self.active.isChecked()

@@ -27,7 +27,9 @@ from techdeck.core.assistant.models import (
     PRIORITY_LABELS, Schedule, TaskItem, fmt_day, fmt_duration, fmt_time,
 )
 from techdeck.core.assistant.store import AssistantStore
+from techdeck.ui.theme import readable_on
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 from techdeck.ui.dialogs.task_edit_dialog import TaskEditDialog
 
@@ -99,7 +101,13 @@ class SchedulePanel(QWidget, ThemeAware):
         outer.setSpacing(10)
 
         # --- header ----------------------------------------------------------
-        header = QHBoxLayout()
+        # In a card of its own, like everything else on the page. It used to
+        # be a bare row on the panel: square corners, text against the panel
+        # edge and the Export button flush with the right-hand side, which
+        # read as a strip jammed into the corner rather than a toolbar.
+        header_card = _card()
+        header = QHBoxLayout(header_card)
+        header.setContentsMargins(16, 12, 16, 12)
         header.setSpacing(10)
 
         titles = QVBoxLayout()
@@ -136,7 +144,7 @@ class SchedulePanel(QWidget, ThemeAware):
         self.export_btn.clicked.connect(self._show_export_menu)
         header.addWidget(self.export_btn)
 
-        outer.addLayout(header)
+        outer.addWidget(header_card)
 
         self.scroller = _Scroller()
         outer.addWidget(self.scroller, 1)
@@ -148,8 +156,13 @@ class SchedulePanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
+        # The header sits on a card now, so its text takes the card's tones.
+        self.range_label.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {palette.on_card}; "
+            f"background: transparent;")
         self.stats_label.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 12px;")
+            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"background: transparent;")
         self.setStyleSheet(f"""
             QFrame#assistantCard {{
                 background-color: {palette.surface};
@@ -276,7 +289,7 @@ class SchedulePanel(QWidget, ThemeAware):
         day_date = day_plan.date_obj()
         heading = QLabel(fmt_day(day_date) if day_date else day_plan.day)
         heading.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {palette.text}; "
+            f"font-size: 13px; font-weight: bold; color: {palette.on_card}; "
             f"background: transparent;")
         box.addWidget(heading)
 
@@ -286,7 +299,7 @@ class SchedulePanel(QWidget, ThemeAware):
             total_text += f"  \u00b7  {fmt_duration(booked)} already booked"
         total = QLabel(total_text)
         total.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 11px; "
+            f"color: {palette.on_card_secondary}; font-size: 11px; "
             f"background: transparent; margin-bottom: 6px;")
         box.addWidget(total)
 
@@ -312,7 +325,7 @@ class SchedulePanel(QWidget, ThemeAware):
         time_label.setFont(mono)
         time_label.setFixedWidth(140)
         time_label.setStyleSheet(
-            f"color: {palette.text_secondary}; background: transparent;")
+            f"color: {palette.on_card_secondary}; background: transparent;")
         layout.addWidget(time_label)
 
         is_work = block.kind in (BLOCK_TASK, BLOCK_FIXED)
@@ -325,7 +338,7 @@ class SchedulePanel(QWidget, ThemeAware):
             spacer.setFixedWidth(18)
             spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
             spacer.setStyleSheet(
-                f"color: {palette.accent_two or palette.text_secondary}; "
+                f"color: {palette.accent_two or palette.on_card_secondary}; "
                 f"background: transparent;")
             layout.addWidget(spacer)
         elif is_work and task is not None:
@@ -340,7 +353,7 @@ class SchedulePanel(QWidget, ThemeAware):
             spacer.setFixedWidth(18)
             spacer.setAlignment(Qt.AlignmentFlag.AlignCenter)
             spacer.setStyleSheet(
-                f"color: {palette.text_secondary}; background: transparent;")
+                f"color: {palette.on_card_secondary}; background: transparent;")
             layout.addWidget(spacer)
 
         title = block.title
@@ -353,15 +366,15 @@ class SchedulePanel(QWidget, ThemeAware):
 
         label = QLabel(title)
         label.setWordWrap(True)
-        colour = palette.text if is_work else palette.text_secondary
+        colour = palette.on_card if is_work else palette.on_card_secondary
         if block.kind == BLOCK_BUSY:
-            colour = palette.text
+            colour = palette.on_card
         weight = ("600" if block.kind in (BLOCK_FIXED, BLOCK_BUSY)
                   else "normal")
         extra = ""
         if task is not None and task.done:
             extra = "text-decoration: line-through;"
-            colour = palette.text_secondary
+            colour = palette.on_card_secondary
         label.setStyleSheet(f"color: {colour}; font-weight: {weight}; "
                             f"background: transparent; {extra}")
         layout.addWidget(label, 1)
@@ -380,11 +393,12 @@ class SchedulePanel(QWidget, ThemeAware):
         if task is not None and (task.notes or task.links):
             info = QPushButton("⋯")
             info.setFixedSize(24, 22)
+            mark_icon_button(info)   # padding:0, or the glyph has no room
             info.setCursor(Qt.CursorShape.PointingHandCursor)
             info.setToolTip("Notes and links")
             info.setStyleSheet(
                 f"QPushButton {{ border: none; background: transparent; "
-                f"color: {palette.text_secondary}; }}"
+                f"color: {palette.on_card_secondary}; }}"
                 f"QPushButton:hover {{ color: {palette.accent}; }}")
             info.clicked.connect(lambda _c=False, t=task: self._open_task(t))
             layout.addWidget(info)
@@ -405,7 +419,8 @@ class SchedulePanel(QWidget, ThemeAware):
 
         heading = QLabel("Not planned \u2014 you're waiting on someone")
         heading.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {WAITING_COLOR}; "
+            f"font-size: 13px; font-weight: bold; "
+            f"color: {readable_on(WAITING_COLOR, palette.surface, palette.on_card)}; "
             f"background: transparent;")
         box.addWidget(heading)
 
@@ -413,15 +428,16 @@ class SchedulePanel(QWidget, ThemeAware):
                       "off whoever has them.")
         note.setWordWrap(True)
         note.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 11px; "
+            f"color: {palette.on_card_secondary}; font-size: 11px; "
             f"background: transparent; margin-bottom: 4px;")
         box.addWidget(note)
 
         for item in items:
-            row = QLabel(f"\u23f8 {item.get('title', '')} "
+            row = QLabel(f"\u2022 {item.get('title', '')} "
                          f"({item.get('reason', 'waiting')})")
             row.setWordWrap(True)
-            row.setStyleSheet(f"color: {palette.text}; background: transparent;")
+            row.setStyleSheet(
+                f"color: {palette.on_card}; background: transparent;")
             box.addWidget(row)
         return card
 
@@ -433,7 +449,8 @@ class SchedulePanel(QWidget, ThemeAware):
 
         heading = QLabel("Didn't fit")
         heading.setStyleSheet(
-            f"font-size: 13px; font-weight: bold; color: {palette.warning}; "
+            f"font-size: 13px; font-weight: bold; "
+            f"color: {readable_on(palette.warning, palette.surface, palette.on_card)}; "
             f"background: transparent;")
         box.addWidget(heading)
 
@@ -441,14 +458,15 @@ class SchedulePanel(QWidget, ThemeAware):
                       "smaller estimate.")
         note.setWordWrap(True)
         note.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 11px; "
+            f"color: {palette.on_card_secondary}; font-size: 11px; "
             f"background: transparent; margin-bottom: 4px;")
         box.addWidget(note)
 
         for item in items:
             row = QLabel(f"• {item.get('title', '')}: {item.get('reason', '')}")
             row.setWordWrap(True)
-            row.setStyleSheet(f"color: {palette.text}; background: transparent;")
+            row.setStyleSheet(
+                f"color: {palette.on_card}; background: transparent;")
             box.addWidget(row)
         return card
 
@@ -496,7 +514,15 @@ class TasksPanel(QWidget, ThemeAware):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(10)
 
-        # --- quick add -------------------------------------------------------
+        # --- quick add + filters, in one header card -------------------------
+        # Both rows live on a card, matching the Schedule tab and the task
+        # cards below: a bare row on the panel reads as a strip wedged into
+        # the corner, with its last button flush against the window edge.
+        header_card = _card()
+        header_box = QVBoxLayout(header_card)
+        header_box.setContentsMargins(16, 12, 16, 12)
+        header_box.setSpacing(8)
+
         add_row = QHBoxLayout()
         add_row.setSpacing(8)
         self.quick_add = QLineEdit()
@@ -516,7 +542,7 @@ class TasksPanel(QWidget, ThemeAware):
         self.detail_btn.setMinimumHeight(34)
         self.detail_btn.clicked.connect(self._add_detailed)
         add_row.addWidget(self.detail_btn)
-        outer.addLayout(add_row)
+        header_box.addLayout(add_row)
 
         # --- filter bar ------------------------------------------------------
         filter_row = QHBoxLayout()
@@ -552,7 +578,8 @@ class TasksPanel(QWidget, ThemeAware):
         self.purge_btn.setMinimumHeight(28)
         self.purge_btn.clicked.connect(self._purge)
         filter_row.addWidget(self.purge_btn)
-        outer.addLayout(filter_row)
+        header_box.addLayout(filter_row)
+        outer.addWidget(header_card)
 
         self.scroller = _Scroller()
         outer.addWidget(self.scroller, 1)
@@ -562,8 +589,10 @@ class TasksPanel(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
+        # The summary sits on the header card, so it takes the card's tones.
         self.summary.setStyleSheet(
-            f"color: {palette.text_secondary}; font-size: 12px;")
+            f"color: {palette.on_card_secondary}; font-size: 12px; "
+            f"background: transparent;")
         self.setStyleSheet(f"""
             QFrame#assistantCard {{
                 background-color: {palette.surface};
@@ -683,9 +712,9 @@ class TasksPanel(QWidget, ThemeAware):
 
         title = QLabel(task.label())
         title.setWordWrap(True)
-        style = f"color: {palette.text}; font-size: 13px; background: transparent;"
+        style = f"color: {palette.on_card}; font-size: 13px; background: transparent;"
         if task.done:
-            style = (f"color: {palette.text_secondary}; font-size: 13px; "
+            style = (f"color: {palette.on_card_secondary}; font-size: 13px; "
                      f"text-decoration: line-through; background: transparent;")
         title.setStyleSheet(style)
         middle.addWidget(title)
@@ -695,39 +724,40 @@ class TasksPanel(QWidget, ThemeAware):
         meta.addWidget(self._chip(PRIORITY_LABELS.get(task.priority, "Medium"),
                                   PRIORITY_COLORS.get(task.priority, "#3B82F6")))
         meta.addWidget(self._chip(fmt_duration(task.estimate_min),
-                                  palette.text_secondary))
+                                  palette.on_card_secondary))
         due = task.deadline_date()
         if due:
             overdue = due < date.today() and not task.done
             meta.addWidget(self._chip(
                 ("overdue · " if overdue else "due ") + due.strftime("%b %d"),
-                "#EF4444" if overdue else palette.text_secondary))
+                "#EF4444" if overdue else palette.on_card_secondary))
         fixed = task.fixed_datetime()
         if fixed:
             meta.addWidget(self._chip(f"📌 {fmt_time(fixed)} "
                                       f"{fixed.strftime('%b %d')}",
                                       palette.accent))
         if not task.splittable:
-            meta.addWidget(self._chip("one sitting", palette.text_secondary))
+            meta.addWidget(self._chip("one sitting", palette.on_card_secondary))
         if task.links:
             meta.addWidget(self._chip(f"🔗 {len(task.links)}",
-                                      palette.text_secondary))
+                                      palette.on_card_secondary))
         if task.waiting:
-            meta.addWidget(self._chip(f"⏸ {task.waiting_label()}",
-                                      WAITING_COLOR))
+            # No icon: U+23F8 (pause) is not in the shipped font and renders
+            # as a missing-glyph box on every theme. The words carry it.
+            meta.addWidget(self._chip(task.waiting_label(), WAITING_COLOR))
         logged = task.logged_minutes()
         if logged:
             # Logged time sits beside the estimate and nothing else happens:
             # no ratio, no verdict. A task that ran long is information.
             meta.addWidget(self._chip(f"{fmt_duration(logged)} logged",
                                       palette.accent if task.is_running
-                                      else palette.text_secondary))
+                                      else palette.on_card_secondary))
         done_steps, total_steps = task.checklist_progress()
         if total_steps:
             open_now = task.id in self._expanded
             steps_chip = self._chip(
                 f"{'▾' if open_now else '▸'} {done_steps}/{total_steps} steps",
-                palette.accent if open_now else palette.text_secondary)
+                palette.accent if open_now else palette.on_card_secondary)
             steps_chip.setCursor(Qt.CursorShape.PointingHandCursor)
             steps_chip.setToolTip("Show the steps")
             # A clickable QLabel rather than a button: a button here would be a
@@ -741,7 +771,7 @@ class TasksPanel(QWidget, ThemeAware):
         if task.notes:
             note = QLabel(task.notes.splitlines()[0][:120])
             note.setStyleSheet(
-                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"color: {palette.on_card_secondary}; font-size: 11px; "
                 f"background: transparent;")
             middle.addWidget(note)
 
@@ -750,7 +780,7 @@ class TasksPanel(QWidget, ThemeAware):
             # Folded away, the one line worth surfacing is what comes next.
             peek = QLabel(f"next: {next_step.label()[:90]}")
             peek.setStyleSheet(
-                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"color: {palette.on_card_secondary}; font-size: 11px; "
                 f"background: transparent;")
             middle.addWidget(peek)
 
@@ -759,10 +789,11 @@ class TasksPanel(QWidget, ThemeAware):
         if not task.done:
             clock = QPushButton("■" if task.is_running else "▶")
             clock.setFixedSize(26, 26)
+            mark_icon_button(clock)   # padding:0, or the glyph has no room
             clock.setCursor(Qt.CursorShape.PointingHandCursor)
             clock.setToolTip("Stop the clock" if task.is_running
                              else "Start the clock on this")
-            accent = palette.accent if task.is_running else palette.text_secondary
+            accent = palette.accent if task.is_running else palette.on_card_secondary
             clock.setStyleSheet(
                 f"QPushButton {{ border: none; background: transparent; "
                 f"color: {accent}; font-size: 13px; }}"
@@ -773,15 +804,21 @@ class TasksPanel(QWidget, ThemeAware):
 
         edit = QPushButton("Edit")
         edit.setFixedHeight(26)
+        # Same family as the icon-button trap: the theme's 8px vertical
+        # padding leaves a 26px-high button ~10px for text that needs ~15,
+        # and the label renders clipped ("Fdit"). Padding it explicitly is
+        # the fix; the height stays, so the row does not grow.
+        edit.setStyleSheet("padding: 2px 10px;")
         edit.clicked.connect(lambda _c=False, t=task: self._edit(t))
         box.addWidget(edit, 0, Qt.AlignmentFlag.AlignTop)
 
         remove = QPushButton("✕")
         remove.setFixedSize(26, 26)
+        mark_icon_button(remove)   # padding:0, or the glyph has no room
         remove.setToolTip("Delete")
         remove.setStyleSheet(
             f"QPushButton {{ border: none; background: transparent; "
-            f"color: {palette.text_secondary}; font-size: 13px; }}"
+            f"color: {palette.on_card_secondary}; font-size: 13px; }}"
             f"QPushButton:hover {{ color: #EF4444; }}")
         remove.clicked.connect(lambda _c=False, t=task: self._delete(t))
         box.addWidget(remove, 0, Qt.AlignmentFlag.AlignTop)
@@ -818,22 +855,26 @@ class TasksPanel(QWidget, ThemeAware):
 
             text = QLabel(step.label())
             text.setWordWrap(True)
-            style = (f"color: {palette.text_secondary}; font-size: 12px; "
+            style = (f"color: {palette.on_card_secondary}; font-size: 12px; "
                      f"background: transparent;")
             if step.done:
                 style += " text-decoration: line-through;"
             text.setStyleSheet(style)
-            line.addWidget(text, 1)
+            # The chips belong to THIS step, so they sit right after its
+            # words. Given the row's stretch they drifted to the far right
+            # edge instead, where they read as belonging to the card.
+            line.addWidget(text, 0)
 
             if step.estimate_min:
                 line.addWidget(self._chip(fmt_duration(step.estimate_min),
-                                          palette.text_secondary))
+                                          palette.on_card_secondary))
             due = step.deadline_date()
             if due:
                 late = due < today and not step.done
                 line.addWidget(self._chip(
                     ("overdue · " if late else "by ") + due.strftime("%b %d"),
-                    "#EF4444" if late else palette.text_secondary))
+                    "#EF4444" if late else palette.on_card_secondary))
+            line.addStretch()
             box.addWidget(row)
 
         rolled = task.checklist_minutes()
@@ -842,17 +883,28 @@ class TasksPanel(QWidget, ThemeAware):
                           f"the task is booked for "
                           f"{fmt_duration(task.estimate_min)}")
             foot.setStyleSheet(
-                f"color: {palette.text_secondary}; font-size: 11px; "
+                f"color: {palette.on_card_secondary}; font-size: 11px; "
                 f"background: transparent;")
             box.addWidget(foot)
         return host
 
-    @staticmethod
-    def _chip(text: str, color: str) -> QLabel:
+    def _chip(self, text: str, color: str) -> QLabel:
+        """A small outlined label on a card.
+
+        The colour goes through ``readable_on``. Status hues are fixed on
+        purpose - "critical is red" has to mean the same thing on every theme
+        - but a fixed hue cannot know what it will be painted on, and amber on
+        halloween's pumpkin card is the same colour twice: the chip vanishes.
+        Where the hue does not read, the card's own text colour is used and
+        the WORD carries the meaning instead.
+        """
+        palette = self.get_current_palette()
+        colour = readable_on(color, palette.surface, palette.on_card_secondary)
         chip = QLabel(text)
         chip.setStyleSheet(
-            f"color: {color}; border: 1px solid {color}; border-radius: 8px; "
-            f"padding: 0px 7px; font-size: 10px; background: transparent;")
+            f"color: {colour}; border: 1px solid {colour}; "
+            f"border-radius: 8px; padding: 0px 7px; font-size: 10px; "
+            f"background: transparent;")
         return chip
 
     # -- actions -------------------------------------------------------------

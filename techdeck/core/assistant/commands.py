@@ -103,6 +103,7 @@ Talk to me. Nothing you say gets filed unless you ask for it.
   /wait <text> [on <who>]           park a task on someone else
   /unwait <text>                    take it back off them
   /clockin <text>  /clockout        the clock    /time [today|week|month]
+  /log <text> 45m                   book time you forgot to clock
   /theme [name|off]                 this page's own colours
   /hours                            your working day    /set <key> <value>
   /purge                            clear out finished tasks
@@ -218,6 +219,7 @@ class AssistantBrain:
             "clockin": self._cmd_clock_in, "start": self._cmd_clock_in,
             "clockout": self._cmd_clock_out, "stop": self._cmd_clock_out,
             "time": self._cmd_time, "timelog": self._cmd_time,
+            "log": self._cmd_log,
             "steps": self._cmd_steps, "step": self._cmd_step,
             "theme": self._cmd_theme,
             "clear": self._cmd_clear,
@@ -629,6 +631,34 @@ class AssistantBrain:
             f"Clocked out of {running.label()}: {fmt_duration(minutes)}.")
         if total > minutes:
             reply.system(f"   {fmt_duration(total)} on it all told.")
+        return reply
+
+    def _cmd_log(self, args: str, now: datetime) -> Reply:
+        """`/log fix the PO sheet 45m` books time you forgot to clock.
+
+        The clock only catches the stretches you remembered to start, and a
+        time log with holes in it is one nobody trusts enough to look at. The
+        duration is read with the same grammar as everywhere else and is taken
+        off the END of the line, so a task whose own name has a number in it
+        ("order 4130 tube") survives.
+        """
+        text = args.strip()
+        if not text:
+            return Reply().error(
+                "How long, and on what? /log fix the PO sheet 45m")
+        minutes, rest = nlp.split_trailing_duration(text)
+        if not minutes:
+            return Reply().error(
+                "I need a length on the end: /log fix the PO sheet 45m")
+        task = self._one_task(rest)
+        if isinstance(task, Reply):
+            return task
+        self.store.log_time(task.id, minutes, when=now,
+                            note="added by hand")
+        total = task.logged_minutes(now)
+        reply = Reply(dirty=True).say(
+            f"Logged {fmt_duration(minutes)} on {task.label()}.")
+        reply.system(f"   {fmt_duration(total)} on it all told.")
         return reply
 
     def _cmd_time(self, args: str, now: datetime) -> Reply:

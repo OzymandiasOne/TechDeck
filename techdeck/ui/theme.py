@@ -78,11 +78,33 @@ class ColorPalette:
     # cards and page background need opposite text tones (halloween: light
     # text on the purple body, dark text on the orange cards).
     card_text: str = ""
+    # The DIMMED text on a card, same reasoning as card_text. Without it a
+    # theme with an opposite-toned card gets the page's secondary colour on
+    # the card and the small print goes unreadable — halloween put pale
+    # lavender on pumpkin orange, which is what made the Assistant hard to
+    # read (reported 2026-10-09, fixed 2026-10-13). Empty falls back to
+    # text_secondary, so one-tone themes are untouched.
+    card_text_secondary: str = ""
     # Splitter handle override (the console's resize edge) — empty falls
     # back to divider / border_strong. Per-widget styled in shell.py, so a
     # stylesheet override can't reach it; it needs a slot.
     splitter_handle: str = ""
     splitter_handle_hover: str = ""
+
+    # ── what to paint text with, per surface ─────────────────────────────────
+    # Use these rather than `text` / `text_secondary` for anything drawn ON a
+    # card: they fall back to the page colours for a one-tone theme and swap
+    # to the card's own tones for a two-tone one.
+
+    @property
+    def on_card(self) -> str:
+        """Primary text sitting on `surface`."""
+        return self.card_text or self.text
+
+    @property
+    def on_card_secondary(self) -> str:
+        """Dimmed text sitting on `surface`."""
+        return self.card_text_secondary or self.text_secondary
 
 
 # ── Built-in theme definitions ────────────────────────────────────────────────
@@ -347,6 +369,8 @@ QPushButton:hover {
         sidebar_text="#E8DCF5",
         sidebar_hover="#2E1745",
         card_text="#2A1503",       # carved-dark tile names on orange cards
+        card_text_secondary="#43260A",   # the small print on orange: near-black,
+                                         # not the body's pale lavender
         card_border="#B34F08",     # darker-orange borders on orange controls
         splitter_handle="#4A1F7A",       # the console's resize edge: witching purple
         splitter_handle_hover="#5D2B96",
@@ -632,6 +656,18 @@ QPushButton:checked:hover {{
     border: 1px solid {theme.accent_hover};
 }}
 
+/* An icon-only button: one glyph, a small fixed size, no label.
+   The rule above gives EVERY button `padding: 8px 16px`, which on a 26x26
+   fixed square leaves negative room for the content - Qt then draws nothing
+   at all and the control vanishes silently (cost us the Assistant's clock
+   and delete buttons, 2026-10-13). Mark one with
+   `techdeck.ui.utils.mark_icon_button(btn)` and it gets its space back. */
+QPushButton[iconOnly="true"] {{
+    padding: 0px;
+    min-width: 0px;
+    min-height: 0px;
+}}
+
 QPushButton[class="primary"] {{
     background-color: {theme.accent};
     color: {theme.accent_text};
@@ -898,6 +934,79 @@ QSlider::sub-page:vertical {{
 }}
 """
     return base + "\n" + theme.extra_stylesheet
+
+
+def _channel(value: float) -> float:
+    value = value / 255.0
+    return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+
+def _luminance(colour: str) -> float:
+    """WCAG relative luminance of a #rrggbb string. Unparseable -> mid grey,
+    so a bad value degrades to "pick something safe" rather than raising."""
+    text = (colour or "").strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(c * 2 for c in text)
+    if len(text) != 6:
+        return 0.5
+    try:
+        r, g, b = (int(text[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return 0.5
+    return 0.2126 * _channel(r) + 0.7152 * _channel(g) + 0.0722 * _channel(b)
+
+
+def contrast_ratio(one: str, two: str) -> float:
+    """WCAG contrast ratio between two colours, 1.0 (same) to 21.0 (black on
+    white)."""
+    first, second = _luminance(one), _luminance(two)
+    light, dark = max(first, second), min(first, second)
+    return (light + 0.05) / (dark + 0.05)
+
+
+# Below this a label stops being comfortable to read at small sizes. WCAG's
+# bar for large text is 3.0; chips are small and often bold, so 3.0 is the
+# floor rather than the target.
+MIN_READABLE_CONTRAST = 3.0
+
+
+def is_light(colour: str) -> bool:
+    """Is this colour light enough to need dark text (and dark tints) on it?"""
+    return _luminance(colour) > 0.45
+
+
+def subtle_tint(text_colour: str, strength: float = 0.22) -> str:
+    """A barely-there tone to sit behind something, in the same family as the
+    text that will sit next to it.
+
+    For the chrome that is neither text nor an accent - a progress track, a
+    divider inside a card. It follows the TEXT colour rather than guessing
+    from the background, because the theme already made that call: halloween
+    paints dark text on a mid-luminance pumpkin orange, and a tint picked by
+    luminance alone would go the other way.
+
+    Deriving it at all is the point: a palette entry can collide with the
+    thing drawn on top of it. halloween's `accent` and `border` are the SAME
+    purple, which made every bar on the Time tab look 100% full.
+    """
+    strength = max(0.04, min(0.6, strength))
+    channel = "0, 0, 0" if _luminance(text_colour) < 0.5 else "255, 255, 255"
+    return f"rgba({channel}, {strength:.2f})"
+
+
+def readable_on(colour: str, background: str, fallback: str) -> str:
+    """``colour`` if it reads on ``background``, else ``fallback``.
+
+    Status hues are deliberately fixed - "critical is red" has to mean the
+    same thing on every theme - but a fixed hue cannot know what it will be
+    painted on. Amber on halloween's pumpkin-orange card is the same colour
+    twice and the chip disappears. This keeps the hue wherever it works and
+    falls back to the surface's own text colour where it does not.
+    """
+    if not colour or not background:
+        return colour or fallback
+    return (colour if contrast_ratio(colour, background) >= MIN_READABLE_CONTRAST
+            else fallback)
 
 
 def get_theme_names() -> list:

@@ -219,3 +219,46 @@ def test_a_comma_in_a_task_name_survives_the_csv():
     task = _logged("Pull drawings, then scribe", 30, MONDAY)
     csv_text = timelog.to_csv([task], "all", MONDAY)
     assert '"Pull drawings, then scribe"' in csv_text
+
+
+# ── a clock that has only just started ───────────────────────────────────────
+
+def test_a_just_started_clock_shows_up_immediately(store):
+    """It is worth 0 minutes but it is not nothing. Without this the Time tab
+    says "no time clocked" while the chip under the terminal says a clock is
+    running, and the honest conclusion is that the clock is broken.
+    """
+    task = store.add_task(TaskItem(title="Fix the PO sheet"))
+    store.clock_in(task.id, MONDAY)
+
+    report = timelog.build_report(store.tasks, "week", MONDAY)
+    assert [row.title for row in report.rows] == ["Fix the PO sheet"]
+    assert report.rows[0].running
+    assert report.rows[0].minutes == 0
+
+
+def test_a_clock_running_today_stays_out_of_last_weeks_report(store):
+    """The running row must not escape its range - "last week" is a question
+    about last week."""
+    task = store.add_task(TaskItem(title="Fix the PO sheet"))
+    store.clock_in(task.id, MONDAY)
+    report = timelog.build_report(store.tasks, "last_week", MONDAY)
+    assert report.rows == []
+
+
+def test_a_finished_zero_minute_session_is_still_dropped(store):
+    """Only a RUNNING clock earns a zero-minute row; a closed one that short
+    was a mis-click and is gone already."""
+    task = store.add_task(TaskItem(title="Fix the PO sheet"))
+    store.clock_in(task.id, MONDAY)
+    store.clock_out(task.id, MONDAY + timedelta(seconds=10))
+    assert timelog.build_report(store.tasks, "week", MONDAY).rows == []
+
+
+# ── logging time by hand ─────────────────────────────────────────────────────
+
+def test_time_logged_by_hand_lands_in_the_report(store):
+    task = store.add_task(TaskItem(title="Fix the PO sheet"))
+    store.log_time(task.id, 90, when=MONDAY, note="forgot to clock")
+    report = timelog.build_report(store.tasks, "week", MONDAY)
+    assert report.total_minutes == 90

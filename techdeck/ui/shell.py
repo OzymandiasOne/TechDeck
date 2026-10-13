@@ -24,6 +24,7 @@ from techdeck.core.constants import (
     WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT, APP_VERSION, TICKETS_PER_RUN,
 )
 from techdeck.ui.theme import generate_stylesheet, get_current_palette
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.widgets.sidebar import Sidebar
 from techdeck.ui.pages.home_page import HomePage, HOME_TILE_H
 
@@ -365,6 +366,7 @@ class MainWindow(QMainWindow):
         self.btn_collapse_console = QPushButton()
         self.btn_collapse_console.setObjectName("consoleCollapseBtn")
         self.btn_collapse_console.setFixedSize(26, 26)
+        mark_icon_button(self.btn_collapse_console)   # padding:0, or the glyph has no room
         self.btn_collapse_console.setIconSize(QSize(16, 16))
         self.btn_collapse_console.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_collapse_console.setToolTip("Collapse console")

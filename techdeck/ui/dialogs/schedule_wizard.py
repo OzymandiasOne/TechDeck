@@ -41,6 +41,7 @@ from techdeck.core.assistant.scheduler import (
 )
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.dialogs.task_edit_dialog import TaskEditDialog
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.theme_aware import ThemeAware
 from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
@@ -435,6 +436,7 @@ class ScheduleWizard(QDialog, ThemeAware):
         more = QPushButton("···")
         more.setToolTip("Notes, links, exact start time, “one sitting”")
         more.setFixedSize(40, 28)
+        mark_icon_button(more)   # padding:0, or the glyph has no room
         more.clicked.connect(lambda _c=False, r=row: self._open_details(r))
         self.table.setCellWidget(row, COL_MORE, more)
 
