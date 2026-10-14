@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 
+from techdeck.ui.dialog_front import bring_to_front
+from techdeck.core.qt_signals import safe_disconnect
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +64,10 @@ class UpdateDialog(QDialog):
         self.layout().activate()
         self.setMinimumHeight(self.layout().minimumSize().height())
         self.resize(self.sizeHint())
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     def _setup_ui(self):
         """Create UI elements."""
@@ -238,12 +245,11 @@ class UpdateDialog(QDialog):
 
         # Disconnect old downloader if it exists
         if self.downloader is not None:
-            try:
-                self.downloader.progress_updated.disconnect()
-                self.downloader.download_complete.disconnect()
-                self.downloader.download_failed.disconnect()
-            except RuntimeError:
-                pass
+            # Each one independently: chained inside a single try, a signal
+            # with nothing attached skipped every disconnect after it.
+            safe_disconnect(self.downloader.progress_updated)
+            safe_disconnect(self.downloader.download_complete)
+            safe_disconnect(self.downloader.download_failed)
             self.downloader = None
 
         from techdeck.core.update_downloader import UpdateDownloader

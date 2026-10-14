@@ -359,3 +359,175 @@ def test_rerun_with_fewer_parts_leaves_no_empty_boxes(ff, tmp_path):
     for r in range(4, 8):
         assert ws.cell(r, 3).value is None
         assert _sides(ws.cell(r, 3)) == (None,) * 4
+
+
+# ── Batch 499: the drawing's item number and the PO's disagree ──────────────
+#
+# CAD named the formed bar 'H6512163-H17-2 BAR.pdf'. Order FK411600's PO calls
+# the same piece '-1' and numbers the order's two tubes '-3A'/'-3B'; the BATCH
+# master PO, which had gone stale, numbered those tubes '-2A'/'-2B'. So the
+# exact (order, DYPN) key misses, and so does the PPN+item alias. The PPN is the
+# part both sides always agree on, and once the tube rows are dropped exactly one
+# row of that PPN is left - which is the answer.
+
+_B499_ORDER_PO = [
+    ["FK411600", "H6512163-H17", "H6512163-H17-1", "262028652-A231", ""],
+    ["FK411600", "H6512163-H17", "H6512163-H17-3A", "218002191", ""],
+    ["FK411600", "H6512163-H17", "H6512163-H17-3B", "218002191", ""],
+]
+_B499_MASTER_PO = [
+    ["FK411600", "H6512163-H17", "H6512163-H17-1", "262028652-A231", ""],
+    ["FK411600", "H6512163-H17", "H6512163-H17-2A", "218002191", ""],
+    ["FK411600", "H6512163-H17", "H6512163-H17-2B", "218002191", ""],
+]
+
+
+def _as_po_rows(rows):
+    """Spreadsheet rows in the shape _read_po_sheet hands back."""
+    return [{"ORDER": o, "PPN": p, "DYPN": d, "SOURCE MATERIAL": sm, "NOTES": n}
+            for o, p, d, sm, n in rows]
+
+
+def _batch_tree(tmp_path, order_rows):
+    """A batch folder with one order folder carrying its own PO workbook."""
+    order_dir = tmp_path / "FK411600-H6512163-H17"
+    order_dir.mkdir(parents=True)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "PO"
+    for _ in range(4):
+        ws.append([])
+    ws.append(["ORDER", "PPN", "DYPN", "SOURCE MATERIAL", "NOTES"])
+    for row in order_rows:
+        ws.append(row)
+    wb.save(order_dir / "H6512163-H17.xlsx")
+    return tmp_path
+
+
+def test_ppn_is_the_dypn_minus_its_last_segment(ff):
+    """The rule the Bent Plates PPN column is filled from - so column B is never
+    blank while C has a part number in it."""
+    assert ff.sdk.split_dypn("H6512163-H17-2")[0] == "H6512163-H17"
+    assert ff.sdk.split_dypn("H7931062-H3-5")[0] == "H7931062-H3"
+    assert ff.sdk.split_dypn("H6512163-H17-2A")[0] == "H6512163-H17"
+    assert ff.sdk.split_dypn("H7658162-H3DR-2")[0] == "H7658162-H3DR"
+
+
+def test_the_master_po_resolves_the_source_material(ff, tmp_path):
+    """The master PO is the authority - it is what the user maintains and what
+    every other app reads."""
+    batch = _batch_tree(tmp_path, _B499_ORDER_PO)
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
+                                   _as_po_rows(_B499_MASTER_PO), {}, {},
+                                   lambda *a: None)
+    assert row is not None, "the bar's source material is findable"
+    assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
+    assert "H6512163-H17-1" in note and "not a tube" in note
+    assert "the batch PO" in note
+
+
+def test_a_stale_order_folder_copy_gives_the_same_answer(ff, tmp_path):
+    """The order folder's workbook holds the WHOLE batch PO as it stood when the
+    folder was built, so an older one carries rows the master has had corrected
+    out. The non-tube filter makes that harmless: the numbering only ever shifts
+    on the rows being discarded, so both copies leave the same one row."""
+    batch = _batch_tree(tmp_path, _B499_ORDER_PO)        # the stale -3A/-3B copy
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
+                                   [], {}, {}, lambda *a: None)
+    assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
+    assert "order FK411600's folder" in note
+
+
+def test_a_tube_serial_can_never_be_the_formed_part(ff, tmp_path):
+    """218002191 is an OVERSIZED TUBE serial. The 499 PO carries no SOURCE
+    MATERIAL sheet at all, so there are no descriptions to judge by - the serial
+    sets are the only signal, and they are enough."""
+    assert "218002191" in ff.sdk.ALL_TUBE_MATERIALS
+    for row in _B499_ORDER_PO[1:]:
+        assert ff._row_kind({"SOURCE MATERIAL": row[3]}, {}) == "tube"
+    assert ff._row_kind({"SOURCE MATERIAL": "262028652-A231"}, {}) != "tube"
+
+
+def test_the_order_folder_is_only_read_when_the_master_has_no_rows(ff, tmp_path):
+    """A stale copy must never override the master - it is a last resort."""
+    batch = _batch_tree(tmp_path, [
+        ["FK411600", "H6512163-H17", "H6512163-H17-9", "WRONG-9", ""],
+    ])
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
+                                   _as_po_rows(_B499_MASTER_PO), {}, {},
+                                   lambda *a: None)
+    assert ff._serial(row["SOURCE MATERIAL"]) == "262028652-A231"
+    assert "the batch PO" in note, "the master won, not the folder copy"
+
+
+def test_two_formable_rows_is_a_coin_flip_so_it_refuses(ff, tmp_path):
+    """A coin flip here puts FORMED on the wrong kit row, so no answer beats a
+    guess - the caller tells the user instead."""
+    ambiguous = [
+        ["FK411600", "H6512163-H17", "H6512163-H17-1", "262028652-A231", ""],
+        ["FK411600", "H6512163-H17", "H6512163-H17-4", "262028653-50", ""],
+    ]
+    batch = _batch_tree(tmp_path, ambiguous)
+    row, note = ff._resolve_by_ppn("H6512163-H17-2", "FK411600", batch,
+                                   [], {}, {}, lambda *a: None)
+    assert row is None and note == ""
+
+
+def test_a_part_with_no_rows_for_its_ppn_resolves_to_nothing(ff, tmp_path):
+    batch = _batch_tree(tmp_path, _B499_ORDER_PO)
+    row, _note = ff._resolve_by_ppn("R9999999-H1-2", "FK411600", batch,
+                                    _as_po_rows(_B499_MASTER_PO), {}, {},
+                                   lambda *a: None)
+    assert row is None
+
+
+# ── a re-run must not wipe what the user typed in ──────────────────────────
+
+def _filled_organizer(tmp_path, data_rows):
+    """A Bent Plates sheet that already HAS rows on it - the re-run case."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Bent Plates"
+    ws.append(["BATCH 499: FORMED PARTS"])
+    ws.append(["ORDER", "PPN", "DYPN", "SOURCE MATERIAL", "NOTES"])
+    for row in data_rows:
+        ws.append(row)
+    path = tmp_path / "PO H499 Pallet & Rod Organizer.xlsx"
+    wb.save(path)
+    return path
+
+
+def test_a_rerun_keeps_a_hand_typed_source_material(ff, tmp_path):
+    """The app clears rows 3 down and rewrites them, so a value the user filled
+    in by hand used to come back blank on the next run - and the row quietly went
+    wrong again."""
+    path = _filled_organizer(tmp_path, [
+        ["FK411600", "H6512163-H17", "H6512163-H17-2", "262028652-A231",
+         "H17-2 BEND"],
+    ])
+    logs = []
+    # the app still cannot find it, so it writes a blank into that cell
+    ff._update_bent_plates(path, "499", [{
+        "ORDER": "FK411600", "PPN": "H6512163-H17",
+        "DYPN": "H6512163-H17-2", "SOURCE MATERIAL": None,
+        "NOTES": "H17-2 BEND",
+    }], logs.append)
+
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    assert ws.cell(3, 4).value == "262028652-A231", "hand-typed value survived"
+    assert any("kept what was already" in m for m in logs), logs
+
+
+def test_a_rerun_still_overwrites_with_a_real_value(ff, tmp_path):
+    """Keeping a hand-typed cell must not freeze a WRONG one: a run that now
+    knows the answer writes it."""
+    path = _filled_organizer(tmp_path, [
+        ["FK411600", "H6512163-H17", "H6512163-H17-2", "WRONG-1", "H17-2 BEND"],
+    ])
+    ff._update_bent_plates(path, "499", [{
+        "ORDER": "FK411600", "PPN": "H6512163-H17",
+        "DYPN": "H6512163-H17-2", "SOURCE MATERIAL": "262028652-A231",
+        "NOTES": "H17-2 BEND",
+    }], lambda *a: None)
+    ws = openpyxl.load_workbook(path)["Bent Plates"]
+    assert ws.cell(3, 4).value == "262028652-A231"

@@ -119,7 +119,8 @@ class SettingsPage(QWidget, ThemeAware):
         icons_dir = Path(__file__).resolve().parents[3] / "assets" / "icons" / icon_folder
         arrow_path = make_tinted_svg_copy(icons_dir / "chevron-down.svg", theme.text)
         combo_style = self._combo_style(theme, arrow_path)
-        for attr in ("theme_combo", "plugin_combo", "_rm_pl_combo"):
+        for attr in ("theme_combo", "assistant_theme_combo", "plugin_combo",
+                     "_rm_pl_combo"):
             combo = getattr(self, attr, None)
             if combo is None:
                 continue
@@ -468,6 +469,37 @@ class SettingsPage(QWidget, ThemeAware):
         self._style_secondary(theme_note, "font-size: 12px; margin-top: 4px;")
         theme_section.addWidget(theme_note)
 
+        # ── Assistant page theme ──
+        # The Assistant is the one page people READ all day, so it gets its own
+        # slot: a seasonal app theme that is fun on the Library can be hard
+        # work behind a wall of text (reported 2026-10-09).
+        assistant_lbl = QLabel("Assistant Page Theme:")
+        assistant_lbl.setStyleSheet("font-weight: 600; margin-top: 14px;")
+        theme_section.addWidget(assistant_lbl)
+
+        assistant_row = QHBoxLayout()
+        self.assistant_theme_combo = QComboBox()
+        self.assistant_theme_combo.setMinimumHeight(34)
+        self.assistant_theme_combo.setMinimumWidth(200)
+        self.assistant_theme_combo.setStyleSheet(
+            self._combo_style(_p_theme, _p_arrow_path))
+        self._refresh_assistant_theme_combo()
+        # No Apply button: one combo, one meaning, applied on pick. An extra
+        # button here would be a second thing to remember for a setting whose
+        # whole point is "let me see it".
+        self.assistant_theme_combo.currentIndexChanged.connect(
+            self._apply_assistant_theme)
+        assistant_row.addWidget(self.assistant_theme_combo)
+        assistant_row.addStretch()
+        theme_section.addLayout(assistant_row)
+
+        assistant_note = QLabel(
+            "Only the Assistant page. Leave it on “Follow the app theme” "
+            "unless that one is hard to read there.")
+        assistant_note.setWordWrap(True)
+        self._style_secondary(assistant_note, "font-size: 12px; margin-top: 4px;")
+        theme_section.addWidget(assistant_note)
+
         # Custom theme management
         builder_row = QHBoxLayout()
         build_btn = QPushButton("+ Build Custom Theme")
@@ -736,6 +768,8 @@ class SettingsPage(QWidget, ThemeAware):
         idx = self.theme_combo.findData(current_theme)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
+        if hasattr(self, "assistant_theme_combo"):
+            self._refresh_assistant_theme_combo()
         # Sound effects widgets live on this tab too
         if hasattr(self, "audio_enabled_check"):
             self._load_audio_settings()
@@ -760,6 +794,34 @@ class SettingsPage(QWidget, ThemeAware):
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
 
+    def _refresh_assistant_theme_combo(self):
+        """Every theme, plus the "follow the app" entry that is the default."""
+        from techdeck.core.constants import halloween_active
+        current = self.settings.get_assistant_theme()
+        combo = self.assistant_theme_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Follow the app theme", "")
+        for name in get_theme_names():
+            # Same seasonal rule as the app combo: halloween is listed in
+            # season, or while it is the page's active choice.
+            if (name == "halloween" and name != current
+                    and not halloween_active(settings=self.settings)):
+                continue
+            combo.addItem(name.replace("_", " ").title(), name)
+        index = combo.findData(current)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _apply_assistant_theme(self):
+        """Pin (or unpin) the Assistant page's theme, live."""
+        name = self.assistant_theme_combo.currentData() or ""
+        if name == self.settings.get_assistant_theme():
+            return
+        self.settings.set_assistant_theme(name)
+        from techdeck.ui.theme_manager import SCOPE_ASSISTANT, get_theme_manager
+        get_theme_manager().set_scope_theme(SCOPE_ASSISTANT, name)
+
     def _apply_theme(self):
         theme_name = self.theme_combo.currentData()
         if not theme_name:
@@ -775,11 +837,21 @@ class SettingsPage(QWidget, ThemeAware):
 
     def _on_custom_theme_saved(self, name: str):
         self._refresh_theme_combo()
+        self._refresh_assistant_theme_combo()
         self._refresh_custom_theme_list()
         # Select the newly saved theme in the combo
         idx = self.theme_combo.findData(name)
         if idx >= 0:
             self.theme_combo.setCurrentIndex(idx)
+
+    def _drop_deleted_assistant_theme(self, name: str):
+        """A custom theme that gets deleted while the Assistant is pinned to
+        it leaves the page following the app, not following nothing."""
+        if self.settings.get_assistant_theme() != name:
+            return
+        self.settings.set_assistant_theme("")
+        from techdeck.ui.theme_manager import SCOPE_ASSISTANT, get_theme_manager
+        get_theme_manager().set_scope_theme(SCOPE_ASSISTANT, "")
 
     def _refresh_custom_theme_list(self):
         self._custom_theme_list.clear()
@@ -810,7 +882,9 @@ class SettingsPage(QWidget, ThemeAware):
         )
         if reply == QMessageBox.StandardButton.Yes:
             delete_custom_theme(name, self.settings.get_custom_themes_dir())
+            self._drop_deleted_assistant_theme(name)
             self._refresh_theme_combo()
+            self._refresh_assistant_theme_combo()
             self._refresh_custom_theme_list()
             if self.settings.get_theme() == name:
                 self.settings.set_theme("dark")

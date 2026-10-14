@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from techdeck.ui.dialog_front import bring_to_front
 from techdeck.ui.theme_manager import get_theme_manager
 
 
@@ -119,6 +120,10 @@ class ReportDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         row.addWidget(close_btn)
         layout.addLayout(row)
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     # ------------------------------------------------------------------ #
 

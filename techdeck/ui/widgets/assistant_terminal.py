@@ -20,6 +20,7 @@ from PySide6.QtGui import (
 )
 
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 from techdeck.ui.widgets.flow_layout import FlowLayout
 
 # Role → colour role. 'accent' and 'text*' resolve against the live palette;
@@ -55,6 +56,10 @@ class TerminalView(QTextEdit, ThemeAware):
     Consecutive messages from the same speaker are grouped under one avatar,
     so a reply plus its footnote is one block instead of two heads.
     """
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     # A techdeck:// anchor was clicked (the user's own avatar). External urls
     # still open with the OS, same split the plugin console uses.
@@ -221,6 +226,10 @@ class TabStrip(QWidget, ThemeAware):
     are independent: reordering the row never renumbers anything.
     """
 
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
+
     tab_selected = Signal(int)
 
     def __init__(self, parent=None):
@@ -307,6 +316,10 @@ class ChipBar(QWidget, ThemeAware):
     (FlowLayout) rather than scroll, so a narrow window loses no options.
     """
 
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
+
     chip_clicked = Signal(str)      # emits the chip's action key
 
     def __init__(self, parent=None):
@@ -363,6 +376,10 @@ class ChipBar(QWidget, ThemeAware):
 
 class CommandLine(QWidget, ThemeAware):
     """The input row: a single line with Up/Down recall and a Send button."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     submitted = Signal(str)
 

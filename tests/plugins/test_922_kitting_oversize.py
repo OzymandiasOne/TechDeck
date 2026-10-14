@@ -240,6 +240,7 @@ def test_no_source_material_never_stamps_a_rod(kit):
     })
     edits = kit._apply_formed_edits(
         ws, {"h7658162-h3dr-2": set()}, lambda *a: None,
+        {"log": lambda *a: None},
         part_rows=range(22, 32), col_triples=kit.STANDARD_COLS)
     assert [addr for addr, _ in edits] == ["H24"]
     assert ws.cells["H24"].endswith("FORMED")

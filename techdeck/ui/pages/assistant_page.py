@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 
 from techdeck.core.assistant.commands import (
-    ACT_CLEAR, ACT_EDIT_NOTE, ACT_EXPORT, ACT_GOTO, ACT_OPEN_WIZARD,
+    ACT_BLOCKS, ACT_CLEAR, ACT_EDIT_NOTE, ACT_EXPORT, ACT_GOTO,
+    ACT_OPEN_WIZARD, ACT_THEME, ACT_TIME_CSV,
     AssistantBrain, Reply,
 )
 from techdeck.core.assistant.models import ChatMessage
@@ -39,17 +40,19 @@ from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.notifier import DesktopNotifier
 from techdeck.core.settings import SettingsManager
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 from techdeck.ui.widgets.assistant_terminal import (
     ACCOUNT_URL, ChipBar, CommandLine, TabStrip, TerminalView,
 )
 from techdeck.ui.widgets.assistant_notes import NotesPanel
 from techdeck.ui.widgets.assistant_schedule import SchedulePanel, TasksPanel
+from techdeck.ui.widgets.assistant_time import TimePanel
 
 logger = logging.getLogger(__name__)
 
-TAB_TERMINAL, TAB_SCHEDULE, TAB_NOTES, TAB_TASKS = range(4)
+TAB_TERMINAL, TAB_SCHEDULE, TAB_NOTES, TAB_TASKS, TAB_TIME = range(5)
 _TAB_KEYS = {"terminal": TAB_TERMINAL, "schedule": TAB_SCHEDULE,
-             "notes": TAB_NOTES, "tasks": TAB_TASKS}
+             "notes": TAB_NOTES, "tasks": TAB_TASKS, "time": TAB_TIME}
 
 # How much transcript to show on open. The file keeps far more; this is just
 # what's worth scrolling through.
@@ -75,6 +78,10 @@ _DEFAULT_REPLY_DELAY_MS = 1000
 class AssistantPage(QWidget, ThemeAware):
     """The whole page. Owns one store, one brain, and four panels."""
 
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
+
     # Overridable so tests can run the reply synchronously. Zero means "now",
     # not "on the next event-loop turn", so a test can assert straight after
     # submit() without pumping timers.
@@ -82,19 +89,22 @@ class AssistantPage(QWidget, ThemeAware):
 
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
-        # Paint our own QSS background (pages are background-colored via the
-        # QStackedWidget > QWidget rule). Without this the page is
-        # TRANSPARENT and shows the stack itself, which is QFrame-family and
-        # paints SURFACE — invisible in one-tone themes, but halloween's
-        # orange surface bled through the whole page (pixel-probed).
-        from PySide6.QtCore import Qt as _Qt
-        self.setAttribute(_Qt.WidgetAttribute.WA_StyledBackground, True)
+        # Paint our own QSS background. Without this the page is TRANSPARENT
+        # and shows the stack behind it, which is QFrame-family and painted
+        # SURFACE. See paint_own_background for the whole story.
+        from techdeck.ui.utils import paint_own_background
+        paint_own_background(self)
         self.settings = settings
         self.store = AssistantStore()
         # Professional theme mutes the goblin, a client demo gets plain
         # acknowledgements, not a feral terminal creature.
+        # The theme list is injected rather than imported by the brain:
+        # core/ stays free of any ui/ import, so /theme can still be tested
+        # without a QApplication.
+        from techdeck.ui.theme import get_theme_names
         self.brain = AssistantBrain(
-            self.store, professional=settings.is_professional())
+            self.store, professional=settings.is_professional(),
+            themes=list(get_theme_names()))
         # Set when the last thing said could plausibly be a task, so the chip
         # row can offer to file it. Nothing is ever filed off this alone.
         self._can_promote = False
@@ -131,6 +141,10 @@ class AssistantPage(QWidget, ThemeAware):
         self.tabs.add_tab(TAB_TERMINAL, "Terminal")
         self.tabs.add_tab(TAB_SCHEDULE, "Schedule")
         self.tabs.add_tab(TAB_TASKS, "Tasks")
+        # Time sits at the end of the working loop (say it, plan it, do it,
+        # see where it went) and before Personal Notes, which is a different
+        # activity and keeps its place apart on the right.
+        self.tabs.add_tab(TAB_TIME, "Time")
         self.tabs.add_tab(TAB_NOTES, "Personal Notes", right=True)
         self.tabs.tab_selected.connect(self._on_tab_changed)
         outer.addWidget(self.tabs)
@@ -148,6 +162,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.schedule_panel = SchedulePanel(self.store)
         self.schedule_panel.rebuild_requested.connect(self.open_wizard)
         self.schedule_panel.export_requested.connect(self._export)
+        self.schedule_panel.blocks_requested.connect(self.open_blocks)
         self.schedule_panel.changed.connect(self._on_data_changed)
 
         self.notes_panel = NotesPanel(self.store)
@@ -156,6 +171,10 @@ class AssistantPage(QWidget, ThemeAware):
         self.tasks_panel = TasksPanel(self.store)
         self.tasks_panel.changed.connect(self._on_data_changed)
         self.tasks_panel.schedule_requested.connect(self.open_wizard)
+
+        self.time_panel = TimePanel(self.store)
+        self.time_panel.changed.connect(self._on_data_changed)
+        self.time_panel.export_requested.connect(self._export_time_csv)
 
         self.panel = QFrame()
         self.panel.setObjectName("assistantPanel")
@@ -167,6 +186,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.stack.addWidget(self.schedule_panel)
         self.stack.addWidget(self.notes_panel)
         self.stack.addWidget(self.tasks_panel)
+        self.stack.addWidget(self.time_panel)
         # A hidden panel (the wide schedule table) must not floor the window's
         # minimum width, same rule every stacked host in TechDeck follows.
         from techdeck.ui.utils import limit_min_size_to_current_page
@@ -260,6 +280,12 @@ class AssistantPage(QWidget, ThemeAware):
         elif action == ACT_CLEAR:
             self.terminal.clear()
             self.store.clear_chat()
+        elif action == ACT_BLOCKS:
+            self.open_blocks()
+        elif action == ACT_THEME:
+            self._set_page_theme(reply.payload.get("name", ""))
+        elif action == ACT_TIME_CSV:
+            self._export_time_csv(reply.payload.get("range", "all"))
         elif action == ACT_EDIT_NOTE:
             note_id = reply.payload.get("note_id")
             self.notes_panel.refresh()
@@ -292,6 +318,13 @@ class AssistantPage(QWidget, ThemeAware):
                           "Show today's blocks from the saved plan"))
             chips.append(("replan", "Replan from now",
                           "Rebuild the plan starting at this minute"))
+        running = self.store.running_task()
+        if running is not None:
+            # The one chip that is about state rather than an action you might
+            # want: a clock you forgot is running is a clock that lies.
+            chips.append(("clockout",
+                          f"\u25a0 Stop: {running.label()[:22]}",
+                          "Stop the clock and log the time"))
         chips.append(("note", "Quick note", "Start a note to yourself"))
         chips.append(("task", "Add a task", "Capture something to do"))
         if open_count:
@@ -318,6 +351,8 @@ class AssistantPage(QWidget, ThemeAware):
         elif key == "tasks":
             self.submit("/tasks")
             self._show_tab(TAB_TASKS)
+        elif key == "clockout":
+            self.submit("/clockout")
         elif key == "help":
             self.submit("/help")
 
@@ -343,6 +378,29 @@ class AssistantPage(QWidget, ThemeAware):
         body = summarize(schedule)
         self.terminal.append_line("result", body)
         self._record("result", body)
+
+    # ── meetings and blocked time ────────────────────────────────────────────
+
+    def open_blocks(self):
+        """The meetings editor. Changes land in the store as they are made, so
+        the next plan picks them up without anything else being pressed."""
+        from techdeck.ui.dialogs.commitments_dialog import CommitmentsDialog
+        dialog = CommitmentsDialog(self.store, parent=self.window())
+        dialog.exec()
+        self._on_data_changed()
+
+    # ── this page's own theme ────────────────────────────────────────────────
+
+    def _set_page_theme(self, name: str):
+        """Apply `/theme <name>`: save it, then tell the theme manager.
+
+        The page owns this (not the brain) because it is the half with a
+        SettingsManager in it. Every Assistant widget follows the scope, so
+        one call repaints the page and nothing outside it.
+        """
+        from techdeck.ui.theme_manager import SCOPE_ASSISTANT, get_theme_manager
+        self.settings.set_assistant_theme(name or "")
+        get_theme_manager().set_scope_theme(SCOPE_ASSISTANT, name or "")
 
     # ── export ───────────────────────────────────────────────────────────────
 
@@ -397,6 +455,43 @@ class AssistantPage(QWidget, ThemeAware):
             self.terminal.append_line("system", hint)
             self._record("system", hint)
 
+    def _export_time_csv(self, range_key: str = "all"):
+        """Save the clocked sessions as CSV. Session-level rows, not a
+        roll-up: a PivotTable can summarise rows, nothing can un-summarise."""
+        from techdeck.core.assistant import exporters, timelog
+
+        content = exporters.time_log_to_csv(self.store.tasks, range_key)
+        if content.count("\r\n") <= 1:
+            QMessageBox.information(
+                self, "Nothing logged",
+                "No clocked time in that range yet. Press \u25b6 on a task "
+                "to start the clock.")
+            return
+
+        _start, _end, label = timelog.resolve_range(range_key)
+        stem = exporters.safe_filename(f"TechDeck time log {label}",
+                                       "TechDeck time log")
+        default_dir = Path.home() / "Desktop"
+        if not default_dir.exists():
+            default_dir = Path.home()
+        path, _chosen = QFileDialog.getSaveFileName(
+            self.window(), "Save time log", str(default_dir / f"{stem}.csv"),
+            "CSV for Excel (*.csv)")
+        if not path:
+            return
+        try:
+            # newline="" keeps the CSV's CRLF endings exactly as built;
+            # Python would otherwise turn them into CRCRLF on Windows.
+            with open(path, "w", encoding="utf-8-sig", newline="") as handle:
+                handle.write(content)
+        except OSError as exc:
+            QMessageBox.warning(self, "Couldn't save",
+                                f"Saving to that location failed:\n\n{exc}")
+            return
+        message = f"Saved the time log to {path}"
+        self.terminal.append_line("system", message)
+        self._record("system", message)
+
     # ── plumbing ─────────────────────────────────────────────────────────────
 
     def _on_tab_changed(self, index: int):
@@ -405,6 +500,8 @@ class AssistantPage(QWidget, ThemeAware):
             self.schedule_panel.refresh()
         elif index == TAB_TASKS:
             self.tasks_panel.refresh()
+        elif index == TAB_TIME:
+            self.time_panel.refresh()
         elif index == TAB_NOTES:
             self.notes_panel.refresh(keep_selection=True)
         elif index == TAB_TERMINAL:
@@ -523,6 +620,8 @@ class AssistantPage(QWidget, ThemeAware):
             self.schedule_panel.refresh()
         elif current == TAB_TASKS:
             self.tasks_panel.refresh()
+        elif current == TAB_TIME:
+            self.time_panel.refresh()
         elif current == TAB_NOTES:
             self.notes_panel.refresh(keep_selection=True)
         self._refresh_chips()
@@ -534,6 +633,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.terminal.set_identity(self._display_name())
         self.schedule_panel.refresh()
         self.tasks_panel.refresh()
+        self.time_panel.refresh()
         self.notes_panel.refresh(keep_selection=True)
         self._refresh_chips()
         QTimer.singleShot(0, self.command_line.focus)
@@ -542,6 +642,13 @@ class AssistantPage(QWidget, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
+        # A pinned Assistant theme is a PAGE-level override, not a second app
+        # theme: the QApplication stylesheet still comes from the app theme, so
+        # the page sets the scoped sheet on ITSELF and Qt resolves a widget's
+        # own stylesheet ahead of an ancestor's for everything inside it. The
+        # call is a no-op ("" sheet) while the page follows the app, which
+        # leaves the application stylesheet in charge exactly as before.
+        self.setStyleSheet(self.scope_stylesheet())
         self.subtitle.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 12px;")
         self.reminders_btn.setStyleSheet(f"""

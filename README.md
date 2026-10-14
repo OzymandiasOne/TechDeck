@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.8 - Halloween Update
+# TechDeck v0.8.7.9 - The Assistant Update
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,119 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.7.9 - The Assistant Update
+
+Every feature in this release came from a suggestion. All of them are on the Assistant page.
+
+### Meetings and blocked time
+
+Enter the meetings and blocked time in your day and the planner builds around them. One-off
+by date, or weekly on the days it falls on, with an off switch for a meeting that has been
+paused. A meeting is deliberately not a task: no priority, no estimate, nothing to check
+off, and it never turns up in your task list. It shows on your agenda with no tick box, it
+is counted apart from your own work so it cannot flatter your hours, and it is left out of
+the calendar export, because it is already on your real calendar and writing it back would
+import a second copy of every standing meeting. Schedule tab, **Meetings**, or `/blocks`.
+
+Reading the meetings off Outlook is not built. That is a real piece of work (the Graph API
+and sign-in inside a locked-down tenant), and the calendar export already goes the other
+way.
+
+### Waiting on someone
+
+Select the checkbox on a task and say who has it, which is optional. A waiting task is kept
+out of your planned day, because booking an hour for work you cannot start is how a plan
+loses trust by 9am. It is never dropped though. It comes back on its own line naming who you
+are waiting on, and once it has sat longer than three days it nudges you to follow up, once
+a day. The number of days is yours to set in **Reminders**. There is a **Waiting** filter on
+the Tasks tab, a chip on the row, and `/wait <task> on <who>` / `/unwait` / `/waiting`.
+
+The clock starts only when the flag goes on, so correcting a typo in the name cannot defer
+the nudge forever.
+
+### Clock in on a task, and see where the time went
+
+Each task row has a play button. Press it and the clock runs, press it again and it stops,
+and a chip under the terminal says what is running. Only one task runs at a time. A session
+under a minute is treated as a mis-click and dropped. A clock left running from an earlier
+day is capped at 8 hours and marked `(auto-closed)` rather than claiming your night.
+`/clockin` and `/clockout` do the same, and `/log <task> 45m` books time you did not clock.
+
+The new **Time** tab adds it up, per task and per day, for Today, This week, Last week, This
+month or Everything, biggest first, with a session-level CSV for Excel. It does not grade
+anybody, it does not correct your estimate from the clock, and it does not invent
+categories: the row is the task, because that is the only grouping the numbers actually
+have. Grouping by area or role needs a tag on the task, which is the next build rather than
+a guess.
+
+### Steps inside a task
+
+A long project stays one thing in your list instead of eight look-alikes. Type the steps one
+per line, through the same grammar as a task line (`order the tube 20m due friday`), so each
+one carries its own time and its own date. Tick them off with one click behind a
+`2/5 steps` chip, with a `next: ...` line while folded. A step's own date gets its own
+overdue nudge, which is the milestone people actually miss.
+
+Steps are never planned separately: the task stays the unit the planner places, or the day
+fills with fragments. Their estimates roll up into the task's estimate only when you press
+the button for it.
+
+### Search, and the Assistant's own theme
+
+- A search box on the Tasks tab, over the titles, the notes, the links **and** the steps,
+  because "I know I wrote that PO number down somewhere" has to find it wherever it was
+  written. It composes with the Open/Waiting/All/Done filter, and an empty result says what
+  was searched for instead of looking like an empty backlog. `/tasks <text>` does the same.
+- The Assistant can wear its own theme, separate from the rest of TechDeck. Settings,
+  Personalization, **Assistant Page Theme** ("Follow the app theme" is the default), or
+  `/theme <name>` / `/theme off` in the terminal. A custom theme that is later deleted
+  leaves the page following the app rather than landing somewhere you never chose.
+
+### Prompts come up in front of whatever you are in
+
+A run asking you for a folder or a choice used to open its window behind Excel or Teams with
+nothing but a taskbar flash, and then sat there waiting while you had no idea it wanted you.
+Windows is not willing to let a background process take the foreground, so asking politely
+was never enough. Every prompt, picker and finish box now comes up on top. The one exception
+is the Windows file picker itself, which is not ours to re-flag: its owner window is lifted
+instead, which puts the picker in front with it.
+
+### Six apps now tell you when something needs you
+
+A run that failed, or whose output will make the next app do the wrong thing, finishes with a
+popup instead of leaving the news in the console. 902 DXF Prep (no pricing workbook, or no PO
+rows, either way no QTY workbook), 911 PO PDF Extractor (nothing extracted), 922 Batch
+Repeater (`922 MPL.xlsx` open in Excel, so nothing saved), 922 FormingFinder (Bent Plates
+rows with no SOURCE MATERIAL), 922 Kitting (no Bent Plates sheet, no DYPN column, or a FORMED
+tag that could not be written) and 922 Runtime Genie (no `.lst` files, so the estimate came
+out at zero).
+
+Everything else stays in the console on purpose. A popup that fires on a healthy run teaches
+people to click it away.
+
+### 922 FormingFinder reads the order's own PO
+
+A formed part whose PO calls it by another number came out of the Bent Plates sheet with no
+PPN and no SOURCE MATERIAL, and 922 Kitting stamps FORMED off that column, so the kitting
+paperwork shipped a formed part untagged (Batch 499, order FK411600: CAD named the bar
+`H6512163-H17-2` while every PO calls that piece `-1`).
+
+- The PPN is never blank when the DYPN is filled, because it is the DYPN without its last
+  segment. True on all 173 rows of that batch's PO. Only the SOURCE MATERIAL can be left for
+  you now.
+- When the part number does not match outright, every row of that PPN is considered, the
+  order's own PO first and the batch master second, minus anything that cannot be a formed
+  part. Exactly one row left wins. Two means no answer, because a coin flip here puts FORMED
+  on the wrong kit row.
+- The batch master PO is the authority for the part list, and an order folder's copy is a
+  last resort. Each copy holds the whole batch PO as it stood when that folder was built, so
+  an older one still carries rows the master has since had corrected out.
+- A SOURCE MATERIAL you filled in by hand survives a re-run. A blank never overwrites a value
+  that is already there, and the console says what it kept. A real value still overwrites, so
+  a wrong cell is not frozen.
 
 ---
 

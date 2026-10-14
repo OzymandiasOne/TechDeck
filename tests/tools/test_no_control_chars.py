@@ -1,4 +1,4 @@
-"""No tracked text file may contain control characters.
+r"""No tracked text file may contain control characters.
 
 Found 2026-09-02, three instances, two of them long-standing:
 
@@ -17,6 +17,19 @@ for those - they are valid escapes - so the corruption is silent, survives revie
 (the char is invisible), and only shows up when someone copies a broken command.
 
 Use raw strings, or chr(92), when a written string contains backslashes.
+
+Widened 2026-10-05 after two more of the same class got PAST this gate, both in
+`docs/FEEDBACK_TRACKER.md`, both written by a non-raw Python string:
+
+- `C:\Dev\_repo_backups\telemetry\...` held a real TAB where `\t` belonged, so the
+  one path telling you where a shared-workbook backup went read
+  `_repo_backups<TAB>elemetry`. A tab is legal in source, so it was in ALLOWED -
+  but a tab in a MARKDOWN file is never wanted and is virtually always this bug.
+- `\2026-09-21` became `\x82` + `6-09-21`: `\202` is a valid OCTAL escape. It is
+  above 32, so the ord() < 32 test never saw it. Nothing in the 0x7f-0x9f C1 range
+  belongs in text, in any file type.
+
+So: tabs are an offence in `.md` only, and the C1 range is an offence everywhere.
 """
 
 import subprocess
@@ -27,6 +40,14 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 TEXT = (".md", ".py", ".iss", ".spec", ".json", ".txt", ".ps1", ".yml", ".yaml", ".cfg")
 ALLOWED = {"\n", "\t"}
+# A tab carries meaning in source and config; in prose it never does, and every
+# one found so far was a mangled "\t" inside a Windows path.
+ALLOWED_MD = {"\n"}
+
+
+def _offends(ch: str, suffix: str) -> bool:
+    allowed = ALLOWED_MD if suffix == ".md" else ALLOWED
+    return (ord(ch) < 32 and ch not in allowed) or 0x7f <= ord(ch) < 0xa0
 
 
 def _tracked_text_files():
@@ -45,8 +66,9 @@ def test_no_control_characters_in_tracked_text():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        suffix = path.suffix.lower()
         for i, ch in enumerate(text):
-            if ord(ch) < 32 and ch not in ALLOWED:
+            if _offends(ch, suffix):
                 line = text.count("\n", 0, i) + 1
                 offenders.append(
                     f"{path.relative_to(ROOT)}:{line} contains {ch!r} "
@@ -56,5 +78,6 @@ def test_no_control_characters_in_tracked_text():
         "control characters in tracked text files:\n  "
         + "\n  ".join(offenders)
         + "\nAlmost always a Python non-raw string that wrote the file: "
-          "'\b' is a backspace and '\1' is SOH, and Python does not warn. "
+          "'\b' is a backspace, '\1' is SOH, '\t' is a tab and '\202' is an "
+          "octal escape - Python warns for none of them. "
           "Use a raw string or chr(92).")

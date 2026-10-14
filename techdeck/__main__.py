@@ -216,6 +216,12 @@ def main():
     from techdeck.ui.theme_manager import get_theme_manager
     theme_manager = get_theme_manager()
     theme_manager.set_theme(settings.get_theme())
+    # The Assistant page may be pinned to its own theme; everything else
+    # follows the app. Set before the window is built so the page paints
+    # right the first time instead of flashing the app theme.
+    from techdeck.ui.theme_manager import SCOPE_ASSISTANT
+    theme_manager.set_scope_theme(SCOPE_ASSISTANT,
+                                  settings.get_assistant_theme())
     _log_step("theme manager set")
 
     def _reapply_stylesheet(_theme_name: str):

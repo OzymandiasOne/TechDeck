@@ -50,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 
@@ -217,8 +217,11 @@ def _resolve_batch_context(params, cancel_event, log):
         pricing = _find_pricing_workbook(work_folder.parent, log)
     batch, po_rows = (None, [])
     if pricing is None:
-        log("WARNING: no PO/pricing workbook (.xlsm/.xlsx) found in the selected "
-            "folder or its parent.")
+        sdk.flag_action(
+            params,
+            "No PO/pricing workbook (.xlsm/.xlsx) is in the folder you picked or "
+            "its parent, so there are no quantities to work from and no QTY "
+            "workbook was built - put the workbook in place and run this again.")
     else:
         log(f"PO spreadsheet: {pricing.name}")
         batch, po_rows = _load_po_rows(pricing, log)
@@ -280,7 +283,8 @@ def _loose_dxfs(dxf_folder: Path) -> list[Path]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
-                po_rows, log, progress_callback, cancel_event) -> bool:
+                po_rows, log, progress_callback, cancel_event,
+                params) -> bool:
     # 1) BATCH# - IGES CONVERT: copy any .igs sitting in the selected folder
     #    (mixed EB folders hold IGES + uncleaned DXFs side by side). No IGES
     #    present is fine - a SigmaNest DXF export folder has none, and the QTY
@@ -313,7 +317,10 @@ def _mode_setup(work_folder: Path, batch_root: Path, batch: str,
 
     # 2) QTY workbook (written to the batch folder, next to the PO spreadsheet)
     if not po_rows:
-        log("WARNING: no PO rows read - QTY workbook not built.")
+        sdk.flag_action(
+            params,
+            "No PO rows could be read, so the QTY workbook was NOT built - check "
+            "the pricing workbook's PO sheet.")
         return True
     qty_path = batch_root / f"{batch} QTY.xlsx"
     if sdk.exists(qty_path):
@@ -673,7 +680,7 @@ def run(params: dict, progress_callback, cancel_event):
 
         if step == 1:
             ok = _mode_setup(work_folder, batch_root, batch, po_rows,
-                             log, scaled, cancel_event)
+                             log, scaled, cancel_event, params)
         else:
             dxf_folder = _find_dxf_folder(work_folder, batch, log)
             if dxf_folder is None:

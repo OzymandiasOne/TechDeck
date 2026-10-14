@@ -30,6 +30,8 @@ from PySide6.QtCore import Qt, QDate, QTime, Signal
 from PySide6.QtGui import QFont
 
 from techdeck.core.assistant import nlp
+
+from techdeck.core.qt_signals import safe_disconnect
 from techdeck.core.assistant.models import (
     PRIORITIES, PRIORITY_LABELS, Schedule, SchedulePrefs, TaskItem,
     fmt_duration, parse_hhmm,
@@ -39,7 +41,9 @@ from techdeck.core.assistant.scheduler import (
 )
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.dialogs.task_edit_dialog import TaskEditDialog
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 COL_TASK, COL_PRIORITY, COL_ESTIMATE, COL_DUE, COL_MORE = range(5)
 
@@ -97,6 +101,10 @@ class PasteTasksDialog(QDialog):
 
 class ScheduleWizard(QDialog, ThemeAware):
     """Collects the answers, builds the plan, saves it on accept."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     STEP_TITLES = ["What are we planning?", "What's on your plate?",
                    "Here's the plan"]
@@ -428,6 +436,7 @@ class ScheduleWizard(QDialog, ThemeAware):
         more = QPushButton("···")
         more.setToolTip("Notes, links, exact start time, “one sitting”")
         more.setFixedSize(40, 28)
+        mark_icon_button(more)   # padding:0, or the glyph has no room
         more.clicked.connect(lambda _c=False, r=row: self._open_details(r))
         self.table.setCellWidget(row, COL_MORE, more)
 
@@ -574,32 +583,20 @@ class ScheduleWizard(QDialog, ThemeAware):
         for row in range(self.table.rowCount()):
             priority = self.table.cellWidget(row, COL_PRIORITY)
             if priority is not None:
-                try:
-                    priority.currentIndexChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(priority.currentIndexChanged)
                 priority.currentIndexChanged.connect(
                     lambda _i, r=row: self._pull_row(r))
             estimate = self.table.cellWidget(row, COL_ESTIMATE)
             if estimate is not None:
-                try:
-                    estimate.valueChanged.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(estimate.valueChanged)
                 estimate.valueChanged.connect(lambda _v, r=row: self._pull_row(r))
             due = self.table.cellWidget(row, COL_DUE)
             if due is not None:
-                try:
-                    due.editingFinished.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(due.editingFinished)
                 due.editingFinished.connect(lambda r=row: self._normalize_due(r))
             more = self.table.cellWidget(row, COL_MORE)
             if more is not None:
-                try:
-                    more.clicked.disconnect()
-                except (TypeError, RuntimeError):
-                    pass
+                safe_disconnect(more.clicked)
                 more.clicked.connect(lambda _c=False, r=row: self._open_details(r))
 
     def _tick_all(self, checked: bool):
@@ -691,7 +688,11 @@ class ScheduleWizard(QDialog, ThemeAware):
 
         self._schedule = build_schedule(ScheduleRequest(
             tasks=tasks, start_day=start_day, end_day=end_day, prefs=prefs,
-            label=label, first_day_start=first_start))
+            label=label, first_day_start=first_start,
+            # Meetings and blocked-out time. Passed every time rather than
+            # offered as an option: a plan built over the top of a standing
+            # meeting is wrong, not customised.
+            commitments=self.store.commitments))
         self.store.add_schedule(self._schedule)
         self._render_review()
         return True
@@ -704,8 +705,13 @@ class ScheduleWizard(QDialog, ThemeAware):
         stats = schedule.stats or {}
         bits = [f"{stats.get('tasks_placed', 0)} tasks placed",
                 f"{fmt_duration(stats.get('work_minutes', 0))} of work"]
+        if stats.get("committed_minutes"):
+            bits.append(f"{fmt_duration(stats['committed_minutes'])} "
+                        f"already booked")
         if stats.get("tasks_unplaced"):
             bits.append(f"{stats['tasks_unplaced']} didn't fit")
+        if stats.get("tasks_waiting"):
+            bits.append(f"{stats['tasks_waiting']} waiting on someone")
         headline = "  ·  ".join(bits)
         colour = palette.warning if schedule.warnings else palette.text_secondary
         self.review_summary.setText(headline)
@@ -750,7 +756,11 @@ class ScheduleWizard(QDialog, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        self.setStyleSheet(f"QDialog {{ background: {palette.background}; }}")
+        # Top-level window: not a child of the Assistant page, so it
+        # inherits nothing and carries the scoped sheet itself.
+        self.setStyleSheet(
+            self.scope_stylesheet()
+            + f"QDialog {{ background: {palette.background}; }}")
         self.step_label.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 12px;")
         if hasattr(self, "review_view"):

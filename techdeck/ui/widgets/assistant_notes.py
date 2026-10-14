@@ -21,6 +21,7 @@ from PySide6.QtGui import QFont, QTextCursor
 from techdeck.core.assistant.models import Note
 from techdeck.core.assistant.store import AssistantStore
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 INDENT = "  "          # two spaces per nesting level
 BULLET = "- "
@@ -36,6 +37,10 @@ class BulletEditor(QTextEdit, ThemeAware):
       the selection.
     * **Ctrl+D** duplicates the line, which is most of what list-building is.
     """
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -165,6 +170,10 @@ class BulletEditor(QTextEdit, ThemeAware):
 
 class NotesPanel(QWidget, ThemeAware):
     """The Personal Notes tab: list on the left, editor on the right."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     changed = Signal()
 

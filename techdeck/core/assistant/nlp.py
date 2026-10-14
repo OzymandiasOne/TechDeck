@@ -50,6 +50,27 @@ def parse_duration(text: str) -> Tuple[Optional[int], Optional[Tuple[int, int]]]
     return None, None
 
 
+def split_trailing_duration(text: str) -> Tuple[Optional[int], str]:
+    """Split ``"fix the PO sheet 45m"`` into ``(45, "fix the PO sheet")``.
+
+    Only a duration at the **end** counts. Commands that take "a task, then
+    how long" (``/log``) resolve the rest of the line to a task by name, and a
+    task name is allowed to contain numbers — "order 4130 tube", "911 setup".
+    Reading a duration from the middle of one of those would quietly rename
+    the task the user meant.
+    """
+    stripped = (text or "").strip()
+    if not stripped:
+        return None, ""
+    minutes, span = parse_duration(stripped)
+    if minutes is None or span is None:
+        return None, stripped
+    # The match has to run to the end of the line (bar trailing whitespace).
+    if stripped[span[1]:].strip():
+        return None, stripped
+    return minutes, stripped[:span[0]].strip(" .,;|-")
+
+
 # ── Priority ─────────────────────────────────────────────────────────────────
 # Deliberately conservative: a bare "high" only counts as a priority when it
 # sits at the end of the line or right after a delimiter. Otherwise "high bay

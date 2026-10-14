@@ -74,3 +74,47 @@ def make_tinted_svg_copy(src_svg_path: Path, color_hex: str) -> str:
     out_path.write_text(svg, encoding="utf-8")
 
     return out_path.as_posix()
+
+
+def mark_icon_button(button, size: int = 0) -> None:
+    """Give an icon-only button room for its glyph.
+
+    The app stylesheet gives every ``QPushButton`` ``padding: 8px 16px``. On a
+    button with a small FIXED size that padding is bigger than the button: the
+    content rect goes negative and Qt draws **nothing** - no glyph, no error,
+    no clue. It cost the Assistant its clock and delete buttons (2026-10-13),
+    and the same trap is waiting for every other 26x26 square in the app.
+
+    Marking a button sets the ``iconOnly`` property the generated stylesheet
+    keys a ``padding: 0`` rule on, and optionally fixes its size in the same
+    call. Call it for any button whose whole content is one glyph.
+    """
+    button.setProperty("iconOnly", "true")
+    if size:
+        button.setFixedSize(size, size)
+    # The property is read when the sheet is applied, so a button marked after
+    # it was first polished needs re-polishing or the rule never lands.
+    style = button.style()
+    if style is not None:
+        style.unpolish(button)
+        style.polish(button)
+
+
+def paint_own_background(widget) -> None:
+    """Make a plain ``QWidget`` actually paint the background its stylesheet
+    gives it.
+
+    A ``QWidget`` that is not a ``QFrame`` ignores ``background-color`` unless
+    ``WA_StyledBackground`` is set, so it stays transparent and shows whatever
+    is behind it. Behind a page is usually a ``QStackedWidget`` - which IS
+    QFrame-family, and so is painted ``surface`` by the stylesheet's ``QFrame``
+    rule (that rule comes LAST at equal specificity, beating the earlier
+    ``QStackedWidget`` one). On a one-tone theme surface and background look
+    alike and nobody notices; on a two-tone theme the host's orange bleeds
+    through every gap in the page above it.
+
+    Call this on any QWidget you give a background in a stylesheet.
+    """
+    from PySide6.QtCore import Qt as _Qt
+
+    widget.setAttribute(_Qt.WidgetAttribute.WA_StyledBackground, True)

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QFrame,
 )
 from PySide6.QtCore import Qt
+from techdeck.ui.dialog_front import bring_to_front
 
 from techdeck.ui.theme_manager import get_theme_manager
 
@@ -132,6 +133,10 @@ class DetailsDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         button_row.addWidget(close_btn)
         layout.addLayout(button_row)
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     # ------------------------------------------------------------------ #
     #  One app's block: name + family tag, then the three sections.

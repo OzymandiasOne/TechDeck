@@ -153,8 +153,15 @@ def load_clip(kind: str, name: str) -> Clip | None:
                     raise OSError(f"frame {i} missing")
                 frames.append(pix)
             clip = Clip(frames, int(meta["size"]), float(meta["loop_travel_px"]))
+        except FileNotFoundError:
+            # A kind declared in KINDS whose frames were never rendered is the
+            # normal state, not a fault (centipede, deliberately unbuilt). It
+            # simply never appears. Warning on it cried wolf every boot.
+            log.debug("halloween decor: %s/%s not in this build", kind, name)
         except Exception as exc:
-            log.warning("halloween decor: no %s/%s clip (%s)", kind, name, exc)
+            # Frames half-present or metadata broken IS a real defect.
+            log.warning("halloween decor: %s/%s clip is broken (%s)",
+                        kind, name, exc)
         _CLIPS[key] = clip
     return _CLIPS[key]
 

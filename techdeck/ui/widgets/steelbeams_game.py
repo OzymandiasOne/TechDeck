@@ -35,6 +35,7 @@ from PySide6.QtGui import (
     QFont, QPainter, QImage, QColor, QBrush, QPen, QShortcut, QKeySequence,
 )
 
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.widgets.steelbeams_events import (
     EventEngine, phase_of, describe_effects, active_mod_labels,
 )
@@ -4262,6 +4263,7 @@ class SteelBeamsGame(QWidget):
         b = QPushButton(text)
         b.setObjectName("tiny")
         b.setFixedSize(26, 26)
+        mark_icon_button(b)   # padding:0, or the glyph has no room
         return b
 
     def _clear_layout(self, layout):

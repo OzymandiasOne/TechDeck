@@ -2,7 +2,7 @@
   "id": "911_po_pdf_extractor",
   "name": "911 PO PDF Extractor",
   "description": "Extract PO packet data from PDFs to Excel with validation reports - prompts for folder when run",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "author": "Anthony Sieben",
   "family": "911",
   "details": {

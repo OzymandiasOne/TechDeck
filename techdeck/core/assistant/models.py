@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, date, time, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ── Priority ─────────────────────────────────────────────────────────────────
@@ -25,6 +25,11 @@ PRIORITY_LABELS = {
     "low": "Low",
 }
 PRIORITY_WEIGHT = {"critical": 10.0, "high": 6.0, "medium": 3.0, "low": 1.0}
+
+# Every length and boundary in the Assistant snaps to this grid. It lives here
+# rather than in the scheduler so the models can clamp against it without
+# importing the engine (the engine imports the models, not the other way).
+GRID_MIN = 5
 
 
 def new_id(prefix: str = "") -> str:
@@ -111,6 +116,113 @@ class Note:
         return ""
 
 
+# ── Checklist steps ──────────────────────────────────────────────────────────
+
+@dataclass
+class ChecklistItem:
+    """One step inside a task.
+
+    Steps exist so a long project can be *one* thing in the backlog with its
+    own stack of work underneath, rather than eight look-alike tasks. A step
+    carries its own optional estimate and its own optional date, because the
+    thing people actually miss on a multi-week job is an internal milestone,
+    not the final deadline.
+
+    Steps are deliberately NOT scheduled individually: the task stays the unit
+    the engine places, so a plan never fills up with fragments. The dialog can
+    roll the steps' estimates up into the task's estimate on request, which is
+    explicit and visible rather than silently derived.
+    """
+    id: str = field(default_factory=lambda: new_id("k_"))
+    text: str = ""
+    done: bool = False
+    estimate_min: int = 0                # 0 = no estimate on this step
+    deadline: Optional[str] = None       # ISO date, this step's own date
+    done_at: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ChecklistItem":
+        try:
+            estimate = max(0, int(d.get("estimate_min", 0) or 0))
+        except (TypeError, ValueError):
+            estimate = 0
+        return cls(
+            id=d.get("id") or new_id("k_"),
+            text=str(d.get("text", "") or ""),
+            done=bool(d.get("done", False)),
+            estimate_min=estimate,
+            deadline=d.get("deadline"),
+            done_at=d.get("done_at"),
+        )
+
+    def deadline_date(self) -> Optional[date]:
+        return _parse_date(self.deadline)
+
+    def label(self) -> str:
+        return self.text.strip() or "(untitled step)"
+
+
+# ── Time log ─────────────────────────────────────────────────────────────────
+
+# A clock-out that lands inside the same minute it started is a mis-click, not
+# work. Anything shorter than this is dropped rather than logged.
+MIN_SESSION_MIN = 1
+# A clock left running when the app closed is capped at this on the way back
+# in, so a forgotten timer cannot claim a whole night.
+MAX_OPEN_SESSION_MIN = 8 * 60
+
+
+@dataclass
+class WorkSession:
+    """One stretch of time actually spent on a task.
+
+    ``end`` is None while the clock is running, so a running timer is just an
+    open session: one source of truth for "am I clocked in", and it survives a
+    restart without a second flag to keep in step with it.
+    """
+    id: str = field(default_factory=lambda: new_id("w_"))
+    start: str = field(default_factory=now_iso)
+    end: Optional[str] = None
+    note: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "WorkSession":
+        return cls(
+            id=d.get("id") or new_id("w_"),
+            start=d.get("start") or now_iso(),
+            end=d.get("end"),
+            note=str(d.get("note", "") or ""),
+        )
+
+    def start_dt(self) -> Optional[datetime]:
+        return _parse_dt(self.start)
+
+    def end_dt(self) -> Optional[datetime]:
+        return _parse_dt(self.end)
+
+    @property
+    def running(self) -> bool:
+        return self.end is None
+
+    def minutes(self, now: Optional[datetime] = None) -> int:
+        """Length in whole minutes. A running session is measured to ``now``."""
+        begin = self.start_dt()
+        if begin is None:
+            return 0
+        finish = self.end_dt() or (now or datetime.now())
+        return max(0, int((finish - begin).total_seconds() // 60))
+
+    def day(self) -> Optional[date]:
+        begin = self.start_dt()
+        return begin.date() if begin else None
+
+
 # ── Tasks ────────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -135,6 +247,17 @@ class TaskItem:
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     schedule_id: Optional[str] = None    # last schedule that placed it
+    # Parked on somebody else. A waiting task is NOT scheduled (planning time
+    # for work you cannot start is the fastest way to stop trusting a plan),
+    # but it is never silently dropped either: it is reported as waiting, and
+    # it earns a follow-up nudge once it has sat too long.
+    waiting: bool = False
+    waiting_on: str = ""                 # who/what, free text, optional
+    waiting_since: Optional[str] = None  # ISO datetime the flag went on
+    # The stack of steps under one job. See ChecklistItem.
+    checklist: List[ChecklistItem] = field(default_factory=list)
+    # Where the time actually went. See WorkSession.
+    sessions: List[WorkSession] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -163,6 +286,15 @@ class TaskItem:
             created_at=d.get("created_at", now_iso()),
             updated_at=d.get("updated_at", now_iso()),
             schedule_id=d.get("schedule_id"),
+            waiting=bool(d.get("waiting", False)),
+            waiting_on=str(d.get("waiting_on", "") or ""),
+            waiting_since=d.get("waiting_since"),
+            checklist=[ChecklistItem.from_dict(c)
+                       for c in (d.get("checklist") or [])
+                       if isinstance(c, dict)],
+            sessions=[WorkSession.from_dict(w)
+                      for w in (d.get("sessions") or [])
+                      if isinstance(w, dict)],
         )
 
     # -- derived helpers used by the scheduler + the UI -----------------------
@@ -204,6 +336,67 @@ class TaskItem:
     def label(self) -> str:
         return self.title.strip() or "(untitled task)"
 
+    # -- waiting --------------------------------------------------------------
+
+    def waiting_label(self) -> str:
+        """'waiting on Dan' / 'waiting'. Used by the chip and the nudge."""
+        who = (self.waiting_on or "").strip()
+        return f"waiting on {who}" if who else "waiting"
+
+    def waiting_days(self, today: Optional[date] = None) -> int:
+        """Whole days the flag has been on. 0 when it went on today or the
+        stamp is missing, a nudge must never fire off an unreadable date."""
+        since = _parse_date(self.waiting_since)
+        if since is None:
+            return 0
+        return max(0, ((today or date.today()) - since).days)
+
+    # -- checklist ------------------------------------------------------------
+
+    def checklist_progress(self) -> Tuple[int, int]:
+        """(done, total) steps."""
+        total = len(self.checklist)
+        return sum(1 for step in self.checklist if step.done), total
+
+    def checklist_minutes(self) -> int:
+        """Total of every step's own estimate. 0 when none of them carry one."""
+        return sum(max(0, step.estimate_min) for step in self.checklist)
+
+    def next_step(self) -> Optional[ChecklistItem]:
+        """The first step still open, which is what a task row should show."""
+        return next((step for step in self.checklist if not step.done), None)
+
+    def get_step(self, step_id: str) -> Optional[ChecklistItem]:
+        return next((s for s in self.checklist if s.id == step_id), None)
+
+    # -- time log -------------------------------------------------------------
+
+    def running_session(self) -> Optional[WorkSession]:
+        return next((s for s in self.sessions if s.running), None)
+
+    @property
+    def is_running(self) -> bool:
+        return self.running_session() is not None
+
+    def logged_minutes(self, now: Optional[datetime] = None) -> int:
+        """Everything clocked against this task, including a running timer."""
+        return sum(session.minutes(now) for session in self.sessions)
+
+    def logged_minutes_between(self, start: date, end: date,
+                              now: Optional[datetime] = None) -> int:
+        """Minutes logged on days in ``[start, end]``, inclusive.
+
+        A session is counted on the day it STARTED. Splitting one across
+        midnight would be more precise and less honest: nobody logging work
+        at 11:50pm thinks of it as two days' work.
+        """
+        total = 0
+        for session in self.sessions:
+            day = session.day()
+            if day is not None and start <= day <= end:
+                total += session.minutes(now)
+        return total
+
 
 # ── Schedule ─────────────────────────────────────────────────────────────────
 
@@ -211,6 +404,99 @@ BLOCK_TASK = "task"
 BLOCK_BREAK = "break"
 BLOCK_LUNCH = "lunch"
 BLOCK_FIXED = "fixed"
+# Somebody else's claim on the day: a meeting, a standing huddle, a shift on
+# the floor. Not a task, so it is never tickable and never counted as your
+# work, it is simply time the engine is not allowed to plan into.
+BLOCK_BUSY = "busy"
+
+WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+@dataclass
+class Commitment:
+    """A standing claim on the day that is not a task.
+
+    Before this existed the only way to tell the planner about a 9am meeting
+    was to file it as a task with a locked start time, which then sat in the
+    backlog asking to be ticked off. A meeting is not work you owe anybody; it
+    is time you do not have. So it is its own object: no priority, no estimate,
+    no done state, and it never appears in the task list.
+
+    Two shapes, because both are real: a one-off on a given date (``day``), and
+    a weekly standing commitment (``weekdays``, Monday = 0). ``weekdays`` wins
+    if both are set.
+    """
+    id: str = field(default_factory=lambda: new_id("c_"))
+    title: str = ""
+    start: str = "09:00"                 # HH:MM, local
+    minutes: int = 30
+    day: Optional[str] = None            # ISO date for a one-off
+    weekdays: List[int] = field(default_factory=list)   # 0=Mon … 6=Sun
+    notes: str = ""
+    active: bool = True
+    created_at: str = field(default_factory=now_iso)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Commitment":
+        try:
+            minutes = max(GRID_MIN, min(24 * 60, int(d.get("minutes", 30) or 30)))
+        except (TypeError, ValueError):
+            minutes = 30
+        weekdays = []
+        for value in (d.get("weekdays") or []):
+            try:
+                number = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= number <= 6 and number not in weekdays:
+                weekdays.append(number)
+        return cls(
+            id=d.get("id") or new_id("c_"),
+            title=str(d.get("title", "") or ""),
+            start=str(d.get("start", "09:00") or "09:00"),
+            minutes=minutes,
+            day=d.get("day"),
+            weekdays=sorted(weekdays),
+            notes=str(d.get("notes", "") or ""),
+            active=bool(d.get("active", True)),
+            created_at=d.get("created_at", now_iso()),
+        )
+
+    def start_time(self) -> time:
+        return parse_hhmm(self.start, time(9, 0))
+
+    def day_date(self) -> Optional[date]:
+        return _parse_date(self.day)
+
+    @property
+    def weekly(self) -> bool:
+        return bool(self.weekdays)
+
+    def occurs_on(self, when: date) -> bool:
+        if not self.active:
+            return False
+        if self.weekly:
+            return when.weekday() in self.weekdays
+        own = self.day_date()
+        return own is not None and own == when
+
+    def label(self) -> str:
+        return self.title.strip() or "(untitled block)"
+
+    def when_label(self) -> str:
+        """'Every Tue, Thu · 9:00 AM · 1h' / 'Fri, Oct 17 · 9:00 AM · 30m'."""
+        start = datetime.combine(date.today(), self.start_time())
+        tail = f"{fmt_time(start)} · {fmt_duration(self.minutes)}"
+        if self.weekly:
+            days = ", ".join(WEEKDAY_LABELS[n] for n in sorted(self.weekdays))
+            return f"Every {days} · {tail}"
+        own = self.day_date()
+        if own is None:
+            return f"No date yet · {tail}"
+        return f"{own.strftime('%a, %b')} {own.day} · {tail}"
 
 
 @dataclass
@@ -274,6 +560,12 @@ class DaySchedule:
     def work_minutes(self) -> int:
         return sum(b.minutes() for b in self.blocks if b.kind in (BLOCK_TASK, BLOCK_FIXED))
 
+    def committed_minutes(self) -> int:
+        """Time the day loses to meetings and other people's claims. Kept
+        apart from work_minutes: it is not work you did, and counting it as
+        such would flatter every utilisation number on the page."""
+        return sum(b.minutes() for b in self.blocks if b.kind == BLOCK_BUSY)
+
 
 @dataclass
 class Schedule:
@@ -314,6 +606,9 @@ class Schedule:
 
     def task_blocks(self) -> List[ScheduleBlock]:
         return [b for b in self.all_blocks() if b.kind in (BLOCK_TASK, BLOCK_FIXED)]
+
+    def busy_blocks(self) -> List[ScheduleBlock]:
+        return [b for b in self.all_blocks() if b.kind == BLOCK_BUSY]
 
 
 # ── Preferences ──────────────────────────────────────────────────────────────

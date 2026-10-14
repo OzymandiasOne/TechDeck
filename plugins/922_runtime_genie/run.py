@@ -97,7 +97,12 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     lst_stems = _collect_lst_stems(lst_dir)
     log(f"LST reference files: {len(lst_stems)}")
     if not lst_stems:
-        log("WARNING: No .lst files found in LST folder - all PDFs will be skipped.")
+        sdk.flag_action(
+            params,
+            f"There are no .lst files in Batch {batch_no}'s LST folder, so every "
+            f"PDF was skipped and the estimate came out at zero - run 922 LST "
+            f"Organizer first, then run this again.",
+            str(lst_dir))
     progress_callback(10)
 
     # ── Order folders ──────────────────────────────────────────────────────────

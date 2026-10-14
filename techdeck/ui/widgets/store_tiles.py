@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QIcon
 
+from techdeck.ui.utils import mark_icon_button
 from techdeck.ui.arcade_chrome import (
     EMP, _SoldStamp, _draw_bubble, _equipped_badge, _greyed, _load_art,
     _load_pixmap, _tile_ring, _trim_v,
@@ -230,6 +231,7 @@ class ShopWindow(QFrame):
         self.close_btn = QPushButton()
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setFixedSize(28, 28)
+        mark_icon_button(self.close_btn)   # padding:0, or the glyph has no room
         xpm = _sf().render("X", 3, EMP["btn_text"])
         self.close_btn.setIcon(QIcon(xpm)); self.close_btn.setIconSize(xpm.size())
         # Transparent: just the X glyph, no button chrome, over the panel.

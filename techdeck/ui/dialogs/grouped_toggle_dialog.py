@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+from techdeck.ui.dialog_front import bring_to_front
 from techdeck.ui.dialogs.selection_dialog import _glyph_path
 
 
@@ -182,6 +183,10 @@ class GroupedToggleDialog(QDialog):
         for gkey, parent in self._parents.items():
             self._apply_child_enable(gkey)
         self._update_count()
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     # --- interaction ----------------------------------------------------------
 

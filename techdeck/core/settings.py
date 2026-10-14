@@ -703,6 +703,25 @@ class SettingsManager:
                     datetime.date.today().year)
         self.save()
 
+    def get_assistant_theme(self) -> str:
+        """The theme the Assistant page wears, or "" to follow the app.
+
+        Its own setting because the Assistant is read, not browsed: a seasonal
+        or high-contrast app theme that is fun on the Library can make a page
+        of dense text hard work (reported 2026-10-09). Never defaults to
+        anything: "" means "whatever the app is wearing", which is what almost
+        everybody wants.
+        """
+        return str(self.data.get("settings", {}).get(
+            "assistant_theme", "") or "")
+
+    def set_assistant_theme(self, theme_name: str) -> None:
+        """Pin the Assistant page to a theme. "" puts it back on the app's."""
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["assistant_theme"] = str(theme_name or "")
+        self.save()
+
     def is_professional(self) -> bool:
         """Professional theme: the light look with the playful features (Ticket
         Counter, My Stuff, My House, games, tickets, fidget) hidden — for client

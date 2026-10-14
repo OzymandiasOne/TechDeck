@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QDialog,
 )
 from PySide6.QtCore import Qt, QPoint
+from techdeck.ui.dialog_front import bring_to_front
 from PySide6.QtGui import QPainter, QColor, QPolygon, QIcon, QPixmap, QImage
 
 from techdeck.ui import pixel_art
@@ -329,6 +330,10 @@ class PixelDialog(QDialog):
         row.addStretch(); row.addWidget(btn); row.addStretch()
         lay.addLayout(row)
         self.setFixedWidth(self.WIDTH)
+        # In FRONT of whatever app the user is in: a run prompts while
+        # they are in Excel, and Windows will not hand a background
+        # process the foreground (see ui/dialog_front.py).
+        bring_to_front(self)
 
     def paintEvent(self, _e):
         p = QPainter(self)

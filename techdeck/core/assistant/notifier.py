@@ -25,13 +25,18 @@ from datetime import datetime, date, time, timedelta
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from techdeck.core.assistant.models import (
-    BLOCK_FIXED, BLOCK_TASK, Schedule, SchedulePrefs, TaskItem,
+    BLOCK_BUSY, BLOCK_FIXED, BLOCK_TASK, Schedule, SchedulePrefs, TaskItem,
     fmt_duration, fmt_time, parse_hhmm,
 )
 
 KIND_STARTING = "starting"
 KIND_DIGEST = "digest"
 KIND_OVERDUE = "overdue"
+# A step inside a task has slipped its own date. Separate from KIND_OVERDUE so
+# the user can keep one and not the other, and so the keys can never collide.
+KIND_STEP = "step"
+# You have been waiting on somebody long enough to go and ask again.
+KIND_WAITING = "waiting"
 
 # Keys of already-sent reminders are kept in the store. Bounded so a heavy user
 # doesn't grow the settings document forever; the oldest simply fall off, and
@@ -62,6 +67,11 @@ class NotifyPrefs:
     digest_at: str = "07:00"
     overdue: bool = True
     quiet_outside_hours: bool = True
+    # Follow-ups on parked work. A task waiting on someone else is invisible
+    # by design (the planner skips it), so without this it can sit for a
+    # fortnight while everyone assumes somebody else is chasing it.
+    waiting_followup: bool = True
+    waiting_after_days: int = 3
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -78,6 +88,11 @@ class NotifyPrefs:
         base.daily_digest = bool(base.daily_digest)
         base.overdue = bool(base.overdue)
         base.quiet_outside_hours = bool(base.quiet_outside_hours)
+        base.waiting_followup = bool(base.waiting_followup)
+        try:
+            base.waiting_after_days = max(1, min(60, int(base.waiting_after_days)))
+        except (TypeError, ValueError):
+            base.waiting_after_days = 3
         try:
             base.lead_minutes = max(0, min(120, int(base.lead_minutes)))
         except (TypeError, ValueError):
@@ -128,7 +143,7 @@ def due_notifications(
     if schedule is not None:
         horizon = now + timedelta(minutes=notify.lead_minutes)
         for block in schedule.all_blocks():
-            if block.kind not in (BLOCK_TASK, BLOCK_FIXED):
+            if block.kind not in (BLOCK_TASK, BLOCK_FIXED, BLOCK_BUSY):
                 continue
             start = block.start_dt()
             if start is None or not (now <= start <= horizon):
@@ -168,6 +183,44 @@ def due_notifications(
                 key=key, title="Past its date",
                 body=f"{task.label()} was due {when}.", kind=KIND_OVERDUE))
 
+    # --- a step inside a task has slipped its own date ----------------------
+    # The whole point of per-step dates is the milestone you miss three weeks
+    # before the task is due, so these fire off the STEP's date, not the task's.
+    if notify.overdue:
+        for task in tasks:
+            if task.done:
+                continue
+            for step in task.checklist:
+                due = step.deadline_date()
+                if step.done or due is None or due >= today:
+                    continue
+                key = f"{KIND_STEP}:{step.id}:{today.isoformat()}"
+                if key in sent:
+                    continue
+                days = (today - due).days
+                when = "yesterday" if days == 1 else f"{days} days ago"
+                out.append(Notification(
+                    key=key, title=f"Step overdue: {task.label()}",
+                    body=f"{step.label()} was due {when}.", kind=KIND_STEP))
+
+    # --- still waiting on somebody ------------------------------------------
+    if notify.waiting_followup:
+        for task in tasks:
+            if task.done or not task.waiting:
+                continue
+            days = task.waiting_days(today)
+            if days < max(1, notify.waiting_after_days):
+                continue
+            key = f"{KIND_WAITING}:{task.id}:{today.isoformat()}"
+            if key in sent:
+                continue
+            who = (task.waiting_on or "").strip()
+            tail = f" on {who}" if who else ""
+            out.append(Notification(
+                key=key, title="Worth a nudge",
+                body=f"{task.label()}: waiting{tail} for {days} days.",
+                kind=KIND_WAITING))
+
     # --- morning digest -----------------------------------------------------
     if notify.daily_digest and schedule is not None:
         key = f"{KIND_DIGEST}:{today.isoformat()}"
@@ -189,7 +242,8 @@ def _digest_body(schedule: Schedule, done_ids: Set[str],
         blocks = [b for b in day_plan.blocks
                   if b.kind in (BLOCK_TASK, BLOCK_FIXED)
                   and not (b.task_id and b.task_id in done_ids)]
-        if not blocks:
+        meetings = [b for b in day_plan.blocks if b.kind == BLOCK_BUSY]
+        if not blocks and not meetings:
             return None
         total = sum(b.minutes() for b in blocks)
         names: List[str] = []
@@ -202,6 +256,12 @@ def _digest_body(schedule: Schedule, done_ids: Set[str],
             lines.append(f"  {name}")
         if len(names) > 3:
             lines.append(f"  and {len(names) - 3} more")
+        if meetings:
+            booked = fmt_duration(sum(b.minutes() for b in meetings))
+            lines.append(f"Plus {len(meetings)} booked "
+                         f"({booked}): {meetings[0].title}"
+                         + (f" +{len(meetings) - 1} more"
+                            if len(meetings) > 1 else ""))
         return "\n".join(lines)
     return None
 

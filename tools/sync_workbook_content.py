@@ -293,6 +293,33 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.7.9", "Oct 14, 2026", "Feature",
+     "A planning and time-visibility release, built entirely from user "
+     "requests. The personal work planner gains four capabilities operators "
+     "asked for: scheduled commitments (meetings and other blocked time) that "
+     "the day plan is built around rather than over; a blocked status for work "
+     "parked on another person or department, which is held out of the plan "
+     "but reported with the name of whoever holds it and raises a follow-up "
+     "prompt after a configurable number of days; elapsed-time capture per "
+     "item, with a reporting view that totals time by item and by day over a "
+     "chosen range and exports to spreadsheet, answering where the week "
+     "actually went; and sub-items under one piece of work, each with its own "
+     "estimate and date, so a multi-week project is tracked as one item with "
+     "internal milestones instead of several look-alike entries. Free-text "
+     "search across the whole work list is included, and the page can be set "
+     "to its own display scheme where sustained reading made the shared one "
+     "hard to use. Reliability: prompts that need an operator answer now open "
+     "in front of whatever application is in use, closing a class of stalled "
+     "runs where a tool waited behind a spreadsheet with no visible signal. "
+     "Six tools now end with an explicit notice when a run failed or produced "
+     "output that would mislead the next step, rather than recording it only "
+     "in the run log. The 922 forming tool resolves a formed part whose "
+     "purchase-order number disagrees with its drawing number by deriving the "
+     "part number and reading source material from the order's own purchase "
+     "order, closing a gap that let a formed part reach kitting paperwork "
+     "untagged; an operator-entered material value now survives a re-run.",
+     "Personal Work Planner, 922 FormingFinder, 922 Kitting, 922 Runtime "
+     "Genie, 922 Batch Repeater, 902 DXF Prep, 911 PO PDF Extractor"),
     ("Beta 0.8.7.8", "Oct 5, 2026", "Feature",
      "A seasonal engagement release: a seasonal theme applies itself for the "
      "month and a discovery trail (what's-new markers across the account pages) "

@@ -23,10 +23,15 @@ from techdeck.core.assistant.models import parse_hhmm
 from techdeck.core.assistant.notifier import NotifyPrefs
 from techdeck.ui.notifier import DesktopNotifier
 from techdeck.ui.theme_aware import ThemeAware
+from techdeck.ui.theme_manager import SCOPE_ASSISTANT
 
 
 class ReminderDialog(QDialog, ThemeAware):
     """Edit :class:`NotifyPrefs`. Read the result with :meth:`result_prefs`."""
+
+    # Follows the Assistant's own theme when one is pinned (Settings ->
+    # Personalization -> Assistant Page Theme), else the app's.
+    THEME_SCOPE = SCOPE_ASSISTANT
 
     def __init__(self, prefs: NotifyPrefs, parent=None):
         super().__init__(parent)
@@ -86,6 +91,25 @@ class ReminderDialog(QDialog, ThemeAware):
         self.overdue.setChecked(self._prefs.overdue)
         form.addRow("", self.overdue)
 
+        # The follow-up nudge for a task parked on somebody else. It has
+        # always worked; it just had no switch, and result_prefs() left both
+        # fields out - so saving this dialog quietly reset them to the
+        # defaults. A setting with no control is a setting nobody can trust.
+        waiting_row = QHBoxLayout()
+        self.waiting = QCheckBox("Nudge me about anything I've been waiting on for")
+        self.waiting.setChecked(self._prefs.waiting_followup)
+        self.waiting_days = QSpinBox()
+        self.waiting_days.setRange(1, 60)
+        self.waiting_days.setSuffix(" days")
+        self.waiting_days.setValue(self._prefs.waiting_after_days)
+        self.waiting_days.setMinimumHeight(30)
+        self.waiting_days.setEnabled(self.waiting.isChecked())
+        self.waiting.toggled.connect(self.waiting_days.setEnabled)
+        waiting_row.addWidget(self.waiting)
+        waiting_row.addWidget(self.waiting_days)
+        waiting_row.addStretch()
+        form.addRow("", waiting_row)
+
         self.quiet = QCheckBox("Stay quiet outside my working hours")
         self.quiet.setChecked(self._prefs.quiet_outside_hours)
         self.quiet.setToolTip(
@@ -143,7 +167,11 @@ class ReminderDialog(QDialog, ThemeAware):
 
     def apply_theme(self):
         palette = self.get_current_palette()
-        self.setStyleSheet(f"QDialog {{ background: {palette.background}; }}")
+        # Top-level window: not a child of the Assistant page, so it
+        # inherits nothing and carries the scoped sheet itself.
+        self.setStyleSheet(
+            self.scope_stylesheet()
+            + f"QDialog {{ background: {palette.background}; }}")
         for label in (self.caveat, self.status):
             label.setStyleSheet(
                 f"color: {palette.text_secondary}; font-size: 11px;")
@@ -155,5 +183,7 @@ class ReminderDialog(QDialog, ThemeAware):
             "daily_digest": self.digest.isChecked(),
             "digest_at": self.digest_at.time().toString("HH:mm"),
             "overdue": self.overdue.isChecked(),
+            "waiting_followup": self.waiting.isChecked(),
+            "waiting_after_days": self.waiting_days.value(),
             "quiet_outside_hours": self.quiet.isChecked(),
         })
