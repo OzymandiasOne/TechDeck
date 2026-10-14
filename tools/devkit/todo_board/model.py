@@ -137,6 +137,31 @@ def _iso(value) -> str:
     return str(value).strip()
 
 
+def excel_com_path(path) -> str:
+    """Return a form of ``path`` that desktop Excel can open through COM.
+
+    Excel refuses a LONG path inside the maintainer's personal
+    ``OneDrive - <org>`` root: it matches the sync root, resolves the file to
+    its cloud URL, and a non-interactive COM instance has no token for it, so
+    ``Workbooks.Open`` dies with "Microsoft Excel cannot access the file" on a
+    workbook openpyxl reads fine and a local copy opens fine (2026-10-14 —
+    `archive_feedback` could not open the telemetry workbook at all; the
+    Pilot Program LIBRARY root is not affected, only this personal one).
+
+    The 8.3 short name defeats that cloud-path match and Excel opens the SAME
+    file in place — ``wb.FullName`` still reports the long path, so the item
+    identity OneDrive and the Power Automate flow depend on never changes
+    (the whole point of editing through Excel; see docs/USAGE_TELEMETRY.md).
+    Falls back to the long path where 8.3 names are disabled.
+    """
+    try:
+        import win32api
+        short = win32api.GetShortPathName(str(path))
+    except Exception:
+        return str(path)
+    return short or str(path)
+
+
 def telemetry_workbook_path() -> Optional[Path]:
     """Locate ``TechDeck Telemetry.xlsx`` in the maintainer's OneDrive.
 
