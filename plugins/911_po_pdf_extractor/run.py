@@ -40,7 +40,7 @@ except ModuleNotFoundError:
 
 
 # ===== CONSTANTS =====
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 # Month name to number mapping
 MONTH_MAP = {

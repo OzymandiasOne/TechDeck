@@ -50,7 +50,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "1.4.1"
+VERSION = "1.5.0"
 
 CHUNK_SIZE = 25  # AutoCAD review batches (Windows 25-file open limit per SOP)
 

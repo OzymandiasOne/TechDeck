@@ -104,7 +104,7 @@ def halloween_active(settings=None) -> bool:
 
 # Application metadata
 APP_NAME = "TechDeck"
-APP_VERSION = "0.8.7.8"  # Halloween Update - the season's theme and its fun; 922 Setup labels existing cards; FormingFinder, SSPO Invoicing Prep, MieTrak Tools, Pallet/Difficulty Stamper, Batch Repeater; every app picks its folder
+APP_VERSION = "0.8.7.9"  # the Assistant update - meetings, waiting on someone, the clock and the Time tab, steps, task search and its own theme; prompts come up in front; six apps flag what needs you; FormingFinder reads the order's own PO
 APP_RELEASE_NAME = "TechDeck Beta"
 CONFIG_VERSION = "1.0.0"
 

@@ -88,7 +88,7 @@ assert _MP_SPEC is not None and _MP_SPEC.loader is not None
 mp = _ilu.module_from_spec(_MP_SPEC)
 _MP_SPEC.loader.exec_module(mp)
 
-VERSION = "2.7.1"
+VERSION = "2.8.0"
 
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
