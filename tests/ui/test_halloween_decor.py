@@ -21,16 +21,17 @@ class _Settings:
 
 
 @pytest.fixture
-def host(qapp):
+def host(qapp, destroy_qt):
     w = QWidget()
     w.resize(1000, 700)
     w.show()
     yield w
     # Free the Qt objects NOW, while the QApplication still exists. Left to
     # the garbage collector they can outlive it and corrupt the heap at exit.
-    w.close()
-    w.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # Destroyed on the spot rather than flushed app-wide: a flush with None
+    # also runs deletes other suites queued and are not done with, which
+    # crashed the full run at ~96% on 2026-10-05. See the destroy_qt fixture.
+    destroy_qt(w)
 
 
 @pytest.fixture
@@ -208,7 +209,10 @@ def test_switching_tabs_swaps_the_webs_and_leaves_none_behind(host, season):
     decor.refresh()
     for tab in OTHER_TABS + ["home"]:
         decor.set_page(tab)
-        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        # Dispatch the webs' OWN deletes, by name, so the dispatch cannot
+        # reach into another suite's queue (the 2026-10-05 crash).
+        for web in host.findChildren(hd.CornerWeb):
+            QCoreApplication.sendPostedEvents(web, QEvent.Type.DeferredDelete)
         live = [w for w in host.findChildren(hd.CornerWeb) if w.isVisible()]
         assert len(live) == len(decor._webs) == len(hd.WEB_LAYOUTS[tab])
 

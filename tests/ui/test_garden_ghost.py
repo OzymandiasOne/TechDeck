@@ -1,7 +1,6 @@
 """The Ghost store item: he haunts the bookshelf in My House
 (techdeck/ui/widgets/garden_scene.py, "The Ghost")."""
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent
 
 from techdeck.ui import emporium_catalog
 from techdeck.ui.widgets import garden_scene as gs
@@ -24,7 +23,7 @@ class _Settings:
 
 
 @pytest.fixture
-def scene(qapp):
+def scene(qapp, destroy_qt):
     made = []
 
     def make(owned):
@@ -34,10 +33,10 @@ def scene(qapp):
         return s
 
     yield make
-    for s in made:
-        s.close()
-        s.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # Destroyed one by one, not with an app-wide DeferredDelete flush: that
+    # form also runs deletes OTHER suites queued and are not done with, which
+    # crashed the full run at ~96% on 2026-10-05. See the destroy_qt fixture.
+    destroy_qt(*made)
 
 
 def _open(s):

@@ -87,7 +87,7 @@ def test_every_small_fixed_size_button_has_room_for_its_glyph():
 
 
 @pytest.mark.parametrize("theme", ["dark", "halloween"])
-def test_a_marked_button_actually_paints_its_glyph(qapp, theme):
+def test_a_marked_button_actually_paints_its_glyph(qapp, theme, destroy_qt):
     """The end-to-end proof: render one and count the colours where the glyph
     is. An unpainted glyph leaves a single flat background colour, which is
     exactly what the bug looked like."""
@@ -109,6 +109,10 @@ def test_a_marked_button_actually_paints_its_glyph(qapp, theme):
         image = button.grab().toImage()
     finally:
         qapp.setStyleSheet(previous)
+        # A shown top-level widget left standing is destroyed at interpreter
+        # shutdown, after the QApplication - which aborts the run. See the
+        # destroy_qt fixture.
+        destroy_qt(button)
 
     colours = {image.pixel(x, y)
                for x in range(image.width()) for y in range(image.height())}

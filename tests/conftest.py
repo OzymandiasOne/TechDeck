@@ -82,3 +82,76 @@ def private_doc():
                 f"repo only")
         return path
     return _resolve
+
+
+# ── Qt objects must not outlive the QApplication ──────────────────────────────
+
+@pytest.fixture
+def destroy_qt():
+    """Destroy the Qt objects a test made, NOW, and nobody else's.
+
+    **The trap, both halves of it.** A ``QWidget`` a test leaves alive is
+    destroyed at interpreter shutdown, by which point the ``QApplication`` may
+    already be gone - and destroying a widget without an application aborts
+    the process. The run reaches ``[100%]`` with every test passing and then
+    dies with an access violation and no summary, so there is no failing test
+    to look at and the exit code is the only evidence.
+
+    ``deleteLater`` does not fix it: it only *queues* the delete, and if
+    nothing dispatches that queue before exit the object is in exactly the
+    same place. Dispatching it with
+    ``QCoreApplication.sendPostedEvents(None, DeferredDelete)`` is worse,
+    because ``None`` means EVERY object: it runs deletes other suites queued
+    and have not finished with, which is what crashed the full run at ~96% on
+    2026-10-05 (the fix then removed the flush from the card-game fixtures and
+    left three more in tests/ui).
+
+    So: destroy this object and only this object, while the application is
+    certainly still alive. ``shiboken6.delete`` runs the C++ destructor on the
+    spot - no queue, no other objects, nothing deferred.
+
+    Use this instead of ``deleteLater()`` in any test or fixture teardown.
+    """
+    import shiboken6
+
+    def _destroy(*objects) -> None:
+        for obj in objects:
+            if obj is None or not shiboken6.isValid(obj):
+                continue
+            close = getattr(obj, "close", None)
+            if close is not None:
+                close()
+            shiboken6.delete(obj)
+
+    return _destroy
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _nothing_qt_outlives_the_application():
+    """The safety net under ``destroy_qt``: at the END of the session, take
+    down every window still standing while the application is still there.
+
+    Destroying a window destroys its children with it, and a ``QObject``'s
+    destructor drops any event still queued for it - so taking the windows
+    down also clears every ``deleteLater`` left pending underneath them. That
+    is why this does NOT end with an app-wide
+    ``sendPostedEvents(None, DeferredDelete)``: such a flush would buy nothing
+    here and carries the very risk that crashed the run on 2026-10-05.
+
+    It is a net, not permission to leak: a test that shows a window still
+    closes it, because a window left standing is also a window the NEXT test
+    can grab pixels from by accident.
+    """
+    yield
+    try:
+        from PySide6.QtWidgets import QApplication
+        import shiboken6
+    except Exception:            # a run with no Qt installed owes nothing here
+        return
+    if QApplication.instance() is None:   # no Qt test ran; nothing was created
+        return
+    for widget in list(QApplication.topLevelWidgets()):
+        if not shiboken6.isValid(widget):
+            continue
+        widget.close()
+        shiboken6.delete(widget)

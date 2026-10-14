@@ -56,16 +56,19 @@ def test_the_backdrop_is_the_page_colour_not_the_card_colour():
         assert palette.surface not in block, name
 
 
-def test_no_surface_bleeds_through_the_gap_under_the_header(store, qapp):
+def test_no_surface_bleeds_through_the_gap_under_the_header(
+        store, qapp, destroy_qt):
     """The end-to-end proof, on the theme that exposes it: put a tab in the
     stacked host it really lives in and read the pixels in the gap between the
     header card and the first content card."""
     palette = THEMES["halloween"]
     previous = qapp.styleSheet()
+    hosts = []
     try:
         qapp.setStyleSheet(generate_stylesheet("halloween"))
         for cls in PANELS:
             host = QStackedWidget()
+            hosts.append(host)
             panel = cls(store)
             host.addWidget(panel)
             host.resize(900, 500)
@@ -88,3 +91,8 @@ def test_no_surface_bleeds_through_the_gap_under_the_header(store, qapp):
                 f"techdeck.ui.utils.paint_own_background on the panel.")
     finally:
         qapp.setStyleSheet(previous)
+        # These are shown TOP-LEVEL windows. Left standing they are destroyed
+        # at interpreter shutdown, after the QApplication has gone, and that
+        # aborts the process - a full run that reaches 100% green and then
+        # dies with no failing test. See the destroy_qt fixture.
+        destroy_qt(*hosts)
