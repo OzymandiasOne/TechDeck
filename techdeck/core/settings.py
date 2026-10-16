@@ -289,6 +289,13 @@ class SettingsManager:
             },
             "settings": {
                 "theme": "dark",
+                # Born already-reset. _create_default_settings does NOT run
+                # _validate_and_migrate, so without this a fresh install gets
+                # the marker only on its SECOND launch -- and the one-time
+                # reset would then wipe a genuine opt-out the user had made in
+                # between, re-applying the seasonal theme they just refused.
+                # A new file cannot hold a bugged opt-out anyway.
+                self._OPT_OUT_RESET_KEY: True,
             },
             "plugin_settings": {}
         }
@@ -362,10 +369,39 @@ class SettingsManager:
         # The built-in Blue theme was retired in 0.8.7.8 -> Dark
         self._migrate_retired_blue_theme()
 
+        # Drop the opt-outs the 2026 lockout manufactured
+        self._reset_bugged_halloween_opt_outs()
+
         # Repair total_runs frozen by the pre-singleton settings race
         self._backfill_total_runs()
 
         self.save()
+
+    # Bump this when a season's opt-outs are known to be untrustworthy.
+    # The marker is what makes the reset ONE-TIME: without it the clear
+    # would re-fire every launch and nobody could ever opt out at all.
+    _BUGGED_OPT_OUT_YEAR = 2026
+    _OPT_OUT_RESET_KEY = "halloween_opt_out_reset_2026"
+
+    def _reset_bugged_halloween_opt_outs(self) -> None:
+        """Clear the Halloween opt-outs recorded during the 2026 lockout.
+
+        Until 2026-10-16 a user on the professional theme got no seasonal
+        theme AND could not find halloween in the picker to ask for it —
+        the picker stocked itself from halloween_active(). Every theme
+        they clicked while hunting for it silently recorded an opt-out.
+        Those flags record a bug, not a preference, so they go; anyone who
+        genuinely wants out picks a theme again, and now the picker works.
+
+        One-time, guarded by a marker. Only THIS year's flag is touched —
+        an older one has already expired and means nothing.
+        """
+        block = self.data.setdefault("settings", {})
+        if block.get(self._OPT_OUT_RESET_KEY):
+            return
+        block[self._OPT_OUT_RESET_KEY] = True
+        if block.get("halloween_opt_out_year") == self._BUGGED_OPT_OUT_YEAR:
+            block.pop("halloween_opt_out_year", None)
 
     def _backfill_total_runs(self) -> None:
         """Repair a total_runs counter frozen by the pre-singleton settings race.
@@ -690,6 +726,22 @@ class SettingsManager:
         from techdeck.core.constants import effective_theme
         return effective_theme(self.get_stored_theme(),
                                block.get("halloween_opt_out_year"))
+
+    def seasonal_theme_paused(self) -> bool:
+        """Is the seasonal theme suppressed by THIS user's own choice?
+
+        True only when a season is running and they picked something else
+        during it. The settings page says so out loud: the opt-out used to
+        be completely silent — you picked a theme in October and lost the
+        season with no hint that had happened (reported 2026-10-16).
+        """
+        import datetime
+        from techdeck.core.constants import is_halloween_season
+        if not is_halloween_season():
+            return False
+        block = self.data.get("settings", {})
+        return (block.get("halloween_opt_out_year")
+                == datetime.date.today().year)
 
     def set_theme(self, theme_name: str) -> None:
         """Set current theme. Choosing a NON-halloween theme during the

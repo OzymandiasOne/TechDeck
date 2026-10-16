@@ -469,6 +469,23 @@ class SettingsPage(QWidget, ThemeAware):
         self._style_secondary(theme_note, "font-size: 12px; margin-top: 4px;")
         theme_section.addWidget(theme_note)
 
+        # Picking a theme during a season quietly switches the seasonal
+        # one off for the rest of it. That used to happen in total
+        # silence, so a user who did it while hunting for the halloween
+        # theme concluded the update had failed (2026-10-16). Say it.
+        self.seasonal_note = QLabel()
+        self.seasonal_note.setWordWrap(True)
+        # Semi-bold, so it does not read as more of the grey boilerplate above
+        # it — this is the line that explains why the theme you wanted isn't
+        # happening. Weight rather than colour: it stays registered as a
+        # secondary label and so follows theme changes, which a hardcoded
+        # colour in `extra` would not.
+        self._style_secondary(self.seasonal_note,
+                              "font-size: 12px; margin-top: 6px; "
+                              "font-weight: 600;")
+        theme_section.addWidget(self.seasonal_note)
+        self._refresh_seasonal_note()
+
         # ── Assistant page theme ──
         # The Assistant is the one page people READ all day, so it gets its own
         # slot: a seasonal app theme that is fun on the Library can be hard
@@ -769,6 +786,7 @@ class SettingsPage(QWidget, ThemeAware):
         self._refresh_theme_combo()
         if hasattr(self, "assistant_theme_combo"):
             self._refresh_assistant_theme_combo()
+        self._refresh_seasonal_note()
         # Sound effects widgets live on this tab too
         if hasattr(self, "audio_enabled_check"):
             self._load_audio_settings()
@@ -793,6 +811,21 @@ class SettingsPage(QWidget, ThemeAware):
         in_season = is_halloween_season()
         return [name for name in get_theme_names()
                 if name != "halloween" or name == current or in_season]
+
+    def _refresh_seasonal_note(self):
+        """Show, or hide, the line explaining a paused seasonal theme."""
+        note = getattr(self, "seasonal_note", None)
+        if note is None:
+            return
+        if self.settings.seasonal_theme_paused():
+            note.setText(
+                "Halloween is paused until Nov 2 because you picked "
+                "another theme this season — choose it above to turn it "
+                "back on.")
+            note.setVisible(True)
+        else:
+            note.clear()
+            note.setVisible(False)
 
     def _refresh_theme_combo(self):
         current = self.settings.get_theme()
@@ -839,6 +872,7 @@ class SettingsPage(QWidget, ThemeAware):
         self._refresh_theme_combo()
         if hasattr(self, "assistant_theme_combo"):
             self._refresh_assistant_theme_combo()
+        self._refresh_seasonal_note()
         self.theme_changed.emit(theme_name)
 
     def _open_theme_builder(self, edit_name: str = ""):
