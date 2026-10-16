@@ -12,7 +12,8 @@ object (the SteelBeamsGame widget) through plain attributes + a few helpers, so 
 logic is unit-testable headlessly. The widget owns the modal window + the tick call.
 
 Outcome primitives (a list per automatic event / per responsive option):
-    ("delta",     attr, amount)      game.<attr> += amount
+    ("delta",     attr, amount)      game.<attr> += amount, floored at 0 (every attr
+                                     this touches is a count of things you own)
     ("delta_pct", attr, frac)        game.<attr> *= (1 + frac)   # frac<0 loses % of current
     ("mul_attr",  attr, factor)      game.<attr> *= factor       # permanent multiplicative
     ("mod",       lever, mult, secs) timed multiplier on a lever (the "until it resolves" bit)
@@ -1090,7 +1091,25 @@ class EventEngine:
         for eff in effects or ():
             kind = eff[0]
             if kind == "delta":
-                setattr(game, eff[1], getattr(game, eff[1]) + eff[2])
+                # Floored at zero. Every attribute "delta" touches is a COUNT of
+                # things you own - developers, solar_fields, del_drones,
+                # space_fabs, harvesters, probe_trust - and none of them can
+                # sensibly go below zero. Unfloored, an event that takes 2
+                # drones when you have 1 left you with -1 (reported 2026-10-15
+                # against space_fabs and del_drones; the other four had the
+                # same hole). probe_trust was the worst of them: it is a budget
+                # shown as "3 / 6 allocated", so a negative broke the
+                # allocation screen, not just a number.
+                #
+                # Record what ACTUALLY changed, not what the event asked for,
+                # so the readout cannot claim "-2 drones" when only one was
+                # there to lose. A clamped-to-nothing effect is not reported.
+                before = getattr(game, eff[1])
+                after = max(0, before + eff[2])
+                setattr(game, eff[1], after)
+                if applied is not None and after != before:
+                    applied.append((kind, eff[1], after - before))
+                continue
             elif kind == "delta_pct":
                 setattr(game, eff[1], getattr(game, eff[1]) * (1.0 + eff[2]))
             elif kind == "mul_attr":
