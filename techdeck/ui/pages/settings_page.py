@@ -764,10 +764,9 @@ class SettingsPage(QWidget, ThemeAware):
     # ──────────────────────────────────────────────────────────────────────
 
     def _load_personalization_settings(self):
-        current_theme = self.settings.get_theme()
-        idx = self.theme_combo.findData(current_theme)
-        if idx >= 0:
-            self.theme_combo.setCurrentIndex(idx)
+        # A full rebuild, not just a re-select: the season can turn over
+        # while the app is open, and the page is built ONCE at startup.
+        self._refresh_theme_combo()
         if hasattr(self, "assistant_theme_combo"):
             self._refresh_assistant_theme_combo()
         # Sound effects widgets live on this tab too
@@ -778,17 +777,27 @@ class SettingsPage(QWidget, ThemeAware):
     # PERSONALIZATION TAB METHODS — THEME
     # ──────────────────────────────────────────────────────────────────────
 
+    def _theme_choices(self, current: str) -> list:
+        """The theme names to offer, with the seasonal-stock rule applied.
+
+        Halloween is seasonal stock: listed during the season, or while it IS
+        the current choice (so a session open across Nov 2 can still switch
+        away from it). The test is the SEASON ALONE, never
+        ``halloween_active()`` -- that folds in the professional check, and
+        using it here made the picker a ONE-WAY DOOR: a user on professional
+        could not find halloween in the list to opt back IN (a real user hit
+        this 2026-10-16). Suppressing the seasonal theme is get_theme()'s job;
+        hiding it from the picker is not.
+        """
+        from techdeck.core.constants import is_halloween_season
+        in_season = is_halloween_season()
+        return [name for name in get_theme_names()
+                if name != "halloween" or name == current or in_season]
+
     def _refresh_theme_combo(self):
-        from techdeck.core.constants import halloween_active
         current = self.settings.get_theme()
         self.theme_combo.clear()
-        for name in get_theme_names():
-            # The halloween theme is seasonal stock: listed only during the
-            # season (or while it IS the active theme, so a session open
-            # across Nov 2 can still switch away from it).
-            if (name == "halloween" and name != current
-                    and not halloween_active(settings=self.settings)):
-                continue
+        for name in self._theme_choices(current):
             self.theme_combo.addItem(name.replace("_", " ").title(), name)
         idx = self.theme_combo.findData(current)
         if idx >= 0:
@@ -796,18 +805,12 @@ class SettingsPage(QWidget, ThemeAware):
 
     def _refresh_assistant_theme_combo(self):
         """Every theme, plus the "follow the app" entry that is the default."""
-        from techdeck.core.constants import halloween_active
         current = self.settings.get_assistant_theme()
         combo = self.assistant_theme_combo
         combo.blockSignals(True)
         combo.clear()
         combo.addItem("Follow the app theme", "")
-        for name in get_theme_names():
-            # Same seasonal rule as the app combo: halloween is listed in
-            # season, or while it is the page's active choice.
-            if (name == "halloween" and name != current
-                    and not halloween_active(settings=self.settings)):
-                continue
+        for name in self._theme_choices(current):
             combo.addItem(name.replace("_", " ").title(), name)
         index = combo.findData(current)
         combo.setCurrentIndex(index if index >= 0 else 0)
@@ -827,6 +830,15 @@ class SettingsPage(QWidget, ThemeAware):
         if not theme_name:
             return
         self.settings.set_theme(theme_name)
+        # Rebuild BOTH lists: the choice that was just applied can change
+        # which themes belong in them (leaving professional in October makes
+        # halloween offerable again). The lists were filled once at page
+        # construction, so without this the picker stays stale for the whole
+        # session -- the user had to restart TechDeck to see halloween
+        # reappear (2026-10-16).
+        self._refresh_theme_combo()
+        if hasattr(self, "assistant_theme_combo"):
+            self._refresh_assistant_theme_combo()
         self.theme_changed.emit(theme_name)
 
     def _open_theme_builder(self, edit_name: str = ""):
@@ -886,7 +898,11 @@ class SettingsPage(QWidget, ThemeAware):
             self._refresh_theme_combo()
             self._refresh_assistant_theme_combo()
             self._refresh_custom_theme_list()
-            if self.settings.get_theme() == name:
+            # The STORED pick, not get_theme(): in season get_theme()
+            # answers "halloween", so the custom theme being deleted
+            # would never match and the user would be left pointed at a
+            # theme that no longer exists once the season ended.
+            if self.settings.get_stored_theme() == name:
                 self.settings.set_theme("dark")
 
     # ──────────────────────────────────────────────────────────────────────

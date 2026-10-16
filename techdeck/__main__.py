@@ -74,17 +74,15 @@ def _current_theme_name() -> str:
             return "dark"
         with open(settings_file, "r", encoding="utf-8") as f:
             data = json.load(f)
-        stored = data.get("settings", {}).get("theme", "dark")
-        # Mirror SettingsManager.get_theme's seasonal default so the splash
-        # matches the theme the app will come up in. constants is pure
-        # python (no PySide6), so importing it here keeps the splash light.
+        block = data.get("settings", {})
+        stored = block.get("theme", "dark")
+        # The SAME rule SettingsManager.get_theme applies, from the one
+        # place it lives, so the splash cannot drift from the theme the app
+        # comes up in. constants is pure python (no PySide6), so importing
+        # it here keeps the splash light.
         try:
-            from techdeck.core.constants import is_halloween_season
-            import datetime
-            if (is_halloween_season() and stored != "professional"
-                    and data.get("settings", {}).get("halloween_opt_out_year")
-                    != datetime.date.today().year):
-                return "halloween"
+            from techdeck.core.constants import effective_theme
+            return effective_theme(stored, block.get("halloween_opt_out_year"))
         except Exception:
             pass
         return stored

@@ -2,7 +2,8 @@
 
 Mirrors test_puppet_master_gate.py's philosophy: pin BOTH states. The window
 must open on Oct 1 and close after Nov 2, the env override must force either
-state in any month, and the professional theme must suppress everything.
+state in any month, and the professional theme must suppress the FEATURES
+(never the seasonal theme itself - reversed 2026-10-16, see effective_theme).
 """
 
 import datetime
@@ -83,7 +84,25 @@ def test_halloween_is_the_default_theme_in_season(tmp_path, monkeypatch):
     assert s.get_theme() == "dark"               # out of season: untouched
 
 
-def test_professional_users_never_get_the_seasonal_default(tmp_path, monkeypatch):
+def test_professional_users_DO_get_the_seasonal_look(tmp_path, monkeypatch):
+    """Reversed on 2026-10-16 (his call) after a user on professional silently
+    missed the entire Halloween update. A seasonal theme we decide the app
+    should open in is a product decision, not a personality feature — so it
+    applies to professional too, while professional keeps its sober FEATURE
+    set (no crawlies, no stock, no games). Set the stored pick directly: going
+    through set_theme IN season is an explicit choice and records an opt-out,
+    which is the next test."""
+    monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
+    s = _mgr(tmp_path)
+    s.data.setdefault("settings", {})["theme"] = "professional"
+    assert s.get_stored_theme() == "professional"   # what they picked
+    assert s.get_theme() == "halloween"             # what they wear
+    assert s.is_professional()                      # features stay sober
+    assert not halloween_active(settings=s)         # so: no crawlies
+
+
+def test_professional_picked_in_season_is_still_an_opt_out(tmp_path, monkeypatch):
+    # Explicitly choosing professional DURING the season means "no thanks".
     monkeypatch.setenv("TECHDECK_HALLOWEEN", "1")
     s = _mgr(tmp_path)
     s.set_theme("professional")

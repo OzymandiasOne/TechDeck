@@ -667,24 +667,29 @@ class SettingsManager:
             pass
         settings["theme"] = "dark"
 
-    def get_theme(self) -> str:
-        """Get current theme name.
+    def get_stored_theme(self) -> str:
+        """The theme the user PICKED, with no seasonal override.
 
-        During the Halloween season the seasonal theme is the DEFAULT: it
-        overrides the stored choice unless the stored theme is professional
-        (client presentations stay sober — checked on the STORED value, not
-        is_professional(), which calls back here) or the user opted out by
-        picking another theme during a season (set_theme records the year;
-        the opt-out expires with the year, so next October the magic
-        returns). Out of season the stored theme rules, untouched."""
+        Ask this — not get_theme() — any time the question is about the
+        user's own choice: whether they chose professional, or whether the
+        custom theme being deleted is the one they are set to. get_theme()
+        can answer "halloween" for someone whose stored pick is something
+        else entirely.
+        """
+        return str(self.data.get("settings", {}).get("theme", "dark"))
+
+    def get_theme(self) -> str:
+        """The theme the app WEARS — the stored choice, or the seasonal
+        default that overrides it. The rule itself lives in
+        constants.effective_theme (one copy; the splash reads it too).
+
+        This can differ from the stored choice, so it is NOT the thing to
+        ask "did the user pick professional" — that is is_professional().
+        """
         block = self.data.get("settings", {})
-        stored = block.get("theme", "dark")
-        from techdeck.core.constants import is_halloween_season
-        if is_halloween_season() and stored != "professional":
-            import datetime
-            if block.get("halloween_opt_out_year") != datetime.date.today().year:
-                return "halloween"
-        return stored
+        from techdeck.core.constants import effective_theme
+        return effective_theme(self.get_stored_theme(),
+                               block.get("halloween_opt_out_year"))
 
     def set_theme(self, theme_name: str) -> None:
         """Set current theme. Choosing a NON-halloween theme during the
@@ -723,10 +728,16 @@ class SettingsManager:
         self.save()
 
     def is_professional(self) -> bool:
-        """Professional theme: the light look with the playful features (Ticket
-        Counter, My Stuff, My House, games, tickets, fidget) hidden — for client
-        presentations."""
-        return self.get_theme() == "professional"
+        """Did the user CHOOSE professional — the light look with the
+        playful features (Ticket Counter, My Stuff, My House, games,
+        tickets, fidget) hidden, for client presentations.
+
+        Reads the STORED choice, never get_theme(): in season get_theme()
+        returns the seasonal theme for everyone, and a professional user
+        wearing the Halloween look must still keep the sober feature set —
+        no spiders crawling across a client demo.
+        """
+        return self.get_stored_theme() == "professional"
 
     def has_seen_my_stuff(self) -> bool:
         """The NEW! sticker on My Account clears once My Stuff has been opened."""

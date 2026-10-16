@@ -63,8 +63,15 @@ def gate_enabled(name: str) -> bool:
 #                            overrides it for dev work in any month — same
 #                            contract as TECHDECK_PUPPET_MASTER above.
 #   halloween_active()     — the season AND not the professional theme; the
-#                            professional theme suppresses ALL of it, exactly
-#                            like every other personality feature.
+#                            professional theme suppresses the FEATURES
+#                            (crawlies, /seance, stock, props), exactly like
+#                            every other personality feature.
+#
+# The THEME is not one of those features. A seasonal theme we decide the app
+# should open in applies to EVERYONE in season, professional included (his
+# call, 2026-10-16) — see effective_theme(). Professional keeps its sober
+# feature set because is_professional() reads the STORED choice, not the theme
+# actually being worn.
 #
 # Features must check the function at USE time (never cache it at import), so
 # a session left open across Nov 2 midnight quietly reverts to normal.
@@ -84,6 +91,35 @@ def is_halloween_season(today=None) -> bool:
         today = datetime.date.today()
     return (HALLOWEEN_SEASON[0] <= (today.month, today.day)
             <= HALLOWEEN_SEASON[1])
+
+
+def effective_theme(stored: str, opt_out_year=None, today=None) -> str:
+    """The theme the app actually WEARS, given the user's stored choice.
+
+    THE ONE PLACE this rule lives. It had been written twice — in
+    SettingsManager.get_theme and again in __main__._current_theme_name for
+    the splash — so the two could drift.
+
+    In season the seasonal theme is the default for EVERYONE, professional
+    included: a theme we decide the app should open in is a decision about
+    the product, not a personality feature (his call, 2026-10-16, after a
+    user on professional silently missed the whole Halloween look). The
+    only thing that overrides it is an EXPLICIT opt-out: picking another
+    theme during a season records that year (SettingsManager.set_theme),
+    and the opt-out expires with the year, so next October the magic
+    returns.
+
+    Professional's sober FEATURE set is unaffected — that is
+    SettingsManager.is_professional(), which reads the STORED theme, never
+    this.
+    """
+    if not is_halloween_season(today):
+        return stored
+    import datetime
+    year = (today or datetime.date.today()).year
+    if opt_out_year == year:
+        return stored
+    return "halloween"
 
 
 def halloween_active(settings=None) -> bool:
