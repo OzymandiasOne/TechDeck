@@ -2685,3 +2685,48 @@ def write_payload_preview(payload: dict, filename: str, log) -> None:
         log(f"Preview written to: {out}")
     except OSError as exc:
         log(f"(Could not write preview file: {exc})")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-way flows (Power Automate Premium)
+#
+# `post_webhook` above is the one-way shout: it reports that the flow ACCEPTED
+# the message, not that the work happened. On Batch 488 every card died inside
+# the flow at 858 ms while TechDeck logged DONE. A two-way flow answers, so the
+# app can report the truth.
+#
+# Re-exported from techdeck.core.flow_client so a plugin only ever imports the
+# SDK. NEVER call a two-way flow URL with `requests` directly from a plugin:
+# the timeout, the fallback, the command_id and the outbox all live in that one
+# helper, and a direct call silently opts out of every one of them.
+#
+#     answer = sdk.ask_flow(url, "post_cards", {"batch": 493},
+#                           fallback={"created": 0}, log=log)
+#     if not answer.reached:
+#         log("The flow is down - posting the old way.")   # the fallback path
+#     elif answer.rejected:
+#         log(f"The flow said no: {answer.message}")
+#     else:
+#         log(f"Created {answer.data.get('created')} cards.")
+#
+# Rules, the gotchas and the flow-side contract: docs/TWO_WAY_FLOW_CLIENT.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from techdeck.core.flow_client import (  # noqa: E402  (deliberately late)
+    FlowAnswer,
+    REASON_BAD_ANSWER,
+    REASON_DRY_RUN,
+    REASON_FLOW_ERROR,
+    REASON_NOT_CONFIGURED,
+    REASON_SANDBOX,
+    REASON_UNREACHABLE,
+    ask_flow,
+    build_envelope,
+    flow_cache_clear,
+    flow_cache_get,
+    flow_cache_put,
+    flush_outbox,
+    new_command_id,
+    outbox_depth,
+    queue_command,
+)

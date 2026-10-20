@@ -48,6 +48,11 @@ a = Analysis(
         # "No module named 'techdeck.core.plugin_window'" (bit customer_dxf_quoting).
         'techdeck.core.plugin_sdk',
         'techdeck.core.plugin_window',
+        # The two-way flow client. plugin_sdk re-exports it, so the graph does
+        # reach it today - named here because it is the kind of module a future
+        # refactor turns into a lazy import, and the failure would only show up
+        # in the frozen exe, mid-flow-call, on a colleague's machine.
+        'techdeck.core.flow_client',
         # Sentry Drone: plugin_sdk lazy-imports both (sentry_style -> sentry_mode;
         # pick_directory_gui/pick_file_gui -> chopper_picker for GUI plugins).
         # Both are inside function bodies, so force them in.
