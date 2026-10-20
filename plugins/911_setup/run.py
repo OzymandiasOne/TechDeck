@@ -195,6 +195,7 @@ from pathlib import Path
 from copy import copy
 
 from openpyxl.cell.cell import MergedCell
+from openpyxl.comments import Comment
 from openpyxl.styles import PatternFill
 from openpyxl.utils import get_column_letter, range_boundaries
 
@@ -681,6 +682,45 @@ def _paste_batch_rows_into_nest(nest_ws, batch_rows: list):
 # Yellow fill marking a DYPN QTY cell that disagrees with the nest packet.
 _QTY_MISMATCH_FILL = PatternFill("solid", fgColor="FFFF00")
 
+# v2.5.0 (floor feedback 2026-10-19: two batches shipped with "the items that
+# should have been referenced from the 911 Forecast missing"). Both nests were
+# simply not in the Working Forecast List yet when they were set up -- the app
+# warned in the console and then handed over a workbook whose three forecast
+# columns are silently blank, after reporting a clean run. The gap is now
+# carried BY THE ARTEFACT: the cells that would have held the values are
+# filled and annotated, so the blank is visibly a known gap rather than an
+# oversight, and the run no longer reports a plain success (see
+# sdk.set_run_outcome at the end of run()).
+_FORECAST_GAP_FILL = PatternFill("solid", fgColor="FFFF00")
+_FORECAST_GAP_COLS = (1, 2, 3)   # NEST A/B/C: FORECAST PO / PO LINE / BATCH
+
+
+def _flag_forecast_gap(nest_ws, nest: str, sheet_title: str, log) -> None:
+    """Mark NEST A4:C4 as a known forecast gap: yellow fill plus one comment
+    on A4 saying why it is blank and how to fill it.
+
+    Row 4 only -- that is the row the forecast values land on, and
+    _fill_nest_part_rows replicates it down the part rows, so a reader who
+    sees blanks below is looking at the same single gap.
+    """
+    note = (f"No row for nest {nest} in the Working Forecast List "
+            f"('{sheet_title}' sheet) when this nest was set up on "
+            f"{_dt.date.today():%Y-%m-%d}.\n\n"
+            "These three columns were left BLANK on purpose - nothing was "
+            "guessed. Once the nest is in the forecast, re-run 911 Setup on "
+            "it with ONLY 'Nest Workbook Data' ticked to fill them in; that "
+            "leaves the rest of this workbook alone.")
+    for col in _FORECAST_GAP_COLS:
+        cell = nest_ws.cell(4, col)
+        if isinstance(cell, MergedCell):
+            continue
+        cell.fill = _FORECAST_GAP_FILL
+    anchor = nest_ws.cell(4, _FORECAST_GAP_COLS[0])
+    if not isinstance(anchor, MergedCell) and anchor.comment is None:
+        anchor.comment = Comment(note, "TechDeck", height=160, width=320)
+    log(f"  Flagged NEST A4:C4 yellow in the workbook with a note explaining "
+        f"the gap.")
+
 
 def _flag_qty_mismatches(nest_ws, batch_rows: list, pmap: dict, nest: str,
                          workbook_name: str, log, mismatches: list,
@@ -787,6 +827,153 @@ def _fill_nest_part_rows(nest_ws, num_parts: int):
             )
             if is_blank:
                 nest_ws.cell(row, c).value = header[c - 1]
+
+
+# ---------------------------------------------------------------------------
+# Step 3b: EB's NC (DSTV) files -> {nest}\Linear Inch Calcs\NC_DSTV\
+#
+# v2.5.0, floor feedback 2026-10-19 - two asks that turned out to be one job:
+#   "create a folder in the nest folders called 'Linear Inch Calcs' and have
+#    it contain a subfolder called 'NC_DSTV'", and
+#   "extract the NC files for a respective batch from the 'DSTV FILES' folder
+#    ... each NC file is contained in its own folder and it can get very
+#    tedious to copy/paste each individual file on the larger batches."
+#
+# Layout, surveyed over all 225 live 911 batches (2026-10-19):
+#   {batch}\DTSV FILES\X{nest}S\{work order}\{part}.NC
+# The batch-level folder is spelled 'DTSV FILES' on 68 batches, 'DSTV FILES'
+# on 4 and 'DSTV FILES-COMPLETE' on 4 - matched by what the name CONTAINS,
+# never by a literal. The nest folder is X + the nest id + S ('X504047S', and
+# 'XP07819S' / 'XS20085S' for lettered nests - same rule). 4,120 NC files sit
+# one to two levels under the nest folder, so the walk is recursive and the
+# result is FLAT, which is what the copy/paste by hand produces.
+#
+# Flattening can collide: 126 of 697 real nest folders hold two NC files with
+# the same name in different work-order folders, and 353 of those 380 pairs
+# are DIFFERENT FILES (only 27 are byte-identical). A flat copy that
+# overwrote on a name clash would therefore have silently lost real parts, so
+# nothing is ever overwritten: an identical file is skipped and a differing
+# one is kept under '{work order}_{name}'. Both are counted in the log.
+#
+# This deliberately writes into a NEW 'NC_DSTV' subfolder and never touches a
+# sibling: the nests that already have a 'Linear Inch Calcs' folder keep their
+# hand-made 'DSTVs' folder (those hold the Voortman-programmed exports, not
+# these EB-generated ones) and the filled calc workbooks beside it.
+# ---------------------------------------------------------------------------
+
+_LINEAR_INCH_DIRNAME = "Linear Inch Calcs"
+_NC_DSTV_DIRNAME = "NC_DSTV"
+_NC_DEST_LABEL = f"{_LINEAR_INCH_DIRNAME}\\{_NC_DSTV_DIRNAME}"
+
+
+def _find_dstv_root(batch_folder: Path):
+    """The batch's DSTV/DTSV files folder, or None. Direct children only."""
+    try:
+        children = sorted(batch_folder.iterdir())
+    except OSError:
+        return None
+    best = None
+    for child in children:
+        if not sdk.is_dir(child):          # Hard Rule 14: raw .is_dir() lies
+            continue
+        name = child.name.upper()
+        if "DSTV" not in name and "DTSV" not in name:
+            continue
+        # A '-COMPLETE' copy is a parallel archive; prefer the plain folder
+        # when both are present, but take whatever exists.
+        if best is None or len(child.name) < len(best.name):
+            best = child
+    return best
+
+
+def _find_nest_dstv_dir(dstv_root: Path, nest: str):
+    """The 'X{nest}S' folder for this nest, or None. Matched case-insensitively,
+    falling back to any folder whose name contains the nest id so a stray
+    suffix still resolves."""
+    want = f"X{nest}S".upper()
+    fallback = None
+    try:
+        children = sorted(dstv_root.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not sdk.is_dir(child):          # Hard Rule 14
+            continue
+        name = child.name.upper()
+        if name == want:
+            return child
+        if fallback is None and nest.upper() in name:
+            fallback = child
+    return fallback
+
+
+def _extract_nest_nc_files(batch_folder: Path, nest: str, dstv_root, log,
+                           cancel_event=None) -> int:
+    """Copy every .NC file for `nest` into
+    {batch}\\{nest}\\Linear Inch Calcs\\NC_DSTV\\, flat. Returns the number
+    copied. A nest with no NC files is a warning, not a stop - the folder is
+    still created, because the ask was for the folder as much as the files.
+    """
+    dest_dir = batch_folder / nest / _LINEAR_INCH_DIRNAME / _NC_DSTV_DIRNAME
+    sdk.ensure_dir(dest_dir)
+
+    if dstv_root is None:
+        log(f"  WARNING: no DSTV/DTSV files folder in this batch - "
+            f"{nest}\\{_NC_DEST_LABEL} was created empty.")
+        return 0
+
+    nest_dir = _find_nest_dstv_dir(dstv_root, nest)
+    if nest_dir is None:
+        log(f"  WARNING: no 'X{nest}S' folder under {dstv_root.name} - "
+            f"{nest}\\{_NC_DEST_LABEL} was created empty.")
+        return 0
+
+    sources = []
+    for path in sorted(nest_dir.rglob("*")):
+        sdk.raise_if_cancelled(cancel_event)   # Hard Rule 14
+        if sdk.is_file(path) and path.suffix.lower() == ".nc":   # Hard Rule 14
+            sources.append(path)
+
+    if not sources:
+        log(f"  WARNING: no .NC files under {dstv_root.name}\\{nest_dir.name} - "
+            f"{nest}\\{_NC_DEST_LABEL} was created empty.")
+        return 0
+
+    copied = skipped = renamed = 0
+    for src in sources:
+        sdk.raise_if_cancelled(cancel_event)
+        dest = dest_dir / src.name
+        if sdk.is_file(dest):
+            try:
+                sdk.ensure_local(src)
+                same = (src.stat().st_size == dest.stat().st_size
+                        and src.read_bytes() == dest.read_bytes())
+            except OSError:
+                same = False
+            if same:
+                skipped += 1
+                continue
+            # Different file, same name: keep both, named by the work-order
+            # folder it came from. Nothing is ever overwritten.
+            dest = dest_dir / f"{src.parent.name}_{src.name}"
+            if sdk.is_file(dest):
+                skipped += 1
+                continue
+            renamed += 1
+        try:
+            sdk.copy_resilient(src, dest, log)   # hydrates + long-paths (HR 13/14)
+            copied += 1
+        except Exception as exc:
+            log(f"  WARNING: could not copy {src.name}: {exc}")
+
+    detail = []
+    if renamed:
+        detail.append(f"{renamed} renamed to avoid a name clash")
+    if skipped:
+        detail.append(f"{skipped} already there")
+    log(f"  NC files: {copied} copied into {nest}\\{_NC_DEST_LABEL}"
+        + (f" ({', '.join(detail)})" if detail else ""))
+    return copied
 
 
 # ---------------------------------------------------------------------------
@@ -1298,8 +1485,15 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         total_pages = len(doc)
 
         stamps = _load_omit_stamp_helpers(log)
+        orphans = 0
         if stamps:
-            remove_pages, materials = stamps._scan_document(doc)
+            # v1.6.0 of the sibling also drops orphan operation-continuation
+            # pages and returns the count; tolerate the 2-tuple so an older
+            # installed Remove Ticket still works (Hard Rule 15: the plugin
+            # tree can lag the repo on an exe install).
+            scanned = stamps._scan_document(doc)
+            remove_pages, materials = scanned[0], scanned[1]
+            orphans = scanned[2] if len(scanned) > 2 else 0
         else:
             materials = set()
             remove_pages = set()
@@ -1344,7 +1538,10 @@ def _extract_nest_drawings(nest_packages_folder: Path, nest_number: str,
         sdk.save_pdf_atomic(doc, dest_path, close=False)
 
         kept = total_pages - len(remove_pages) + added
-        log(f"  Drawings PDF: {dest_path.name} ({kept} page(s), removed {len(remove_pages)} MOVE TICKET page(s))")
+        tickets = len(remove_pages) - orphans
+        extra = (f" and {orphans} extra operation page(s)" if orphans else "")
+        log(f"  Drawings PDF: {dest_path.name} ({kept} page(s), removed "
+            f"{tickets} MOVE TICKET page(s){extra})")
         return True
 
     except Exception as e:
@@ -1819,6 +2016,10 @@ def _dialog_groups() -> list:
          "label": "Nest Workbook Data (forecast, mil spec, batch list)",
          "checked": True,
          "children": []},
+        {"key": "nc_dstv",
+         "label": "Linear Inch Calcs (NC_DSTV) - copy EB's NC files per nest",
+         "checked": True,
+         "children": []},
         {"key": "inspection_sheets",
          "label": "Inspection Sheets",
          "checked": True,
@@ -1888,6 +2089,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     plate = _on("plate_batch")
     do_folders = _on("folder_setup")
     do_nest_data = _on("nest_data")
+    do_nc_dstv = _on("nc_dstv")
     do_inspection = _on("inspection_sheets")
     do_stamping = _on("pdf_stamping")
     stamp_difficulty = do_stamping and _opt("pdf_stamping", "difficulty", True)
@@ -1895,6 +2097,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     enabled = [n for n, f in (("Generate Teams Cards", do_cards),
                               ("Nest Folder Setup", do_folders),
                               ("Nest Workbook Data", do_nest_data),
+                              ("Linear Inch Calcs (NC_DSTV)", do_nc_dstv),
                               ("Inspection Sheets", do_inspection),
                               ("PDF Stamping", do_stamping)) if f]
     if not enabled:
@@ -2093,6 +2296,29 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 f"NOT created: {', '.join(missing[:10])}"
                 + (" ..." if len(missing) > 10 else ""))
 
+    # ------------------------------------------------------------------ #
+    # Step 3b -- Linear Inch Calcs\NC_DSTV: EB's NC files, one flat folder
+    # per nest (v2.5.0, floor feedback 2026-10-19). Its own stage, so it can
+    # be re-run on a batch that is already set up without touching anything
+    # else, and unticked by a site that does not use the calcs.
+    # ------------------------------------------------------------------ #
+    if do_nc_dstv:
+        log(f"Extracting NC files into '{_NC_DEST_LABEL}'...")
+        dstv_root = _find_dstv_root(batch_folder)
+        if dstv_root is None:
+            log("  WARNING: this batch has no DSTV/DTSV files folder - the "
+                "NC_DSTV folders will be created empty.")
+        else:
+            log(f"  Source: {dstv_root.name}")
+        nc_total = 0
+        for nest in nest_numbers:
+            sdk.raise_if_cancelled(cancel_event)   # Hard Rule 14
+            nc_total += _extract_nest_nc_files(
+                batch_folder, nest, dstv_root, log, cancel_event)
+        log(f"  {nc_total} NC file(s) copied across {len(nest_numbers)} nest(s).")
+    else:
+        log("[skipped] Linear Inch Calcs (NC_DSTV) unchecked.")
+
     progress_callback(15)
     if cancel_event.is_set():
         return
@@ -2254,6 +2480,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                 log(f"  WARNING: No forecast rows found for nest {nest} in the "
                     f"'{forecast_ws.title}' sheet (column "
                     f"{get_column_letter(forecast_nest_col)}).")
+                _flag_forecast_gap(nest_ws, nest, forecast_ws.title, log)
             else:
                 log(f"  Found {len(forecast_rows)} forecast rows.")
                 _paste_forecast_into_nest(nest_ws, forecast_rows)
@@ -2444,7 +2671,20 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             "folder -> 'Always keep on this device', let it finish syncing, then "
             "re-run 911 Setup. (If these nests have not been added to the "
             "forecast yet, add them there first.)")
+        log("Each affected workbook has NEST A4:C4 highlighted yellow with a "
+            "note saying the same thing. To fill them in later, re-run 911 "
+            "Setup on the nest with ONLY 'Nest Workbook Data' ticked - that "
+            "leaves the folders, inspection sheets and stamped PDFs alone.")
         log(f"{'!'*50}")
+        # The run DID work; it just did not produce complete workbooks, and
+        # until v2.5.0 it still ended on a plain green tick. That is how two
+        # batches reached the floor with blank forecast columns.
+        sdk.set_run_outcome(
+            params, sdk.RUN_OUTCOME_WARNING,
+            f"Forecast columns A-C left blank on {len(missing_forecast)} of "
+            f"{total_nests} nest(s) ({', '.join(missing_forecast[:5])}"
+            + (" ..." if len(missing_forecast) > 5 else "")
+            + ") - those nests are not in the Working Forecast List yet.")
 
     # ------------------------------------------------------------------ #
     # QTY verification summary -- repeated at the end so warnings that
