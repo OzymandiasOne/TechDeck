@@ -272,6 +272,21 @@ ENGINEERING = [
      "a warning rather than passing quietly.",
      "922 forming and kitting; verified end to end against a live production "
      "batch."),
+    ("Oct 2026", "Shared-Routine Call Verification", "Quality",
+     "Where two tools do the same job they call one shared routine rather "
+     "than keeping a copy each, which is what keeps them agreeing on the "
+     "data. The weakness is the handover: because the connection is made "
+     "while a tool is running, changing the routine for one caller and not "
+     "the other was not detectable before release, and one such change "
+     "stopped a 922 batch preparation step for six days before an operator "
+     "diagnostic identified it. A new build check now reads every one of "
+     "these shared calls and refuses to package if a caller and the routine "
+     "it calls disagree.",
+     "Removes a class of failure that could only be found by an operator "
+     "hitting it in production. Twenty shared calls across five tools are "
+     "verified on every build.",
+     "Build-time check; covers every tool that shares a routine with "
+     "another."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -312,8 +327,16 @@ VERSION_ROWS = [
      "rebuilt from the part numbers on all 105 live batch lists (5,415 "
      "values) and moved to a single shared definition, correcting pricing "
      "consolidation rows that were falling back to a file name and sorting "
-     "to the wrong place.",
-     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride"),
+     "to the wrong place. Reliability: 922 batch preparation could not "
+     "complete its parts-list and repeat-detection step, reported by an "
+     "operator diagnostic six days after the previous release; the cause was "
+     "a shared routine two tools call, changed for one caller only, and a "
+     "new build check now verifies every such shared call so the class "
+     "cannot recur. The same diagnostic also showed that a computer going to "
+     "sleep with the application open was being recorded as an application "
+     "freeze; it is now distinguished from one, so a genuine freeze is "
+     "visible in a report rather than buried among false entries.",
+     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride, 922 Setup"),
     ("Beta 0.8.7.9", "Oct 14, 2026", "Feature",
      "A planning and time-visibility release, built entirely from user "
      "requests. The personal work planner gains four capabilities operators "
