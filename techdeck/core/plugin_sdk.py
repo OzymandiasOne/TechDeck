@@ -408,6 +408,36 @@ def is_nest_id(text) -> bool:
     return bool(NEST_ID_RE.match(str(text or "").strip()))
 
 
+# THE DYPN (EB part number) shape -- single home, same contract as NEST_ID_RE:
+# plugins alias it (`_DYPN_RE = sdk.DYPN_ID_RE`) and never re-type it.
+#
+# Graded on the DYPN column of all 105 live 911 BATCH LISTs (5,415 values,
+# 2026-10-19). The shapes in the wild:
+#
+#   H4139818-97        base: optional 1-3 letter prefix, 5+ digits, -digits
+#   H4524555-12M       trailing letter suffix  <- the reported miss: Baked
+#                      Beans read "DYPN cell not found - used file name" on
+#                      every -NNM part (V103 504123 H4524555-12M, 10/19)
+#   H7376008-P001E     letter inside the segment after the dash
+#   H6761001-15-10A    more than one dash segment
+#   H7212563H352-13    a letter+digits group inside the stem
+#
+# 4,115 of those values matched the old `^[A-Z]{0,3}\d{4,}-\d{1,4}$`; this
+# matches 4,833. The rest are plate material codes that live in the same
+# column on L/P/3X batches (EB218001124CP12) and are deliberately NOT DYPNs.
+# The 5-digit minimum is load-bearing: `\d{4,}` also matches an ISO date
+# ("2026-10-20"), and these patterns are used to pick a part number out of
+# arbitrary spreadsheet cells.
+DYPN_ID_RE = re.compile(
+    r"^[A-Z]{0,3}\d{5,}(?:[A-Z]\d{2,4})?(?:-[A-Z]{0,2}\d{1,4})+[A-Z]?$",
+    re.IGNORECASE)
+
+
+def is_dypn(text) -> bool:
+    """True when `text` is DYPN shaped (trimmed first)."""
+    return bool(DYPN_ID_RE.match(str(text or "").strip()))
+
+
 def load_sibling(plugin_id: str, anchor=None):
     """Import a sibling plugin's run.py as a module and return it.
 
