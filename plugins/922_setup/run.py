@@ -112,6 +112,7 @@ from __future__ import annotations
 
 import json
 import re
+import traceback
 from pathlib import Path
 
 # SDK bootstrap — works in-process (TechDeck/frozen exe) and standalone.
@@ -1187,6 +1188,39 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
 
 def _run_mpl_update(params: dict, progress_callback, cancel_event,
                     batch_path: Path, batch: str, shared_state: dict) -> bool:
+    """The stage below, with its "never raises" promise actually kept.
+
+    Every failure path INSIDE the stage warns loudly and returns False. What
+    got through was a failure the stage never anticipated: the Repeater's
+    borrowed helper had grown an argument (v2.8.2), the TypeError came out of
+    `run()`, and the batch lost its cards, its pallet stamps and its repeat
+    pull as well as its MPL column. A stage documented as non-blocking has to
+    be non-blocking for an unexpected exception too, so the one thing nobody
+    can foresee is the one thing that must still only warn.
+
+    PluginCancelled is a BaseException, so Cancel still gets through.
+    """
+    try:
+        return _mpl_update_stage(params, progress_callback, cancel_event,
+                                 batch_path, batch, shared_state)
+    except Exception as exc:
+        shared_state.setdefault("922", {})["mpl_update_done"] = False
+        _label_stage_problem(
+            params,
+            f"The MPL and repeat-detection step stopped on an unexpected "
+            f"error ({type(exc).__name__}: {exc}), so the MPL was not updated "
+            f"and repeats were not detected. The rest of the run carried on - "
+            f"cards will go up untagged, so run the Batch Repeater's 'Label "
+            f"REPEAT cards' pass afterwards. Please send a debug report.",
+            title="922 Setup - MPL + repeats")
+        log = params.get("log", print)
+        log("ERROR: MPL + repeats stopped on an unexpected error:")
+        log(traceback.format_exc())
+        return False
+
+
+def _mpl_update_stage(params: dict, progress_callback, cancel_event,
+                      batch_path: Path, batch: str, shared_state: dict) -> bool:
     """Update the 922 MPL (PO matrix column + MASTER PARTS catalog) and
     detect this batch's repeat orders. Results land in shared_state['922']:
 
