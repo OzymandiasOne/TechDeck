@@ -37,6 +37,11 @@ packet):
     Nothing is stamped for N/A, unrated, or not-found nests. Those are
     collected and reported in ONE popup at the end of the run rather than
     printed on the packet.
+
+v1.6.0 (floor feedback 2026-10-19): orphan operation-continuation pages go
+too - the near-empty PART SKETCH page carrying only "8000 THE ER ON THIS
+OPERATION IS EMBEDDED IN THE WORK PACKAGE DRAWING" and no PART: field. See
+_is_orphan_operation_page for why the phrase alone is not the test.
 """
 
 import os
@@ -58,7 +63,7 @@ except ModuleNotFoundError:
     from techdeck.core import plugin_sdk as sdk
 
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 # Stamp styling per C.D.'s request (feedback 2026-07-13): red, size 16,
 # Century Gothic bold, under the Quality Requirements section. v1.2.0 made it
@@ -342,14 +347,42 @@ def _extract_material(page) -> str:
     return ""
 
 
+# v1.6.0 (floor feedback 2026-10-19: "remove the pages that contain the text
+# '8000 THE ER ON THIS OPERATION.....' - they are just extra pages that I end
+# up deleting anyway"). EB's report server spills a part's operation list onto
+# a second PART SKETCH page when the part has more operations than the form
+# has lines. That continuation page carries the page counter, the work order,
+# the "PART SKETCH" heading, the nest id, and the one op text - no PART:, no
+# drawing, no labeling block.
+#
+# The phrase alone is NOT the test. Graded on 394 real nest packets / 19,159
+# pages (2026-10-19): 243 pages carry the 8000 text, and 195 of them are
+# genuine PART SKETCH pages that simply list 8000 as a SECOND operation
+# alongside "130 CUT AND STAMP...". Those must be kept - deleting on the
+# phrase alone would have thrown away four out of every five. The 48 orphans
+# are exactly the pages with no PART: field, so that is the test; the clean
+# split is what makes this safe. See docs/plugins/911_remove_ticket.md.
+_ORPHAN_OP_TEXT = "8000 THE ER ON THIS OPERATION"
+_PART_FIELD = "PART:"
+
+
+def _is_orphan_operation_page(text_upper: str) -> bool:
+    """True for an operation-continuation page: it carries the 8000 operation
+    text but no PART: field, so there is no part on it to print."""
+    return (_ORPHAN_OP_TEXT in text_upper
+            and _PART_FIELD not in text_upper)
+
+
 def _scan_document(doc, cancel_event=None):
-    """(pages to remove, distinct MATERIAL values found on them).
+    """(pages to remove, distinct MATERIAL values found on them, orphan count).
 
     A page is removed if it contains 'MOVE TICKET' text AND does NOT contain
-    'MIL-SPEC' or 'HULL'. Pages with MIL-SPEC or HULL are always kept.
+    'MIL-SPEC' or 'HULL' (pages with MIL-SPEC or HULL are always kept), OR if
+    it is an orphan operation-continuation page (see above).
     """
     indices = set()
     materials = set()
+    orphans = 0
     for i, page in enumerate(doc):
         if cancel_event is not None and i % 16 == 0 and cancel_event.is_set():
             break
@@ -359,7 +392,10 @@ def _scan_document(doc, cancel_event=None):
             material = _extract_material(page)
             if material:
                 materials.add(material)
-    return indices, materials
+        elif _is_orphan_operation_page(text):
+            indices.add(i)
+            orphans += 1
+    return indices, materials, orphans
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +811,7 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         return False, warnings
 
     try:
-        remove_pages, materials = _scan_document(doc, cancel_event)
+        remove_pages, materials, orphans = _scan_document(doc, cancel_event)
 
         if not remove_pages:
             log(f"  Skipped (no MOVE TICKET pages found): {pdf_path.name}")
@@ -810,12 +846,15 @@ def _process_pdf(pdf_path: Path, output_path: Path, batch: str, log,
         sdk.save_pdf_atomic(doc, output_path, close=False)
 
         removed = len(remove_pages)
+        tickets = removed - orphans
         kept = total - removed
         suffix = f", material '{material}'" if material else ""
+        if orphans:
+            suffix = f", {orphans} extra operation page(s)" + suffix
         if sketches is not None and sketches.restored:
             suffix += (f", {len(sketches.restored)} sketch graphic(s) restored"
                        + (f" (+{sketches.pages_added} page(s))" if sketches.pages_added else ""))
-        log(f"  {pdf_path.name}: removed {removed} MOVE TICKET page(s), kept {kept}{suffix} -> {output_path.name}")
+        log(f"  {pdf_path.name}: removed {tickets} MOVE TICKET page(s), kept {kept}{suffix} -> {output_path.name}")
         return True, warnings
     except Exception as e:
         log(f"  ERROR processing {pdf_path.name}: {e}")
