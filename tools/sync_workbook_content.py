@@ -293,6 +293,27 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "Oct 20, 2026", "Feature",
+     "A floor-feedback release. 911 batch setup now collects each nest's "
+     "machine program files into a single folder per nest, instead of the "
+     "operator opening one work-order folder at a time across a batch; a "
+     "survey of every live batch found that one file name in six collides "
+     "with another, so the collection keeps both files rather than "
+     "overwriting, which the manual method could not guarantee. The same "
+     "tool no longer reports a complete run when a nest is absent from the "
+     "shared forecast: the three affected columns are highlighted and "
+     "annotated in the workbook itself with the nest, the date and the one "
+     "step to re-run, and the run closes as a warning - two batches had "
+     "reached the floor with silently blank columns and a clean result. "
+     "Packet preparation drops the near-empty continuation pages operators "
+     "were deleting by hand; the rule was graded against 394 real packets "
+     "first, where four of every five pages carrying that text turned out to "
+     "be genuine drawings that must be kept. Part-number recognition was "
+     "rebuilt from the part numbers on all 105 live batch lists (5,415 "
+     "values) and moved to a single shared definition, correcting pricing "
+     "consolidation rows that were falling back to a file name and sorting "
+     "to the wrong place.",
+     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride"),
     ("Beta 0.8.7.9", "Oct 14, 2026", "Feature",
      "A planning and time-visibility release, built entirely from user "
      "requests. The personal work planner gains four capabilities operators "
