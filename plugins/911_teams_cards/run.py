@@ -988,26 +988,41 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         return True
 
     log("\nPosting cards to the webhook...")
-    ok = sdk.post_webhook(url, payload, log)
+    result = sdk.post_cards(url, payload, log, what="911 cards", params=params)
     _pct(1.0)
-    if ok:
-        # Only on a confirmed 2xx: a failed post must stay re-offerable.
-        _record_posted_titles([c["title"] for c in cards], log)
-        log(f"\nTeams cards: DONE. Requested {len(cards)} card(s) in "
-            f"'{payload['bucket']}'.")
-        log(f"Check the {payload['plan']} tab in the D922 channel to confirm.")
-        # These nests are now carded, so they leave the card queue and join
-        # the setup queue. Gated on the confirmed 2xx for the same reason the
-        # ledger is: a failed post must leave the row exactly as it was.
-        _advance_schedule_status(
-            params, template, log,
-            [(r["batch"], r["nest"]) for r in card_rows],
-            [template.get("schedule_status", "NEED TEAMS/SETUP")],
-            template.get("status_after_cards", _STATUS_AFTER_CARDS_DEFAULT),
-            cancel_event)
-        return True
-    log("\nTeams cards: FAILED - see the errors above. No cards were created.")
-    return False
+    if not result.delivered:
+        log("\nTeams cards: FAILED - see the errors above. No cards were created.")
+        return False
+    if result.knows and not result.answer.ok:
+        # The flow reached a decision and it was NO, so nothing was created.
+        # The ledger and the schedule must be left exactly as they were.
+        log(f"\nTeams cards: {result.headline(len(cards))}")
+        return False
+
+    # A flow that reports per-card failures lets us record only the cards that
+    # really exist, so a re-run offers the rest instead of treating a partial
+    # post as a complete one. A flow that cannot answer yet reports nothing
+    # here, and the list is every title -- today's behaviour.
+    missed = set(result.failed_titles)
+    made = [(c, r) for c, r in zip(cards, card_rows) if c["title"] not in missed]
+    if missed:
+        log(f"{len(missed)} card(s) the flow could not create stay in the "
+            f"queue for the next run.")
+
+    # Only once the post is known to have landed: a failed post must stay
+    # re-offerable.
+    _record_posted_titles([c["title"] for c, _ in made], log)
+    log(f"\nTeams cards: {result.headline(len(cards))}")
+    log(f"Check the {payload['plan']} tab in the D922 channel to confirm.")
+    # These nests are now carded, so they leave the card queue and join the
+    # setup queue. Same gating as the ledger, for the same reason.
+    _advance_schedule_status(
+        params, template, log,
+        [(r["batch"], r["nest"]) for _, r in made],
+        [template.get("schedule_status", "NEED TEAMS/SETUP")],
+        template.get("status_after_cards", _STATUS_AFTER_CARDS_DEFAULT),
+        cancel_event)
+    return True
 
 
 # ---------------------------------------------------------------------------

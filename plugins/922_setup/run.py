@@ -703,9 +703,10 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
 
     log("")
     log(f"Posting the {what} labels to the webhook...")
-    ok = sdk.post_webhook(url, payload, log)
+    result = sdk.post_cards(url, payload, log, what=f"{what} labels",
+                            params=params, subject="label")
     progress_callback(100)
-    if not ok:
+    if not result.delivered:
         _label_stage_problem(
             params,
             f"The {what}-label post failed - Batch {batch}'s cards were not "
@@ -713,8 +714,17 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
             popup=False)
         return False
 
-    log(f"DONE. Requested {what} labels for {len(cards)} card(s) in Batch "
-        f"{batch}. Check the D922 PIPELINE board in Teams to confirm.")
+    # A flow that answers tells us how many cards it actually labelled; one
+    # that does not yet gives today's "requested" wording.
+    log(f"{result.headline(len(cards), subject='label')} Batch {batch} - "
+        f"check the D922 PIPELINE board in Teams to confirm.")
+    if result.knows and not result.answer.ok:
+        _label_stage_problem(
+            params,
+            f"The {what}-label flow declined Batch {batch}'s post: "
+            f"{result.answer.message or 'no reason given'}",
+            popup=False)
+        return False
     if unlabelled:
         _label_stage_problem(
             params,
@@ -953,10 +963,12 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         return batch
 
     log("\nPosting cards to the webhook...")
-    ok = sdk.post_webhook(url, payload, log)
+    result = sdk.post_cards(url, payload, log, what="922 cards", params=params)
     progress_callback(100)
-    if ok:
-        log(f"\nDONE. Requested {len(cards)} card(s) for Batch {batch}.")
+    if result.delivered:
+        # The flow's own counts when it reports them, today's wording when it
+        # does not. Never a DONE line claiming more than the flow said.
+        log(f"\n{result.headline(len(cards))}")
         log("Check the D922 PIPELINE plan in Teams to confirm.")
         return batch
     log("\nFAILED — see the errors above. The payload was not created.")

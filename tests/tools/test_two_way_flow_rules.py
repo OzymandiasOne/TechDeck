@@ -32,7 +32,8 @@ ROOT = Path(__file__).resolve().parents[2]
 # Calls that reach a flow over the network. `flush_outbox` is included on
 # purpose: it delivers a whole queue itself, so wrapping it in a loop is the
 # same mistake wearing a hat.
-FLOW_CALLS = {"ask_flow", "flush_outbox", "post_webhook"}
+FLOW_CALLS = {"ask_flow", "flush_outbox", "post_webhook", "post_payload",
+              "post_cards"}
 
 LOOP_NODES = (ast.For, ast.AsyncFor, ast.While,
               ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
@@ -122,6 +123,35 @@ def test_no_flow_address_outside_constants():
         "A flow address outside constants.py (E-FLOW-3). Put it in "
         "techdeck/core/constants.py so the publish scrub can redact it.\n  "
         + "\n  ".join(offenders))
+
+
+def test_every_flow_sender_honours_the_922_sandbox():
+    """E-FLOW-4. A sandbox run must never reach a real flow.
+
+    `python -m tools.devkit.sandbox_922 launch ready` runs the apps against
+    Batch 900, and the ONLY thing standing between that and real cards on the
+    live Planner board is each sender checking the sandbox first. post_webhook
+    always did; post_payload shipped without it for about ten minutes, which
+    is exactly how long it takes to not notice.
+    """
+    source = (ROOT / "techdeck" / "core" / "flow_client.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(source, filename="flow_client.py")
+    senders = {"post_payload", "ask_flow", "flush_outbox"}
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in senders:
+            found[node.name] = any(
+                isinstance(inner, ast.Call)
+                and _called_name(inner) in ("_sandbox_root", "sandbox_922_root")
+                for inner in ast.walk(node))
+    missing = sorted(n for n in senders if not found.get(n))
+    assert not found or not missing, (
+        "These send to a flow without checking the 922 sandbox first "
+        f"(E-FLOW-4): {', '.join(missing)}. Call _sandbox_root() and preview "
+        "the payload instead of posting it.")
+    assert set(found) == senders, (
+        f"a sender was renamed or removed; update this gate: found {sorted(found)}")
 
 
 def test_the_sdk_re_exports_the_two_way_helpers():

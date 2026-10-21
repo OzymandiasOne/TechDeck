@@ -41,6 +41,18 @@ PICKABLE = [
      "nest": "503840", "date": dt.datetime(2026, 11, 6),
      "notes": "HSS 2.5X2.5X0.312 ANGLE", "difficulty": "DIFFICULT"},
 ]
+def _took_it(st, sink):
+    """A `sdk.post_cards` stand-in: capture the payload and report the flow we
+    have today -- it took the message and cannot say what it did with it.
+    These tests are about WHICH nests get posted, not what comes back."""
+    def _stub(url, payload, log, **kw):
+        sink.append(payload)
+        return st.sdk.CardPost(
+            delivered=True, knows=False,
+            answer=st.sdk.FlowAnswer(ok=False, reason="no_answer"))
+    return _stub
+
+
 MATERIALS = {
     "V092": {"503836": {"code": "218004493", "desc": ""}},
     "V093": {"503840": {"code": "218004494", "desc": ""}},
@@ -73,8 +85,7 @@ def _stage(st, tmp_path, monkeypatch, choose, rows_in=None, settings=None):
                         lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
     monkeypatch.setattr(st, "_ledger_path",
                         lambda: tmp_path / "911_setup_posted_cards.json")
-    monkeypatch.setattr(st.sdk, "post_webhook",
-                        lambda url, payload, log: posted.append(payload) or True)
+    monkeypatch.setattr(st.sdk, "post_cards", _took_it(st, posted))
     status_rows = [{"excel_row": r["excel_row"], "batch": r["batch"],
                     "nest": r["nest"], "status": "NEED TEAMS/SETUP"}
                    for r in schedule]
@@ -205,8 +216,7 @@ def test_a_headless_run_cards_everything_without_a_dialog(st, tmp_path, monkeypa
     monkeypatch.setattr(st, "_read_batch_list_materials",
                         lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
     monkeypatch.setattr(st, "_ledger_path", lambda: tmp_path / "led.json")
-    monkeypatch.setattr(st.sdk, "post_webhook",
-                        lambda url, payload, log: posted.append(payload) or True)
+    monkeypatch.setattr(st.sdk, "post_cards", _took_it(st, posted))
     monkeypatch.setattr(st, "_schedule_status_rows",
                         lambda *a, **k: (Path("s.xlsx"), 6, [], ""))
     monkeypatch.setattr(st, "_write_schedule_statuses",

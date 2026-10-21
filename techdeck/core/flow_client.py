@@ -89,9 +89,17 @@ class FlowAnswer(NamedTuple):
 REASON_UNREACHABLE = "unreachable"   # network/proxy/timeout -- never arrived
 REASON_FLOW_ERROR = "flow_error"     # non-2xx: the flow itself broke
 REASON_BAD_ANSWER = "bad_answer"     # 2xx, but not the contract shape
+REASON_NO_ANSWER = "no_answer"       # 2xx, no answer, and none was expected
 REASON_NOT_CONFIGURED = "not_configured"   # no URL set for this command
 REASON_SANDBOX = "sandbox"           # sandbox run: deliberately not sent
 REASON_DRY_RUN = "dry_run"           # caller asked for a preview only
+
+# `bad_answer` vs `no_answer` is the whole migration story. A flow that has
+# not been given its Response action yet returns a bare 2xx, and that is
+# CORRECT for it -- the app simply learns nothing, exactly as before. Calling
+# that an error would print a scary line on every card post until all four
+# flows are upgraded. A flow we KNOW answers returning nothing readable is a
+# real fault, and that one stays `bad_answer`.
 
 
 # -----------------------------------------------------------------------------
@@ -232,7 +240,7 @@ def ask_flow(url: str, command: str, data: Optional[dict] = None, *,
         return _fallback_answer(fallback, reason, cid,
                                 f"{label}: nothing was sent to the flow.")
 
-    answer = _post(url, envelope, timeout, say)
+    answer = _post(url, envelope, timeout, say, label=command)
     if answer.reached and answer.ok and cache_key:
         cache_put(cache_key, answer.data)
     if not answer.reached:
@@ -241,12 +249,54 @@ def ask_flow(url: str, command: str, data: Optional[dict] = None, *,
     return answer
 
 
+def post_payload(url: str, payload: dict, *, label: str = "",
+                 log: Optional[Callable[[str], None]] = None,
+                 timeout: float = DEFAULT_TIMEOUT_S,
+                 expect_answer: bool = True) -> FlowAnswer:
+    """POST `payload` **verbatim** and read a contract answer if one comes back.
+
+    `ask_flow` is the front door for a NEW two-way flow: it wraps the caller's
+    data in the envelope. This is the door for a flow that already has its own
+    payload shape — the four card flows — where wrapping it would break the
+    live flow and every installed TechDeck pointed at it.
+
+    `expect_answer=False` says the flow may still be the one-way kind. A bare
+    2xx is then reported as `no_answer` and logged as "accepted", not as a
+    fault: that is the correct behaviour for a flow whose Response action has
+    not been added yet.
+
+    Honours the 922 sandbox the same way `post_webhook` does — nothing is
+    sent, the payload is previewed, and the caller carries on as after a real
+    post. Without that, a sandbox run against Batch 900 would write real cards
+    onto the live Planner board.
+    """
+    say = _logger(log)
+    timeout = max(1.0, min(float(timeout or DEFAULT_TIMEOUT_S), MAX_TIMEOUT_S))
+
+    if _sandbox_root() is not None:
+        say(f"SANDBOX: the '{label or 'flow'}' post was NOT sent - "
+            f"payload previewed instead.")
+        _preview(payload, label or "payload", say)
+        return FlowAnswer(ok=False, reason=REASON_SANDBOX,
+                          message="Sandbox run: nothing was sent to the flow.")
+
+    if not (url or "").strip():
+        say(f"No webhook URL is configured for '{label or 'this post'}'.")
+        return FlowAnswer(ok=False, reason=REASON_NOT_CONFIGURED,
+                          message="No flow address is configured.")
+
+    return _post(url.strip(), payload, timeout, say, label=label,
+                 expect_answer=expect_answer)
+
+
 def _post(url: str, envelope: dict, timeout: float,
-          say: Callable[[str], None]) -> FlowAnswer:
+          say: Callable[[str], None], *, label: str = "",
+          expect_answer: bool = True) -> FlowAnswer:
     """One HTTP round trip, turned into a FlowAnswer. `reached` is True only
-    when the flow returned a contract-shaped answer."""
+    when the flow returned a contract-shaped answer. `label` names the flow in
+    the log lines (a raw card payload has no `command` to name itself with)."""
     cid = envelope.get("command_id", "")
-    command = envelope.get("command", "")
+    command = label or envelope.get("command", "") or "flow"
 
     import requests
 
@@ -270,6 +320,15 @@ def _post(url: str, envelope: dict, timeout: float,
     except ValueError:
         body = None
     if not isinstance(body, dict) or "ok" not in body:
+        if not expect_answer:
+            # A one-way flow that has not been taught to answer yet. It took
+            # the message; that is all it was ever going to tell us.
+            say(f"The '{command}' flow accepted the request "
+                f"(HTTP {resp.status_code}). It does not report back yet.")
+            return FlowAnswer(ok=False, reason=REASON_NO_ANSWER, command_id=cid,
+                              status=resp.status_code,
+                              message="The flow accepted the request, but "
+                                      "cannot say what it did with it.")
         say(f"ERROR: the '{command}' flow answered, but not in the agreed shape.")
         say(f"Response: {(resp.text or '')[:500]}")
         return FlowAnswer(ok=False, reason=REASON_BAD_ANSWER, command_id=cid,

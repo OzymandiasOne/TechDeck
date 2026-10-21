@@ -2728,5 +2728,157 @@ from techdeck.core.flow_client import (  # noqa: E402  (deliberately late)
     flush_outbox,
     new_command_id,
     outbox_depth,
+    post_payload,
     queue_command,
 )
+from techdeck.core.flow_client import REASON_NO_ANSWER  # noqa: E402
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Card posts that tell the truth
+#
+# The four card flows (922 Setup's cards, its pallet and material labels,
+# 911 Teams Cards, the 922 Repeat Tagger) all did the same thing: POST, get a
+# 2xx, log DONE. A 2xx means the flow ACCEPTED the message. On Batch 488 every
+# run died inside the flow at 858 ms and TechDeck logged DONE for 35 cards that
+# never existed.
+#
+# `post_cards` posts the plugin's own payload unchanged — these flows have a
+# live contract and installed TechDecks pointed at them — and reads a counts
+# answer if the flow has been taught to give one:
+#
+#     {"ok": true, "reason": "created",
+#      "message": "<one sentence for the user>",
+#      "data": {"created": 31, "skipped": 4, "failed": 1,
+#               "failures": ["BATCH 493: 1234-5 - label slot missing"],
+#               "job_id": "<for a post too big to finish in 120 s>"}}
+#
+# Until a flow has its Response action, a bare 2xx comes back and the plugin
+# reports exactly what it reports today. No flow change is required for this
+# code to ship, and no installed version breaks when one is upgraded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CardPost(NamedTuple):
+    """What really happened to a card post.
+
+    `delivered` is the old `post_webhook` boolean: the flow took the request.
+    `knows` is the new part — whether the flow told us what it DID with it.
+    The counts are None while a flow still cannot answer, which is why no
+    caller may print a count without checking.
+    """
+    delivered: bool
+    knows: bool
+    answer: "FlowAnswer"
+    created: Optional[int] = None
+    skipped: Optional[int] = None
+    failed: Optional[int] = None
+
+    @property
+    def failures(self) -> list:
+        """Per-card failure lines the flow sent back, if any."""
+        raw = self.answer.data.get("failures")
+        return [str(x) for x in raw] if isinstance(raw, list) else []
+
+    @property
+    def failed_titles(self) -> list:
+        """The titles of the cards the flow could NOT create — the machine-
+        readable twin of `failures`. This is what lets a plugin record only
+        the cards that really exist, so a re-run offers the rest instead of
+        treating a partial post as a complete one."""
+        raw = self.answer.data.get("failed_titles")
+        return [str(x) for x in raw] if isinstance(raw, list) else []
+
+    @property
+    def job_id(self) -> str:
+        """Set when the flow took the work but could not finish inside the
+        platform's 120 s answer window, so the app must ask again later."""
+        return str(self.answer.data.get("job_id") or "")
+
+    def headline(self, requested: Optional[int] = None,
+                 subject: str = "card") -> str:
+        """The one line a plugin prints to end the post. It carries its own
+        verdict word, so every card plugin reports a post the same way and
+        none of them can claim more than the flow actually said."""
+        if not self.delivered:
+            return (f"FAILED - see the errors above. The {subject}s were "
+                    f"not created.")
+        n = "" if requested is None else f"{requested} "
+        if self.answer.reason == REASON_SANDBOX:
+            return (f"DONE (sandbox). {n}{subject}(s) were previewed, not "
+                    f"posted.")
+        if not self.knows:
+            # The honest version of today's message: we asked, and that is all
+            # we know. Never "created". The post itself already logged that the
+            # flow cannot report back, and the caller adds its own "check the
+            # board" line, so neither is repeated here.
+            return f"DONE. Requested {n}{subject}(s)."
+        if not self.answer.ok:
+            said = self.answer.message or "the flow declined the request"
+            return f"NOT DONE: {said}"
+        parts = []
+        if self.created is not None:
+            parts.append(f"{self.created} {subject}(s) created")
+        if self.skipped:
+            parts.append(f"{self.skipped} already there")
+        if self.failed:
+            parts.append(f"{self.failed} FAILED")
+        if not parts:
+            return f"DONE. {self.answer.message or 'The flow did the work.'}"
+        return "DONE. " + ", ".join(parts) + "."
+
+
+def post_cards(url: str, payload: dict, log, *, what: str = "cards",
+               params: Optional[dict] = None,
+               subject: str = "card") -> CardPost:
+    """POST a card payload and report what the flow really did.
+
+    A drop-in for `post_webhook` at a card call site: branch on
+    `result.delivered` exactly as on the old boolean, and print
+    `result.headline(requested)` instead of a hand-written DONE line.
+
+    Anything the flow reports as failed, or any rejection, marks the run ⚠
+    here — so no card plugin can forget to, and a partial post stops looking
+    like a clean success.
+    """
+    answer = post_payload(url, payload, label=what, log=log,
+                          expect_answer=False)
+    # A sandbox run counts as delivered on purpose: nothing was sent, and the
+    # plugin must carry on exactly as after a real post so the sandbox
+    # exercises the whole path.
+    delivered = answer.reached or answer.reason in (REASON_NO_ANSWER,
+                                                    REASON_SANDBOX)
+    result = CardPost(
+        delivered=delivered,
+        knows=answer.reached,
+        answer=answer,
+        created=_as_count(answer.data.get("created")),
+        skipped=_as_count(answer.data.get("skipped")),
+        failed=_as_count(answer.data.get("failed")),
+    )
+
+    if result.knows:
+        for line in result.failures:
+            log(f"  ! {line}")
+        if result.job_id:
+            log(f"The flow is still working (job {result.job_id}).")
+        trouble = ""
+        if not answer.ok:
+            trouble = answer.message or f"the flow declined the {what} post"
+        elif result.failed:
+            trouble = (f"{result.failed} {subject}(s) were not created - "
+                       f"see the lines above.")
+        if trouble and params is not None:
+            set_run_outcome(params, RUN_OUTCOME_WARNING, trouble)
+    return result
+
+
+def _as_count(value) -> Optional[int]:
+    """A count from a flow answer, or None when the flow did not send one.
+    Power Automate will hand back a string for a number often enough that
+    int(value) is worth the try."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
