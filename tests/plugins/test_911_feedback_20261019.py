@@ -119,10 +119,58 @@ def test_nc_files_are_copied_flat(tmp_path, setup_mod):
     dest = _dest(batch)
     assert dest.is_dir()
     names = sorted(p.name for p in dest.iterdir())
-    assert names == ["Rem. Sq..NC", "h4139818-287.a.1.NC", "h4139818-97.a.1.NC"]
-    assert copied == 3
+    assert names == ["h4139818-287.a.1.NC", "h4139818-97.a.1.NC"]
+    assert copied == 2
     # the work-order folders themselves are NOT recreated
     assert not (dest / "x4681991").exists()
+
+
+def test_ebs_own_file_names_are_kept(tmp_path, setup_mod):
+    """Requester, 2026-10-21: "Keeping EB's file names is fine, we use changing
+    it as a way to track work progress." Renaming them to the work order -- the
+    way the hand-made DSTVs folder does -- would destroy that signal."""
+    batch = _make_batch(tmp_path)
+    setup_mod._extract_nest_nc_files(
+        batch, "504047", setup_mod._find_dstv_root(batch), lambda *a: None)
+    names = sorted(p.name for p in _dest(batch).iterdir())
+    assert names == ["h4139818-287.a.1.NC", "h4139818-97.a.1.NC"]
+
+
+def test_the_yard_remnant_is_left_behind(tmp_path, setup_mod):
+    """Requester, 2026-10-21, asked whether the yard remnant should come too:
+    "Negative, we do not use that file for anything as far as I know."
+
+    Matched on the FOLDER, not the file name. Surveying 60 live batches /
+    3,635 .NC files found 150 under a 'yard' folder and the same 150 named
+    'Rem. Sq..NC', so the two rules pick identically today -- but the folder is
+    the structural fact, and a name rule could one day drop a real part whose
+    name happens to contain "rem".
+    """
+    batch = _make_batch(tmp_path)
+    nest_src = batch / "DTSV FILES" / "X504047S"
+    # A real part that would be caught by a name rule, and a remnant that
+    # would be missed by one.
+    (nest_src / "x4681991" / "h999-REMOTE-BRACKET.NC").write_text("REAL")
+    (nest_src / "yard" / "offcut.NC").write_text("ALSO A REMNANT")
+
+    copied = setup_mod._extract_nest_nc_files(
+        batch, "504047", setup_mod._find_dstv_root(batch), lambda *a: None)
+
+    names = sorted(p.name for p in _dest(batch).iterdir())
+    assert "Rem. Sq..NC" not in names
+    assert "offcut.NC" not in names, "everything under yard stays behind"
+    assert "h999-REMOTE-BRACKET.NC" in names, "a real part is not a remnant"
+    assert copied == 3
+
+
+def test_the_skipped_remnant_is_reported(tmp_path, setup_mod):
+    """Left behind on purpose is still worth saying out loud -- otherwise the
+    count in the log does not match what is in the source folder."""
+    batch = _make_batch(tmp_path)
+    lines = []
+    setup_mod._extract_nest_nc_files(
+        batch, "504047", setup_mod._find_dstv_root(batch), lines.append)
+    assert any("yard remnant" in line for line in lines), lines
 
 
 def test_only_nc_files_come_across(tmp_path, setup_mod):
@@ -166,7 +214,7 @@ def test_rerun_copies_nothing_new(tmp_path, setup_mod):
     setup_mod._extract_nest_nc_files(batch, "504047", root, lambda *a: None)
     again = setup_mod._extract_nest_nc_files(batch, "504047", root, lambda *a: None)
     assert again == 0
-    assert len(list(_dest(batch).iterdir())) == 3
+    assert len(list(_dest(batch).iterdir())) == 2
 
 
 @pytest.mark.parametrize("folder", ["DTSV FILES", "DSTV FILES",

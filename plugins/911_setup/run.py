@@ -859,10 +859,19 @@ def _fill_nest_part_rows(nest_ws, num_parts: int):
 # sibling: the nests that already have a 'Linear Inch Calcs' folder keep their
 # hand-made 'DSTVs' folder (those hold the Voortman-programmed exports, not
 # these EB-generated ones) and the filled calc workbooks beside it.
+#
+# EB's file names are KEPT, confirmed by the requester 2026-10-21: "we use
+# changing it as a way to track work progress", so renaming them to the work
+# order (the way the hand-made DSTVs folder does) would destroy that signal.
+# The yard remnant is NOT copied, same message: "we do not use that file for
+# anything." See _extract_nest_nc_files for why that is matched on the folder.
 # ---------------------------------------------------------------------------
 
 _LINEAR_INCH_DIRNAME = "Linear Inch Calcs"
 _NC_DSTV_DIRNAME = "NC_DSTV"
+# EB files each nest's remnant under a 'yard' folder. The requester asked for
+# it to be left behind (2026-10-21): "we do not use that file for anything."
+_NC_YARD_DIRNAME = "yard"
 _NC_DEST_LABEL = f"{_LINEAR_INCH_DIRNAME}\\{_NC_DSTV_DIRNAME}"
 
 
@@ -929,14 +938,28 @@ def _extract_nest_nc_files(batch_folder: Path, nest: str, dstv_root, log,
         return 0
 
     sources = []
+    left_in_yard = 0
     for path in sorted(nest_dir.rglob("*")):
         sdk.raise_if_cancelled(cancel_event)   # Hard Rule 14
-        if sdk.is_file(path) and path.suffix.lower() == ".nc":   # Hard Rule 14
-            sources.append(path)
+        if not (sdk.is_file(path) and path.suffix.lower() == ".nc"):  # Hard Rule 14
+            continue
+        # The yard remnant is deliberately left behind (requester, 2026-10-21:
+        # "we do not use that file for anything"). Matched on the FOLDER, not
+        # the file name: surveying 60 live batches / 3,635 .NC files found 150
+        # under a 'yard' folder and the same 150 named 'Rem. Sq..NC', so the
+        # two rules pick identically today - but the folder is the structural
+        # fact, and a name rule could drop a real part one day.
+        if any(p.lower() == _NC_YARD_DIRNAME
+               for p in path.relative_to(nest_dir).parts[:-1]):
+            left_in_yard += 1
+            continue
+        sources.append(path)
 
     if not sources:
+        extra = (f" ({left_in_yard} yard remnant(s) left behind)"
+                 if left_in_yard else "")
         log(f"  WARNING: no .NC files under {dstv_root.name}\\{nest_dir.name} - "
-            f"{nest}\\{_NC_DEST_LABEL} was created empty.")
+            f"{nest}\\{_NC_DEST_LABEL} was created empty.{extra}")
         return 0
 
     copied = skipped = renamed = 0
@@ -971,6 +994,8 @@ def _extract_nest_nc_files(batch_folder: Path, nest: str, dstv_root, log,
         detail.append(f"{renamed} renamed to avoid a name clash")
     if skipped:
         detail.append(f"{skipped} already there")
+    if left_in_yard:
+        detail.append(f"{left_in_yard} yard remnant(s) left behind")
     log(f"  NC files: {copied} copied into {nest}\\{_NC_DEST_LABEL}"
         + (f" ({', '.join(detail)})" if detail else ""))
     return copied
