@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.7.9 - the Assistant update - meetings, waiting on someone, the clock and the Time tab, steps, task search and its own theme; prompts come up in front; six apps flag what needs you; FormingFinder reads the order's own PO
+; Version 0.8.8 - Teams cards report what the flow really did; 911 Setup gathers the NC files and flags a nest the forecast has not caught up with; the MPL stage runs again; Remove Ticket drops the orphan operation pages
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.7.9"
+#define MyAppVersion "0.8.8"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
