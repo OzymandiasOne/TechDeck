@@ -245,6 +245,51 @@ def test_an_http_error_is_not_delivered(posts, log):
     assert result.delivered is False
 
 
+def test_a_broken_flow_does_not_claim_nothing_was_created(posts, log):
+    """The flow died partway. We have no idea how far it got, so the one thing
+    the line must not say is that no cards exist."""
+    say, _ = log
+    posts.reply = FakeResponse(500, None, text="boom")
+    line = sdk.post_cards(URL, CARD_PAYLOAD, say).headline(35)
+    assert "may have been created" in line
+    assert "were not created" not in line
+
+
+# ---------------------------------------------------------------------------
+# The slow flow
+#
+# The live 922 Setup flow runs ~71 s on a normal batch and averages nearer two
+# minutes, against a 120 s platform answer window. A post that outlives the
+# window is the realistic case, not a corner one, and the flow is still
+# creating cards while it happens.
+# ---------------------------------------------------------------------------
+
+def test_a_card_post_waits_longer_than_a_quick_two_way_call(posts, log):
+    """The 20 s default would have timed out on every single real card post."""
+    say, _ = log
+    sdk.post_cards(URL, CARD_PAYLOAD, say)
+    assert posts.calls[-1][2] == fc.CARD_POST_TIMEOUT_S
+    assert fc.CARD_POST_TIMEOUT_S > fc.PLATFORM_ANSWER_WINDOW_S
+
+
+def test_a_timed_out_post_is_never_reported_as_a_failure(posts, log):
+    """It is still working. Telling the user it failed sends them off to
+    re-run a job that is already running."""
+    import requests
+    say, _ = log
+    params = {}
+    posts.reply = requests.exceptions.ReadTimeout("still going")
+    result = sdk.post_cards(URL, CARD_PAYLOAD, say, params=params)
+    assert result.delivered is True
+    assert result.knows is False
+    assert result.answer.reason == fc.REASON_TIMED_OUT
+    line = result.headline(35)
+    assert "FAILED" not in line
+    assert "may still be on their way" in line
+    # Not a clean success either - nobody knows yet whether the cards exist.
+    assert params["run_outcome"]["status"] == sdk.RUN_OUTCOME_WARNING
+
+
 def test_no_url_sends_nothing_and_is_not_delivered(posts, log):
     say, _ = log
     result = sdk.post_cards("", CARD_PAYLOAD, say)

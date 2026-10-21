@@ -45,9 +45,21 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
-# The platform's own ceiling: a request trigger cannot answer after 120 s.
-MAX_TIMEOUT_S = 120.0
+# The platform's own ceiling: a request trigger cannot answer after 120 s. A
+# flow that is still working at that point never gets to speak.
+PLATFORM_ANSWER_WINDOW_S = 120.0
+
+# Our socket ceiling sits ABOVE that window on purpose: we want the gateway's
+# own reply -- its answer, or its "no response" error -- to win the race, so
+# the app learns something instead of guessing from a local timeout.
+MAX_TIMEOUT_S = 180.0
+
 DEFAULT_TIMEOUT_S = 20.0
+
+# Card posts are the slow ones. The live 922 Setup flow runs ~71 s on a normal
+# batch and averages nearer two minutes, so the 20 s default would have timed
+# out on every real post. Just over the platform window, for the reason above.
+CARD_POST_TIMEOUT_S = 130.0
 
 # A NamedTuple's default is ONE shared object, so a plain {} here would let
 # `answer.data["x"] = 1` in any caller poison every later default-data answer.
@@ -86,7 +98,8 @@ class FlowAnswer(NamedTuple):
 
 # Machine `reason` words this module produces itself. A flow may return any
 # other word; these are ours, so callers can branch on them.
-REASON_UNREACHABLE = "unreachable"   # network/proxy/timeout -- never arrived
+REASON_UNREACHABLE = "unreachable"   # never arrived: nothing happened
+REASON_TIMED_OUT = "timed_out"       # arrived, still working when we gave up
 REASON_FLOW_ERROR = "flow_error"     # non-2xx: the flow itself broke
 REASON_BAD_ANSWER = "bad_answer"     # 2xx, but not the contract shape
 REASON_NO_ANSWER = "no_answer"       # 2xx, no answer, and none was expected
@@ -302,6 +315,25 @@ def _post(url: str, envelope: dict, timeout: float,
 
     try:
         resp = requests.post(url, json=envelope, timeout=timeout)
+    except requests.exceptions.ConnectionError as exc:
+        # Never arrived. This is the ONLY case where we may tell the user that
+        # nothing happened. (ConnectTimeout lands here too, and should: it is a
+        # connection that was never made. It also subclasses Timeout, which is
+        # why this except block has to come first.)
+        say(f"ERROR: could not reach the '{command}' flow: {exc}")
+        say("Check your network/VPN and that the flow is on. Carrying on without it.")
+        return FlowAnswer(ok=False, reason=REASON_UNREACHABLE, command_id=cid,
+                          message="Could not reach the flow.")
+    except requests.exceptions.Timeout:
+        # The request WAS delivered; the flow simply had not finished. It is
+        # very likely still working, so claiming nothing happened would be a
+        # lie in the other direction.
+        say(f"The '{command}' flow took the request but had not answered after "
+            f"{timeout:.0f}s.")
+        say("It is probably still working. Check Teams before running it again.")
+        return FlowAnswer(ok=False, reason=REASON_TIMED_OUT, command_id=cid,
+                          message="The flow took the request but did not "
+                                  "answer in time.")
     except requests.exceptions.RequestException as exc:
         say(f"ERROR: could not reach the '{command}' flow: {exc}")
         say("Check your network/VPN and that the flow is on. Carrying on without it.")

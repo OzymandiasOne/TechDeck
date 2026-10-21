@@ -998,6 +998,16 @@ def _run_teams_cards(params: dict, progress_callback, cancel_event,
         # The ledger and the schedule must be left exactly as they were.
         log(f"\nTeams cards: {result.headline(len(cards))}")
         return False
+    if result.answer.reason == sdk.REASON_TIMED_OUT:
+        # The flow has the request and is probably still working, so we do not
+        # know which cards exist. Record nothing and advance nothing: the flow
+        # de-dupes by title, so a re-run creates no doubles and the ledger
+        # catches up then. Guessing either way here is how a nest silently
+        # vanishes from the queue.
+        log(f"\nTeams cards: {result.headline(len(cards))}")
+        log("Nothing was recorded, so these nests are offered again next run "
+            "(the flow skips any card that already exists).")
+        return True
 
     # A flow that reports per-card failures lets us record only the cards that
     # really exist, so a re-run offers the rest instead of treating a partial

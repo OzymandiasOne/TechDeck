@@ -2731,7 +2731,11 @@ from techdeck.core.flow_client import (  # noqa: E402  (deliberately late)
     post_payload,
     queue_command,
 )
-from techdeck.core.flow_client import REASON_NO_ANSWER  # noqa: E402
+from techdeck.core.flow_client import (  # noqa: E402
+    CARD_POST_TIMEOUT_S,
+    REASON_NO_ANSWER,
+    REASON_TIMED_OUT,
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2799,6 +2803,11 @@ class CardPost(NamedTuple):
         """The one line a plugin prints to end the post. It carries its own
         verdict word, so every card plugin reports a post the same way and
         none of them can claim more than the flow actually said."""
+        if self.answer.reason == REASON_FLOW_ERROR:
+            # The flow broke partway. We do NOT know how far it got, so this
+            # must not claim nothing was created.
+            return (f"FAILED - the flow errored. Some {subject}s may have been "
+                    f"created; check Teams before running it again.")
         if not self.delivered:
             return (f"FAILED - see the errors above. The {subject}s were "
                     f"not created.")
@@ -2806,6 +2815,13 @@ class CardPost(NamedTuple):
         if self.answer.reason == REASON_SANDBOX:
             return (f"DONE (sandbox). {n}{subject}(s) were previewed, not "
                     f"posted.")
+        if self.answer.reason == REASON_TIMED_OUT:
+            # The flow has the request and is very likely still working. The
+            # live card flow runs ~71 s against a 120 s answer window, so this
+            # is the realistic case, not a corner one.
+            return (f"The flow took the request for {n}{subject}(s) but had "
+                    f"not finished in time. Check Teams - they may still be "
+                    f"on their way.")
         if not self.knows:
             # The honest version of today's message: we asked, and that is all
             # we know. Never "created". The post itself already logged that the
@@ -2828,8 +2844,8 @@ class CardPost(NamedTuple):
 
 
 def post_cards(url: str, payload: dict, log, *, what: str = "cards",
-               params: Optional[dict] = None,
-               subject: str = "card") -> CardPost:
+               params: Optional[dict] = None, subject: str = "card",
+               timeout: float = CARD_POST_TIMEOUT_S) -> CardPost:
     """POST a card payload and report what the flow really did.
 
     A drop-in for `post_webhook` at a card call site: branch on
@@ -2840,13 +2856,18 @@ def post_cards(url: str, payload: dict, log, *, what: str = "cards",
     here — so no card plugin can forget to, and a partial post stops looking
     like a clean success.
     """
-    answer = post_payload(url, payload, label=what, log=log,
+    answer = post_payload(url, payload, label=what, log=log, timeout=timeout,
                           expect_answer=False)
     # A sandbox run counts as delivered on purpose: nothing was sent, and the
     # plugin must carry on exactly as after a real post so the sandbox
     # exercises the whole path.
+    #
+    # A TIMED-OUT post counts too, and that one matters: the flow has the
+    # request and is probably still creating the cards. Reporting it as a
+    # failure would send the user off to re-run a job that is already running.
     delivered = answer.reached or answer.reason in (REASON_NO_ANSWER,
-                                                    REASON_SANDBOX)
+                                                    REASON_SANDBOX,
+                                                    REASON_TIMED_OUT)
     result = CardPost(
         delivered=delivered,
         knows=answer.reached,
@@ -2869,6 +2890,13 @@ def post_cards(url: str, payload: dict, log, *, what: str = "cards",
                        f"see the lines above.")
         if trouble and params is not None:
             set_run_outcome(params, RUN_OUTCOME_WARNING, trouble)
+    elif answer.reason == REASON_TIMED_OUT and params is not None:
+        # Not a failure, but not a clean success either: nobody knows yet
+        # whether the cards exist.
+        set_run_outcome(
+            params, RUN_OUTCOME_WARNING,
+            f"The {what} flow did not finish in time - check Teams before "
+            f"running it again.")
     return result
 
 

@@ -210,11 +210,41 @@ def test_a_broken_log_callback_cannot_kill_the_call(posts):
     assert answer.reached
 
 
-def test_timeout_is_clamped_to_the_platform_ceiling(posts):
+def test_timeout_is_clamped_to_the_socket_ceiling(posts):
     fc.ask_flow(URL, "probe", timeout=9999)
     assert posts.calls[-1][2] == fc.MAX_TIMEOUT_S
     fc.ask_flow(URL, "probe", timeout=0)
     assert posts.calls[-1][2] == fc.DEFAULT_TIMEOUT_S
+
+
+def test_our_socket_ceiling_sits_above_the_platform_answer_window():
+    """Deliberate: we want the gateway's own reply -- its answer, or its
+    'no response' error -- to win the race against our local timeout, so the
+    app learns something instead of guessing."""
+    assert fc.MAX_TIMEOUT_S > fc.PLATFORM_ANSWER_WINDOW_S
+    assert fc.CARD_POST_TIMEOUT_S > fc.PLATFORM_ANSWER_WINDOW_S
+    assert fc.CARD_POST_TIMEOUT_S <= fc.MAX_TIMEOUT_S
+
+
+def test_a_timeout_is_not_the_same_as_never_arriving(posts):
+    """The request WAS delivered and the flow is probably still working. The
+    live card flow runs ~71 s against a 120 s window, so this is the realistic
+    case. Calling it 'unreachable' would tell the user nothing happened."""
+    import requests
+    posts.script(requests.exceptions.ReadTimeout("took too long"))
+    answer = fc.ask_flow(URL, "post_cards", fallback={"created": 0})
+    assert answer.reason == fc.REASON_TIMED_OUT
+    assert not answer.reached
+
+
+def test_a_connect_timeout_counts_as_never_arriving(posts):
+    """ConnectTimeout subclasses BOTH ConnectionError and Timeout. It is a
+    connection that was never made, so it must land on `unreachable` -- which
+    is why the ConnectionError branch has to be checked first."""
+    import requests
+    posts.script(requests.exceptions.ConnectTimeout("no route"))
+    answer = fc.ask_flow(URL, "post_cards")
+    assert answer.reason == fc.REASON_UNREACHABLE
 
 
 def test_the_envelope_is_what_gets_posted(posts):

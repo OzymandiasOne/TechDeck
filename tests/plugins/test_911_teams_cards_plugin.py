@@ -286,7 +286,7 @@ def _stub_schedule_io(st, monkeypatch, writes, statuses=None, fail=""):
     return rows
 
 
-def _card_post(st, sink, *, delivered=True, answer=None, ok=True):
+def _card_post(st, sink, *, delivered=True, answer=None, ok=True, reason=""):
     """A stand-in for `sdk.post_cards`, capturing the payload.
 
     `answer=None` is the flow we have TODAY: it takes the message and cannot
@@ -302,7 +302,7 @@ def _card_post(st, sink, *, delivered=True, answer=None, ok=True):
         if answer is None:
             return st.sdk.CardPost(
                 delivered=True, knows=False,
-                answer=st.sdk.FlowAnswer(ok=False, reason="no_answer"))
+                answer=st.sdk.FlowAnswer(ok=False, reason=reason or "no_answer"))
         return st.sdk.CardPost(
             delivered=True, knows=True,
             answer=st.sdk.FlowAnswer(ok=ok, reached=True, data=answer),
@@ -312,7 +312,8 @@ def _card_post(st, sink, *, delivered=True, answer=None, ok=True):
 
 
 def _stage(st, tmp_path, monkeypatch, settings=None, writes=None,
-           statuses=None, fail="", answer=None, ok=True, delivered=True):
+           statuses=None, fail="", answer=None, ok=True, delivered=True,
+           reason=""):
     """Run the stage with the schedule + BATCH LISTs stubbed out, capturing
     the payload that would be POSTed. Returns (posted_payloads, log_lines)."""
     posted, lines = [], []
@@ -324,7 +325,7 @@ def _stage(st, tmp_path, monkeypatch, settings=None, writes=None,
                         lambda: tmp_path / "911_setup_posted_cards.json")
     monkeypatch.setattr(st.sdk, "post_cards",
                         _card_post(st, posted, delivered=delivered,
-                                   answer=answer, ok=ok))
+                                   answer=answer, ok=ok, reason=reason))
     _stub_schedule_io(st, monkeypatch, writes if writes is not None else [],
                       statuses, fail)
     params = {"log": lines.append, "console": None,
@@ -400,6 +401,27 @@ def test_a_flow_that_confirms_the_card_records_and_advances_it(
         "BATCH: V092 - NEST: 503836 (218004493)"}
     assert writes == [(138, "NEED SETUP", "V092 503836")]
     assert "1 card(s) created" in "\n".join(lines)
+
+
+def test_a_timed_out_post_records_nothing_and_stays_reofferable(
+        st, tmp_path, monkeypatch):
+    """The live card flow runs ~71 s against a 120 s answer window, so a post
+    that outlives it is realistic -- and the flow is still creating cards while
+    it happens. We do not know which exist, so record nothing: the flow
+    de-dupes by title, so the re-run creates no doubles and the ledger catches
+    up then. Guessing either way is how a nest silently vanishes."""
+    writes = []
+    posted, lines = _stage(st, tmp_path, monkeypatch, writes=writes,
+                           reason="timed_out")
+    assert len(posted[0]["tasks"]) == 1
+    assert st._load_posted_titles(lambda m: None) == set()
+    assert writes == []
+    blob = "\n".join(lines)
+    assert "may still be on their way" in blob
+    assert "offered again next run" in blob
+
+    posted2, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted2[0]["tasks"]) == 1
 
 
 def test_a_declined_post_records_nothing_and_advances_nothing(
