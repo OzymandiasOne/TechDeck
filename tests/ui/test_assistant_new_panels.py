@@ -322,9 +322,14 @@ def test_a_step_keeps_its_chips_beside_it(store, qapp):
     """
     from PySide6.QtWidgets import QLabel
 
+    # The deadline is relative to TODAY on purpose. A hardcoded one was a time
+    # bomb: the chip reads "by <date>" while the date is ahead and
+    # "overdue - <date>" once it passes, so a fixed 2026-10-16 passed in
+    # October and failed every build after it (caught 2026-10-20).
+    due = date.today() + timedelta(days=30)
     task = store.add_task(TaskItem(title="Rollout", checklist=[
         ChecklistItem(text="pull the drawings", estimate_min=15,
-                      deadline="2026-10-16")]))
+                      deadline=due.isoformat())]))
     panel = TasksPanel(store)
     panel._toggle_steps(task.id)
     panel.refresh()
@@ -347,8 +352,8 @@ def test_a_step_keeps_its_chips_beside_it(store, qapp):
 
     # tick, the step's words, then ITS chips, and only then the stretch that
     # pushes the leftovers away.
-    assert texts == ["QCheckBox", "pull the drawings", "15m", "by Oct 16",
-                     "<stretch>"]
+    assert texts == ["QCheckBox", "pull the drawings", "15m",
+                     f"by {due:%b %d}", "<stretch>"]
 
 
 def test_the_task_row_shows_all_three_of_its_buttons(store, qapp):

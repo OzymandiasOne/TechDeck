@@ -5,6 +5,7 @@ the snapshot and the file rotation that preserves a dead session's state."""
 
 import json
 import sys
+import threading
 import time
 
 import pytest
@@ -175,6 +176,99 @@ def test_watchdog_dumps_stacks_when_the_heartbeat_stops(logs, monkeypatch):
         wd._beat()                              # recovery
         time.sleep(0.4)
         assert "recovered" in hang_watchdog.hang_log_path().read_text(encoding="utf-8")
+    finally:
+        wd.mark_clean_exit()
+
+
+def test_a_suspended_process_is_not_reported_as_a_hang(logs, monkeypatch):
+    """Machine sleep is not a hang, and must not be dumped as one.
+
+    Found in the first field debug report to reach us (2026-10-20): twelve of
+    its thirteen stack dumps were the laptop sleeping with TechDeck open - one
+    of them 38,913 seconds - each "recovering" one second after the wake. Every
+    thread parks in wait() while the process is suspended, so the dump says
+    nothing, and 5,644 lines of it is where a real hang goes to hide.
+
+    The tell is that the WATCHDOG's own tick lost the same wall time the UI
+    thread did. Simulated faithfully here: the stop event's wait stalls for far
+    longer than _TICK (the suspend), the heartbeat stops for exactly that
+    window, and it resumes on the wake the way the Qt timer does.
+    """
+    monkeypatch.setattr(hang_watchdog, "_FIRST_DUMP_AFTER", 0.5)
+    monkeypatch.setattr(hang_watchdog, "_TICK", 0.1)
+    monkeypatch.setattr(hang_watchdog, "_SUSPEND_SLACK", 0.3)
+
+    wd = hang_watchdog.HangWatchdog(main_window=None)
+    wd._timer = object()
+    wd._beat()
+
+    suspended = threading.Event()
+    real_wait = wd._stop.wait
+    stalls = [1.0]
+
+    def wait(timeout=None):
+        if stalls:
+            suspended.set()
+            try:
+                return real_wait(stalls.pop(0))
+            finally:
+                suspended.clear()
+        return real_wait(timeout)
+
+    monkeypatch.setattr(wd._stop, "wait", wait)
+
+    # The UI thread: beats every tick, and goes silent for exactly as long as
+    # the process is suspended.
+    stop_beating = threading.Event()
+
+    def beater():
+        while not stop_beating.wait(0.05):
+            if not suspended.is_set():
+                wd._beat()
+
+    pulse = threading.Thread(target=beater, daemon=True)
+
+    wd.start()
+    pulse.start()
+    try:
+        time.sleep(1.8)
+        text = hang_watchdog.hang_log_path().read_text(encoding="utf-8")
+        assert "not a hang: the process was suspended" in text
+        assert "HANG #" not in text
+    finally:
+        stop_beating.set()
+        pulse.join(timeout=1)
+        wd.mark_clean_exit()
+
+
+def test_a_real_hang_still_dumps_after_a_suspend(logs, monkeypatch):
+    """The suspend check must not disarm the watchdog: a wedged UI thread after
+    a wake is still a hang, caught on the ticks that follow."""
+    monkeypatch.setattr(hang_watchdog, "_FIRST_DUMP_AFTER", 0.5)
+    monkeypatch.setattr(hang_watchdog, "_TICK", 0.1)
+    monkeypatch.setattr(hang_watchdog, "_SUSPEND_SLACK", 0.3)
+
+    wd = hang_watchdog.HangWatchdog(main_window=None)
+    wd._timer = object()
+    wd._beat()
+
+    real_wait = wd._stop.wait
+    stalls = [1.0]
+
+    def wait(timeout=None):
+        if stalls:
+            return real_wait(stalls.pop(0))
+        return real_wait(timeout)
+
+    monkeypatch.setattr(wd._stop, "wait", wait)
+    wd.start()
+    try:
+        # Never beat again: the wake is the new baseline, and the UI thread
+        # staying silent past it is the real thing.
+        time.sleep(2.0)
+        text = hang_watchdog.hang_log_path().read_text(encoding="utf-8")
+        assert "not a hang: the process was suspended" in text
+        assert "HANG #1" in text
     finally:
         wd.mark_clean_exit()
 

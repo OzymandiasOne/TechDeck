@@ -14,6 +14,12 @@ dialog is a separate OS window that an offscreen capture run can neither grab
 nor drive, while the drone's picker is a Qt widget. Every folder-pick caption in
 the guide says so. Shared driver: guide_captures/_picker.py.
 
+ALWAYS capture with TECHDECK_HALLOWEEN=0 (and the equivalent for any future
+season). A fresh capture profile picks up whatever season is live, so a
+re-shoot in October silently repaints the dialog orange while every other
+chapter stays on the default dark theme - caught 2026-10-20 re-shooting
+911_setup_actions.png for the NC_DSTV toggle.
+
 Uses the camera library (tools/capture_guide_screens.py): sandboxed fresh
 profile, hidden main window. App-created dialogs flash on the real screen
 briefly; expected for a manual capture tool.

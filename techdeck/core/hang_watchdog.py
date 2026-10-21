@@ -60,6 +60,13 @@ _FIRST_DUMP_AFTER = 10.0
 _MAX_DUMPS_PER_EPISODE = 4
 # Watchdog thread tick.
 _TICK = 1.0
+# A watchdog tick that took THIS much longer than _TICK means the whole process
+# was suspended, not that the UI thread wedged - the machine slept, or the VM
+# was paused. Nothing was running, so there is nothing to dump: every thread
+# parks in wait() and the "hang" clears one tick after the wake. Twelve of the
+# thirteen dumps in the first field report to reach us were this (one of them
+# 38,913s = a weekend), which is exactly the noise that buries a real hang.
+_SUSPEND_SLACK = 5.0
 # Force a state write this often even when nothing changed (keeps the file's
 # timestamp close to the moment of death).
 _STATE_MAX_AGE = 30.0
@@ -297,9 +304,28 @@ class HangWatchdog:
         last_state_write = 0.0
         last_signature = None
 
+        last_tick = time.monotonic()
         while not self._stop.wait(_TICK):
             try:
-                stale = time.monotonic() - self._last_beat
+                now = time.monotonic()
+                tick_took = now - last_tick
+                last_tick = now
+                stale = now - self._last_beat
+
+                # The process was suspended (sleep / hibernate / paused VM):
+                # our own tick lost the same wall time the UI thread did, so
+                # the staleness is not a hang. Say so in one line and treat
+                # the wake as the new baseline.
+                if tick_took > _TICK + _SUSPEND_SLACK:
+                    if stale >= _FIRST_DUMP_AFTER:
+                        woke = f"{datetime.now():%Y-%m-%d %H:%M:%S}"
+                        self._emit(
+                            f"--- not a hang: the process was suspended for "
+                            f"{tick_took:.0f}s (woke {woke}) ---"
+                        )
+                    episode_dumps = 0
+                    next_dump_at = _FIRST_DUMP_AFTER
+                    continue
 
                 if self._timer is not None and stale >= next_dump_at:
                     if episode_dumps < _MAX_DUMPS_PER_EPISODE:

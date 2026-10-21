@@ -408,6 +408,36 @@ def is_nest_id(text) -> bool:
     return bool(NEST_ID_RE.match(str(text or "").strip()))
 
 
+# THE DYPN (EB part number) shape -- single home, same contract as NEST_ID_RE:
+# plugins alias it (`_DYPN_RE = sdk.DYPN_ID_RE`) and never re-type it.
+#
+# Graded on the DYPN column of all 105 live 911 BATCH LISTs (5,415 values,
+# 2026-10-19). The shapes in the wild:
+#
+#   H4139818-97        base: optional 1-3 letter prefix, 5+ digits, -digits
+#   H4524555-12M       trailing letter suffix  <- the reported miss: Baked
+#                      Beans read "DYPN cell not found - used file name" on
+#                      every -NNM part (V103 504123 H4524555-12M, 10/19)
+#   H7376008-P001E     letter inside the segment after the dash
+#   H6761001-15-10A    more than one dash segment
+#   H7212563H352-13    a letter+digits group inside the stem
+#
+# 4,115 of those values matched the old `^[A-Z]{0,3}\d{4,}-\d{1,4}$`; this
+# matches 4,833. The rest are plate material codes that live in the same
+# column on L/P/3X batches (EB218001124CP12) and are deliberately NOT DYPNs.
+# The 5-digit minimum is load-bearing: `\d{4,}` also matches an ISO date
+# ("2026-10-20"), and these patterns are used to pick a part number out of
+# arbitrary spreadsheet cells.
+DYPN_ID_RE = re.compile(
+    r"^[A-Z]{0,3}\d{5,}(?:[A-Z]\d{2,4})?(?:-[A-Z]{0,2}\d{1,4})+[A-Z]?$",
+    re.IGNORECASE)
+
+
+def is_dypn(text) -> bool:
+    """True when `text` is DYPN shaped (trimmed first)."""
+    return bool(DYPN_ID_RE.match(str(text or "").strip()))
+
+
 def load_sibling(plugin_id: str, anchor=None):
     """Import a sibling plugin's run.py as a module and return it.
 
@@ -2655,3 +2685,228 @@ def write_payload_preview(payload: dict, filename: str, log) -> None:
         log(f"Preview written to: {out}")
     except OSError as exc:
         log(f"(Could not write preview file: {exc})")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Two-way flows (Power Automate Premium)
+#
+# `post_webhook` above is the one-way shout: it reports that the flow ACCEPTED
+# the message, not that the work happened. On Batch 488 every card died inside
+# the flow at 858 ms while TechDeck logged DONE. A two-way flow answers, so the
+# app can report the truth.
+#
+# Re-exported from techdeck.core.flow_client so a plugin only ever imports the
+# SDK. NEVER call a two-way flow URL with `requests` directly from a plugin:
+# the timeout, the fallback, the command_id and the outbox all live in that one
+# helper, and a direct call silently opts out of every one of them.
+#
+#     answer = sdk.ask_flow(url, "post_cards", {"batch": 493},
+#                           fallback={"created": 0}, log=log)
+#     if not answer.reached:
+#         log("The flow is down - posting the old way.")   # the fallback path
+#     elif answer.rejected:
+#         log(f"The flow said no: {answer.message}")
+#     else:
+#         log(f"Created {answer.data.get('created')} cards.")
+#
+# Rules, the gotchas and the flow-side contract: docs/TWO_WAY_FLOW_CLIENT.md.
+# ─────────────────────────────────────────────────────────────────────────────
+
+from techdeck.core.flow_client import (  # noqa: E402  (deliberately late)
+    FlowAnswer,
+    REASON_BAD_ANSWER,
+    REASON_DRY_RUN,
+    REASON_FLOW_ERROR,
+    REASON_NOT_CONFIGURED,
+    REASON_SANDBOX,
+    REASON_UNREACHABLE,
+    ask_flow,
+    build_envelope,
+    flow_cache_clear,
+    flow_cache_get,
+    flow_cache_put,
+    flush_outbox,
+    new_command_id,
+    outbox_depth,
+    post_payload,
+    queue_command,
+)
+from techdeck.core.flow_client import (  # noqa: E402
+    CARD_POST_TIMEOUT_S,
+    REASON_NO_ANSWER,
+    REASON_TIMED_OUT,
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Card posts that tell the truth
+#
+# The four card flows (922 Setup's cards, its pallet and material labels,
+# 911 Teams Cards, the 922 Repeat Tagger) all did the same thing: POST, get a
+# 2xx, log DONE. A 2xx means the flow ACCEPTED the message. On Batch 488 every
+# run died inside the flow at 858 ms and TechDeck logged DONE for 35 cards that
+# never existed.
+#
+# `post_cards` posts the plugin's own payload unchanged — these flows have a
+# live contract and installed TechDecks pointed at them — and reads a counts
+# answer if the flow has been taught to give one:
+#
+#     {"ok": true, "reason": "created",
+#      "message": "<one sentence for the user>",
+#      "data": {"created": 31, "skipped": 4, "failed": 1,
+#               "failures": ["BATCH 493: 1234-5 - label slot missing"],
+#               "job_id": "<for a post too big to finish in 120 s>"}}
+#
+# Until a flow has its Response action, a bare 2xx comes back and the plugin
+# reports exactly what it reports today. No flow change is required for this
+# code to ship, and no installed version breaks when one is upgraded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CardPost(NamedTuple):
+    """What really happened to a card post.
+
+    `delivered` is the old `post_webhook` boolean: the flow took the request.
+    `knows` is the new part — whether the flow told us what it DID with it.
+    The counts are None while a flow still cannot answer, which is why no
+    caller may print a count without checking.
+    """
+    delivered: bool
+    knows: bool
+    answer: "FlowAnswer"
+    created: Optional[int] = None
+    skipped: Optional[int] = None
+    failed: Optional[int] = None
+
+    @property
+    def failures(self) -> list:
+        """Per-card failure lines the flow sent back, if any."""
+        raw = self.answer.data.get("failures")
+        return [str(x) for x in raw] if isinstance(raw, list) else []
+
+    @property
+    def failed_titles(self) -> list:
+        """The titles of the cards the flow could NOT create — the machine-
+        readable twin of `failures`. This is what lets a plugin record only
+        the cards that really exist, so a re-run offers the rest instead of
+        treating a partial post as a complete one."""
+        raw = self.answer.data.get("failed_titles")
+        return [str(x) for x in raw] if isinstance(raw, list) else []
+
+    @property
+    def job_id(self) -> str:
+        """Set when the flow took the work but could not finish inside the
+        platform's 120 s answer window, so the app must ask again later."""
+        return str(self.answer.data.get("job_id") or "")
+
+    def headline(self, requested: Optional[int] = None,
+                 subject: str = "card") -> str:
+        """The one line a plugin prints to end the post. It carries its own
+        verdict word, so every card plugin reports a post the same way and
+        none of them can claim more than the flow actually said."""
+        if self.answer.reason == REASON_FLOW_ERROR:
+            # The flow broke partway. We do NOT know how far it got, so this
+            # must not claim nothing was created.
+            return (f"FAILED - the flow errored. Some {subject}s may have been "
+                    f"created; check Teams before running it again.")
+        if not self.delivered:
+            return (f"FAILED - see the errors above. The {subject}s were "
+                    f"not created.")
+        n = "" if requested is None else f"{requested} "
+        if self.answer.reason == REASON_SANDBOX:
+            return (f"DONE (sandbox). {n}{subject}(s) were previewed, not "
+                    f"posted.")
+        if self.answer.reason == REASON_TIMED_OUT:
+            # The flow has the request and is very likely still working. The
+            # live card flow runs ~71 s against a 120 s answer window, so this
+            # is the realistic case, not a corner one.
+            return (f"The flow took the request for {n}{subject}(s) but had "
+                    f"not finished in time. Check Teams - they may still be "
+                    f"on their way.")
+        if not self.knows:
+            # The honest version of today's message: we asked, and that is all
+            # we know. Never "created". The post itself already logged that the
+            # flow cannot report back, and the caller adds its own "check the
+            # board" line, so neither is repeated here.
+            return f"DONE. Requested {n}{subject}(s)."
+        if not self.answer.ok:
+            said = self.answer.message or "the flow declined the request"
+            return f"NOT DONE: {said}"
+        parts = []
+        if self.created is not None:
+            parts.append(f"{self.created} {subject}(s) created")
+        if self.skipped:
+            parts.append(f"{self.skipped} already there")
+        if self.failed:
+            parts.append(f"{self.failed} FAILED")
+        if not parts:
+            return f"DONE. {self.answer.message or 'The flow did the work.'}"
+        return "DONE. " + ", ".join(parts) + "."
+
+
+def post_cards(url: str, payload: dict, log, *, what: str = "cards",
+               params: Optional[dict] = None, subject: str = "card",
+               timeout: float = CARD_POST_TIMEOUT_S) -> CardPost:
+    """POST a card payload and report what the flow really did.
+
+    A drop-in for `post_webhook` at a card call site: branch on
+    `result.delivered` exactly as on the old boolean, and print
+    `result.headline(requested)` instead of a hand-written DONE line.
+
+    Anything the flow reports as failed, or any rejection, marks the run ⚠
+    here — so no card plugin can forget to, and a partial post stops looking
+    like a clean success.
+    """
+    answer = post_payload(url, payload, label=what, log=log, timeout=timeout,
+                          expect_answer=False)
+    # A sandbox run counts as delivered on purpose: nothing was sent, and the
+    # plugin must carry on exactly as after a real post so the sandbox
+    # exercises the whole path.
+    #
+    # A TIMED-OUT post counts too, and that one matters: the flow has the
+    # request and is probably still creating the cards. Reporting it as a
+    # failure would send the user off to re-run a job that is already running.
+    delivered = answer.reached or answer.reason in (REASON_NO_ANSWER,
+                                                    REASON_SANDBOX,
+                                                    REASON_TIMED_OUT)
+    result = CardPost(
+        delivered=delivered,
+        knows=answer.reached,
+        answer=answer,
+        created=_as_count(answer.data.get("created")),
+        skipped=_as_count(answer.data.get("skipped")),
+        failed=_as_count(answer.data.get("failed")),
+    )
+
+    if result.knows:
+        for line in result.failures:
+            log(f"  ! {line}")
+        if result.job_id:
+            log(f"The flow is still working (job {result.job_id}).")
+        trouble = ""
+        if not answer.ok:
+            trouble = answer.message or f"the flow declined the {what} post"
+        elif result.failed:
+            trouble = (f"{result.failed} {subject}(s) were not created - "
+                       f"see the lines above.")
+        if trouble and params is not None:
+            set_run_outcome(params, RUN_OUTCOME_WARNING, trouble)
+    elif answer.reason == REASON_TIMED_OUT and params is not None:
+        # Not a failure, but not a clean success either: nobody knows yet
+        # whether the cards exist.
+        set_run_outcome(
+            params, RUN_OUTCOME_WARNING,
+            f"The {what} flow did not finish in time - check Teams before "
+            f"running it again.")
+    return result
+
+
+def _as_count(value) -> Optional[int]:
+    """A count from a flow answer, or None when the flow did not send one.
+    Power Automate will hand back a string for a number often enough that
+    int(value) is worth the try."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

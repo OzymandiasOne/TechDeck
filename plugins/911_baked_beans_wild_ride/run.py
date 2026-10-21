@@ -67,7 +67,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VERSION = "1.2.7"
+VERSION = "1.2.8"
 
 # --- The ride ---------------------------------------------------------------
 STEP_RUN_SHEET = "Run NC Style Baked Beans spreadsheet"
@@ -90,7 +90,12 @@ _TOTAL_PATTERNS = [
 ]
 
 # DYPN-shaped cell, e.g. "R4533287-109" (leading/trailing spaces tolerated).
-_DYPN_RE = re.compile(r"^[A-Z]{0,3}\d{4,}-\d{1,4}$", re.IGNORECASE)
+# v1.2.8: the pattern moved to the SDK as the single home. It used to be
+# `^[A-Z]{0,3}\d{4,}-\d{1,4}$`, which rejected every DYPN carrying a letter
+# suffix -- "H4524555-12M" (V103 504123, reported 2026-10-19) fell through to
+# the file-name fallback and shipped the "DYPN cell not found - used file
+# name" note on every such part. See sdk.DYPN_ID_RE for the graded shapes.
+_DYPN_RE = sdk.DYPN_ID_RE  # single home in the SDK - never re-type the pattern
 
 # The REF sheet's labeled fields: "Batch/Nest" -> "  V085 P07819" (batch then
 # nest) and "Part #" -> the DYPN. Located by LABEL text, never a fixed cell;
@@ -214,11 +219,16 @@ def _extract_part(ws, file_stem: str):
 
 
 def _dypn_sort_key(dypn: str):
-    """Natural sort: R4533287-110 after R4533287-109, not lexicographically."""
-    m = re.match(r"^(.*?)(\d+)$", dypn)
+    """Natural sort: R4533287-110 after R4533287-109, not lexicographically.
+
+    v1.2.8: a trailing letter suffix is split off rather than making the whole
+    key lexicographic, so H4524555-12M still sorts beside H4524555-12 instead
+    of landing after H4524555-100M.
+    """
+    m = re.match(r"^(.*?)(\d+)([A-Z]*)$", dypn, re.IGNORECASE)
     if m:
-        return (m.group(1), int(m.group(2)))
-    return (dypn, -1)
+        return (m.group(1), int(m.group(2)), m.group(3).upper())
+    return (dypn, -1, "")
 
 
 def _nest_name_part(nests: list) -> str:

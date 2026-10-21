@@ -88,7 +88,7 @@ assert _MP_SPEC is not None and _MP_SPEC.loader is not None
 mp = _ilu.module_from_spec(_MP_SPEC)
 _MP_SPEC.loader.exec_module(mp)
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 
 # Hardcoded constants
 SHEET_NAME = "PO 321+"
@@ -952,10 +952,16 @@ def run(params: Dict[str, Any], progress_callback, cancel_event) -> None:
             log("Dry run enabled in Settings -> not posting.")
             sdk.write_payload_preview(payload, "last_922_repeat_tag_payload.json", log)
         else:
-            if sdk.post_webhook(url, payload, log):
-                log(f"Repeat cards should now sit in 'BATCH {new_po_num}: MODEL CHECK' "
+            result = sdk.post_cards(url, payload, log, what="repeat tags",
+                                    params=params, subject="tag")
+            if result.delivered and not (result.knows
+                                         and not result.answer.ok):
+                log(result.headline(len(payload["titles"]), subject="tag"))
+                log(f"They should now sit in 'BATCH {new_po_num}: MODEL CHECK' "
                     "with the REPEAT label - check the D922 PIPELINE board "
                     "in Teams.")
+                # A flow that reports failures names them; they stay untagged.
+                error_count += result.failed or 0
             else:
                 error_count += 1
 

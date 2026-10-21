@@ -286,8 +286,34 @@ def _stub_schedule_io(st, monkeypatch, writes, statuses=None, fail=""):
     return rows
 
 
+def _card_post(st, sink, *, delivered=True, answer=None, ok=True, reason=""):
+    """A stand-in for `sdk.post_cards`, capturing the payload.
+
+    `answer=None` is the flow we have TODAY: it takes the message and cannot
+    say what it did (a bare 2xx). Pass a dict to play the upgraded flow that
+    reports counts and per-card failures.
+    """
+    def _stub(url, payload, log, **kw):
+        sink.append(payload)
+        if not delivered:
+            return st.sdk.CardPost(
+                delivered=False, knows=False,
+                answer=st.sdk.FlowAnswer(ok=False, reason="unreachable"))
+        if answer is None:
+            return st.sdk.CardPost(
+                delivered=True, knows=False,
+                answer=st.sdk.FlowAnswer(ok=False, reason=reason or "no_answer"))
+        return st.sdk.CardPost(
+            delivered=True, knows=True,
+            answer=st.sdk.FlowAnswer(ok=ok, reached=True, data=answer),
+            created=answer.get("created"), skipped=answer.get("skipped"),
+            failed=answer.get("failed"))
+    return _stub
+
+
 def _stage(st, tmp_path, monkeypatch, settings=None, writes=None,
-           statuses=None, fail=""):
+           statuses=None, fail="", answer=None, ok=True, delivered=True,
+           reason=""):
     """Run the stage with the schedule + BATCH LISTs stubbed out, capturing
     the payload that would be POSTed. Returns (posted_payloads, log_lines)."""
     posted, lines = [], []
@@ -297,8 +323,9 @@ def _stage(st, tmp_path, monkeypatch, settings=None, writes=None,
                         lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
     monkeypatch.setattr(st, "_ledger_path",
                         lambda: tmp_path / "911_setup_posted_cards.json")
-    monkeypatch.setattr(st.sdk, "post_webhook",
-                        lambda url, payload, log: posted.append(payload) or True)
+    monkeypatch.setattr(st.sdk, "post_cards",
+                        _card_post(st, posted, delivered=delivered,
+                                   answer=answer, ok=ok, reason=reason))
     _stub_schedule_io(st, monkeypatch, writes if writes is not None else [],
                       statuses, fail)
     params = {"log": lines.append, "console": None,
@@ -327,21 +354,88 @@ def test_rerun_does_not_repost_what_it_already_created(st, tmp_path, monkeypatch
 
 
 def test_a_failed_post_stays_reofferable(st, tmp_path, monkeypatch):
-    """The ledger records a 2xx only -- a webhook failure must not make the
-    nest look done."""
-    monkeypatch.setattr(st, "_read_schedule_rows",
-                        lambda *a, **k: ([dict(r) for r in SCHEDULE], ""))
-    monkeypatch.setattr(st, "_read_batch_list_materials",
-                        lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
-    monkeypatch.setattr(st, "_ledger_path",
-                        lambda: tmp_path / "911_setup_posted_cards.json")
-    monkeypatch.setattr(st.sdk, "post_webhook", lambda url, payload, log: False)
-    st._run_teams_cards({"log": lambda m: None, "console": None, "settings": {}},
-                        lambda v: None, threading.Event(), "")
+    """The ledger records a post the flow actually took -- a failure must not
+    make the nest look done."""
+    posted, _ = _stage(st, tmp_path, monkeypatch, delivered=False)
+    assert len(posted[0]["tasks"]) == 1          # it did try
     assert st._load_posted_titles(lambda m: None) == set()
 
-    posted, _ = _stage(st, tmp_path, monkeypatch)
-    assert len(posted[0]["tasks"]) == 1      # re-offered on the next run
+    posted2, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted2[0]["tasks"]) == 1         # re-offered on the next run
+
+
+# ── what the flow ANSWERS (two-way, 2026-10-21) ─────────────────────────────
+# Until a flow has its Response action it reports nothing and everything above
+# holds unchanged. Once it answers, the ledger and the status belt follow what
+# it actually DID -- which is the whole point of Batch 488's fix.
+
+def test_a_flow_that_reports_a_failure_leaves_that_card_reofferable(
+        st, tmp_path, monkeypatch):
+    """The Batch 488 case, now visible: the post lands, the flow creates
+    nothing, and the nest must stay in the queue instead of being recorded as
+    carded."""
+    writes = []
+    title = "BATCH: V092 - NEST: 503836 (218004493)"
+    posted, lines = _stage(
+        st, tmp_path, monkeypatch, writes=writes,
+        answer={"created": 0, "failed": 1,
+                "failures": [f"{title} - label slot missing"],
+                "failed_titles": [title]})
+    assert len(posted[0]["tasks"]) == 1
+    assert st._load_posted_titles(lambda m: None) == set(), \
+        "a card the flow could not create must not be recorded"
+    assert writes == [], "its schedule row must not advance either"
+    assert "stay in the queue" in "\n".join(lines)
+
+    posted2, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted2[0]["tasks"]) == 1         # re-offered
+
+
+def test_a_flow_that_confirms_the_card_records_and_advances_it(
+        st, tmp_path, monkeypatch):
+    writes = []
+    posted, lines = _stage(st, tmp_path, monkeypatch, writes=writes,
+                           answer={"created": 1, "skipped": 0, "failed": 0})
+    assert len(posted[0]["tasks"]) == 1
+    assert st._load_posted_titles(lambda m: None) == {
+        "BATCH: V092 - NEST: 503836 (218004493)"}
+    assert writes == [(138, "NEED SETUP", "V092 503836")]
+    assert "1 card(s) created" in "\n".join(lines)
+
+
+def test_a_timed_out_post_records_nothing_and_stays_reofferable(
+        st, tmp_path, monkeypatch):
+    """The live card flow runs ~71 s against a 120 s answer window, so a post
+    that outlives it is realistic -- and the flow is still creating cards while
+    it happens. We do not know which exist, so record nothing: the flow
+    de-dupes by title, so the re-run creates no doubles and the ledger catches
+    up then. Guessing either way is how a nest silently vanishes."""
+    writes = []
+    posted, lines = _stage(st, tmp_path, monkeypatch, writes=writes,
+                           reason="timed_out")
+    assert len(posted[0]["tasks"]) == 1
+    assert st._load_posted_titles(lambda m: None) == set()
+    assert writes == []
+    blob = "\n".join(lines)
+    assert "may still be on their way" in blob
+    assert "offered again next run" in blob
+
+    posted2, _ = _stage(st, tmp_path, monkeypatch)
+    assert len(posted2[0]["tasks"]) == 1
+
+
+def test_a_declined_post_records_nothing_and_advances_nothing(
+        st, tmp_path, monkeypatch):
+    """`ok: false` is the flow deliberately saying no, so nothing was created.
+    It is NOT a transport failure, but it must leave the world untouched."""
+    writes = []
+    posted, lines = _stage(
+        st, tmp_path, monkeypatch, writes=writes, ok=False,
+        answer={"created": 0})
+    assert len(posted[0]["tasks"]) == 1
+    assert st._load_posted_titles(lambda m: None) == set()
+    assert writes == []
+    assert "NOT DONE" in "\n".join(lines)
 
 
 def test_ledger_survives_a_bom(st, tmp_path, monkeypatch):
@@ -389,16 +483,7 @@ def test_a_posted_card_advances_only_its_own_row(st, tmp_path, monkeypatch):
 
 def test_a_failed_post_never_advances_the_status(st, tmp_path, monkeypatch):
     writes = []
-    monkeypatch.setattr(st, "_read_schedule_rows",
-                        lambda *a, **k: ([dict(r) for r in SCHEDULE], ""))
-    monkeypatch.setattr(st, "_read_batch_list_materials",
-                        lambda root, batch, log: (MATERIALS.get(batch, {}), ""))
-    monkeypatch.setattr(st, "_ledger_path",
-                        lambda: tmp_path / "911_setup_posted_cards.json")
-    monkeypatch.setattr(st.sdk, "post_webhook", lambda url, payload, log: False)
-    _stub_schedule_io(st, monkeypatch, writes)
-    st._run_teams_cards({"log": lambda m: None, "console": None, "settings": {}},
-                        lambda v: None, threading.Event(), "")
+    _stage(st, tmp_path, monkeypatch, writes=writes, delivered=False)
     assert writes == []
 
 

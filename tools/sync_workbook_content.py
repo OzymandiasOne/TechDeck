@@ -272,6 +272,21 @@ ENGINEERING = [
      "a warning rather than passing quietly.",
      "922 forming and kitting; verified end to end against a live production "
      "batch."),
+    ("Oct 2026", "Shared-Routine Call Verification", "Quality",
+     "Where two tools do the same job they call one shared routine rather "
+     "than keeping a copy each, which is what keeps them agreeing on the "
+     "data. The weakness is the handover: because the connection is made "
+     "while a tool is running, changing the routine for one caller and not "
+     "the other was not detectable before release, and one such change "
+     "stopped a 922 batch preparation step for six days before an operator "
+     "diagnostic identified it. A new build check now reads every one of "
+     "these shared calls and refuses to package if a caller and the routine "
+     "it calls disagree.",
+     "Removes a class of failure that could only be found by an operator "
+     "hitting it in production. Twenty shared calls across five tools are "
+     "verified on every build.",
+     "Build-time check; covers every tool that shares a routine with "
+     "another."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -293,6 +308,35 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "Oct 20, 2026", "Feature",
+     "A floor-feedback release. 911 batch setup now collects each nest's "
+     "machine program files into a single folder per nest, instead of the "
+     "operator opening one work-order folder at a time across a batch; a "
+     "survey of every live batch found that one file name in six collides "
+     "with another, so the collection keeps both files rather than "
+     "overwriting, which the manual method could not guarantee. The same "
+     "tool no longer reports a complete run when a nest is absent from the "
+     "shared forecast: the three affected columns are highlighted and "
+     "annotated in the workbook itself with the nest, the date and the one "
+     "step to re-run, and the run closes as a warning - two batches had "
+     "reached the floor with silently blank columns and a clean result. "
+     "Packet preparation drops the near-empty continuation pages operators "
+     "were deleting by hand; the rule was graded against 394 real packets "
+     "first, where four of every five pages carrying that text turned out to "
+     "be genuine drawings that must be kept. Part-number recognition was "
+     "rebuilt from the part numbers on all 105 live batch lists (5,415 "
+     "values) and moved to a single shared definition, correcting pricing "
+     "consolidation rows that were falling back to a file name and sorting "
+     "to the wrong place. Reliability: 922 batch preparation could not "
+     "complete its parts-list and repeat-detection step, reported by an "
+     "operator diagnostic six days after the previous release; the cause was "
+     "a shared routine two tools call, changed for one caller only, and a "
+     "new build check now verifies every such shared call so the class "
+     "cannot recur. The same diagnostic also showed that a computer going to "
+     "sleep with the application open was being recorded as an application "
+     "freeze; it is now distinguished from one, so a genuine freeze is "
+     "visible in a report rather than buried among false entries.",
+     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride, 922 Setup"),
     ("Beta 0.8.7.9", "Oct 14, 2026", "Feature",
      "A planning and time-visibility release, built entirely from user "
      "requests. The personal work planner gains four capabilities operators "

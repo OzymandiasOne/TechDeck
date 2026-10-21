@@ -120,13 +120,16 @@ def _saved_theme(tmp_path, theme):
     assert doc["settings"]["theme"] == theme
 
 
+# get_STORED_theme, not get_theme: these are about the migration's effect on
+# the user's saved pick. get_theme() answers what the app is WEARING, which in
+# season is the seasonal theme, so it would hide the thing being tested.
 def test_retired_blue_theme_lands_on_dark(tmp_path):
     _saved_theme(tmp_path, "blue")
-    assert SettingsManager(settings_dir=tmp_path).get_theme() == "dark"
+    assert SettingsManager(settings_dir=tmp_path).get_stored_theme() == "dark"
 
 
 def test_custom_theme_named_blue_is_kept(tmp_path):
     _saved_theme(tmp_path, "blue")
     (tmp_path / "themes").mkdir(exist_ok=True)
     (tmp_path / "themes" / "blue.json").write_text("{}", encoding="utf-8")
-    assert SettingsManager(settings_dir=tmp_path).get_theme() == "blue"
+    assert SettingsManager(settings_dir=tmp_path).get_stored_theme() == "blue"

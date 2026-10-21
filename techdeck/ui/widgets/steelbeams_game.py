@@ -2437,12 +2437,34 @@ class SteelBeamsGame(QWidget):
                 self._timer.start()
 
     def _show_woog_dialog(self, pages):
-        """Pop the NES-style Woogy message box over the probe UI (no pause)."""
+        """Pop the NES-style Woogy message box over the probe UI, HOLDING the sim.
+
+        It used to run underneath. First contact starts the war and pops this
+        box in the same tick, so the armada was killing probes while the player
+        read the threat — one player read it, closed it, and was already on the
+        overrun screen without ever getting a turn (reported 2026-10-15). A box
+        the player must click through is an action they are being asked to take;
+        the sim waits for it, exactly as a responsive event modal does.
+        """
         box = getattr(self, "_woog_box", None)
         if box is None:
             return
-        box.show_pages(pages)
+        self._timer.stop()
+        box.show_pages(pages, on_close=self._resume_after_woog)
         self._position_woog_box()
+
+    def _resume_after_woog(self):
+        """Restart the sim when the Woogy box is dismissed.
+
+        Guarded on BOTH endings, because close_box() fires this from the
+        endgame paths too — and _fire_game_over stops the timer and then closes
+        the box, so an unguarded restart here would set it going again after
+        the lose screen was already up.
+        """
+        if self.endgame_done or self.game_over:
+            return
+        if not self._timer.isActive():
+            self._timer.start()
 
     def _position_woog_box(self):
         box = getattr(self, "_woog_box", None)

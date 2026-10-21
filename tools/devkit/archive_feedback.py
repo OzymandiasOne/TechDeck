@@ -31,7 +31,7 @@ import argparse
 import sys
 import time
 
-from tools.devkit.todo_board.model import telemetry_workbook_path
+from tools.devkit.todo_board.model import excel_com_path, telemetry_workbook_path
 
 WITHDRAWN_STATUS = "Withdrawn (resubmitting)"
 _XL_UP = -4162
@@ -68,7 +68,7 @@ def main(argv=None) -> int:
     xl.DisplayAlerts = False
     wb = None
     try:
-        wb = xl.Workbooks.Open(str(live), ReadOnly=not args.write, UpdateLinks=0)
+        wb = xl.Workbooks.Open(excel_com_path(live), ReadOnly=not args.write, UpdateLinks=0)
         fb, ar = wb.Worksheets("Feedback"), wb.Worksheets("Archive")
         table = fb.ListObjects("FeedbackTable")
         print(f"FeedbackTable: {table.Range.Address} ({table.ListRows.Count} rows)")

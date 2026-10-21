@@ -112,6 +112,7 @@ from __future__ import annotations
 
 import json
 import re
+import traceback
 from pathlib import Path
 
 # SDK bootstrap — works in-process (TechDeck/frozen exe) and standalone.
@@ -122,7 +123,7 @@ except ModuleNotFoundError:
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from techdeck.core import plugin_sdk as sdk
 
-VERSION = "2.8.1"
+VERSION = "2.9.0"
 
 # The 'TechDeck 922 Setup - Create Production Cards' Power Automate flow.
 # Baked in so a fresh install posts out of the box (same pattern as the
@@ -702,9 +703,10 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
 
     log("")
     log(f"Posting the {what} labels to the webhook...")
-    ok = sdk.post_webhook(url, payload, log)
+    result = sdk.post_cards(url, payload, log, what=f"{what} labels",
+                            params=params, subject="label")
     progress_callback(100)
-    if not ok:
+    if not result.delivered:
         _label_stage_problem(
             params,
             f"The {what}-label post failed - Batch {batch}'s cards were not "
@@ -712,8 +714,17 @@ def _post_label_pass(params: dict, progress_callback, cancel_event, key: str,
             popup=False)
         return False
 
-    log(f"DONE. Requested {what} labels for {len(cards)} card(s) in Batch "
-        f"{batch}. Check the D922 PIPELINE board in Teams to confirm.")
+    # A flow that answers tells us how many cards it actually labelled; one
+    # that does not yet gives today's "requested" wording.
+    log(f"{result.headline(len(cards), subject='label')} Batch {batch} - "
+        f"check the D922 PIPELINE board in Teams to confirm.")
+    if result.knows and not result.answer.ok:
+        _label_stage_problem(
+            params,
+            f"The {what}-label flow declined Batch {batch}'s post: "
+            f"{result.answer.message or 'no reason given'}",
+            popup=False)
+        return False
     if unlabelled:
         _label_stage_problem(
             params,
@@ -952,10 +963,12 @@ def _run_teams_setup(params: dict, progress_callback, cancel_event,
         return batch
 
     log("\nPosting cards to the webhook...")
-    ok = sdk.post_webhook(url, payload, log)
+    result = sdk.post_cards(url, payload, log, what="922 cards", params=params)
     progress_callback(100)
-    if ok:
-        log(f"\nDONE. Requested {len(cards)} card(s) for Batch {batch}.")
+    if result.delivered:
+        # The flow's own counts when it reports them, today's wording when it
+        # does not. Never a DONE line claiming more than the flow said.
+        log(f"\n{result.headline(len(cards))}")
         log("Check the D922 PIPELINE plan in Teams to confirm.")
         return batch
     log("\nFAILED — see the errors above. The payload was not created.")
@@ -1187,6 +1200,39 @@ def _run_folder_setup(params: dict, progress_callback, cancel_event,
 
 def _run_mpl_update(params: dict, progress_callback, cancel_event,
                     batch_path: Path, batch: str, shared_state: dict) -> bool:
+    """The stage below, with its "never raises" promise actually kept.
+
+    Every failure path INSIDE the stage warns loudly and returns False. What
+    got through was a failure the stage never anticipated: the Repeater's
+    borrowed helper had grown an argument (v2.8.2), the TypeError came out of
+    `run()`, and the batch lost its cards, its pallet stamps and its repeat
+    pull as well as its MPL column. A stage documented as non-blocking has to
+    be non-blocking for an unexpected exception too, so the one thing nobody
+    can foresee is the one thing that must still only warn.
+
+    PluginCancelled is a BaseException, so Cancel still gets through.
+    """
+    try:
+        return _mpl_update_stage(params, progress_callback, cancel_event,
+                                 batch_path, batch, shared_state)
+    except Exception as exc:
+        shared_state.setdefault("922", {})["mpl_update_done"] = False
+        _label_stage_problem(
+            params,
+            f"The MPL and repeat-detection step stopped on an unexpected "
+            f"error ({type(exc).__name__}: {exc}), so the MPL was not updated "
+            f"and repeats were not detected. The rest of the run carried on - "
+            f"cards will go up untagged, so run the Batch Repeater's 'Label "
+            f"REPEAT cards' pass afterwards. Please send a debug report.",
+            title="922 Setup - MPL + repeats")
+        log = params.get("log", print)
+        log("ERROR: MPL + repeats stopped on an unexpected error:")
+        log(traceback.format_exc())
+        return False
+
+
+def _mpl_update_stage(params: dict, progress_callback, cancel_event,
+                      batch_path: Path, batch: str, shared_state: dict) -> bool:
     """Update the 922 MPL (PO matrix column + MASTER PARTS catalog) and
     detect this batch's repeat orders. Results land in shared_state['922']:
 
@@ -1250,7 +1296,7 @@ def _run_mpl_update(params: dict, progress_callback, cancel_event,
         log("Updating the MPL from the batch's folders + PO workbook...")
         mpl_errors = rep._update_mpl_sheets(
             spreadsheet_path, rep.quote_path(base_path), int(batch),
-            batch_path, do_matrix, do_master, dry_run, log)
+            batch_path, do_matrix, do_master, dry_run, log, params)
         state["mpl_update_done"] = (mpl_errors == 0 and not dry_run)
     else:
         log("MPL updates switched OFF in the Batch Repeater's Settings.")

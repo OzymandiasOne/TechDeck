@@ -1,4 +1,4 @@
-# TechDeck v0.8.7.9 - The Assistant Update
+# TechDeck v0.8.8 - Cards That Tell The Truth
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,106 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.8 - Cards That Tell The Truth
+
+Most of this release came from the floor feedback of 2026-10-19.
+
+### 911 Setup gathers the NC files
+
+A new stage, selected by default, copies every NC file for the batch out of the DSTV
+folders into a new `Linear Inch Calcs\NC_DSTV` folder inside each nest folder. They sit
+one or two folders down and were copied one at a time by hand.
+
+The batch folder is spelled `DTSV FILES` on 68 of the 225 live batches, `DSTV FILES` on 4
+and `DSTV FILES-COMPLETE` on 4, so it is matched by what the name contains. The walk is
+recursive and the result is flat, which is what copying by hand produces.
+
+**Nothing is ever overwritten.** 126 of 697 real nest folders hold two NC files with the
+same name in different work-order folders, and 353 of those 380 pairs are genuinely
+different files - a flat copy that overwrote would have silently lost real parts. An
+identical file is skipped; a differing one is kept as `{work order}_{name}`. Both are
+counted in the log. The hand-made `DSTVs` folder beside it is never touched.
+
+Two details the requester confirmed before it shipped. **EB's file names are kept** -
+"we use changing it as a way to track work progress", so renaming them to the work
+order (the way the hand-made `DSTVs` folder does) would destroy that signal. **The
+yard remnant is left behind** - "we do not use that file for anything". That is
+matched on the FOLDER, not the file name: a survey of 60 live batches and 3,635 `.NC`
+files found 150 under a `yard` folder and the same 150 named `Rem. Sq..NC`, so the two
+rules pick identically today - but the folder is the structural fact, and a name rule
+could one day drop a real part whose name contains "rem". What is left behind is
+counted in the log.
+
+### 911 Setup marks a nest the forecast has not caught up with
+
+Two batches reached the floor with three blank columns on the nest sheet and a clean green
+run. Not a lookup bug: those nests were the newest in their batch and were not in the
+Working Forecast List yet. What was wrong is that nothing said so - the app warned in a
+console nobody reads and handed over the workbook anyway.
+
+The gap is now carried by the artefact. `NEST A4:C4` is filled yellow with a note on `A4`
+naming the nest, the sheet and the date, and saying to re-run with only **Nest Workbook
+Data** ticked once the forecast catches up. The run ends on a warning instead of a tick.
+The columns stay blank; nothing is guessed.
+
+### Teams cards report what really happened
+
+TechDeck logged DONE when the webhook *accepted* the message, not when the cards existed.
+On Batch 488 every run died inside the flow at 858 ms and the app reported a clean success
+for 35 cards that were never created.
+
+The 922 Setup card flow now answers, and the app reads the answer: how many cards it
+created, how many were already there, and anything it could not do. A flow that dies
+partway is reported as a failure instead of a success. 911 Teams Cards records only the
+cards the flow confirms, so a card that failed stays in the queue and is offered again
+next run rather than being written off as carded.
+
+This is the first thing built on the Power Automate Premium licence. The other four card
+flows still answer with nothing, which the app reports plainly ("Requested 31 card(s)")
+rather than as an error, so each can be upgraded on its own.
+
+**The card step now waits for the flow** - about a minute - instead of returning at once.
+A post that outlives the platform's 120-second answer window is reported as still working,
+never as a failure, because the flow is still creating the cards while it happens.
+
+### 922 Setup's MPL stage runs again
+
+"Fill Out MPL + Find Repeats" crashed on the first run of every batch in 0.8.7.9 and took
+the rest of the run with it, so the batch lost its Teams cards, its pallet stamps and its
+repeat pull as well as its MPL column. 922 Setup borrows that stage from 922 Batch
+Repeater; the Repeater's helper gained an argument and only its own call site moved with
+it. It shipped broken and stayed broken for six days.
+
+Two layers now. A build gate fails on a cross-plugin call whose signature does not match
+the sibling's, and the stage itself is wrapped so that any unexpected error becomes the
+loud warning its docstring has promised since v2.6.0 and the remaining stages still run.
+
+### 911 Remove Ticket drops the orphan operation pages
+
+Floor request: the extra pages carrying `8000 THE ER ON THIS OPERATION.....`. The phrase
+alone is not the test, and that is the whole ticket - graded on 394 real nest packets and
+19,159 pages, 243 carry the phrase and 195 of them are genuine PART SKETCH pages that
+simply list 8000 as a second operation. Deleting on the phrase would have thrown away four
+out of every five. The orphans are exactly the pages with no `PART:` field. Swept over the
+whole corpus: 48 orphans removed, 195 real sketch pages kept, 0 wrongly removed.
+
+### Fixes
+
+- **The seasonal theme reaches everyone.** Professional users were carved out of the
+  seasonal default silently, and the picker stocked itself from the same gate, so the one
+  control that could undo the state was hidden by it. Professional keeps its sober feature
+  set - the look changes, the crawlies stay away.
+- **A sleeping laptop is no longer reported as a hang.** The clock keeps counting through
+  sleep on Windows, so a machine that slept overnight woke to a stale heartbeat and the
+  watchdog dumped every thread. Twelve of the thirteen stack dumps in the first field debug
+  report to reach us were this, one of them 38,913s - 295KB of log, which is exactly where
+  a real hang goes to hide.
+- **911 Baked Beans Wild Ride** handles a DYPN that ends in a letter.
+- **ASA: The Video Game** - Woogy's message box holds the war instead of running under it,
+  and a random event can no longer drive your counts negative.
 
 ---
 
