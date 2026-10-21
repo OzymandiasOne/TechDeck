@@ -38,6 +38,25 @@ FLOW_CALLS = {"ask_flow", "flush_outbox", "post_webhook", "post_payload",
 LOOP_NODES = (ast.For, ast.AsyncFor, ast.While,
               ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
+# The delivery mechanism itself. These two files ARE the retry machinery, so
+# the loop is the point rather than the mistake - but the exemption is a
+# contract, not a hole, and `test_the_delivery_mechanism_stays_bounded` below
+# enforces the half that matters.
+#
+#   flow_client.py   loops over the envelopes in ONE queue, bounded by `limit`,
+#                    stopping on the first unreachable flow rather than
+#                    hammering it.
+#   outbox_pump.py   loops over the distinct command QUEUES, which cannot be
+#                    merged: each queue has its own flow address and its own
+#                    payload shape, so "send one call with the whole batch"
+#                    has no meaning across two different commands. It runs on
+#                    a daemon thread, once per launch, with a limit and a
+#                    timeout well below anything a user could feel.
+#
+# What is NOT exempt, and never will be: looping over WORK ITEMS. A call per
+# queued row is the Batch 488 mistake regardless of which file it sits in.
+DELIVERY_MECHANISM = {"flow_client.py", "outbox_pump.py"}
+
 
 def _python_files() -> list[Path]:
     files = sorted((ROOT / "plugins").rglob("run.py"))
@@ -61,10 +80,7 @@ def test_no_flow_call_happens_inside_a_loop():
     a job id -- never a call per item."""
     offenders = []
     for path in _python_files():
-        # The client's own outbox loop is the one legitimate place: it is the
-        # delivery mechanism, bounded by `limit`, and it stops on the first
-        # unreachable flow instead of hammering it.
-        if path.name == "flow_client.py":
+        if path.name in DELIVERY_MECHANISM:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
@@ -81,6 +97,47 @@ def test_no_flow_call_happens_inside_a_loop():
         "the platform cannot answer after 120 s: send ONE call with the whole "
         "batch and let the flow hand back a job id.\n  "
         + "\n  ".join(offenders))
+
+
+def test_the_delivery_mechanism_stays_bounded():
+    """E-FLOW-1, the other half. `outbox_pump` is exempt from the no-loop rule
+    because it IS the retry machinery - so the thing that actually protects the
+    user is its budget, and that budget is what this gate holds.
+
+    flow_client's own defaults are limit=25 at 20 s, which is 500 seconds of
+    frozen application if anyone ever calls a flush on the GUI thread. The pump
+    must never inherit those numbers, and must never grow into them later.
+    """
+    from techdeck.core import outbox_pump
+
+    worst_case_s = outbox_pump.PUMP_LIMIT * outbox_pump.PUMP_TIMEOUT_S
+    assert worst_case_s <= 60, (
+        f"The outbox pump's worst-case pass is now {worst_case_s:.0f}s "
+        f"({outbox_pump.PUMP_LIMIT} commands x {outbox_pump.PUMP_TIMEOUT_S}s). "
+        "A backlog is never urgent - it exists because the first attempt "
+        "already failed - so it drains over several launches instead of "
+        "holding one launch hostage. Lower the limit, not this gate.")
+    assert outbox_pump.PUMP_TIMEOUT_S < 120, (
+        "Past the platform's answer window there is nothing left to wait for.")
+
+
+def test_the_pump_is_actually_wired_up():
+    """The bug this whole module of work exists to fix: `flush_outbox` shipped
+    in v0.8.8 complete and tested, re-exported through the SDK, and called by
+    NOTHING. A queued command sat in a JSONL file forever, so "we'll send it
+    next time" was a promise the app could not keep.
+
+    An outbox with no pump is worse than no outbox, because it converts a loud
+    failure the user can retry into a silent one nobody ever learns about.
+    """
+    shell = (ROOT / "techdeck" / "ui" / "shell.py").read_text(encoding="utf-8")
+    assert "outbox_pump" in shell, (
+        "Nothing starts the outbox pump. Every queued command is now lost "
+        "silently - see LESSONS_LEARNED, 'an outbox with no pump'.")
+
+    pump = (ROOT / "techdeck" / "core" / "outbox_pump.py").read_text(encoding="utf-8")
+    assert "flush_outbox" in pump, (
+        "The pump no longer calls flush_outbox, so nothing empties the queue.")
 
 
 def test_no_plugin_posts_to_a_flow_on_its_own():

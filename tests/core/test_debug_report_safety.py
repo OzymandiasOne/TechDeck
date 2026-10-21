@@ -198,3 +198,18 @@ class TestOutboxSection:
         from techdeck.core import flow_client
         monkeypatch.setattr(flow_client, "flow_dir", lambda: tmp_path)
         assert "Nothing has ever been queued" in "\n".join(debug_report._collect_outbox())
+
+    def test_parked_commands_are_reported_loudly(self, tmp_path, monkeypatch):
+        """A parked command is already lost unless someone looks, and a
+        non-zero count here almost always means a build shipped with the flow
+        URL unset - which silently eats every submission on that machine."""
+        from techdeck.core import flow_client
+        monkeypatch.setattr(flow_client, "flow_dir", lambda: tmp_path)
+        dead = tmp_path / "dead_letter"
+        dead.mkdir()
+        (dead / "suggestion_create.jsonl").write_text(
+            '{"command": "suggestion_create"}\n', encoding="utf-8")
+        joined = "\n".join(debug_report._collect_outbox())
+        assert "UNDELIVERABLE" in joined
+        assert "suggestion_create" in joined
+        assert "1 parked" in joined

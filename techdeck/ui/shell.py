@@ -268,6 +268,14 @@ class MainWindow(QMainWindow):
         # (well after the fade-in so startup feel is untouched).
         QTimer.singleShot(4000, self._maybe_offer_debug_report)
 
+        # Deliver anything a previous session queued but could not send (a
+        # suggestion typed while the network was down, a crash report the
+        # flow never answered). Its own daemon thread, started late so it
+        # never competes with the fade-in, and silent unless it fails:
+        # the user was told "it will send itself next time", and this is the
+        # thing that makes that true.
+        QTimer.singleShot(6000, self._start_outbox_pump)
+
         # Startup fade-in. Window opens at opacity 0 so it is invisible behind
         # the splash subprocess while warmup_pages() runs. __main__.py calls
         # start_fadein() AFTER the splash closes, so the user sees a clean
@@ -1114,6 +1122,18 @@ class MainWindow(QMainWindow):
         dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
         dialog.exec()
     
+    def _start_outbox_pump(self):
+        """Drain the two-way flow outbox in the background, once per launch.
+
+        Guarded like every other startup extra: a queue that cannot be drained
+        is a thing to log, never a thing that stops TechDeck opening.
+        """
+        try:
+            from techdeck.core import outbox_pump
+            outbox_pump.start()
+        except Exception:
+            logger.exception("outbox pump failed to start")
+
     def _maybe_offer_debug_report(self):
         """If the PREVIOUS session ended dirty (killed / crashed / froze),
         offer to generate a debug report right now — the report is excellent

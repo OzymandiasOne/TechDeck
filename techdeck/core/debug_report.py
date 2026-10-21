@@ -392,22 +392,38 @@ def _collect_outbox() -> list[str]:
     colleague says they sent something that never arrived.
     """
     from techdeck.core import flow_client
+    lines: list[str] = []
+
     out_dir = flow_client.flow_dir() / "outbox"
-    if not out_dir.is_dir():
-        return ["Nothing has ever been queued (no outbox directory)."]
-    queues = sorted(p for p in out_dir.glob("*.jsonl"))
+    queues = sorted(out_dir.glob("*.jsonl")) if out_dir.is_dir() else []
     if not queues:
-        return ["Outbox is empty - everything queued has been delivered."]
-    lines = []
-    for path in queues:
-        command = path.stem
-        try:
-            depth = flow_client.outbox_depth(command)
-        except Exception as exc:
-            lines.append(f"  {command:34} [unreadable: {exc}]")
-            continue
-        note = "" if depth else "   (drained; file kept)"
-        lines.append(f"  {command:34} {depth:>4} waiting{note}")
+        lines.append("Outbox: nothing queued.")
+    else:
+        for path in queues:
+            command = path.stem
+            try:
+                depth = flow_client.outbox_depth(command)
+            except Exception as exc:
+                lines.append(f"  {command:34} [unreadable: {exc}]")
+                continue
+            note = "" if depth else "   (drained; file kept)"
+            lines.append(f"  {command:34} {depth:>4} waiting{note}")
+
+    # Parked commands matter MORE than waiting ones: a waiting command still
+    # has a future, a parked one is already lost unless someone looks. A
+    # non-zero count here almost always means a build shipped with the flow
+    # URL unset, which silently eats every submission on that machine.
+    dead_dir = flow_client.flow_dir() / "dead_letter"
+    parked = sorted(dead_dir.glob("*.jsonl")) if dead_dir.is_dir() else []
+    if parked:
+        lines.append("")
+        lines.append("UNDELIVERABLE (parked - no flow address was configured):")
+        for path in parked:
+            depth = flow_client.dead_letter_depth(path.stem)
+            if depth:
+                lines.append(f"  {path.stem:34} {depth:>4} parked")
+    if not out_dir.is_dir() and not parked:
+        return ["Nothing has ever been queued (no outbox directory)."]
     return lines
 
 
