@@ -59,11 +59,13 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
 ORGANIZER_GLOB = "*Pallet & Rod Organizer*.xlsx"
+TRACKER_FOLDER = "2 - Planning"
+TRACKER_GLOB = "*Material Use Tracker*.xlsx"
 INFO_SHEET = "PO Info Drop"
 SAW_PALLET = "SAW"
 YELLOW = "FFF4C2"           # the review highlight; matches the report's target
@@ -84,6 +86,92 @@ def _organizer(batch_path: Path, batch_no, log):
             "Set the batch up first, then run this again.")
     log(f"Organizer: {hits[0].name}")
     return hits[0]
+
+
+def _size_triple(text):
+    """A tube size as (side, side, wall) so two documents can be compared.
+
+    The tracker writes a square tube as `3.0 SQ X .25` and the organizer writes
+    the same one as `3.0 X 3.0 X 0.25 NOM`, so neither string matches the other
+    and the numbers are the only common ground. `SQ` with two numbers means the
+    side is repeated. Returns None when it cannot read three numbers out.
+    """
+    import re
+    t = str(text or "").upper()
+    nums = [float(n) for n in re.findall(r"\d*\.?\d+", t)]
+    if "SQ" in t and len(nums) == 2:
+        nums = [nums[0], nums[0], nums[1]]
+    if len(nums) < 3:
+        return None
+    return (round(nums[0], 3), round(nums[1], 3), round(nums[2], 3))
+
+
+def _tracker_order(root, batch_no, log):
+    """{serial: position} in the order the Material Use Tracker lists them.
+
+    The tracker carries one sheet per batch, named by the batch number, and its
+    rows are already grouped the way the floor reads them - pallet 1, then 2,
+    then 3, then SAW on its own. The cutting list's sheets come out in that
+    same order so the two documents can be read side by side (Anthony,
+    2026-10-26).
+
+    A missing tracker, a batch with no sheet yet, or a file somebody has open
+    is a NOTE and nothing more: the order falls back to TechDeck's own.
+    Read-only throughout - this is somebody's live planning workbook.
+    """
+    if root is None:
+        return {}
+    hits = [p for p in (Path(root) / TRACKER_FOLDER).glob(TRACKER_GLOB)
+            if not p.name.startswith("~$")]
+    if not hits:
+        log(f"No Material Use Tracker in '{TRACKER_FOLDER}' - sheets go in "
+            f"TechDeck's own order")
+        return {}
+    try:
+        wb = sdk.load_workbook_resilient(hits[0], read_only=True,
+                                         data_only=True, log=log)
+    except Exception as exc:
+        log(f"Could not read {hits[0].name} ({exc}) - sheets go in TechDeck's "
+            f"own order")
+        return {}
+    try:
+        sheet = next((n for n in sdk.visible_sheetnames(wb)
+                      if str(n).strip() == str(batch_no)), None)
+        if sheet is None:
+            log(f"{hits[0].name} has no sheet for batch {batch_no} yet - "
+                f"sheets go in TechDeck's own order")
+            return {}
+        ws = wb[sheet]
+        header_row, cols = sdk.find_header_row(ws, ["PALLET", "ITEM"])
+        if header_row is None:
+            log(f"No PALLET / ITEM header row on {hits[0].name} sheet "
+                f"'{sheet}' - sheets go in TechDeck's own order")
+            return {}
+        c_item = cols["ITEM"]
+        c_size = cols.get("SIZE")
+        order, n = {}, 0
+        for r in ws.iter_rows(min_row=header_row + 1, values_only=True):
+            def _v(c):
+                v = r[c - 1] if c and c - 1 < len(r) else None
+                return "" if v is None else str(v).strip()
+            # the serial comes back as a float on some rows (218012959.0), and
+            # the lower half of the sheet holds plate/rod tags, not serials
+            serial = _v(c_item).split(".")[0]
+            if not serial.isdigit() or serial in order:
+                continue
+            order[serial] = n
+            # the SIZE is the fallback: batch 505's tracker stocks 3.0 X 3.0 X
+            # 0.25 under item 218136140 while the PO calls it 218003095, and
+            # without this that material drops out of its pallet group
+            triple = _size_triple(_v(c_size))
+            if triple is not None:
+                order.setdefault(triple, n)
+            n += 1
+    finally:
+        wb.close()
+    log(f"Sheet order from {hits[0].name} sheet '{batch_no}' "
+        f"({len(order)} materials)")
+    return order
 
 
 def _read_tubes(path: Path, log):
@@ -232,6 +320,68 @@ def _pallet_of(serial, desc, pallet_map):
     return "UNKNOWN"
 
 
+def _group_materials(tubes, pallet_map, root_922, batch_no, log):
+    """-> [(serial, [tube, ...])], one entry per source material.
+
+    Two separate decisions, in this order, and the order matters:
+
+      1. The packet NAME (`2.3`, `SAW.1`) is worked out over TechDeck's own
+         ordering - SAW first, biggest tube first - because that is what matched
+         the hand-built `SAW.1`-`SAW.6` packets on batch 505. A name has to land
+         the same whoever builds it, so nothing downstream may rename a file.
+      2. The materials are THEN put in the Material Use Tracker's order, which
+         is how the floor reads them: pallet 1, then 2, then 3, then SAW. That
+         is the order the workbook's sheets and the report's groups come out in.
+    """
+    by_serial = {}
+    for t in tubes:
+        by_serial.setdefault(t["serial"], []).append(t)
+    materials = sorted(
+        by_serial.items(),
+        key=lambda kv: (kv[1][0]["pallet"] != SAW_PALLET,
+                        _size_key(kv[1][0]["desc"])))
+
+    # the packet number is the organizer's OWN number for that material. SAW
+    # counts as its own pallet here, so those are numbered fresh.
+    counters = {}
+    for _serial, entries in materials:
+        entries.sort(key=lambda e: -(e["length"] or 0))
+        pallet = entries[0]["pallet"]
+        hit = pallet_map.get(_norm_material(entries[0]["desc"]))
+        index = hit[1] if (hit and pallet != SAW_PALLET and hit[1]) else ""
+        if not index:
+            counters[pallet] = counters.get(pallet, 0) + 1
+            index = str(counters[pallet])
+        packet = f"{pallet}.{index}"
+        for e in entries:
+            e["packet"] = packet
+
+    tracker = _tracker_order(root_922, batch_no, log)
+    if tracker:
+        LAST = 10 ** 6
+
+        def _pos(serial, desc):
+            if serial in tracker:
+                return tracker[serial]
+            triple = _size_triple(desc)
+            return tracker.get(triple, LAST) if triple else LAST
+
+        materials.sort(key=lambda kv: _pos(kv[0], kv[1][0]["desc"]))
+        by_size, strays = [], []
+        for serial, entries in materials:
+            if serial in tracker:
+                continue
+            (strays if _pos(serial, entries[0]["desc"]) == LAST
+             else by_size).append(f"{serial} ({entries[0]['desc']})")
+        for s in by_size:
+            log(f"{s} is not on the tracker by item number - placed by its "
+                f"size instead")
+        if strays:
+            log(f"{len(strays)} source material(s) are not on the tracker "
+                f"sheet at all, so they come last: {', '.join(strays)}")
+    return materials
+
+
 # ───────────────────────────────────────────────────────────── the workbook
 
 def _guard_output(dest: Path):
@@ -277,13 +427,20 @@ def _write_workbook(dest: Path, materials, log):
 
 # ──────────────────────────────────────────────────────────────── the report
 
-def _write_report(dest: Path, batch_no, materials, log):
+def _write_report(dest: Path, batch_no, materials, no_sheet, log):
     """The colour-coded PDF, same shape as the LST Organizer's."""
     C = sdk.REPORT_COLORS
     flat = [e for _s, entries in materials for e in entries]
     review = [e for e in flat if e["review"] and e["length"] is not None]
     missing = [e for e in flat if e["length"] is None]
     unknown = [e for e in flat if e["pallet"] == "UNKNOWN"]
+    # a tube with no drawing at all is already listed under "no drawing found";
+    # these are the ones whose length IS good (read off an assembly sheet) but
+    # that have no single-tube page for a binder
+    _missing_parts = {e["part"] for e in missing}
+    no_print = sorted((e for e in no_sheet
+                       if e["part"] not in _missing_parts),
+                      key=lambda e: e["part"])
 
     d = sdk.ReportPdf()
     d.text(f"Production Packets - Batch {batch_no}", size=16, bold=True,
@@ -304,6 +461,9 @@ def _write_report(dest: Path, batch_no, materials, log):
         ("No drawing found", len(missing),
          C["miss_bg"] if missing else C["ok_bg"],
          C["miss_tx"] if missing else C["ok_tx"]),
+        ("No print of their own to bind", len(no_print),
+         C["extra_bg"] if no_print else C["ok_bg"],
+         C["extra_tx"] if no_print else C["ok_tx"]),
         ("Source material not recognised", len(unknown),
          C["miss_bg"] if unknown else C["ok_bg"],
          C["miss_tx"] if unknown else C["ok_tx"]),
@@ -324,6 +484,22 @@ def _write_report(dest: Path, batch_no, materials, log):
         for e in missing:
             d.row([e["part"], e["order"], e["desc"], e["packet"], ""], w5,
                   fill=C["miss_bg"], tcolor=C["miss_tx"])
+        d.gap(14)
+
+    if no_print:
+        d.text("No print of their own - not in a drawing binder", size=11,
+               bold=True, color=C["extra_tx"])
+        for line in ("The batch draws these tubes on an assembly sheet only, "
+                     "so the length is good",
+                     "but there is no single-tube page to bind. Their "
+                     "assembly sheet is in the saw cut",
+                     "packet; the laser binders are short by these parts."):
+            d.text(line, size=8, color=C["grey"])
+        d.header_row(["Part", "Length", "Material", "Pallet", "Read from"], w5)
+        for e in no_print:
+            d.row([e["part"], "-" if e["length"] is None else str(e["length"]),
+                   e["desc"], e["packet"], e["source"]], w5,
+                  fill=C["extra_bg"], tcolor=C["extra_tx"])
         d.gap(14)
 
     if review:
@@ -384,6 +560,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     log(f"922 Production Packets v{VERSION}")
 
+    root_922 = sdk.resolve_922_root(settings.get("base_path", ""))
     picked = sdk.request_922_batch_folder(params, settings.get("base_path", ""))
     if picked is None or cancel_event.is_set():
         return
@@ -430,29 +607,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         except Exception:
             pass
 
-    # group by source material, SAW packets first, then by tube size descending
-    by_serial = {}
-    for t in tubes:
-        by_serial.setdefault(t["serial"], []).append(t)
-    materials = sorted(
-        by_serial.items(),
-        key=lambda kv: (kv[1][0]["pallet"] != SAW_PALLET,
-                        _size_key(kv[1][0]["desc"])))
-    # the packet number is the organizer's OWN number for that material, so a
-    # packet file lands on the same name whoever builds it. SAW counts as its
-    # own pallet here, so those are numbered fresh.
-    counters = {}
-    for serial, entries in materials:
-        entries.sort(key=lambda e: -(e["length"] or 0))
-        pallet = entries[0]["pallet"]
-        hit = pallet_map.get(_norm_material(entries[0]["desc"]))
-        index = hit[1] if (hit and pallet != SAW_PALLET and hit[1]) else ""
-        if not index:
-            counters[pallet] = counters.get(pallet, 0) + 1
-            index = str(counters[pallet])
-        packet = f"{pallet}.{index}"
-        for e in entries:
-            e["packet"] = packet
+    materials = _group_materials(tubes, pallet_map, root_922, batch_no, log)
     progress_callback(80)
 
     out_dir = batch_path / f"Batch {batch_no} - Documentation" / PACKETS_FOLDER
@@ -461,10 +616,24 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # be compared side by side and a human sheet is never written over
     book = _write_workbook(
         out_dir / f"{batch_no} Tubes (TechDeck).xlsx", materials, log)
-    progress_callback(90)
+    progress_callback(85)
+
+    log("Binding the packet drawings...")
+    tube_parts = {t["part"] for t in tubes}
+    drawings = pk.survey(batch_path, tube_parts, log=log,
+                         cancel_event=cancel_event)
+    packets, no_sheet = pk.build(out_dir / PACKETS_SUBFOLDER, batch_no,
+                                 materials, drawings, log)
+    log(f"{len(packets)} packet PDF(s), "
+        f"{sum(n for _p, n in packets)} pages in total")
+    progress_callback(95)
+
+    # the report is written LAST on purpose: which tubes have no print of their
+    # own is only known once the binders have been built, and the report is
+    # where the reader goes looking for it
     report = _write_report(
         out_dir / f"Production Packets Report (TechDeck) - Batch {batch_no}.pdf",
-        batch_no, materials, log)
+        batch_no, materials, no_sheet, log)
     progress_callback(100)
 
     flagged = sum(1 for t in tubes if t["review"] and t["length"] is not None)
@@ -484,15 +653,6 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         sdk.set_run_outcome(
             params, sdk.RUN_OUTCOME_WARNING,
             f"{flagged + blank} tube(s) need a look - see the report")
-
-    log("Binding the packet drawings...")
-    tube_parts = {t["part"] for t in tubes}
-    drawings = pk.survey(batch_path, tube_parts, log=log,
-                         cancel_event=cancel_event)
-    packets, no_sheet = pk.build(out_dir / PACKETS_SUBFOLDER, batch_no,
-                                 materials, drawings, log)
-    log(f"{len(packets)} packet PDF(s), "
-        f"{sum(n for _p, n in packets)} pages in total")
 
     sdk.link_output(params, f"Open {book.name}", str(book), prefix="[CUT LIST]")
     sdk.link_output(params, "Open the Production Packets report", str(report),
