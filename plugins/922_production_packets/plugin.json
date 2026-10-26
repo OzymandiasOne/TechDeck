@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",
@@ -24,7 +24,8 @@
     "output": [
       "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after it, with the part name, its saw cut length and the quantity. No headers, ready to paste into the optimizer.",
       "Any row it wants you to check is highlighted yellow.",
-      "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, and the full cutting list."
+      "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, and the full cutting list.",
+      "A TechDeck Packets folder of bound drawings: one per saw cut material with the order number stamped on and the cut length highlighted, one per laser material, one of the drawings worth checking, and one holding every other drawing in the batch."
     ]
   },
   "settings": {

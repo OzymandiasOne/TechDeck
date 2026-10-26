@@ -52,9 +52,17 @@ assert _CL_SPEC is not None and _CL_SPEC.loader is not None
 cl = _ilu.module_from_spec(_CL_SPEC)
 _CL_SPEC.loader.exec_module(cl)
 
+_PK_SPEC = _ilu.spec_from_file_location(
+    'techdeck_922_packets',
+    Path(__file__).resolve().parent / 'packets.py')
+assert _PK_SPEC is not None and _PK_SPEC.loader is not None
+pk = _ilu.module_from_spec(_PK_SPEC)
+_PK_SPEC.loader.exec_module(pk)
+
 VERSION = "1.0.0"
 
 PACKETS_FOLDER = "Production Packets"
+PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
 ORGANIZER_GLOB = "*Pallet & Rod Organizer*.xlsx"
 INFO_SHEET = "PO Info Drop"
 SAW_PALLET = "SAW"
@@ -234,7 +242,7 @@ def _guard_output(dest: Path):
     carrying "(TechDeck)" in the name, and it never merges, renames or deletes
     anything that is already in there.
     """
-    if "(TechDeck)" not in dest.name:
+    if "(TechDeck)" not in dest.name and PACKETS_SUBFOLDER not in dest.parts:
         raise RuntimeError(
             f"refusing to write {dest.name} - this app only writes its own "
             f"'(TechDeck)' files into the Production Packets folder")
@@ -476,6 +484,15 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         sdk.set_run_outcome(
             params, sdk.RUN_OUTCOME_WARNING,
             f"{flagged + blank} tube(s) need a look - see the report")
+
+    log("Binding the packet drawings...")
+    tube_parts = {t["part"] for t in tubes}
+    drawings = pk.survey(batch_path, tube_parts, log=log,
+                         cancel_event=cancel_event)
+    packets, no_sheet = pk.build(out_dir / PACKETS_SUBFOLDER, batch_no,
+                                 materials, drawings, log)
+    log(f"{len(packets)} packet PDF(s), "
+        f"{sum(n for _p, n in packets)} pages in total")
 
     sdk.link_output(params, f"Open {book.name}", str(book), prefix="[CUT LIST]")
     sdk.link_output(params, "Open the Production Packets report", str(report),
