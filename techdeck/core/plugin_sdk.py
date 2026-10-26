@@ -1673,6 +1673,10 @@ STANDARD_TUBE_MATERIALS = {
 OVERSIZED_TUBE_MATERIALS = {
     '181361440', '218000414', '218001209', '218001975', '218002101',
     '218002191', '218002642', '218002778', '218004273', '218012555',
+    '218012959',   # 6.0 X 6.0 X 0.50 NOM - saw cut, never lasered (added
+                   # 2026-10-26; it was the ONLY tube serial on batches
+                   # 495-507 that no list claimed, so every caller read it
+                   # as "not a tube material")
     '218017859', '218018574', '218019943', '218020020', '218020119',
     '218026338', '218026500', '218032982',
 }

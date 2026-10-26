@@ -117,6 +117,13 @@ TOOL_SECTIONS = [
    "the correct order. Stages are chosen up front and the batch folder is "
    "picked once.",
    "Active", "0.8.6.4"),
+  ("922 Production Packets",
+   "Builds the tube cutting list a batch feeds into the cutting optimizer.",
+   "Reads every tube on the batch off the Pallet & Rod Organizer, groups them "
+   "by source material across the pallets, and reads each saw cut length "
+   "straight off the shop drawings. Lengths it is unsure about are filled in "
+   "and highlighted rather than left blank, and a report names them.",
+   "Active", "0.8.9"),
   ("922 Batch Repeater",
    "Copies repeat orders forward from prior 922 batches and maintains the "
    "parts catalog.",

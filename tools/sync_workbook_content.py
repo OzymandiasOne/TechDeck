@@ -1107,6 +1107,7 @@ GANTT_ROWS = [
     ("922 Difficulty Stamper", GANTT_DONE, 1, "2026-08", "2026-08"),
     ("922 Runtime Genie", GANTT_DONE, 1, "2026-04", "2026-05"),
     ("922 Master Parts Catalog", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("922 Production Packets", GANTT_DEV, 0.9, "2026-10", "2026-10"),
     ("Flat Bar Forming Support", GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "902 QTDR WORKFLOW"),
     ("902 DXF Prep", GANTT_DONE, 1, "2026-06", "2026-07"),

@@ -1,0 +1,52 @@
+{
+  "id": "922_production_packets",
+  "name": "922 Production Packets",
+  "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
+  "version": "1.0.0",
+  "author": "Anthony Sieben",
+  "family": "922",
+  "icon": "icon.png",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 1800,
+  "details": {
+    "setup": [
+      "The batch's PO H<batch> Pallet & Rod Organizer must be filled out - the pallets and source materials come straight off it.",
+      "The order folders need their shop prints. Lengths are read off the assembly drawing where a tube belongs to one, and off the tube's own sheet where it doesn't.",
+      "Nothing else. The app only reads; it writes one workbook and one report."
+    ],
+    "how_it_works": [
+      "You pick the Batch folder.",
+      "It reads every tube on the batch off the Pallet Organizer and groups them by source material, split across pallets 1, 2, 3 and SAW.",
+      "For each tube it finds the saw cut length: a 'SAW CUT' note or a dimension in parentheses is taken as printed, otherwise the assembly dimension plus 0.1 for each end that gets ground.",
+      "Where two tubes on one assembly are nearly the same length it still fills both in, in length order, and marks them for you to check."
+    ],
+    "output": [
+      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after it, with the part name, its saw cut length and the quantity. No headers, ready to paste into the optimizer.",
+      "Any row it wants you to check is highlighted yellow.",
+      "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, and the full cutting list."
+    ]
+  },
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "922 Root (optional)",
+        "description": "Leave blank to find the 922 QTDR Production Packages folder automatically.",
+        "placeholder": "C:\\Users\\YourName\\...\\922 QTDR Production Packages",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
+      }
+    ]
+  }
+}

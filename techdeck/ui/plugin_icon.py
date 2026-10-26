@@ -36,6 +36,7 @@ from techdeck.ui.theme import PIXEL_ICON_THEMES
 # uses "blueprint".
 PLUGIN_ICON_KEYS = {
     "922_setup":            "icons8-toolbox",
+    "922_production_packets": "shrek",
     "911_setup":            "microsoft_excel_2019",
     "911_teams_cards":      "sym_speech_bubble",
     "911_batch_repeater":   "repeat",
