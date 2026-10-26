@@ -18,6 +18,8 @@ Two rules this file exists to enforce:
     exec()ing, never comes back).
   * The native file dialogs are the exception and cannot use this. See
     `front_parent_for_native_dialog`.
+  * A popup TechDeck opens ON ITS OWN waits for the screen to be clear. See
+    `when_no_modal`.
 """
 
 from __future__ import annotations
@@ -105,3 +107,42 @@ def front_parent_for_native_dialog(parent: QWidget | None) -> None:
             alert(parent)
     except Exception as exc:                                  # pragma: no cover
         logger.warning("could not lift the native dialog's owner: %s", exc)
+
+
+def when_no_modal(callback, owner: QWidget | None = None,
+                  retry_ms: int = 750) -> None:
+    """Run `callback` once nothing modal is on screen.
+
+    Anything TechDeck pops up ON ITS OWN - the update offer, the crash-report
+    offer - must go through here. Two of them can come due in the same second
+    (the update check answers on a 3s timer, the crash-report offer fires on a
+    4s one). Both parent to the main window, so the newcomer is app-modal but
+    Windows stacks it BEHIND the dialog already showing: invisible, and eating
+    every click meant for the dialog the user CAN see. The app looks frozen and
+    is not - Esc is the only way out, and only if you know it is there.
+
+    Cost: 2026-10-26, an "exe is completely frozen" report that was two popups
+    deep. `bring_to_front` cannot help: both dialogs are topmost, so the one
+    that got there first still wins the stack.
+
+    NOT for a dialog the user just asked for by clicking something. That one is
+    a reply and belongs on top immediately.
+    """
+    from PySide6.QtCore import QTimer
+
+    def _attempt() -> None:
+        app = QApplication.instance()
+        if app is None:               # shutting down - drop it
+            return
+        if owner is not None:
+            try:
+                if not owner.isVisible():
+                    return            # window gone/hidden: nothing to open over
+            except RuntimeError:
+                return                # underlying C++ object already deleted
+        if app.activeModalWidget() is not None:
+            QTimer.singleShot(retry_ms, _attempt)
+            return
+        callback()
+
+    _attempt()
