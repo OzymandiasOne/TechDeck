@@ -3,8 +3,11 @@
 What it builds
 --------------
 `<batch> Tubes.xlsx` in the batch's `Production Packets` folder: one sheet per
-source material, named after the serial, three columns and no headers - part
-name, saw cut length, quantity - ready to paste into the 1D cutting optimizer.
+source material, named after its packet (`SAW.4`, `2.5`), carrying the material
+number, the batch and the pallet across the top and then part name, saw cut
+length and quantity - Carrie's formatting, lifted from the two sheets she
+marked up. A row worth a second look gets an arrow in the Problem? column,
+which brings up the X at the top of the sheet.
 Beside it, `Production Packets Report - Batch <n>.pdf`, which says where every
 length came from and which ones want a human eye.
 
@@ -59,7 +62,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -68,8 +71,24 @@ TRACKER_FOLDER = "2 - Planning"
 TRACKER_GLOB = "*Material Use Tracker*.xlsx"
 INFO_SHEET = "PO Info Drop"
 SAW_PALLET = "SAW"
-YELLOW = "FFF4C2"           # the review highlight; matches the report's target
 SWAMP_GREEN = "#4FD468"
+
+# Carrie's sheet formatting, lifted cell for cell from the sheets she marked up
+# ("GET THE FORMATTING FROM SHEETS SAW.4 AND 2.5", 2026-10-26). Her file uses
+# theme colours; these are the same shades written out, so a theme change on
+# somebody's machine cannot move them.
+SAW_TOP, SAW_BAND = "CCC1DA", "B3A2C7"        # accent4, tint .6 / .4 - purple
+LASER_TOP, LASER_BAND = "B7DEE8", "93CDDD"    # accent5, tint .6 / .4 - blue
+PROBLEM_FONT = "4F6228"                       # accent3 tint -.5 - dark olive
+X_FONT = "C00000"                             # the dark red of the X
+ARROW = chr(0x2192)                           # the arrow that marks a bad row
+# One X per sheet, not per row: the arrow says WHICH row, the X says this sheet
+# has something in it. It is a plain formula, not conditional formatting - the
+# only CF rule in Carrie's file is a broken one whose formula is the text
+# "IF(A5-A100=\"\")", which can never fire, so it is not reproduced.
+X_FORMULA = '=IF(COUNTA(A5:A100)>0,"X","")'
+COL_WIDTHS = {"A": 12.43, "B": 20.71, "C": 10.86, "D": 13.14, "E": 10.71}
+ROW_H, ROW_H_TALL = 20.1, 24.95
 
 
 # ───────────────────────────────────────────────────────────────── the batch
@@ -280,7 +299,7 @@ def _read_pallets(path: Path, log):
             for cell in row:
                 if isinstance(cell.value, str) and "MATERIAL REQUIRED" in                         cell.value.upper():
                     heads.append((cell.row, cell.column))
-        out = {}
+        out, order = {}, 0
         for r0, c0 in heads:
             pallet = None
             for r in range(r0 - 1, 0, -1):
@@ -295,10 +314,20 @@ def _read_pallets(path: Path, log):
                 desc = ws.cell(r, c0 + 1).value
                 if desc is None or not str(desc).strip():
                     continue
-                idx = ws.cell(r, c0).value
-                out.setdefault(_norm_material(desc), (pallet, str(idx or '').strip()))
+                text = str(desc).strip()
+                key = _norm_material(desc)
+                if key in out:
+                    continue
+                # the organizer's own item number is kept for the record, but it
+                # is NOT the packet number - see _packet_names
+                out[key] = {"pallet": pallet,
+                            "idx": str(ws.cell(r, c0).value or "").strip(),
+                            "order": order,
+                            "text": text,
+                            "saw": "SAW CUT" in text.upper()}
+                order += 1
         log(f"Pallet map: {len(out)} materials across "
-            f"{len({p for p, _i in out.values()})} pallets")
+            f"{len({e['pallet'] for e in out.values()})} pallets")
         return out
     finally:
         wb.close()
@@ -307,17 +336,40 @@ def _read_pallets(path: Path, log):
 def _pallet_of(serial, desc, pallet_map):
     """Which packet group a source material belongs to.
 
-    An oversized tube is saw cut, and SAW counts as its own pallet for this
-    process even though it rides on pallet 1. Everything else takes the pallet
-    number the organizer gave it. Anything neither knows is reported, never
+    The organizer decides: it writes "(SAW CUT)" after the materials that go to
+    the saw, and SAW counts as its own packet group for this process even though
+    those materials ride on pallet 1. Everything else takes the pallet number the
+    organizer gave it. `sdk.tube_class` is only the fallback for a material the
+    organizer does not list at all; anything neither knows is reported, never
     guessed at.
     """
-    if sdk.tube_class(serial) == "oversized":
-        return SAW_PALLET
     hit = pallet_map.get(_norm_material(desc))
     if hit:
-        return hit[0]
+        return SAW_PALLET if hit["saw"] else hit["pallet"]
+    if sdk.tube_class(serial) == "oversized":
+        return SAW_PALLET
     return "UNKNOWN"
+
+
+def _packet_names(pallet_map):
+    """{normalised material: packet name} - `SAW.1`, `1.1`, `2.3`.
+
+    Numbered FRESH per group, walking the organizer's MATERIAL REQUIRED list in
+    its own order: the saw cut materials become SAW.1, SAW.2 ... and the rest are
+    numbered within their own pallet.
+
+    The organizer's own item number is NOT the packet number, which cost a
+    wrong file name. Batch 505's pallet 1 lists seven materials - six saw cut,
+    and one laser one sitting at position 5 - and the hand-built packet for that
+    laser material is `1.1`, not `1.5`. Pallet 2 hid the bug, because every one
+    of its materials is laser so its item numbers and its packet numbers agree.
+    """
+    counters, out = {}, {}
+    for key, e in sorted(pallet_map.items(), key=lambda kv: kv[1]["order"]):
+        group = SAW_PALLET if e["saw"] else e["pallet"]
+        counters[group] = counters.get(group, 0) + 1
+        out[key] = f"{group}.{counters[group]}"
+    return out
 
 
 def _group_materials(tubes, pallet_map, root_922, batch_no, log):
@@ -341,20 +393,26 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
         key=lambda kv: (kv[1][0]["pallet"] != SAW_PALLET,
                         _size_key(kv[1][0]["desc"])))
 
-    # the packet number is the organizer's OWN number for that material. SAW
-    # counts as its own pallet here, so those are numbered fresh.
+    names = _packet_names(pallet_map)
+    taken = set(names.values())
     counters = {}
     for _serial, entries in materials:
         entries.sort(key=lambda e: -(e["length"] or 0))
         pallet = entries[0]["pallet"]
-        hit = pallet_map.get(_norm_material(entries[0]["desc"]))
-        index = hit[1] if (hit and pallet != SAW_PALLET and hit[1]) else ""
-        if not index:
+        key = _norm_material(entries[0]["desc"])
+        packet = names.get(key)
+        while packet is None:                  # not on the organizer at all
             counters[pallet] = counters.get(pallet, 0) + 1
-            index = str(counters[pallet])
-        packet = f"{pallet}.{index}"
+            candidate = f"{pallet}.{counters[pallet]}"
+            if candidate not in taken:
+                packet = candidate
+                taken.add(packet)
+        org = pallet_map.get(key)
         for e in entries:
             e["packet"] = packet
+            # rows 1 and 2 of the sheet are the organizer's own words
+            e["mat_text"] = org["text"] if org else f"HSS {e['desc']}"
+            e["org_pallet"] = org["pallet"] if org else pallet
 
     tracker = _tracker_order(root_922, batch_no, log)
     if tracker:
@@ -399,29 +457,114 @@ def _guard_output(dest: Path):
     return dest
 
 
-def _write_workbook(dest: Path, materials, log):
-    """One sheet per source material: part / length / qty, no headers.
+def _safe_sheet(name, used):
+    """A sheet name Excel will take, unique within the workbook."""
+    bad = set("[]:*?/" + chr(92))
+    title = "".join(ch for ch in str(name) if ch not in bad)[:31] or "Sheet"
+    base, n = title, 2
+    while title in used:
+        title = f"{base[:27]} ({n})"
+        n += 1
+    used.add(title)
+    return title
 
-    A row the reader was unsure about is filled in anyway and highlighted
-    yellow - a blank cell in a cutting list is worse than a flagged guess.
+
+def _write_workbook(dest: Path, batch_no, materials, log):
+    """One sheet per source material, formatted the way Carrie asked for.
+
+    The sheet is named after its PACKET (`SAW.4`, `2.5`) and the source material
+    number sits in A1, which is how she renamed the two sheets she marked up.
+    Rows 1 and 2 are the Pallet Organizer's own words - the material line is
+    copied from its MATERIAL REQUIRED entry, "(SAW CUT)" and all.
+
+    A row the reader was unsure about gets an ARROW in the Problem? column
+    instead of the yellow highlight we used before. The X in E1 then appears by
+    formula, so a sheet with anything to look at says so at the top.
     """
     from openpyxl import Workbook
-    from openpyxl.styles import PatternFill
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-    fill = PatternFill("solid", fgColor=YELLOW)
+    thin = Side(style="thin")
+    center = Alignment(horizontal="center", vertical="center")
+
     wb = Workbook()
     wb.remove(wb.active)
+    used = set()
+    flagged = 0
     for serial, entries in materials:
-        ws = wb.create_sheet(title=serial[:31])
-        for i, e in enumerate(entries, start=1):
-            ws.cell(i, 1, e["part"])
-            ws.cell(i, 2, e["length"])
-            ws.cell(i, 3, e["qty"])
-            if e["review"]:
-                for c in (1, 2, 3):
-                    ws.cell(i, c).fill = fill
-        ws.column_dimensions["A"].width = 24
+        saw = entries[0]["pallet"] == SAW_PALLET
+        top, band = ((SAW_TOP, SAW_BAND) if saw else (LASER_TOP, LASER_BAND))
+        ws = wb.create_sheet(_safe_sheet(entries[0]["packet"], used))
+        for col, width in COL_WIDTHS.items():
+            ws.column_dimensions[col].width = width
+
+        # row 1 - the material number, the batch, and the problem flag
+        ws.merge_cells("C1:D1")
+        ws["A1"] = int(serial) if str(serial).isdigit() else serial
+        ws["B1"] = "Electric Boat"
+        ws["C1"] = f"Batch {batch_no}: Pallet {entries[0]['org_pallet']}"
+        ws["E1"] = X_FORMULA
+        for c in "ABCDE":
+            cell = ws[f"{c}1"]
+            cell.fill = PatternFill("solid", fgColor=top)
+            cell.alignment = center
+            cell.font = Font(name="Calibri", size=12, color="000000")
+            cell.border = Border(top=thin, bottom=thin, right=thin,
+                                 left=None if c == "D" else thin)
+        ws["E1"].font = Font(name="Aharoni", size=18, bold=True, color=X_FONT)
+        ws.row_dimensions[1].height = ROW_H
+
+        # row 2 - the material exactly as the organizer writes it
+        ws.merge_cells("A2:E2")
+        ws["A2"] = entries[0]["mat_text"]
+        for c in "ABCDE":
+            cell = ws[f"{c}2"]
+            cell.fill = PatternFill("solid", fgColor=band)
+            cell.alignment = center
+            cell.font = Font(name="Calibri", size=14, bold=True,
+                             color="000000")
+            cell.border = Border(top=thin, bottom=thin,
+                                 left=thin if c == "A" else None,
+                                 right=thin if c == "E" else None)
+        ws.row_dimensions[2].height = ROW_H_TALL
+        ws.row_dimensions[3].height = ROW_H
+
+        # row 4 - the headers. The table is open on its left and right edges,
+        # the way hers is, so only the inner lines are drawn.
+        for c, text, size, color in (("A", "Problem?", 11, PROBLEM_FONT),
+                                     ("B", "Parts Id.", 14, None),
+                                     ("C", "Length", 14, None),
+                                     ("D", "Quantity", 14, None)):
+            cell = ws[f"{c}4"]
+            cell.value = text
+            cell.font = Font(name="Calibri", size=size, bold=True,
+                             color=color or "000000")
+            cell.alignment = center
+            cell.border = Border(bottom=thin,
+                                 left=thin if c in "BCD" else None,
+                                 right=thin if c in "ABC" else None)
+        ws.row_dimensions[4].height = ROW_H_TALL
+
+        # the parts
+        for i, e in enumerate(entries):
+            r = 5 + i
+            flag = bool(e["review"]) or e["length"] is None
+            flagged += int(flag)
+            cell = ws.cell(r, 1, ARROW if flag else None)
+            cell.font = Font(name="Calibri", size=14, bold=True)
+            cell.alignment = center
+            cell.border = Border(top=thin, right=thin, bottom=thin)
+            for col, value in ((2, e["part"]), (3, e["length"]), (4, e["qty"])):
+                cell = ws.cell(r, col, value)
+                cell.font = Font(name="Calibri", size=12, color="000000")
+                cell.alignment = center
+                cell.border = Border(top=thin, bottom=thin, left=thin,
+                                     right=thin if col < 4 else None)
+            ws.row_dimensions[r].height = ROW_H
+
     sdk.save_workbook(wb, _guard_output(dest), log=log)
+    if flagged:
+        log(f"{flagged} row(s) marked with an arrow in the Problem? column")
     return dest
 
 
@@ -615,7 +758,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # a separate file from the hand-built "<batch> Tubes.xlsx", so the two can
     # be compared side by side and a human sheet is never written over
     book = _write_workbook(
-        out_dir / f"{batch_no} Tubes (TechDeck).xlsx", materials, log)
+        out_dir / f"{batch_no} Tubes (TechDeck).xlsx", batch_no, materials, log)
     progress_callback(85)
 
     log("Binding the packet drawings...")

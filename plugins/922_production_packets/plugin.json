@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",
@@ -19,12 +19,13 @@
       "You pick the Batch folder.",
       "It reads every tube on the batch off the Pallet Organizer and groups them by source material, split across pallets 1, 2, 3 and SAW.",
       "For each tube it finds the saw cut length: a 'SAW CUT' note or a dimension in parentheses is taken as printed, otherwise the assembly dimension plus 0.1 for each end that gets ground.",
-      "Where two tubes on one assembly are nearly the same length it still fills both in, in length order, and marks them for you to check."
+      "Where two tubes on one assembly are nearly the same length it still fills both in, in length order, and marks them for you to check.",
+      "Rows 1 and 2 of every sheet are the Pallet Organizer's own words, so the material line reads exactly as it does there, SAW CUT and all."
     ],
     "output": [
-      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after it, with the part name, its saw cut length and the quantity. No headers, ready to paste into the optimizer.",
+      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after its packet (SAW.4, 2.5). The material number, the batch and the pallet run across the top, then the parts: Problem?, Parts Id., Length, Quantity.",
       "The sheets come out in the Material Use Tracker's order for that batch - pallet 1, then 2, then 3, then SAW - so you can read the two side by side.",
-      "Any row it wants you to check is highlighted yellow.",
+      "A row it wants you to check gets an arrow in the Problem? column, and that brings up the red X at the top of the sheet - so you can see which sheets need a look without opening them.",
       "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, which tubes have no print of their own to bind, and the full cutting list.",
       "A TechDeck Packets folder of bound drawings: one per saw cut material with the order number stamped on and the cut length highlighted, one per laser material, one of the drawings worth checking, and one holding every other drawing in the batch."
     ]
