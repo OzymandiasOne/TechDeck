@@ -9,7 +9,7 @@ Four sets, which together account for every drawing in the batch:
                               dimension highlighted. Matches the hand-built
                               packets in "THIS IS WHAT I WANT DRIVEWORKS TO
                               MAKE" page for page.
-  2. `<serial>.pdf`         - one per LASER source material. Individual tube
+  2. `<n.n>_<size>.pdf`     - one per LASER source material. Individual tube
                               sheets only, no assembly sheets, unstamped.
   3. `_Problem Drawings.pdf`- every drawing behind a flagged or blank length,
                               assembly sheets included.
@@ -34,8 +34,24 @@ except ModuleNotFoundError:                       # standalone / CLI testing
     from techdeck.core import plugin_sdk as sdk
 
 PART_RE = re.compile(r'^[A-Z]{1,2}\d{6,7}-[A-Z0-9]+-\d+[A-Z]?$')
+SIZE_RE = re.compile(r'(\d+(?:\.\d+)?)\s*X\s*(\d+(?:\.\d+)?)\s*X\s*(\d+(?:\.\d+)?)')
 STAMP_COLOR = (0.0, 0.42, 0.80)      # the blue the hand-stamped drawings use
 HIGHLIGHT = (1.0, 0.93, 0.30)        # the yellow over the saw cut dimension
+
+
+def _size_name(desc):
+    """A source material as Carrie names a packet file: `4.0 SQ X 0.25`.
+
+    Her packets spell a square tube `4.0 SQ X 0.25` and a rectangular one
+    `6.0 X 4.0 X 0.50`, and drop the `NOM`. The number tokens are reused exactly
+    as the organizer prints them (`0.50`, never `0.5`), which is what lands the
+    name on hers character for character.
+    """
+    m = SIZE_RE.search(str(desc or "").upper())
+    if m is None:
+        return str(desc or "").strip()
+    a, b, wall = m.groups()
+    return f"{a} SQ X {wall}" if a == b else f"{a} X {b} X {wall}"
 
 
 def _open(path):
@@ -211,8 +227,11 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
                 pages += _append(doc, sheet, e["order"], stamp=saw)
             if not pages:
                 continue
-            name = (f"{entries[0]['packet']}_{entries[0]['desc']}.pdf" if saw
-                    else f"{serial}.pdf")
+            # every packet is named the way Carrie's hand-built set is,
+            # saw and laser alike: `SAW.4_4.0 SQ X 0.375.pdf`, `2.1_4.0 SQ X
+            # 0.25.pdf` (Anthony, 2026-10-27)
+            name = (f"{entries[0]['packet']}_"
+                    f"{_size_name(entries[0]['desc'])}.pdf")
             dest = out_dir / _safe(name)
             doc.save(sdk.long_path(dest), garbage=3, deflate=True)
             written.append((dest, pages))
