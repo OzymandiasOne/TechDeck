@@ -154,3 +154,65 @@ def test_readable_means_it_names_a_part(pk):
     assert not pk._readable([])
     # a mixed document still counts - one usable page is enough
     assert pk._readable([(0, "other", []), (1, "tube", ["H900000-H1-4"])])
+
+
+# ──────────────────────────────── a wrong PO part number vs a missing print
+
+def test_a_mis_numbered_part_is_told_apart_from_a_missing_print(mod, tmp_path):
+    """Batch 507, verified against Carrie's own hand corrections 2026-10-30.
+
+    Her PO Info Drop has two assemblies' tube suffixes swapped: it says
+    `H7421762-H55` needs -5 and -8, while the batch carries sheets for -4, -6
+    and -10. She corrected it by hand to exactly -4, -6 and -10. So "no
+    individual drawing" was covering two different problems, and only one of
+    them is somebody's missing print.
+    """
+    prints = tmp_path / "ORD" / "CAD-AND-SHOP-PRINTS"
+    for name in ("H7421762-H55-2", "H7421762-H55-4", "H7421762-H55-6",
+                 "H7421762-H55-10", "H5222068-H12-2 PLT"):
+        d = prints / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.pdf").write_bytes(b"%PDF-1.4 not a real pdf")
+
+    # the PO's own roster: the two mis-numbered tubes, a missing-print one,
+    # and -2, which is a PLATE on this assembly and so must NOT be suggested
+    # as a tube number even though a sheet for it exists
+    all_parts = {"H7421762-H55-5", "H7421762-H55-8", "H7421762-H55-2",
+                 "H7212562-H780-12"}
+    no_sheet = [
+        {"part": "H7421762-H55-5", "desc": "6.0 X 6.0 X 0.50 NOM"},
+        {"part": "H7421762-H55-8", "desc": "6.0 X 6.0 X 0.50 NOM"},
+        {"part": "H7212562-H780-12", "desc": "5.0 X 5.0 X 0.50 NOM"}]
+
+    mod._diagnose_no_sheet(tmp_path, no_sheet, all_parts, lambda *_a: None)
+    by_part = {e["part"]: e for e in no_sheet}
+
+    wrong = by_part["H7421762-H55-5"]
+    assert wrong["why"] == "part number looks wrong"
+    # it names the three Carrie actually used, and nothing else - in
+    # particular not -2, the plate
+    assert wrong["suggest"] == ("H7421762-H55-4, H7421762-H55-6, "
+                                "H7421762-H55-10")
+    assert "H7421762-H55-2" not in wrong["suggest"]
+    assert by_part["H7421762-H55-8"]["suggest"] == wrong["suggest"]
+
+    absent = by_part["H7212562-H780-12"]
+    assert absent["why"] == "no print for this assembly at all"
+    assert absent["suggest"] == "", "nothing to suggest, somebody must look"
+
+
+def test_a_suffix_the_po_already_claims_is_not_suggested(mod, tmp_path):
+    """Only part numbers NO tube on the PO claims are a candidate - otherwise
+    every assembly would suggest its own siblings."""
+    prints = tmp_path / "ORD" / "CAD-AND-SHOP-PRINTS"
+    for name in ("H900000-H1-4", "H900000-H1-5"):
+        d = prints / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{name}.pdf").write_bytes(b"%PDF-1.4")
+
+    # -4 and -5 are both on the PO; -4 just has no readable sheet
+    all_parts = {"H900000-H1-4", "H900000-H1-5"}
+    no_sheet = [{"part": "H900000-H1-4", "desc": "2.0 X 2.0 X 0.188 NOM"}]
+    mod._diagnose_no_sheet(tmp_path, no_sheet, all_parts, lambda *_a: None)
+    assert no_sheet[0]["why"] == "no sheet for this part"
+    assert no_sheet[0]["suggest"] == ""

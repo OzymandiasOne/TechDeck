@@ -353,10 +353,11 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
             f"the binders as incomplete and say so")
 
     if no_sheet:
+        # a bare list here would repeat what `_diagnose_no_sheet` prints next,
+        # with less in it - it names each one AND says whether the part number
+        # looks wrong or the print is simply absent
         log(f"{len(no_sheet)} tube(s) have no individual drawing, so they are "
-            f"not in a binder:")
-        for e in no_sheet:
-            log(f"    {e['part']}  ({e['desc']})")
+            f"not in a binder")
     return written, no_sheet
 
 

@@ -69,7 +69,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -224,9 +224,11 @@ def _tracker_order(root, batch_no, log):
 def _read_tubes(path: Path, log):
     """Every TUBE on the batch, from the organizer's PO Info Drop.
 
-    Returns `(rows, skipped)` - `[{part, order, serial, desc, qty}]` and the
-    rows that were left behind although their SOURCE MATERIAL is a serial
-    `sdk.tube_class` knows as a tube.
+    Returns `(rows, skipped, all_parts)` - `[{part, order, serial, desc,
+    qty}]`, the rows left behind although their SOURCE MATERIAL is a serial
+    `sdk.tube_class` knows as a tube, and every part number on the sheet
+    whatever it is made of (`_diagnose_no_sheet` needs the plate and rod
+    numbers too).
 
     A row is a tube when it carries a Base Material - the organizer fills that
     column for tubes only, which is how the plate and rod lines are left
@@ -258,12 +260,17 @@ def _read_tubes(path: Path, log):
         c_qty = cols["QTY"]
         c_base = cols["BASE MATERIAL"]
 
-        rows, skipped, seen = [], [], set()
+        rows, skipped, seen, all_parts = [], [], set(), set()
         for r in ws.iter_rows(min_row=header_row + 1, values_only=True):
             def _v(c):
                 v = r[c - 1] if c - 1 < len(r) else None
                 return "" if v is None else str(v).strip()
             part, serial, base = _v(c_dypn), _v(c_src), _v(c_base)
+            if part:
+                # every part on the PO, plate and rod included - a part number
+                # the PO already uses is not a candidate for "this tube is
+                # probably mis-numbered" (see _diagnose_no_sheet)
+                all_parts.add(part.upper())
             if not part or not serial or not base:
                 # a row with a part number and a serial TechDeck knows as a
                 # tube, but no Base Material, is a tube that would vanish
@@ -294,7 +301,7 @@ def _read_tubes(path: Path, log):
             f"cutting list - fill that column in and run again:")
         for e in skipped:
             log(f"    {e['part']}  (material {e['serial']})")
-    return rows, skipped
+    return rows, skipped, all_parts
 
 
 def _size_key(desc):
@@ -477,6 +484,73 @@ def _packet_names(pallet_map):
         counters[group] = counters.get(group, 0) + 1
         out[(key, group)] = f"{group}.{counters[group]}"
     return out
+
+
+def _diagnose_no_sheet(batch_path: Path, no_sheet, all_parts, log):
+    """Say WHY a tube reached no binder - and name the part it probably is.
+
+    Two very different things were both reported as "no individual drawing":
+
+      * **the PO's part number is wrong.** Batch 507's PO Info Drop has the
+        tube suffixes of two assemblies swapped: it says `H7421762-H55` needs
+        -5 and -8 while the batch carries sheets for -4, -6 and -10, and says
+        `H7421762-H54` needs -4 and -10 while that one has -6 and -8. Carrie
+        corrected exactly that by hand (`-5`->`-4`, `-8`->`-6`, plus `-10`), so
+        the drawings are right and the paperwork is wrong. Detectable: the
+        assembly HAS sheets, just for suffixes no tube on the PO claims.
+      * **the prints are genuinely missing.** `H7212562-H780-12/13/14` and
+        `R6511964-H7-3A` have no sheet for their assembly at all, so there is
+        nothing to suggest and somebody has to go and find the print.
+
+    Annotates each entry with `why` and `suggest`, read-only, file NAMES only -
+    no PDF is opened.
+    """
+    import re
+    suf = re.compile(r"^(.+)-(\d+[A-Z]?)$")
+
+    sheets, claimed = {}, {}
+    for p in Path(batch_path).rglob("*.pdf"):
+        if "CAD-AND-SHOP-PRINTS" not in str(p).upper():
+            continue
+        m = suf.match(p.stem.upper())
+        if m:
+            sheets.setdefault(m.group(1), set()).add(m.group(2))
+    # EVERY part on the PO, plate and rod included: batch 507's
+    # `H7421762-H55-2` is a plate, so it is not a candidate tube number even
+    # though a sheet for it exists
+    for part in all_parts:
+        m = suf.match(str(part).upper())
+        if m:
+            claimed.setdefault(m.group(1), set()).add(m.group(2))
+
+    wrong, absent = [], []
+    for e in no_sheet:
+        m = suf.match(e["part"].upper())
+        stem = m.group(1) if m else e["part"].upper()
+        spare = sorted((sheets.get(stem) or set())
+                       - (claimed.get(stem) or set()),
+                       key=lambda s: (int(re.sub(r"\D", "", s) or 0), s))
+        if spare:
+            e["why"] = "part number looks wrong"
+            e["suggest"] = ", ".join(f"{stem}-{s}" for s in spare)
+            wrong.append(e)
+        else:
+            e["why"] = ("no print for this assembly at all"
+                        if not sheets.get(stem) else "no sheet for this part")
+            e["suggest"] = ""
+            absent.append(e)
+
+    if wrong:
+        log(f"{len(wrong)} tube(s) have no drawing, but their assembly DOES - "
+            f"the PO's part number is probably wrong:")
+        for e in wrong:
+            log(f"    {e['part']} -> the batch has {e['suggest']}")
+    if absent:
+        log(f"{len(absent)} tube(s) have no print anywhere in the batch - "
+            f"somebody has to find those:")
+        for e in absent:
+            log(f"    {e['part']}  ({e['desc']})")
+    return no_sheet
 
 
 def _group_materials(tubes, pallet_map, root_922, batch_no, log):
@@ -865,14 +939,15 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
                bold=True, color=C["extra_tx"])
         for line in ("The batch draws these tubes on an assembly sheet only, "
                      "so the length is good",
-                     "but there is no single-tube page to bind. Their "
-                     "assembly sheet is in the saw cut",
-                     "packet; the laser binders are short by these parts."):
+                     "but there is no single-tube page to bind. Where the "
+                     "assembly HAS sheets for part",
+                     "numbers the PO does not list, the PO's number is "
+                     "probably the wrong one."):
             d.text(line, size=8, color=C["grey"])
-        d.header_row(["Part", "Length", "Material", "Pallet", "Read from"], w5)
+        d.header_row(["Part", "Length", "Why", "The batch has", ""], w5)
         for e in no_print:
             d.row([e["part"], "-" if e["length"] is None else str(e["length"]),
-                   e["desc"], e["packet"], e["source"]], w5,
+                   e.get("why", ""), e.get("suggest", "") or "-", ""], w5,
                   fill=C["extra_bg"], tcolor=C["extra_tx"])
         d.gap(14)
 
@@ -991,7 +1066,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     progress_callback(5)
 
     organizer = _organizer(batch_path, batch_no, log)
-    tubes, skipped_rows = _read_tubes(organizer, log)
+    tubes, skipped_rows, all_parts = _read_tubes(organizer, log)
     pallet_map, order_pallets = _read_pallets(organizer, log)
     if not tubes:
         raise sdk.UserFacingError(
@@ -1048,6 +1123,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
                                  materials, drawings, log)
     log(f"{len(packets)} packet PDF(s), "
         f"{sum(n for _p, n in packets)} pages in total")
+    if no_sheet:
+        _diagnose_no_sheet(batch_path, no_sheet, all_parts, log)
     progress_callback(95)
 
     # the report is written LAST on purpose: which tubes have no print of their
@@ -1071,8 +1148,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             params,
             f"Fill in the saw cut length for {blank} tube(s) by hand in "
             f"{book.name}.",
-            "TechDeck found no drawing for them anywhere in the batch, so it "
-            "left those cells empty rather than guess. The report lists them.")
+            "TechDeck found no drawing it could match to those part numbers, "
+            "so it left the cells empty rather than guess. The report says "
+            "which of them look MIS-NUMBERED - the assembly has sheets under "
+            "part numbers the PO does not list - and which have no print in "
+            "the batch at all.")
     # A new material does NOT get a popup: the organizer placed it, so the
     # cutting list is right and nothing downstream acts on it wrongly - it is
     # the app working correctly, which is the wrong class for a dialog

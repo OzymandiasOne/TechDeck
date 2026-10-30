@@ -71,7 +71,7 @@ def test_a_tube_row_with_no_base_material_is_reported_not_dropped(mod,
         ("AA100", "H900000-H1-4", KNOWN_LASER, 1, "2.0 X 2.0 X 0.188 NOM"),
         ("AA100", "H900000-H2-4", KNOWN_LASER, 1, None),      # the hole
     ])
-    tubes, skipped = mod._read_tubes(path, lambda *_a: None)
+    tubes, skipped, _all = mod._read_tubes(path, lambda *_a: None)
     assert [t["part"] for t in tubes] == ["H900000-H1-4"]
     assert [(e["part"], e["serial"]) for e in skipped] == \
         [("H900000-H2-4", KNOWN_LASER)]
@@ -84,7 +84,7 @@ def test_a_plate_row_with_no_base_material_is_not_reported(mod, tmp_path):
         ("AA100", "H900000-H1-2", "262028653-11", 1, None),   # a plate
         ("AA100", "H900000-H1-3", "211031592", 1, None),      # a rod
     ])
-    tubes, skipped = mod._read_tubes(path, lambda *_a: None)
+    tubes, skipped, _all = mod._read_tubes(path, lambda *_a: None)
     assert len(tubes) == 1
     assert skipped == [], "a plate is not a dropped tube"
 
@@ -94,7 +94,7 @@ def test_a_serial_on_neither_sdk_list_is_flagged(mod, tmp_path):
         tmp_path,
         [("AA100", "H900000-H1-4", NEVER_SEEN, 1, "6.0 X 8.0 X 0.50 NOM")],
         materials=("HSS 6.0 X 8.0 X 0.50 NOM",))
-    tubes, _skipped = mod._read_tubes(path, lambda *_a: None)
+    tubes, _skipped, _all = mod._read_tubes(path, lambda *_a: None)
     pallet_map, orders = mod._read_pallets(path, lambda *_a: None)
     for t in tubes:
         t["length"], t["review"] = 10.0, False
@@ -113,7 +113,7 @@ def test_a_known_material_is_not_flagged(mod, tmp_path):
     path = _organizer(
         tmp_path,
         [("AA100", "H900000-H1-4", KNOWN_LASER, 1, "2.0 X 2.0 X 0.188 NOM")])
-    tubes, _skipped = mod._read_tubes(path, lambda *_a: None)
+    tubes, _skipped, _all = mod._read_tubes(path, lambda *_a: None)
     pallet_map, orders = mod._read_pallets(path, lambda *_a: None)
     for t in tubes:
         t["length"], t["review"] = 10.0, False
@@ -132,7 +132,7 @@ def test_a_material_the_organizer_does_not_list_is_flagged(mod, tmp_path):
         tmp_path,
         [("AA100", "H900000-H1-4", KNOWN_SAW, 1, "5.0 X 5.0 X 0.50 NOM")],
         materials=("HSS 2.0 X 2.0 X 0.188 NOM",))   # a DIFFERENT material
-    tubes, _skipped = mod._read_tubes(path, lambda *_a: None)
+    tubes, _skipped, _all = mod._read_tubes(path, lambda *_a: None)
     pallet_map, orders = mod._read_pallets(path, lambda *_a: None)
     for t in tubes:
         t["length"], t["review"] = 10.0, False
