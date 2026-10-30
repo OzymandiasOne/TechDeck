@@ -3,11 +3,17 @@
 What it builds
 --------------
 `<batch> Tubes.xlsx` in the batch's `Production Packets` folder: one sheet per
-source material, named after its packet (`SAW.4`, `2.5`), carrying the material
-number, the batch and the pallet across the top and then part name, saw cut
-length and quantity - Carrie's formatting, lifted from the two sheets she
-marked up. A row worth a second look gets an arrow in the Problem? column,
-which brings up the X at the top of the sheet.
+source material PER PALLET, named after its packet (`SAW.4`, `2.5`), carrying
+the material number, the batch and the pallet across the top and then part
+name, saw cut length and quantity - Carrie's formatting, lifted from the two
+sheets she marked up. A row worth a second look gets an arrow in the Problem?
+column, which brings up the X at the top of the sheet.
+
+A material whose parts fill one pallet and spill onto the next is listed twice
+(or three times) by the Pallet Organizer, and each listing gets its own sheet
+and its own binder - `1.3`, `2.3`, `3.1` for one size on batch 506. Which
+pallet a given tube sits on comes from its ORDER, which the organizer's top
+half files under exactly one pallet.
 Beside it, `Production Packets Report - Batch <n>.pdf`, which says where every
 length came from and which ones want a human eye.
 
@@ -62,7 +68,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -168,6 +174,7 @@ def _tracker_order(root, batch_no, log):
             return {}
         c_item = cols["ITEM"]
         c_size = cols.get("SIZE")
+        c_pallet = cols.get("PALLET")
         order, n = {}, 0
         for r in ws.iter_rows(min_row=header_row + 1, values_only=True):
             def _v(c):
@@ -176,15 +183,22 @@ def _tracker_order(root, batch_no, log):
             # the serial comes back as a float on some rows (218012959.0), and
             # the lower half of the sheet holds plate/rod tags, not serials
             serial = _v(c_item).split(".")[0]
-            if not serial.isdigit() or serial in order:
+            if not serial.isdigit():
                 continue
-            order[serial] = n
-            # the SIZE is the fallback: batch 505's tracker stocks 3.0 X 3.0 X
-            # 0.25 under item 218136140 while the PO calls it 218003095, and
-            # without this that material drops out of its pallet group
+            # the tracker lists a material once per PALLET it lands on, so the
+            # pallet is part of the key - otherwise a material split across
+            # pallets 2 and 3 gives both its sheets pallet 2's position
+            pallet = _v(c_pallet).upper().replace("PALLET", "").strip()
             triple = _size_triple(_v(c_size))
-            if triple is not None:
-                order.setdefault(triple, n)
+            for key in ((pallet, serial), serial,
+                        (pallet, triple) if triple else None,
+                        # the SIZE is the fallback: batch 505's tracker stocks
+                        # 3.0 X 3.0 X 0.25 under item 218136140 while the PO
+                        # calls it 218003095, and without this that material
+                        # drops out of its pallet group
+                        triple):
+                if key is not None:
+                    order.setdefault(key, n)
             n += 1
     finally:
         wb.close()
@@ -278,12 +292,27 @@ def _norm_material(text):
 
 
 def _read_pallets(path: Path, log):
-    """{normalised material: pallet number} from the Pallet Organizer sheet.
+    """Read both halves of the Pallet Organizer sheet.
 
-    The printed sheet's lower half lists the source materials each pallet
-    needs, numbered, under a 'MATERIAL REQUIRED' heading per pallet. Both the
-    heading and the 'PALLET n' title above it are found by TEXT, never by cell
-    address (Hard Rule 1) - the block moves as the batch's order count changes.
+    Returns `(pallet_map, order_pallets)`:
+
+      * `pallet_map` - `{normalised material: [entry, ...]}`, one entry per
+        pallet the material is listed under, in the organizer's own order.
+      * `order_pallets` - `{order number: pallet}` from the sheet's TOP half,
+        which is how a single tube is tied to a single pallet.
+
+    The lower half lists the source materials each pallet needs, numbered,
+    under a 'MATERIAL REQUIRED' heading per pallet; the upper half lists that
+    pallet's orders and the materials each one uses. The heading and the
+    'PALLET n' title above it are found by TEXT, never by cell address (Hard
+    Rule 1) - both blocks move as the batch's order count changes.
+
+    **A material is listed under every pallet that needs it.** When its parts
+    fill one pallet and spill onto the next, the organizer writes it out again
+    (Anthony, 2026-10-29) - 11 of the 19 batches on the drive do this, and
+    `2.0 X 2.0 X 0.188` is the usual one. Keeping only the first listing threw
+    whole pallets away: batch 506 reported "2 pallets" with three on the sheet.
+    So every listing is kept and each one becomes its own packet.
     """
     import re
     wb = sdk.load_workbook_resilient(path, read_only=False, data_only=True, log=log)
@@ -292,67 +321,97 @@ def _read_pallets(path: Path, log):
                       if n.strip().upper() == "PALLET ORGANIZER"), None)
         if sheet is None:
             log("WARNING: no 'Pallet Organizer' sheet - pallet numbers skipped")
-            return {}
+            return {}, {}
         ws = wb[sheet]
         heads = []
         for row in ws.iter_rows():
             for cell in row:
                 if isinstance(cell.value, str) and "MATERIAL REQUIRED" in                         cell.value.upper():
                     heads.append((cell.row, cell.column))
-        out, order = {}, 0
+        out, order_pallets, order = {}, {}, 0
         for r0, c0 in heads:
-            pallet = None
+            pallet, title_row = None, None
             for r in range(r0 - 1, 0, -1):
                 v = ws.cell(r, c0).value
                 m = re.search(r"PALLET\s*(\d+)", str(v or "").upper())
                 if m:
                     pallet = m.group(1)
+                    title_row = r
                     break
-            if pallet is None:
+            if pallet is None or title_row is None:
                 continue
+            # the TOP half: this pallet's order numbers, in the same column as
+            # its title, between the title and the MATERIAL REQUIRED heading
+            for r in range(title_row + 1, r0):
+                v = ws.cell(r, c0).value
+                num = str(v or "").strip()
+                if num and not num.replace(".", "", 1).isdigit():
+                    order_pallets.setdefault(num.upper(), pallet)
             for r in range(r0 + 1, r0 + 40):
                 desc = ws.cell(r, c0 + 1).value
                 if desc is None or not str(desc).strip():
                     continue
                 text = str(desc).strip()
                 key = _norm_material(desc)
-                if key in out:
-                    continue
+                seen = out.setdefault(key, [])
+                if any(e["pallet"] == pallet for e in seen):
+                    continue              # the same material twice on one pallet
                 # the organizer's own item number is kept for the record, but it
                 # is NOT the packet number - see _packet_names
-                out[key] = {"pallet": pallet,
-                            "idx": str(ws.cell(r, c0).value or "").strip(),
-                            "order": order,
-                            "text": text,
-                            "saw": "SAW CUT" in text.upper()}
+                seen.append({"pallet": pallet,
+                             "idx": str(ws.cell(r, c0).value or "").strip(),
+                             "order": order,
+                             "text": text,
+                             "saw": "SAW CUT" in text.upper()})
                 order += 1
-        log(f"Pallet map: {len(out)} materials across "
-            f"{len({e['pallet'] for e in out.values()})} pallets")
-        return out
+        pallets = {e["pallet"] for v in out.values() for e in v}
+        log(f"Pallet map: {len(out)} materials across {len(pallets)} pallets, "
+            f"{len(order_pallets)} orders")
+        for key, entries in sorted(out.items(),
+                                   key=lambda kv: kv[1][0]["order"]):
+            if len(entries) > 1:
+                log(f"{key} fills more than one pallet "
+                    f"({', '.join(e['pallet'] for e in entries)}) - it gets a "
+                    f"sheet and a packet per pallet")
+        return out, order_pallets
     finally:
         wb.close()
 
 
-def _pallet_of(serial, desc, pallet_map):
-    """Which packet group a source material belongs to.
+def _pallet_of(serial, desc, pallet_map, order_pallets=None, order=""):
+    """Which packet group ONE TUBE belongs to.
 
     The organizer decides: it writes "(SAW CUT)" after the materials that go to
     the saw, and SAW counts as its own packet group for this process even though
-    those materials ride on pallet 1. Everything else takes the pallet number the
-    organizer gave it. `sdk.tube_class` is only the fallback for a material the
-    organizer does not list at all; anything neither knows is reported, never
-    guessed at.
+    those materials ride on pallet 1. A saw material is therefore never split,
+    however many pallets it is listed under.
+
+    Everything else takes the pallet number the organizer gave it. Where the
+    material is listed under SEVERAL pallets its parts are split between them,
+    and the tube's own ORDER says which one it is on: the sheet's top half
+    files every order under exactly one pallet. On batch 506 all 36 orders
+    matched, so this is the organizer's own answer, not a guess.
+
+    `sdk.tube_class` is only the fallback for a material the organizer does not
+    list at all; anything neither knows is reported, never guessed at.
     """
-    hit = pallet_map.get(_norm_material(desc))
-    if hit:
-        return SAW_PALLET if hit["saw"] else hit["pallet"]
+    hits = pallet_map.get(_norm_material(desc)) or []
+    if hits:
+        if any(e["saw"] for e in hits):
+            return SAW_PALLET
+        pallets = [e["pallet"] for e in hits]
+        if len(pallets) > 1:
+            mine = (order_pallets or {}).get(str(order or "").strip().upper())
+            if mine in pallets:
+                return mine
+        return pallets[0]
     if sdk.tube_class(serial) == "oversized":
         return SAW_PALLET
     return "UNKNOWN"
 
 
 def _packet_names(pallet_map):
-    """{normalised material: packet name} - `SAW.1`, `1.1`, `2.3`.
+    """{(normalised material, group): packet name} - `SAW.1`, `1.1`, `2.3`.
 
     Numbered FRESH per group, walking the organizer's MATERIAL REQUIRED list in
     its own order: the saw cut materials become SAW.1, SAW.2 ... and the rest are
@@ -363,12 +422,20 @@ def _packet_names(pallet_map):
     and one laser one sitting at position 5 - and the hand-built packet for that
     laser material is `1.1`, not `1.5`. Pallet 2 hid the bug, because every one
     of its materials is laser so its item numbers and its packet numbers agree.
+
+    A material listed under several pallets earns a name on EACH of them, which
+    is why the key carries the group: batch 506's `2.0 X 2.0 X 0.188` is `1.3`,
+    `2.3` and `3.1`. A SAW material is one group however many pallets list it,
+    so it is numbered once.
     """
+    flat = [(key, e) for key, entries in pallet_map.items() for e in entries]
     counters, out = {}, {}
-    for key, e in sorted(pallet_map.items(), key=lambda kv: kv[1]["order"]):
+    for key, e in sorted(flat, key=lambda kv: kv[1]["order"]):
         group = SAW_PALLET if e["saw"] else e["pallet"]
+        if (key, group) in out:
+            continue
         counters[group] = counters.get(group, 0) + 1
-        out[key] = f"{group}.{counters[group]}"
+        out[(key, group)] = f"{group}.{counters[group]}"
     return out
 
 
@@ -385,13 +452,17 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
          is how the floor reads them: pallet 1, then 2, then 3, then SAW. That
          is the order the workbook's sheets and the report's groups come out in.
     """
-    by_serial = {}
+    # one group per (source material, pallet): a material whose parts spill
+    # onto the next pallet is listed again by the organizer and gets its own
+    # sheet and its own binder for each (Anthony, 2026-10-29)
+    by_group = {}
     for t in tubes:
-        by_serial.setdefault(t["serial"], []).append(t)
-    materials = sorted(
-        by_serial.items(),
-        key=lambda kv: (kv[1][0]["pallet"] != SAW_PALLET,
-                        _size_key(kv[1][0]["desc"])))
+        by_group.setdefault((t["serial"], t["pallet"]), []).append(t)
+    groups = sorted(
+        by_group.values(),
+        key=lambda v: (v[0]["pallet"] != SAW_PALLET,
+                       _size_key(v[0]["desc"]), v[0]["pallet"]))
+    materials = [(v[0]["serial"], v) for v in groups]
 
     names = _packet_names(pallet_map)
     taken = set(names.values())
@@ -400,14 +471,17 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
         entries.sort(key=lambda e: -(e["length"] or 0))
         pallet = entries[0]["pallet"]
         key = _norm_material(entries[0]["desc"])
-        packet = names.get(key)
+        packet = names.get((key, pallet))
         while packet is None:                  # not on the organizer at all
             counters[pallet] = counters.get(pallet, 0) + 1
             candidate = f"{pallet}.{counters[pallet]}"
             if candidate not in taken:
                 packet = candidate
                 taken.add(packet)
-        org = pallet_map.get(key)
+        hits = pallet_map.get(key) or []
+        org = next((e for e in hits
+                    if (SAW_PALLET if e["saw"] else e["pallet"]) == pallet),
+                   hits[0] if hits else None)
         for e in entries:
             e["packet"] = packet
             # rows 1 and 2 of the sheet are the organizer's own words
@@ -418,19 +492,32 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
     if tracker:
         LAST = 10 ** 6
 
-        def _pos(serial, desc):
-            if serial in tracker:
-                return tracker[serial]
+        def _pos(serial, desc, pallet):
             triple = _size_triple(desc)
-            return tracker.get(triple, LAST) if triple else LAST
+            for key in ((pallet, serial), serial,
+                        (pallet, triple) if triple else None, triple):
+                if key is not None and key in tracker:
+                    return tracker[key]
+            return LAST
 
-        materials.sort(key=lambda kv: _pos(kv[0], kv[1][0]["desc"]))
-        by_size, strays = [], []
+        materials.sort(key=lambda kv: _pos(kv[0], kv[1][0]["desc"],
+                                           kv[1][0]["pallet"]))
+        by_size, by_serial, strays = [], [], []
         for serial, entries in materials:
-            if serial in tracker:
+            pallet = entries[0]["pallet"]
+            if (pallet, serial) in tracker:
                 continue
-            (strays if _pos(serial, entries[0]["desc"]) == LAST
-             else by_size).append(f"{serial} ({entries[0]['desc']})")
+            label = f"{serial} ({entries[0]['desc']}) on pallet {pallet}"
+            if serial in tracker:
+                by_serial.append(label)
+            elif _pos(serial, entries[0]["desc"], pallet) == LAST:
+                strays.append(label)
+            else:
+                by_size.append(label)
+        for s in by_serial:
+            log(f"{s} is not a row on the tracker - the organizer says that "
+                f"pallet needs it, so its sheet follows the material's other "
+                f"tracker row")
         for s in by_size:
             log(f"{s} is not on the tracker by item number - placed by its "
                 f"size instead")
@@ -470,7 +557,7 @@ def _safe_sheet(name, used):
 
 
 def _write_workbook(dest: Path, batch_no, materials, log):
-    """One sheet per source material, formatted the way Carrie asked for.
+    """One sheet per source material per pallet, formatted the way Carrie asked.
 
     The sheet is named after its PACKET (`SAW.4`, `2.5`) and the source material
     number sits in A1, which is how she renamed the two sheets she marked up.
@@ -596,7 +683,10 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, log):
     d.header_row(["Batch summary", "Count"], w2)
     rows = [
         ("Tubes on the batch", len(flat), None, None),
-        ("Source materials", len(materials), None, None),
+        ("Source materials", len({e["serial"] for e in flat}), None, None),
+        # a material whose parts spill onto the next pallet is cut and bound
+        # per pallet, so there are more sheets than materials
+        ("Cutting list sheets", len(materials), None, None),
         ("Lengths read from a drawing", len(flat) - len(missing), None, None),
         ("Needs a look before you cut", len(review),
          C["rev_bg"] if review else C["ok_bg"],
@@ -714,7 +804,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     organizer = _organizer(batch_path, batch_no, log)
     tubes = _read_tubes(organizer, log)
-    pallet_map = _read_pallets(organizer, log)
+    pallet_map, order_pallets = _read_pallets(organizer, log)
     if not tubes:
         raise sdk.UserFacingError(
             f"Batch {batch_no}'s organizer lists no tubes.",
@@ -742,7 +832,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             t["length"] = length
             t["source"] = source
             t["review"] = bool(review)
-            t["pallet"] = _pallet_of(t["serial"], t["desc"], pallet_map)
+            t["pallet"] = _pallet_of(t["serial"], t["desc"], pallet_map,
+                                     order_pallets, t["order"])
             progress_callback(12 + int(63 * (i + 1) / len(tubes)))
     finally:
         try:
@@ -781,7 +872,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     flagged = sum(1 for t in tubes if t["review"] and t["length"] is not None)
     blank = sum(1 for t in tubes if t["length"] is None)
-    log(f"{len(tubes)} tubes across {len(materials)} source materials")
+    log(f"{len(tubes)} tubes across "
+        f"{len({t['serial'] for t in tubes})} source materials, "
+        f"{len(materials)} sheet(s)")
     if flagged:
         log(f"{flagged} highlighted yellow - check those before you cut")
     if blank:
