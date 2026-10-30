@@ -5,9 +5,10 @@ What it builds
 `<batch> Tubes.xlsx` in the batch's `Production Packets` folder: one sheet per
 source material PER PALLET, named after its packet (`SAW.4`, `2.5`), carrying
 the material number, the batch and the pallet across the top and then part
-name, saw cut length and quantity - Carrie's formatting, lifted from the two
-sheets she marked up. A row worth a second look gets an arrow in the Problem?
-column, which brings up the X at the top of the sheet.
+name, saw cut length, quantity and the order it came in on - Carrie's
+formatting, lifted from the two sheets she marked up. A row worth a second look
+gets an arrow in the Problem? column, which brings up the X at the top of the
+sheet.
 
 A material whose parts fill one pallet and spill onto the next is listed twice
 (or three times) by the Pallet Organizer, and each listing gets its own sheet
@@ -68,7 +69,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -93,7 +94,14 @@ ARROW = chr(0x2192)                           # the arrow that marks a bad row
 # only CF rule in Carrie's file is a broken one whose formula is the text
 # "IF(A5-A100=\"\")", which can never fire, so it is not reproduced.
 X_FORMULA = '=IF(COUNTA(A5:A100)>0,"X","")'
-COL_WIDTHS = {"A": 12.43, "B": 20.71, "C": 10.86, "D": 13.14, "E": 10.71}
+# E is the Order column, added after Quantity so Carrie's Parts Id. / Length /
+# Quantity stay in the columns she put them in (Anthony, 2026-10-30). The X
+# moves along to F, keeping it at the end of the table.
+COL_WIDTHS = {"A": 12.43, "B": 20.71, "C": 10.86, "D": 13.14, "E": 13.14,
+              "F": 10.71}
+X_CELL = "F1"
+LAST_COL = "F"
+DATA_COLS = "ABCDE"
 ROW_H, ROW_H_TALL = 20.1, 24.95
 
 
@@ -564,8 +572,12 @@ def _write_workbook(dest: Path, batch_no, materials, log):
     Rows 1 and 2 are the Pallet Organizer's own words - the material line is
     copied from its MATERIAL REQUIRED entry, "(SAW CUT)" and all.
 
+    Columns are Problem?, Parts Id., Length, Quantity, Order - the order number
+    each part came in on (Anthony, 2026-10-30), added after Quantity so the
+    three columns Carrie laid out stay where she put them.
+
     A row the reader was unsure about gets an ARROW in the Problem? column
-    instead of the yellow highlight we used before. The X in E1 then appears by
+    instead of the yellow highlight we used before. The X in F1 then appears by
     formula, so a sheet with anything to look at says so at the top.
     """
     from openpyxl import Workbook
@@ -590,21 +602,22 @@ def _write_workbook(dest: Path, batch_no, materials, log):
         ws["A1"] = int(serial) if str(serial).isdigit() else serial
         ws["B1"] = "Electric Boat"
         ws["C1"] = f"Batch {batch_no}: Pallet {entries[0]['org_pallet']}"
-        ws["E1"] = X_FORMULA
-        for c in "ABCDE":
+        ws[X_CELL] = X_FORMULA
+        for c in COL_WIDTHS:
             cell = ws[f"{c}1"]
             cell.fill = PatternFill("solid", fgColor=top)
             cell.alignment = center
             cell.font = Font(name="Calibri", size=12, color="000000")
             cell.border = Border(top=thin, bottom=thin, right=thin,
                                  left=None if c == "D" else thin)
-        ws["E1"].font = Font(name="Aharoni", size=18, bold=True, color=X_FONT)
+        ws[X_CELL].font = Font(name="Aharoni", size=18, bold=True,
+                               color=X_FONT)
         ws.row_dimensions[1].height = ROW_H
 
         # row 2 - the material exactly as the organizer writes it
-        ws.merge_cells("A2:E2")
+        ws.merge_cells(f"A2:{LAST_COL}2")
         ws["A2"] = entries[0]["mat_text"]
-        for c in "ABCDE":
+        for c in COL_WIDTHS:
             cell = ws[f"{c}2"]
             cell.fill = PatternFill("solid", fgColor=band)
             cell.alignment = center
@@ -612,7 +625,7 @@ def _write_workbook(dest: Path, batch_no, materials, log):
                              color="000000")
             cell.border = Border(top=thin, bottom=thin,
                                  left=thin if c == "A" else None,
-                                 right=thin if c == "E" else None)
+                                 right=thin if c == LAST_COL else None)
         ws.row_dimensions[2].height = ROW_H_TALL
         ws.row_dimensions[3].height = ROW_H
 
@@ -621,15 +634,16 @@ def _write_workbook(dest: Path, batch_no, materials, log):
         for c, text, size, color in (("A", "Problem?", 11, PROBLEM_FONT),
                                      ("B", "Parts Id.", 14, None),
                                      ("C", "Length", 14, None),
-                                     ("D", "Quantity", 14, None)):
+                                     ("D", "Quantity", 14, None),
+                                     ("E", "Order", 14, None)):
             cell = ws[f"{c}4"]
             cell.value = text
             cell.font = Font(name="Calibri", size=size, bold=True,
                              color=color or "000000")
             cell.alignment = center
             cell.border = Border(bottom=thin,
-                                 left=thin if c in "BCD" else None,
-                                 right=thin if c in "ABC" else None)
+                                 left=thin if c != DATA_COLS[0] else None,
+                                 right=thin if c != DATA_COLS[-1] else None)
         ws.row_dimensions[4].height = ROW_H_TALL
 
         # the parts
@@ -641,12 +655,14 @@ def _write_workbook(dest: Path, batch_no, materials, log):
             cell.font = Font(name="Calibri", size=14, bold=True)
             cell.alignment = center
             cell.border = Border(top=thin, right=thin, bottom=thin)
-            for col, value in ((2, e["part"]), (3, e["length"]), (4, e["qty"])):
+            for col, value in ((2, e["part"]), (3, e["length"]),
+                               (4, e["qty"]), (5, e["order"])):
                 cell = ws.cell(r, col, value)
                 cell.font = Font(name="Calibri", size=12, color="000000")
                 cell.alignment = center
                 cell.border = Border(top=thin, bottom=thin, left=thin,
-                                     right=thin if col < 4 else None)
+                                     right=thin if col < len(DATA_COLS)
+                                     else None)
             ws.row_dimensions[r].height = ROW_H
 
     sdk.save_workbook(wb, _guard_output(dest), log=log)

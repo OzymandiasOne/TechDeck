@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",
@@ -23,7 +23,7 @@
       "Rows 1 and 2 of every sheet are the Pallet Organizer's own words, so the material line reads exactly as it does there, SAW CUT and all."
     ],
     "output": [
-      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after its packet (SAW.4, 2.5). The material number, the batch and the pallet run across the top, then the parts: Problem?, Parts Id., Length, Quantity.",
+      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after its packet (SAW.4, 2.5). The material number, the batch and the pallet run across the top, then the parts: Problem?, Parts Id., Length, Quantity, Order.",
       "Where a material fills up one pallet and runs onto the next, the organizer lists it again, and you get a sheet and a binder for each pallet - 1.3, 2.3 and 3.1 for the one size. Which pallet a tube lands on comes from its order number.",
       "The sheets come out in the Material Use Tracker's order for that batch - pallet 1, then 2, then 3, then SAW - so you can read the two side by side.",
       "A row it wants you to check gets an arrow in the Problem? column, and that brings up the red X at the top of the sheet - so you can see which sheets need a look without opening them.",
