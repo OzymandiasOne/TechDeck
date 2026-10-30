@@ -197,9 +197,9 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
     out_dir = Path(out_dir)
     sdk.ensure_dir(out_dir)
     written, no_sheet = [], []
-    # every tube sheet that made it into a binder, so the count at the end can
-    # be checked against what the batch holds
-    all_bound = set()
+    # every tube PART whose drawing made it into a binder, so the count at the
+    # end can be checked against the batch's tube roster
+    all_parts_bound = set()
 
     by_part = {}
     for _serial, entries in materials:
@@ -232,7 +232,7 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
                     no_sheet.append(e)
                     continue
                 pages += _append(doc, sheet, e["order"], stamp=saw)
-                all_bound.add(sheet)
+                all_parts_bound.add(e["part"])
             if not pages:
                 continue
             # every packet is named the way Carrie's hand-built set is,
@@ -274,9 +274,20 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
     # page-level net, so the accounting it did is now done by numbers instead:
     # `build` reports how many tube sheets it bound against how many the batch
     # has, and `no_sheet` names every tube that reached no binder.
-    bound = len({(p, i) for p, i in all_bound})
-    tube_sheets = len({(p, i) for p, i, kind, _n in drawings if kind == "tube"})
-    log(f"Tube sheets bound: {bound} of the {tube_sheets} in the batch")
+    # Counted in PARTS, not in sheets. The batch holds more 'tube' sheets than
+    # it has tubes - a repeat order carries the same drawing again - and only
+    # the first copy of each part is bound, so a sheet count reads as a gap
+    # that is not there (506: 49 bound of 71 sheets, but of 63 tubes).
+    bound = len(all_parts_bound)
+    total = len({e["part"] for _s, entries in materials for e in entries})
+    short = total - bound - len({e["part"] for e in no_sheet})
+    log(f"Tube drawings bound: {bound} of the batch's {total} tubes"
+        + (f", {len({e['part'] for e in no_sheet})} with no sheet of their own"
+           if no_sheet else ""))
+    if short:
+        log(f"WARNING: {short} tube(s) reached no binder and are not on the "
+            f"no-drawing list either - that should not be possible, so treat "
+            f"the binders as incomplete and say so")
 
     if no_sheet:
         log(f"{len(no_sheet)} tube(s) have no individual drawing, so they are "
