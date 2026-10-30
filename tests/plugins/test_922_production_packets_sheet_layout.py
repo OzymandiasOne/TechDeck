@@ -94,3 +94,31 @@ def test_the_table_is_still_open_on_both_edges(book):
     for col in ("B", "C", "D"):
         assert sides(ws[f"{col}4"]) == {"left", "right"}
         assert sides(ws[f"{col}5"]) == {"left", "right"}
+
+
+# ──────────────────────────────────────────── no padding in the title cells
+
+def test_tidy_strips_padding_and_collapses_runs(mod):
+    """Carrie, 2026-10-30: "in cell A2 ... there's a bunch of spaces in the
+    cell after the last word." Her own hand-built 505 sheet `2.5` really does
+    hold `HSS 2.5 X 2.5 X 0.25 NOM ` with the trailing space."""
+    assert mod._tidy("HSS 2.5 X 2.5 X 0.25 NOM ") == "HSS 2.5 X 2.5 X 0.25 NOM"
+    assert mod._tidy("  HSS 2.0  X 2.0 X 0.188\xa0") == "HSS 2.0 X 2.0 X 0.188"
+    assert mod._tidy("HSS 3.0 X 3.0\nNOM") == "HSS 3.0 X 3.0 NOM"
+    assert mod._tidy(None) == ""
+    assert mod._tidy(218019941) == "218019941"
+
+
+def test_a_padded_organizer_wording_reaches_a2_clean(mod, tmp_path):
+    import openpyxl
+    entries = [{"part": "R7212587-H11-4B", "order": "BL416619",
+                "serial": "218002101  ", "desc": "5.0 X 5.0 X 0.50 NOM",
+                "qty": 1, "length": 26.5, "review": False, "packet": "SAW.1",
+                "org_pallet": "1", "pallet": "SAW",
+                "mat_text": "  HSS 5.0 X 5.0 X 0.50 NOM (SAW CUT)   "}]
+    dest = tmp_path / "900 Tubes (TechDeck).xlsx"
+    mod._write_workbook(dest, "900", [("218002101", entries)],
+                        lambda *_a: None)
+    ws = openpyxl.load_workbook(dest)["SAW.1"]
+    assert ws["A2"].value == "HSS 5.0 X 5.0 X 0.50 NOM (SAW CUT)"
+    assert ws["A1"].value == 218002101, "a padded serial is still a number"

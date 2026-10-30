@@ -69,7 +69,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.9.0"
+VERSION = "1.10.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -736,6 +736,15 @@ def _guard_output(dest: Path):
     return dest
 
 
+def _tidy(text):
+    """A cell's text with no padding: outer whitespace gone, inner runs to one.
+
+    Covers the non-breaking space and the newline too, which a pasted
+    organizer cell carries and which are just as invisible as a plain space.
+    """
+    return " ".join(str(text or "").split())
+
+
 def _safe_sheet(name, used):
     """A sheet name Excel will take, unique within the workbook."""
     bad = set("[]:*?/" + chr(92))
@@ -783,7 +792,8 @@ def _write_workbook(dest: Path, batch_no, materials, log):
 
         # row 1 - the material number, the batch, and the problem flag
         ws.merge_cells("C1:D1")
-        ws["A1"] = int(serial) if str(serial).isdigit() else serial
+        ws["A1"] = (int(serial) if str(serial).isdigit()
+                    else _tidy(serial))
         ws["B1"] = "Electric Boat"
         ws["C1"] = f"Batch {batch_no}: Pallet {entries[0]['org_pallet']}"
         ws[X_CELL] = X_FORMULA
@@ -798,9 +808,16 @@ def _write_workbook(dest: Path, batch_no, materials, log):
                                color=X_FONT)
         ws.row_dimensions[1].height = ROW_H
 
-        # row 2 - the material exactly as the organizer writes it
+        # row 2 - the material exactly as the organizer writes it, minus any
+        # padding. Carrie, 2026-10-30: "in cell A2 of each of the excel sheets
+        # ... there's a bunch of spaces in the cell after the last word."
+        # Row 2 is centred in a merged band, so padding shows up as text that
+        # sits left of centre. Her own hand-built 505 sheet `2.5` carries
+        # `HSS 2.5 X 2.5 X 0.25 NOM ` with the trailing space, so the wording
+        # really does arrive padded sometimes - `_tidy` makes it impossible to
+        # reach the sheet whatever the organizer holds.
         ws.merge_cells(f"A2:{LAST_COL}2")
-        ws["A2"] = entries[0]["mat_text"]
+        ws["A2"] = _tidy(entries[0]["mat_text"])
         for c in COL_WIDTHS:
             cell = ws[f"{c}2"]
             cell.fill = PatternFill("solid", fgColor=band)

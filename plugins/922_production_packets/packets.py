@@ -9,8 +9,10 @@ Three sets:
                               dimension highlighted. Matches the hand-built
                               packets in "THIS IS WHAT I WANT DRIVEWORKS TO
                               MAKE" page for page.
-  2. `<n.n>_<size>.pdf`     - one per LASER source material. Individual tube
-                              sheets only, no assembly sheets, unstamped.
+  2. `<n.n>_<size>.pdf`     - one per LASER source material. Built exactly like
+                              the SAW set since v1.10.0 (Carrie, 2026-10-30):
+                              the assembly sheet then its tubes' own sheets,
+                              order-stamped.
   3. `_Problem Drawings.pdf`- every drawing behind a flagged or blank length,
                               assembly sheets included.
 
@@ -276,25 +278,29 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
             for name in parts:
                 assembly_of.setdefault(name, (path, page_i))
 
-    # 1 + 2 - one binder per source material
+    # 1 + 2 - one binder per source material. SAW and laser are built the SAME
+    # way: Carrie, 2026-10-30 - "it's currently not pulling the assembly
+    # drawings into the material binders for pallets 1-3 (it is working
+    # correctly for saw tubes). can you please have it bind the tube laser
+    # tubes the same as it does the saw tubes?". Until v1.10.0 the assembly
+    # sheet and the order stamp were gated on `pallet == "SAW"`, because the
+    # hand-built set we matched page for page only had saw packets in it.
     for serial, entries in materials:
-        saw = entries[0]["pallet"] == "SAW"
         doc = fitz.open()
         used_assemblies = set()
         pages = 0
         try:
             # grouped by order, the way the hand-built packets read
             for e in sorted(entries, key=lambda e: (e["order"], e["part"])):
-                if saw:
-                    asm = assembly_of.get(e["part"])
-                    if asm is not None and asm not in used_assemblies:
-                        used_assemblies.add(asm)
-                        pages += _append(doc, asm, e["order"], stamp=True)
+                asm = assembly_of.get(e["part"])
+                if asm is not None and asm not in used_assemblies:
+                    used_assemblies.add(asm)
+                    pages += _append(doc, asm, e["order"], stamp=True)
                 sheet = tube_sheet.get(e["part"])
                 if sheet is None:
                     no_sheet.append(e)
                     continue
-                pages += _append(doc, sheet, e["order"], stamp=saw)
+                pages += _append(doc, sheet, e["order"], stamp=True)
                 all_parts_bound.add(e["part"])
             if not pages:
                 continue
