@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",

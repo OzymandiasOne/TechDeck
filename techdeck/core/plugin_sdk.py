@@ -1683,6 +1683,30 @@ OVERSIZED_TUBE_MATERIALS = {
 
 ALL_TUBE_MATERIALS = STANDARD_TUBE_MATERIALS | OVERSIZED_TUBE_MATERIALS
 
+# A material re-stocked under a NEW serial: {retired: current}. Both stay on
+# the lists above, because the retired number is still printed on paperwork.
+#
+# 218003095 -> 218136140 (3.0 X 3.0 X 0.25 NOM). Carrie, 2026-10-30: "ALL the
+# 3.0 x 3.0 x 0.25 tubes will be 218136140 going forward... When we pull
+# repeats up from the past, we should be changing the pdfs that say 218003095
+# but we haven't made that a priority." So a batch can carry BOTH numbers for
+# one physical size - which is why the Material Use Tracker lists batch 505's
+# under 218136140 while that PO calls it 218003095.
+TUBE_MATERIAL_ALIASES = {
+    '218003095': '218136140',
+}
+
+
+def canonical_tube_material(serial) -> str:
+    """The CURRENT serial for a material, following TUBE_MATERIAL_ALIASES.
+
+    A retired number still on an old repeat's print resolves to the one the
+    floor stocks today, so one physical size is one material however the
+    paperwork spells it.
+    """
+    s = str(serial or '').strip()
+    return TUBE_MATERIAL_ALIASES.get(s, s)
+
 
 def tube_class(serial) -> Optional[str]:
     """Classify a source-material serial: 'standard' (laser tube), 'oversized'

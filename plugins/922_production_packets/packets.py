@@ -53,7 +53,12 @@ def _size_name(desc):
     """
     m = SIZE_RE.search(str(desc or "").upper())
     if m is None:
-        return str(desc or "").strip()
+        # a round tube (`1.66 OD X 0.166 NOM`, batch 486) has no third number,
+        # so it keeps its own wording - minus the noise words, which do not
+        # belong in a file name
+        return re.sub(r"\s+", " ",
+                      re.sub(r"\bHSS\b|\bNOM\b|\bTHK\b", " ",
+                             str(desc or "").upper())).strip()
     a, b, wall = m.groups()
     return f"{a} SQ X {wall}" if a == b else f"{a} X {b} X {wall}"
 
@@ -100,32 +105,85 @@ def classify(path, tube_parts):
     return out
 
 
+def _copy_rank(path: Path):
+    """Which COPY of a drawing to read first.
+
+    The same drawing name appears several times in a batch - 46% of them do,
+    measured over 60 batches on 2026-10-30 - and only one copy is kept. Two
+    kinds of shadow had the app throwing the good one away:
+
+      * a NUMERIC subfolder beside the drawing (`...\\<part>\\7000\\<part>.pdf`).
+        That copy carries no readable part number, so `classify` calls it
+        'other' and the tube ends up with "no individual drawing" although its
+        real sheet is sitting right next to it. `7` sorts before a letter, so
+        plain path order picked it every time. On batch 506 this is what put 14
+        tubes outside every binder.
+      * the REPEAT BATCHES copy of a part the order also carries itself. It is
+        a previous job's print, so the order's own is the one to bind.
+
+    Lower sorts first: the order's own folder before a repeat, a plain folder
+    before a numeric one, then the shallower path.
+    """
+    s = str(path).upper()
+    return (1 if "REPEAT" in s else 0,
+            1 if path.parent.name.isdigit() else 0,
+            len(path.parts),
+            s)
+
+
+def _readable(pages):
+    """True when a copy actually names parts - a tube or an assembly sheet."""
+    return any(kind in ("tube", "assembly") for _i, kind, _n in pages)
+
+
 def survey(batch_path, tube_parts, log=None, cancel_event=None):
     """Classify every SHEET of every shop drawing in the batch, once.
 
-    Returns [(path, page_index, kind, parts)] in path order. One pass, because
-    each sheet is wanted by more than one packet and re-reading the tree per
-    packet is the slow part.
+    Returns [(path, page_index, kind, parts)]. One copy of each drawing NAME is
+    used, chosen by `_copy_rank` and then checked: if the best-ranked copy
+    names no parts at all but another copy of the same drawing does, the
+    readable one is used instead. In the ordinary case that is still one
+    `classify` per drawing.
     """
-    out = []
-    seen_stems = set()
-    for i, p in enumerate(sorted(Path(batch_path).rglob("*.pdf"))):
-        if i % 32 == 0 and cancel_event is not None:
-            sdk.raise_if_cancelled(cancel_event)
+    by_stem = {}
+    for p in sorted(Path(batch_path).rglob("*.pdf")):
         if "CAD-AND-SHOP-PRINTS" not in str(p).upper():
             continue
-        # a repeat order carries the same sheet under REPEAT BATCHES; one copy
-        # of each drawing is enough
-        if p.stem.upper() in seen_stems:
-            continue
-        seen_stems.add(p.stem.upper())
-        for page_i, kind, parts in classify(p, tube_parts):
-            out.append((p, page_i, kind, parts))
+        by_stem.setdefault(p.stem.upper(), []).append(p)
+
+    out, rescued, unreadable = [], [], []
+    for n, stem in enumerate(sorted(by_stem)):
+        if n % 32 == 0 and cancel_event is not None:
+            sdk.raise_if_cancelled(cancel_event)
+        copies = sorted(by_stem[stem], key=_copy_rank)
+        chosen, pages = copies[0], classify(copies[0], tube_parts)
+        if not _readable(pages):
+            for alt in copies[1:]:
+                alt_pages = classify(alt, tube_parts)
+                if _readable(alt_pages):
+                    rescued.append(stem)
+                    chosen, pages = alt, alt_pages
+                    break
+            else:
+                if len(copies) > 1:
+                    unreadable.append(stem)
+        for page_i, kind, parts in pages:
+            out.append((chosen, page_i, kind, parts))
+
     if log:
         kinds = {}
         for _p, _i, kind, _n in out:
             kinds[kind] = kinds.get(kind, 0) + 1
-        log(f"Sheets surveyed: {kinds}")
+        log(f"Sheets surveyed: {kinds} from {len(by_stem)} drawing(s)")
+        if rescued:
+            log(f"{len(rescued)} drawing(s) read from a second copy because "
+                f"the first names no parts: {', '.join(sorted(rescued)[:6])}"
+                + (" ..." if len(rescued) > 6 else ""))
+        if unreadable:
+            log(f"WARNING: {len(unreadable)} drawing(s) have several copies "
+                f"and NONE names a part - they go in no binder: "
+                f"{', '.join(sorted(unreadable)[:6])}"
+                + (" ..." if len(unreadable) > 6 else ""))
     return out
 
 

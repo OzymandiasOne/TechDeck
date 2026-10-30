@@ -69,7 +69,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -134,6 +134,12 @@ def _size_triple(text):
     nums = [float(n) for n in re.findall(r"\d*\.?\d+", t)]
     if "SQ" in t and len(nums) == 2:
         nums = [nums[0], nums[0], nums[1]]
+    # a ROUND tube is `1.66 OD X 0.166` - diameter and wall, two numbers and no
+    # second side. Batch 486 carries one (211031252). Giving it a 0 middle
+    # keeps it a distinct key from any square tube rather than no key at all,
+    # which is what dropped it out of its pallet group.
+    if "OD" in t and len(nums) == 2:
+        nums = [nums[0], 0.0, nums[1]]
     if len(nums) < 3:
         return None
     return (round(nums[0], 3), round(nums[1], 3), round(nums[2], 3))
@@ -316,7 +322,11 @@ def _norm_material(text):
     import re
     t = str(text or "").upper()
     t = re.sub(r"\(.*?\)", " ", t)        # the organizer appends "(SAW CUT)"
-    t = re.sub(r"\bHSS\b|\bNOM\b|,", " ", t)
+    # THK is the same noise word as NOM: batch 391's PO writes
+    # `3.0 X 3.0 X 0.50 THK` where the organizer writes `... NOM`, and keeping
+    # it meant the two never matched and the material fell to UNKNOWN
+    # (found in the 380-502 sweep, 2026-10-30)
+    t = re.sub(r"\bHSS\b|\bNOM\b|\bTHK\b|,", " ", t)
     t = re.sub(r"\s*X\s*", " X ", t)
     return " ".join(t.split())
 
@@ -482,17 +492,36 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
          is how the floor reads them: pallet 1, then 2, then 3, then SAW. That
          is the order the workbook's sheets and the report's groups come out in.
     """
-    # one group per (source material, pallet): a material whose parts spill
-    # onto the next pallet is listed again by the organizer and gets its own
-    # sheet and its own binder for each (Anthony, 2026-10-29)
+    # One group per (SIZE, pallet). A material whose parts spill onto the next
+    # pallet is listed again by the organizer and gets its own sheet and its
+    # own binder for each (Anthony, 2026-10-29).
+    #
+    # The key is the SIZE, not the serial, because one physical size can carry
+    # two serials: 218003095 was retired in favour of 218136140 for
+    # 3.0 X 3.0 X 0.25, and an old repeat's print still says the old number
+    # (Carrie, 2026-10-30). Keying on the serial made two groups claim ONE
+    # packet name, and the second binder overwrote the first on disk -
+    # batches 426, 474, 491, 496 and 497 all did this. The size is also what
+    # `_packet_names` keys on, so a collision is now impossible by
+    # construction. The floor merges them by hand too (474, 497).
     by_group = {}
     for t in tubes:
-        by_group.setdefault((t["serial"], t["pallet"]), []).append(t)
+        by_group.setdefault((_norm_material(t["desc"]), t["pallet"]),
+                            []).append(t)
     groups = sorted(
         by_group.values(),
         key=lambda v: (v[0]["pallet"] != SAW_PALLET,
                        _size_key(v[0]["desc"]), v[0]["pallet"]))
-    materials = [(v[0]["serial"], v) for v in groups]
+
+    materials = []
+    for v in groups:
+        serials = sorted({sdk.canonical_tube_material(e["serial"])
+                          for e in v})
+        raw = sorted({e["serial"] for e in v})
+        for e in v:
+            e["serials"] = raw
+        materials.append((serials[0] if len(serials) == 1
+                          else " / ".join(serials), v))
 
     names = _packet_names(pallet_map)
     taken = set(names.values())
@@ -528,6 +557,31 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
             e["off_organizer"] = org is None
             e["new_material"] = sdk.tube_class(e["serial"]) is None
 
+    # Two sheets sharing a packet name means two binders sharing a FILE name,
+    # and the second silently overwrote the first (batches 426, 474, 491, 496,
+    # 497 before the group key became the size). Keyed on the size this cannot
+    # happen, so if it ever does the run says so instead of losing a file.
+    _seen = {}
+    for serial, entries in materials:
+        p = entries[0]["packet"]
+        if p in _seen:
+            log(f"WARNING: packet {p} is claimed by both {_seen[p]} and "
+                f"{serial} - their binders would overwrite each other. "
+                f"Treat this batch's packets as incomplete and report it")
+        _seen[p] = serial
+
+    # a merged group carries a retired serial AND the current one. Carrie's
+    # standing job is to restamp those old repeat prints, so name them.
+    for serial, entries in materials:
+        raw = entries[0].get("serials") or []
+        if len(raw) > 1:
+            old = [s for s in raw if s in sdk.TUBE_MATERIAL_ALIASES]
+            log(f"{entries[0]['desc']} on pallet {entries[0]['pallet']} comes "
+                f"in under {len(raw)} serials ({', '.join(raw)}) - one sheet "
+                f"and one packet, filed as {serial}"
+                + (f". The print(s) still saying {', '.join(old)} want "
+                   f"restamping" if old else ""))
+
     off = sorted({(e["serial"], e["desc"]) for _s, en in materials
                   for e in en if e["off_organizer"]})
     for serial, desc in off:
@@ -544,25 +598,37 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
     if tracker:
         LAST = 10 ** 6
 
-        def _pos(serial, desc, pallet):
+        def _pos(entries):
+            """The group's spot on the tracker, by any serial it carries.
+
+            A merged group holds both the retired serial and the current one,
+            and the tracker may list either, so every one is tried before the
+            size fallback.
+            """
+            e0 = entries[0]
+            pallet, desc = e0["pallet"], e0["desc"]
+            serials = list(e0.get("serials") or [])
+            serials += [sdk.canonical_tube_material(s) for s in serials]
+            keys = [(pallet, s) for s in serials] + serials
             triple = _size_triple(desc)
-            for key in ((pallet, serial), serial,
-                        (pallet, triple) if triple else None, triple):
-                if key is not None and key in tracker:
+            if triple is not None:
+                keys += [(pallet, triple), triple]
+            for key in keys:
+                if key in tracker:
                     return tracker[key]
             return LAST
 
-        materials.sort(key=lambda kv: _pos(kv[0], kv[1][0]["desc"],
-                                           kv[1][0]["pallet"]))
+        materials.sort(key=lambda kv: _pos(kv[1]))
         by_size, by_serial, strays = [], [], []
         for serial, entries in materials:
             pallet = entries[0]["pallet"]
-            if (pallet, serial) in tracker:
+            serials = list(entries[0].get("serials") or [])
+            if any((pallet, s) in tracker for s in serials):
                 continue
             label = f"{serial} ({entries[0]['desc']}) on pallet {pallet}"
-            if serial in tracker:
+            if any(s in tracker for s in serials):
                 by_serial.append(label)
-            elif _pos(serial, entries[0]["desc"], pallet) == LAST:
+            elif _pos(entries) == LAST:
                 strays.append(label)
             else:
                 by_size.append(label)
