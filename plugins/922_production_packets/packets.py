@@ -165,7 +165,12 @@ def survey(batch_path, tube_parts, log=None, cancel_event=None):
                     chosen, pages = alt, alt_pages
                     break
             else:
-                if len(copies) > 1:
+                # only a TUBE going unread is worth saying out loud. Every
+                # batch carries ~60 plate and rod sheets (`... PLT`, `... ROD`)
+                # that name no tube and belong in no binder by design, and a
+                # warning that fires on all of them teaches the reader to skip
+                # warnings (506 printed 62 of them).
+                if stem in tube_parts:
                     unreadable.append(stem)
         for page_i, kind, parts in pages:
             out.append((chosen, page_i, kind, parts))
