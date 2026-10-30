@@ -69,7 +69,7 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -218,10 +218,19 @@ def _tracker_order(root, batch_no, log):
 def _read_tubes(path: Path, log):
     """Every TUBE on the batch, from the organizer's PO Info Drop.
 
-    Returns [{part, order, serial, desc, qty}]. A row is a tube when it carries
-    a Base Material - the organizer fills that column for tubes only, which is
-    how the plate and rod lines are left behind. Columns are looked up by
-    header NAME (Hard Rule 1).
+    Returns `(rows, skipped)` - `[{part, order, serial, desc, qty}]` and the
+    rows that were left behind although their SOURCE MATERIAL is a serial
+    `sdk.tube_class` knows as a tube.
+
+    A row is a tube when it carries a Base Material - the organizer fills that
+    column for tubes only, which is how the plate and rod lines are left
+    behind. Columns are looked up by header NAME (Hard Rule 1).
+
+    **That one column is the only thing marking a row as a tube**, so a row it
+    was not filled on vanishes. Checked against all 19 batches on the drive on
+    2026-10-30: no batch drops SOME of its tubes, and batch 503 (where the
+    column is empty on all 61 tube rows) reads zero tubes and fails loudly. But
+    nothing was WATCHING for it, so `skipped` now is, and the report names them.
     """
     wb = sdk.load_workbook_resilient(path, read_only=True, data_only=True, log=log)
     try:
@@ -243,13 +252,20 @@ def _read_tubes(path: Path, log):
         c_qty = cols["QTY"]
         c_base = cols["BASE MATERIAL"]
 
-        rows, seen = [], set()
+        rows, skipped, seen = [], [], set()
         for r in ws.iter_rows(min_row=header_row + 1, values_only=True):
             def _v(c):
                 v = r[c - 1] if c - 1 < len(r) else None
                 return "" if v is None else str(v).strip()
             part, serial, base = _v(c_dypn), _v(c_src), _v(c_base)
             if not part or not serial or not base:
+                # a row with a part number and a serial TechDeck knows as a
+                # tube, but no Base Material, is a tube that would vanish
+                if (part and serial
+                        and sdk.tube_class(serial.split(".")[0]) is not None):
+                    skipped.append({"part": part.upper(), "order": _v(c_order),
+                                    "serial": serial.split(".")[0],
+                                    "desc": "", "qty": 1})
                 continue
             serial = serial.split(".")[0]          # Excel hands back 218012959.0
             key = (part.upper(), serial)
@@ -266,7 +282,13 @@ def _read_tubes(path: Path, log):
         wb.close()
     log(f"{len(rows)} tubes on the batch, "
         f"{len({r['serial'] for r in rows})} source materials")
-    return rows
+    if skipped:
+        log(f"WARNING: {len(skipped)} row(s) on '{INFO_SHEET}' carry a tube "
+            f"source material but no Base Material, so they are NOT on the "
+            f"cutting list - fill that column in and run again:")
+        for e in skipped:
+            log(f"    {e['part']}  (material {e['serial']})")
+    return rows, skipped
 
 
 def _size_key(desc):
@@ -495,6 +517,28 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
             # rows 1 and 2 of the sheet are the organizer's own words
             e["mat_text"] = org["text"] if org else f"HSS {e['desc']}"
             e["org_pallet"] = org["pallet"] if org else pallet
+            # two safeguards against a NEW or unknown tube material slipping
+            # through quietly (Anthony, 2026-10-30):
+            #   off_organizer - the Pallet Organizer does not list this
+            #     material at all, so its pallet came from TechDeck's own
+            #     sdk.tube_class list, not from the paperwork
+            #   new_material  - neither SDK list has this serial. Batch 495
+            #     carries 211002778 (6.0 X 8.0 X 0.50), one digit off the
+            #     218002778 that IS listed, and nothing said a word
+            e["off_organizer"] = org is None
+            e["new_material"] = sdk.tube_class(e["serial"]) is None
+
+    off = sorted({(e["serial"], e["desc"]) for _s, en in materials
+                  for e in en if e["off_organizer"]})
+    for serial, desc in off:
+        log(f"WARNING: {serial} ({desc}) is not on the Pallet Organizer's "
+            f"MATERIAL REQUIRED list - TechDeck filed it from its own tube "
+            f"list instead. Add it to the organizer so the paperwork agrees")
+    new = sorted({(e["serial"], e["desc"]) for _s, en in materials
+                  for e in en if e["new_material"]})
+    for serial, desc in new:
+        log(f"WARNING: {serial} ({desc}) is a tube material TechDeck has "
+            f"never seen - add it to the SDK's tube material lists")
 
     tracker = _tracker_order(root_922, batch_no, log)
     if tracker:
@@ -673,13 +717,19 @@ def _write_workbook(dest: Path, batch_no, materials, log):
 
 # ──────────────────────────────────────────────────────────────── the report
 
-def _write_report(dest: Path, batch_no, materials, no_sheet, log):
+def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
+                  log):
     """The colour-coded PDF, same shape as the LST Organizer's."""
     C = sdk.REPORT_COLORS
     flat = [e for _s, entries in materials for e in entries]
     review = [e for e in flat if e["review"] and e["length"] is not None]
     missing = [e for e in flat if e["length"] is None]
     unknown = [e for e in flat if e["pallet"] == "UNKNOWN"]
+    # one row per MATERIAL for the two new-material checks, not per tube
+    off_org = sorted({(e["serial"], e["desc"], e["packet"]) for e in flat
+                      if e.get("off_organizer")})
+    new_mat = sorted({(e["serial"], e["desc"], e["packet"]) for e in flat
+                      if e.get("new_material")})
     # a tube with no drawing at all is already listed under "no drawing found";
     # these are the ones whose length IS good (read off an assembly sheet) but
     # that have no single-tube page for a binder
@@ -716,6 +766,15 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, log):
         ("Source material not recognised", len(unknown),
          C["miss_bg"] if unknown else C["ok_bg"],
          C["miss_tx"] if unknown else C["ok_tx"]),
+        ("Materials TechDeck has never seen", len(new_mat),
+         C["miss_bg"] if new_mat else C["ok_bg"],
+         C["miss_tx"] if new_mat else C["ok_tx"]),
+        ("Materials not on the Pallet Organizer", len(off_org),
+         C["rev_bg"] if off_org else C["ok_bg"],
+         C["rev_tx"] if off_org else C["ok_tx"]),
+        ("PO rows left off the cutting list", len(skipped_rows),
+         C["miss_bg"] if skipped_rows else C["ok_bg"],
+         C["miss_tx"] if skipped_rows else C["ok_tx"]),
     ]
     for label, n, bg, tx in rows:
         d.row([label, str(n)], w2, fill=bg, tcolor=tx)
@@ -764,6 +823,53 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, log):
         for e in review:
             d.row([e["part"], str(e["length"]), e["desc"], e["packet"],
                    e["source"]], w5, fill=C["rev_bg"], tcolor=C["rev_tx"])
+        d.gap(14)
+
+    if new_mat:
+        d.text("Tube material TechDeck has never seen", size=11, bold=True,
+               color=C["miss_tx"])
+        for line in ("This serial is on neither of TechDeck's tube material "
+                     "lists. The Pallet Organizer",
+                     "placed it, so the cutting list is right - but check the "
+                     "serial is not a typo of a",
+                     "material we already stock, and have it added to "
+                     "TechDeck so the next batch knows it."):
+            d.text(line, size=8, color=C["grey"])
+        d.header_row(["Serial", "Material", "Packet", "", ""], w5)
+        for serial, desc, packet in new_mat:
+            d.row([serial, desc, packet, "", ""], w5,
+                  fill=C["miss_bg"], tcolor=C["miss_tx"])
+        d.gap(14)
+
+    if off_org:
+        d.text("Material not on the Pallet Organizer", size=11, bold=True,
+               color=C["rev_tx"])
+        for line in ("The organizer's MATERIAL REQUIRED list does not carry "
+                     "this material, so TechDeck",
+                     "filed it from its own tube list instead of from the "
+                     "paperwork. Add it to the",
+                     "organizer so the two documents agree."):
+            d.text(line, size=8, color=C["grey"])
+        d.header_row(["Serial", "Material", "Packet", "", ""], w5)
+        for serial, desc, packet in off_org:
+            d.row([serial, desc, packet, "", ""], w5,
+                  fill=C["rev_bg"], tcolor=C["rev_tx"])
+        d.gap(14)
+
+    if skipped_rows:
+        d.text("PO rows left off the cutting list", size=11, bold=True,
+               color=C["miss_tx"])
+        for line in ("These rows carry a tube source material but no Base "
+                     "Material, and that column is",
+                     "the only thing marking a row as a tube - so they are "
+                     "NOT on any sheet and NOT in any",
+                     "binder. Fill the Base Material in on the PO Info Drop "
+                     "and run this again."):
+            d.text(line, size=8, color=C["grey"])
+        d.header_row(["Part", "Order", "Serial", "", ""], w5)
+        for e in skipped_rows:
+            d.row([e["part"], e["order"], e["serial"], "", ""], w5,
+                  fill=C["miss_bg"], tcolor=C["miss_tx"])
         d.gap(14)
 
     if unknown:
@@ -819,7 +925,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     progress_callback(5)
 
     organizer = _organizer(batch_path, batch_no, log)
-    tubes = _read_tubes(organizer, log)
+    tubes, skipped_rows = _read_tubes(organizer, log)
     pallet_map, order_pallets = _read_pallets(organizer, log)
     if not tubes:
         raise sdk.UserFacingError(
@@ -883,7 +989,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     # where the reader goes looking for it
     report = _write_report(
         out_dir / f"Production Packets Report (TechDeck) - Batch {batch_no}.pdf",
-        batch_no, materials, no_sheet, log)
+        batch_no, materials, no_sheet, skipped_rows, log)
     progress_callback(100)
 
     flagged = sum(1 for t in tubes if t["review"] and t["length"] is not None)
@@ -901,10 +1007,33 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             f"{book.name}.",
             "TechDeck found no drawing for them anywhere in the batch, so it "
             "left those cells empty rather than guess. The report lists them.")
-    if flagged or blank:
+    # A new material does NOT get a popup: the organizer placed it, so the
+    # cutting list is right and nothing downstream acts on it wrongly - it is
+    # the app working correctly, which is the wrong class for a dialog
+    # (tests/tools/test_action_items_popup.py). The console WARNING, the report
+    # section and the warning outcome carry it.
+    new_mats = sorted({t["serial"] for t in tubes if t.get("new_material")})
+    # A skipped row DOES: those parts are on no sheet, so the 1D optimizer
+    # nests nothing for them and the batch gets cut short.
+    if skipped_rows:
+        sdk.flag_action(
+            params,
+            f"{len(skipped_rows)} part(s) on the PO Info Drop have no Base "
+            f"Material, so they are NOT on the cutting list.",
+            "That column is the only thing marking a row as a tube. Fill it "
+            "in and run this again. The report names every one.")
+
+    if flagged or blank or new_mats or skipped_rows:
+        reasons = []
+        if flagged or blank:
+            reasons.append(f"{flagged + blank} tube(s) need a look")
+        if new_mats:
+            reasons.append(f"{len(new_mats)} unknown material(s)")
+        if skipped_rows:
+            reasons.append(f"{len(skipped_rows)} row(s) left off")
         sdk.set_run_outcome(
             params, sdk.RUN_OUTCOME_WARNING,
-            f"{flagged + blank} tube(s) need a look - see the report")
+            f"{', '.join(reasons)} - see the report")
 
     sdk.link_output(params, f"Open {book.name}", str(book), prefix="[CUT LIST]")
     sdk.link_output(params, "Open the Production Packets report", str(report),

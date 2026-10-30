@@ -1,6 +1,6 @@
 """Bind a batch's shop drawings into the production packet PDFs.
 
-Four sets, which together account for every drawing in the batch:
+Three sets:
 
   1. `SAW.<n>_<size>.pdf`   - one per SAW CUT source material. Per contributing
                               order: the assembly sheet (when its tubes belong
@@ -13,9 +13,13 @@ Four sets, which together account for every drawing in the batch:
                               sheets only, no assembly sheets, unstamped.
   3. `_Problem Drawings.pdf`- every drawing behind a flagged or blank length,
                               assembly sheets included.
-  4. `_Everything Else.pdf` - every drawing in the batch that is NOT an
-                              individual tube sheet: plate and rod parts, plus
-                              the tube assembly sheets.
+
+A fourth, `_Everything Else.pdf`, held every sheet that was not an individual
+tube page - plate, rod, and the tube assembly sheets. It was dropped in v1.7.0
+(Anthony, 2026-10-30): on batch 506 it was 206 pages and 28MB that nobody
+opened. It was also the only page-level accounting, so `build` now LOGS how
+many tube sheets it bound against how many the batch holds, and `no_sheet`
+still names every tube that reached no binder.
 
 Nothing here ever writes outside the folder it is handed, and it only ever
 creates files - no drawing in the batch is modified in place.
@@ -184,7 +188,7 @@ def _append(out_doc, sheet, order=None, stamp=False):
 
 
 def build(out_dir: Path, batch_no, materials, drawings, log):
-    """Write all four packet sets.
+    """Write the packet sets.
 
     Returns (written, no_sheet) - [(path, pages)] and the tubes that have no
     individual drawing anywhere in the batch, so a short binder is reported
@@ -193,6 +197,9 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
     out_dir = Path(out_dir)
     sdk.ensure_dir(out_dir)
     written, no_sheet = [], []
+    # every tube sheet that made it into a binder, so the count at the end can
+    # be checked against what the batch holds
+    all_bound = set()
 
     by_part = {}
     for _serial, entries in materials:
@@ -225,6 +232,7 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
                     no_sheet.append(e)
                     continue
                 pages += _append(doc, sheet, e["order"], stamp=saw)
+                all_bound.add(sheet)
             if not pages:
                 continue
             # every packet is named the way Carrie's hand-built set is,
@@ -260,21 +268,15 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
         finally:
             doc.close()
 
-    # 4 - everything that is not an individual tube sheet
-    rest = [(path, page_i) for path, page_i, kind, _n in drawings
-            if kind != "tube"]
-    if rest:
-        doc = fitz.open()
-        pages = 0
-        try:
-            for src in rest:
-                pages += _append(doc, src)
-            dest = out_dir / "_Everything Else.pdf"
-            doc.save(sdk.long_path(dest), garbage=3, deflate=True)
-            written.append((dest, pages))
-            log(f"  {dest.name}  ({pages} pages)")
-        finally:
-            doc.close()
+    # `_Everything Else.pdf` lived here until v1.7.0 - a binder of every sheet
+    # that was not an individual tube page, which on batch 506 was 206 pages
+    # and 28MB nobody opened (Anthony, 2026-10-30). It was also the only
+    # page-level net, so the accounting it did is now done by numbers instead:
+    # `build` reports how many tube sheets it bound against how many the batch
+    # has, and `no_sheet` names every tube that reached no binder.
+    bound = len({(p, i) for p, i in all_bound})
+    tube_sheets = len({(p, i) for p, i, kind, _n in drawings if kind == "tube"})
+    log(f"Tube sheets bound: {bound} of the {tube_sheets} in the batch")
 
     if no_sheet:
         log(f"{len(no_sheet)} tube(s) have no individual drawing, so they are "
