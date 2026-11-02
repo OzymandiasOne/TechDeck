@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",
@@ -29,7 +29,8 @@
       "A row it wants you to check gets an arrow in the Problem? column, and that brings up the red X at the top of the sheet - so you can see which sheets need a look without opening them.",
       "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, which tubes have no print of their own to bind, and the full cutting list.",
       "A TechDeck Packets folder of bound drawings, each named after its packet - SAW.4_4.0 SQ X 0.375.pdf, 2.1_4.0 SQ X 0.25.pdf. Every binder reads the same way: for each order, the assembly drawing first, then that order's own tube sheets, every page stamped with the order number and the saw cut dimension highlighted where the drawing gives one. Plus one holding the drawings worth checking.",
-      "The report flags anything that could slip past: a tube material TechDeck has never seen, a material the Pallet Organizer does not list, and any part on the PO Info Drop with no Base Material filled in - that column is the only thing marking a row as a tube, so those parts reach no sheet and no binder."
+      "The report flags anything that could slip past: a tube material TechDeck has never seen, a material the Pallet Organizer does not list, and any part on the PO Info Drop with no Base Material filled in - that column is the only thing marking a row as a tube, so those parts reach no sheet and no binder.",
+      "With step 2 switched on it reads the 1Ds you nested, highlights each material line, writes in which batch an estimated drop came from, adds the drop (and pre-cut bar) blanks, builds a cover page per pallet off the Pallet Organizer, and binds PALLET 1/2/3.pdf and SAW TUBES.pdf - only the saw binder carries tube drawings."
     ]
   },
   "settings": {
@@ -42,6 +43,14 @@
         "placeholder": "C:\\Users\\YourName\\...\\922 QTDR Production Packages",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "production_run_binders",
+        "type": "boolean",
+        "label": "Build the production run binders (step 2)",
+        "description": "Off by default. Leave it off for the normal run: the app builds the cutting list and the packet drawings, then stops so you can nest the 1Ds. Switch it on and run the app again to mark up those 1Ds, build the pallet cover pages and bind the production run.",
+        "required": false,
+        "default": false
       },
       {
         "key": "sentry_drone",

@@ -69,7 +69,14 @@ assert _PK_SPEC is not None and _PK_SPEC.loader is not None
 pk = _ilu.module_from_spec(_PK_SPEC)
 _PK_SPEC.loader.exec_module(pk)
 
-VERSION = "1.10.0"
+_RS_SPEC = _ilu.spec_from_file_location(
+    'techdeck_922_runsheets',
+    Path(__file__).resolve().parent / 'runsheets.py')
+assert _RS_SPEC is not None and _RS_SPEC.loader is not None
+rs = _ilu.module_from_spec(_RS_SPEC)
+_RS_SPEC.loader.exec_module(rs)
+
+VERSION = "1.11.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -421,6 +428,67 @@ def _read_pallets(path: Path, log):
                     f"({', '.join(e['pallet'] for e in entries)}) - it gets a "
                     f"sheet and a packet per pallet")
         return out, order_pallets
+    finally:
+        wb.close()
+
+
+def read_cover_blocks(path: Path, log):
+    """-> {pallet: {"listing": [(order, material)], "materials": [text, ...]}}
+
+    What a production run COVER PAGE says, straight off the Pallet Organizer.
+    Carrie builds that page by pasting two things into a Word table: the
+    pallet's column of order numbers with the material each one uses, and the
+    `MATERIAL REQUIRED` block under it. Both are already on the sheet, so step
+    2 reads them rather than asking anybody to paste anything.
+
+    Same TEXT-anchored walk as `_read_pallets` (Hard Rule 1) - the blocks move
+    down the sheet as a batch's order count changes, so neither the title nor
+    the heading can be a cell address.
+    """
+    import re
+    wb = sdk.load_workbook_resilient(path, read_only=False, data_only=True,
+                                     log=log)
+    try:
+        sheet = next((n for n in sdk.visible_sheetnames(wb)
+                      if n.strip().upper() == "PALLET ORGANIZER"), None)
+        if sheet is None:
+            log("WARNING: no 'Pallet Organizer' sheet - no cover pages")
+            return {}
+        ws = wb[sheet]
+        heads = []
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and                         "MATERIAL REQUIRED" in cell.value.upper():
+                    heads.append((cell.row, cell.column))
+        out = {}
+        for r0, c0 in heads:
+            pallet, title_row = None, None
+            for r in range(r0 - 1, 0, -1):
+                m = re.search(r"PALLET\s*(\d+)",
+                              str(ws.cell(r, c0).value or "").upper())
+                if m:
+                    pallet, title_row = m.group(1), r
+                    break
+            if pallet is None or title_row is None:
+                continue
+            listing = []
+            for r in range(title_row + 1, r0):
+                num = str(ws.cell(r, c0).value or "").strip()
+                if not num or num.replace(".", "", 1).isdigit():
+                    continue
+                listing.append((num, str(ws.cell(r, c0 + 1).value or "").strip()))
+            materials = []
+            for r in range(r0 + 1, r0 + 40):
+                desc = ws.cell(r, c0 + 1).value
+                if desc is None or not str(desc).strip():
+                    continue
+                materials.append(str(desc).strip())
+            out[pallet] = {"listing": listing, "materials": materials}
+        log(f"Cover blocks: {len(out)} pallet(s) - "
+            + ", ".join(f"{p} ({len(v['listing'])} orders, "
+                        f"{len(v['materials'])} materials)"
+                        for p, v in sorted(out.items())))
+        return out
     finally:
         wb.close()
 
@@ -1066,12 +1134,130 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
 
 # ────────────────────────────────────────────────────────────────────── run
 
+def _step_two(params, settings, log, batch_no, batch_path, root_922,
+              progress_callback, cancel_event):
+    r"""Step 2: mark up the 1Ds, build the covers, bind the production run.
+
+    Carrie's own four-stage reference for batch 508 is what this follows
+    (`TechDeck Packets\ANTHONY REF`, 2026-11-02). Step 1 has to have run and
+    she has to have made the 1Ds in between - the nesting is hers, not ours.
+    """
+    out_dir = batch_path / f"Batch {batch_no} - Documentation" / PACKETS_FOLDER
+    packets_dir = out_dir / PACKETS_SUBFOLDER
+    run_dir = packets_dir / rs.RUN_FOLDER
+
+    packets = rs.read_cutting_list(
+        out_dir / f"{batch_no} Tubes (TechDeck).xlsx", log)
+    if not packets:
+        raise sdk.UserFacingError(
+            f"Step 1's cutting list for batch {batch_no} has no sheets in it.",
+            "Run the app with this option switched OFF first.")
+
+    one_d = sdk.request_directory(
+        params, f"Pick the folder holding batch {batch_no}'s 1D PDFs",
+        str(packets_dir))
+    if one_d is None or cancel_event.is_set():
+        return None
+    log(f"1Ds: {one_d}")
+    progress_callback(20)
+
+    bars = rs.read_tracker(root_922, batch_no, log)
+    blocks = read_cover_blocks(_organizer(batch_path, batch_no, log), log)
+    sheets = rs.match_1ds(Path(one_d), packets, log)
+    progress_callback(35)
+
+    # 1 - every 1D gets her notes and highlights
+    log("Marking up the 1Ds...")
+    marked = {}
+    for n, (packet, src) in enumerate(sorted(sheets.items())):
+        sdk.raise_if_cancelled(cancel_event)
+        info = packets[packet]
+        saw = info["pallet"] == SAW_PALLET
+        dest = run_dir / "1Ds (marked up)" / f"{rs.safe_name(packet)}.pdf"
+        added = rs.annotate(src, dest, bars.get((info["pallet"],
+                                                 info["serial"])), saw, log)
+        marked[packet] = dest
+        log(f"  {packet:6s} {', '.join(added)}")
+        progress_callback(35 + int(25 * (n + 1) / max(len(sheets), 1)))
+
+    # 2 - a cover page per pallet, plus the saw one. The saw cover carries
+    # the pallet block of whichever pallet the saw materials are listed under
+    # (pallet 1 on batch 508), because that is the paperwork the saw operator
+    # is handed alongside it.
+    log("Building the cover pages...")
+    templates = Path(__file__).resolve().parent / "templates"
+    covers = {}
+    for pallet in sorted(blocks):
+        sdk.raise_if_cancelled(cancel_event)
+        block = blocks[pallet]
+        covers[pallet] = rs.cover_pdf(
+            templates / rs.TEMPLATE_LASER,
+            run_dir / "Cover Sheets" / f"_{pallet}.pdf", batch_no,
+            f"PALLET {pallet}", block["listing"], block["materials"], [], log)
+    saw_pallet = next((p for p in sorted(blocks)
+                       if any("SAW CUT" in t.upper()
+                              for t in blocks[p]["materials"])), None)
+    if saw_pallet is not None:
+        block = blocks[saw_pallet]
+        covers[SAW_PALLET] = rs.cover_pdf(
+            templates / rs.TEMPLATE_SAW,
+            run_dir / "Cover Sheets" / "_SAW.pdf", batch_no,
+            f"PALLET {saw_pallet}", block["listing"], block["materials"],
+            [t.replace(" (SAW CUT)", "").strip()
+             for t in block["materials"] if "SAW CUT" in t.upper()], log)
+    progress_callback(80)
+
+    # 3 - bind. A pallet binder is the cover and its 1Ds; the SAW binder
+    # also carries each material's drawings, because only the saw operator
+    # cuts from a print. Carrie, 2026-11-02: "I don't want the tube drawings
+    # for pallet 1,2,3 ... the tube laser parts don't need drawings because
+    # they'll be programmed."
+    log("Binding the production run...")
+    drawings = rs.packet_drawings(packets_dir)
+    by_pallet = {}
+    for packet, info in packets.items():
+        by_pallet.setdefault(info["pallet"], []).append(packet)
+    written = []
+    for pallet in sorted(by_pallet, key=lambda p: (p == SAW_PALLET, p)):
+        sdk.raise_if_cancelled(cancel_event)
+        cover = covers.get(pallet)
+        if cover is None:
+            log(f"WARNING: no cover page for pallet {pallet} - its binder "
+                f"starts at the first 1D")
+        pages = [cover] if cover else []
+        for packet in sorted(by_pallet[pallet], key=_packet_sort):
+            sheet = marked.get(packet)
+            if sheet is None:
+                continue                      # match_1ds already said so
+            pages.append(sheet)
+            if pallet == SAW_PALLET and packet in drawings:
+                pages.append(drawings[packet])
+        name = ("SAW TUBES.pdf" if pallet == SAW_PALLET
+                else f"PALLET {pallet}.pdf")
+        made = rs.bind(run_dir / name, pages, log)
+        if made is not None:
+            written.append(made)
+    progress_callback(100)
+    return run_dir, written, len(sheets), len(packets)
+
+
+def _packet_sort(packet):
+    """`2.10` after `2.9`, and SAW last - a packet name is not a number."""
+    head, _, tail = str(packet).partition(".")
+    return (head == SAW_PALLET, head, int(tail) if tail.isdigit() else 0)
+
+
 def run(params: dict, progress_callback, cancel_event: threading.Event):
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
     console = params.get("console")
 
     log(f"922 Production Packets v{VERSION}")
+
+    # Step 2 is off unless somebody turns it on in Settings > Apps. It cannot
+    # run in the same pass as step 1: the 1Ds it works from are nested by
+    # hand, in software TechDeck does not drive, between the two runs.
+    step_two = bool(settings.get("production_run_binders"))
 
     root_922 = sdk.resolve_922_root(settings.get("base_path", ""))
     picked = sdk.request_922_batch_folder(params, settings.get("base_path", ""))
@@ -1081,6 +1267,31 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     batch_path = Path(batch_path)
     log(f"Batch {batch_no}: {batch_path}")
     progress_callback(5)
+
+    if step_two:
+        log("Step 2: the production run binders")
+        done = _step_two(params, settings, log, batch_no, batch_path,
+                         root_922, progress_callback, cancel_event)
+        if done is None or cancel_event.is_set():
+            return
+        run_dir, written, marked, total = done
+        log(f"{marked} of {total} packet(s) had a 1D, "
+            f"{len(written)} binder(s) built")
+        if marked < total:
+            sdk.flag_action(
+                params,
+                f"{total - marked} source material(s) have no 1D, so they are "
+                f"missing from their binder.",
+                "The console names each one. Nest them, put the PDFs in the "
+                "same folder named after their packet (1.1.pdf, SAW.2.pdf) "
+                "and run this again.")
+            sdk.set_run_outcome(
+                params, sdk.RUN_OUTCOME_PARTIAL,
+                f"{total - marked} material(s) have no 1D - see the console")
+        for dest, pages in written:
+            sdk.link_output(params, f"Open {dest.name}", str(dest),
+                            prefix="[BINDER]")
+        return
 
     organizer = _organizer(batch_path, batch_no, log)
     tubes, skipped_rows, all_parts = _read_tubes(organizer, log)
@@ -1201,6 +1412,13 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     sdk.link_output(params, f"Open {book.name}", str(book), prefix="[CUT LIST]")
     sdk.link_output(params, "Open the Production Packets report", str(report),
                     prefix="[REPORT]")
+
+    # step 1 ends by saying what has to happen before step 2 can run - the
+    # nesting in between is hers, and nothing here can do it for her
+    log("")
+    log("NEXT: nest these materials into 1Ds, save one PDF per packet named "
+        "after it (1.1.pdf, SAW.2.pdf), then switch on 'Build the production "
+        "run binders' in Settings > Apps and run this again.")
 
     if console is not None and hasattr(console, "safe_colored_log"):
         console.safe_colored_log("Get out me swamp!", SWAMP_GREEN)
