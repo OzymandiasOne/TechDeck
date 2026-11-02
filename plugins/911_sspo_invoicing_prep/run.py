@@ -740,6 +740,66 @@ class _SupplementPdfExporter:
             self._log(f"  WARNING: {self.error} - no supplement PDFs this run.")
             return False
 
+    @staticmethod
+    def _widen_hashed_columns(sheet, log) -> int:
+        """Widen any column Excel is rendering as ###### before we print it.
+
+        A.T., 2026-10-29: "dates in Excel cells that are too narrow to
+        display properly appear as XXXXXX. The PDF reproduces the same text
+        instead of displaying the date." Excel fills a too-narrow DATE or
+        NUMBER cell with hashes, and ExportAsFixedFormat prints exactly what is
+        on screen, so the supplement went out with hashes where a date belongs.
+
+        Only the offending columns move, and only ever WIDER - invoicing tuned
+        INV_COL_WIDTHS, and an AutoFit that SHRANK a column would quietly
+        re-lay-out their sheet. Text never hashes (it overflows or wraps), so
+        only date/number cells are worth asking about, and one hit settles the
+        column. The sheet is already fit-to-one-page-wide, so a wider column
+        rescales the print instead of spilling onto a second page.
+
+        The workbook is open READ-ONLY and closed with SaveChanges=False, so
+        this changes what gets PRINTED and nothing on disk.
+        """
+        try:
+            used = sheet.UsedRange
+            rows, cols = used.Rows.Count, used.Columns.Count
+            if rows < 1 or cols < 1:
+                return 0
+            values = used.Value
+            if rows == 1 and cols == 1:
+                values = ((values,),)
+            elif rows == 1:
+                values = (values,)
+            elif cols == 1:
+                values = tuple((v,) for v in values)
+        except Exception as exc:
+            log(f"  NOTE: couldn't measure the column widths ({exc}).")
+            return 0
+
+        widened = 0
+        for c in range(1, cols + 1):
+            for r in range(1, rows + 1):
+                try:
+                    value = values[r - 1][c - 1]
+                except (IndexError, TypeError):
+                    continue
+                if value is None or isinstance(value, str):
+                    continue            # text overflows; it never hashes
+                try:
+                    shown = str(used.Cells(r, c).Text or "")
+                except Exception:
+                    continue
+                if not shown or set(shown) != {"#"}:
+                    continue
+                column = used.Columns(c).EntireColumn
+                before = column.ColumnWidth
+                column.AutoFit()
+                if column.ColumnWidth < before:
+                    column.ColumnWidth = before
+                widened += 1
+                break
+        return widened
+
     def export(self, xlsx_path: Path, pdf_path: Path) -> bool:
         if not self._start():
             return False
@@ -747,7 +807,12 @@ class _SupplementPdfExporter:
         try:
             # Plain paths on purpose: Excel COM does not accept the \\?\ prefix.
             wb = self._excel.Workbooks.Open(str(xlsx_path), ReadOnly=True)
-            wb.Worksheets(INV_SHEET).ExportAsFixedFormat(_XL_TYPE_PDF, str(pdf_path))
+            sheet = wb.Worksheets(INV_SHEET)
+            widened = self._widen_hashed_columns(sheet, self._log)
+            if widened:
+                self._log(f"  widened {widened} column(s) Excel was showing "
+                          f"as ###### - the dates print in full.")
+            sheet.ExportAsFixedFormat(_XL_TYPE_PDF, str(pdf_path))
             if not sdk.exists(pdf_path):
                 raise RuntimeError("Excel reported success but no PDF appeared")
             return True
