@@ -196,6 +196,45 @@ def survey(batch_path, tube_parts, log=None, cancel_event=None):
 
 # ───────────────────────────────────────────────────────────── the stamping
 
+STAMP_SIZE = 13
+# where the order number is written by hand, as a fraction of the page: the
+# clear band above the title block. Fallbacks run left then down, staying in
+# the drawing's own white space rather than the notes band or the title block.
+STAMP_SPOTS = ((0.58, 0.17), (0.58, 0.11), (0.40, 0.11), (0.40, 0.17),
+               (0.58, 0.24), (0.40, 0.24), (0.14, 0.11))
+
+
+def _stamp_spot(page, words, order):
+    """The first of `STAMP_SPOTS` whose patch of page is still blank.
+
+    Until v1.10.0 only SAW sheets were stamped, and on those the hand-stamp
+    position is empty. Laser sheets put their detail view further left, so the
+    fixed spot printed the order number across the Detail A geometry (batch
+    508, `1.1` page 1).
+
+    Blankness is read off the RENDERED pixels, not off `get_text` +
+    `get_drawings`: every one of these sheets is drawn inside a border
+    rectangle whose bounding box covers the whole page, so a bbox test calls
+    all seven spots occupied and the stamp never moves.
+    """
+    rect = page.rect
+    width = fitz.get_text_length(f"ORDER: {order}", fontname="hebo",
+                                 fontsize=STAMP_SIZE)
+    for fx, fy in STAMP_SPOTS:
+        x, y = rect.width * fx, rect.height * fy
+        # insert_text draws from the BASELINE, so the box sits above y
+        box = fitz.Rect(x - 2, y - STAMP_SIZE - 2, x + width + 2, y + 4)
+        if box.x1 > rect.width or box.y0 < 0:
+            continue
+        try:
+            pix = page.get_pixmap(clip=box, dpi=36, colorspace=fitz.csGRAY)
+        except Exception:
+            return (x, y)
+        if pix.samples and min(pix.samples) >= 250:      # nothing but paper
+            return (x, y)
+    return (rect.width * STAMP_SPOTS[0][0], rect.height * STAMP_SPOTS[0][1])
+
+
 def _stamp_page(page, order):
     """Put `ORDER: <n>` on the sheet and highlight its saw cut dimension.
 
@@ -206,9 +245,8 @@ def _stamp_page(page, order):
     words = page.get_text("words")
     rect = page.rect
     if order:
-        page.insert_text((rect.width * 0.58, rect.height * 0.17),
-                         f"ORDER: {order}", fontsize=13, fontname="hebo",
-                         color=STAMP_COLOR)
+        page.insert_text(_stamp_spot(page, words, order), f"ORDER: {order}",
+                         fontsize=13, fontname="hebo", color=STAMP_COLOR)
     for i, w in enumerate(words):
         if w[4].strip().upper().lstrip("(") != "SAW":
             continue

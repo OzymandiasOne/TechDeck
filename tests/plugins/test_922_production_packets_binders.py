@@ -101,3 +101,44 @@ def test_the_assembly_sheet_is_bound_once_per_binder(pk, tmp_path, batch):
     finally:
         doc.close()
     assert naming_both == 1
+
+
+# ───────────────────────────────────────────── where the order stamp lands
+
+def _page_with_ink(doc, ink_rect):
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(4, 4, 608, 788))      # the sheet's own border
+    page.draw_rect(ink_rect, fill=(0.3, 0.3, 0.3))
+    return page
+
+
+def test_the_stamp_moves_off_the_drawing(pk):
+    """Laser sheets put their detail view where the saw sheets leave paper, so
+    the fixed hand-stamp spot printed `ORDER:` across the Detail A geometry
+    (batch 508, `1.1` page 1). v1.10.0 looks for blank paper instead."""
+    doc = fitz.open()
+    default = (612 * pk.STAMP_SPOTS[0][0], 792 * pk.STAMP_SPOTS[0][1])
+
+    # a clear sheet keeps the hand position, so saw packets do not move
+    clear = _page_with_ink(doc, fitz.Rect(60, 400, 300, 600))
+    assert pk._stamp_spot(clear, clear.get_text("words"), "X1") == default
+
+    # ink ON the hand position pushes the stamp to another blank spot
+    busy = _page_with_ink(doc, fitz.Rect(330, 110, 580, 260))
+    spot = pk._stamp_spot(busy, busy.get_text("words"), "X1")
+    assert spot != default
+    assert fitz.Rect(spot[0] - 2, spot[1] - pk.STAMP_SIZE - 2,
+                     spot[0] + 60, spot[1] + 4).x1 <= 612
+    doc.close()
+
+
+def test_the_border_rect_alone_does_not_push_the_stamp(pk):
+    """The regression this replaced: every sheet is drawn inside a border whose
+    bounding box covers the page, so a bbox test called all seven spots taken
+    and the stamp never moved at all."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(4, 4, 608, 788))
+    assert pk._stamp_spot(page, page.get_text("words"), "X1") == \
+        (612 * pk.STAMP_SPOTS[0][0], 792 * pk.STAMP_SPOTS[0][1])
+    doc.close()
