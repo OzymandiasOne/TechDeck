@@ -1,4 +1,4 @@
-# TechDeck v0.8.8 - Cards That Tell The Truth
+# TechDeck v0.8.9 - The Cutting List
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,116 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.9 - The Cutting List
+
+Most of this release came from the feedback you sent.
+
+### New app: 922 Production Packets
+
+You pick the batch and it works out the saw cut length for every tube on it, writes the
+cutting list you feed the 1D optimizer, and binds the shop prints behind it, one binder
+per source material.
+
+The tubes, the pallets and the source materials all come off the batch's
+`PO H{n} Pallet & Rod Organizer.xlsx`. A row counts as a tube when it carries a Base
+Material, which is what leaves the plate and rod lines behind.
+
+**The cut length ladder**, measured against 291 real parts on batches 500-504, 285 right:
+
+1. A `( N SAW CUT )` note, or a bare parenthesis under a dimension, IS the cut length and
+   is used as printed. Nothing is added.
+2. Otherwise the assembly dimension plus 0.10" per ground end: `+0.10` for an end tube,
+   `+0.20` for a middle tube of a 3-or-more tube assembly, because note 1 on every sheet
+   models each jointed end 0.1" oversized for the grind.
+3. A one-off tube with no assembly takes a parenthesised dimension if it has one, else the
+   dimension as printed. A straight cut gets nothing added.
+
+Everything rounds up to the tenth. A tube that belongs to an assembly is read off the
+assembly sheet only; its own part sheet is opened for one purpose, to rank that assembly's
+tubes by length. Pairing a dimension to its tube is by length rank, shortest to shortest:
+nearest-callout scored 12 of 28 on the two-tube drawings and reading-order 24 of 28,
+because a callout's leader points away from the tube it names.
+
+Oversized tubes are saw cut, and SAW counts as its own pallet, numbered fresh from the
+biggest tube down. Batch 505's hand-built packets run `SAW.1 = 6.0 X 6.0 X 0.50` down to
+`SAW.6 = 3.0 X 3.0 X 0.375`, and all six matched.
+
+**It never quietly writes a guess.** Two tubes on one assembly within half an inch of each
+other get both lengths in length order plus an arrow in the Problem? column; a tube with no
+drawing anywhere in the batch leaves its length cell empty, raises an action item, and ends
+the run on a warning. The app only reads the batch, writes only files carrying `(TechDeck)`
+in the name, and never merges, renames or deletes what is already in that folder.
+
+What you get, in `Batch {n} - Documentation\Production Packets\`:
+
+- `{batch} Tubes (TechDeck).xlsx` - one sheet per source material per pallet, named after
+  its packet (`SAW.4`, `2.5`). The material number, batch and pallet run across the top,
+  then Problem?, Parts Id., Length, Quantity, Order. The sheets come out in the Material
+  Use Tracker's order for that batch, so the two read side by side. Where a material fills
+  one pallet and runs onto the next, the organizer lists it again and you get a sheet and a
+  binder for each pallet.
+- A `TechDeck Packets` folder of bound drawings, one per source material, each named after
+  its packet. Every binder reads the same way: for each order the assembly drawing first,
+  then that order's own tube sheets, every page stamped with the order number and the saw
+  cut dimension highlighted where the drawing gives one.
+- `Production Packets Report (TechDeck) - Batch {n}.pdf` - what needs a look, what had no
+  drawing, which tubes have no print of their own to bind, and the full cutting list.
+
+### The second half: the production run binders
+
+Off by default, because the 1Ds in the middle are nested by hand in software TechDeck does
+not drive. Go to: Settings> Apps> 922 Production Packets and select
+**Build the production run binders**.
+
+The first half stops once the cutting list and the material binders are written, and says
+what comes next. You nest the 1Ds, put the PDFs in a folder named after their packet
+(`1.1.pdf`, `SAW.2.pdf`), then switch the second half on and run it again. It asks you for
+that folder.
+
+- **Each 1D comes back marked up:** the material line highlighted, a `drop:______` blank
+  under the Total Bars box, and on a saw sheet a `pre-cut bar length:______` blank above it,
+  because a saw bar is cut from stock of an unknown length. Everything is anchored on text
+  found on the page, never on a coordinate.
+- **An estimated drop says where it came from.** The Material Use Tracker's LENGTH column
+  carries a `~` when the bar is a leftover drop rather than a fresh stick. That, and only
+  that, puts a blue arrow and `DROP FROM BATCH n (ESTIMATED)` on the 1D, plus a `~` in front
+  of the length. The batch named is the most recent earlier one that used the same item and
+  left something over - batch 508's `1.2` points at 505 and its `2.1` at 506, because 507
+  left zero of both. 7 of 7 on her own reference set.
+- **A cover page per pallet**, built from the two Word procedure docs that ship
+  with the app, one for tube laser parts and one for saw cut tubes. The pallet's order listing and its
+  MATERIAL REQUIRED block are carried across from the Pallet Organizer. Orders whose
+  material is saw cut come out yellow with their material rows grey, and every material
+  group bands green.
+- **It binds `PALLET 1.pdf`, `PALLET 2.pdf`, `PALLET 3.pdf` and `SAW TUBES.pdf`** into a
+  `Production Run` folder, with the marked-up 1Ds and the cover pages kept beside them.
+  Only the saw binder carries tube drawings, because the tube laser parts get programmed.
+- A source material with no 1D is named in the console and in a popup at the end, and the
+  run finishes partial rather than quietly handing over a short binder.
+
+Step 2 reproduces all four of the reference binders page for page: 3 / 4 / 2 / 19 pages,
+every page the same kind in the same place.
+
+### Fixes
+
+**922 Pallet Stamper now reads a work packet that's been re-printed to a new PDF.** That
+kind of print has no text in it at all, only a picture of the text, so the stamper couldn't
+tell the packet from a drawing and stopped with "no work packet found". 13 orders across
+batches 510-514 hit it. Page 1 is read as a picture when there is under 80 characters of
+text to read - an emptiness test was not enough, because a packet TechDeck stamped in an
+earlier batch carries that stamp as real text and nothing else. The Difficulty Stamper and
+922 Setup identify packets the same way, so they got it too. 13 of 13 now read; of the 25
+shop drawings in the same folders, 0 are mistaken for a packet; an ordinary packet never
+reaches the picture reader.
+
+**911 SSPO Invoicing Prep: a date too narrow for its column printed as `######`** on the
+supplement PDF, because `ExportAsFixedFormat` prints exactly what is on screen. Excel is
+asked which cells it is hashing and only those columns are widened, on date and number
+cells only. A column is never made narrower, so the tuned supplement layout survives, and
+the workbook on disk keeps the widths you set.
 
 ---
 
