@@ -301,14 +301,14 @@ ENGINEERING = [
 VERSION_RENAMES = {
     # Past re-keys (a dict can hold each old key once, so superseded targets
     # move to this comment): "In Development" -> "Beta 0.8.6.11",
-    # "In Development" -> "Beta 0.8.7.1".
-    "In Development": "Beta 0.8.7.6",
+    # "In Development" -> "Beta 0.8.7.1", "In Development" -> "Beta 0.8.7.6".
+    "In Development": "Beta 0.8.8",
     "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("In Development", "Oct 20, 2026", "Feature",
+    ("Beta 0.8.8", "Oct 21, 2026", "Feature",
      "A floor-feedback release. 911 batch setup now collects each nest's "
      "machine program files into a single folder per nest, instead of the "
      "operator opening one work-order folder at a time across a batch; a "
@@ -335,8 +335,21 @@ VERSION_ROWS = [
      "cannot recur. The same diagnostic also showed that a computer going to "
      "sleep with the application open was being recorded as an application "
      "freeze; it is now distinguished from one, so a genuine freeze is "
-     "visible in a report rather than buried among false entries.",
-     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride, 922 Setup"),
+     "visible in a report rather than buried among false entries. "
+     "Production-board accuracy: creating a batch's cards on the shared "
+     "production board reported success as soon as the request was accepted, "
+     "not when the cards existed - on one batch all 35 cards failed to be "
+     "created and the run still reported complete, which was found only when "
+     "the board was looked at. The integration now returns what it actually "
+     "did, and the application reports it: how many cards were created, how "
+     "many already existed, and which ones failed. A card that failed is no "
+     "longer recorded as done, so it is offered again on the next run rather "
+     "than being lost. This is the first capability built on the upgraded "
+     "integration licence, which allows the service to answer rather than "
+     "only receive; the remaining four card integrations can be upgraded "
+     "individually without a new release.",
+     "911 Setup, 911 Remove Ticket, 911 Baked Beans Wild Ride, 922 Setup, "
+     "911 Teams Cards, 922 Batch Repeater"),
     ("Beta 0.8.7.9", "Oct 14, 2026", "Feature",
      "A planning and time-visibility release, built entirely from user "
      "requests. The personal work planner gains four capabilities operators "
@@ -1094,6 +1107,7 @@ GANTT_ROWS = [
     ("922 Difficulty Stamper", GANTT_DONE, 1, "2026-08", "2026-08"),
     ("922 Runtime Genie", GANTT_DONE, 1, "2026-04", "2026-05"),
     ("922 Master Parts Catalog", GANTT_DONE, 1, "2026-07", "2026-07"),
+    ("922 Production Packets", GANTT_DEV, 0.9, "2026-10", "2026-10"),
     ("Flat Bar Forming Support", GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "902 QTDR WORKFLOW"),
     ("902 DXF Prep", GANTT_DONE, 1, "2026-06", "2026-07"),

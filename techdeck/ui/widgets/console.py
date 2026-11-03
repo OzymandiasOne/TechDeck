@@ -1092,6 +1092,28 @@ class ConsoleWidget(QWidget, ThemeAware):
             f'{self._escape_html(text)}</span>'
         )
 
+    @Slot(str, str)
+    def append_colored(self, text: str, color: str):
+        """Append one plain line in a given colour — thread-safe via @Slot."""
+        self._append_line(
+            f'<span style="color: {color};">{self._escape_html(text)}</span>'
+        )
+
+    def safe_colored_log(self, text: str, color: str):
+        """Call append_colored from any thread safely.
+
+        `append_markup` touches the widget directly, so a plugin worker thread
+        cannot use it; this is the marshalled counterpart for a run that wants
+        to say one line in its own colour.
+        """
+        QMetaObject.invokeMethod(
+            self,
+            "append_colored",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, text),
+            Q_ARG(str, color),
+        )
+
     def safe_game_log(self, text: str):
         """Call append_game from any thread safely."""
         QMetaObject.invokeMethod(

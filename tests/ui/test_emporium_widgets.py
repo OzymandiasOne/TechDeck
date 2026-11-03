@@ -4,6 +4,8 @@ shim that keeps every pre-split import path working."""
 
 from techdeck.core.settings import SettingsManager
 
+from tests.conftest import wear_theme
+
 
 # ---- re-export contract ------------------------------------------------------
 
@@ -208,6 +210,7 @@ def test_my_stuff_shows_a_found_cartridge_greyed_until_found(qapp, tmp_path, mon
     from techdeck.ui.pages.mystuff_page import MyStuffPage
     monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
     monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", True)
+    wear_theme(monkeypatch)              # he follows the worn theme now
     s = SettingsManager(settings_dir=tmp_path)
     page = MyStuffPage(s)
     tile = next(t for t in page.tiles if t.item["id"] == "game_puppet_master")

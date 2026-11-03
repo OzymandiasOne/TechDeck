@@ -74,7 +74,7 @@ import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 REPORT_DIR_NAME = "debug_reports"
 
@@ -99,7 +99,18 @@ _IMPORT_PROBES = [
     "rapidocr_onnxruntime",
 ]
 
-_REDACT_MARKERS = ("api_key", "token", "password", "secret")
+# Structural backstop only. The real credential defence is report_scrub, which
+# works on the assembled TEXT - a key-name list can only catch names someone
+# thought of, and that is exactly how `webhook_url` leaked its `sig=` signature
+# out of every report ever generated (found 2026-10-21).
+#
+# Deliberately NOT in this list: "url" / "webhook". report_scrub redacts a
+# URL's query and KEEPS its host, because "it was talking to
+# <tenant>.powerplatform.com" is the diagnosis the report exists to deliver,
+# while the signature is the only part that is secret. Blanking the value here
+# would throw the host away before the scrubber ever sees it.
+_REDACT_MARKERS = ("api_key", "token", "password", "secret",
+                   "credential", "bearer", "signature")
 
 # Cloud endpoints the connectivity collector probes. Answers whether a future
 # "who's online + nudge" feature could reach a cloud MQTT broker from THIS
@@ -118,14 +129,23 @@ _CONNECTIVITY_TARGETS = [
 _CONNECTIVITY_TIMEOUT = 4.0
 
 
-def _redact(obj):
-    """Recursively blank out values whose key looks like a credential."""
+def _redact(obj: Any) -> Any:
+    """Recursively blank out values whose key looks like a credential.
+
+    Only STRINGS long enough to be one are blanked. The old version blanked by
+    key name alone, so `"tokens_used": 0` - a ticket tally - printed as
+    `<redacted>`, which made the report lie about the very state it exists to
+    show. A number and an empty string are never credentials.
+    """
     if isinstance(obj, dict):
-        return {
-            k: ("<redacted>" if any(m in str(k).lower() for m in _REDACT_MARKERS)
-                else _redact(v))
-            for k, v in obj.items()
-        }
+        out = {}
+        for k, v in obj.items():
+            looks_keyed = any(m in str(k).lower() for m in _REDACT_MARKERS)
+            if looks_keyed and isinstance(v, str) and len(v.strip()) >= 8:
+                out[k] = "<redacted>"
+            else:
+                out[k] = _redact(v)
+        return out
     if isinstance(obj, list):
         return [_redact(v) for v in obj]
     return obj
@@ -360,6 +380,50 @@ def _collect_drawing_reader() -> list[str]:
     if all(ln.startswith("  [OK") or ln.startswith("         ") or ln.startswith("Package")
            for ln in lines):
         lines.append("Reader is complete - 911 Inspection Dimensions can read drawings.")
+    return lines
+
+
+def _collect_outbox() -> list[str]:
+    """Two-way flow commands still waiting to be delivered.
+
+    A queue that never drains is otherwise completely invisible: the user was
+    told "saved, it will send itself", and if the pump is broken nobody ever
+    finds out. Depth per command is the first thing to look at when a
+    colleague says they sent something that never arrived.
+    """
+    from techdeck.core import flow_client
+    lines: list[str] = []
+
+    out_dir = flow_client.flow_dir() / "outbox"
+    queues = sorted(out_dir.glob("*.jsonl")) if out_dir.is_dir() else []
+    if not queues:
+        lines.append("Outbox: nothing queued.")
+    else:
+        for path in queues:
+            command = path.stem
+            try:
+                depth = flow_client.outbox_depth(command)
+            except Exception as exc:
+                lines.append(f"  {command:34} [unreadable: {exc}]")
+                continue
+            note = "" if depth else "   (drained; file kept)"
+            lines.append(f"  {command:34} {depth:>4} waiting{note}")
+
+    # Parked commands matter MORE than waiting ones: a waiting command still
+    # has a future, a parked one is already lost unless someone looks. A
+    # non-zero count here almost always means a build shipped with the flow
+    # URL unset, which silently eats every submission on that machine.
+    dead_dir = flow_client.flow_dir() / "dead_letter"
+    parked = sorted(dead_dir.glob("*.jsonl")) if dead_dir.is_dir() else []
+    if parked:
+        lines.append("")
+        lines.append("UNDELIVERABLE (parked - no flow address was configured):")
+        for path in parked:
+            depth = flow_client.dead_letter_depth(path.stem)
+            if depth:
+                lines.append(f"  {path.stem:34} {depth:>4} parked")
+    if not out_dir.is_dir() and not parked:
+        return ["Nothing has ever been queued (no outbox directory)."]
     return lines
 
 
@@ -691,14 +755,34 @@ def _collect_connectivity() -> list[str]:
 
 # ------------------------------------------------------------------ assembly
 
-def generate_debug_report(main_window=None) -> Path:
-    """Collect every section and write the report file.
+def build_report_text(main_window=None, *, lightweight: bool = False) -> list[str]:
+    """Collect every section and return the report as lines, scrubbed.
 
-    Returns the written file's path. Individual collectors may fail (their
-    section then contains the traceback) but this function only raises if the
-    report cannot be written anywhere at all.
+    Separated from the file write so a report can be SENT without first
+    landing on disk, and so the scrub is provably the last thing that happens
+    to the text on every path out of this module.
+
+    `lightweight=True` drops the four collectors that have side effects or
+    cost real time, and keeps everything that describes what just happened:
+
+      * PLUGINS            - validates every installed plugin, which means
+                             `exec_module` on every one of them. On the crash
+                             path we are offering a report 4 s after a launch
+                             that followed a dirty exit, quite possibly caused
+                             by one of those plugins. Re-running their imports
+                             inside the crash handler is how you crash inside
+                             the crash handler.
+      * IMPORT PROBE       - imports every critical module.
+      * DRAWING READER     - loads the OCR engines.
+      * NETWORK CONNECTIVITY - five TCP+TLS connects at 4 s each.
+
+    None of the four says anything about the failure being reported, and all
+    four run on the UI thread in the interactive case.
     """
     lines: list[str] = ["TechDeck Debug Report"]
+    if lightweight:
+        lines.append("(lightweight: plugin validation, import probe, drawing "
+                     "reader and connectivity were skipped)")
 
     def section(title: str, fn: Callable[[], list[str]]):
         lines.append("")
@@ -715,11 +799,13 @@ def generate_debug_report(main_window=None) -> Path:
     section("PREVIOUS SESSION (state at exit)", _collect_previous_session)
     section("ENVIRONMENT", _collect_environment)
     section("ONEDRIVE / LIBRARY DISCOVERY", _collect_onedrive_discovery)
-    section("PLUGINS (validated on this machine)", _collect_plugins)
-    section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
-    section("DRAWING READER (911 Inspection Dimensions OCR)", _collect_drawing_reader)
-    section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
+    if not lightweight:
+        section("PLUGINS (validated on this machine)", _collect_plugins)
+        section("IMPORT PROBE (frozen bundle contents)", _collect_import_probe)
+        section("DRAWING READER (911 Inspection Dimensions OCR)", _collect_drawing_reader)
+        section("NETWORK CONNECTIVITY (cloud broker reachability)", _collect_connectivity)
     section("USAGE TELEMETRY (successful-run history)", _collect_usage)
+    section("PENDING FLOW COMMANDS (outbox)", _collect_outbox)
     section("SETTINGS SNAPSHOT", _collect_settings)
     section("DISK / PERMISSIONS", _collect_disk)
     section("LIVE UI PROBE", lambda: _collect_ui_probe(main_window))
@@ -727,6 +813,22 @@ def generate_debug_report(main_window=None) -> Path:
     section("LOGS", _collect_logs)
     lines.append("")
     lines.append("=== END OF REPORT " + "=" * 46)
+
+    # LAST, always. A report may be written to the user's Desktop or POSTed to
+    # a flow; neither may carry a credential, so the scrub sits at the one
+    # point both paths share rather than in each caller.
+    from techdeck.core.report_scrub import scrub_text
+    return scrub_text(lines)
+
+
+def generate_debug_report(main_window=None, *, lightweight: bool = False) -> Path:
+    """Collect every section and write the report file.
+
+    Returns the written file's path. Individual collectors may fail (their
+    section then contains the traceback) but this function only raises if the
+    report cannot be written anywhere at all.
+    """
+    lines = build_report_text(main_window, lightweight=lightweight)
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     name = f"TechDeck_DebugReport_{os.environ.get('COMPUTERNAME', 'PC')}_{stamp}.txt"

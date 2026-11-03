@@ -41,12 +41,24 @@ def test_halloween_is_offered_to_professional_users_in_season():
     # the user's ability to find the theme and choose it.
     assert "halloween" in _choices("professional", season=True)
 
-def test_halloween_is_hidden_out_of_season():
-    assert "halloween" not in _choices("dark", season=False)
+def test_halloween_is_offered_out_of_season_too():
+    """It used to be hidden in November. Anthony, 2026-11-03: "halloween
+    theme stays on everyone's techdecks."
+
+    This is load-bearing now, not a preference: the Puppet Master follows
+    the WORN theme rather than the calendar, so a picker that drops
+    halloween on Nov 3 would wall him off until next October.
+    """
+    assert "halloween" in _choices("dark", season=False)
 
 def test_halloween_stays_listed_out_of_season_while_worn():
     # A session open across Nov 2 must still be able to switch AWAY from it.
     assert "halloween" in _choices("halloween", season=False)
+
+def test_the_stock_is_the_same_in_and_out_of_season():
+    """One list all year. The seasonal filter is gone, so nothing about the
+    date may change what the picker offers."""
+    assert _choices("dark", season=True) == _choices("dark", season=False)
 
 def test_every_other_theme_is_always_offered():
     for season in (True, False):

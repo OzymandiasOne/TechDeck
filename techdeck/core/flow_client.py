@@ -134,6 +134,19 @@ def cache_path(key: str) -> Path:
     return flow_dir() / "cache" / f"{_safe_name(key)}.json"
 
 
+def dead_letter_path(command: str) -> Path:
+    """Where a command that can never be delivered is parked.
+
+    A queued command with no flow address used to be DROPPED and counted as
+    delivered, which is right for a telemetry row and very wrong for anything
+    a person wrote: a colleague's suggestion or crash report would vanish
+    while the app reported success. Parking it keeps it recoverable, and the
+    debug report prints the depth so a build with an unset URL is visible
+    instead of silently eating submissions.
+    """
+    return flow_dir() / "dead_letter" / f"{_safe_name(command)}.jsonl"
+
+
 def _safe_name(name: str) -> str:
     """A command/cache name as a safe single filename component."""
     cleaned = "".join(c if (c.isalnum() or c in "-_") else "_" for c in str(name))
@@ -506,10 +519,11 @@ def flush_outbox(command: str, url: str = "", *,
             left.append(envelope)
             continue
         if not target:
-            # Nowhere to send it, and nowhere it will ever go. Dropping it
-            # beats a queue that grows forever.
-            say(f"(Dropping a queued '{command}' with no flow address.)")
-            delivered += 1
+            # Nowhere to send it, and nowhere it will ever go. It must leave
+            # the live queue (which would otherwise grow forever on a machine
+            # that never had a URL) but it must NOT be called delivered: see
+            # dead_letter_path. Neither delivered nor waiting.
+            _dead_letter(command, envelope, say)
             continue
         answer = _post(target, envelope, timeout, say)
         if answer.reached:
@@ -536,6 +550,33 @@ def _restore(items: List[Dict[str, Any]], url: str) -> List[Dict[str, Any]]:
         item.setdefault("url", (url or "").strip())
         out.append(item)
     return out
+
+
+def _dead_letter(command: str, envelope: Dict[str, Any],
+                 say: Callable[[str], None]) -> None:
+    """Park an undeliverable command. Never raises: losing it quietly is the
+    one outcome this function exists to prevent, but a failed park must not
+    take the rest of the flush down with it."""
+    path = dead_letter_path(command)
+    try:
+        with _LOCK:
+            _mkdir(path.parent)
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(envelope) + "\n")
+        say(f"(A queued '{command}' has no flow address - parked, not sent.)")
+    except OSError as exc:
+        say(f"(Could not park an undeliverable '{command}': {exc})")
+
+
+def dead_letter_depth(command: str) -> int:
+    """How many commands were parked as undeliverable."""
+    path = dead_letter_path(command)
+    try:
+        with _LOCK:
+            with open(path, "r", encoding="utf-8") as fh:
+                return sum(1 for line in fh if line.strip())
+    except OSError:
+        return 0
 
 
 def outbox_depth(command: str) -> int:

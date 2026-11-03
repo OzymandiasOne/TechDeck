@@ -25,6 +25,7 @@ from techdeck.core.constants import (
 )
 from techdeck.ui.theme import generate_stylesheet, get_current_palette
 from techdeck.ui.utils import mark_icon_button
+from techdeck.ui.dialog_front import when_no_modal, message_box
 from techdeck.ui.widgets.sidebar import Sidebar
 from techdeck.ui.pages.home_page import HomePage, HOME_TILE_H
 
@@ -265,8 +266,19 @@ class MainWindow(QMainWindow):
             logger.exception("halloween decor failed to start")
 
         # After a crash/freeze, offer a debug report once on the next start
-        # (well after the fade-in so startup feel is untouched).
-        QTimer.singleShot(4000, self._maybe_offer_debug_report)
+        # (well after the fade-in so startup feel is untouched). Queued
+        # behind the update offer if that one got there first - see
+        # when_no_modal().
+        QTimer.singleShot(
+            4000, lambda: when_no_modal(self._maybe_offer_debug_report, owner=self))
+
+        # Deliver anything a previous session queued but could not send (a
+        # suggestion typed while the network was down, a crash report the
+        # flow never answered). Its own daemon thread, started late so it
+        # never competes with the fade-in, and silent unless it fails:
+        # the user was told "it will send itself next time", and this is the
+        # thing that makes that true.
+        QTimer.singleShot(6000, self._start_outbox_pump)
 
         # Startup fade-in. Window opens at opacity 0 so it is invisible behind
         # the splash subprocess while warmup_pages() runs. __main__.py calls
@@ -1110,10 +1122,28 @@ class MainWindow(QMainWindow):
         logger.warning("Update check failed: %s", error_msg)
 
     def _show_update_dialog_slot(self, update_info, mandatory):
-        """Show update dialog (Qt slot - always runs on main GUI thread)."""
-        dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
-        dialog.exec()
+        """Show update dialog (Qt slot - always runs on main GUI thread).
+
+        Queued behind any modal already showing - see when_no_modal().
+        """
+        def _show():
+            dialog = UpdateDialog(update_info, mandatory=mandatory, parent=self)
+            dialog.exec()
+
+        when_no_modal(_show, owner=self)
     
+    def _start_outbox_pump(self):
+        """Drain the two-way flow outbox in the background, once per launch.
+
+        Guarded like every other startup extra: a queue that cannot be drained
+        is a thing to log, never a thing that stops TechDeck opening.
+        """
+        try:
+            from techdeck.core import outbox_pump
+            outbox_pump.start()
+        except Exception:
+            logger.exception("outbox pump failed to start")
+
     def _maybe_offer_debug_report(self):
         """If the PREVIOUS session ended dirty (killed / crashed / froze),
         offer to generate a debug report right now — the report is excellent
@@ -1132,15 +1162,16 @@ class MainWindow(QMainWindow):
         if not should_offer_debug_report(prev):
             return
         logger.info("Previous session ended dirty - offering a debug report")
-        reply = QMessageBox.question(
+        reply = message_box(
             self,
+            QMessageBox.Icon.Question,
             "TechDeck didn't close cleanly",
             "It looks like TechDeck crashed or was shut down the hard way "
             "last time.\n\nCreate a debug report now? It captures what the "
             "app was doing when it stopped, saves to your Desktop, and can "
             "be sent to a TechDeck admin.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes,
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            default=QMessageBox.StandardButton.Yes,
         )
         if reply == QMessageBox.StandardButton.Yes:
             # Reuse the Settings page's generate-and-reveal flow (busy

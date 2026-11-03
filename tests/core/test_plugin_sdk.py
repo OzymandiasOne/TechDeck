@@ -470,3 +470,104 @@ def test_both_packet_layouts_are_recognised(tmp_path):
     _make_pdf(tmp_path / "b.pdf", ["QA FRM 922", "MOVE TO LOCATION"])
     assert plugin_sdk.classify_pdf(tmp_path / "a.pdf") == "packet"
     assert plugin_sdk.classify_pdf(tmp_path / "b.pdf") == "packet"
+
+
+# ───────────────────────────── a work packet with no text layer (2026-11-02)
+
+class TestFlattenedWorkPacket:
+    """Carrie, 2026-11-02: the pallet stamper has been skipping orders.
+
+    The cause, found in her debug report and confirmed against the live files:
+    some packets reach us re-printed through Windows' "Microsoft Print To PDF",
+    which turns every character into vector outlines. The page LOOKS normal and
+    says `Lead Trade: 922` in plain sight, but `get_text()` returns nothing, so
+    `classify_pdf` called it 'other' and the order went unstamped.
+
+    Thirteen orders across batches 510-514; 508 and 509 were clean. In batch
+    514 the five that failed were EXACTLY the five whose producer is
+    "Microsoft: Print To PDF" - the other 31 are iText, the real EB system.
+    """
+
+    def _page(self, text):
+        """A one-page PDF carrying `text` as real text."""
+        import fitz
+        doc = fitz.open()
+        page = doc.new_page()
+        y = 72
+        for line in text.split("\n"):
+            page.insert_text((40, y), line, fontsize=10)
+            y += 14
+        return doc
+
+    def test_a_rich_page_never_reaches_the_reader(self, tmp_path, monkeypatch):
+        """The cost guard: OCR must not run on an ordinary packet."""
+        from techdeck.core import plugin_sdk as sdk
+        doc = self._page("LEAD TRADE: 922\n" + "SOME OTHER CONTENT " * 12)
+        dest = tmp_path / "packet.pdf"
+        doc.save(str(dest))
+        doc.close()
+
+        called = []
+        monkeypatch.setattr(sdk, "_page_text_ocr",
+                            lambda *a, **k: called.append(1) or "")
+        assert sdk.classify_pdf(dest) == "packet"
+        assert called == [], "a page with real text must not pay for OCR"
+
+    def test_an_almost_empty_page_falls_back_to_the_reader(self, tmp_path,
+                                                           monkeypatch):
+        """Not simply "empty": a flattened packet TechDeck already stamped in
+        an earlier batch carries the stamp and nothing else, about 20
+        characters. Batch 510's XY686793 reads `BATCH: 385 PALLET: 3` and
+        batch 511's BL361287 reads `PO 418 PALLET 2` - both were still missed
+        when the trigger was "no text at all"."""
+        from techdeck.core import plugin_sdk as sdk
+        doc = self._page("BATCH: 385\nPALLET: 3")
+        dest = tmp_path / "flat.pdf"
+        doc.save(str(dest))
+        doc.close()
+
+        assert sdk.classify_pdf(dest) == "other", "nothing to go on yet"
+        monkeypatch.setattr(
+            sdk, "_page_text_ocr",
+            lambda *a, **k: "ORDER#: BM351780 LEAD TRADE: 922 FRM 922")
+        assert sdk.classify_pdf(dest) == "packet"
+
+    def test_the_reader_failing_leaves_the_old_behaviour(self, tmp_path,
+                                                         monkeypatch):
+        """Best effort: no reader in the build must not make things worse."""
+        from techdeck.core import plugin_sdk as sdk
+        doc = self._page("BATCH: 385\nPALLET: 3")
+        dest = tmp_path / "flat.pdf"
+        doc.save(str(dest))
+        doc.close()
+        monkeypatch.setattr(sdk, "_page_text_ocr", lambda *a, **k: "")
+        assert sdk.classify_pdf(dest) == "other"
+        # and the little text there was is still what the caller gets
+        assert "PALLET: 3" in (sdk.read_page1_text(dest) or "")
+
+    def test_a_marker_survives_the_reader_dropping_spaces(self):
+        """Real OCR output off one of these pages ran words together -
+        `FOROFFICIALUSEONLY`, `GENERALDYNAMICS` - so a marker is matched
+        against the squashed text too."""
+        from techdeck.core import plugin_sdk as sdk
+        assert sdk.text_is_work_packet("ORDER#: BM351780 LEADTRADE: 922")
+        assert sdk.text_is_work_packet("QA FRM922 PAGE 1")
+        assert sdk.text_is_work_packet("DESKTOPWORKPACKAGE")
+        # the ordinary spelling still works
+        assert sdk.text_is_work_packet("LEAD TRADE: 922")
+        # and a drawing is still not a packet
+        assert not sdk.text_is_work_packet(
+            "DO NOT SCALE DRAWING UNLESS OTHERWISE SPECIFIED")
+
+    def test_a_title_block_survives_it_too(self):
+        from techdeck.core import plugin_sdk as sdk
+        assert sdk.text_has_title_block("DONOTSCALEDRAWING ENGAPPR")
+        assert sdk.text_has_title_block(
+            "DO NOT SCALE DRAWING UNLESS OTHERWISE SPECIFIED")
+        # one marker is still not enough
+        assert not sdk.text_has_title_block("ENG APPR")
+
+    def test_squash_is_only_about_whitespace(self):
+        from techdeck.core import plugin_sdk as sdk
+        assert sdk._squash("  lead\ttrade\n922 ") == "LEADTRADE922"
+        assert sdk._squash(None) == ""

@@ -1673,11 +1673,39 @@ STANDARD_TUBE_MATERIALS = {
 OVERSIZED_TUBE_MATERIALS = {
     '181361440', '218000414', '218001209', '218001975', '218002101',
     '218002191', '218002642', '218002778', '218004273', '218012555',
+    '218012959',   # 6.0 X 6.0 X 0.50 NOM - saw cut, never lasered (added
+                   # 2026-10-26; it was the ONLY tube serial on batches
+                   # 495-507 that no list claimed, so every caller read it
+                   # as "not a tube material")
     '218017859', '218018574', '218019943', '218020020', '218020119',
     '218026338', '218026500', '218032982',
 }
 
 ALL_TUBE_MATERIALS = STANDARD_TUBE_MATERIALS | OVERSIZED_TUBE_MATERIALS
+
+# A material re-stocked under a NEW serial: {retired: current}. Both stay on
+# the lists above, because the retired number is still printed on paperwork.
+#
+# 218003095 -> 218136140 (3.0 X 3.0 X 0.25 NOM). Carrie, 2026-10-30: "ALL the
+# 3.0 x 3.0 x 0.25 tubes will be 218136140 going forward... When we pull
+# repeats up from the past, we should be changing the pdfs that say 218003095
+# but we haven't made that a priority." So a batch can carry BOTH numbers for
+# one physical size - which is why the Material Use Tracker lists batch 505's
+# under 218136140 while that PO calls it 218003095.
+TUBE_MATERIAL_ALIASES = {
+    '218003095': '218136140',
+}
+
+
+def canonical_tube_material(serial) -> str:
+    """The CURRENT serial for a material, following TUBE_MATERIAL_ALIASES.
+
+    A retired number still on an old repeat's print resolves to the one the
+    floor stocks today, so one physical size is one material however the
+    paperwork spells it.
+    """
+    s = str(serial or '').strip()
+    return TUBE_MATERIAL_ALIASES.get(s, s)
 
 
 def tube_class(serial) -> Optional[str]:
@@ -1789,11 +1817,73 @@ def is_real_pdf(path) -> bool:
     return not _NOT_A_REAL_PDF_RE.match(Path(path).stem)
 
 
+_OCR_ENGINE = "unbuilt"          # None once we know it cannot be built
+_OCR_DPI = 150                   # enough for a packet heading, cheap enough
+_OCR_SAID = False
+# Below this many characters, page 1 has no readable content of its own and is
+# worth a look with the OCR reader. Not simply "empty": a flattened packet that
+# TechDeck already STAMPED in an earlier batch carries the stamp as real text
+# and nothing else, so `get_text()` returns about 20 characters - `BATCH: 385
+# PALLET: 3`. Batch 510's XY686793 and 511's BL361287 are both that case. A
+# genuine page 1 of either a packet or a drawing runs to hundreds.
+_OCR_MIN_CHARS = 80
+
+
+def _page_text_ocr(page, name, log=None) -> str:
+    """Read a page that carries no text layer, with the bundled OCR reader.
+
+    Some work packets reach us re-printed through Windows' "Microsoft Print To
+    PDF", which turns every character into vector outlines: the page LOOKS
+    normal and `get_text()` returns nothing at all, so a packet that plainly
+    says `Lead Trade: 922` classified as 'other' and its order went unstamped.
+    Carrie reported it 2026-11-02; it starts at batch 510 and by 514 it was 5
+    orders of 36. The 31 that worked were all produced by iText, the real EB
+    system - a clean split, and the producer string names the culprit.
+
+    Best effort by design: if the reader cannot start, the caller gets "" and
+    behaves exactly as it did before. Never raises.
+    """
+    global _OCR_ENGINE, _OCR_SAID
+    if _OCR_ENGINE is None:
+        return ""
+    try:
+        import fitz
+        import numpy as np
+        if _OCR_ENGINE == "unbuilt":
+            # BOTH the import and the construction need guarding: RapidOCR
+            # loads its engine classes by NAME out of its own config.yaml, so
+            # a frozen build that did not bundle them fails HERE, not at
+            # import (see 911 Inspection Dimensions, FTOURIGNY-LT 2026-09-01).
+            from rapidocr_onnxruntime import RapidOCR
+            if log:
+                log(f"  {name} has no text in it - starting the built-in "
+                    f"reader to look at the page instead (first use is slow).")
+            _OCR_ENGINE = RapidOCR()
+        elif log and not _OCR_SAID:
+            log(f"  {name} has no text in it - reading the page instead.")
+        _OCR_SAID = True
+        pix = page.get_pixmap(dpi=_OCR_DPI, colorspace=fitz.csRGB, alpha=False)
+        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+            pix.height, pix.width, 3)
+        result, _elapsed = _OCR_ENGINE(img)
+        return " ".join(line[1] for line in (result or [])).upper()
+    except Exception as exc:
+        _OCR_ENGINE = None          # do not pay the failure once per PDF
+        if log:
+            log(f"  NOTE: the built-in reader could not start ({exc}), so "
+                f"{name} stays unreadable.")
+        return ""
+
+
 def read_page1_text(path, log=None) -> Optional[str]:
     """Upper-cased page-1 text of `path`, or None when it cannot be read.
 
     None is the honest answer for an unreadable file - callers decide what to
     do with "I don't know", which is never the same as a confident verdict.
+
+    A page carrying almost no text falls back to the bundled OCR reader
+    (`_page_text_ocr`). That path only runs below `_OCR_MIN_CHARS`, so an
+    ordinary batch never pays for it.
     """
     import fitz
     path = Path(path)
@@ -1801,7 +1891,12 @@ def read_page1_text(path, log=None) -> Optional[str]:
         ensure_local(path)
         doc = fitz.open(long_path(path))
         try:
-            return doc[0].get_text().upper()
+            text = doc[0].get_text().upper()
+            if len(text.strip()) >= _OCR_MIN_CHARS:
+                return text
+            # keep whatever little there was if the reader adds nothing
+            seen = _page_text_ocr(doc[0], path.name, log=log)
+            return seen if len(seen) > len(text) else text
         finally:
             doc.close()
     except Exception as exc:
@@ -1852,10 +1947,24 @@ def is_drawing_pdf(path, log=None) -> bool:
     return classify_pdf(path, log=log) == "drawing"
 
 
+def _squash(text: str) -> str:
+    """Upper-cased with every space taken out.
+
+    The OCR fallback in `read_page1_text` runs words together where the
+    original had thin spacing - a real page came back as `FOROFFICIALUSEONLY`
+    - so a marker is matched against both forms. Widening this costs nothing:
+    `LEADTRADE`, `FRM922` and `DESKTOPWORKPACKAGE` do not occur by accident in
+    a document that is not a work packet.
+    """
+    return "".join((text or "").upper().split())
+
+
 def text_is_work_packet(page_text: str) -> bool:
     """The work-packet test on text you have ALREADY read."""
     text = (page_text or "").upper()
-    return any(marker in text for marker in _WORK_PACKET_MARKERS)
+    squashed = _squash(text)
+    return any(marker in text or _squash(marker) in squashed
+               for marker in _WORK_PACKET_MARKERS)
 
 
 def text_has_title_block(page_text: str) -> bool:
@@ -1866,7 +1975,9 @@ def text_has_title_block(page_text: str) -> bool:
     round-trip.
     """
     text = (page_text or "").upper()
-    hits = sum(1 for marker in _TITLE_BLOCK_MARKERS if marker in text)
+    squashed = _squash(text)
+    hits = sum(1 for marker in _TITLE_BLOCK_MARKERS
+               if marker in text or _squash(marker) in squashed)
     return hits >= _TITLE_BLOCK_MIN_HITS
 
 

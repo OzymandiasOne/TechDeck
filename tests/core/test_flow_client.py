@@ -421,12 +421,40 @@ def test_a_queued_command_with_no_url_falls_back_to_the_flush_url(posts):
     assert posts.calls[-1][0] == URL
 
 
-def test_a_queued_command_with_nowhere_to_go_is_dropped(posts):
-    """Otherwise the queue grows forever on a machine that never had a URL."""
+def test_a_queued_command_with_nowhere_to_go_is_parked_not_dropped(posts):
+    """It must leave the live queue (which would otherwise grow forever on a
+    machine that never had a URL) but it must NOT be counted as delivered.
+
+    This used to report (1, 0) and discard the envelope. Fine for a telemetry
+    row; data loss for anything a person wrote - a colleague's suggestion or
+    crash report vanished while the app said "sent". Now it is parked where
+    the debug report can see it, and it is neither delivered nor waiting.
+    """
     fc.queue_command("", "save_row", {"n": 1})
     delivered, left = fc.flush_outbox("save_row")
     assert posts.calls == []
+    assert (delivered, left) == (0, 0)
+    assert fc.outbox_depth("save_row") == 0
+    assert fc.dead_letter_depth("save_row") == 1
+    parked = [json.loads(l) for l in
+              fc.dead_letter_path("save_row").read_text(encoding="utf-8").splitlines()]
+    assert parked[0]["data"]["n"] == 1
+    assert parked[0]["command_id"]          # still identifiable afterwards
+
+
+def test_parking_does_not_block_the_commands_behind_it(posts):
+    """One undeliverable envelope must not strand a queue that is otherwise
+    perfectly sendable."""
+    fc.queue_command("", "save_row", {"n": 1})
+    fc.queue_command(URL, "save_row", {"n": 2})
+    delivered, left = fc.flush_outbox("save_row")
     assert (delivered, left) == (1, 0)
+    assert fc.dead_letter_depth("save_row") == 1
+    assert posts.calls[-1][1]["data"]["n"] == 2
+
+
+def test_dead_letter_depth_is_zero_when_nothing_was_ever_parked():
+    assert fc.dead_letter_depth("never_parked") == 0
 
 
 def test_flush_respects_its_limit_and_leaves_the_rest_queued(posts):

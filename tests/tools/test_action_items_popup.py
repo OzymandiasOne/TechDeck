@@ -43,6 +43,20 @@ EXPECTED_ITEMS = {
     "902_dxf_prep": 2,          # no pricing workbook, and no PO rows — either way
                                 # the QTY workbook was never built
     "922_runtime_genie": 1,     # no .lst files, so the estimate came out at zero
+    "922_production_packets": 3,  # a tube with no drawing anywhere in the batch
+                                # leaves its cut length EMPTY, and the optimizer
+                                # would nest nothing for it; and a PO row with no
+                                # Base Material reaches no sheet at all, so the
+                                # optimizer nests nothing and the batch is cut
+                                # short (v1.7.0). Third, in step 2: a source
+                                # material with no 1D means the binder PRINTED
+                                # and handed to the floor is short that material
+                                # and says so nowhere on the paper, so it never
+                                # gets cut - same class as the other two, one
+                                # step further down the line (v1.11.0). A tube
+                                # material TechDeck has never seen deliberately
+                                # does NOT pop - the organizer placed it, so the
+                                # list is correct
     "922_batch_repeater": 1,    # 922 MPL.xlsx open in Excel — nothing saved
     "911_po_pdf_extractor": 1,  # nothing extracted, so nothing written
 }

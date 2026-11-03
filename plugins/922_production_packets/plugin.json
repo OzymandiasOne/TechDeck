@@ -1,0 +1,66 @@
+{
+  "id": "922_production_packets",
+  "name": "922 Production Packets",
+  "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
+  "version": "1.11.0",
+  "author": "Anthony Sieben",
+  "family": "922",
+  "icon": "icon.png",
+  "requires_admin": false,
+  "requires_main_thread": false,
+  "timeout": 1800,
+  "details": {
+    "setup": [
+      "The batch's PO H<batch> Pallet & Rod Organizer must be filled out - the pallets and source materials come straight off it.",
+      "The order folders need their shop prints. Lengths are read off the assembly drawing where a tube belongs to one, and off the tube's own sheet where it doesn't.",
+      "Nothing else. The app only reads; it writes one workbook and one report."
+    ],
+    "how_it_works": [
+      "You pick the Batch folder.",
+      "It reads every tube on the batch off the Pallet Organizer and groups them by source material and pallet - 1, 2, 3, and SAW on its own.",
+      "For each tube it finds the saw cut length: a 'SAW CUT' note or a dimension in parentheses is taken as printed, otherwise the assembly dimension plus 0.1 for each end that gets ground.",
+      "Where two tubes on one assembly are nearly the same length it still fills both in, in length order, and marks them for you to check.",
+      "Rows 1 and 2 of every sheet are the Pallet Organizer's own words, so the material line reads exactly as it does there, SAW CUT and all."
+    ],
+    "output": [
+      "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after its packet (SAW.4, 2.5). The material number, the batch and the pallet run across the top, then the parts: Problem?, Parts Id., Length, Quantity, Order.",
+      "Where a material fills up one pallet and runs onto the next, the organizer lists it again, and you get a sheet and a binder for each pallet - 1.3, 2.3 and 3.1 for the one size. Which pallet a tube lands on comes from its order number.",
+      "The sheets come out in the Material Use Tracker's order for that batch - pallet 1, then 2, then 3, then SAW - so you can read the two side by side.",
+      "A row it wants you to check gets an arrow in the Problem? column, and that brings up the red X at the top of the sheet - so you can see which sheets need a look without opening them.",
+      "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, which tubes have no print of their own to bind, and the full cutting list.",
+      "A TechDeck Packets folder of bound drawings, each named after its packet - SAW.4_4.0 SQ X 0.375.pdf, 2.1_4.0 SQ X 0.25.pdf. Every binder reads the same way: for each order, the assembly drawing first, then that order's own tube sheets, every page stamped with the order number and the saw cut dimension highlighted where the drawing gives one. Plus one holding the drawings worth checking.",
+      "The report flags anything that could slip past: a tube material TechDeck has never seen, a material the Pallet Organizer does not list, and any part on the PO Info Drop with no Base Material filled in - that column is the only thing marking a row as a tube, so those parts reach no sheet and no binder.",
+      "With step 2 switched on it reads the 1Ds you nested, highlights each material line, writes in which batch an estimated drop came from, adds the drop (and pre-cut bar) blanks, builds a cover page per pallet off the Pallet Organizer, and binds PALLET 1/2/3.pdf and SAW TUBES.pdf - only the saw binder carries tube drawings."
+    ]
+  },
+  "settings": {
+    "fields": [
+      {
+        "key": "base_path",
+        "type": "directory",
+        "label": "922 Root (optional)",
+        "description": "Leave blank to find the 922 QTDR Production Packages folder automatically.",
+        "placeholder": "C:\\Users\\YourName\\...\\922 QTDR Production Packages",
+        "required": false,
+        "default": ""
+      },
+      {
+        "key": "production_run_binders",
+        "type": "boolean",
+        "label": "Build the production run binders (step 2)",
+        "description": "Off by default. Leave it off for the normal run: the app builds the cutting list and the packet drawings, then stops so you can nest the 1Ds. Switch it on and run the app again to mark up those 1Ds, build the pallet cover pages and bind the production run.",
+        "required": false,
+        "default": false
+      },
+      {
+        "key": "sentry_drone",
+        "type": "boolean",
+        "label": "Sentry Drone mode",
+        "description": "Pick the file or folder through the targeting-drone kill-cam - crosshair cursor, lock-on, and a railgun strike on the target. Off = a normal Explorer dialog. Buy the Sentry Drone at Woogy's Emporium; set every app at once from My Stuff.",
+        "required": false,
+        "default": false,
+        "hidden_unless_unlocked": "toy_sentry_drone"
+      }
+    ]
+  }
+}
