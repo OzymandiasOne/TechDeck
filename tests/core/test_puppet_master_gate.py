@@ -29,13 +29,33 @@ import pytest
 from techdeck.core import constants
 
 
+class _Settings:
+    """The two members the gate reads off SettingsManager."""
+
+    def __init__(self, worn="halloween", stored=None):
+        self._worn, self._stored = worn, stored if stored is not None else worn
+
+    def get_theme(self):
+        return self._worn
+
+    def is_professional(self):
+        return self._stored == "professional"
+
+
 @pytest.fixture
 def gate(monkeypatch):
     """Set the flag either way, with the env override cleared so the constant
-    is what actually decides."""
-    def _set(enabled):
+    is what actually decides, and the app WEARING halloween by default.
+
+    The theme is part of the gate now (2026-11-03), so a test that wants him
+    awake has to dress the app for him. `SettingsManager` is imported lazily
+    inside the gate, so patching the attribute on the module is enough.
+    """
+    def _set(enabled, worn="halloween", stored=None):
         monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
         monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", enabled)
+        monkeypatch.setattr("techdeck.core.settings.SettingsManager",
+                            lambda *a, **k: _Settings(worn, stored))
     return _set
 
 
@@ -63,6 +83,65 @@ def test_a_blank_override_defers_to_the_constant(monkeypatch, junk):
     monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", False)
     monkeypatch.setenv("TECHDECK_PUPPET_MASTER", junk)
     assert constants.puppet_master_enabled() is False
+
+
+# -- the theme is the gate (2026-11-03) -------------------------------------
+# "puppetmaster should be relegated to just halloween theme (halloween theme
+# stays on everyone's techdecks)."  In season everyone WEARS halloween, so
+# nothing changes for anyone then; out of season he belongs to whoever picks
+# the theme on purpose.
+
+def test_he_is_awake_while_the_app_wears_halloween(gate):
+    gate(True, worn="halloween")
+    assert constants.puppet_master_enabled() is True
+
+
+@pytest.mark.parametrize("worn", ["dark", "light", "cyberpunk", "matrix",
+                                  "cherry_blossom", "my_custom"])
+def test_he_is_asleep_on_every_other_theme(gate, worn):
+    gate(True, worn=worn)
+    assert constants.puppet_master_enabled() is False
+
+
+def test_a_professional_user_keeps_him_away_even_wearing_the_look(gate):
+    """In season a professional user is SHOWN halloween. The sober feature
+    set still wins, the same carve-out is_professional() exists for - no
+    puppet talking over a client demo."""
+    gate(True, worn="halloween", stored="professional")
+    assert constants.puppet_master_enabled() is False
+
+
+def test_the_kill_switch_still_beats_the_theme(gate):
+    gate(False, worn="halloween")
+    assert constants.puppet_master_enabled() is False
+
+
+def test_the_env_override_still_wakes_him_on_any_theme(gate, monkeypatch):
+    """How he is demoed in July without editing code."""
+    gate(True, worn="dark")
+    monkeypatch.setenv("TECHDECK_PUPPET_MASTER", "1")
+    assert constants.puppet_master_enabled() is True
+
+
+def test_unreadable_settings_hide_him_rather_than_leak_him(monkeypatch):
+    """Fails CLOSED, like every other door he has."""
+    monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
+    monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("settings.json is a crater")
+
+    monkeypatch.setattr("techdeck.core.settings.SettingsManager", _boom)
+    assert constants.puppet_master_enabled() is False
+
+
+def test_the_gate_by_name_follows_the_theme_too(gate):
+    """plugin.json's `gate: puppet_master` resolves through the same rule,
+    so the Library cartridge tracks the theme with everything else."""
+    gate(True, worn="halloween")
+    assert constants.gate_enabled("puppet_master") is True
+    gate(True, worn="dark")
+    assert constants.gate_enabled("puppet_master") is False
 
 
 # ── entry point 1: the startup greeting ─────────────────────────────────────

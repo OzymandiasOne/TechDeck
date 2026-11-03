@@ -7,10 +7,13 @@ from techdeck.core import constants
 from techdeck.core.settings import SettingsManager
 from techdeck.ui import whats_new as wn
 
+from tests.conftest import wear_theme
+
 
 def _on(monkeypatch):
     monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
     monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", True)
+    wear_theme(monkeypatch)              # he follows the worn theme now
     monkeypatch.setattr(constants, "halloween_active", lambda settings=None: True)
     monkeypatch.setattr(wn, "halloween_active", lambda settings=None: True)
 

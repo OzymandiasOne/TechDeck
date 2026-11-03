@@ -12,6 +12,8 @@ from pathlib import Path
 
 from techdeck.core.plugin_loader import PluginLoader
 
+from tests.conftest import wear_theme
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -118,6 +120,7 @@ def test_a_gated_plugin_is_not_discovered_while_its_gate_is_shut(monkeypatch, tm
     _write_plugin(tmp_path, "game_typo", gate="pupet_master")
     _write_plugin(tmp_path, "game_open")
     monkeypatch.delenv("TECHDECK_PUPPET_MASTER", raising=False)
+    wear_theme(monkeypatch)   # the gate follows the worn theme (2026-11-03)
     for on in (False, True):
         monkeypatch.setattr(constants, "PUPPET_MASTER_ENABLED", on)
         loader = PluginLoader(plugins_dir=tmp_path)

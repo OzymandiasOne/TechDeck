@@ -155,3 +155,31 @@ def _nothing_qt_outlives_the_application():
             continue
         widget.close()
         shiboken6.delete(widget)
+
+
+def wear_theme(monkeypatch, worn="halloween", stored=None):
+    """Dress the app in a theme, for the Puppet Master gate.
+
+    ``constants.puppet_master_enabled`` reads the WORN theme off the default
+    SettingsManager (2026-11-03: he follows the halloween THEME, not the
+    calendar), so a test that flips ``PUPPET_MASTER_ENABLED`` on also has to
+    dress the app or he stays asleep.
+
+    The gate imports SettingsManager LAZILY, so patching the attribute on the
+    settings module reaches it while a test file's own module-level
+    ``SettingsManager`` name still points at the real class - a test can go on
+    building a real one in ``tmp_path`` for everything else.
+
+    ``stored`` is the theme the user PICKED, which only differs from ``worn``
+    in season; pass ``stored="professional"`` for the user who is shown the
+    halloween look but keeps the sober feature set.
+    """
+    class _Settings:
+        def get_theme(self):
+            return worn
+
+        def is_professional(self):
+            return (worn if stored is None else stored) == "professional"
+
+    monkeypatch.setattr("techdeck.core.settings.SettingsManager",
+                        lambda *a, **k: _Settings())

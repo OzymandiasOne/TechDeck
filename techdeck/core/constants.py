@@ -36,13 +36,44 @@ PUPPET_MASTER_ENABLED = True    # flipped for the Halloween Update (0.8.7.8, 202
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
-def puppet_master_enabled() -> bool:
-    """True when the Puppet Master may appear. Env override wins so the
-    feature can be exercised on a dev machine while shipping off."""
+def puppet_master_enabled(settings=None) -> bool:
+    """True when the Puppet Master may appear: the app is WEARING the
+    halloween theme, and professional is not the user's own pick.
+
+    He is no longer a calendar feature. Anthony, 2026-11-03: "puppetmaster
+    should be relegated to just halloween theme (halloween theme stays on
+    everyone's techdecks)." In season everyone wears halloween, so everyone
+    still gets him exactly as before; out of season he belongs to whoever
+    chooses the theme on purpose, which is why the picker now stocks
+    halloween all year (SettingsPage._theme_choices). Hiding the theme in
+    November would wall him off for good.
+
+    The read is the WORN theme (``get_theme``), never the stored one: a user
+    on dark during the season is shown the halloween look and should get him
+    with it. Professional opts out even while wearing it, the same carve-out
+    ``is_professional`` exists for - no puppet talking over a client demo.
+
+    ``PUPPET_MASTER_ENABLED`` stays the master kill switch above all of this,
+    and ``TECHDECK_PUPPET_MASTER`` still wins outright so he can be exercised
+    on a dev machine in July. Fails CLOSED: any error reading settings hides
+    him rather than leaking him.
+
+    ``settings`` is injectable for tests, like ``halloween_active``.
+    """
     override = _os.environ.get("TECHDECK_PUPPET_MASTER", "").strip().lower()
     if override:
         return override in _TRUTHY
-    return PUPPET_MASTER_ENABLED
+    if not PUPPET_MASTER_ENABLED:
+        return False
+    try:
+        if settings is None:
+            from techdeck.core.settings import SettingsManager
+            settings = SettingsManager()
+        if settings.is_professional():
+            return False
+        return settings.get_theme() == "halloween"
+    except Exception:
+        return False
 
 
 def gate_enabled(name: str) -> bool:

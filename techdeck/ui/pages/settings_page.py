@@ -796,21 +796,25 @@ class SettingsPage(QWidget, ThemeAware):
     # ──────────────────────────────────────────────────────────────────────
 
     def _theme_choices(self, current: str) -> list:
-        """The theme names to offer, with the seasonal-stock rule applied.
+        """The theme names to offer. Halloween is stocked ALL YEAR.
 
-        Halloween is seasonal stock: listed during the season, or while it IS
-        the current choice (so a session open across Nov 2 can still switch
-        away from it). The test is the SEASON ALONE, never
-        ``halloween_active()`` -- that folds in the professional check, and
-        using it here made the picker a ONE-WAY DOOR: a user on professional
-        could not find halloween in the list to opt back IN (a real user hit
-        this 2026-10-16). Suppressing the seasonal theme is get_theme()'s job;
-        hiding it from the picker is not.
+        It used to be seasonal stock, listed only during the season or while
+        it was the current choice. Anthony, 2026-11-03: "halloween theme
+        stays on everyone's techdecks". It has to, because the Puppet Master
+        now lives behind that THEME rather than behind the calendar
+        (``constants.puppet_master_enabled``) -- dropping halloween from the
+        picker in November would wall him off until next October.
+
+        Suppressing the seasonal DEFAULT is still get_theme()'s job; hiding
+        the theme from the picker was never the same thing. Gating this list
+        on ``halloween_active()`` once made it a ONE-WAY DOOR, because that
+        folds in the professional check and a user on professional could not
+        find halloween to opt back IN (a real user hit this 2026-10-16).
+
+        Kept as a function, and ``current`` kept in the signature, so both
+        combos go on sharing ONE stock rule instead of growing two copies.
         """
-        from techdeck.core.constants import is_halloween_season
-        in_season = is_halloween_season()
-        return [name for name in get_theme_names()
-                if name != "halloween" or name == current or in_season]
+        return list(get_theme_names())
 
     def _refresh_seasonal_note(self):
         """Show, or hide, the line explaining a paused seasonal theme."""
