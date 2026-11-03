@@ -929,10 +929,32 @@ def check_plugin(plugin_dir: Path, available_fp: set[str], available_tp: set[str
 
 # ---------------------------------------------------------------- --load mode
 
-def load_all_plugins(errors: list[str]) -> int:
-    """Load every plugin through PluginLoader exactly like the app does."""
+def _manifest_gate(plugin_id: str) -> str:
+    """The `gate` a plugin's manifest names, or "" if it names none."""
+    try:
+        data = json.loads((PLUGINS_DIR / plugin_id / "plugin.json")
+                          .read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(data.get("gate", "") or "")
+
+
+def load_all_plugins(errors: list[str], warnings: list[str]) -> int:
+    """Load every plugin through PluginLoader exactly like the app does.
+
+    A plugin whose `gate` is SHUT is meant to be invisible - that is the whole
+    point of a gate - so its absence is reported as a note, never an error.
+    This matters because a gate's answer can depend on MACHINE STATE: the
+    Puppet Master follows the halloween theme (2026-11-03), so he is absent on
+    a CI runner, which has no theme at all, and present on a machine wearing
+    it. Treating that as an error turned the public main red immediately after
+    the v0.8.9 tag while every dev machine wearing the theme stayed green -
+    the exact "passes locally, fails only on CI" class this file exists to
+    catch, and it was this file doing it.
+    """
     sys.path.insert(0, str(REPO))
     from techdeck.core.plugin_loader import PluginLoader  # noqa: deferred import
+    from techdeck.core.constants import gate_enabled      # noqa: deferred import
 
     loader = PluginLoader(PLUGINS_DIR)
     discovered = {p.id for p in loader.discover_plugins()}
@@ -940,6 +962,12 @@ def load_all_plugins(errors: list[str]) -> int:
     on_disk = {d.name for d in PLUGINS_DIR.iterdir()
                if d.is_dir() and (d / "plugin.json").exists()}
     for missing in sorted(on_disk - discovered):
+        gate = _manifest_gate(missing)
+        if gate and not gate_enabled(gate):
+            warnings.append(
+                f"{missing}: not discovered because its '{gate}' gate is shut "
+                f"on this machine - expected, that is what a gate is for")
+            continue
         errors.append(f"{missing}: present on disk but NOT discovered by PluginLoader "
                       f"- check plugin.json")
 
@@ -1004,7 +1032,7 @@ def main() -> int:
     if args.load:
         print()
         print("Loading every plugin via PluginLoader (--load)...")
-        loaded = load_all_plugins(errors)
+        loaded = load_all_plugins(errors, warnings)
         print(f"  {loaded} plugin(s) loaded and validated")
 
     print()
