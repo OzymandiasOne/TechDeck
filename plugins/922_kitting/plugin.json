@@ -2,7 +2,7 @@
   "id": "922_kitting",
   "name": "922 Kitting",
   "description": "Formats and prints kitting paperwork for an entire 922 batch. Applies batch color formatting, flags kit lines missing their source material before printing, detects formed parts (plates and flat bars) from the Bent Plates sheet, re-prints any order with too many parts on the larger bin label, and merges all kit pages into a single PDF.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Anthony Sieben",
   "family": "922",
   "details": {
@@ -17,6 +17,7 @@
       "An order with more parts than the normal checklist has room for is re-printed on the 'Larger Bin Label' sheet - same colors, same FORMED tags - and that page takes its place in the kitting PDF, so no part gets left off."
     ],
     "output": [
+      "The kitting PDF now opens on the Material Pull List (QF-PR-10), filled from the organizer's Material QTY tab with the batch number set - the warehouse's copy to sign. A filled copy of the pull list workbook lands beside the PDFs in case you need to add material to it by hand.",
       "A single merged, color-formatted kitting PDF for the batch, ready to print."
     ]
   },
@@ -32,6 +33,14 @@
         "placeholder": "Auto-detect: OneDrive \\ ... \\ Pilot Program \\ 922 QTDR Production Packages",
         "required": false,
         "default": ""
+      },
+      {
+        "key": "pull_list_cover",
+        "type": "boolean",
+        "label": "Material pull list cover",
+        "description": "On by default. Fills the QF-PR-10 Material Pull List from the organizer's Material QTY tab and puts it in front of the kitting PDF, ready for the warehouse to sign. Switch it off to print the kit without it.",
+        "required": false,
+        "default": true
       },
       {
         "key": "sentry_drone",
