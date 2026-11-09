@@ -146,6 +146,22 @@ def test_a_material_the_organizer_does_not_list_is_flagged(mod, tmp_path):
     assert entry["new_material"] is False
 
 
+def test_the_same_part_on_two_orders_keeps_both_rows(mod, tmp_path):
+    """Batch 511 (Carrie, 2026-11-09): H7652061-H12-4A rode two orders, the
+    (part, serial) dedupe kept only the first, and the batch was cut one tube
+    short - the cutting list said one and the binder held one print. The order
+    is part of the key now; only a literal repeat of the same row collapses."""
+    path = _organizer(tmp_path, [
+        ("AA100", "H900000-H1-4", KNOWN_LASER, 1, "HSS 2.0 X 2.0 X 0.188"),
+        ("BB200", "H900000-H1-4", KNOWN_LASER, 1, "HSS 2.0 X 2.0 X 0.188"),
+        ("BB200", "H900000-H1-4", KNOWN_LASER, 1, "HSS 2.0 X 2.0 X 0.188"),
+    ])
+    tubes, skipped, _all = mod._read_tubes(path, lambda *_a: None)
+    assert skipped == []
+    assert [(t["part"], t["order"]) for t in tubes] == [
+        ("H900000-H1-4", "AA100"), ("H900000-H1-4", "BB200")]
+
+
 def test_the_everything_else_binder_is_gone():
     """It was 206 pages and 28MB on batch 506 and nobody opened it.
 

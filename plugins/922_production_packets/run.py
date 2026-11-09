@@ -76,7 +76,7 @@ assert _RS_SPEC is not None and _RS_SPEC.loader is not None
 rs = _ilu.module_from_spec(_RS_SPEC)
 _RS_SPEC.loader.exec_module(rs)
 
-VERSION = "1.11.0"
+VERSION = "1.12.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -288,7 +288,13 @@ def _read_tubes(path: Path, log):
                                     "desc": "", "qty": 1})
                 continue
             serial = serial.split(".")[0]          # Excel hands back 218012959.0
-            key = (part.upper(), serial)
+            # the ORDER is part of the key: the same part on TWO orders is two
+            # physical tubes, and keying on (part, serial) alone dropped the
+            # second - batch 511 carried H7652061-H12-4A on FK409785 AND
+            # X8385397, the cutting list said one tube, and the binder held
+            # one print (Carrie, 2026-11-09). Only a literal repeat of the
+            # same row is a duplicate.
+            key = (part.upper(), serial, _v(c_order).upper())
             if key in seen:
                 continue
             seen.add(key)
@@ -302,6 +308,13 @@ def _read_tubes(path: Path, log):
         wb.close()
     log(f"{len(rows)} tubes on the batch, "
         f"{len({r['serial'] for r in rows})} source materials")
+    repeats = {}
+    for row in rows:
+        repeats.setdefault((row["part"], row["serial"]), []).append(row["order"])
+    for (part, _s), orders in sorted(repeats.items()):
+        if len(orders) > 1:
+            log(f"{part} is on {len(orders)} orders ({', '.join(orders)}) - "
+                f"one tube to cut and one print to bind for each")
     if skipped:
         log(f"WARNING: {len(skipped)} row(s) on '{INFO_SHEET}' carry a tube "
             f"source material but no Base Material, so they are NOT on the "
