@@ -197,7 +197,9 @@ def _cover_rows(path):
 
 
 def test_the_cover_table_is_built_from_the_organizer(rs, tmp_path):
-    """Pallet 1 of batch 508, exactly as her `_1.pdf` reads."""
+    """Pallet 1 of batch 508, exactly as her `_1.pdf` reads - run as batch
+    999, because 508 is the number baked into the template and a test that
+    passes 508 cannot see it fail to change (which it did, batches 509-511)."""
     listing = [("BM338238", "6.0 X 6.0 X 0.50 NOM"),
                ("X7454801", "4.0 X 4.0 X 0.375 NOM"),
                ("X8355524", "3.5 X 3.5 X 0.25 NOM"),
@@ -207,11 +209,12 @@ def test_the_cover_table_is_built_from_the_organizer(rs, tmp_path):
                  "HSS 3.5 X 3.5 X 0.25 NOM",
                  "HSS 3.0 X 3.0 X 0.25 NOM"]
     dest = tmp_path / "cover.docx"
-    rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_LASER, dest, 508,
-                 "PALLET 1", listing, materials, [])
+    rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_LASER, dest, 999,
+                 "PALLET 1", listing, materials, [], pallet="1")
     xml, rows = _cover_rows(dest)
 
-    assert rows[0][0] == ("PALLET 1", rs.FILL_TITLE)
+    top, band = rs.PALLET_FILLS["1"]
+    assert rows[0][0] == ("PALLET 1", top)
     body = rows[2:2 + len(listing)]
     assert [c[0][0] for c in body] == [o for o, _m in listing]
 
@@ -220,16 +223,86 @@ def test_the_cover_table_is_built_from_the_organizer(rs, tmp_path):
     assert yellow == ["BM338238", "X7454801"]
 
     # the material column bands every other material GROUP
-    assert body[1][1][1] == rs.FILL_BAND, "material 2 is a banded group"
+    assert body[1][1][1] == band, "material 2 is a banded group"
     assert body[0][1][1] is None, "material 1 is not"
 
     head = next(r for r in rows if r[0][0].startswith("MATERIAL REQUIRED"))
-    assert head[0] == (f"MATERIAL REQUIRED: {len(materials)}", rs.FILL_TITLE)
+    assert head[0] == (f"MATERIAL REQUIRED: {len(materials)}", top)
     mats = rows[rows.index(head) + 1:]
     assert [c[1][0] for c in mats] == materials
-    assert [c[0][1] for c in mats] == [rs.FILL_SAW_MAT, rs.FILL_SAW_MAT,
+    # the grey shades the NAME cell only - her covers leave the count alone
+    assert [c[0][1] for c in mats] == [None, None, None, None]
+    assert [c[1][1] for c in mats] == [rs.FILL_SAW_MAT, rs.FILL_SAW_MAT,
                                        None, None], "grey = saw cut"
-    assert "BATCH 508" in re.sub(r"<[^>]+>", "", xml)
+    text = re.sub(r"<[^>]+>", "", xml)
+    assert "BATCH 999" in text
+    assert "508" not in text
+
+
+def test_the_batch_number_lands_however_word_split_it(rs, tmp_path):
+    """THE BATCHES 509-511 MISS (Carrie, 2026-11-04): the heading lives in
+    both templates as FOUR runs (`BATCH`, ` `, `50`, `8`), the old regex over
+    the raw XML never matched, and every batch's cover printed the template's
+    own 508."""
+    listing = [("BM338238", "6.0 X 6.0 X 0.50 NOM")]
+    materials = ["HSS 6.0 X 6.0 X 0.50 NOM (SAW CUT)"]
+    for name in (rs.TEMPLATE_LASER, rs.TEMPLATE_SAW):
+        dest = tmp_path / f"c_{name}.docx"
+        rs.fill_docx(PDIR / "templates" / name, dest, 511, "PALLET 1",
+                     listing, materials, [])
+        text = re.sub(r"<[^>]+>", "",
+                      zipfile.ZipFile(str(dest)).read("word/document.xml")
+                      .decode("utf-8"))
+        assert "BATCH 511" in text, name
+        assert "508" not in text, name
+
+
+def test_each_pallet_cover_wears_its_own_colour(rs, tmp_path):
+    """Her 508 reference set and her fixed 509 covers: pallet 1 is green,
+    pallet 2 gold, pallet 3 blue - banner and band. The first build painted
+    every pallet with pallet 1's green (Carrie, 2026-11-04)."""
+    listing = [("FL348781", "2.5 X 2.5 X 0.25 NOM"),
+               ("BK600708", "2.5 X 2.5 X 0.188 NOM")]
+    materials = ["HSS 2.5 X 2.5 X 0.25 NOM", "HSS 2.5 X 2.5 X 0.188 NOM"]
+    for pallet, (top, band) in rs.PALLET_FILLS.items():
+        dest = tmp_path / f"p{pallet}.docx"
+        rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_LASER, dest, 509,
+                     f"PALLET {pallet}", listing, materials, [],
+                     pallet=pallet)
+        _xml, rows = _cover_rows(dest)
+        assert rows[0][0] == (f"PALLET {pallet}", top)
+        head = next(r for r in rows
+                    if r[0][0].startswith("MATERIAL REQUIRED"))
+        assert head[0][1] == top
+        assert rows[3][1][1] == band, "group 2 wears the pallet's band"
+
+
+def test_a_two_material_order_is_yellow_when_either_is_saw_cut(rs, tmp_path):
+    """509 pallet 1: FL358235 uses "4.0 X 4.0 X 0.50 NOM, 2.5 X 2.5 X 0.25
+    NOM" and the 0.50 is saw cut. Matching on the JOINED string matched no
+    material, the row stayed white, and Carrie yellowed it by hand. The bands
+    follow the LISTING's groups too: hers band groups 2 and 4; keying off the
+    MATERIAL REQUIRED index banded group 3 instead."""
+    listing = [("FL358235", "4.0 X 4.0 X 0.50 NOM, 2.5 X 2.5 X 0.25 NOM"),
+               ("FK346544", "4.0 X 4.0 X 0.50 NOM, 2.5 X 2.5 X 0.25 NOM"),
+               ("X7439237", "4.0 X 4.0 X 0.375 NOM"),
+               ("X7439430", "3.5 X 3.5 X 0.25 NOM"),
+               ("FL358236", "3.0 X 3.0 X 0.25 NOM")]
+    materials = ["HSS 4.0 X 4.0 X 0.50 NOM (SAW CUT)",
+                 "HSS 2.5 X 2.5 X 0.25 NOM",
+                 "HSS 4.0 X 4.0 X 0.375 NOM (SAW CUT)",
+                 "HSS 3.5 X 3.5 X 0.25 NOM",
+                 "HSS 3.0 X 3.0 X 0.25 NOM"]
+    dest = tmp_path / "cover.docx"
+    rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_LASER, dest, 509,
+                 "PALLET 1", listing, materials, [], pallet="1")
+    _xml, rows = _cover_rows(dest)
+    body = rows[2:2 + len(listing)]
+    yellow = [c[0][0] for c in body if c[0][1] == rs.FILL_SAW_ORDER]
+    assert yellow == ["FL358235", "FK346544", "X7439237"]
+    band = rs.PALLET_FILLS["1"][1]
+    banded = [c[0][0] for c in body if c[1][1] == band]
+    assert banded == ["X7439237", "FL358236"], "listing groups 2 and 4"
 
 
 def test_only_the_saw_cover_carries_the_sign_off_lines(rs, tmp_path):

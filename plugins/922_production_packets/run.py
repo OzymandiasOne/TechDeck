@@ -1176,6 +1176,20 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
 
     bars = rs.read_tracker(root_922, batch_no, log)
     blocks = read_cover_blocks(_organizer(batch_path, batch_no, log), log)
+    # Carrie marks a cover by hand when a material is required on TWO pallets
+    # - batch 509's pallet 1 says "CUT WITH PALLET 2" next to the 2.5 X 2.5 X
+    # 0.25 its combo orders share with pallet 2. Which cover gets the note is
+    # her judgement, so the run points at the situation and leaves the ink to
+    # her.
+    shared = {}
+    for p, block in sorted(blocks.items()):
+        for text in block["materials"]:
+            if "SAW CUT" not in text.upper():
+                shared.setdefault(rs._norm(text), []).append(p)
+    for key, ps in sorted(shared.items()):
+        if len(ps) > 1:
+            log(f"NOTE: {key} is required on pallets {' and '.join(ps)} - "
+                f"add the 'CUT WITH PALLET n' note to the right cover by hand")
     sheets = rs.match_1ds(Path(one_d), packets, log)
     progress_callback(35)
 
@@ -1206,7 +1220,8 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
         covers[pallet] = rs.cover_pdf(
             templates / rs.TEMPLATE_LASER,
             run_dir / "Cover Sheets" / f"_{pallet}.pdf", batch_no,
-            f"PALLET {pallet}", block["listing"], block["materials"], [], log)
+            f"PALLET {pallet}", block["listing"], block["materials"], [],
+            log, pallet=pallet)
     saw_pallet = next((p for p in sorted(blocks)
                        if any("SAW CUT" in t.upper()
                               for t in blocks[p]["materials"])), None)
@@ -1217,7 +1232,8 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
             run_dir / "Cover Sheets" / "_SAW.pdf", batch_no,
             f"PALLET {saw_pallet}", block["listing"], block["materials"],
             [t.replace(" (SAW CUT)", "").strip()
-             for t in block["materials"] if "SAW CUT" in t.upper()], log)
+             for t in block["materials"] if "SAW CUT" in t.upper()],
+            log, pallet=saw_pallet)
     progress_callback(80)
 
     # 3 - bind. A pallet binder is the cover and its 1Ds; the SAW binder
