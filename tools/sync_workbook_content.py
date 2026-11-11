@@ -103,10 +103,14 @@ SYSTEM_FEATURES = [
     ("Coordination Card Delivery",
      "Tools post batch coordination cards straight into the team's planning "
      "boards, sorted into the correct pipeline stage with labels for "
-     "difficulty, machine routing and pallet, and re-tag repeat orders.",
+     "difficulty, machine routing and pallet, and re-tag repeat orders. The "
+     "integration reports back what it actually did - how many cards were "
+     "created, how many already existed and which failed - and a card that "
+     "failed is offered again on the next run.",
      "Batch coordination is set up from the batch data itself rather than "
-     "typed in one card at a time, and it cannot drift out of step with the "
-     "folders the operators actually work from.",
+     "typed in one card at a time, it cannot drift out of step with the "
+     "folders the operators actually work from, and a failed hand-off to the "
+     "board is seen when it happens rather than when someone looks.",
      "Active"),
     ("Historical Parts Catalogs",
      "Compiled parts catalogs covering every past 911 and 922 batch, "
@@ -118,6 +122,39 @@ SYSTEM_FEATURES = [
      "One click captures a full diagnostic report -- versions, settings, "
      "environment, recent errors -- for support.",
      "Reduces a problem report from a back-and-forth to a single attachment.",
+     "Active"),
+    # New rows are APPENDED to the sheet in list order, so add below this line
+    # in the order the features shipped.
+    ("Personal Planning Workspace",
+     "Staff capture their workload in plain language and the platform lays "
+     "the day out as a worked schedule: dated commitments first, the rest "
+     "ordered by value against time, every estimate padded, and anything "
+     "that will not fit reported with the reason. Scheduled meetings and "
+     "blocked time are planned around; work parked on another person is held "
+     "out of the plan but tracked, with a follow-up prompt after a set number "
+     "of days; time spent is captured per item and reported by item and by "
+     "day with a spreadsheet export; a large piece of work carries its own "
+     "dated sub-steps; and the whole list is searchable. Plans export to "
+     "Outlook, and the page can use its own display scheme.",
+     "Turns an over-committed day into a conversation before it becomes a "
+     "missed deadline, and answers where the week went from recorded time "
+     "rather than recollection.",
+     "Active"),
+    ("Seasonal Themes & What's-New Markers",
+     "A seasonal display theme applies itself for its month, and what's-new "
+     "markers across the account pages lead operators to newly added "
+     "engagement features.",
+     "Keeps the engagement layer discoverable without an announcement having "
+     "to be read.",
+     "Active"),
+    ("Foreground Prompts & Run Notices",
+     "A prompt that needs an operator's answer opens in front of whatever "
+     "application is in use, and tools end with an explicit on-screen notice "
+     "when a run failed or produced output that would mislead the next step, "
+     "rather than recording it only in the run log.",
+     "Closes a class of stalled runs where a tool waited unseen behind a "
+     "spreadsheet, and stops a failed step from being discovered only when "
+     "the next tool does the wrong thing.",
      "Active"),
 ]
 
@@ -287,6 +324,116 @@ ENGINEERING = [
      "verified on every build.",
      "Build-time check; covers every tool that shares a routine with "
      "another."),
+    # New rows are APPENDED to the sheet in list order, so add below this line
+    # in date order. (The two Aug 2026 rows were logged late, 2026-11-11: both
+    # were on the Gantt chart and in the process log but never reached here.)
+    ("Aug 2026", "Windows Long-Path Reliability", "Reliability",
+     "A field report of repeated 'file not found' failures was traced to "
+     "Windows' 260-character path limit rather than a missing file: the "
+     "customer folder tree runs close to the limit before a tool writes "
+     "anything. Treated as a platform defect rather than a one-tool bug - "
+     "every file operation in every tool now goes through shared routines "
+     "that are safe on long paths, including the existence checks that fail "
+     "silently, and a build check prevents reintroduction.",
+     "Tools no longer fail with a misleading message wherever the folder "
+     "tree runs deep, and a create-if-missing guard can no longer overwrite "
+     "real work because a check wrongly answered no.",
+     "Around 215 file operations across all 25 tools; enforced on every "
+     "build."),
+    ("Aug 2026", "Cloud File Prefetch & Run Profiling", "Performance",
+     "Analysis of 253 recorded tool runs showed the dominant machine-time "
+     "cost was waiting on cloud-synchronised files retrieved one at a time. "
+     "Tools now retrieve the files they will need in the background while "
+     "the operator is still answering prompts, and the run log itself is "
+     "mined as the profiler.",
+     "Shortens the runs that spend most of their time waiting on downloads, "
+     "and gives performance work a measured basis instead of impressions.",
+     "Shared routine; adopted by the tools with the longest cloud waits."),
+    ("Sep 2026", "Packaging Check for Runtime-Loaded Components", "Quality",
+     "A release shipped with the image-recognition component missing from "
+     "its package: the component loads its own parts by name while running, "
+     "which the packaging step cannot see, so the inspection tool returned "
+     "nothing and reported the drawings as empty. The component was restored "
+     "the same day, the build now reads the component's own configuration "
+     "and refuses to package if any part it names is absent, and a component "
+     "that cannot start is reported as such rather than as empty input.",
+     "The omission cannot recur silently, and an operator is pointed at the "
+     "tool rather than sent hunting through paperwork that was never the "
+     "problem.",
+     "Build-time check on every release; corrective release issued the same "
+     "day."),
+    ("Sep 2026", "Guarded Publishing & Repository Backup", "Security",
+     "Publishing the filtered copy of the source was a sequence of "
+     "hand-entered commands; run once in the wrong place, the filter rewrote "
+     "the working history itself, which was recovered only from a copy an "
+     "earlier step happened to leave behind. Publishing is now one scripted "
+     "step that first takes a verified full backup outside the repository, "
+     "refuses to run anywhere but an isolated copy, and stops before the "
+     "push for a deliberate go-ahead.",
+     "The development record can no longer be damaged by the act of "
+     "publishing it, and a verified restore point exists before any history "
+     "operation.",
+     "Every publish; the last five backups are retained, each verified by "
+     "commit, branch and tag count."),
+    ("Sep 2026", "Published-Copy Verification", "Testing",
+     "The published copy of the source is a filtered rebuild, so a test "
+     "could pass on the development machine and fail only on the published "
+     "copy - on three releases the public build failed immediately after "
+     "publishing. Two build checks now reproduce the filter's effect before "
+     "anything leaves: one applies the name-scrubbing rules to every "
+     "published file and compiles the result, the other fails any test that "
+     "reads a file the filter removes.",
+     "A release no longer discovers on the public side what could have been "
+     "known before it left.",
+     "All published source and tests; enforced on every build."),
+    ("Sep 2026", "Release Content Inventory", "Process",
+     "A release shipped a whole new tool without naming it in any "
+     "announcement, because the notes were compiled from the feedback log "
+     "and the tool had no request behind it. The list of what ships is now "
+     "read from the code history - every new or changed tool since the "
+     "previous release - and the build fails if a new tool is not named in "
+     "the release record.",
+     "Operators are told about every tool they receive, and an announcement "
+     "can no longer drift from what was actually built.",
+     "Every release; checked in the build and against each announcement "
+     "text."),
+    ("Oct 2026", "Sleep vs Freeze Detection", "Quality",
+     "The diagnostic record was logging a computer going to sleep with the "
+     "application open as an application freeze, burying genuine freezes "
+     "among false entries. The two are now distinguished.",
+     "A genuine freeze is visible in a diagnostic report rather than lost "
+     "among false alarms.",
+     "Platform-wide; hang monitoring and the one-click debug report."),
+    ("Oct 2026", "Verified Integration Results", "Reliability",
+     "Creating a batch's coordination cards reported success as soon as the "
+     "request was accepted, not when the cards existed - on one batch all 35 "
+     "cards failed to be created and the run still reported complete. The "
+     "integration now returns what it actually did and the application "
+     "reports it: cards created, cards already present, and cards that "
+     "failed, with a failed card offered again on the next run.",
+     "A failed hand-off to the production board is seen at the moment it "
+     "happens instead of when someone looks at the board. First capability "
+     "built on the upgraded integration licence.",
+     "911 card creation first; the remaining four card integrations can be "
+     "upgraded individually without a new release."),
+    ("Oct 2026", "Part-Number Recognition Rebuild", "Data",
+     "Part-number recognition was rebuilt from the part numbers on all 105 "
+     "live batch lists (5,415 values) and moved to a single shared "
+     "definition, after pricing consolidation rows were found falling back "
+     "to a file name and sorting to the wrong place.",
+     "Every tool recognises the same set of part-number shapes, so a new "
+     "shape is corrected once rather than tool by tool.",
+     "Shared definition; every tool that reads part numbers."),
+    ("Nov 2026", "Optical Reading of Text-Less Work Packets", "Reliability",
+     "Work packets re-printed through a generic PDF printer lose their "
+     "machine-readable text, which stopped the packet-marking step on 13 "
+     "orders across five batches with a false 'no work packet found'. The "
+     "affected tools now read such a page as an image when it carries no "
+     "usable text.",
+     "Packet marking no longer depends on how a document happened to be "
+     "printed, and the operator is not sent looking for a packet that is "
+     "already in the folder.",
+     "Central fix in the shared toolkit; three 922 tools."),
 ]
 
 # AUTOMATION TOOLS and ROADMAP are NOT upserted from here -- they are rebuilt
@@ -496,7 +643,8 @@ VERSION_ROWS = [
      "previously rebuilt by hand every week. A complete illustrated user "
      "manual now ships inside the application, opened from the console or "
      "the settings page, and is regenerated by every build so it always "
-     "matches the software it describes."),
+     "matches the software it describes.",
+     "922 Setup, 911 SSPO Invoicing Prep, Integrated User Manual (new)"),
     ("Beta 0.8.7.4", "Sep 4, 2026", "Feature",
      "The 911 batch setup tool now prepares plate work as well as structural "
      "shapes. Until now its output was tailored to shapes, and plate batches "
@@ -576,7 +724,7 @@ VERSION_ROWS = [
      "filed automatically into the folder tree. Selecting the top-level "
      "customer folder no longer starts a run across every order in the "
      "programme; the operator is offered the orders and nests to include.",
-     "Inspection Data Capture"),
+     "911 Inspection Dimensions"),
     ("Beta 0.8.7.2", "Sep 1, 2026", "Feature",
      "The inspection-data capture tool now completes the weld-prep entries as "
      "well as the dimensions. Previously it recorded the weld-prep callout "
@@ -1039,6 +1187,185 @@ PI_NEW = [
      "INSTEAD OF TYPING A NUMBER - THE NUMBER IS READ FROM THE FOLDER ITSELF "
      "AND ONE PICK IS SHARED ACROSS A QUEUED RUN; ONE SHARED ROUTINE REPLACES "
      "SIX HAND-COPIED PROMPT BLOCKS AND IS THE STANDARD FOR NEW 922 TOOLS"),
+
+    # ---- September to November 2026 (logged 2026-11-11) ---------------------
+    # New rows are APPENDED to the sheet in list order: keep this block in the
+    # order the work shipped, and add below it.
+    ("INSPECTION READER CORRECTIVE RELEASE", "COMPLETE",
+     "THE IMAGE RECOGNITION COMPONENT WAS MISSING FROM THE 0.8.7.2 PACKAGE, SO "
+     "THE DRAWING DIMENSION READER RETURNED NOTHING AND REPORTED THE DRAWINGS "
+     "AS EMPTY; RESTORED THE SAME DAY WITH A BUILD CHECK THAT READS THE "
+     "COMPONENT'S OWN CONFIGURATION. ANGULAR DIMENSIONS NOW CARRY THE CORRECT "
+     "TOLERANCE AND IMPLAUSIBLE READINGS ARE WITHHELD FOR REVIEW INSTEAD OF "
+     "ENTERED; RE-VALIDATED ON THE REPORTING PACKET (122 DIMENSIONS, 24 PARTS, "
+     "19 INSPECTION SHEETS)"),
+    ("PUBLISHING - VERIFIED BACKUP + GUARDED SCRIPT", "COMPLETE",
+     "PUBLISHING WAS A CHAIN OF HAND-ENTERED COMMANDS; RUN ONCE IN THE WRONG "
+     "PLACE, THE HISTORY FILTER REWROTE THE WORKING REPOSITORY ITSELF AND WAS "
+     "RECOVERED ONLY FROM A COPY AN EARLIER STEP HAD LEFT BEHIND. PUBLISHING IS "
+     "NOW ONE SCRIPT THAT TAKES A VERIFIED FULL BACKUP OUTSIDE THE REPOSITORY "
+     "FIRST, REFUSES TO RUN ANYWHERE BUT AN ISOLATED COPY, AND STOPS BEFORE "
+     "THE PUSH"),
+    ("911 SCRIPTING PREP", "COMPLETE",
+     "NEW TOOL: BUILDS THE TWO-SHEET SSPO ERP SCRIPTING WORKBOOK FROM A "
+     "FINISHED AWARD REVIEW AND THE WORKING FORECAST LIST INSTEAD OF TYPING IT "
+     "LINE BY LINE; LINES IT CANNOT RESOLVE ARE LISTED INSIDE THE SAME FILE "
+     "WITH THE REASON. VALUES SHARED ACROSS AN ORDER LINE (PO, LINE, REVISION, "
+     "CLAUSES, SHIP-TO, PROMISE DATE) ARE ENTERED ONCE AND PROPAGATE TO EVERY "
+     "LINE. THE PO PDF EXTRACTOR, WITHDRAWN IN ERROR AS SUPERSEDED, WAS "
+     "REINSTATED - THE TWO SERVE OPPOSITE DIRECTIONS"),
+    ("911 PLATE BATCH SETUP", "COMPLETE",
+     "911 SETUP NOW PREPARES PLATE WORK AS WELL AS STRUCTURAL SHAPES: THE "
+     "PLATE WORKBOOK AND PLATE VERIFICATION FORM, MATERIAL SPEC RECORDED AS "
+     "NOT APPLICABLE ON CARBON PLATE - DECIDED BY THE PAPERWORK'S OWN FERROUS "
+     "FLAG, NEVER INFERRED FROM THE MATERIAL NAME - AND THE TRACEABILITY NUMBER "
+     "CARRIED FROM THE FORECAST. THE PLATE SELECTION DELIBERATELY DOES NOT "
+     "PERSIST BETWEEN RUNS"),
+    ("PUBLISHED-COPY TEST GATES", "COMPLETE",
+     "ON THREE RELEASES THE PUBLIC BUILD FAILED RIGHT AFTER PUBLISHING, EACH "
+     "TIME ON SOMETHING THAT PASSED LOCALLY: THE PUBLISHING FILTER REWRITES "
+     "NAMES AND REMOVES PRIVATE FILES. TWO BUILD CHECKS NOW REPRODUCE THAT "
+     "LOCALLY - ONE COMPILES EVERY PUBLISHED FILE AFTER THE NAME SCRUB, ONE "
+     "FAILS ANY TEST THAT READS A FILE THE FILTER REMOVES"),
+    ("922 REPEAT IDENTIFICATION AT SETUP", "COMPLETE",
+     "922 SETUP NOW RECORDS THE BATCH IN THE MASTER PARTS LIST AND FINDS "
+     "REPEAT ORDERS AT THE START OF THE RUN, SO REPEAT CARDS ARE CREATED "
+     "ALREADY LABELLED AND ALREADY IN THE MODEL-CHECK STAGE; IT ALSO CREATES "
+     "THE BATCH'S FOURTEEN-STEP PROGRESS CHECKLIST CARD THAT WAS MADE BY HAND "
+     "ON EVERY BATCH"),
+    ("INVOICE SUPPLEMENT AUTOMATION", "COMPLETE",
+     "INVOICING PREP FILLS THE INVOICE NUMBER AND SHIP DATE ON THE SUPPLEMENT "
+     "FROM THE WORKING FORECAST, PRINTS THE SUPPLEMENT TO PDF BESIDE THE "
+     "INVOICE, AND GATHERS EACH NEST'S PRICING CALCULATIONS INTO ITS INVOICING "
+     "FOLDER; A NEST WITH NO INVOICE NUMBER IS LEFT BLANK AND NAMED"),
+    ("PART SKETCH REPAIR + MATERIAL DESIGNATION", "COMPLETE",
+     "PART SKETCH PAGES THAT LOST THEIR DRAWING ON THE REPORT SERVER ARE "
+     "FILLED BACK IN FROM THE BATCH'S OWN SKETCH LIBRARY, AND THE MATERIAL "
+     "DESIGNATION IS WRITTEN ON EVERY PART SKETCH SO THE SHOP CAN SCRIBE FROM "
+     "THE PRINT"),
+    ("RELEASE CONTENT INVENTORY", "COMPLETE",
+     "A RELEASE SHIPPED A WHOLE NEW TOOL AND NAMED IT IN NO ANNOUNCEMENT, "
+     "BECAUSE THE NOTES WERE BUILT FROM THE FEEDBACK LOG AND THE TOOL HAD NO "
+     "REQUEST BEHIND IT; THE SHIPPING LIST IS NOW READ FROM THE CODE HISTORY "
+     "AND THE BUILD FAILS IF A NEW TOOL IS NOT NAMED IN THE RELEASE RECORD"),
+    ("SCRIBE VERIFICATION SHEET CORRECTIONS", "COMPLETE",
+     "THE SCRIBE VERIFICATION TABLE WAS FIXED AT 24 ROWS, SILENTLY OMITTING "
+     "PARTS BEYOND THAT ON LARGER NESTS; IT NOW MATCHES THE NEST'S PART COUNT, "
+     "LISTS PARTS IN NEST-PACKAGE ORDER, TAKES QUANTITIES FROM THE NEST "
+     "PACKAGE ON A MISMATCH, AND FILLS THE MATERIAL SPEC PER PART FOR "
+     "NON-FERROUS PLATE; A QUANTITY CHECK THAT HAD NEVER RUN ON PLATE WORK IS "
+     "FIXED. THE 911 NEST-FILE GATHERING TOOL ALSO GAINS THE SAME COLOUR-CODED "
+     "RECONCILIATION REPORT AS ITS 922 COUNTERPART"),
+    ("SEASONAL THEME + WHAT'S-NEW MARKERS", "COMPLETE",
+     "A SEASONAL DISPLAY THEME APPLIES ITSELF FOR ITS MONTH AND WHAT'S-NEW "
+     "MARKERS ACROSS THE ACCOUNT PAGES LEAD TO NEW ENGAGEMENT FEATURES; A "
+     "THIRD OPTIONAL ENGAGEMENT MODULE WAS ADDED, AND A RETIRED THEME IS "
+     "MIGRATED AUTOMATICALLY"),
+    ("SOURCE MATERIAL LABELS ON EXISTING CARDS", "COMPLETE",
+     "922 SETUP APPLIES SOURCE-MATERIAL LABELS TO COORDINATION CARDS THAT "
+     "ALREADY EXIST, SO A RE-RUN COMPLETES A PARTLY LABELLED BOARD INSTEAD OF "
+     "SKIPPING IT, AND NO LONGER BLOCKS ON A REPEAT-TAG WARNING THE OPERATOR "
+     "CHOSE TO SKIP"),
+    ("PARTIAL-SHIPMENT INVOICING", "COMPLETE",
+     "EACH PARTIAL SHIPMENT OF A NEST GETS ITS OWN INVOICE NUMBER AND SHIP "
+     "DATE, MATCHED BY SUB-GROUP AND CLOSE-OUT WEEK; A NEST THAT CANNOT BE "
+     "RESOLVED IS LEFT BLANK AND NAMED RATHER THAN GUESSED"),
+    ("PO VS DRAWING NUMBER RECONCILIATION", "COMPLETE",
+     "THE 922 FORMING, KITTING AND NEST-FILE TOOLS RECONCILE A PO PART NUMBER "
+     "THAT DISAGREES WITH ITS DRAWING NUMBER, CLOSING A GAP THAT PRODUCED "
+     "UNLABELLED FORMED PARTS, WRONGLY STAMPED ROD LINES AND FALSE "
+     "MISSING-TUBE REPORTS; AN OPERATOR-ENTERED MATERIAL VALUE NOW SURVIVES A "
+     "RE-RUN"),
+    ("PROVEN-PACKET STAMPING", "COMPLETE",
+     "THE TWO 922 PACKET STAMPERS STAMP ONLY A PROVEN WORK PACKET AND CLEAN "
+     "STRAY STAMPS OFF SKETCHES AND PRINTS; 6 OF 252 ORDERS ACROSS FOUR "
+     "BATCHES HAD BEEN MIS-STAMPED"),
+    ("FOLDER PICKERS REPLACE TYPED PATHS", "COMPLETE",
+     "SIX MORE TOOLS THAT ASKED FOR A TYPED PATH OR BATCH NUMBER NOW OPEN A "
+     "FOLDER PICKER, REMOVING A CLASS OF TYPO FAILURES; A BUILD CHECK KEEPS "
+     "NEW TOOLS ON THE PICKER"),
+    ("PLANNER - MEETINGS, WAITING, TIME CAPTURE, STEPS", "COMPLETE",
+     "THE PERSONAL WORK PLANNER GAINS FOUR USER-REQUESTED CAPABILITIES: "
+     "SCHEDULED COMMITMENTS THE DAY IS PLANNED AROUND; A WAITING STATUS THAT "
+     "HOLDS WORK OUT OF THE PLAN, NAMES WHO HOLDS IT AND PROMPTS A FOLLOW-UP; "
+     "ELAPSED-TIME CAPTURE WITH TOTALS BY ITEM AND BY DAY PLUS A SPREADSHEET "
+     "EXPORT; AND DATED SUB-STEPS UNDER ONE PIECE OF WORK. ALSO FREE-TEXT "
+     "SEARCH AND A PER-PAGE DISPLAY SCHEME"),
+    ("FOREGROUND PROMPTS + RUN NOTICES", "COMPLETE",
+     "A PROMPT THAT NEEDS AN ANSWER NOW OPENS IN FRONT OF WHATEVER APPLICATION "
+     "IS IN USE INSTEAD OF BEHIND IT, AND SIX TOOLS END WITH AN EXPLICIT "
+     "NOTICE WHEN A RUN FAILED OR PRODUCED OUTPUT THAT WOULD MISLEAD THE NEXT "
+     "STEP"),
+    ("SHARED-ROUTINE CALL VERIFICATION", "COMPLETE",
+     "A ROUTINE SHARED BY TWO TOOLS WAS CHANGED FOR ONE CALLER ONLY, WHICH "
+     "STOPPED A 922 BATCH PREPARATION STEP FOR SIX DAYS BEFORE AN OPERATOR "
+     "DIAGNOSTIC NAMED IT; FIXED THE SAME DAY, AND A BUILD CHECK NOW VERIFIES "
+     "EVERY SUCH SHARED CALL (20 ACROSS FIVE TOOLS)"),
+    ("911 NEST PROGRAM FILE COLLECTION", "COMPLETE",
+     "911 SETUP COLLECTS EACH NEST'S MACHINE PROGRAM FILES INTO ONE FOLDER PER "
+     "NEST INSTEAD OF THE OPERATOR OPENING ONE WORK-ORDER FOLDER AT A TIME; "
+     "ONE FILE NAME IN SIX COLLIDES WITH ANOTHER ACROSS THE LIVE BATCHES, SO "
+     "BOTH FILES ARE KEPT RATHER THAN OVERWRITTEN"),
+    ("FORECAST-MISSING NEST WARNING", "COMPLETE",
+     "A NEST ABSENT FROM THE SHARED FORECAST NO LONGER PRODUCES A CLEAN RUN "
+     "WITH SILENTLY BLANK COLUMNS: THE THREE COLUMNS ARE HIGHLIGHTED AND "
+     "ANNOTATED WITH THE NEST, THE DATE AND THE ONE STEP TO RE-RUN, AND THE "
+     "RUN ENDS ON A WARNING. TWO BATCHES HAD REACHED THE FLOOR THAT WAY"),
+    ("CONTINUATION PAGE REMOVAL", "COMPLETE",
+     "PACKET PREPARATION DROPS THE NEAR-EMPTY CONTINUATION PAGES OPERATORS "
+     "WERE DELETING BY HAND; THE RULE WAS GRADED AGAINST 394 REAL PACKETS "
+     "FIRST, WHERE FOUR OF EVERY FIVE PAGES CARRYING THAT TEXT WERE GENUINE "
+     "DRAWINGS THAT MUST BE KEPT"),
+    ("PART-NUMBER RECOGNITION REBUILD", "COMPLETE",
+     "PART-NUMBER RECOGNITION REBUILT FROM THE PART NUMBERS ON ALL 105 LIVE "
+     "BATCH LISTS (5,415 VALUES) AND MOVED TO ONE SHARED DEFINITION, "
+     "CORRECTING PRICING CONSOLIDATION ROWS THAT FELL BACK TO A FILE NAME AND "
+     "SORTED TO THE WRONG PLACE"),
+    ("SLEEP VS FREEZE DETECTION", "COMPLETE",
+     "A COMPUTER GOING TO SLEEP WITH THE APPLICATION OPEN WAS RECORDED AS AN "
+     "APPLICATION FREEZE; THE TWO ARE NOW DISTINGUISHED, SO A GENUINE FREEZE "
+     "IS VISIBLE IN A REPORT RATHER THAN BURIED AMONG FALSE ENTRIES"),
+    ("VERIFIED CARD CREATION (TWO-WAY INTEGRATION)", "COMPLETE",
+     "CARD CREATION REPORTED SUCCESS WHEN THE REQUEST WAS ACCEPTED, NOT WHEN "
+     "THE CARDS EXISTED - ON ONE BATCH ALL 35 CARDS FAILED AND THE RUN STILL "
+     "REPORTED COMPLETE. THE INTEGRATION NOW RETURNS WHAT IT ACTUALLY DID "
+     "(CREATED, ALREADY PRESENT, FAILED) AND A FAILED CARD IS OFFERED AGAIN ON "
+     "THE NEXT RUN; FIRST CAPABILITY BUILT ON THE UPGRADED INTEGRATION "
+     "LICENCE"),
+    ("922 PRODUCTION PACKETS", "COMPLETE",
+     "NEW TOOL: WORKS OUT THE SAW CUT LENGTH FOR EVERY TUBE ON A BATCH, WRITES "
+     "THE CUTTING LIST THE 1D OPTIMIZER CONSUMES, AND BINDS THE SHOP PRINTS "
+     "INTO ONE BINDER PER SOURCE MATERIAL; CUT-LENGTH RULES GRADED AGAINST 291 "
+     "REAL PARTS ACROSS FIVE LIVE BATCHES BEFORE RELEASE. A LENGTH IT IS "
+     "UNSURE OF IS FLAGGED, NEVER QUIETLY GUESSED"),
+    ("PRODUCTION RUN BINDERS", "COMPLETE",
+     "SECOND STAGE OF 922 PRODUCTION PACKETS, RUN AFTER THE OPERATOR'S OWN "
+     "NESTING: MARKS UP EACH NEST SHEET, BUILDS A COVER PAGE PER PALLET FROM "
+     "THE STANDARD PROCEDURE DOCUMENTS, AND BINDS THE PRODUCTION RUN; "
+     "REPRODUCED A HAND-BUILT REFERENCE SET PAGE FOR PAGE"),
+    ("TEXT-LESS WORK PACKET READ", "COMPLETE",
+     "WORK PACKETS RE-PRINTED THROUGH A GENERIC PDF PRINTER LOSE THEIR "
+     "MACHINE-READABLE TEXT, WHICH STOPPED PACKET MARKING ON 13 ORDERS ACROSS "
+     "FIVE BATCHES; THE THREE AFFECTED TOOLS NOW READ SUCH A PAGE AS AN IMAGE. "
+     "ALSO: INVOICE SUPPLEMENTS NO LONGER PRINT A NARROW DATE OR AMOUNT AS "
+     "######"),
+    ("KITTING PULL LIST COVER", "COMPLETE",
+     "KIT PAPERWORK NOW OPENS WITH THE BATCH'S FILLED MATERIAL PULL LIST: THE "
+     "STANDARD FORM IS FILLED FROM THE BATCH'S MATERIAL PLAN AND BOUND IN AS "
+     "EACH KIT'S COVER PAGES, WITH THE FILLED WORKBOOK KEPT ALONGSIDE FOR HAND "
+     "ADDITIONS; PREVIOUSLY BUILT BY HAND FOR EVERY BATCH"),
+    ("A PRINT FOR EVERY PART MADE", "COMPLETE",
+     "A BATCH MAKING THE SAME TUBE ON MORE THAN ONE ORDER WAS COUNTED ONCE, SO "
+     "THE CUTTING LIST RAN A TUBE SHORT AND THE PACKET HELD ONE PRINT; EVERY "
+     "PART MADE NOW GETS ITS OWN CUTTING-LIST LINE AND STAMPED PRINT. THE "
+     "PALLET COVER PAGES NOW CARRY THE RIGHT BATCH NUMBER, PER-PALLET COLOURS "
+     "AND SAW-CUT HIGHLIGHTING FOR MIXED-MATERIAL ORDERS"),
+    ("TRACKING RECORD CATCH-UP", "COMPLETE",
+     "AUDIT OF THE THREE TRACKING WORKBOOKS FOUND THE RECORD HAD STOPPED IN "
+     "SEPTEMBER WHEREVER NO SCRIPT OWNED A SHEET: THE GANTT CHART'S TASK AND "
+     "PROGRESS-NOTE SHEETS, THIS LOG, AND TWO SHEETS OF THE VERSION "
+     "CONTROLLER. ALL BROUGHT CURRENT, AND THE TWO UNOWNED GANTT SHEETS ARE "
+     "NOW WRITTEN BY THE SYNC SCRIPT FROM VERSION CONTROL"),
 ]
 
 # ---- Automation Projects Gantt Chart :: project rows ------------------------
@@ -1092,33 +1419,45 @@ GANTT_ROWS = [
      GANTT_DONE, 1, "2026-07", "2026-08"),
     ("922 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
     ("911 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
+    # Meetings, waiting, time capture and steps shipped 0.8.7.9 (Oct 14).
     ("Personal Planning Workspace (Assistant)",
-     GANTT_DONE, 1, "2026-07", "2026-08"),
+     GANTT_DONE, 1, "2026-07", "2026-10"),
     ("SECTION", "ENGINEERING & RELIABILITY PROGRAMS"),
     ("Reliability Hardening (OneDrive, Cancellation, Settings, Errors)",
      GANTT_DONE, 1, "2026-06", "2026-09"),
+    # Suite grew 1,312 -> 2,765 between Sep 1 and the 0.8.10 release.
     ("Automated Testing & Continuous Integration",
-     GANTT_DONE, 1, "2026-07", "2026-08"),
-    ("Security & Publishing Controls", GANTT_DONE, 1, "2026-07", "2026-08"),
-    ("Build & Ship Quality Gates", GANTT_DONE, 1, "2026-06", "2026-08"),
-    ("Diagnostics & Supportability", GANTT_DONE, 1, "2026-06", "2026-08"),
+     GANTT_DONE, 1, "2026-07", "2026-11"),
+    # Guarded publish script + verified backup + published-copy gates (Sep).
+    ("Security & Publishing Controls", GANTT_DONE, 1, "2026-07", "2026-09"),
+    # Runtime-component, release-inventory (Sep) and shared-call (Oct) gates.
+    ("Build & Ship Quality Gates", GANTT_DONE, 1, "2026-06", "2026-10"),
+    # Sleep-vs-freeze detection shipped 0.8.8 (Oct 21).
+    ("Diagnostics & Supportability", GANTT_DONE, 1, "2026-06", "2026-10"),
+    # Six more folder pickers (0.8.7.8), foreground prompts (0.8.7.9) - Oct.
     ("Usability Standardization (Shared Prompts, Folder-Pick Entry)",
-     GANTT_DONE, 1, "2026-06", "2026-08"),
+     GANTT_DONE, 1, "2026-06", "2026-10"),
     ("Long-Path (MAX_PATH) Platform-Wide Fix",
      GANTT_DONE, 1, "2026-08", "2026-09"),
     ("Performance Profiling & Cloud Prefetch",
      GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "911 QTDR WORKFLOW AUTOMATION"),
-    ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-08"),
-    ("911 Teams Cards", GANTT_DONE, 1, "2026-07", "2026-08"),
+    # Plate batches (0.8.7.4), verification sheet (0.8.7.7), program-file
+    # collection and the forecast warning (0.8.8, Oct 21).
+    ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-10"),
+    # Verified card creation (two-way integration) shipped 0.8.8.
+    ("911 Teams Cards", GANTT_DONE, 1, "2026-07", "2026-10"),
     ("911 Batch Repeater", GANTT_DONE, 1, "2026-03", "2026-07"),
-    ("911 Remove Ticket", GANTT_DONE, 1, "2026-03", "2026-07"),
+    # Sketch repair + material designation (0.8.7.6), continuation pages
+    # (0.8.8).
+    ("911 Remove Ticket", GANTT_DONE, 1, "2026-03", "2026-10"),
     ("911 PO PDF Extractor (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
     ("911 Sketch Extractor (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
     ("911 LST Organizer", GANTT_DONE, 1, "2026-06", "2026-09"),
     ("911 Baked Beans Wild Ride (NC Pricing Consolidation)",
      GANTT_DONE, 1, "2026-07", "2026-07"),
-    ("911 SSPO Invoicing Prep", GANTT_DONE, 1, "2026-06", "2026-09"),
+    # Partial shipments (0.8.7.8), narrow-date print fix (0.8.9, Nov 3).
+    ("911 SSPO Invoicing Prep", GANTT_DONE, 1, "2026-06", "2026-11"),
     ("911 SSPO Award Review", GANTT_DONE, 1, "2026-06", "2026-07"),
     ("911 Data Extraction", GANTT_DONE, 1, "2026-02", "2026-04"),
     ("911 Data Organizer", GANTT_DONE, 1, "2026-02", "2026-07"),
@@ -1129,19 +1468,23 @@ GANTT_ROWS = [
     # New app, shipped 0.8.7.3 (Sep 2, 2026).
     ("911 Scripting Prep", GANTT_DONE, 1, "2026-09", "2026-09"),
     ("SECTION", "922 QTDR WORKFLOW AUTOMATION"),
+    # Repeat identification (0.8.7.5), labels on existing cards (0.8.7.8),
+    # text-less packet read (0.8.9, Nov 3).
     ("922 Setup (Folder Build, Teams Cards, Stage Orchestration)",
-     GANTT_DONE, 1, "2026-03", "2026-08"),
+     GANTT_DONE, 1, "2026-03", "2026-11"),
     ("922 Batch Repeater (Support + Catalog Rebuild)",
      GANTT_DONE, 1, "2026-02", "2027-01"),
     ("922 Pallet Stamper (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
     ("922 LST Organizer (Support + v3 Rebuild)",
      GANTT_DONE, 1, "2026-02", "2027-01"),
-    ("922 FormingFinder", GANTT_DONE, 1, "2026-04", "2026-09"),
-    ("922 Kitting", GANTT_DONE, 1, "2026-04", "2026-09"),
-    ("922 Difficulty Stamper", GANTT_DONE, 1, "2026-08", "2026-08"),
+    ("922 FormingFinder", GANTT_DONE, 1, "2026-04", "2026-10"),
+    # Material pull list cover shipped 0.8.10 (Nov 11).
+    ("922 Kitting", GANTT_DONE, 1, "2026-04", "2026-11"),
+    ("922 Difficulty Stamper", GANTT_DONE, 1, "2026-08", "2026-11"),
     ("922 Runtime Genie", GANTT_DONE, 1, "2026-04", "2026-05"),
     ("922 Master Parts Catalog", GANTT_DONE, 1, "2026-07", "2026-07"),
-    ("922 Production Packets", GANTT_DEV, 0.9, "2026-10", "2026-10"),
+    # First commit 2026-10-26; shipped 0.8.9 (Nov 3), extended 0.8.10.
+    ("922 Production Packets", GANTT_DONE, 1, "2026-10", "2026-11"),
     ("Flat Bar Forming Support", GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "902 QTDR WORKFLOW"),
     ("902 DXF Prep", GANTT_DONE, 1, "2026-06", "2026-07"),
@@ -1185,8 +1528,15 @@ GANTT_ROWS = [
     ("SECTION", "SHIPOS / PALANTIR FOUNDRY"),
     ("ShipOS Implementation Lead (Navy Maritime Industrial Base)",
      GANTT_DEV, 0.2, "2026-07", "2027-03"),
+    # All six courses finished 2026-11-04, which is the training half of the
+    # program; the capstone half runs to the final presentation, week of
+    # 2027-01-18 (Cohort 7 Capstone Guide). 0.5 = coursework done, capstone
+    # not yet built - HIS number to move, like every completion on this chart.
     ("American Tech Fellowship (Palantir Foundry, 12-Week Program)",
-     GANTT_PLAN, 0, "2026-09", "2026-12"),
+     GANTT_DEV, 0.5, "2026-10", "2027-01"),
+    # Scoped and proposed; nothing built yet. 0.1 is the scoping share.
+    ("Fellowship Capstone (Foundry Workflow on ASA Production Data)",
+     GANTT_DEV, 0.1, "2026-10", "2027-01"),
     ("SECTION", "PLANNED / UPCOMING"),
     # The illustrated User Guide (34 chapters, riding release/v0.8.7.5) IS
     # this project, so it moves from Planning to Project Development.
@@ -1200,4 +1550,461 @@ GANTT_ROWS = [
     ("Code Signing Certificate", GANTT_PLAN, 0, "2026-09", "2026-10"),
     ("EB Quoting Automation", GANTT_PLAN, 0, "2026-12", "2027-08"),
     ("EB Batch Setup Full Automation", GANTT_PLAN, 0, "2027-02", "2027-11"),
+]
+
+
+# ---- Automation Projects Gantt Chart :: 'Engineering Tasks' sheet -----------
+# The chart's task list (table ToDoList23, columns B-K). It is the three
+# Version Controller sheets merged and date-sorted, plus the work that is not
+# TechDeck (DriveWorks, 902 paperwork, the fellowship). Until 2026-11-11 no
+# script owned it, so it stopped on Sep 1 while ten releases went by - the same
+# drift the chart's project rows had before GANTT_ROWS existed.
+#
+# A row is (task, priority, status, start, due, fraction complete, done,
+# notes, production update, subject). Dates are "YYYY-MM-DD"; `due`, the
+# fraction, `done` and the subject may be None, which leaves that cell EMPTY -
+# an unknown is left blank, never estimated. Rows are matched on the task
+# name, so a row already on the sheet is updated in place and only new ones
+# are appended, in list order: keep the list in date order, add at the bottom.
+#
+# Only rows named here are touched. Everything logged by hand before
+# 2026-09-02 stays exactly as it was written.
+TASK_DONE, TASK_OPEN, TASK_TODO = "Complete", "In Progress", "Not Started"
+SUBJECT_TOOLS = "Automation Tools"
+SUBJECT_FEATURES = "System Features"
+SUBJECT_ENGINEERING = "Engineering & Reliability"
+
+
+def _eng_task(initiative, start, due, priority="High"):
+    """A task row built from the ENGINEERING entry of that name, so the two
+    workbooks cannot describe one initiative two different ways."""
+    for _date, name, category, what, value, _scope in ENGINEERING:
+        if name == initiative:
+            return (name, priority, TASK_DONE, start, due, 1, 1,
+                    f"[{category}] {what}", value, SUBJECT_ENGINEERING)
+    raise KeyError(f"no ENGINEERING entry named {initiative!r}")
+
+
+def _feature_task(feature, start, due, priority="Normal"):
+    """Same, from a SYSTEM_FEATURES entry."""
+    for name, what, value, _status in SYSTEM_FEATURES:
+        if name == feature:
+            return (name, priority, TASK_DONE, start, due, 1, 1,
+                    what, value, SUBJECT_FEATURES)
+    raise KeyError(f"no SYSTEM_FEATURES entry named {feature!r}")
+
+
+GANTT_TASKS = [
+    _eng_task("Packaging Check for Runtime-Loaded Components",
+              "2026-09-01", "2026-09-01"),
+    _eng_task("Guarded Publishing & Repository Backup",
+              "2026-09-01", "2026-09-01"),
+    _eng_task("Published-Copy Verification", "2026-09-01", "2026-09-30"),
+    ("911 Scripting Prep", "High", TASK_DONE, "2026-09-02", "2026-09-04", 1, 1,
+     "New tool. Builds the two-sheet SSPO ERP scripting workbook from a "
+     "finished award review and the Working Forecast List, instead of typing "
+     "it out line by line.",
+     "Lines the tool cannot resolve are listed inside the same file with the "
+     "reason. Values shared across an order line are entered once and "
+     "propagate to every line (added Sep 4).",
+     SUBJECT_TOOLS),
+    ("911 Setup - Plate Batch Preparation", "High", TASK_DONE,
+     "2026-09-03", "2026-09-04", 1, 1,
+     "911 batch setup now prepares plate work as well as structural shapes: "
+     "the plate workbook and plate verification form, with the material "
+     "specification recorded as not applicable on carbon plate - decided by "
+     "the ferrous flag the shop paperwork itself carries - and the "
+     "traceability number carried from the forecast.",
+     "Plate batches were previously prepared by hand around the tool. The "
+     "plate selection deliberately does not persist, so a prior plate run can "
+     "never apply plate paperwork to a shape batch.",
+     SUBJECT_TOOLS),
+    _feature_task("Integrated User Manual", "2026-09-04", "2026-09-11"),
+    ("922 Setup - Repeat Identification & Progress Checklist", "High",
+     TASK_DONE, "2026-09-11", "2026-09-11", 1, 1,
+     "922 batch setup records the batch in the master parts list and "
+     "identifies repeat orders at the start of the run, so each repeat's "
+     "coordination card is created already labelled and already in the "
+     "model-check stage.",
+     "Cards were previously created plain and re-tagged in a later pass. The "
+     "tool also creates the batch's fourteen-step progress checklist card, "
+     "which was made by hand on every batch.",
+     SUBJECT_TOOLS),
+    ("Weekly Invoicing Reports Automation", "High", TASK_DONE,
+     "2026-09-11", "2026-09-11", 1, 1,
+     "Invoicing preparation takes a copy of the entire pricing master and a "
+     "close-out date range instead of a sheet trimmed to the week by hand, "
+     "and produces both weekly reports - the work order close outs and the "
+     "material status listing - alongside the invoicing packages.",
+     "Replaces two documents previously rebuilt by hand every week.",
+     SUBJECT_TOOLS),
+    ("911 Invoice Supplement Automation", "High", TASK_DONE,
+     "2026-09-16", "2026-09-17", 1, 1,
+     "Invoicing preparation fills the invoice number and ship date on the "
+     "supplement from the working forecast, prints the supplement to PDF "
+     "beside the invoice, and gathers each nest's pricing calculations into "
+     "its invoicing folder.",
+     "A nest with no invoice number is left blank and named rather than "
+     "printed - nothing ships without an invoice number.",
+     SUBJECT_TOOLS),
+    ("MieTrak Tools", "High", TASK_DONE, "2026-09-17", "2026-09-17", 1, 1,
+     "New tool. A picker window of small MieTrak helpers; the first, the "
+     "Hardware Code Generator, builds a hardware part number from dropdown "
+     "picks and copies it to the clipboard.",
+     "Replaces a standalone program left behind by a departed colleague. Its "
+     "code tables were kept verbatim and are covered by automated tests, so "
+     "the numbers keep matching.",
+     SUBJECT_TOOLS),
+    ("911 Part Sketch Repair & Material Designation", "High", TASK_DONE,
+     "2026-09-17", "2026-09-17", 1, 1,
+     "Part sketch pages that lost their drawing on the report server are "
+     "filled back in from the batch's own sketch library, and the material "
+     "designation is written on every part sketch.",
+     "The shop can scribe from the print, and a blank sketch page no longer "
+     "has to be patched by hand.",
+     SUBJECT_TOOLS),
+    _eng_task("Release Content Inventory", "2026-09-18", "2026-09-18",
+              priority="Normal"),
+    ("902 Batch Validator", "High", TASK_DONE, "2026-09-21", "2026-09-21", 1, 1,
+     "New tool. On the day a 902 batch arrives it reports which parts are not "
+     "ready to work: no drawing file, a drawing file that holds no geometry, "
+     "a damaged model file, or no print. Read-only - no file in the batch is "
+     "moved or altered.",
+     "One report goes back to the customer as a single request instead of a "
+     "part at a time; over three thousand parts were on hold waiting on a "
+     "handful of files when this was commissioned. Validated against "
+     "fourteen received batches.",
+     SUBJECT_TOOLS),
+    ("911 Scribe Verification Sheet Corrections", "High", TASK_DONE,
+     "2026-09-21", "2026-09-21", 1, 1,
+     "The scribe verification table was fixed at twenty-four rows and "
+     "silently omitted parts beyond that on larger nests. It now matches the "
+     "nest's part count, lists parts in nest-package order, takes quantities "
+     "from the nest package where it disagrees with the batch list, and fills "
+     "the material specification per part for non-ferrous plate.",
+     "No part is left off the verification sheet, and a quantity check that "
+     "had never run on plate work is fixed.",
+     SUBJECT_TOOLS),
+    ("922 Setup - Material Labels on Existing Cards", "High", TASK_DONE,
+     "2026-09-25", "2026-10-05", 1, 1,
+     "Batch setup applies source-material labels to coordination cards that "
+     "already exist, so a re-run completes a partly labelled board instead of "
+     "skipping it.",
+     "Reported by an operator whose cards already existed and so never "
+     "received their material labels.",
+     SUBJECT_TOOLS),
+    ("911 Partial-Shipment Invoicing", "High", TASK_DONE,
+     "2026-09-28", "2026-10-05", 1, 1,
+     "Each partial shipment of a nest gets its own invoice number and ship "
+     "date, matched by sub-group and close-out week. Previously every "
+     "shipment of a split nest received the first shipment's values.",
+     "A nest the tool cannot resolve is left blank and named rather than "
+     "guessed.",
+     SUBJECT_TOOLS),
+    ("922 Part-Number Reconciliation (PO vs Drawing)", "High", TASK_DONE,
+     "2026-10-05", "2026-10-14", 1, 1,
+     "The 922 forming, kitting and nest-file tools reconcile a purchase-order "
+     "part number that disagrees with its drawing number.",
+     "Closes a gap that produced unlabelled formed parts, wrongly stamped rod "
+     "lines and false missing-tube reports.",
+     SUBJECT_TOOLS),
+    ("922 Proven Work-Packet Stamping", "High", TASK_DONE,
+     "2026-10-05", "2026-10-05", 1, 1,
+     "The two packet-marking tools stamp only a document proven to be the "
+     "work packet, and clean stray stamps off sketches and prints.",
+     "Six of 252 orders across four batches had been mis-stamped.",
+     SUBJECT_TOOLS),
+    _feature_task("Seasonal Themes & What's-New Markers",
+                  "2026-10-05", "2026-10-05"),
+    ("Personal Planning Workspace - Meetings, Waiting, Time Capture, Steps",
+     "Normal", TASK_DONE, "2026-10-09", "2026-10-14", 1, 1,
+     "The personal work planner gains scheduled commitments the day is "
+     "planned around, a waiting status that holds work out of the plan and "
+     "prompts a follow-up, elapsed-time capture with totals by item and by "
+     "day, dated sub-steps under one piece of work, and free-text search.",
+     "Built entirely from user requests. Answers where the week went from "
+     "recorded time rather than recollection.",
+     SUBJECT_FEATURES),
+    _feature_task("Foreground Prompts & Run Notices",
+                  "2026-10-14", "2026-10-14"),
+    ("American Tech Fellowship - Coursework (6 Courses)", "High", TASK_DONE,
+     "2026-10-16", "2026-11-04", 1, 1,
+     "All six courses of the Palantir Foundry fellowship completed: platform "
+     "overview, data transformation (without code and in Python), ontology "
+     "development, application building, the checkpoint exercises, and AI "
+     "and automation. The final course's issue-to-work-order automation ran "
+     "end to end and was verified live.",
+     "Completes the training half of the program. The capstone - a real "
+     "workflow built on company data - is the second half.",
+     None),
+    ("American Tech Fellowship - Capstone Project", "High", TASK_OPEN,
+     "2026-10-19", "2027-01-18", 0.1, None,
+     "A production workflow built in the company's own Foundry environment "
+     "on real work data. Requirements gathered with production management, "
+     "the target system scoped end to end (Nov 4), and the written proposal "
+     "prepared for the Nov 9 submission deadline.",
+     "Program milestones: midpoint check-in the week of Dec 1, program break "
+     "Dec 15 to Jan 6, demo dry run the week of Jan 11, final presentation to "
+     "Palantir engineers and company leadership the week of Jan 18, 2027.",
+     None),
+    _eng_task("Shared-Routine Call Verification", "2026-10-20", "2026-10-20"),
+    ("911 Nest Program File Collection", "High", TASK_DONE,
+     "2026-10-20", "2026-10-21", 1, 1,
+     "911 batch setup collects each nest's machine program files into a "
+     "single folder per nest, instead of the operator opening one work-order "
+     "folder at a time across a batch.",
+     "A survey of every live batch found one file name in six collides with "
+     "another, so the collection keeps both files rather than overwriting - "
+     "which the manual method could not guarantee.",
+     SUBJECT_TOOLS),
+    ("911 Forecast-Missing Nest Warning", "High", TASK_DONE,
+     "2026-10-20", "2026-10-21", 1, 1,
+     "A nest absent from the shared forecast no longer produces a clean run: "
+     "the three affected columns are highlighted and annotated in the "
+     "workbook with the nest, the date and the one step to re-run, and the "
+     "run closes as a warning.",
+     "Two batches had reached the floor with silently blank columns and a "
+     "clean result. The columns stay blank - nothing is guessed.",
+     SUBJECT_TOOLS),
+    ("911 Continuation Page Removal", "High", TASK_DONE,
+     "2026-10-20", "2026-10-21", 1, 1,
+     "Packet preparation drops the near-empty continuation pages operators "
+     "were deleting by hand.",
+     "The rule was graded against 394 real packets first, where four of "
+     "every five pages carrying that text turned out to be genuine drawings "
+     "that must be kept.",
+     SUBJECT_TOOLS),
+    _eng_task("Part-Number Recognition Rebuild", "2026-10-20", "2026-10-21"),
+    _eng_task("Sleep vs Freeze Detection", "2026-10-20", "2026-10-21"),
+    _eng_task("Verified Integration Results", "2026-10-21", "2026-10-21"),
+    ("922 Production Packets", "High", TASK_DONE,
+     "2026-10-26", "2026-11-03", 1, 1,
+     "New tool. Works out the saw cut length for every tube on a batch, "
+     "writes the cutting list the 1D optimizer consumes, and binds the shop "
+     "prints into one binder per source material.",
+     "Cut-length rules were graded against 291 real parts across five live "
+     "batches before release. A length the tool is unsure of is flagged for "
+     "a decision, never quietly guessed.",
+     SUBJECT_TOOLS),
+    ("922 Production Packets - Production Run Binders", "High", TASK_DONE,
+     "2026-11-02", "2026-11-03", 1, 1,
+     "A second stage, run after the operator's own nesting: marks up each "
+     "nest sheet, builds a cover page per pallet from the standard procedure "
+     "documents, and binds the production run.",
+     "Reproduced a hand-built reference set of binders page for page.",
+     SUBJECT_TOOLS),
+    _eng_task("Optical Reading of Text-Less Work Packets",
+              "2026-11-02", "2026-11-03"),
+    ("American Tech Fellowship - AI Implementation Homework (Levels 0-4)",
+     "Normal", TASK_OPEN, "2026-11-04", None, None, None,
+     "Five practice assignments on the fellowship's AI maturity ladder: data "
+     "processing, search and visualization, decision guidance, feedback "
+     "loops, and AI-driven automation.",
+     "Worked alongside the capstone as hands-on practice in building from a "
+     "blank page.",
+     None),
+    ("922 Kitting - Material Pull List Cover", "High", TASK_DONE,
+     "2026-11-09", "2026-11-11", 1, 1,
+     "Kit paperwork now opens with the batch's filled material pull list: "
+     "the standard form is filled from the batch's material plan and bound "
+     "in as each kit's cover pages, with the filled workbook kept alongside "
+     "for hand additions.",
+     "The pull list was previously built by hand for every batch.",
+     SUBJECT_TOOLS),
+    ("922 Production Packets - A Print for Every Part Made", "High",
+     TASK_DONE, "2026-11-09", "2026-11-11", 1, 1,
+     "A batch making the same tube on more than one order was counted once, "
+     "so the cutting list ran one tube short and the packet carried a single "
+     "print. Every part made now gets its own cutting-list line and stamped "
+     "print, grouped behind each order's own assembly sheet.",
+     "The per-pallet cover pages now also carry the correct batch number, "
+     "per-pallet colour coding, and saw-cut highlighting for mixed-material "
+     "orders.",
+     SUBJECT_TOOLS),
+]
+
+
+# ---- Automation Projects Gantt Chart :: 'Progress Notes' sheet --------------
+# The narrative build log: the good, the bad and the ugly, one row per event.
+# A row is (date "YYYY-MM-DD", subject, type, what happened, resolution /
+# outcome); type is one of NOTE_TYPES. Rows are matched on subject AND date,
+# updated in place if already there and otherwise appended in list order -
+# keep the list in date order and add at the bottom. Like the task list, this
+# sheet had no script behind it until 2026-11-11 and stopped on Sep 1.
+NOTE_TYPES = ("Milestone", "Problem", "Decision", "Unresolved")
+
+GANTT_NOTES = [
+    ("2026-09-01", "Inspection Reader Missing From the Build", "Problem",
+     "The 0.8.7.2 release shipped without the image-recognition component "
+     "the inspection-data tool depends on: the component loads its own parts "
+     "by name while running, which the packaging step cannot see. In the "
+     "field the tool returned nothing and reported the drawings as "
+     "containing no sketch pages.",
+     "Corrective release 0.8.7.2.1 issued the same day and re-validated on "
+     "the reporting packet (122 dimensions, 24 parts, 19 inspection sheets). "
+     "A build check now reads the component's own configuration, and a "
+     "component that cannot start is reported as such."),
+    ("2026-09-01", "Publishing Rewrote the Working History", "Problem",
+     "While publishing a release, the history filter was run in the working "
+     "repository instead of an isolated copy. It rewrote the development "
+     "history in place and removed the internal documentation from it.",
+     "Fully recovered from a copy an earlier step had left behind. "
+     "Publishing is now a single script that takes a verified backup first "
+     "and refuses to run anywhere but an isolated copy."),
+    ("2026-09-02", "TechDeck v0.8.7.3 Release", "Milestone",
+     "Release cut and pushed live: the new 911 Scripting Prep tool builds "
+     "the SSPO ERP scripting workbook from a finished award review, and the "
+     "purchase-order extraction tool was reinstated after being withdrawn in "
+     "error - the two serve opposite directions.",
+     "Live to the team. The scripting sheet arrives filled in rather than "
+     "transcribed, with unresolved lines listed in the same file."),
+    ("2026-09-04", "TechDeck v0.8.7.4 Release", "Milestone",
+     "Release cut and pushed live: 911 batch setup prepares plate work as "
+     "well as shapes, the scripting tool takes shared order-line values "
+     "once, and the difficulty marker is preserved on part drawings.",
+     "Live to the team. Plate batches are no longer prepared by hand around "
+     "the tool."),
+    ("2026-09-04", "Public Build Failed After Publishing", "Problem",
+     "For the third time, a release's public build failed immediately after "
+     "publishing on something that passed locally. The published copy is a "
+     "filtered rebuild - names are rewritten and private files removed - so "
+     "its code and tests can differ from the development copy.",
+     "Two build checks now reproduce the filter locally: one compiles every "
+     "published file after the name scrub, one fails any test that reads a "
+     "file the filter removes. The failure is found before anything leaves."),
+    ("2026-09-11", "TechDeck v0.8.7.5 Release", "Milestone",
+     "Release cut and pushed live: 922 batch setup identifies repeat orders "
+     "at the start of the run and creates the batch's progress checklist "
+     "card; invoicing preparation produces both weekly reports from the "
+     "pricing master; a complete illustrated user manual ships inside the "
+     "application.",
+     "Live to the team. The manual is regenerated by every build, so it "
+     "cannot fall behind the software."),
+    ("2026-09-17", "TechDeck v0.8.7.6 Release", "Milestone",
+     "Release cut and pushed live: the new MieTrak Tools window (Hardware "
+     "Code Generator); invoice number, ship date and a supplement PDF on the "
+     "invoicing packages; part sketch pages repaired from the batch's sketch "
+     "library, with the material designation written on each.",
+     "Live to the team."),
+    ("2026-09-18", "New Tool Left Out of the Announcement", "Problem",
+     "The 0.8.7.6 announcement named a whole new tool nowhere: the notes had "
+     "been built from the feedback log, and the tool had no request behind "
+     "it.",
+     "A follow-up announcement went out. The shipping list is now read from "
+     "the code history, and the build fails if a new tool is not named in "
+     "the release record."),
+    ("2026-09-21", "TechDeck v0.8.7.7 Release", "Milestone",
+     "Release cut and pushed live: the new 902 Batch Validator reports, on "
+     "the day a batch arrives, which parts are not ready to work; the 911 "
+     "scribe verification sheet now fits the nest's part count.",
+     "Live to the team. Validated against fourteen received 902 batches and "
+     "the program's own delay log."),
+    ("2026-09-21", "Verification Sheet Dropped Parts Past 24", "Problem",
+     "Reported from the floor: the scribe verification table ran out of "
+     "lines on larger batches. The table was fixed at twenty-four rows in "
+     "both templates, so part 25 onward was silently omitted.",
+     "The table now matches the nest's part count in both directions. The "
+     "same review found a quantity check that had never run on plate work, "
+     "also fixed."),
+    ("2026-10-05", "TechDeck v0.8.7.8 Release", "Milestone",
+     "Release cut and pushed live: material labels applied to existing "
+     "coordination cards; an invoice number and ship date per partial "
+     "shipment; part-number reconciliation across the 922 forming, kitting "
+     "and nest-file tools; packet marking restricted to a proven work "
+     "packet; six more tools take a folder pick instead of a typed path; a "
+     "seasonal display theme.",
+     "Live to the team."),
+    ("2026-10-05", "Release Verified in Parts, Failed Whole", "Problem",
+     "The test suite passed folder by folder but crashed when run as one "
+     "process, which is how the build gate and the public check run it. The "
+     "cause was a test fixture, not the product, and it surfaced after the "
+     "release had been published.",
+     "A release now starts by proving the whole suite green in a single "
+     "process before anything else is done."),
+    ("2026-10-14", "TechDeck v0.8.7.9 Release", "Milestone",
+     "Release cut and pushed live: the personal work planner gains meetings, "
+     "a waiting status, time capture and reporting, sub-steps and search; "
+     "prompts open in front of whatever application is in use; six tools end "
+     "with an explicit notice when a run needs attention.",
+     "Live to the team. Built entirely from user requests."),
+    ("2026-10-20", "922 Setup Stage Broken for Six Days", "Problem",
+     "An operator diagnostic showed 922 batch preparation could not complete "
+     "its parts-list and repeat-detection step. A routine two tools share "
+     "had been changed for one caller only, and because the connection is "
+     "made while a tool runs, no build check could see it.",
+     "Fixed the same day. A new build check verifies every shared call - "
+     "twenty across five tools - so the class cannot recur."),
+    ("2026-10-20", "Blank Forecast Columns Reported as a Clean Run", "Problem",
+     "Two 911 batches reached the floor with three columns silently blank: "
+     "the nests were not yet in the shared forecast when they were set up, "
+     "and the tool warned only in a log while reporting a clean run.",
+     "The columns are now highlighted and annotated in the workbook with the "
+     "nest, the date and the one step to re-run, and the run ends on a "
+     "warning. The columns stay blank - nothing is guessed."),
+    ("2026-10-20", "American Tech Fellowship - Courses 1 to 3 Complete",
+     "Milestone",
+     "First three courses of the Palantir Foundry fellowship finished: "
+     "platform overview, data transformation (pipelines without code and "
+     "Python transforms), and ontology development (object, link and action "
+     "types).",
+     "Capstone requirements gathering with production management began the "
+     "same week."),
+    ("2026-10-21", "TechDeck v0.8.8 Release", "Milestone",
+     "Release cut and pushed live: 911 setup collects each nest's machine "
+     "program files into one folder; continuation pages are dropped from "
+     "packets; part-number recognition rebuilt from all live batch lists; "
+     "the 922 setup stage restored.",
+     "Live to the team."),
+    ("2026-10-21", "Card Creation Reported Success Without Creating Cards",
+     "Problem",
+     "Creating a batch's coordination cards reported success as soon as the "
+     "request was accepted. On one batch all 35 cards failed to be created "
+     "and the run still reported complete; it was found only when the board "
+     "was looked at.",
+     "The integration now returns what it actually did - created, already "
+     "present, failed - and a failed card is offered again on the next run. "
+     "First capability built on the upgraded integration licence."),
+    ("2026-11-03", "TechDeck v0.8.9 Release", "Milestone",
+     "Release cut and pushed live: the new 922 Production Packets tool works "
+     "out every tube's saw cut length, writes the cutting list and binds the "
+     "shop prints, with a second stage that binds the production run after "
+     "nesting.",
+     "Live to the team. Cut-length rules graded against 291 real parts "
+     "across five live batches before release."),
+    ("2026-11-03", "Re-Printed Work Packets Lost Their Text", "Problem",
+     "Packet marking stopped on 13 orders across five batches with 'no work "
+     "packet found' on packets that looked normal. They had been re-printed "
+     "through a generic PDF printer, which replaces the text with a picture "
+     "of it.",
+     "The three affected tools now read such a page as an image. The "
+     "upstream cause - packets being re-printed that way - is still to be "
+     "traced."),
+    ("2026-11-04", "American Tech Fellowship - Coursework Complete",
+     "Milestone",
+     "All six fellowship courses finished. The final course's AI and "
+     "automation exercise ran end to end and was verified live.",
+     "The program moves to the capstone: proposal due Nov 9, midpoint "
+     "check-in the week of Dec 1, final presentation to Palantir engineers "
+     "and company leadership the week of Jan 18, 2027."),
+    ("2026-11-04", "Fellowship Capstone Scoped", "Decision",
+     "The capstone's target system was scoped end to end. Maintenance and "
+     "safety were taken out of scope by management decision, leaving the "
+     "path a customer order travels through production.",
+     "The first deliverable is one thin end-to-end slice; nothing widens "
+     "until it runs."),
+    ("2026-11-11", "TechDeck v0.8.10 Release", "Milestone",
+     "Release cut and pushed live: kit paperwork opens with the batch's "
+     "filled material pull list; production packets carry a print for every "
+     "part made; the pallet cover pages are corrected.",
+     "Live to the team. 2,765 automated tests green; the pre-ship gate "
+     "stopped the build once on a real defect in the new code, fixed before "
+     "release."),
+    ("2026-11-11", "Tracking Record Audit (Sep to Nov)", "Problem",
+     "An audit of the tracking workbooks found the record had stopped on "
+     "Sep 1 wherever no script owned a sheet: this log, the task list beside "
+     "it, and parts of the other two workbooks. The Version Controller had "
+     "also missed its 0.8.9 row.",
+     "All three workbooks brought current. The task list and this log are "
+     "now written by the sync script from version control, so they can no "
+     "longer fall behind by being forgotten."),
 ]

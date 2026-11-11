@@ -2,11 +2,15 @@
 
     python tools/sync_tracking_workbooks.py           # report the gap only
     python tools/sync_tracking_workbooks.py --write   # apply it
+    ... --no-count    skip the full test-suite run that stamps the test
+                      count; claims citing it are left as they already are.
+                      Use it when the box is short of memory.
 
 All live in ..\\Other Documents next to the repo:
     TECH_PROCESS_IMPROVEMENT.xlsm         internal build log (TASK | STATE | DESC)
     TechDeck Version Controller.xlsx      the presented record (6 sheets)
-    Automation Projects Gantt Chart.xlsm  the project timeline (edited via
+    Automation Projects Gantt Chart.xlsm  the project timeline, its task list
+                                          and its progress notes (edited via
                                           Excel COM -- see sync_gantt)
 
 Why this is a script and not a hand edit: the workbooks kept drifting because
@@ -43,6 +47,7 @@ PI = DOCS / "TECH_PROCESS_IMPROVEMENT.xlsm"
 GANTT = DOCS / "Automation Projects Gantt Chart.xlsm"
 GANTT_SHEET = "Gantt Chart"
 TODAY = date.today().strftime("%b %d, %Y").replace(" 0", " ")
+COUNT_TESTS = True          # --no-count clears it; see test_count()
 
 
 def _current_version() -> str:
@@ -152,9 +157,16 @@ def test_count():
     Returns 0 if the run fails or anything is red, and the claim is left alone
     rather than replaced with a number nobody verified. Cached -- both
     workbooks cite it, and an 18-second suite run should happen once.
+
+    `--no-count` (COUNT_TESTS = False) takes that same fallback on purpose.
+    The suite has grown to minutes and a few GB of windows; on 2026-11-11 a
+    sync died twice on a box with under 1 GB free before it wrote a row. The
+    workbooks themselves need none of that, only this one number does.
     """
     import re
     import subprocess
+    if not COUNT_TESTS:
+        return 0
     try:
         # No -q: pytest.ini already sets `addopts = -q`, and a second one makes
         # it -qq, which suppresses the very summary line this reads. That is
@@ -198,6 +210,38 @@ def set_pair(ws, label, value):
     if r:
         ws.cell(row=r, column=2).value = value
     return bool(r)
+
+
+def _version_key(label):
+    """'Beta 0.8.7.2.1' -> (0, 8, 7, 2, 1). A range ('Beta 0.7.5-0.7.8') sorts
+    on its first version; a row with no version in it ('In Development')
+    sorts last."""
+    m = re.search(r"\d+(?:\.\d+)+", str(label or ""))
+    return tuple(int(p) for p in m.group(0).split(".")) if m else (10 ** 6,)
+
+
+def sort_version_history(ws, log=None):
+    """Put VERSION HISTORY back into release order. Returns rows moved.
+
+    `upsert` appends new rows in LIST order and the content list is written
+    newest first, so two releases logged in the same run land reversed --
+    0.8.10 above 0.8.9, found 2026-11-11, the first time a release had been
+    missed and two were caught up at once. Moving values alone is safe here:
+    `restyle` runs afterwards and repaints banding and row heights from row
+    position, not from what the row used to hold.
+    """
+    first, last = 3, last_data_row(ws)
+    rows = [[ws.cell(row=r, column=c).value for c in range(1, 6)]
+            for r in range(first, last + 1)]
+    ordered = sorted(rows, key=lambda row: _version_key(row[0]))   # stable
+    moved = sum(1 for a, b in zip(rows, ordered) if a != b)
+    if moved:
+        for r, values in zip(range(first, last + 1), ordered):
+            for c, v in enumerate(values, start=1):
+                ws.cell(row=r, column=c).value = v
+        if log is not None:
+            log.append(f"    - {moved} row(s) moved back into release order")
+    return moved
 
 
 # ------------------------------------------------------------------ styling
@@ -431,6 +475,8 @@ def sync_version_controller(write):
         log = []
         close_gaps(ws, 4, log)
         u, a = upsert(ws, rows, last_data_row(ws), ncols, key_col=key, log=log)
+        if sheet == "VERSION HISTORY":
+            sort_version_history(ws, log)
         notes.append(f"  {sheet:<26} {u} updated, {a} added")
         notes += log
 
@@ -476,6 +522,28 @@ def sync_version_controller(write):
     return notes
 
 
+def pi_rows(tests, notes=None):
+    """PI_NEW with the live test count filled in.
+
+    A row that cites the count is HELD BACK when the count is unavailable
+    (`tests` is 0: the suite could not be run, or was red). It used to go
+    through with its placeholder intact, so the fallback meant to leave a
+    claim alone instead overwrote the last verified number on the sheet with
+    the literal text '{tests}'.
+    """
+    rows = []
+    for row in C.PI_NEW:
+        if any("{tests}" in v for v in row):
+            if not tests:
+                if notes is not None:
+                    notes.append(f"  Sheet1  test count unavailable -- "
+                                 f"left as it is: {row[0]}")
+                continue
+            row = tuple(v.replace("{tests}", str(tests)) for v in row)
+        rows.append(row)
+    return rows
+
+
 def sync_process_improvement(write):
     wb = open_workbook(PI, keep_vba=True)
     ws = wb["Sheet1"]
@@ -491,9 +559,7 @@ def sync_process_improvement(write):
     notes.insert(0, f"  Sheet1  {renamed} entries reframed")
 
     close_gaps(ws, 2, notes)
-    tests = test_count()
-    rows = [tuple(v.replace("{tests}", str(tests)) if tests else v for v in row)
-            for row in C.PI_NEW]
+    rows = pi_rows(test_count(), notes)
     log = []
     u, a = upsert(ws, rows, last_data_row(ws), 3, log=log)
     notes.append(f"  Sheet1  {u} updated, {a} added")
@@ -555,6 +621,110 @@ def _gantt_bar(status, start, end):
     return bar
 
 
+# The chart workbook's two log sheets. Neither had a writer until 2026-11-11:
+# the project rows above were scripted, these were "update by hand when work
+# ships", and both stopped on Sep 1 while ten releases went by. Same content
+# contract as everything else here -- the rows live in version control
+# (C.GANTT_TASKS, C.GANTT_NOTES), are matched on a key, updated in place when
+# already present and appended otherwise. Rows the content does not name are
+# never touched, so everything logged by hand stays as it was written.
+TASK_SHEET, TASK_TABLE = "Engineering Tasks", "ToDoList23"
+TASK_FIRST_COL, TASK_NCOLS = 2, 10                       # B .. K
+NOTE_SHEET, NOTE_NCOLS = "Progress Notes", 5             # A .. E
+
+
+def _iso(spec):
+    """'YYYY-MM-DD' -> datetime at midnight; None stays None."""
+    from datetime import datetime
+    return datetime.strptime(spec, "%Y-%m-%d") if spec else None
+
+
+def _same_cell(have, want):
+    """Does the sheet already hold the content's value?
+
+    Dates compare by DAY: a date written through COM before the serial-number
+    fix carries a stray 04:00, and that must not read as a difference.
+    """
+    from datetime import date, datetime
+    if want is None:
+        return have in (None, "")
+    if isinstance(want, datetime):
+        if isinstance(have, datetime):
+            return have.date() == want.date()
+        return isinstance(have, date) and have == want.date()
+    if isinstance(want, (int, float)):
+        return (isinstance(have, (int, float)) and not isinstance(have, bool)
+                and abs(float(have) - float(want)) < 1e-9)
+    return isinstance(have, str) and have.strip() == str(want).strip()
+
+
+def _plan_tasks(ws, notes):
+    """(cell updates, rows to append) for the Engineering Tasks sheet."""
+    have = {}
+    for r, cells in enumerate(ws.iter_rows(
+            min_row=3, min_col=TASK_FIRST_COL,
+            max_col=TASK_FIRST_COL + TASK_NCOLS - 1, values_only=True), start=3):
+        name = cells[0]
+        if isinstance(name, str) and name.strip():
+            have.setdefault(name.strip().lower(), (r, list(cells)))
+    updates, appends = [], []
+    for entry in C.GANTT_TASKS:
+        want = list(entry)
+        want[3], want[4] = _iso(want[3]), _iso(want[4])
+        hit = have.get(entry[0].strip().lower())
+        if hit is None:
+            appends.append(want)
+            notes.append(f"  GANTT CHART                {TASK_SHEET}: "
+                         f"+ {entry[0]}")
+            continue
+        r, cells = hit
+        changed = [i for i, (h, w) in enumerate(zip(cells, want))
+                   if not _same_cell(h, w)]
+        updates += [(r, TASK_FIRST_COL + i, want[i]) for i in changed]
+        if changed:
+            notes.append(f"  GANTT CHART                {TASK_SHEET}: "
+                         f"{entry[0]}: col "
+                         f"{'/'.join('BCDEFGHIJK'[i] for i in changed)}")
+    return updates, appends
+
+
+def _plan_notes(ws, notes):
+    """(cell updates, rows to append, last data row) for Progress Notes."""
+    from datetime import datetime
+    have, last = {}, 2
+    for r, cells in enumerate(ws.iter_rows(
+            min_row=3, min_col=1, max_col=NOTE_NCOLS, values_only=True),
+            start=3):
+        if all(v in (None, "") for v in cells):
+            continue
+        last = r
+        day, subject = cells[0], cells[1]
+        if isinstance(day, datetime):
+            day = day.date()
+        if isinstance(subject, str):
+            have.setdefault((subject.strip().lower(), day), (r, list(cells)))
+    updates, appends = [], []
+    for entry in C.GANTT_NOTES:
+        when = _iso(entry[0])
+        assert when is not None, f"progress note {entry[1]!r} has no date"
+        want = [when] + list(entry[1:])
+        hit = have.get((entry[1].strip().lower(), when.date()))
+        if hit is None:
+            appends.append(want)
+            notes.append(f"  GANTT CHART                {NOTE_SHEET}: "
+                         f"+ {entry[0]}  {entry[1]}")
+            continue
+        r, cells = hit
+        changed = [i for i, (h, w) in enumerate(zip(cells, want))
+                   if not _same_cell(h, w)]
+        updates += [(r, 1 + i, want[i]) for i in changed]
+        if changed:
+            notes.append(f"  GANTT CHART                {NOTE_SHEET}: "
+                         f"{entry[1]}: col "
+                         f"{'/'.join('ABCDE'[i] for i in changed)}")
+    return updates, appends, last
+
+
 def sync_gantt(write):
     """The Gantt chart is edited cell by cell THROUGH EXCEL, never openpyxl.
 
@@ -571,6 +741,10 @@ def sync_gantt(write):
     the dates. A content row missing from the sheet is inserted directly under
     the previous row of its section. Rows the content does not name -- the
     legend, the critical-requirements block, hidden sheets -- are untouched.
+
+    The workbook's two log sheets ride the same pass: 'Engineering Tasks'
+    (C.GANTT_TASKS, matched on the task name) and 'Progress Notes'
+    (C.GANTT_NOTES, matched on subject + date). See _plan_tasks / _plan_notes.
     """
     from datetime import datetime
 
@@ -608,6 +782,8 @@ def sync_gantt(write):
     if restyle_rows:
         notes.append(f"  GANTT CHART                Progress Notes: "
                      f"{len(restyle_rows)} row(s) to restyle")
+    task_updates, task_appends = _plan_tasks(wb[TASK_SHEET], notes)
+    note_updates, note_appends, note_last = _plan_notes(ws_n, notes)
     wb.close()
 
     renames = []                                # (sheet row, new name)
@@ -670,7 +846,8 @@ def sync_gantt(write):
                 notes.append(f"  GANTT CHART                {name}: bar "
                              f"repainted {start}..{end}")
 
-    if not (renames or updates or inserts or restyle_rows):
+    if not (renames or updates or inserts or restyle_rows or task_updates
+            or task_appends or note_updates or note_appends):
         notes.append("  GANTT CHART                up to date")
         return notes
     if not write:
@@ -700,14 +877,54 @@ def sync_gantt(write):
             r_, g_, b_ = (int(hex_rgb[i:i + 2], 16) for i in (0, 2, 4))
             return r_ + (g_ << 8) + (b_ << 16)
 
-        def com_set(row_, col, v):
+        def put(sheet, row_, col, v):
             # A datetime handed to COM crosses a timezone conversion and lands
             # hours off midnight (2026-09-01 04:00 on this machine). Write the
             # Excel date serial instead -- exact, and the cell keeps its format.
-            if isinstance(v, datetime):
-                sh.Cells(row_, col).Value2 = (v - datetime(1899, 12, 30)).days
+            # None means the content has no value for this cell: leave it
+            # EMPTY rather than writing a placeholder.
+            cell = sheet.Cells(row_, col)
+            if v is None:
+                cell.ClearContents()
+            elif isinstance(v, datetime):
+                cell.Value2 = (v - datetime(1899, 12, 30)).days
             else:
-                sh.Cells(row_, col).Value = v
+                cell.Value = v
+
+        def com_set(row_, col, v):
+            put(sh, row_, col, v)
+
+        def style_note_row(sheet, r):
+            """The Progress Notes look: even rows banded, everything wrapped
+            and top-aligned, the date as 'Sep 1, 2026'."""
+            rng = sheet.Range(sheet.Cells(r, 1), sheet.Cells(r, NOTE_NCOLS))
+            if r % 2 == 0:
+                rng.Interior.Color = com_color("F2F2F2")
+            else:
+                rng.Interior.ColorIndex = -4142         # xlNone -- white rows
+            rng.WrapText = True
+            rng.VerticalAlignment = -4160               # xlVAlignTop
+            sheet.Cells(r, 1).NumberFormat = "mmm d, yyyy"
+            sheet.Rows(r).AutoFit()
+
+        def style_task_row(sheet, r):
+            """The task table's look, set explicitly: a new table row inherits
+            the row above it, and the rows above disagree with each other
+            (three different number formats in the % column alone)."""
+            first, last = TASK_FIRST_COL, TASK_FIRST_COL + TASK_NCOLS - 1
+            rng = sheet.Range(sheet.Cells(r, first), sheet.Cells(r, last))
+            rng.Font.Name, rng.Font.Size = "Courier New", 12
+            rng.Font.Bold = False
+            rng.WrapText = True
+            rng.VerticalAlignment = -4108               # xlCenter
+            rng.HorizontalAlignment = 1                 # xlGeneral
+            for col in (first + 3, first + 4):          # START / DUE DATE
+                sheet.Cells(r, col).NumberFormat = "mm-dd-yy"
+                sheet.Cells(r, col).HorizontalAlignment = -4152     # xlRight
+            sheet.Cells(r, first + 5).NumberFormat = "0%"
+            sheet.Cells(r, first + 6).NumberFormat = '"Done";"";""'
+            sheet.Cells(r, first + 6).HorizontalAlignment = -4108
+            sheet.Rows(r).AutoFit()
 
         def paint(row, bar):
             for col, hex_rgb in bar.items():
@@ -728,20 +945,36 @@ def sync_gantt(write):
                 com_set(r, col, v)
             if bar:                             # else it inherits stale fills
                 paint(r, bar)
+        shn = wbx.Worksheets(NOTE_SHEET)
         if restyle_rows:
-            shn = wbx.Worksheets("Progress Notes")
             for r in restyle_rows:
-                rng = shn.Range(shn.Cells(r, 1), shn.Cells(r, 5))
-                if r % 2 == 0:
-                    rng.Interior.Color = com_color("F2F2F2")
-                else:
-                    rng.Interior.ColorIndex = -4142     # xlNone -- white rows
-                rng.WrapText = True
-                rng.VerticalAlignment = -4160           # xlVAlignTop
-                shn.Cells(r, 1).NumberFormat = "mmm d, yyyy"
-                shn.Rows(r).AutoFit()
+                style_note_row(shn, r)
             notes.append(f"  GANTT CHART                Progress Notes: "
                          f"{len(restyle_rows)} row(s) restyled")
+        for r, col, v in note_updates:
+            put(shn, r, col, v)
+        for r in sorted({r for r, _, _ in note_updates}):
+            shn.Rows(r).AutoFit()                       # the text length moved
+        for offset, values in enumerate(note_appends, start=1):
+            r = note_last + offset
+            for col, v in enumerate(values, start=1):
+                put(shn, r, col, v)
+            style_note_row(shn, r)
+        if task_updates or task_appends:
+            sht = wbx.Worksheets(TASK_SHEET)
+            table = sht.ListObjects(TASK_TABLE)
+            for r, col, v in task_updates:
+                put(sht, r, col, v)
+            for r in sorted({r for r, _, _ in task_updates}):
+                sht.Rows(r).AutoFit()
+            for values in task_appends:
+                # ListRows.Add grows the TABLE, not just the used range, so
+                # the new row keeps the table's banding, its filter and the
+                # completion data bar.
+                r = table.ListRows.Add().Range.Row
+                for i, v in enumerate(values):
+                    put(sht, r, TASK_FIRST_COL + i, v)
+                style_task_row(sht, r)
         if label_ok:
             sh.Range("I2").Value = datetime.now()
             notes.append(f"  GANTT CHART                last updated -> {TODAY}")
@@ -770,4 +1003,5 @@ def main(write=False):
 
 
 if __name__ == "__main__":
+    COUNT_TESTS = "--no-count" not in sys.argv
     main("--write" in sys.argv)
