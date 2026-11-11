@@ -1360,6 +1360,13 @@ PI_NEW = [
      "PART MADE NOW GETS ITS OWN CUTTING-LIST LINE AND STAMPED PRINT. THE "
      "PALLET COVER PAGES NOW CARRY THE RIGHT BATCH NUMBER, PER-PALLET COLOURS "
      "AND SAW-CUT HIGHLIGHTING FOR MIXED-MATERIAL ORDERS"),
+    ("PLATFORM 1.0 - TOOL LIBRARY + PER-TOOL DELIVERY", "PENDING",
+     "NEXT PLATFORM GENERATION, CAPABILITY SIDE: EACH TOOL DELIVERED AND "
+     "UPDATED ON ITS OWN FROM A LIBRARY INSIDE THE APPLICATION, SO A FIX TO "
+     "ONE TOOL NO LONGER NEEDS A FULL RELEASE AND THE INSTALLER CARRIES THE "
+     "PLATFORM ONLY. DIRECTION AGREED NOV 10; ONE TOOL SET PER OPERATOR IS IN "
+     "PLACE AND THE DELIVERY DESIGN IS SETTLED (PER-TOOL DOWNLOAD, INTEGRITY "
+     "CHECK, SWAP WITHOUT A REINSTALL); THE DELIVERY ITSELF IS NOT BUILT YET"),
     ("TRACKING RECORD CATCH-UP", "COMPLETE",
      "AUDIT OF THE THREE TRACKING WORKBOOKS FOUND THE RECORD HAD STOPPED IN "
      "SEPTEMBER WHEREVER NO SCRIPT OWNED A SHEET: THE GANTT CHART'S TASK AND "
@@ -1392,7 +1399,18 @@ GANTT_DEFERRED = "Deferred"
 GANTT_RENAMES = {
     "Automated Testing & Continuous Integration (1,312 Tests)":
         "Automated Testing & Continuous Integration",
+    "Crane Inspection Tracker":
+        "Crane Inspection Tracker (Cancelled by Management)",
 }
+
+# Chart rows taken OFF the chart, by exact name. The writer deletes the row.
+# A row is removed only on his word, and the reason is recorded here - leaving
+# a name out of GANTT_ROWS does nothing by itself, because rows the content
+# does not name are never touched.
+GANTT_REMOVED = [
+    # The same work as the fellowship row, listed twice (2026-11-11).
+    "ShipOS Implementation Lead (Navy Maritime Industrial Base)",
+]
 
 GANTT_ROWS = [
     ("SECTION", "TECHDECK — PLATFORM & INFRASTRUCTURE"),
@@ -1422,6 +1440,13 @@ GANTT_ROWS = [
     # Meetings, waiting, time capture and steps shipped 0.8.7.9 (Oct 14).
     ("Personal Planning Workspace (Assistant)",
      GANTT_DONE, 1, "2026-07", "2026-10"),
+    # The CAPABILITY side of 1.0, not the look: tools delivered and updated one
+    # at a time. His call 2026-11-11 - "focus on the capability aspects of it,
+    # not so much the UI". 0.15 = the design is settled and the one-tool-set
+    # groundwork is in; delivery itself is unbuilt. Finish month is a
+    # placeholder until he sets one.
+    ("TechDeck 1.0 Platform (Tool Library & Per-Tool Updates)",
+     GANTT_DEV, 0.15, "2026-09", "2027-03"),
     ("SECTION", "ENGINEERING & RELIABILITY PROGRAMS"),
     ("Reliability Hardening (OneDrive, Cancellation, Settings, Errors)",
      GANTT_DONE, 1, "2026-06", "2026-09"),
@@ -1494,14 +1519,18 @@ GANTT_ROWS = [
     ("902 Setup App Suite (Mirrors 911/922 Toolchains)",
      GANTT_PLAN, 0, "2026-08", "2026-10"),
     ("SECTION", "QUALITY, ESTIMATING & SHOP TOOLS"),
+    # Closed as complete by him, 2026-11-11.
     ("Customer DXF Analysis (Quoting + Automated Offsets)",
-     GANTT_DEV, 0.7, "2026-02", "2026-09"),
+     GANTT_DONE, 1, "2026-02", "2026-09"),
     ("Sheet Metal Calculators", GANTT_DONE, 1, "2026-07", "2026-07"),
     ("MieTrak Tools (Hardware Code Generator)", GANTT_DONE, 1, "2026-09", "2026-09"),
     ("Batch Auditor", GANTT_DONE, 1, "2026-05", "2026-06"),
     ("QA Gemba Analyzer", GANTT_DONE, 1, "2026-06", "2026-07"),
     ("QR Code Generator (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
-    ("Crane Inspection Tracker", GANTT_DEV, 0.75, "2026-02", "2026-10"),
+    # Cancelled by management (his word, 2026-11-11). It stays on the chart
+    # as a record, at the completion it had reached when it stopped.
+    ("Crane Inspection Tracker (Cancelled by Management)",
+     GANTT_DEFERRED, 0.75, "2026-02", "2026-10"),
     ("SECTION", "DRIVEWORKS & DESIGN AUTOMATION"),
     ("DriveWorks Automation (Support)", GANTT_DONE, 1, "2026-02", "2027-01"),
     ("DriveWorks Difficulty Layer (Compound-Cut Flagging, TUBE + CLEVIS)",
@@ -1517,17 +1546,18 @@ GANTT_ROWS = [
     ("NC-1 G Code Automation", GANTT_DEFERRED, 0, "2026-02", "2027-02"),
     ("NC-to-SolidWorks Conversion Feasibility Study",
      GANTT_DONE, 1, "2026-02", "2026-03"),
+    # Both closed as complete by him, 2026-11-11.
     ("DXF Linear-Inch Measurement Engine",
-     GANTT_DEV, 0.75, "2026-02", "2026-07"),
+     GANTT_DONE, 1, "2026-02", "2026-07"),
     ("DSTV / NC File Format Study (SolidWorks Integration)",
-     GANTT_DEV, 0.25, "2026-02", "2026-09"),
+     GANTT_DONE, 1, "2026-02", "2026-09"),
     ("911 Master Parts List", GANTT_DONE, 1, "2026-02", "2026-07"),
     ("Throughput-Based Cut Estimating", GANTT_DONE, 1, "2026-07", "2026-07"),
     ("EB Bevel Book Transcription (947 Reference Prints)",
      GANTT_DONE, 1, "2026-08", "2026-09"),
     ("SECTION", "SHIPOS / PALANTIR FOUNDRY"),
-    ("ShipOS Implementation Lead (Navy Maritime Industrial Base)",
-     GANTT_DEV, 0.2, "2026-07", "2027-03"),
+    # "ShipOS Implementation Lead" was the same work as the fellowship row
+    # below; he kept this one (2026-11-11). See GANTT_REMOVED.
     # All six courses finished 2026-11-04, which is the training half of the
     # program; the capstone half runs to the final presentation, week of
     # 2027-01-18 (Cohort 7 Capstone Guide). 0.5 = coursework done, capstone
@@ -1538,15 +1568,17 @@ GANTT_ROWS = [
     ("Fellowship Capstone (Foundry Workflow on ASA Production Data)",
      GANTT_DEV, 0.1, "2026-10", "2027-01"),
     ("SECTION", "PLANNED / UPCOMING"),
-    # The illustrated User Guide (34 chapters, riding release/v0.8.7.5) IS
-    # this project, so it moves from Planning to Project Development.
+    # The illustrated User Guide IS this project. It shipped in 0.8.7.5 and
+    # is rebuilt and updated with every release, so it is complete and its bar
+    # runs to the latest release (his call, 2026-11-11: "yes and ongoing").
     ("922/911 Quick Reference Library (TechDeck)",
-     GANTT_DEV, 0.75, "2026-09", "2027-01"),
+     GANTT_DONE, 1, "2026-09", "2026-11"),
     ("Engineering Change (ECR/ECO/ECN) Generator",
      GANTT_PLAN, 0, "2027-03", "2027-05"),
-    ("922 PO Builder", GANTT_PLAN, 0, "2026-09", "2026-12"),
+    # Not before 2027 (his word, 2026-11-11); same length, moved out.
+    ("922 PO Builder", GANTT_PLAN, 0, "2027-01", "2027-04"),
     ("922 Quote Builder", GANTT_PLAN, 0, "2026-10", "2027-01"),
-    ("Automated 922 Rod Tags", GANTT_PLAN, 0, "2026-09", "2026-11"),
+    ("Automated 922 Rod Tags", GANTT_PLAN, 0, "2027-01", "2027-03"),
     ("Code Signing Certificate", GANTT_PLAN, 0, "2026-09", "2026-10"),
     ("EB Quoting Automation", GANTT_PLAN, 0, "2026-12", "2027-08"),
     ("EB Batch Setup Full Automation", GANTT_PLAN, 0, "2027-02", "2027-11"),
@@ -1620,6 +1652,18 @@ GANTT_TASKS = [
      "never apply plate paperwork to a shape batch.",
      SUBJECT_TOOLS),
     _feature_task("Integrated User Manual", "2026-09-04", "2026-09-11"),
+    ("TechDeck 1.0 - Tool Library & Per-Tool Updates", "High", TASK_OPEN,
+     "2026-09-09", None, 0.15, None,
+     "The next platform generation, on the capability side: each automation "
+     "tool becomes content delivered and updated on its own from a library "
+     "inside the application, instead of every tool shipping inside one "
+     "installer. A fix to one tool no longer needs a full release, and the "
+     "installer carries the platform only.",
+     "Direction agreed Nov 10, 2026. Groundwork in place: one tool set per "
+     "operator replaces the older grouped sets, and the delivery design is "
+     "settled (per-tool download, integrity check, swap without a reinstall). "
+     "The delivery itself is not built yet.",
+     SUBJECT_FEATURES),
     ("922 Setup - Repeat Identification & Progress Checklist", "High",
      TASK_DONE, "2026-09-11", "2026-09-11", 1, 1,
      "922 batch setup records the batch in the master parts list and "
@@ -1796,7 +1840,7 @@ GANTT_TASKS = [
     _eng_task("Optical Reading of Text-Less Work Packets",
               "2026-11-02", "2026-11-03"),
     ("American Tech Fellowship - AI Implementation Homework (Levels 0-4)",
-     "Normal", TASK_OPEN, "2026-11-04", None, None, None,
+     "Normal", TASK_OPEN, "2026-11-04", None, 0, None,
      "Five practice assignments on the fellowship's AI maturity ladder: data "
      "processing, search and visualization, decision guidance, feedback "
      "loops, and AI-driven automation.",
@@ -1824,13 +1868,27 @@ GANTT_TASKS = [
 ]
 
 
+# Hand-written task rows whose STATUS has moved. These rows were logged by
+# hand and their text is not in version control, so only the cells named here
+# change: (task name, status, fraction complete, done). None leaves that cell
+# exactly as it is on the sheet. A name here must not also be in GANTT_TASKS.
+TASK_CANCELLED = "Cancelled"
+GANTT_TASK_STATUS = [
+    # Cancelled by management (his word, 2026-11-11); stopped at 75%.
+    ("Crane Inspection Tracker", TASK_CANCELLED, None, None),
+    # Closed as complete by him, 2026-11-11.
+    ("Customer DXF System Improvements (Round 2)", TASK_DONE, 1, 1),
+]
+
+
 # ---- Automation Projects Gantt Chart :: 'Progress Notes' sheet --------------
 # The narrative build log: the good, the bad and the ugly, one row per event.
 # A row is (date "YYYY-MM-DD", subject, type, what happened, resolution /
 # outcome); type is one of NOTE_TYPES. Rows are matched on subject AND date,
 # updated in place if already there and otherwise appended in list order -
-# keep the list in date order and add at the bottom. Like the task list, this
-# sheet had no script behind it until 2026-11-11 and stopped on Sep 1.
+# keep the list in date order. A new row is INSERTED where its date belongs,
+# so a note logged late still reads in order. Like the task list, this sheet
+# had no script behind it until 2026-11-11 and stopped on Sep 1.
 NOTE_TYPES = ("Milestone", "Problem", "Decision", "Unresolved")
 
 GANTT_NOTES = [
@@ -1992,6 +2050,15 @@ GANTT_NOTES = [
      "path a customer order travels through production.",
      "The first deliverable is one thin end-to-end slice; nothing widens "
      "until it runs."),
+    ("2026-11-10", "TechDeck 1.0 Direction Set", "Decision",
+     "The end state for the next platform generation was agreed. The "
+     "capability that matters is delivery: each tool is installed and "
+     "updated on its own from a library inside the application, so a fix to "
+     "one tool reaches operators without a full release, and the installer "
+     "carries the platform only.",
+     "The current look is kept; the work goes into delivery rather than a "
+     "redesign. How it is built is still open, and the delivery piece does "
+     "not depend on that choice."),
     ("2026-11-11", "TechDeck v0.8.10 Release", "Milestone",
      "Release cut and pushed live: kit paperwork opens with the batch's "
      "filled material pull list; production packets carry a print for every "
@@ -2007,4 +2074,16 @@ GANTT_NOTES = [
      "All three workbooks brought current. The task list and this log are "
      "now written by the sync script from version control, so they can no "
      "longer fall behind by being forgotten."),
+    ("2026-11-11", "Project Status Review", "Decision",
+     "Open rows on the chart were reviewed one by one. Customer DXF "
+     "Analysis, the DXF linear-inch measurement engine and the DSTV / NC "
+     "file format study are closed as complete. The crane inspection "
+     "tracker was cancelled by management at about three quarters built. "
+     "922 PO Builder and Automated 922 Rod Tags will not start before 2027. "
+     "The in-application manual is complete and is updated with every "
+     "release.",
+     "The chart now matches. The separate ShipOS implementation-lead row "
+     "was removed because it described the same work as the fellowship row, "
+     "which stays. TechDeck 1.0 was added as its own row, tracked on its "
+     "capability - delivering and updating tools individually."),
 ]

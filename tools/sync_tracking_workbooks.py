@@ -685,13 +685,36 @@ def _plan_tasks(ws, notes):
             notes.append(f"  GANTT CHART                {TASK_SHEET}: "
                          f"{entry[0]}: col "
                          f"{'/'.join('BCDEFGHIJK'[i] for i in changed)}")
+    # Hand-written rows whose status moved: only the status, completion and
+    # done cells are in play, and None leaves a cell exactly as it is.
+    for name, status, pct, done in C.GANTT_TASK_STATUS:
+        hit = have.get(name.strip().lower())
+        if hit is None:
+            notes.append(f"  GANTT CHART                {TASK_SHEET}: ! "
+                         f"{name!r} is not on the sheet -- status not set")
+            continue
+        r, cells = hit
+        changed = [i for i, w in ((2, status), (5, pct), (6, done))
+                   if w is not None and not _same_cell(cells[i], w)]
+        updates += [(r, TASK_FIRST_COL + i, {2: status, 5: pct, 6: done}[i])
+                    for i in changed]
+        if changed:
+            notes.append(f"  GANTT CHART                {TASK_SHEET}: "
+                         f"{name}: status -> {status}")
     return updates, appends
 
 
 def _plan_notes(ws, notes):
-    """(cell updates, rows to append, last data row) for Progress Notes."""
-    from datetime import datetime
-    have, last = {}, 2
+    """(cell updates, rows to insert, last data row) for Progress Notes.
+
+    A new note is INSERTED where its date belongs rather than appended, so a
+    note logged late still reads in order. Each insert is (target row, values)
+    with the target in the numbering that holds once the inserts before it
+    have landed -- the list is in date order, so every earlier insert sits
+    above the next one and pushes it down by one.
+    """
+    from datetime import date, datetime
+    have, last, dated = {}, 2, []                 # dated: (row, day) in order
     for r, cells in enumerate(ws.iter_rows(
             min_row=3, min_col=1, max_col=NOTE_NCOLS, values_only=True),
             start=3):
@@ -701,6 +724,8 @@ def _plan_notes(ws, notes):
         day, subject = cells[0], cells[1]
         if isinstance(day, datetime):
             day = day.date()
+        if isinstance(day, date):
+            dated.append((r, day))
         if isinstance(subject, str):
             have.setdefault((subject.strip().lower(), day), (r, list(cells)))
     updates, appends = [], []
@@ -710,7 +735,11 @@ def _plan_notes(ws, notes):
         want = [when] + list(entry[1:])
         hit = have.get((entry[1].strip().lower(), when.date()))
         if hit is None:
-            appends.append(want)
+            # Below the last existing row dated on or before it; below the
+            # header when the sheet holds nothing that early.
+            after = max((r for r, day in dated if day <= when.date()),
+                        default=2)
+            appends.append((after + 1 + len(appends), want))
             notes.append(f"  GANTT CHART                {NOTE_SHEET}: "
                          f"+ {entry[0]}  {entry[1]}")
             continue
@@ -846,8 +875,15 @@ def sync_gantt(write):
                 notes.append(f"  GANTT CHART                {name}: bar "
                              f"repainted {start}..{end}")
 
-    if not (renames or updates or inserts or restyle_rows or task_updates
-            or task_appends or note_updates or note_appends):
+    # Rows taken off the chart on his word (C.GANTT_REMOVED). Anything the
+    # content merely does not name is left alone; this list is the only way a
+    # row leaves.
+    removals = [name for name in C.GANTT_REMOVED if name in grid]
+    for name in removals:
+        notes.append(f"  GANTT CHART                - {name}  (row removed)")
+
+    if not (renames or updates or inserts or removals or restyle_rows
+            or task_updates or task_appends or note_updates or note_appends):
         notes.append("  GANTT CHART                up to date")
         return notes
     if not write:
@@ -945,6 +981,14 @@ def sync_gantt(write):
                 com_set(r, col, v)
             if bar:                             # else it inherits stale fills
                 paint(r, bar)
+        # Removals last and by NAME: every row number above was worked out
+        # before anything moved, and a delete would shift them.
+        for name in removals:
+            for r in range(sh.UsedRange.Rows.Count + sh.UsedRange.Row, 4, -1):
+                v = sh.Cells(r, 1).Value
+                if isinstance(v, str) and v.strip() == name:
+                    sh.Rows(r).Delete(-4162)    # xlShiftUp
+                    break
         shn = wbx.Worksheets(NOTE_SHEET)
         if restyle_rows:
             for r in restyle_rows:
@@ -955,11 +999,18 @@ def sync_gantt(write):
             put(shn, r, col, v)
         for r in sorted({r for r, _, _ in note_updates}):
             shn.Rows(r).AutoFit()                       # the text length moved
-        for offset, values in enumerate(note_appends, start=1):
-            r = note_last + offset
+        last_now = note_last
+        for target, values in note_appends:
+            if target <= last_now:                      # lands above later rows
+                shn.Rows(target).Insert(-4121, 0)
             for col, v in enumerate(values, start=1):
-                put(shn, r, col, v)
-            style_note_row(shn, r)
+                put(shn, target, col, v)
+            last_now += 1
+        if note_appends:
+            # An insert moves every row below it onto the other band colour,
+            # so the look is re-applied from the first new row down.
+            for r in range(min(t for t, _ in note_appends), last_now + 1):
+                style_note_row(shn, r)
         if task_updates or task_appends:
             sht = wbx.Worksheets(TASK_SHEET)
             table = sht.ListObjects(TASK_TABLE)

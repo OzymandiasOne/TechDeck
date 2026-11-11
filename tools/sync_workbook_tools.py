@@ -347,6 +347,11 @@ ROADMAP_ROWS = [
      "Deliver anonymous usage counts and in-app feedback to the development "
      "team automatically, so effort is aimed at the tools actually in use.",
      "Platform", "Delivered"),
+    ("High", "Tool Library & Per-Tool Updates (Platform 1.0)",
+     "Deliver and update each automation tool individually from a library "
+     "inside the application, so a fix to one tool reaches operators without "
+     "a full release and the installer carries the platform only.",
+     "Platform", "Planned"),
     ("Medium", "Live SharePoint Data (Graph API)",
      "Read forecast and batch data directly from SharePoint rather than the "
      "locally synced copy, removing the dependency on a machine's sync state.",

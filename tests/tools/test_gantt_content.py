@@ -42,8 +42,20 @@ def test_done_means_one_hundred_percent():
     for name, status, pct, *_ in _projects():
         if status == C.GANTT_DONE:
             assert pct == 1, f"{name}: Complete but {pct:.0%}"
-        if status in (C.GANTT_PLAN, C.GANTT_DEFERRED):
-            assert pct == 0, f"{name}: {status.split()[0]} but {pct:.0%}"
+        if status == C.GANTT_PLAN:
+            assert pct == 0, f"{name}: Planning but {pct:.0%}"
+        # Deferred is NOT held to zero: a project stopped part-way (the crane
+        # tracker, cancelled at 75%) keeps the completion it had reached.
+        if status == C.GANTT_DEFERRED:
+            assert pct < 1, f"{name}: Deferred but 100%"
+
+
+def test_removed_rows_are_gone_from_the_content():
+    """A row cannot be both on the chart and taken off it."""
+    names = {r[0] for r in _projects()}
+    for name in C.GANTT_REMOVED:
+        assert name not in names, f"{name!r} is removed AND still a chart row"
+    assert len(set(C.GANTT_REMOVED)) == len(C.GANTT_REMOVED)
 
 
 def test_dates_parse_and_run_forward():
@@ -104,6 +116,42 @@ def test_a_complete_task_is_done_and_an_open_one_is_not():
         else:
             assert done is None and pct != 1, (
                 f"{task}: {status} but marked done or 100%")
+
+
+def test_adopted_task_rows_only_move_their_status():
+    """GANTT_TASK_STATUS touches hand-written rows, so it may only name rows
+    the content does not otherwise own - or the two would fight over a row."""
+    owned = {r[0].strip().lower() for r in C.GANTT_TASKS}
+    statuses = {C.TASK_DONE, C.TASK_OPEN, C.TASK_TODO, C.TASK_CANCELLED}
+    seen = set()
+    for name, status, pct, done in C.GANTT_TASK_STATUS:
+        key = name.strip().lower()
+        assert key not in owned, f"{name!r} is also a GANTT_TASKS row"
+        assert key not in seen, f"{name!r} listed twice"
+        seen.add(key)
+        assert status in statuses, f"{name}: unknown status {status!r}"
+        assert pct is None or 0 <= pct <= 1
+        assert done in (None, 1)
+        if status == C.TASK_DONE:
+            assert pct == 1 and done == 1, f"{name}: Complete needs 100% + Done"
+
+
+def test_a_hand_written_row_changes_status_and_nothing_else(monkeypatch):
+    from datetime import datetime
+
+    import sync_tracking_workbooks as S
+
+    monkeypatch.setattr(C, "GANTT_TASKS", [])
+    monkeypatch.setattr(C, "GANTT_TASK_STATUS",
+                        [("Old Project", C.TASK_CANCELLED, None, None),
+                         ("Not There", C.TASK_DONE, 1, 1)])
+    on_sheet = [None, "Old Project", "Low", C.TASK_OPEN, datetime(2025, 1, 5),
+                None, 0.75, None, "his own notes", "his own update", None]
+    notes = []
+    updates, appends = S._plan_tasks(_sheet([on_sheet]), notes)
+    assert appends == []
+    assert updates == [(3, 4, C.TASK_CANCELLED)]     # column D only
+    assert any("Not There" in n and "not on the sheet" in n for n in notes)
 
 
 def test_task_names_are_unique():
@@ -171,6 +219,7 @@ def test_a_task_already_on_the_sheet_is_not_appended_again(monkeypatch):
     row = ("Some Task", "High", C.TASK_DONE, "2026-09-02", "2026-09-04", 1, 1,
            "what", "value", C.SUBJECT_TOOLS)
     monkeypatch.setattr(C, "GANTT_TASKS", [row])
+    monkeypatch.setattr(C, "GANTT_TASK_STATUS", [])
     # As Excel hands it back: real dates, and one carrying the stray 04:00
     # that dates written through COM used to pick up.
     on_sheet = [None, "Some Task", "High", C.TASK_DONE,
@@ -192,6 +241,7 @@ def test_a_changed_task_is_updated_in_place_not_duplicated(monkeypatch):
     row = ("Capstone", "High", C.TASK_OPEN, "2026-10-19", None, 0.4, None,
            "what", "value", None)
     monkeypatch.setattr(C, "GANTT_TASKS", [row])
+    monkeypatch.setattr(C, "GANTT_TASK_STATUS", [])
     on_sheet = [None, "Capstone", "High", C.TASK_OPEN, datetime(2026, 10, 19),
                 None, 0.1, None, "what", "value", None]
     updates, appends = S._plan_tasks(_sheet([on_sheet]), [])
@@ -215,6 +265,31 @@ def test_notes_match_on_subject_and_date(monkeypatch):
     earlier = [datetime(2026, 9, 1), "A Release", "Milestone", "old", "old"]
     updates, appends, last = S._plan_notes(_sheet([earlier]), [])
     assert updates == [] and len(appends) == 1 and last == 3
+    assert appends[0][0] == 4                        # directly below it
+
+
+def test_a_note_logged_late_is_inserted_where_its_date_belongs(monkeypatch):
+    """Appending at the bottom put a Nov 10 note under the Nov 11 ones."""
+    from datetime import datetime
+
+    import sync_tracking_workbooks as S
+
+    monkeypatch.setattr(C, "GANTT_NOTES", [
+        ("2026-08-01", "Before Everything", "Decision", "w", "o"),
+        ("2026-11-10", "Logged Late", "Decision", "w", "o"),
+        ("2026-11-11", "Same Day As The Last", "Decision", "w", "o"),
+    ])
+    sheet = _sheet([
+        [datetime(2026, 9, 1), "First", "Milestone", "w", "o"],        # row 3
+        [datetime(2026, 11, 11), "Release", "Milestone", "w", "o"],    # row 4
+        [datetime(2026, 11, 11), "Audit", "Problem", "w", "o"],        # row 5
+    ])
+    _, appends, last = S._plan_notes(sheet, [])
+    assert last == 5
+    # Each target allows for the inserts that land above it: the August note
+    # goes under the header (3), the late one between Sep 1 and Nov 11 (now
+    # row 5), the same-day one below every existing Nov 11 row (now row 8).
+    assert [t for t, _ in appends] == [3, 5, 8]
 
 
 def test_version_history_is_put_back_in_release_order():
