@@ -343,6 +343,7 @@ def build_cover(excel, template_path, template_info, stage_dir, batch_no,
     merged = fitz.open()
     try:
         for p in pdfs:
+            sdk.ensure_local(p)
             src = fitz.open(str(p))
             try:
                 merged.insert_pdf(src)
