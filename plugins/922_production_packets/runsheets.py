@@ -286,12 +286,17 @@ def annotate(src: Path, dest: Path, info, saw, log):
 
 # ─────────────────────────────────────────────────────────── the cover page
 
-# The cover's shading, read out of Carrie's own template rather than guessed.
-# All three are derivable, so TechDeck can colour a cover it has never seen:
-FILL_TITLE = "C6E0B4"     # the PALLET n / MATERIAL REQUIRED heading rows
-FILL_SAW_ORDER = "FFFF00" # an ORDER whose material is saw cut - yellow
-FILL_SAW_MAT = "D9D9D9"   # that material's row in MATERIAL REQUIRED - grey
-FILL_BAND = "E2EFDA"      # every other material GROUP, so the groups read apart
+# The cover's shading, read out of Carrie's own covers rather than guessed.
+# EVERY PALLET KEEPS ITS OWN COLOUR PAIR - banner, then the group band - and
+# the SAW cover wears the colours of the pallet its block is listed under.
+# Sampled from her 508 reference set and her fixed 509 covers (2026-11-04):
+# the first build painted every pallet with pallet 1's green.
+PALLET_FILLS = {"1": ("C6E0B4", "E2EFDA"),     # green
+                "2": ("FFE699", "FFF2CC"),     # gold
+                "3": ("BDD6EE", "DEEBF7")}     # blue
+DEFAULT_FILLS = PALLET_FILLS["1"]              # a pallet 4 has never happened
+FILL_SAW_ORDER = "FFFF00" # an ORDER using a saw cut material - yellow
+FILL_SAW_MAT = "D9D9D9"   # that material's NAME cell in MATERIAL REQUIRED - grey
 
 # the saw page's sign-off line, one per saw material, copied from Carrie's own
 USED_LINE = ("USED: {material} - TAG: " + "_" * 14
@@ -333,6 +338,39 @@ def _set_cell(cell, text=None, fill=None):
     return cell
 
 
+def _set_batch_number(xml, batch_no):
+    """Write the batch number into the `BATCH <n>` heading, however Word
+    split it across runs.
+
+    The shipped templates carry the heading as FOUR runs - `BATCH`, ` `, `50`,
+    `8` - so a regex over the raw XML never sees `BATCH 508` as one string,
+    and the template's own number printed on every batch's cover (Carrie,
+    2026-11-04, batches 509 onward). The text nodes are read as ONE string
+    instead; the digits after BATCH are rewritten wherever they sit, the new
+    number landing in the first of their nodes and the rest emptied.
+    """
+    nodes = list(TEXT_RE.finditer(xml))
+    text = "".join(m.group(2) for m in nodes)
+    hit = re.search(r"BATCH\s*(\d+)", text)
+    if hit is None:
+        return xml
+    lo, hi = hit.span(1)
+    edits, pos, placed = [], 0, False
+    for m in nodes:
+        start, content = pos, m.group(2)
+        pos = start + len(content)
+        if pos <= lo or start >= hi:
+            continue
+        head = content[:max(lo - start, 0)]
+        tail = content[hi - start:] if hi - start < len(content) else ""
+        edits.append((m.start(2), m.end(2),
+                      head + ("" if placed else str(batch_no)) + tail))
+        placed = True
+    for a, b, new_text in reversed(edits):
+        xml = xml[:a] + new_text + xml[b:]
+    return xml
+
+
 def _set_row(row, values):
     """`values` is [(text, fill), ...] for the row's cells, left to right."""
     cells = CELL_RE.findall(row)
@@ -351,7 +389,7 @@ def _set_row(row, values):
 
 
 def fill_docx(template: Path, dest: Path, batch_no, title, listing,
-              materials, saw_materials):
+              materials, saw_materials, pallet=None):
     """Write `template` out as `dest` with this batch's cover data in it.
 
     The table is rebuilt in the document XML rather than through Word's COM
@@ -361,11 +399,10 @@ def fill_docx(template: Path, dest: Path, batch_no, title, listing,
     cells"). Cloning her own row XML also keeps every font, border and width
     exactly as she set them - nothing is re-styled from scratch.
 
-    Three shadings are reproduced, all of them derivable:
-      * an ORDER is yellow when the material it uses is saw cut;
-      * that material's MATERIAL REQUIRED row is grey for the same reason;
-      * the material column bands every other material GROUP, so a reader can
-        see where one material's orders end and the next start.
+    The shading is derivable, so TechDeck can colour a cover it has never
+    seen: the banner and the band are the PALLET'S OWN colour pair
+    (`PALLET_FILLS`), an order is yellow when ANY material it uses is saw cut,
+    and a saw cut material's NAME is grey in MATERIAL REQUIRED.
     """
     src = zipfile.ZipFile(sdk.long_path(str(template)))
     try:
@@ -389,35 +426,43 @@ def fill_docx(template: Path, dest: Path, batch_no, title, listing,
     t_title, t_blank, t_body = rows[0], rows[1], rows[3]
     t_mat_head, t_mat = rows[15], rows[16]
 
-    # which MATERIAL REQUIRED entry each order's material is, so the banding
-    # and the yellow both key off the same list the page already prints
-    index, saw = {}, set()
-    for i, text in enumerate(materials, start=1):
-        key = _norm(text)
-        index.setdefault(key, i)
-        if "SAW CUT" in text.upper():
-            saw.add(key)
+    fill_top, fill_band = PALLET_FILLS.get(str(pallet or ""), DEFAULT_FILLS)
 
-    built = [_set_row(t_title, [(title, FILL_TITLE)]), t_blank]
+    # yellow keys off the MATERIAL REQUIRED list the page already prints. An
+    # order can use TWO materials ("4.0 X 4.0 X 0.50 NOM, 2.5 X 2.5 X 0.25
+    # NOM", 509 pallet 1) and is yellow when ANY of them is saw cut - matching
+    # on the joined string matched nothing, and Carrie yellowed those rows by
+    # hand (2026-11-04).
+    saw = {_norm(text) for text in materials if "SAW CUT" in text.upper()}
+
+    built = [_set_row(t_title, [(title, fill_top)]), t_blank]
+    # the band marks every other material GROUP as the listing reads DOWN THE
+    # PAGE, so a reader can see where one material's orders end and the next
+    # start. Keying it off the MATERIAL REQUIRED index banded the wrong rows
+    # the moment a two-material order made the two lists disagree (509 pallet
+    # 1: her fix bands the listing's groups 2 and 4).
+    group, prev = 0, None
     for order, material in listing:
-        key = _norm(material)
-        n = index.get(key)
+        keys = [_norm(part) for part in str(material).split(",")]
+        if keys != prev:
+            group, prev = group + 1, keys
         built.append(_set_row(t_body, [
-            (order, FILL_SAW_ORDER if key in saw else None),
-            (material, FILL_BAND if n and n % 2 == 0 else None)]))
+            (order, FILL_SAW_ORDER if any(k in saw for k in keys) else None),
+            (material, fill_band if group % 2 == 0 else None)]))
     built += [rows[13], rows[14],
               _set_row(t_mat_head,
-                       [(f"MATERIAL REQUIRED: {len(materials)}", FILL_TITLE)])]
+                       [(f"MATERIAL REQUIRED: {len(materials)}", fill_top)])]
     for i, text in enumerate(materials, start=1):
+        # the grey stays OFF the count cell - hers shades the name only
         shade = FILL_SAW_MAT if "SAW CUT" in text.upper() else None
-        built.append(_set_row(t_mat, [(str(i), shade), (text, shade)]))
+        built.append(_set_row(t_mat, [(str(i), None), (text, shade)]))
 
     head, tail = table.group(0).split(rows[0], 1)
     rebuilt = head + "".join(built) + tail.split(rows[-1], 1)[1]
     xml = xml[:table.start()] + rebuilt + xml[table.end():]
 
     # the heading is the only place the batch number appears
-    xml = re.sub(r"(BATCH\s*)\d+", lambda m: f"{m.group(1)}{batch_no}", xml)
+    xml = _set_batch_number(xml, batch_no)
 
     # the saw page ends with a line per saw material for the operator to
     # write the tag and the leftover length on. Built here, not by the caller,
@@ -449,7 +494,7 @@ def _norm(text):
 
 
 def cover_pdf(template: Path, dest: Path, batch_no, title, listing, materials,
-              saw_materials, log):
+              saw_materials, log, pallet=None):
     """Fill one procedure page and export it to PDF.
 
     The filling is `fill_docx` (pure XML, no Word). Word is used only for the
@@ -462,7 +507,7 @@ def cover_pdf(template: Path, dest: Path, batch_no, title, listing, materials,
 
     work = Path(tempfile.mkdtemp(prefix="td922cover_")) / template.name
     fill_docx(template, work, batch_no, title, listing, materials,
-              saw_materials)
+              saw_materials, pallet=pallet)
 
     pythoncom.CoInitialize()
     word = None

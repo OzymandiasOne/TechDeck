@@ -53,6 +53,16 @@ try:
 except ImportError:
     _COM_AVAILABLE = False
 
+# pull_list.py lives beside this file; load it by path so it resolves under
+# every plugin-loader import style (dev repo AND %LOCALAPPDATA% installs).
+import importlib.util as _ilu
+_PL_SPEC = _ilu.spec_from_file_location(
+    "techdeck_922_kitting_pull_list",
+    Path(__file__).resolve().parent / "pull_list.py")
+assert _PL_SPEC is not None and _PL_SPEC.loader is not None
+pl = _ilu.module_from_spec(_PL_SPEC)
+_PL_SPEC.loader.exec_module(pl)
+
 
 # Constants -------------------------------------------------------------------
 
@@ -497,12 +507,20 @@ def _render_oversize_pages(excel, ws_big, oversize, bent_plates, pdf_dir,
 
 
 def _merge_kit_pages(pdf_paths: list[Path], iterations: list[int],
-                     larger_pages: dict[int, Path], dest: Path, log) -> None:
+                     larger_pages: dict[int, Path], dest: Path, log,
+                     cover: Optional[Path] = None) -> None:
     """Merge the per-iteration 2-page exports into the final kitting PDF,
     SUBSTITUTING the larger bin label page for any order that overflowed - the
-    order keeps its place in the print order, it just prints all its parts."""
+    order keeps its place in the print order, it just prints all its parts.
+    `cover` (the material pull list, v1.5.0) goes in front of everything."""
     merged = fitz.open()
     try:
+        if cover is not None:
+            src = fitz.open(sdk.long_path(cover))
+            try:
+                merged.insert_pdf(src)
+            finally:
+                src.close()
         for i, n in enumerate(iterations):
             src_path = pdf_paths[i]
             sdk.ensure_local(src_path)  # OneDrive placeholder -> download first
@@ -691,6 +709,31 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
     sdk.ensure_dir(pdf_dir)
 
     sdk.copy_resilient(organizer_path, staged_workbook, log)  # hydrate + locked-open message
+
+    # The material pull list - the kit's cover sheet (Carrie's outline,
+    # 2026-11-10). Everything it needs is read up front, read-only; any gap is
+    # a WARNING and the kitting paperwork still prints, coverless, as before.
+    pull = None
+    if settings.get("pull_list_cover", True):
+        template = pl.find_template(
+            sdk.resolve_922_root(settings.get("base_path", "")))
+        qty_rows = pl.read_material_qty(staged_workbook, log)
+        if template is None:
+            log("WARNING: no 'QF-PR-10 - Material Pull List - Electric Boat' "
+                "workbook in Notes/Pull list - the kit prints without its "
+                "pull list cover")
+        elif not qty_rows:
+            log(f"WARNING: the organizer has no readable "
+                f"'{pl.MATERIAL_QTY_SHEET}' tab (or it is empty) - the kit "
+                f"prints without its pull list cover")
+        else:
+            info = pl.read_template(template, log)
+            if info is not None:
+                tube_desc, plate_desc = pl.desc_maps(staged_workbook, log)
+                pull = (template, info, qty_rows, tube_desc, plate_desc)
+        if pull is None:
+            sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING,
+                                "no pull list cover - see the console")
 
     excel = None
     wb = None
@@ -881,6 +924,31 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         wb.Close(False)
         wb = None
         ws_kit = None
+
+        cover_pdf = pull_xlsx = None
+        hand = []
+        if pull is not None:
+            log("Building the material pull list cover...")
+            p_template, p_info, p_rows, tube_desc, plate_desc = pull
+            try:
+                cover_pdf, pull_xlsx, hand = pl.build_cover(
+                    excel, p_template, p_info, stage_dir, batch_no, p_rows,
+                    tube_desc, plate_desc, log)
+            except Exception as exc:
+                log(f"WARNING: the pull list cover failed ({exc}) - the kit "
+                    f"prints without it")
+                cover_pdf = pull_xlsx = None
+            if cover_pdf is None:
+                sdk.set_run_outcome(params, sdk.RUN_OUTCOME_WARNING,
+                                    "no pull list cover - see the console")
+            for mid in hand:
+                log(f"  {mid}: size unknown to the template AND the "
+                    f"organizer - write it on the printed sheet")
+            if hand:
+                sdk.set_run_outcome(
+                    params, sdk.RUN_OUTCOME_WARNING,
+                    f"{len(hand)} pull list size(s) need a hand fill")
+
         excel.Quit()
         excel = None
         progress_callback(92)
@@ -889,7 +957,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         log(f"Merging {len(pdf_paths)} full PDF(s) into {final_pdf.name}"
             + (f" ({len(larger_pages)} order(s) on the larger bin label)"
                if larger_pages else "") + "...")
-        _merge_kit_pages(pdf_paths, iterations, larger_pages, final_pdf, log)
+        _merge_kit_pages(pdf_paths, iterations, larger_pages, final_pdf, log,
+                         cover=cover_pdf)
         progress_callback(94)
 
         # Merge labels-only PDFs
@@ -908,6 +977,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
             merged_labels.close()
         progress_callback(96)
 
+        # The filled pull list workbook rides along for hand additions and
+        # reprints - the outline's "you can add more material if needed".
+        if pull_xlsx is not None:
+            dest_xlsx = (kitting_dir /
+                         f"Material Pull List (TechDeck) - Batch {batch_no}.xlsx")
+            shutil.copy2(sdk.long_path(pull_xlsx), sdk.long_path(dest_xlsx))
+            log(f"Pull list workbook: {dest_xlsx.name}")
+
         # Copy staged workbook back over the OneDrive original
         log("Copying workbook back to OneDrive...")
         shutil.copy2(sdk.long_path(staged_workbook), sdk.long_path(organizer_path))
@@ -919,6 +996,9 @@ def run(params: dict, progress_callback, cancel_event: threading.Event) -> None:
         if larger_pages:
             log(f"  Larger bin labels: {len(larger_pages)} "
                 f"({', '.join(oversize[i][0] for i in sorted(larger_pages))})")
+        log(f"  Pull list cover  : "
+            + ("in front of the kit PDF" if cover_pdf else
+               "NOT built - see the warnings above"))
         log(f"  Full output PDF  : {final_pdf}")
         log(f"  Labels output PDF: {labels_pdf}")
         log("=" * 50)

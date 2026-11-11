@@ -328,17 +328,23 @@ def build(out_dir: Path, batch_no, materials, drawings, log):
         used_assemblies = set()
         pages = 0
         try:
-            # grouped by order, the way the hand-built packets read
+            # grouped by order, the way the hand-built packets read.
+            # ONE PRINT PER PART MADE (Carrie, 2026-11-09, batch 511): the
+            # same tube on two orders is two physical parts, so each order's
+            # block carries its own stamped copy - assembly sheet included -
+            # and a quantity above one binds that many copies of the tube
+            # sheet. "WE NEED ONE FOR EVERY PART THAT WILL BE MADE."
             for e in sorted(entries, key=lambda e: (e["order"], e["part"])):
                 asm = assembly_of.get(e["part"])
-                if asm is not None and asm not in used_assemblies:
-                    used_assemblies.add(asm)
+                if asm is not None and (asm, e["order"]) not in used_assemblies:
+                    used_assemblies.add((asm, e["order"]))
                     pages += _append(doc, asm, e["order"], stamp=True)
                 sheet = tube_sheet.get(e["part"])
                 if sheet is None:
                     no_sheet.append(e)
                     continue
-                pages += _append(doc, sheet, e["order"], stamp=True)
+                for _copy in range(max(int(e.get("qty") or 1), 1)):
+                    pages += _append(doc, sheet, e["order"], stamp=True)
                 all_parts_bound.add(e["part"])
             if not pages:
                 continue

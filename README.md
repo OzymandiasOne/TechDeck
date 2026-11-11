@@ -1,4 +1,4 @@
-# TechDeck v0.8.9 - The Cutting List
+# TechDeck v0.8.10 - The Pull List
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,34 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.10 - The Pull List
+
+Both changes in this update came from your feedback. Thank you for keeping it
+coming :)
+
+### 922 Kitting: the material pull list is now the kit's cover sheet
+
+The kitting paperwork now opens with the batch's filled pull list: the two pull
+list pages are bound in front of each kit's PDF, filled from the batch's Pallet
+& Rod Organizer Material QTY tab. The filled pull list workbook also lands
+beside the PDF, so you can still add to it by hand.
+
+### 922 Production Packets
+
+- A batch that makes the same tube on more than one order now gets a print for
+  every part made: the cutting list used to carry that tube once, so the nest
+  came out a tube short and the packet held a single print. Each order's block
+  in the binder now opens with its own stamped assembly sheet, and an order
+  making more than one of a tube binds that many copies of the tube sheet.
+
+- The pallet cover pages: the batch number now actually prints (every batch's
+  covers said BATCH 508), each pallet now keeps its own color (pallet 1 green,
+  pallet 2 gold, pallet 3 blue) instead of all green, and an order is now
+  marked yellow when any of its materials is saw cut, not only when all of
+  them are.
 
 ---
 

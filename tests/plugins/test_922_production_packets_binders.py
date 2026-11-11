@@ -88,8 +88,13 @@ def test_a_binder_carries_the_assembly_sheet_and_the_order_stamp(
         assert part in body
 
 
-def test_the_assembly_sheet_is_bound_once_per_binder(pk, tmp_path, batch):
-    """Both tubes share one assembly, and it must not be bound twice."""
+def test_the_assembly_sheet_is_bound_once_per_order(pk, tmp_path, batch):
+    """Both tubes share one assembly AND one order: one assembly sheet.
+
+    Once per ORDER since v1.12.0, not once per binder - a second order of the
+    same assembly opens its own block with its own stamped copy (the test
+    below). Within one order it must still not repeat per tube.
+    """
     out = tmp_path / "out"
     written, _no_sheet = pk.build(out, "900", _materials("2", "2.1"),
                                   batch, lambda *_a: None)
@@ -101,6 +106,54 @@ def test_the_assembly_sheet_is_bound_once_per_binder(pk, tmp_path, batch):
     finally:
         doc.close()
     assert naming_both == 1
+
+
+def _entry(part, order, qty=1):
+    return {"part": part, "order": order, "serial": "218019941",
+            "desc": "2.0 X 2.0 X 0.188 NOM", "qty": qty, "length": 10.0,
+            "review": False, "pallet": "2", "packet": "2.1"}
+
+
+def _pages_naming_only(path, part, other):
+    """How many pages of the binder name `part` and not `other`."""
+    doc = fitz.open(str(path))
+    try:
+        return sum(part in doc[i].get_text() and other not in doc[i].get_text()
+                   for i in range(doc.page_count))
+    finally:
+        doc.close()
+
+
+def test_a_part_on_two_orders_gets_a_print_per_order(pk, tmp_path, batch):
+    """THE BATCH 511 MISS (Carrie, 2026-11-09): the same tube on TWO orders is
+    two physical parts, and the binder carried one print. "WE NEED ONE FOR
+    EVERY PART THAT WILL BE MADE." Each order's block now opens with its own
+    stamped assembly sheet and carries its own stamped tube print."""
+    out = tmp_path / "out"
+    mats = [("218019941", [_entry(TUBES[0], "AA100"),
+                           _entry(TUBES[0], "BB200")])]
+    written, no_sheet = pk.build(out, "900", mats, batch, lambda *_a: None)
+    assert no_sheet == []
+    path, pages = written[0]
+    assert pages == 4                      # (asm + tube) per order
+    body = _text(path)
+    assert body.count("ORDER: AA100") == 2
+    assert body.count("ORDER: BB200") == 2
+    assert _pages_naming_only(path, TUBES[0], TUBES[1]) == 2
+
+
+def test_a_quantity_above_one_binds_that_many_copies(pk, tmp_path, batch):
+    """Quantity 3 of a tube is three physical parts: three stamped prints of
+    its sheet behind one assembly sheet, not one print and a number the floor
+    has to go read off the cutting list."""
+    out = tmp_path / "out"
+    mats = [("218019941", [_entry(TUBES[0], "AA100", qty=3)])]
+    written, no_sheet = pk.build(out, "900", mats, batch, lambda *_a: None)
+    assert no_sheet == []
+    path, pages = written[0]
+    assert pages == 4                      # asm once, the tube sheet x3
+    assert _text(path).count("ORDER: AA100") == 4
+    assert _pages_naming_only(path, TUBES[0], TUBES[1]) == 3
 
 
 # ───────────────────────────────────────────── where the order stamp lands

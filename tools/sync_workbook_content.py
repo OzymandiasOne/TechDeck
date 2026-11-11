@@ -308,6 +308,40 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("Beta 0.8.10", "Nov 11, 2026", "Feature",
+     "A floor-feedback release for the 922 line. Kit paperwork now opens "
+     "with the batch's filled material pull list: the standard pull-list "
+     "form is filled from the batch's material plan and bound in as each "
+     "kit's cover pages, with the filled workbook kept alongside for hand "
+     "additions - work previously done by hand for every batch. Production "
+     "packet accuracy: a batch making the same tube on more than one order "
+     "was counted once, so the cutting list ran one tube short and the "
+     "packet carried a single print; every part made now gets its own "
+     "cutting-list line and stamped print, grouped behind each order's own "
+     "assembly sheet. The per-pallet cover pages now carry the correct "
+     "batch number (a template fault printed one fixed number on every "
+     "batch), per-pallet color coding, and a mixed-material order is "
+     "highlighted whenever any of its material is saw cut.",
+     "922 Kitting, 922 Production Packets"),
+    ("Beta 0.8.9", "Nov 3, 2026", "Feature",
+     "A production-paperwork release. New tool: 922 Production Packets "
+     "prepares a batch's tube cutting paperwork end to end - it works out "
+     "the saw cut length for every tube on the batch, writes the cutting "
+     "list the 1D optimizer consumes, and assembles the shop prints into "
+     "one binder per source material; the cut-length rules were graded "
+     "against 291 real parts across five live batches before release. A "
+     "second stage, run after the operator's own nesting, marks up each "
+     "nest sheet, builds a per-pallet cover page from the standard "
+     "procedure documents, and binds the production run. Reliability: work "
+     "packets that had been re-printed through a generic PDF printer lose "
+     "their machine-readable text, which stopped the pallet stamping step "
+     "on 13 orders across five batches with a false 'no work packet "
+     "found'; the three affected tools now read such pages optically and "
+     "continue. Invoice supplements no longer print a date or amount as "
+     "###### when its column is too narrow - the column is widened for the "
+     "print only, and the operator's own workbook layout is preserved.",
+     "922 Production Packets, 922 Pallet Stamper, 922 Difficulty Stamper, "
+     "922 Setup, 911 SSPO Invoicing Prep"),
     ("Beta 0.8.8", "Oct 21, 2026", "Feature",
      "A floor-feedback release. 911 batch setup now collects each nest's "
      "machine program files into a single folder per nest, instead of the "
