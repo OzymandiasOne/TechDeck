@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.9 - New app: 922 Production Packets builds the tube cutting list, the material binders and the production run binders; a work packet that lost its text still reads; a narrow invoice date prints in full
+; Version 0.8.10 - 922 Kitting binds the filled material pull list as the kit's cover; 922 Production Packets prints every part made (duplicate tubes) and the pallet covers carry the right batch number and colors
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.9"
+#define MyAppVersion "0.8.10"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"
