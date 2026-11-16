@@ -277,6 +277,31 @@ def test_each_pallet_cover_wears_its_own_colour(rs, tmp_path):
         assert rows[3][1][1] == band, "group 2 wears the pallet's band"
 
 
+def test_the_note_heading_wears_the_pallet_colour_too(rs, tmp_path):
+    """Batch 513 (2026-11-16): "BEFORE STARTING, PLEASE REVIEW NOTES:" printed
+    in pallet 1's green on every cover. It now matches the banner - gold on
+    pallet 2, blue on pallet 3 - and pallet 1 keeps the template's own green.
+    The SAW template paints it with the lighter 40% tint, so its swap lands on
+    the same lighter rung."""
+    listing = [("BM338238", "6.0 X 6.0 X 0.50 NOM")]
+    materials = ["HSS 6.0 X 6.0 X 0.50 NOM (SAW CUT)"]
+    for pallet, colour in (("1", "70AD47"), ("2", "FFC000"), ("3", "5B9BD5")):
+        dest = tmp_path / f"n{pallet}.docx"
+        rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_LASER, dest, 513,
+                     f"PALLET {pallet}", listing, materials, [], pallet=pallet)
+        xml = (zipfile.ZipFile(str(dest)).read("word/document.xml")
+               .decode("utf-8"))
+        assert f'<w:color w:val="{colour}"' in xml, pallet
+        if pallet != "1":
+            assert "70AD47" not in xml, "the template's green must be gone"
+    saw = tmp_path / "nsaw.docx"
+    rs.fill_docx(PDIR / "templates" / rs.TEMPLATE_SAW, saw, 513, "SAW TUBES",
+                 listing, materials, ["HSS 6.0 X 6.0 X 0.50 NOM"], pallet="2")
+    xml = zipfile.ZipFile(str(saw)).read("word/document.xml").decode("utf-8")
+    assert '<w:color w:val="FFD966"' in xml
+    assert "A8D08D" not in xml
+
+
 def test_a_two_material_order_is_yellow_when_either_is_saw_cut(rs, tmp_path):
     """509 pallet 1: FL358235 uses "4.0 X 4.0 X 0.50 NOM, 2.5 X 2.5 X 0.25
     NOM" and the 0.50 is saw cut. Matching on the JOINED string matched no
