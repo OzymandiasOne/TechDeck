@@ -59,9 +59,20 @@ def test_each_row_carries_its_own_order_number(book):
         ["R7212587-H14-4A", None, 2, "BL416616"]
 
 
+def test_e1_totals_length_times_quantity(book, mod):
+    """Carrie, 2026-11-17: E1 shows the total length the sheet needs - every
+    length times its quantity, added up. A live formula over the same 5:100
+    rows the X watches, so a length she fills in by hand (a tube with no
+    drawing leaves Length blank) rolls into the total the moment she types
+    it."""
+    ws = book["SAW.1"]
+    assert ws["E1"].value == mod.TOTAL_FORMULA
+    assert mod.TOTAL_FORMULA == "=SUMPRODUCT(C5:C100,D5:D100)"
+    assert ws["E1"].number_format == "0.0"
+
+
 def test_the_x_moved_to_f_and_still_watches_column_a(book, mod):
     ws = book["SAW.1"]
-    assert ws["E1"].value is None, "E1 is part of the header band, not the X"
     assert ws["F1"].value == mod.X_FORMULA
     assert "A5:A100" in mod.X_FORMULA, "the arrow column is still A"
     assert ws["F1"].font.name == "Aharoni"

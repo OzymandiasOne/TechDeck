@@ -101,6 +101,11 @@ ARROW = chr(0x2192)                           # the arrow that marks a bad row
 # only CF rule in Carrie's file is a broken one whose formula is the text
 # "IF(A5-A100=\"\")", which can never fire, so it is not reproduced.
 X_FORMULA = '=IF(COUNTA(A5:A100)>0,"X","")'
+# E1 totals the sheet - every length times its quantity, added up (Carrie,
+# 2026-11-17). A live formula rather than a computed number, so a length she
+# fills in by hand (a tube with no drawing) rolls into the total the moment
+# she types it. Same 5:100 rows the X formula watches.
+TOTAL_FORMULA = "=SUMPRODUCT(C5:C100,D5:D100)"
 # E is the Order column, added after Quantity so Carrie's Parts Id. / Length /
 # Quantity stay in the columns she put them in (Anthony, 2026-10-30). The X
 # moves along to F, keeping it at the end of the table.
@@ -877,6 +882,8 @@ def _write_workbook(dest: Path, batch_no, materials, log):
                     else _tidy(serial))
         ws["B1"] = "Electric Boat"
         ws["C1"] = f"Batch {batch_no}: Pallet {entries[0]['org_pallet']}"
+        ws["E1"] = TOTAL_FORMULA
+        ws["E1"].number_format = "0.0"
         ws[X_CELL] = X_FORMULA
         for c in COL_WIDTHS:
             cell = ws[f"{c}1"]
