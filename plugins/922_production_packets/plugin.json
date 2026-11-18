@@ -2,7 +2,7 @@
   "id": "922_production_packets",
   "name": "922 Production Packets",
   "description": "Builds the tube cutting list a batch feeds into the 1D cutting optimizer",
-  "version": "1.13.0",
+  "version": "1.14.0",
   "author": "Anthony Sieben",
   "family": "922",
   "icon": "icon.png",
@@ -25,7 +25,7 @@
     "output": [
       "<batch> Tubes.xlsx in the batch's Production Packets folder - one sheet per source material, named after its packet (SAW.4, 2.5). The material number, the batch, the pallet and the total length the sheet needs run across the top, then the parts: Problem?, Parts Id., Length, Quantity, Order. The total is every length times its quantity, added up, and it recalculates if you fill a missing length in by hand.",
       "Where a material fills up one pallet and runs onto the next, the organizer lists it again, and you get a sheet and a binder for each pallet - 1.3, 2.3 and 3.1 for the one size. Which pallet a tube lands on comes from its order number.",
-      "The sheets come out in the Material Use Tracker's order for that batch - pallet 1, then 2, then 3, then SAW - so you can read the two side by side.",
+      "The sheets are in packet order - SAW.1, SAW.2, then 1.1, 1.2 and so on through pallets 2 and 3 - so the tabs read in order. The run still checks the batch against the Material Use Tracker and names any material that has no row on it.",
       "A row it wants you to check gets an arrow in the Problem? column, and that brings up the red X at the top of the sheet - so you can see which sheets need a look without opening them.",
       "A Production Packets report PDF beside it, listing what needs a look, what had no drawing, which tubes have no print of their own to bind, and the full cutting list.",
       "A TechDeck Packets folder of bound drawings, each named after its packet - SAW.4_4.0 SQ X 0.375.pdf, 2.1_4.0 SQ X 0.25.pdf. Every binder reads the same way: for each order, the assembly drawing first, then that order's own tube sheets, every page stamped with the order number and the saw cut dimension highlighted where the drawing gives one. One print per part being made: a tube on two orders, or with a quantity above one, gets a copy for each. Plus one holding the drawings worth checking.",

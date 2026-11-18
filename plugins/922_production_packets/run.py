@@ -158,16 +158,16 @@ def _size_triple(text):
 
 
 def _tracker_order(root, batch_no, log):
-    """{serial: position} in the order the Material Use Tracker lists them.
+    """{serial: position} for every row the Material Use Tracker lists.
 
-    The tracker carries one sheet per batch, named by the batch number, and its
-    rows are already grouped the way the floor reads them - pallet 1, then 2,
-    then 3, then SAW on its own. The cutting list's sheets come out in that
-    same order so the two documents can be read side by side (Anthony,
-    2026-10-26).
+    The tracker carries one sheet per batch, named by the batch number. Up to
+    v1.13.0 this ordering decided the cutting list's sheet order (Anthony,
+    2026-10-26); the sheets sort by packet name now (Carrie, 2026-11-18) and
+    the tracker is a CROSS-CHECK only - a material with no row on it breaks
+    step 2's drop lookups, so `_group_materials` names the mismatches.
 
     A missing tracker, a batch with no sheet yet, or a file somebody has open
-    is a NOTE and nothing more: the order falls back to TechDeck's own.
+    is a NOTE and nothing more: the check is skipped.
     Read-only throughout - this is somebody's live planning workbook.
     """
     if root is None:
@@ -175,28 +175,28 @@ def _tracker_order(root, batch_no, log):
     hits = [p for p in (Path(root) / TRACKER_FOLDER).glob(TRACKER_GLOB)
             if not p.name.startswith("~$")]
     if not hits:
-        log(f"No Material Use Tracker in '{TRACKER_FOLDER}' - sheets go in "
-            f"TechDeck's own order")
+        log(f"No Material Use Tracker in '{TRACKER_FOLDER}' - skipping the "
+            f"tracker check")
         return {}
     try:
         wb = sdk.load_workbook_resilient(hits[0], read_only=True,
                                          data_only=True, log=log)
     except Exception as exc:
-        log(f"Could not read {hits[0].name} ({exc}) - sheets go in TechDeck's "
-            f"own order")
+        log(f"Could not read {hits[0].name} ({exc}) - skipping the tracker "
+            f"check")
         return {}
     try:
         sheet = next((n for n in sdk.visible_sheetnames(wb)
                       if str(n).strip() == str(batch_no)), None)
         if sheet is None:
             log(f"{hits[0].name} has no sheet for batch {batch_no} yet - "
-                f"sheets go in TechDeck's own order")
+                f"skipping the tracker check")
             return {}
         ws = wb[sheet]
         header_row, cols = sdk.find_header_row(ws, ["PALLET", "ITEM"])
         if header_row is None:
             log(f"No PALLET / ITEM header row on {hits[0].name} sheet "
-                f"'{sheet}' - sheets go in TechDeck's own order")
+                f"'{sheet}' - skipping the tracker check")
             return {}
         c_item = cols["ITEM"]
         c_size = cols.get("SIZE")
@@ -228,8 +228,8 @@ def _tracker_order(root, batch_no, log):
             n += 1
     finally:
         wb.close()
-    log(f"Sheet order from {hits[0].name} sheet '{batch_no}' "
-        f"({len(order)} materials)")
+    log(f"Checking the materials against {hits[0].name} sheet '{batch_no}' "
+        f"({len(order)} rows)")
     return order
 
 
@@ -572,6 +572,24 @@ def _packet_names(pallet_map):
     return out
 
 
+def _packet_sort_key(packet):
+    """The tab order Carrie reads (2026-11-18): SAW.1, SAW.2, then 1.1 up to
+    1.n, 2.n, 3.n - SAW first, pallets in number order, and the minor number
+    numeric so 1.10 lands after 1.9, not after 1.1. Anything unparseable (an
+    UNKNOWN pallet's sheet) comes last rather than crashing the sort."""
+    major, _, minor = str(packet).rpartition(".")
+    try:
+        n = int(minor)
+    except ValueError:
+        n = 10 ** 6
+    if major == SAW_PALLET:
+        return (0, 0, n)
+    try:
+        return (1, int(major), n)
+    except ValueError:
+        return (2, 0, n)
+
+
 def _diagnose_no_sheet(batch_path: Path, no_sheet, all_parts, log):
     """Say WHY a tube reached no binder - and name the part it probably is.
 
@@ -648,9 +666,14 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
          ordering - SAW first, biggest tube first - because that is what matched
          the hand-built `SAW.1`-`SAW.6` packets on batch 505. A name has to land
          the same whoever builds it, so nothing downstream may rename a file.
-      2. The materials are THEN put in the Material Use Tracker's order, which
-         is how the floor reads them: pallet 1, then 2, then 3, then SAW. That
-         is the order the workbook's sheets and the report's groups come out in.
+      2. The materials THEN sort by that packet name - SAW.1, SAW.2, 1.1 up
+         to 1.n, 2.n, 3.n - which is the order the workbook's sheet tabs and
+         the report's groups come out in. They used to follow the Material
+         Use Tracker's row order instead, which jumbled the packet numbers
+         on the tabs (batch 513 read 1.1, 1.4, 1.5, 1.2, ...); Carrie asked
+         for the numbered order (2026-11-18). The tracker is still read as a
+         cross-check, because a material with no row on it breaks step 2's
+         drop lookups and the floor's cross-reading.
     """
     # One group per (SIZE, pallet). A material whose parts spill onto the next
     # pallet is listed again by the organizer and gets its own sheet and its
@@ -754,31 +777,28 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
         log(f"WARNING: {serial} ({desc}) is a tube material TechDeck has "
             f"never seen - add it to the SDK's tube material lists")
 
+    # the sheets and the report read in PACKET order (Carrie, 2026-11-18:
+    # "I WOULD LIKE this order, i'd like SAW.1 , SAW.2 , 1.1, 1.2, ...")
+    materials.sort(key=lambda kv: _packet_sort_key(kv[1][0]["packet"]))
+
+    # the tracker no longer orders anything, but a material it does not list
+    # still breaks step 2's drop lookups and the floor's cross-reading, so
+    # the mismatches are still named.
     tracker = _tracker_order(root_922, batch_no, log)
     if tracker:
-        LAST = 10 ** 6
-
-        def _pos(entries):
-            """The group's spot on the tracker, by any serial it carries.
-
-            A merged group holds both the retired serial and the current one,
-            and the tracker may list either, so every one is tried before the
-            size fallback.
-            """
+        def _found(entries):
+            """Whether the tracker lists the group AT ALL, by any serial it
+            carries - a merged group holds both the retired serial and the
+            current one - with the size as the last resort."""
             e0 = entries[0]
-            pallet, desc = e0["pallet"], e0["desc"]
             serials = list(e0.get("serials") or [])
             serials += [sdk.canonical_tube_material(s) for s in serials]
-            keys = [(pallet, s) for s in serials] + serials
-            triple = _size_triple(desc)
+            keys = [(e0["pallet"], s) for s in serials] + serials
+            triple = _size_triple(e0["desc"])
             if triple is not None:
-                keys += [(pallet, triple), triple]
-            for key in keys:
-                if key in tracker:
-                    return tracker[key]
-            return LAST
+                keys += [(e0["pallet"], triple), triple]
+            return any(key in tracker for key in keys)
 
-        materials.sort(key=lambda kv: _pos(kv[1]))
         by_size, by_serial, strays = [], [], []
         for serial, entries in materials:
             pallet = entries[0]["pallet"]
@@ -788,20 +808,18 @@ def _group_materials(tubes, pallet_map, root_922, batch_no, log):
             label = f"{serial} ({entries[0]['desc']}) on pallet {pallet}"
             if any(s in tracker for s in serials):
                 by_serial.append(label)
-            elif _pos(entries) == LAST:
+            elif not _found(entries):
                 strays.append(label)
             else:
                 by_size.append(label)
         for s in by_serial:
-            log(f"{s} is not a row on the tracker - the organizer says that "
-                f"pallet needs it, so its sheet follows the material's other "
-                f"tracker row")
+            log(f"{s} has no row of its own on the tracker - the organizer "
+                f"says that pallet needs it, so add the pallet's row")
         for s in by_size:
-            log(f"{s} is not on the tracker by item number - placed by its "
-                f"size instead")
+            log(f"{s} is on the tracker by its size only, not by item number")
         if strays:
             log(f"{len(strays)} source material(s) are not on the tracker "
-                f"sheet at all, so they come last: {', '.join(strays)}")
+                f"sheet at all: {', '.join(strays)}")
     return materials
 
 
