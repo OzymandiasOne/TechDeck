@@ -193,8 +193,13 @@ class ForecastRow(NamedTuple):
 # ---- Invoice Supplement look (reproduced from the hand-made ASA sheet) ------------
 INV_HEADERS = ["PO ", "PO Line", "Batch", "Workorder", "DYPN",
                "Source Material", "Qty", "Nest ", "Price/Ea", "Ext. Price"]
+# Every column the sheet writes needs a width here. G was missing until
+# 2026-11-18, and G3 is the Invoice Date: at Excel's default 8.43 the date
+# does not fit, so Excel hash-fills the cell and the WORKBOOK A.T. opens
+# shows ###### even though the PDF prints correctly (the print-time
+# _widen_hashed_columns pass closes the workbook with SaveChanges=False).
 INV_COL_WIDTHS = {"A": 11.0, "B": 9.71, "C": 13.86, "D": 13.0, "E": 14.43,
-                  "F": 13.86, "H": 14.43, "I": 14.29, "J": 11.57}
+                  "F": 13.86, "G": 10.86, "H": 14.43, "I": 14.29, "J": 11.57}
 INV_HEADER_ROW = 7
 INV_DATA_START = 8
 # px, anchor A1. Was (553, 202) = the logo's natural size, which sprawled over
