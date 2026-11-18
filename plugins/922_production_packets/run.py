@@ -76,7 +76,7 @@ assert _RS_SPEC is not None and _RS_SPEC.loader is not None
 rs = _ilu.module_from_spec(_RS_SPEC)
 _RS_SPEC.loader.exec_module(rs)
 
-VERSION = "1.12.0"
+VERSION = "1.14.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
