@@ -59,6 +59,13 @@ EXPECTED_ITEMS = {
                                 # list is correct
     "922_batch_repeater": 1,    # 922 MPL.xlsx open in Excel — nothing saved
     "911_po_pdf_extractor": 1,  # nothing extracted, so nothing written
+    # neither half of the rule - by the maintainer's explicit call, 2026-11-19
+    "911_setup": 1,             # the shared 911 BATCH template lost the formulas
+                                # that fill Part Description. The run's own
+                                # sheets are right (the app's backup filled
+                                # them), but EVERY run stays on the backup until
+                                # somebody repairs the file, and for four weeks
+                                # nobody knew it was broken. One item per run.
 }
 
 # Plugins that raised their OWN ending popup before any of this, and still do.

@@ -10,11 +10,16 @@ size up in SOURCE MATERIAL INFO. Both SACO templates were re-saved on 2026-10-23
 with the Rev C form, which made D16:G17 one merged cell with nothing in it, so
 the cell came out blank on every sheet from then on and no run said so.
 
-The app owns the cell now. Each part gets ITS OWN row's material rather than the
-first row sharing its PO line, and nothing depends on the forecast having filled
-the PO columns. Verified through live Excel on copies of both real templates
-(shape and plate), 2026-11-19: `code / size` on two lines in slot 1, mirrored
-into every duplicate slot, with NEST A:C left blank.
+The formulas went back into both templates the same day
+(`tools/devkit/fix_911_template.py`), and the template stays in charge: while a
+copied tab has its formulas, the app does not touch the cell. What the app has
+now is a BACKUP - if the formulas are missing it fills the cell itself, so the
+sheet is still right, and the run ends on ONE popup saying the template was
+modified and needs fixing (the maintainer's call, 2026-11-19).
+
+Verified through live Excel on copies of both real templates, shape and plate:
+repaired template -> the formulas fill it and the backup stays off; the
+2026-10-23 template -> the backup fills slot 1 and every duplicate slot.
 
 The Excel half needs COM, so it is pinned here at the source level; the lookup
 half is plain openpyxl and is tested for real.
@@ -124,6 +129,19 @@ def test_the_size_column_is_found_by_header_name(su):
     assert su._part_descriptions(wb, wb["NEST"], lambda *_: None) == [("ABC", "THE SIZE")]
 
 
+def test_plate_shows_the_column_the_plate_template_shows(su):
+    """Both templates' formulas read the table's THIRD column - SIZE on shape,
+    DESCRIPTION on plate, whose table carries the two the other way round."""
+    plate_headers = ("SOURCE", "MATERIAL", "DESCRIPTION ", "SIZE", "MIL SPEC", "FORM")
+    wb = _workbook([("3X24-814", "H1-1", "ABC", 1)],
+                   [("ABC", "HSS", "THE DESCRIPTION", "THE SIZE", "", "")],
+                   table_headers=plate_headers)
+    quiet = lambda *_: None
+    assert su._part_descriptions(wb, wb["NEST"], quiet, plate=True) == [
+        ("ABC", "THE DESCRIPTION")]
+    assert su._part_descriptions(wb, wb["NEST"], quiet) == [("ABC", "THE SIZE")]
+
+
 def test_no_table_at_all_still_gives_the_code(su):
     said = []
     wb = _workbook([("FM1", "H1-1", "ABC", 1)], with_table=False)
@@ -137,27 +155,56 @@ def test_a_blank_material_is_left_blank(su):
 
 
 # ── the Excel half, pinned at the source ────────────────────────────────────
-def test_the_run_hands_the_descriptions_to_the_builder(su):
-    src = inspect.getsource(su)
-    assert "part_descs = _part_descriptions(wb, nest_ws, log)" in src
-    assert "_build_inspection_sheets_via_excel(nest_excel, part_rows, log,\n" in src
+def test_the_template_stays_in_charge(su):
+    """A tab that still has its formulas is left alone; the write is a BACKUP."""
+    src = inspect.getsource(su._build_inspection_sheets_via_excel)
+    assert "template_fills = bool(desc_cell.HasFormula)" in src
+    guard = src.index("if not template_fills:")
+    write = src.index("desc_cell.Value = ")
+    assert guard < write, "slot 1 must only be written when the formulas are gone"
+    assert 'new_sheet.Range("D17").HasFormula' in src     # two-cell layout: both
+
+
+def test_the_builder_reports_which_sheets_fell_back(su):
+    src = inspect.getsource(su._build_inspection_sheets_via_excel)
+    assert "backup_sheets.append(sheet_name)" in src
+    assert "return backup_sheets" in src
     assert "descriptions" in inspect.signature(
         su._build_inspection_sheets_via_excel).parameters
 
 
-def test_the_builder_writes_slot_one_and_handles_both_layouts(su):
-    """Rev C = one merged cell; the older template = code over size, two cells."""
+def test_the_backup_handles_both_layouts(su):
+    """One merged cell (the 2026-10-23 shape) or code over size, two cells."""
     src = inspect.getsource(su._build_inspection_sheets_via_excel)
-    assert 'desc_cell = new_sheet.Range("D16")' in src
-    assert "MergeArea.Rows.Count >= 2" in src            # which layout is this?
-    assert 'new_sheet.Range("D17").Value = size' in src   # the older two-cell one
+    assert "MergeArea.Rows.Count >= 2" in src
+    assert 'new_sheet.Range("D17").Value = size or None' in src
 
 
 def test_a_duplicate_slot_in_the_single_cell_layout_only_mirrors_slot_one(su):
-    """'=D$17' aimed inside Rev C's merge is dropped by COM without a word."""
+    """'=D$17' aimed inside a two-row merge is dropped by COM without a word."""
     src = inspect.getsource(su._build_inspection_sheets_via_excel)
-    single = src.index("if single_cell:\n                        mirror")
+    single = src.index("mirror = new_sheet.Range(")
     rebuild = src.index("xlPasteFormats = -4122")
     assert single < rebuild, "the single-cell branch must leave before the rebuild"
     assert "continue" in src[single:rebuild]
     assert "'=IF(D$16=\"\",\"\",D$16)'" in src
+
+
+def test_a_modified_template_pops_once_for_the_whole_run(su):
+    """ONE action item however many nests fell back - and it says what he asked
+    it to say: the file was modified and needs fixing for 911 Setup to work."""
+    src = inspect.getsource(su.run)
+    assert src.count("sdk.flag_action(") == 1
+    block = src[src.index("if template_backup:"):]
+    block = block[:block.index("# QTY verification summary")]
+    assert "has been modified and needs to be" in block
+    assert "911 Setup to work properly" in block
+    assert "911 PLATE BATCH _.xlsx" in block and "911 BATCH _.xlsx" in block
+    assert "template_backup.append(nest)" in src
+
+
+def test_the_backups_notes_stay_quiet_unless_it_runs(su):
+    """'not in SOURCE MATERIAL INFO' is noise while the template fills the cell."""
+    src = inspect.getsource(su.run)
+    assert "_part_descriptions(wb, nest_ws, backup_notes.append, plate)" in src
+    assert "for note in backup_notes:" in src
