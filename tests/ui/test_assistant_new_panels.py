@@ -261,7 +261,11 @@ def test_a_meeting_shows_on_the_agenda_without_a_tick_box(store, qapp):
         ScheduleRequest, build_schedule,
     )
 
-    day = date.today() + timedelta(days=1)
+    # The next Wednesday, never "tomorrow": on a Friday tomorrow is a Saturday,
+    # the planner lays out no blocks on a weekend, and this test failed one
+    # day a week for a reason that had nothing to do with meetings.
+    today = date.today()
+    day = today + timedelta(days=(2 - today.weekday()) % 7 or 7)
     store.add_commitment(Commitment(title="Production meeting", start="09:00",
                                     minutes=60, day=day.isoformat()))
     schedule = build_schedule(ScheduleRequest(
