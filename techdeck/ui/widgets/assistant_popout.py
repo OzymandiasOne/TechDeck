@@ -137,9 +137,15 @@ class AssistantPopout(QFrame, ThemeAware):
         self._title = QLabel("Assistant")
         self._title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         bar_row.addWidget(self._title, 1)
-        self._pop_in_btn = QPushButton("Pop back in")
+        # An X, like any panel you close (the maintainer's call after trying
+        # it, 2026-11-20: the words "Pop back in" were a label to read where a
+        # glyph does). Icon-only, so it must be marked or the app sheet's
+        # button padding leaves the glyph no room and Qt draws nothing.
+        self._pop_in_btn = QPushButton("✕")
+        from techdeck.ui.utils import mark_icon_button
+        mark_icon_button(self._pop_in_btn, 22)
         self._pop_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._pop_in_btn.setToolTip("Put the Assistant back on its own page")
+        self._pop_in_btn.setToolTip("Pop back in")
         self._pop_in_btn.clicked.connect(self.pop_in_requested.emit)
         bar_row.addWidget(self._pop_in_btn)
         box.addWidget(self._bar)
@@ -548,14 +554,14 @@ class AssistantPopout(QFrame, ThemeAware):
             QPushButton {{
                 background: transparent;
                 color: {palette.text_secondary};
-                border: 1px solid {palette.border};
+                border: none;
                 border-radius: 11px;
-                padding: 2px 10px;
-                font-size: 11px;
+                padding: 0;
+                font-size: 13px;
             }}
             QPushButton:hover {{
-                border-color: {palette.accent};
-                color: {palette.accent};
+                background: {palette.surface_hover};
+                color: {palette.text};
             }}
         """)
         from PySide6.QtGui import QColor
