@@ -514,7 +514,70 @@ class MainWindow(QMainWindow):
         from techdeck.ui.utils import limit_min_size_to_current_page
         limit_min_size_to_current_page(self.page_stack)
 
-        main_layout.addWidget(self.page_stack, 1)
+        # The page stack sits in its own nested layout so a DOCKED Assistant
+        # panel can reserve a strip beside it (that layout's contents margins)
+        # and the page reflows instead of being covered. A layout, not a
+        # wrapper widget: warmup_pages() invalidates the central layout to
+        # restore the window size, and that reaches a nested layout.
+        self.page_area = QHBoxLayout()
+        self.page_area.setContentsMargins(0, 0, 0, 0)
+        self.page_area.setSpacing(0)
+        self.page_area.addWidget(self.page_stack)
+        main_layout.addLayout(self.page_area, 1)
+
+        # The Assistant, popped out: a panel floating over whichever page is
+        # showing. Built now, hidden, so the first Pop out click is instant.
+        from techdeck.ui.widgets.assistant_popout import AssistantPopout
+        self.assistant_popout = AssistantPopout(
+            central, self.page_area, self.page_stack,
+            bounds_fn=lambda: central.rect().adjusted(
+                self.sidebar.width(), 0, 0, 0),
+            watch=[self.sidebar])
+        self.assistant_popout.restore_state(self.settings.get_assistant_popout())
+        self.assistant_popout.pop_in_requested.connect(self._pop_in_assistant)
+        self.assistant_popout.geometry_settled.connect(self._save_popout_state)
+        self.assistant_page.pop_out_requested.connect(self._pop_out_assistant)
+        self.assistant_page.pop_in_requested.connect(self._pop_in_assistant)
+        self.assistant_page.compact_width_changed.connect(
+            self._fit_popout_to_tab)
+
+    # ── the Assistant's floating panel ──────────────────────────────────────
+
+    def _pop_out_assistant(self):
+        """Lift the Assistant off its page into the floating panel."""
+        if self.assistant_page.is_popped_out():
+            return
+        self.assistant_popout.pop_out(self.assistant_page.release_body())
+        self._fit_popout_to_tab()
+        self._save_popout_state()
+
+    def _fit_popout_to_tab(self):
+        """Tell the panel how wide the Assistant tab now showing needs to be.
+
+        Twice: now, so the panel never shows a frame of clipped buttons, and
+        again once the event loop has turned, because a tab that just
+        refreshed can still be settling its labels (Tasks came out 22px short
+        on the first reading)."""
+        def fit():
+            if self.assistant_page.is_popped_out():
+                self.assistant_popout.set_content_minimum(
+                    self.assistant_page.compact_min_width())
+        fit()
+        QTimer.singleShot(0, fit)
+
+    def _pop_in_assistant(self):
+        """Put the Assistant back on its own page."""
+        if not self.assistant_page.is_popped_out():
+            return
+        self._save_popout_state()
+        self.assistant_popout.pop_in()
+        self.assistant_page.reclaim_body()
+
+    def _save_popout_state(self):
+        try:
+            self.settings.set_assistant_popout(self.assistant_popout.state())
+        except Exception as exc:        # where a panel sits must never cost a run
+            logger.warning("Could not save the Assistant panel's place: %s", exc)
     
     def warmup_pages(self):
         """Trigger first-paint and any one-time lazy setup on every page in
