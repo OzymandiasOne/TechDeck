@@ -1459,6 +1459,10 @@ GANTT_DEFERRED = "Deferred"
 # count now lives with the claim in the Version Controller, where it is read
 # from a live pytest run.
 GANTT_RENAMES = {
+    # The capstone target changed 2026-11-11: sales PO intake, not
+    # production data.
+    "Fellowship Capstone (Foundry Workflow on ASA Production Data)":
+        "Fellowship Capstone (Customer PO Intake in Foundry)",
     "Automated Testing & Continuous Integration (1,312 Tests)":
         "Automated Testing & Continuous Integration",
     "Crane Inspection Tracker":
@@ -1624,13 +1628,17 @@ GANTT_ROWS = [
     # below; he kept this one (2026-11-11). See GANTT_REMOVED.
     # All six courses finished 2026-11-04, which is the training half of the
     # program; the capstone half runs to the final presentation, week of
-    # 2027-01-18 (Cohort 7 Capstone Guide). 0.5 = coursework done, capstone
-    # not yet built - HIS number to move, like every completion on this chart.
+    # 2027-01-18 (Cohort 7 Capstone Guide). 0.7 = coursework done (half)
+    # plus 0.4 of the capstone half - HIS number to move, like every
+    # completion on this chart. Set by me 2026-11-23 and flagged to him.
     ("American Tech Fellowship (Palantir Foundry, 12-Week Program)",
-     GANTT_DEV, 0.5, "2026-10", "2027-01"),
-    # Scoped and proposed; nothing built yet. 0.1 is the scoping share.
-    ("Fellowship Capstone (Foundry Workflow on ASA Production Data)",
-     GANTT_DEV, 0.1, "2026-10", "2027-01"),
+     GANTT_DEV, 0.7, "2026-10", "2027-01"),
+    # Target changed 2026-11-11 to customer PO intake (see GANTT_RENAMES).
+    # 0.4 (mine, 2026-11-23, flagged to him): reader, match, review screen
+    # and the dry-run send are built; the ERP write, PDF upload, midpoint
+    # and presentation are not.
+    ("Fellowship Capstone (Customer PO Intake in Foundry)",
+     GANTT_DEV, 0.4, "2026-10", "2027-01"),
     ("SECTION", "PLANNED / UPCOMING"),
     # The illustrated User Guide IS this project. It shipped in 0.8.7.5 and
     # is rebuilt and updated with every release, so it is complete and its bar
@@ -1846,11 +1854,19 @@ GANTT_TASKS = [
      "workflow built on company data - is the second half.",
      None),
     ("American Tech Fellowship - Capstone Project", "High", TASK_OPEN,
-     "2026-10-19", "2027-01-18", 0.1, None,
-     "A production workflow built in the company's own Foundry environment "
-     "on real work data. Requirements gathered with production management, "
-     "the target system scoped end to end (Nov 4), and the written proposal "
-     "prepared for the Nov 9 submission deadline.",
+     "2026-10-19", "2027-01-18", 0.4, None,
+     "A sales-order intake workflow built in the company's own Foundry "
+     "environment: a customer purchase order PDF is read, each line is "
+     "matched to the existing ERP item, the salesperson reviews the result "
+     "on one screen, and the approved order is sent to the ERP. The target "
+     "changed on Nov 11; the first one, a daily production screen, "
+     "overlapped with work already under way on the same platform. Built "
+     "Nov 16 to 23: the PDF reader and parser, the item match, the review "
+     "screen with line editing, and the send step running as a dry run "
+     "that checks every line and writes nothing.",
+     "On the 18 sample orders, 53 of 54 lines pass every check and the one "
+     "that does not is named with its reason. Still to build: the write "
+     "into a test copy of the ERP, and uploading a PDF from the screen. "
      "Program milestones: midpoint check-in the week of Dec 1, program break "
      "Dec 15 to Jan 6, demo dry run the week of Jan 11, final presentation to "
      "Palantir engineers and company leadership the week of Jan 18, 2027.",
@@ -1939,6 +1955,26 @@ GANTT_TASKS = [
      "own planning files, read-only, before it was called done. Rides the "
      "next release.",
      SUBJECT_TOOLS),
+    ("Fellowship Capstone - PO Reader and Item Match", "High", TASK_DONE,
+     "2026-11-16", "2026-11-17", 1, 1,
+     "First build in the company's Foundry environment. Sample purchase "
+     "order PDFs are loaded, their text is extracted, and a parser turns it "
+     "into a clean order table and a clean line table. Each line is then "
+     "matched to the existing ERP item by the rule agreed with the "
+     "salesperson.",
+     "Every sample order passes the parser's own checks: line numbers with "
+     "no gaps, and lines adding up to the order total. The samples had "
+     "already been keyed by hand, which gave an answer key; the match "
+     "agreed with it on every line it settled without help.",
+     None),
+    ("Fellowship Capstone - Order Review Screen", "High", TASK_DONE,
+     "2026-11-18", "2026-11-20", 1, 1,
+     "The screen the salesperson works from: every line of every waiting "
+     "order in one list with its matched item and division, lines selected "
+     "for sending, and a line corrected in place.",
+     "Read-only toward the ERP by design. The write was moved behind this "
+     "screen once it was clear the write is the hardest part of the build.",
+     None),
     ("911 SSPO Invoicing Prep - Invoice Date in the Saved Workbook", "High",
      TASK_DONE, "2026-11-18", "2026-11-18", 1, 1,
      "The invoice date showed as ###### in the saved workbook. The earlier "
@@ -1978,6 +2014,16 @@ GANTT_TASKS = [
      "stage's options were drawn as selected and could not be cleared. "
      "Rides the next release.",
      SUBJECT_TOOLS),
+    ("Fellowship Capstone - Send Check (Dry Run)", "High", TASK_DONE,
+     "2026-11-23", "2026-11-23", 1, 1,
+     "The send step is wired to the review screen as a dry run. It runs "
+     "every check a real send will run, groups the selected lines into "
+     "sales orders, and reports what it would write. Nothing is written to "
+     "the ERP yet.",
+     "53 of 54 sample lines are ready to send; the one blocked line has no "
+     "matching item and says so. 65 automated tests pass. The next stage is "
+     "the write against a test copy of the ERP.",
+     None),
 ]
 
 
@@ -2199,6 +2245,31 @@ GANTT_NOTES = [
      "was removed because it described the same work as the fellowship row, "
      "which stays. TechDeck 1.0 was added as its own row, tracked on its "
      "capability - delivering and updating tools individually."),
+    ("2026-11-11", "Fellowship Capstone Target Changed", "Decision",
+     "The first capstone target, a daily production screen with an exception "
+     "record under it, overlapped with work already under way for the "
+     "company on the same platform. The capstone moved to customer PO intake "
+     "for one high-volume sales account: a PO PDF is read, each line is "
+     "matched to the existing ERP item, the salesperson reviews it on one "
+     "screen, and the approved order is sent to the ERP.",
+     "Access to the company's Foundry environment was confirmed the same "
+     "day. The scoping done on Nov 4 stays on file as history."),
+    ("2026-11-16", "Capstone First Build: PO Reader and Parser", "Milestone",
+     "18 sample purchase orders loaded into Foundry. Their text is "
+     "extracted and parsed into a clean order table and a clean line table, "
+     "and every order passes the parser's own checks. Scope was settled "
+     "with the salesperson the same day: every PO is a new order, "
+     "quantities and prices go in as printed, and anything the tool is "
+     "unsure of is shown to her to decide.",
+     "The item match followed on Nov 17 and agreed with how the sample "
+     "orders had been keyed by hand on every line it settled without help."),
+    ("2026-11-16", "Sales Order Write Is the Hard Part", "Problem",
+     "A review of the environment found the ERP offers no ready-made way to "
+     "create a sales order from outside. The write has to build the order "
+     "itself, including values the ERP normally fills in.",
+     "The plan was re-ordered: a read-only midpoint first (match, review "
+     "screen, a send that only checks), and the real write last, against a "
+     "test copy of the ERP."),
     ("2026-11-18", "Invoice Date Fix Reached the Print but Not the Workbook",
      "Problem",
      "The earlier correction for dates printing as ###### widened the "
@@ -2228,4 +2299,26 @@ GANTT_NOTES = [
      "A run that had to fall back closes with a notice that the template "
      "has been modified and needs to be fixed, so a damaged template is "
      "seen on the first batch instead of a month later."),
+    ("2026-11-20", "Capstone Review Screen Working", "Milestone",
+     "The salesperson's review screen runs on the sample orders: 54 lines "
+     "across 18 orders in one list, each with its matched item and division "
+     "by name, lines selectable for sending, and a line editable in place.",
+     "Checked on the live screen, not only in the build report."),
+    ("2026-11-20", "A Source Table Became Unavailable", "Problem",
+     "Part-way through the build, one ERP table the tool read was no longer "
+     "readable from the build environment. It supplied one value per "
+     "customer that the send step needs.",
+     "Treated as deliberate and not worked around. By decision the value "
+     "now lives in the tool's own settings, one entry per customer. Accepted "
+     "trade-off: the tool will not notice if that value changes in the ERP. "
+     "A request for a cut-down read-only view is on file for when more "
+     "accounts are added."),
+    ("2026-11-23", "Capstone Send Step Running as a Dry Run", "Milestone",
+     "The send button on the review screen now runs every check a real send "
+     "will run and reports what it would write, without writing anything. "
+     "On the samples, 53 of 54 lines are ready; the one blocked line has no "
+     "matching item and says so.",
+     "Nothing is written to the ERP yet. Next: the write against a test "
+     "copy of the ERP, then uploading a PDF from the screen. Midpoint "
+     "check-in is the week of Dec 1."),
 ]
