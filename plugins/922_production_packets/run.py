@@ -1180,16 +1180,32 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
 # ────────────────────────────────────────────────────────────────────── run
 
 def _step_two(params, settings, log, batch_no, batch_path, root_922,
-              progress_callback, cancel_event):
+              progress_callback, cancel_event, options=None):
     r"""Step 2: mark up the 1Ds, build the covers, bind the production run.
 
     Carrie's own four-stage reference for batch 508 is what this follows
     (`TechDeck Packets\ANTHONY REF`, 2026-11-02). Step 1 has to have run and
     she has to have made the 1Ds in between - the nesting is hers, not ours.
+
+    `options` is the steps window's three ticks under step 2 (STEP2_1DS,
+    STEP2_COVERS, STEP2_BIND); None, or a missing key, means "build it". A
+    part that is NOT ticked is never rebuilt and never deleted: the binders
+    then use whatever marked-up 1Ds and cover sheets are already in the
+    Production Run folder, so re-binding after fixing one cover by hand does
+    not write over the other folder.
+
+    Returns (run_dir, binders written, packets with a marked-up 1D, packets),
+    the third being None on a run that touched neither the 1Ds nor the
+    binders, where the count would mean nothing.
     """
+    do_1ds, do_covers, do_bind = (
+        options is None or bool(options.get(key, True))
+        for key in (STEP2_1DS, STEP2_COVERS, STEP2_BIND))
     out_dir = batch_path / f"Batch {batch_no} - Documentation" / PACKETS_FOLDER
     packets_dir = out_dir / PACKETS_SUBFOLDER
     run_dir = packets_dir / rs.RUN_FOLDER
+    marked_dir = run_dir / MARKED_FOLDER
+    covers_dir = run_dir / COVERS_FOLDER
 
     packets = rs.read_cutting_list(
         out_dir / f"{batch_no} Tubes (TechDeck).xlsx", log)
@@ -1198,74 +1214,99 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
             f"Step 1's cutting list for batch {batch_no} has no sheets in it.",
             "Run the app with 'Build the cutting list' selected first.")
 
-    one_d = sdk.request_directory(
-        params, f"Pick the folder holding batch {batch_no}'s 1D PDFs",
-        str(packets_dir))
-    if one_d is None or cancel_event.is_set():
-        return None
-    log(f"1Ds: {one_d}")
-    progress_callback(20)
-
-    bars = rs.read_tracker(root_922, batch_no, log)
-    blocks = read_cover_blocks(_organizer(batch_path, batch_no, log), log)
-    # Carrie marks a cover by hand when a material is required on TWO pallets
-    # - batch 509's pallet 1 says "CUT WITH PALLET 2" next to the 2.5 X 2.5 X
-    # 0.25 its combo orders share with pallet 2. Which cover gets the note is
-    # her judgement, so the run points at the situation and leaves the ink to
-    # her.
-    shared = {}
-    for p, block in sorted(blocks.items()):
-        for text in block["materials"]:
-            if "SAW CUT" not in text.upper():
-                shared.setdefault(rs._norm(text), []).append(p)
-    for key, ps in sorted(shared.items()):
-        if len(ps) > 1:
-            log(f"NOTE: {key} is required on pallets {' and '.join(ps)} - "
-                f"add the 'CUT WITH PALLET n' note to the right cover by hand")
-    sheets = rs.match_1ds(Path(one_d), packets, log)
-    progress_callback(35)
-
     # 1 - every 1D gets her notes and highlights
-    log("Marking up the 1Ds...")
     marked = {}
-    for n, (packet, src) in enumerate(sorted(sheets.items())):
-        sdk.raise_if_cancelled(cancel_event)
-        info = packets[packet]
-        saw = info["pallet"] == SAW_PALLET
-        dest = run_dir / "1Ds (marked up)" / f"{rs.safe_name(packet)}.pdf"
-        added = rs.annotate(src, dest, bars.get((info["pallet"],
-                                                 info["serial"])), saw, log)
-        marked[packet] = dest
-        log(f"  {packet:6s} {', '.join(added)}")
-        progress_callback(35 + int(25 * (n + 1) / max(len(sheets), 1)))
+    if do_1ds:
+        one_d = sdk.request_directory(
+            params, f"Pick the folder holding batch {batch_no}'s 1D PDFs",
+            str(packets_dir))
+        if one_d is None or cancel_event.is_set():
+            return None
+        log(f"1Ds: {one_d}")
+        progress_callback(20)
+
+        bars = rs.read_tracker(root_922, batch_no, log)
+        sheets = rs.match_1ds(Path(one_d), packets, log)
+        progress_callback(35)
+
+        log("Marking up the 1Ds...")
+        for n, (packet, src) in enumerate(sorted(sheets.items())):
+            sdk.raise_if_cancelled(cancel_event)
+            info = packets[packet]
+            saw = info["pallet"] == SAW_PALLET
+            dest = marked_dir / f"{rs.safe_name(packet)}.pdf"
+            added = rs.annotate(src, dest, bars.get((info["pallet"],
+                                                     info["serial"])), saw, log)
+            marked[packet] = dest
+            log(f"  {packet:6s} {', '.join(added)}")
+            progress_callback(35 + int(25 * (n + 1) / max(len(sheets), 1)))
+    else:
+        # not ticked: nothing is asked for and nothing is rewritten - the
+        # binders take the marked-up 1Ds an earlier run left behind
+        for packet in packets:
+            dest = marked_dir / f"{rs.safe_name(packet)}.pdf"
+            if sdk.is_file(dest):
+                marked[packet] = dest
+        if do_bind:
+            log(f"1Ds not selected - binding the {len(marked)} marked-up "
+                f"1D(s) already in '{MARKED_FOLDER}'")
+            for packet in sorted(set(packets) - set(marked), key=_packet_sort):
+                log(f"  WARNING: {packet} has no marked-up 1D in that folder")
+    progress_callback(60)
 
     # 2 - a cover page per pallet, plus the saw one. The saw cover carries
     # the pallet block of whichever pallet the saw materials are listed under
     # (pallet 1 on batch 508), because that is the paperwork the saw operator
     # is handed alongside it.
-    log("Building the cover pages...")
-    templates = Path(__file__).resolve().parent / "templates"
     covers = {}
-    for pallet in sorted(blocks):
-        sdk.raise_if_cancelled(cancel_event)
-        block = blocks[pallet]
-        covers[pallet] = rs.cover_pdf(
-            templates / rs.TEMPLATE_LASER,
-            run_dir / "Cover Sheets" / f"_{pallet}.pdf", batch_no,
-            f"PALLET {pallet}", block["listing"], block["materials"], [],
-            log, pallet=pallet)
-    saw_pallet = next((p for p in sorted(blocks)
-                       if any("SAW CUT" in t.upper()
-                              for t in blocks[p]["materials"])), None)
-    if saw_pallet is not None:
-        block = blocks[saw_pallet]
-        covers[SAW_PALLET] = rs.cover_pdf(
-            templates / rs.TEMPLATE_SAW,
-            run_dir / "Cover Sheets" / "_SAW.pdf", batch_no,
-            f"PALLET {saw_pallet}", block["listing"], block["materials"],
-            [t.replace(" (SAW CUT)", "").strip()
-             for t in block["materials"] if "SAW CUT" in t.upper()],
-            log, pallet=saw_pallet)
+    if do_covers:
+        blocks = read_cover_blocks(_organizer(batch_path, batch_no, log), log)
+        # Carrie marks a cover by hand when a material is required on TWO
+        # pallets - batch 509's pallet 1 says "CUT WITH PALLET 2" next to the
+        # 2.5 X 2.5 X 0.25 its combo orders share with pallet 2. Which cover
+        # gets the note is her judgement, so the run points at the situation
+        # and leaves the ink to her.
+        shared = {}
+        for p, block in sorted(blocks.items()):
+            for text in block["materials"]:
+                if "SAW CUT" not in text.upper():
+                    shared.setdefault(rs._norm(text), []).append(p)
+        for key, ps in sorted(shared.items()):
+            if len(ps) > 1:
+                log(f"NOTE: {key} is required on pallets {' and '.join(ps)} - "
+                    f"add the 'CUT WITH PALLET n' note to the right cover by "
+                    f"hand")
+
+        log("Building the cover pages...")
+        templates = Path(__file__).resolve().parent / "templates"
+        for pallet in sorted(blocks):
+            sdk.raise_if_cancelled(cancel_event)
+            block = blocks[pallet]
+            covers[pallet] = rs.cover_pdf(
+                templates / rs.TEMPLATE_LASER,
+                covers_dir / f"_{pallet}.pdf", batch_no,
+                f"PALLET {pallet}", block["listing"], block["materials"], [],
+                log, pallet=pallet)
+        saw_pallet = next((p for p in sorted(blocks)
+                           if any("SAW CUT" in t.upper()
+                                  for t in blocks[p]["materials"])), None)
+        if saw_pallet is not None:
+            block = blocks[saw_pallet]
+            covers[SAW_PALLET] = rs.cover_pdf(
+                templates / rs.TEMPLATE_SAW,
+                covers_dir / "_SAW.pdf", batch_no,
+                f"PALLET {saw_pallet}", block["listing"], block["materials"],
+                [t.replace(" (SAW CUT)", "").strip()
+                 for t in block["materials"] if "SAW CUT" in t.upper()],
+                log, pallet=saw_pallet)
+    else:
+        for pallet in sorted({info["pallet"] for info in packets.values()}):
+            dest = covers_dir / f"_{pallet}.pdf"
+            if sdk.is_file(dest):
+                covers[pallet] = dest
+        if do_bind:
+            log(f"Cover sheets not selected - binding the {len(covers)} "
+                f"already in '{COVERS_FOLDER}'")
     progress_callback(80)
 
     # 3 - bind. A pallet binder is the cover and its 1Ds; the SAW binder
@@ -1273,33 +1314,35 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
     # cuts from a print. Carrie, 2026-11-02: "I don't want the tube drawings
     # for pallet 1,2,3 ... the tube laser parts don't need drawings because
     # they'll be programmed."
-    log("Binding the production run...")
-    drawings = rs.packet_drawings(packets_dir)
-    by_pallet = {}
-    for packet, info in packets.items():
-        by_pallet.setdefault(info["pallet"], []).append(packet)
     written = []
-    for pallet in sorted(by_pallet, key=lambda p: (p == SAW_PALLET, p)):
-        sdk.raise_if_cancelled(cancel_event)
-        cover = covers.get(pallet)
-        if cover is None:
-            log(f"WARNING: no cover page for pallet {pallet} - its binder "
-                f"starts at the first 1D")
-        pages = [cover] if cover else []
-        for packet in sorted(by_pallet[pallet], key=_packet_sort):
-            sheet = marked.get(packet)
-            if sheet is None:
-                continue                      # match_1ds already said so
-            pages.append(sheet)
-            if pallet == SAW_PALLET and packet in drawings:
-                pages.append(drawings[packet])
-        name = ("SAW TUBES.pdf" if pallet == SAW_PALLET
-                else f"PALLET {pallet}.pdf")
-        made = rs.bind(run_dir / name, pages, log)
-        if made is not None:
-            written.append(made)
+    if do_bind:
+        log("Binding the production run...")
+        drawings = rs.packet_drawings(packets_dir)
+        by_pallet = {}
+        for packet, info in packets.items():
+            by_pallet.setdefault(info["pallet"], []).append(packet)
+        for pallet in sorted(by_pallet, key=lambda p: (p == SAW_PALLET, p)):
+            sdk.raise_if_cancelled(cancel_event)
+            cover = covers.get(pallet)
+            if cover is None:
+                log(f"WARNING: no cover page for pallet {pallet} - its binder "
+                    f"starts at the first 1D")
+            pages = [cover] if cover else []
+            for packet in sorted(by_pallet[pallet], key=_packet_sort):
+                sheet = marked.get(packet)
+                if sheet is None:
+                    continue                  # already named in the console
+                pages.append(sheet)
+                if pallet == SAW_PALLET and packet in drawings:
+                    pages.append(drawings[packet])
+            name = ("SAW TUBES.pdf" if pallet == SAW_PALLET
+                    else f"PALLET {pallet}.pdf")
+            made = rs.bind(run_dir / name, pages, log)
+            if made is not None:
+                written.append(made)
     progress_callback(100)
-    return run_dir, written, len(sheets), len(packets)
+    have = len(marked) if (do_1ds or do_bind) else None
+    return run_dir, written, have, len(packets)
 
 
 def _packet_sort(packet):
@@ -1311,6 +1354,12 @@ def _packet_sort(packet):
 STEP_LIST = "cutting_list"
 STEP_PACKETS = "packet_drawings"
 STEP_BINDERS = "run_binders"
+# the three things step 2 builds, each its own tick under it in the window
+STEP2_1DS = "marked_1ds"
+STEP2_COVERS = "cover_sheets"
+STEP2_BIND = "binders"
+MARKED_FOLDER = "1Ds (marked up)"
+COVERS_FOLDER = "Cover Sheets"
 
 
 def _dialog_groups() -> list:
@@ -1340,7 +1389,18 @@ def _dialog_groups() -> list:
          # and the subtext already says step 2 waits for the 1Ds
          "label": "Build the production run binders (step 2)",
          "checked": False,
-         "children": []},
+         # one tick per thing step 2 writes into the Production Run folder
+         # (asked for 2026-11-23). A part left unticked is not rebuilt and
+         # not deleted - the binders use what is already there.
+         "children": [
+             {"key": STEP2_1DS, "label": f"{MARKED_FOLDER} folder",
+              "checked": True},
+             {"key": STEP2_COVERS, "label": f"{COVERS_FOLDER} folder",
+              "checked": True},
+             {"key": STEP2_BIND,
+              "label": "Binders (PALLET 1, 2, 3 and SAW TUBES)",
+              "checked": True},
+         ]},
     ]
 
 
@@ -1356,7 +1416,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         window_title="922 Production Packets",
         header="922 Production Packets - Select Steps",
         subtext=("Steps run top to bottom. Uncheck a step to skip it. Step 2 "
-                 "is the second run, once you have nested the 1Ds."),
+                 "is for after the 1Ds are nested: click its name to choose "
+                 "what it builds."),
         run_button_text="Run Selected",
     )
     if choices is None:
@@ -1367,6 +1428,10 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         bool(choices.get(key, {}).get("enabled"))
         for key in (STEP_LIST, STEP_PACKETS, STEP_BINDERS))
     step_one = do_list or do_packets
+    binder_opts = dict(choices.get(STEP_BINDERS, {}).get("options") or {})
+    if do_binders and binder_opts and not any(binder_opts.values()):
+        log("Step 2 was selected with nothing under it selected - skipped.")
+        do_binders = False
     if not (step_one or do_binders):
         log("No steps selected - nothing was run.")
         cancel_event.set()
@@ -1393,7 +1458,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             params, settings, log, batch_no, batch_path, root_922,
             (lambda p: progress_callback(50 + p // 2)) if step_one
             else progress_callback,
-            cancel_event)
+            cancel_event, binder_opts)
         if not finished:
             return
 
@@ -1402,17 +1467,19 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
 
 def _run_step_two(params, settings, log, batch_no, batch_path, root_922,
-                  progress_callback, cancel_event) -> bool:
+                  progress_callback, cancel_event, options=None) -> bool:
     """Step 2 and what the run says about it. False = the user backed out."""
     log("Step 2: the production run binders")
     done = _step_two(params, settings, log, batch_no, batch_path,
-                     root_922, progress_callback, cancel_event)
+                     root_922, progress_callback, cancel_event, options)
     if done is None or cancel_event.is_set():
         return False
     run_dir, written, marked, total = done
-    log(f"{marked} of {total} packet(s) had a 1D, "
-        f"{len(written)} binder(s) built")
-    if marked < total:
+    binding = options is None or bool(options.get(STEP2_BIND, True))
+    if marked is not None:
+        log(f"{marked} of {total} packet(s) have a marked-up 1D"
+            + (f", {len(written)} binder(s) built" if binding else ""))
+    if marked is not None and marked < total:
         sdk.flag_action(
             params,
             f"{total - marked} source material(s) have no 1D, so they are "
@@ -1426,6 +1493,10 @@ def _run_step_two(params, settings, log, batch_no, batch_path, root_922,
     for dest, pages in written:
         sdk.link_output(params, f"Open {dest.name}", str(dest),
                         prefix="[BINDER]")
+    if not written:
+        # a run that built only a folder still ends on something to click
+        sdk.link_output(params, "Open the Production Run folder",
+                        str(run_dir), prefix="[FOLDER]")
     return True
 
 
