@@ -126,7 +126,9 @@ TOOL_SECTIONS = [
    "and highlighted rather than left blank, and a report names them. Binds "
    "one stamped print per part made behind each order's assembly sheet, "
    "and - once the operator's nesting is done - marks up the nest sheets "
-   "and builds a cover page per pallet for the production run.",
+   "and builds a cover page per pallet for the production run. The operator "
+   "chooses which stages run, and which pallet binders are bound, from one "
+   "step-selection window.",
    "Active", "0.8.9"),
   ("922 Batch Repeater",
    "Copies repeat orders forward from prior 922 batches and maintains the "

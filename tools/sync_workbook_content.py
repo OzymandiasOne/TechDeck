@@ -134,8 +134,11 @@ SYSTEM_FEATURES = [
      "out of the plan but tracked, with a follow-up prompt after a set number "
      "of days; time spent is captured per item and reported by item and by "
      "day with a spreadsheet export; a large piece of work carries its own "
-     "dated sub-steps; and the whole list is searchable. Plans export to "
-     "Outlook, and the page can use its own display scheme.",
+     "dated sub-steps; and the whole list is searchable. The workspace can "
+     "be lifted out into a floating panel inside the application - movable, "
+     "resizable, docking to any edge - so the plan stays in view while a "
+     "tool runs. Plans export to Outlook, and the page can use its own "
+     "display scheme.",
      "Turns an over-committed day into a conversation before it becomes a "
      "missed deadline, and answers where the week went from recorded time "
      "rather than recollection.",
@@ -455,6 +458,34 @@ VERSION_RENAMES = {
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
+    ("In Development", "Nov 23, 2026", "Feature",
+     "A floor-feedback release, built from requests sent in by planning and "
+     "invoicing staff. 922 Production Packets now opens with the platform's "
+     "standard step-selection window: the operator chooses which stages run "
+     "- the cutting list, the packet drawings, the production run binders - "
+     "and, within the last, whether the marked-up nest sheets and cover "
+     "pages are rebuilt and which pallet binders are bound, so one binder "
+     "can be re-made after a hand correction without rewriting the rest. "
+     "Each cutting-list sheet now totals the tube length it calls for, as a "
+     "live figure that updates when a length is filled in by hand, and the "
+     "sheets are ordered by packet number. The cover pages' note heading "
+     "takes each pallet's own colour. 911 batch setup: a template edit made "
+     "in October had removed the formulas that fill the Part Description on "
+     "the inspection sheets, so every sheet built since carried that field "
+     "blank unless it was typed in by hand; both templates are repaired, "
+     "and the tool now fills the field itself whenever a template's formula "
+     "is missing and closes the run with a notice that the template needs "
+     "attention. Invoice supplements: the invoice date showed as ###### in "
+     "the saved workbook - the earlier correction had reached the printed "
+     "copy only - and now displays in both, with an automated check that "
+     "every column the tool writes has a set width. The personal planning "
+     "workspace can be lifted out into a floating panel inside the "
+     "application and kept in view beside whichever tool is running; it "
+     "moves, resizes and docks to any edge. The shared step-selection "
+     "window, used by four tools, was also corrected: a skipped stage's "
+     "options were drawn as selected and could not be cleared.",
+     "922 Production Packets, 911 Setup, 911 SSPO Invoicing Prep, Personal "
+     "Planning Workspace, 922 Setup, 911 Batch Repeater"),
     ("Beta 0.8.10", "Nov 11, 2026", "Feature",
      "A floor-feedback release for the 922 line. Kit paperwork now opens "
      "with the batch's filled material pull list: the standard pull-list "
@@ -1373,6 +1404,37 @@ PI_NEW = [
      "PROGRESS-NOTE SHEETS, THIS LOG, AND TWO SHEETS OF THE VERSION "
      "CONTROLLER. ALL BROUGHT CURRENT, AND THE TWO UNOWNED GANTT SHEETS ARE "
      "NOW WRITTEN BY THE SYNC SCRIPT FROM VERSION CONTROL"),
+    ("CUTTING LIST TOTALS AND SHEET ORDER", "COMPLETE",
+     "THREE FLOOR REQUESTS ON 922 PRODUCTION PACKETS: EACH CUTTING-LIST SHEET "
+     "NOW TOTALS THE TUBE LENGTH IT CALLS FOR, AS A LIVE FIGURE THAT UPDATES "
+     "WHEN A LENGTH IS FILLED IN BY HAND; THE SHEETS ARE ORDERED BY PACKET "
+     "NUMBER; AND THE COVER PAGES' NOTE HEADING TAKES EACH PALLET'S OWN "
+     "COLOUR. EACH CHECKED READ-ONLY AGAINST A LIVE BATCH'S PLANNING FILES"),
+    ("INVOICE DATE IN THE SAVED WORKBOOK", "COMPLETE",
+     "THE INVOICE DATE SHOWED AS ###### IN THE SAVED INVOICE WORKBOOK; THE "
+     "EARLIER CORRECTION HAD WIDENED THE COLUMN FOR THE PRINTED COPY ONLY. "
+     "THE COLUMN NOW CARRIES A SET WIDTH IN THE WORKBOOK ITSELF, AND AN "
+     "AUTOMATED CHECK REQUIRES A SET WIDTH ON EVERY COLUMN THE TOOL WRITES"),
+    ("INSPECTION SHEET PART DESCRIPTION SAFEGUARD", "COMPLETE",
+     "A TEMPLATE EDIT IN OCTOBER REMOVED THE FORMULAS THAT FILL THE PART "
+     "DESCRIPTION ON THE 911 INSPECTION SHEETS, SO EVERY SHEET BUILT SINCE "
+     "CARRIED THE FIELD BLANK UNLESS IT WAS TYPED IN BY HAND. BOTH TEMPLATES "
+     "REPAIRED (FOUR CELLS, NOTHING ELSE). THE TOOL NOW FILLS THE FIELD "
+     "ITSELF WHENEVER A TEMPLATE'S FORMULA IS MISSING AND CLOSES THE RUN "
+     "WITH A NOTICE THAT THE TEMPLATE NEEDS ATTENTION"),
+    ("PLANNING WORKSPACE FLOATING PANEL", "COMPLETE",
+     "THE PERSONAL PLANNING WORKSPACE CAN BE LIFTED OUT INTO A FLOATING PANEL "
+     "INSIDE THE APPLICATION, KEPT IN VIEW BESIDE WHICHEVER TOOL IS RUNNING; "
+     "IT MOVES, RESIZES, DOCKS TO ANY EDGE AND REMEMBERS ITS PLACE. A USER "
+     "REQUEST FROM OCTOBER"),
+    ("PRODUCTION PACKETS STEP SELECTION", "COMPLETE",
+     "922 PRODUCTION PACKETS NOW OPENS WITH THE PLATFORM'S STANDARD "
+     "STEP-SELECTION WINDOW: THE OPERATOR CHOOSES WHICH STAGES RUN, WHETHER "
+     "THE MARKED-UP NEST SHEETS AND COVER PAGES ARE REBUILT, AND WHICH PALLET "
+     "BINDERS ARE BOUND, SO ONE BINDER CAN BE RE-MADE AFTER A HAND CORRECTION "
+     "WITHOUT REWRITING THE REST. THE SHARED WINDOW (FOUR TOOLS) WAS "
+     "CORRECTED ON THE WAY: A SKIPPED STAGE'S OPTIONS WERE DRAWN AS SELECTED "
+     "AND COULD NOT BE CLEARED"),
 ]
 
 # ---- Automation Projects Gantt Chart :: project rows ------------------------
@@ -1438,8 +1500,9 @@ GANTT_ROWS = [
     ("922 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
     ("911 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
     # Meetings, waiting, time capture and steps shipped 0.8.7.9 (Oct 14).
+    # The floating panel was built Nov 20 (rides 0.8.11).
     ("Personal Planning Workspace (Assistant)",
-     GANTT_DONE, 1, "2026-07", "2026-10"),
+     GANTT_DONE, 1, "2026-07", "2026-11"),
     # The CAPABILITY side of 1.0, not the look: tools delivered and updated one
     # at a time. His call 2026-11-11 - "focus on the capability aspects of it,
     # not so much the UI". 0.15 = the design is settled and the one-tool-set
@@ -1469,7 +1532,8 @@ GANTT_ROWS = [
     ("SECTION", "911 QTDR WORKFLOW AUTOMATION"),
     # Plate batches (0.8.7.4), verification sheet (0.8.7.7), program-file
     # collection and the forecast warning (0.8.8, Oct 21).
-    ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-10"),
+    # v2.6.0 (Part Description safeguard) was built Nov 19, rides 0.8.11.
+    ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-11"),
     # Verified card creation (two-way integration) shipped 0.8.8.
     ("911 Teams Cards", GANTT_DONE, 1, "2026-07", "2026-10"),
     ("911 Batch Repeater", GANTT_DONE, 1, "2026-03", "2026-07"),
@@ -1865,6 +1929,55 @@ GANTT_TASKS = [
      "per-pallet colour coding, and saw-cut highlighting for mixed-material "
      "orders.",
      SUBJECT_TOOLS),
+    ("922 Production Packets - Cutting List Totals, Sheet Order, Cover Colours",
+     "Normal", TASK_DONE, "2026-11-16", "2026-11-18", 1, 1,
+     "Each cutting-list sheet totals the tube length it calls for, as a live "
+     "figure that updates when a length is filled in by hand. The sheets are "
+     "ordered by packet number, and the cover pages' note heading takes each "
+     "pallet's own colour.",
+     "Three requests from the floor. Each was checked against a live batch's "
+     "own planning files, read-only, before it was called done. Rides the "
+     "next release.",
+     SUBJECT_TOOLS),
+    ("911 SSPO Invoicing Prep - Invoice Date in the Saved Workbook", "High",
+     TASK_DONE, "2026-11-18", "2026-11-18", 1, 1,
+     "The invoice date showed as ###### in the saved workbook. The earlier "
+     "correction widened the column for the printed copy only; the column "
+     "now carries a set width in the workbook itself.",
+     "An automated check now requires a set width on every column the tool "
+     "writes, so the same fault cannot return on another column. Rides the "
+     "next release.",
+     SUBJECT_TOOLS),
+    ("911 Setup - Inspection Sheet Part Description Safeguard", "High",
+     TASK_DONE, "2026-11-19", "2026-11-19", 1, 1,
+     "The Part Description on the inspection sheets was filled by formulas "
+     "in the template, and a template edit in October had removed them. The "
+     "tool now fills the field itself whenever a template's formula is "
+     "missing, and closes the run with a notice that the template needs "
+     "attention.",
+     "Both templates were repaired the same day, changing only the four "
+     "affected cells. The template stays in charge; the tool's own write is "
+     "the backup. Rides the next release.",
+     SUBJECT_TOOLS),
+    ("Personal Planning Workspace - Floating Panel", "Normal", TASK_DONE,
+     "2026-11-20", "2026-11-20", 1, 1,
+     "The personal work planner can be lifted out into a floating panel "
+     "inside the application, kept in view beside whichever tool is running. "
+     "It moves, resizes, docks to any edge and remembers its place.",
+     "A user request from October: keep the plan visible while running "
+     "tools. Rides the next release.",
+     SUBJECT_FEATURES),
+    ("922 Production Packets - Step Selection Window", "Normal", TASK_DONE,
+     "2026-11-23", "2026-11-23", 1, 1,
+     "The tool opens with the platform's standard step-selection window. "
+     "The operator chooses which stages run, whether the marked-up nest "
+     "sheets and cover pages are rebuilt, and which pallet binders are "
+     "bound.",
+     "One binder can be re-made after a hand correction without rewriting "
+     "the rest. The shared window was corrected on the way: a skipped "
+     "stage's options were drawn as selected and could not be cleared. "
+     "Rides the next release.",
+     SUBJECT_TOOLS),
 ]
 
 
@@ -2086,4 +2199,33 @@ GANTT_NOTES = [
      "was removed because it described the same work as the fellowship row, "
      "which stays. TechDeck 1.0 was added as its own row, tracked on its "
      "capability - delivering and updating tools individually."),
+    ("2026-11-18", "Invoice Date Fix Reached the Print but Not the Workbook",
+     "Problem",
+     "The earlier correction for dates printing as ###### widened the "
+     "columns at print time only. The printed supplement was right, and the "
+     "workbook the invoicing staff open still showed ######. It was reported "
+     "again after the release.",
+     "The date column now carries a set width in the workbook itself, "
+     "checked in Excel on a real invoice workbook. An automated check "
+     "requires a set width on every column the tool writes. Rides the next "
+     "release."),
+    ("2026-11-19", "Inspection Templates Lost Their Part Description",
+     "Problem",
+     "Planning reported the Part Description on the 911 inspection sheets "
+     "was not being filled in. The tool had never written it: two formulas "
+     "in the template did, and both inspection templates had been re-saved "
+     "on Oct 23 with those formulas gone. Every sheet built since carried "
+     "the field blank unless it was typed in by hand.",
+     "Both templates repaired the same day, changing only the four affected "
+     "cells. The October save was not rolled back, because it had also "
+     "corrected fifty tolerance formulas."),
+    ("2026-11-19", "Templates Stay in Charge of the Inspection Sheet",
+     "Decision",
+     "After the template fault, the first fix had the tool write the Part "
+     "Description itself every time. That was changed the same day: the "
+     "template's own formula stays in charge, and the tool fills the field "
+     "only when the formula is missing.",
+     "A run that had to fall back closes with a notice that the template "
+     "has been modified and needs to be fixed, so a damaged template is "
+     "seen on the first batch instead of a month later."),
 ]
