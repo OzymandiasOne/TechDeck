@@ -6,7 +6,7 @@ first run to the second meant leaving the app to flip it, and remembering to
 flip it back before the next batch.
 
 What is pinned here:
-- the window lists the three steps, and step 2 starts unticked on every run;
+- the window lists the three steps, and every one of them starts ticked;
 - the ticks decide what runs, and nothing else does (the old setting is gone);
 - closing the window, or ticking nothing, runs nothing and asks for no batch;
 - a run that skipped the packet drawings never reports "0 tubes without a
@@ -98,17 +98,34 @@ def test_the_window_lists_the_three_steps_in_run_order(mod):
     assert keys == [mod.STEP_LIST, mod.STEP_PACKETS, mod.STEP_BINDERS]
 
 
-def test_step_two_starts_unticked_and_the_first_half_ticked(mod):
+def test_every_step_starts_ticked(mod):
+    """Asked for twice on 2026-11-23: 'Have all of them on by default', then
+    'should be toggled by default right?' about step 2 itself."""
     ticked = {g["key"]: g["checked"] for g in mod._dialog_groups()}
     assert ticked == {mod.STEP_LIST: True, mod.STEP_PACKETS: True,
-                      mod.STEP_BINDERS: False}
+                      mod.STEP_BINDERS: True}
+
+
+def test_the_window_says_to_untick_step_two_on_a_first_run(rig, mod):
+    """Everything on means a batch's first run asks for 1Ds that are not
+    nested yet. The window has to say so where it is read."""
+    go, _calls = rig
+    console, _cancel = go({mod.STEP_LIST})
+    assert "first run" in console.kwargs["subtext"]
 
 
 def test_the_window_is_not_sticky(mod):
-    """Last run's ticks are the wrong default for the next batch's first run:
-    step 2 ticked there fails for want of 1Ds nobody has nested yet."""
+    """The two runs of a batch want different ticks, so last run's are the
+    wrong default for the next one whichever run that is."""
     source = (PLUGIN_DIR / "run.py").read_text(encoding="utf-8")
     assert "remember_as=" not in source
+
+
+def test_an_untouched_window_runs_both_halves(rig, mod):
+    go, calls = rig
+    defaults = {g["key"] for g in mod._dialog_groups() if g["checked"]}
+    go(defaults)
+    assert calls == [("pick",), ("one", True, True, True), ("two",)]
 
 
 def test_run_opens_the_window_with_the_standard_wording(rig, mod):
@@ -122,7 +139,7 @@ def test_run_opens_the_window_with_the_standard_wording(rig, mod):
 
 # ── the ticks decide what runs ──────────────────────────────────────────────
 
-def test_the_default_ticks_run_the_first_half_only(rig, mod):
+def test_the_first_half_alone_is_the_first_run_of_a_batch(rig, mod):
     go, calls = rig
     go({mod.STEP_LIST, mod.STEP_PACKETS})
     assert calls == [("pick",), ("one", True, True, False)]
@@ -197,7 +214,7 @@ def test_step_two_lists_the_folders_then_a_tick_per_binder(mod):
 
 def test_everything_under_step_two_starts_selected(mod):
     """Asked for in so many words, 2026-11-23: 'Have all of them on by
-    default.' Step 2 itself still starts cleared - see the window tests."""
+    default.'"""
     groups = {g["key"]: g for g in mod._dialog_groups()}
     assert all(c["checked"] for c in groups[mod.STEP_BINDERS]["children"])
 

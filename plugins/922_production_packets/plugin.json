@@ -16,7 +16,7 @@
       "Nothing else. The app only reads; it writes one workbook and one report."
     ],
     "how_it_works": [
-      "A window lists the three steps with a checkbox each: Build the cutting list, Bind the packet drawings, and Build the production run binders. The first two start selected and the third does not. Clear the ones you want to skip, then click Run Selected.",
+      "A window lists the three steps with a checkbox each: Build the cutting list, Bind the packet drawings, and Build the production run binders. All three start selected. On a batch's first run, clear the third: it needs the 1Ds, and you have not nested them yet. Clear any other you want to skip, then click Run Selected.",
       "Click the third step's name to show what it builds: the marked-up 1Ds and cover sheets together, then a checkbox for each binder - PALLET 1, PALLET 2, PALLET 3 and SAW TUBES. They all start selected. One you clear is left as it is on disk, and the binders use what is already there.",
       "You pick the Batch folder.",
       "It reads every tube on the batch off the Pallet Organizer and groups them by source material and pallet - 1, 2, 3, and SAW on its own.",

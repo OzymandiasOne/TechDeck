@@ -1394,10 +1394,16 @@ def _dialog_groups() -> list:
     run to the second meant leaving the app, flipping it, and remembering to
     flip it back before the next batch.
 
-    Step 2 starts UNTICKED on every run and the window is deliberately NOT
-    sticky (no remember_as). The 1Ds step 2 works from are nested by hand
-    between the two runs, so "what I ticked last time" is the wrong default
-    exactly when it matters: the first run of the next batch.
+    EVERYTHING starts ticked, step 2 and all five options under it
+    (Anthony, 2026-11-23: "Have all of them on by default", then, on seeing
+    step 2 open unticked: "should be toggled by default right?"). The cost
+    is known and accepted: on a batch's FIRST run the 1Ds are not nested
+    yet, so step 2 has to be unticked there or it asks for a 1D folder that
+    does not exist. The window's subtext says so.
+
+    The window is deliberately NOT sticky (no remember_as): the two runs of
+    a batch want different ticks, so "what I ticked last time" is the wrong
+    default for the next run either way.
     """
     return [
         {"key": STEP_LIST,
@@ -1412,7 +1418,7 @@ def _dialog_groups() -> list:
          # short on purpose: the window clips a label past ~45 characters,
          # and the subtext already says step 2 waits for the 1Ds
          "label": "Build the production run binders (step 2)",
-         "checked": False,
+         "checked": True,
          # Asked for 2026-11-23. A part left unticked is not rebuilt and
          # not deleted - the binders use what is already on disk.
          "children": [
@@ -1440,8 +1446,8 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         window_title="922 Production Packets",
         header="922 Production Packets - Select Steps",
         subtext=("Steps run top to bottom. Uncheck a step to skip it. Step 2 "
-                 "is for after the 1Ds are nested: click its name to choose "
-                 "what it builds."),
+                 "needs your nested 1Ds, so uncheck it on a batch's first "
+                 "run. Click its name to choose what it builds."),
         run_button_text="Run Selected",
     )
     if choices is None:
