@@ -76,7 +76,7 @@ assert _RS_SPEC is not None and _RS_SPEC.loader is not None
 rs = _ilu.module_from_spec(_RS_SPEC)
 _RS_SPEC.loader.exec_module(rs)
 
-VERSION = "1.14.0"
+VERSION = "1.15.0"
 
 PACKETS_FOLDER = "Production Packets"
 PACKETS_SUBFOLDER = "TechDeck Packets"   # our own folder; nothing to overwrite
@@ -112,6 +112,9 @@ TOTAL_FORMULA = "=SUMPRODUCT(C5:C100,D5:D100)"
 COL_WIDTHS = {"A": 12.43, "B": 20.71, "C": 10.86, "D": 13.14, "E": 13.14,
               "F": 10.71}
 X_CELL = "F1"
+# what the report's "no print to bind" count says on a run that skipped the
+# packet drawings
+NOT_BOUND = "not checked"
 LAST_COL = "F"
 DATA_COLS = "ABCDE"
 ROW_H, ROW_H_TALL = 20.1, 24.95
@@ -997,7 +1000,10 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
     # these are the ones whose length IS good (read off an assembly sheet) but
     # that have no single-tube page for a binder
     _missing_parts = {e["part"] for e in missing}
-    no_print = sorted((e for e in no_sheet
+    # no_sheet is None when the packet drawings were not bound this run: that
+    # is "nobody looked", and must never print as a reassuring zero
+    bound = no_sheet is not None
+    no_print = sorted((e for e in (no_sheet or [])
                        if e["part"] not in _missing_parts),
                       key=lambda e: e["part"])
 
@@ -1023,9 +1029,10 @@ def _write_report(dest: Path, batch_no, materials, no_sheet, skipped_rows,
         ("No drawing found", len(missing),
          C["miss_bg"] if missing else C["ok_bg"],
          C["miss_tx"] if missing else C["ok_tx"]),
-        ("No print of their own to bind", len(no_print),
-         C["extra_bg"] if no_print else C["ok_bg"],
-         C["extra_tx"] if no_print else C["ok_tx"]),
+        ("No print of their own to bind",
+         len(no_print) if bound else NOT_BOUND,
+         (C["extra_bg"] if no_print else C["ok_bg"]) if bound else None,
+         (C["extra_tx"] if no_print else C["ok_tx"]) if bound else None),
         ("Source material not recognised", len(unknown),
          C["miss_bg"] if unknown else C["ok_bg"],
          C["miss_tx"] if unknown else C["ok_tx"]),
@@ -1189,7 +1196,7 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
     if not packets:
         raise sdk.UserFacingError(
             f"Step 1's cutting list for batch {batch_no} has no sheets in it.",
-            "Run the app with this option switched OFF first.")
+            "Run the app with 'Build the cutting list' selected first.")
 
     one_d = sdk.request_directory(
         params, f"Pick the folder holding batch {batch_no}'s 1D PDFs",
@@ -1301,6 +1308,42 @@ def _packet_sort(packet):
     return (head == SAW_PALLET, head, int(tail) if tail.isdigit() else 0)
 
 
+STEP_LIST = "cutting_list"
+STEP_PACKETS = "packet_drawings"
+STEP_BINDERS = "run_binders"
+
+
+def _dialog_groups() -> list:
+    """The steps window's plain-data spec (sdk.request_grouped_toggles).
+
+    The same window 922 Setup and 911 Setup open, asked for 2026-11-23: until
+    v1.15.0 step 2 was a switch in Settings > Apps, so getting from the first
+    run to the second meant leaving the app, flipping it, and remembering to
+    flip it back before the next batch.
+
+    Step 2 starts UNTICKED on every run and the window is deliberately NOT
+    sticky (no remember_as). The 1Ds step 2 works from are nested by hand
+    between the two runs, so "what I ticked last time" is the wrong default
+    exactly when it matters: the first run of the next batch.
+    """
+    return [
+        {"key": STEP_LIST,
+         "label": "Build the cutting list",
+         "checked": True,
+         "children": []},
+        {"key": STEP_PACKETS,
+         "label": "Bind the packet drawings",
+         "checked": True,
+         "children": []},
+        {"key": STEP_BINDERS,
+         # short on purpose: the window clips a label past ~45 characters,
+         # and the subtext already says step 2 waits for the 1Ds
+         "label": "Build the production run binders (step 2)",
+         "checked": False,
+         "children": []},
+    ]
+
+
 def run(params: dict, progress_callback, cancel_event: threading.Event):
     log = params.get("log", print)
     settings = params.get("settings", {}) or {}
@@ -1308,10 +1351,26 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
 
     log(f"922 Production Packets v{VERSION}")
 
-    # Step 2 is off unless somebody turns it on in Settings > Apps. It cannot
-    # run in the same pass as step 1: the 1Ds it works from are nested by
-    # hand, in software TechDeck does not drive, between the two runs.
-    step_two = bool(settings.get("production_run_binders"))
+    choices = sdk.request_grouped_toggles(
+        params, _dialog_groups(),
+        window_title="922 Production Packets",
+        header="922 Production Packets - Select Steps",
+        subtext=("Steps run top to bottom. Uncheck a step to skip it. Step 2 "
+                 "is the second run, once you have nested the 1Ds."),
+        run_button_text="Run Selected",
+    )
+    if choices is None:
+        log("Step selection cancelled - nothing was run.")
+        cancel_event.set()  # user cancel: not a successful (ticket-earning) run
+        return
+    do_list, do_packets, do_binders = (
+        bool(choices.get(key, {}).get("enabled"))
+        for key in (STEP_LIST, STEP_PACKETS, STEP_BINDERS))
+    step_one = do_list or do_packets
+    if not (step_one or do_binders):
+        log("No steps selected - nothing was run.")
+        cancel_event.set()
+        return
 
     root_922 = sdk.resolve_922_root(settings.get("base_path", ""))
     picked = sdk.request_922_batch_folder(params, settings.get("base_path", ""))
@@ -1322,31 +1381,63 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     log(f"Batch {batch_no}: {batch_path}")
     progress_callback(5)
 
-    if step_two:
-        log("Step 2: the production run binders")
-        done = _step_two(params, settings, log, batch_no, batch_path,
-                         root_922, progress_callback, cancel_event)
-        if done is None or cancel_event.is_set():
+    # Both halves ticked in one pass share the bar, half each. That is a
+    # re-run - the 1Ds have to exist already - but nothing stops it.
+    if step_one:
+        _step_one(params, log, batch_no, batch_path, root_922,
+                  (lambda p: progress_callback(p // 2)) if do_binders
+                  else progress_callback,
+                  cancel_event, do_list, do_packets, more_to_come=do_binders)
+    if do_binders:
+        finished = _run_step_two(
+            params, settings, log, batch_no, batch_path, root_922,
+            (lambda p: progress_callback(50 + p // 2)) if step_one
+            else progress_callback,
+            cancel_event)
+        if not finished:
             return
-        run_dir, written, marked, total = done
-        log(f"{marked} of {total} packet(s) had a 1D, "
-            f"{len(written)} binder(s) built")
-        if marked < total:
-            sdk.flag_action(
-                params,
-                f"{total - marked} source material(s) have no 1D, so they are "
-                f"missing from their binder.",
-                "The console names each one. Nest them, put the PDFs in the "
-                "same folder named after their packet (1.1.pdf, SAW.2.pdf) "
-                "and run this again.")
-            sdk.set_run_outcome(
-                params, sdk.RUN_OUTCOME_PARTIAL,
-                f"{total - marked} material(s) have no 1D - see the console")
-        for dest, pages in written:
-            sdk.link_output(params, f"Open {dest.name}", str(dest),
-                            prefix="[BINDER]")
-        return
 
+    if console is not None and hasattr(console, "safe_colored_log"):
+        console.safe_colored_log("Get out me swamp!", SWAMP_GREEN)
+
+
+def _run_step_two(params, settings, log, batch_no, batch_path, root_922,
+                  progress_callback, cancel_event) -> bool:
+    """Step 2 and what the run says about it. False = the user backed out."""
+    log("Step 2: the production run binders")
+    done = _step_two(params, settings, log, batch_no, batch_path,
+                     root_922, progress_callback, cancel_event)
+    if done is None or cancel_event.is_set():
+        return False
+    run_dir, written, marked, total = done
+    log(f"{marked} of {total} packet(s) had a 1D, "
+        f"{len(written)} binder(s) built")
+    if marked < total:
+        sdk.flag_action(
+            params,
+            f"{total - marked} source material(s) have no 1D, so they are "
+            f"missing from their binder.",
+            "The console names each one. Nest them, put the PDFs in the "
+            "same folder named after their packet (1.1.pdf, SAW.2.pdf) "
+            "and run this again.")
+        sdk.set_run_outcome(
+            params, sdk.RUN_OUTCOME_PARTIAL,
+            f"{total - marked} material(s) have no 1D - see the console")
+    for dest, pages in written:
+        sdk.link_output(params, f"Open {dest.name}", str(dest),
+                        prefix="[BINDER]")
+    return True
+
+
+def _step_one(params, log, batch_no, batch_path, root_922, progress_callback,
+              cancel_event, do_list, do_packets, more_to_come=False):
+    """Step 1: read every tube's length, then the cutting list workbook and
+    the packet drawings - whichever of the two were ticked - and the report.
+
+    The lengths are read either way: the packet drawings need them to know
+    which prints belong in the Problem Drawings binder, and the report is
+    built from them.
+    """
     organizer = _organizer(batch_path, batch_no, log)
     tubes, skipped_rows, all_parts = _read_tubes(organizer, log)
     pallet_map, order_pallets = _read_pallets(organizer, log)
@@ -1393,20 +1484,30 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     sdk.ensure_dir(out_dir)
     # a separate file from the hand-built "<batch> Tubes.xlsx", so the two can
     # be compared side by side and a human sheet is never written over
-    book = _write_workbook(
-        out_dir / f"{batch_no} Tubes (TechDeck).xlsx", batch_no, materials, log)
+    book = out_dir / f"{batch_no} Tubes (TechDeck).xlsx"
+    if do_list:
+        book = _write_workbook(book, batch_no, materials, log)
+    else:
+        # the reason to untick it: lengths typed into that workbook by hand
+        # would be written over by a fresh one
+        log(f"Cutting list not selected - {book.name} is left exactly as it is")
     progress_callback(85)
 
-    log("Binding the packet drawings...")
-    tube_parts = {t["part"] for t in tubes}
-    drawings = pk.survey(batch_path, tube_parts, log=log,
-                         cancel_event=cancel_event)
-    packets, no_sheet = pk.build(out_dir / PACKETS_SUBFOLDER, batch_no,
-                                 materials, drawings, log)
-    log(f"{len(packets)} packet PDF(s), "
-        f"{sum(n for _p, n in packets)} pages in total")
-    if no_sheet:
-        _diagnose_no_sheet(batch_path, no_sheet, all_parts, log)
+    no_sheet = None                 # None = not looked at, never "none found"
+    if do_packets:
+        log("Binding the packet drawings...")
+        tube_parts = {t["part"] for t in tubes}
+        drawings = pk.survey(batch_path, tube_parts, log=log,
+                             cancel_event=cancel_event)
+        packets, no_sheet = pk.build(out_dir / PACKETS_SUBFOLDER, batch_no,
+                                     materials, drawings, log)
+        log(f"{len(packets)} packet PDF(s), "
+            f"{sum(n for _p, n in packets)} pages in total")
+        if no_sheet:
+            _diagnose_no_sheet(batch_path, no_sheet, all_parts, log)
+    else:
+        log("Packet drawings not selected - the TechDeck Packets folder is "
+            "left exactly as it is")
     progress_callback(95)
 
     # the report is written LAST on purpose: which tubes have no print of their
@@ -1426,6 +1527,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         log(f"{flagged} highlighted yellow - check those before you cut")
     if blank:
         log(f"{blank} with no drawing - those cells are empty")
+    if blank and do_list:
         sdk.flag_action(
             params,
             f"Fill in the saw cut length for {blank} tube(s) by hand in "
@@ -1463,16 +1565,16 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             params, sdk.RUN_OUTCOME_WARNING,
             f"{', '.join(reasons)} - see the report")
 
-    sdk.link_output(params, f"Open {book.name}", str(book), prefix="[CUT LIST]")
+    if do_list:
+        sdk.link_output(params, f"Open {book.name}", str(book),
+                        prefix="[CUT LIST]")
     sdk.link_output(params, "Open the Production Packets report", str(report),
                     prefix="[REPORT]")
 
     # step 1 ends by saying what has to happen before step 2 can run - the
     # nesting in between is hers, and nothing here can do it for her
-    log("")
-    log("NEXT: nest these materials into 1Ds, save one PDF per packet named "
-        "after it (1.1.pdf, SAW.2.pdf), then switch on 'Build the production "
-        "run binders' in Settings > Apps and run this again.")
-
-    if console is not None and hasattr(console, "safe_colored_log"):
-        console.safe_colored_log("Get out me swamp!", SWAMP_GREEN)
+    if not more_to_come:
+        log("")
+        log("NEXT: nest these materials into 1Ds, save one PDF per packet "
+            "named after it (1.1.pdf, SAW.2.pdf), then run this again with "
+            "'Build the production run binders' selected.")

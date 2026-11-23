@@ -649,8 +649,8 @@ def read_cutting_list(path: Path, log):
     if not sdk.is_file(path):
         raise sdk.UserFacingError(
             f"There is no {path.name} in the Production Packets folder.",
-            "Step 2 builds on step 1's cutting list. Run the app with this "
-            "option switched OFF first, make the 1Ds, then run it again.")
+            "Step 2 builds on step 1's cutting list. Run the app with 'Build "
+            "the cutting list' selected first, make the 1Ds, then run it again.")
     wb = sdk.load_workbook_resilient(path, read_only=True, data_only=True,
                                      log=log)
     try:
