@@ -9,7 +9,15 @@ Styled after SelectionDialog so multi-pick dialogs read the same everywhere.
 Unlike SelectionDialog's root->items tree, the two levels here mean different
 things: a parent checkbox decides whether the stage RUNS, a child checkbox
 tunes HOW it runs. So parents are never tri-state, and unchecking a parent
-greys its children (their state is kept and returned regardless).
+greys its children AND shows them unticked (their state is kept, returned
+regardless, and put back the moment the parent is ticked again).
+
+That second half was added 2026-11-23. Before it, a skipped stage's options
+went unclickable but stayed drawn as bright ticks - the checkbox style had no
+disabled form - so the window read as "these will run and I cannot turn them
+off" (reported against 922 Production Packets: "unselected it doesnt unselect
+all of them. i cant deselect any of its children"). What is on screen now
+matches what will happen: nothing under a skipped stage runs.
 
 First used by the consolidated 922 Setup (Teams Setup -> Batch Repeater ->
 Pallet Stamper master window). Reached from plugin worker threads via
@@ -79,6 +87,9 @@ class GroupedToggleDialog(QDialog):
 
         self._groups = [dict(g) for g in groups]
         self._suppress = False  # guards itemChanged while we grey children
+        # {group key: {child key: bool}} - what a skipped stage's options were
+        # set to before they were shown unticked; see _apply_child_enable
+        self._kept: dict[str, dict[str, bool]] = {}
 
         self.setWindowTitle(window_title)
         self.setModal(True)
@@ -202,18 +213,32 @@ class GroupedToggleDialog(QDialog):
         self._update_count()
 
     def _apply_child_enable(self, gkey: str):
-        """Grey a group's option rows while the group itself is unchecked.
-        Check state is preserved either way — options only READ back when the
-        group is enabled, so nothing is lost by toggling the parent."""
+        """Grey a group's option rows, and show them unticked, while the group
+        itself is unchecked. Their real state is kept in ``_kept`` and put
+        back when the group is ticked again - options only READ back when the
+        group is enabled, so nothing is lost by toggling the parent, and
+        ``result_map`` reports the kept state either way."""
         parent = self._parents[gkey]
         enabled = parent.checkState(0) == Qt.CheckState.Checked
+        off_limits = self._disabled_children[gkey]
         self._suppress = True
         try:
+            if not enabled and gkey not in self._kept:
+                self._kept[gkey] = {
+                    ckey: child.checkState(0) == Qt.CheckState.Checked
+                    for ckey, child in self._children[gkey].items()}
+            restore = self._kept.pop(gkey, None) if enabled else None
             for ckey, child in self._children[gkey].items():
                 flags = Qt.ItemFlag.ItemIsUserCheckable
-                if enabled and ckey not in self._disabled_children[gkey]:
+                if enabled and ckey not in off_limits:
                     flags |= Qt.ItemFlag.ItemIsEnabled
                 child.setFlags(flags)
+                if not enabled:
+                    child.setCheckState(0, Qt.CheckState.Unchecked)
+                elif restore is not None and ckey not in off_limits:
+                    child.setCheckState(
+                        0, Qt.CheckState.Checked if restore.get(ckey)
+                        else Qt.CheckState.Unchecked)
         finally:
             self._suppress = False
 
@@ -234,9 +259,14 @@ class GroupedToggleDialog(QDialog):
             out[gkey] = {
                 "enabled": (self._parents[gkey].checkState(0)
                             == Qt.CheckState.Checked),
+                # a skipped group's options are DRAWN unticked; what they
+                # were set to is in _kept, and that is what is reported
                 "options": {
                     ckey: (ckey not in self._disabled_children[gkey]
-                           and child.checkState(0) == Qt.CheckState.Checked)
+                           and (self._kept[gkey].get(ckey, False)
+                                if gkey in self._kept
+                                else child.checkState(0)
+                                == Qt.CheckState.Checked))
                     for ckey, child in self._children[gkey].items()
                 },
             }
@@ -270,6 +300,11 @@ class GroupedToggleDialog(QDialog):
             QTreeView::indicator:unchecked:hover {{
                 border: 1px solid {t.accent};
             }}
+            QTreeView::indicator:disabled {{
+                border: 1px solid {t.border};
+                background: {t.surface};
+            }}
+            QTreeWidget::item:disabled {{ color: {t.text_secondary}; }}
             QTreeView::indicator:checked {{
                 border: 1px solid {t.accent};
                 background: {t.accent};
