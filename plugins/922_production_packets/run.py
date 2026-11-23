@@ -1187,20 +1187,22 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
     (`TechDeck Packets\ANTHONY REF`, 2026-11-02). Step 1 has to have run and
     she has to have made the 1Ds in between - the nesting is hers, not ours.
 
-    `options` is the steps window's three ticks under step 2 (STEP2_1DS,
-    STEP2_COVERS, STEP2_BIND); None, or a missing key, means "build it". A
-    part that is NOT ticked is never rebuilt and never deleted: the binders
-    then use whatever marked-up 1Ds and cover sheets are already in the
-    Production Run folder, so re-binding after fixing one cover by hand does
-    not write over the other folder.
+    `options` is the steps window's ticks under step 2: STEP2_PREP (the
+    marked-up 1Ds and the cover sheets, one tick for the pair) and one
+    `_binder_key(pallet)` per binder. None, or a missing key, means "build
+    it". A part that is NOT ticked is never rebuilt and never deleted: the
+    binders then use whatever marked-up 1Ds and cover sheets are already in
+    the Production Run folder, so re-binding one pallet after fixing its
+    cover by hand does not write over the fix or touch the other binders.
 
-    Returns (run_dir, binders written, packets with a marked-up 1D, packets),
-    the third being None on a run that touched neither the 1Ds nor the
-    binders, where the count would mean nothing.
+    Returns (run_dir, binders written, packets with a marked-up 1D, packets
+    counted). The count covers every packet when the 1Ds are being marked
+    up, and only the pallets being bound when they are not.
     """
-    do_1ds, do_covers, do_bind = (
-        options is None or bool(options.get(key, True))
-        for key in (STEP2_1DS, STEP2_COVERS, STEP2_BIND))
+    def on(key):
+        return options is None or bool(options.get(key, True))
+
+    do_1ds = do_covers = on(STEP2_PREP)
     out_dir = batch_path / f"Batch {batch_no} - Documentation" / PACKETS_FOLDER
     packets_dir = out_dir / PACKETS_SUBFOLDER
     run_dir = packets_dir / rs.RUN_FOLDER
@@ -1213,6 +1215,14 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
         raise sdk.UserFacingError(
             f"Step 1's cutting list for batch {batch_no} has no sheets in it.",
             "Run the app with 'Build the cutting list' selected first.")
+
+    # One tick per binder. A pallet the window has no row for (a pallet 4 has
+    # never happened) has no tick to clear, so it is bound.
+    wanted = {info["pallet"] for info in packets.values()
+              if on(_binder_key(info["pallet"]))}
+    do_bind = bool(wanted)
+    scope = [packet for packet, info in packets.items()
+             if do_1ds or info["pallet"] in wanted]
 
     # 1 - every 1D gets her notes and highlights
     marked = {}
@@ -1250,7 +1260,7 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
         if do_bind:
             log(f"1Ds not selected - binding the {len(marked)} marked-up "
                 f"1D(s) already in '{MARKED_FOLDER}'")
-            for packet in sorted(set(packets) - set(marked), key=_packet_sort):
+            for packet in sorted(set(scope) - set(marked), key=_packet_sort):
                 log(f"  WARNING: {packet} has no marked-up 1D in that folder")
     progress_callback(60)
 
@@ -1323,6 +1333,10 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
             by_pallet.setdefault(info["pallet"], []).append(packet)
         for pallet in sorted(by_pallet, key=lambda p: (p == SAW_PALLET, p)):
             sdk.raise_if_cancelled(cancel_event)
+            name = _binder_name(pallet)
+            if pallet not in wanted:
+                log(f"{name} not selected - left exactly as it is")
+                continue
             cover = covers.get(pallet)
             if cover is None:
                 log(f"WARNING: no cover page for pallet {pallet} - its binder "
@@ -1335,14 +1349,22 @@ def _step_two(params, settings, log, batch_no, batch_path, root_922,
                 pages.append(sheet)
                 if pallet == SAW_PALLET and packet in drawings:
                     pages.append(drawings[packet])
-            name = ("SAW TUBES.pdf" if pallet == SAW_PALLET
-                    else f"PALLET {pallet}.pdf")
             made = rs.bind(run_dir / name, pages, log)
             if made is not None:
                 written.append(made)
     progress_callback(100)
-    have = len(marked) if (do_1ds or do_bind) else None
-    return run_dir, written, have, len(packets)
+    return (run_dir, written,
+            sum(1 for packet in scope if packet in marked), len(scope))
+
+
+def _binder_name(pallet):
+    """The file a pallet's production run binder is written to."""
+    return "SAW TUBES.pdf" if pallet == SAW_PALLET else f"PALLET {pallet}.pdf"
+
+
+def _binder_key(pallet):
+    """The steps-window key of a pallet's binder tick."""
+    return f"binder_{pallet}"
 
 
 def _packet_sort(packet):
@@ -1354,10 +1376,12 @@ def _packet_sort(packet):
 STEP_LIST = "cutting_list"
 STEP_PACKETS = "packet_drawings"
 STEP_BINDERS = "run_binders"
-# the three things step 2 builds, each its own tick under it in the window
-STEP2_1DS = "marked_1ds"
-STEP2_COVERS = "cover_sheets"
-STEP2_BIND = "binders"
+# What step 2 builds, each its own tick under it in the window: the two
+# folders the binders are made from (one tick for the pair), then a tick per
+# binder. The window opens before the batch is picked, so the pallets are the
+# standing three plus SAW - 121 of 122 past batches are exactly that.
+STEP2_PREP = "prep_folders"
+BINDER_PALLETS = ("1", "2", "3", SAW_PALLET)
 MARKED_FOLDER = "1Ds (marked up)"
 COVERS_FOLDER = "Cover Sheets"
 
@@ -1389,17 +1413,17 @@ def _dialog_groups() -> list:
          # and the subtext already says step 2 waits for the 1Ds
          "label": "Build the production run binders (step 2)",
          "checked": False,
-         # one tick per thing step 2 writes into the Production Run folder
-         # (asked for 2026-11-23). A part left unticked is not rebuilt and
-         # not deleted - the binders use what is already there.
+         # Asked for 2026-11-23. A part left unticked is not rebuilt and
+         # not deleted - the binders use what is already on disk.
          "children": [
-             {"key": STEP2_1DS, "label": f"{MARKED_FOLDER} folder",
+             {"key": STEP2_PREP,
+              "label": f"{MARKED_FOLDER} and {COVERS_FOLDER}",
               "checked": True},
-             {"key": STEP2_COVERS, "label": f"{COVERS_FOLDER} folder",
-              "checked": True},
-             {"key": STEP2_BIND,
-              "label": "Binders (PALLET 1, 2, 3 and SAW TUBES)",
-              "checked": True},
+         ] + [
+             {"key": _binder_key(pallet),
+              "label": f"{_binder_name(pallet)[:-4]} binder",
+              "checked": True}
+             for pallet in BINDER_PALLETS
          ]},
     ]
 
@@ -1475,11 +1499,9 @@ def _run_step_two(params, settings, log, batch_no, batch_path, root_922,
     if done is None or cancel_event.is_set():
         return False
     run_dir, written, marked, total = done
-    binding = options is None or bool(options.get(STEP2_BIND, True))
-    if marked is not None:
-        log(f"{marked} of {total} packet(s) have a marked-up 1D"
-            + (f", {len(written)} binder(s) built" if binding else ""))
-    if marked is not None and marked < total:
+    log(f"{marked} of {total} packet(s) have a marked-up 1D, "
+        f"{len(written)} binder(s) built")
+    if marked < total:
         sdk.flag_action(
             params,
             f"{total - marked} source material(s) have no 1D, so they are "

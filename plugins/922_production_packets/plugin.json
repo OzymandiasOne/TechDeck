@@ -17,7 +17,7 @@
     ],
     "how_it_works": [
       "A window lists the three steps with a checkbox each: Build the cutting list, Bind the packet drawings, and Build the production run binders. The first two start selected and the third does not. Clear the ones you want to skip, then click Run Selected.",
-      "Click the third step's name to show what it builds: the marked-up 1Ds, the cover sheets, and the binders. Each has its own checkbox. One you clear is left as it is on disk, and the binders use what is already there.",
+      "Click the third step's name to show what it builds: the marked-up 1Ds and cover sheets together, then a checkbox for each binder - PALLET 1, PALLET 2, PALLET 3 and SAW TUBES. They all start selected. One you clear is left as it is on disk, and the binders use what is already there.",
       "You pick the Batch folder.",
       "It reads every tube on the batch off the Pallet Organizer and groups them by source material and pallet - 1, 2, 3, and SAW on its own.",
       "For each tube it finds the saw cut length: a 'SAW CUT' note or a dimension in parentheses is taken as printed, otherwise the assembly dimension plus 0.1 for each end that gets ground.",
