@@ -1,9 +1,9 @@
 ﻿; TechDeck Installer Script
-; Version 0.8.10 - 922 Kitting binds the filled material pull list as the kit's cover; 922 Production Packets prints every part made (duplicate tubes) and the pallet covers carry the right batch number and colors
+; Version 0.8.11 - the Assistant pops out into a floating panel; 922 Production Packets opens with the steps window, totals each cutting list sheet and sorts the sheets; 911 Setup backs up the inspection sheet's Part Description; the invoice date shows in the invoice workbook
 ; Requires Inno Setup 6.0 or later
 
 #define MyAppName "TechDeck"
-#define MyAppVersion "0.8.10"
+#define MyAppVersion "0.8.11"
 #define MyAppPublisher "Anthony Siebenmorgen"
 #define MyAppURL "https://github.com/OzymandiasOne/TechDeck"
 #define MyAppExeName "TechDeck.exe"

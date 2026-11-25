@@ -451,14 +451,15 @@ ENGINEERING = [
 VERSION_RENAMES = {
     # Past re-keys (a dict can hold each old key once, so superseded targets
     # move to this comment): "In Development" -> "Beta 0.8.6.11",
-    # "In Development" -> "Beta 0.8.7.1", "In Development" -> "Beta 0.8.7.6".
-    "In Development": "Beta 0.8.8",
+    # "In Development" -> "Beta 0.8.7.1", "In Development" -> "Beta 0.8.7.6",
+    # "In Development" -> "Beta 0.8.8".
+    "In Development": "Beta 0.8.11",
     "0.8.6.11": "Beta 0.8.6.11",
 }
 
 # ---- VERSION HISTORY  (version, date, type, deliverables, tools) ------------
 VERSION_ROWS = [
-    ("In Development", "Nov 23, 2026", "Feature",
+    ("Beta 0.8.11", "Nov 25, 2026", "Feature",
      "A floor-feedback release, built from requests sent in by planning and "
      "invoicing staff. 922 Production Packets now opens with the platform's "
      "standard step-selection window: the operator chooses which stages run "
@@ -1504,7 +1505,7 @@ GANTT_ROWS = [
     ("922 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
     ("911 Dashboard Widget (TechDeck)", GANTT_DONE, 1, "2026-02", "2026-06"),
     # Meetings, waiting, time capture and steps shipped 0.8.7.9 (Oct 14).
-    # The floating panel was built Nov 20 (rides 0.8.11).
+    # The floating panel was built Nov 20 (shipped 0.8.11).
     ("Personal Planning Workspace (Assistant)",
      GANTT_DONE, 1, "2026-07", "2026-11"),
     # The CAPABILITY side of 1.0, not the look: tools delivered and updated one
@@ -1536,7 +1537,7 @@ GANTT_ROWS = [
     ("SECTION", "911 QTDR WORKFLOW AUTOMATION"),
     # Plate batches (0.8.7.4), verification sheet (0.8.7.7), program-file
     # collection and the forecast warning (0.8.8, Oct 21).
-    # v2.6.0 (Part Description safeguard) was built Nov 19, rides 0.8.11.
+    # v2.6.0 (Part Description safeguard) was built Nov 19, shipped 0.8.11.
     ("911 Setup", GANTT_DONE, 1, "2026-02", "2026-11"),
     # Verified card creation (two-way integration) shipped 0.8.8.
     ("911 Teams Cards", GANTT_DONE, 1, "2026-07", "2026-10"),
@@ -1952,8 +1953,8 @@ GANTT_TASKS = [
      "ordered by packet number, and the cover pages' note heading takes each "
      "pallet's own colour.",
      "Three requests from the floor. Each was checked against a live batch's "
-     "own planning files, read-only, before it was called done. Rides the "
-     "next release.",
+     "own planning files, read-only, before it was called done. Shipped in "
+     "0.8.11.",
      SUBJECT_TOOLS),
     ("Fellowship Capstone - PO Reader and Item Match", "High", TASK_DONE,
      "2026-11-16", "2026-11-17", 1, 1,
@@ -1981,8 +1982,8 @@ GANTT_TASKS = [
      "correction widened the column for the printed copy only; the column "
      "now carries a set width in the workbook itself.",
      "An automated check now requires a set width on every column the tool "
-     "writes, so the same fault cannot return on another column. Rides the "
-     "next release.",
+     "writes, so the same fault cannot return on another column. Shipped in "
+     "0.8.11.",
      SUBJECT_TOOLS),
     ("911 Setup - Inspection Sheet Part Description Safeguard", "High",
      TASK_DONE, "2026-11-19", "2026-11-19", 1, 1,
@@ -1993,7 +1994,7 @@ GANTT_TASKS = [
      "attention.",
      "Both templates were repaired the same day, changing only the four "
      "affected cells. The template stays in charge; the tool's own write is "
-     "the backup. Rides the next release.",
+     "the backup. Shipped in 0.8.11.",
      SUBJECT_TOOLS),
     ("Personal Planning Workspace - Floating Panel", "Normal", TASK_DONE,
      "2026-11-20", "2026-11-20", 1, 1,
@@ -2001,7 +2002,7 @@ GANTT_TASKS = [
      "inside the application, kept in view beside whichever tool is running. "
      "It moves, resizes, docks to any edge and remembers its place.",
      "A user request from October: keep the plan visible while running "
-     "tools. Rides the next release.",
+     "tools. Shipped in 0.8.11.",
      SUBJECT_FEATURES),
     ("922 Production Packets - Step Selection Window", "Normal", TASK_DONE,
      "2026-11-23", "2026-11-23", 1, 1,
@@ -2012,7 +2013,7 @@ GANTT_TASKS = [
      "One binder can be re-made after a hand correction without rewriting "
      "the rest. The shared window was corrected on the way: a skipped "
      "stage's options were drawn as selected and could not be cleared. "
-     "Rides the next release.",
+     "Shipped in 0.8.11.",
      SUBJECT_TOOLS),
     ("Fellowship Capstone - Send Check (Dry Run)", "High", TASK_DONE,
      "2026-11-23", "2026-11-23", 1, 1,
@@ -2278,8 +2279,7 @@ GANTT_NOTES = [
      "again after the release.",
      "The date column now carries a set width in the workbook itself, "
      "checked in Excel on a real invoice workbook. An automated check "
-     "requires a set width on every column the tool writes. Rides the next "
-     "release."),
+     "requires a set width on every column the tool writes. Shipped in 0.8.11."),
     ("2026-11-19", "Inspection Templates Lost Their Part Description",
      "Problem",
      "Planning reported the Part Description on the 911 inspection sheets "
@@ -2321,4 +2321,11 @@ GANTT_NOTES = [
      "Nothing is written to the ERP yet. Next: the write against a test "
      "copy of the ERP, then uploading a PDF from the screen. Midpoint "
      "check-in is the week of Dec 1."),
+    ("2026-11-25", "TechDeck v0.8.11 Release", "Milestone",
+     "Release cut and pushed live: the personal planning workspace lifts out "
+     "into a floating panel; 922 Production Packets opens with the standard "
+     "step-selection window and totals and orders its cutting-list sheets; "
+     "911 setup safeguards the inspection sheet's Part Description; the "
+     "invoice date displays in the saved workbook.",
+     "Live to the team. 2,891 automated tests green."),
 ]

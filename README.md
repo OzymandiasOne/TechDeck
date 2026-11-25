@@ -1,4 +1,4 @@
-# TechDeck v0.8.10 - The Pull List
+# TechDeck v0.8.11 - Pick Your Steps
 
 [![Tests](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml/badge.svg)](https://github.com/OzymandiasOne/TechDeck/actions/workflows/tests.yml)
 
@@ -6,6 +6,63 @@
 for Electric Boat ASA manufacturing workflows
 to colleagues who can't run Python directly. No installs, no PATH changes - just run
 the `.exe`.
+
+---
+
+## What's New in v0.8.11 - Pick Your Steps
+
+Nearly everything in this update came from your feedback. Thank you for keeping
+it coming :)
+
+### The Assistant can now pop out
+
+Click **Pop out** at the top of the Assistant tab and the Assistant becomes a
+small panel inside the TechDeck window. The panel stays on top of whatever page
+you go to next, so you can keep it in view while you run your apps. Drag it by
+its title bar, resize it from any edge, or drag it to a side of the window to
+snap it there. Click the **X** to put it back.
+
+### 922 Production Packets
+
+- The run now opens with the same steps window as 922 Setup, so you choose what
+  runs: **Build the cutting list**, **Bind the packet drawings**, and **Build
+  the production run binders**. All three start selected, so on a batch's first
+  run uncheck the binders step, because it needs your nested 1Ds. This replaces
+  the setting in Settings > Apps.
+
+- Click the binders step's name to choose what it builds: the marked up 1Ds and
+  cover sheets, plus a checkbox for each binder (PALLET 1, PALLET 2, PALLET 3,
+  and SAW TUBES). Anything you uncheck is left exactly as it is, so you can fix
+  one cover by hand and re-bind just that pallet.
+
+- Cell E1 of each cutting list sheet now shows the total length needed for that
+  sheet. The total updates when you type a length in by hand.
+
+- The cutting list's sheets are now in order: SAW.1, SAW.2, then 1.1, 1.2, 1.3,
+  and so on.
+
+- Pallet covers: the "BEFORE STARTING, PLEASE REVIEW NOTES:" heading now
+  matches its pallet's color.
+
+### 911 Setup
+
+Part Description on the inspection sheets was coming out blank: the formulas
+that fill it went missing from both SACO templates on October 23. The templates
+were fixed on November 19. 911 Setup now also fills Part Description itself if
+those formulas ever go missing again, and a popup tells you the template needs
+fixing.
+
+### 911 SSPO Invoicing Prep
+
+The invoice date now shows in the invoice workbook instead of ######. The fix
+in 0.8.9 only reached the PDF.
+
+### The steps window
+
+In 922 Setup, 911 Setup, 911 Batch Repeater and 922 Production Packets: when
+you unchecked a step, the options under it still showed as checked and could
+not be clicked. They now show unchecked while the step is off, and come back
+as you left them when you select the step again.
 
 ---
 
