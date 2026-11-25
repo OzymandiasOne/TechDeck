@@ -295,6 +295,16 @@ PALLET_FILLS = {"1": ("C6E0B4", "E2EFDA"),     # green
                 "2": ("FFE699", "FFF2CC"),     # gold
                 "3": ("BDD6EE", "DEEBF7")}     # blue
 DEFAULT_FILLS = PALLET_FILLS["1"]              # a pallet 4 has never happened
+
+# The "BEFORE STARTING, PLEASE REVIEW NOTES:" heading wears the pallet's
+# colour too (batch 513: pallets 2 and 3 printed it in pallet 1's green).
+# Both templates paint it in Word's stock green - full strength on the 7000
+# page, the 40% tint on the SAW page - and the banner fills above are light
+# tints of the SAME stock colours, so each template shade maps to the same
+# rung of the pallet's own family. Pallet 1 already IS the template's green,
+# so it has no entry and that template text is left exactly as Carrie set it.
+NOTE_HEAD_COLORS = {"70AD47": {"2": "FFC000", "3": "5B9BD5"},
+                    "A8D08D": {"2": "FFD966", "3": "9DC3E6"}}
 FILL_SAW_ORDER = "FFFF00" # an ORDER using a saw cut material - yellow
 FILL_SAW_MAT = "D9D9D9"   # that material's NAME cell in MATERIAL REQUIRED - grey
 
@@ -464,6 +474,14 @@ def fill_docx(template: Path, dest: Path, batch_no, title, listing,
     # the heading is the only place the batch number appears
     xml = _set_batch_number(xml, batch_no)
 
+    # the note heading matches the banner. The whole <w:color/> element is
+    # replaced, w:themeColor dropped with it, or Word re-derives the green.
+    for green, by_pallet in NOTE_HEAD_COLORS.items():
+        swap = by_pallet.get(str(pallet or ""))
+        if swap:
+            xml = re.sub(rf'<w:color w:val="{green}"[^>]*/>',
+                         f'<w:color w:val="{swap}"/>', xml)
+
     # the saw page ends with a line per saw material for the operator to
     # write the tag and the leftover length on. Built here, not by the caller,
     # so the wording cannot drift between the two pages.
@@ -631,8 +649,8 @@ def read_cutting_list(path: Path, log):
     if not sdk.is_file(path):
         raise sdk.UserFacingError(
             f"There is no {path.name} in the Production Packets folder.",
-            "Step 2 builds on step 1's cutting list. Run the app with this "
-            "option switched OFF first, make the 1Ds, then run it again.")
+            "Step 2 builds on step 1's cutting list. Run the app with 'Build "
+            "the cutting list' selected first, make the 1Ds, then run it again.")
     wb = sdk.load_workbook_resilient(path, read_only=True, data_only=True,
                                      log=log)
     try:

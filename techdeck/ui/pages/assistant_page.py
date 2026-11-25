@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
     QFrame, QFileDialog, QMessageBox, QPushButton,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from techdeck.core.assistant.commands import (
     ACT_BLOCKS, ACT_CLEAR, ACT_EDIT_NOTE, ACT_EXPORT, ACT_GOTO,
@@ -87,6 +87,19 @@ class AssistantPage(QWidget, ThemeAware):
     # submit() without pumping timers.
     REPLY_DELAY_MS = _DEFAULT_REPLY_DELAY_MS
 
+    # The header's Pop out button, and the Pop back in button on the note the
+    # page shows while it is out. The SHELL does the moving (it owns the
+    # floating panel); the page only asks.
+    pop_out_requested = Signal()
+    pop_in_requested = Signal()
+    # The tab showing changed while popped out, so the width the body needs
+    # may have too (the Terminal fits in 320; Schedule's button row wants 600).
+    compact_width_changed = Signal()
+
+    # Margins of the body on the page, and inside the floating panel.
+    _PAGE_MARGINS = (24, 20, 24, 16)
+    _COMPACT_MARGINS = (6, 6, 6, 4)
+
     def __init__(self, settings: SettingsManager, parent=None):
         super().__init__(parent)
         # Paint our own QSS background. Without this the page is TRANSPARENT
@@ -109,9 +122,37 @@ class AssistantPage(QWidget, ThemeAware):
         # row can offer to file it. Nothing is ever filed off this alone.
         self._can_promote = False
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 24, 16)
+        # Everything the Assistant IS lives in `body`, one widget, so it can be
+        # lifted out of the page into the floating panel and put back without
+        # rebuilding anything (ui/widgets/assistant_popout.py). The page itself
+        # is only the body's home, plus a note for while it is away.
+        page_box = QVBoxLayout(self)
+        page_box.setContentsMargins(0, 0, 0, 0)
+        page_box.setSpacing(0)
+        self.body = QWidget()
+        page_box.addWidget(self.body, 1)
+        self._page_box = page_box
+        self._popped_out = False
+
+        self.away_note = QWidget()
+        away_box = QVBoxLayout(self.away_note)
+        away_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        away_box.setSpacing(12)
+        self.away_label = QLabel("The Assistant is popped out.")
+        self.away_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.away_btn = QPushButton("Pop back in")
+        self.away_btn.setMinimumHeight(30)
+        self.away_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.away_btn.clicked.connect(self.pop_in_requested.emit)
+        away_box.addWidget(self.away_label)
+        away_box.addWidget(self.away_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        self.away_note.hide()
+        page_box.addWidget(self.away_note, 1)
+
+        outer = QVBoxLayout(self.body)
+        outer.setContentsMargins(*self._PAGE_MARGINS)
         outer.setSpacing(10)
+        self._body_box = outer
 
         # ── header ───────────────────────────────────────────────────────────
         header = QHBoxLayout()
@@ -131,6 +172,15 @@ class AssistantPage(QWidget, ThemeAware):
         self.reminders_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.reminders_btn.clicked.connect(self._open_reminder_settings)
         header.addWidget(self.reminders_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        self.pop_out_btn = QPushButton("Pop out")
+        self.pop_out_btn.setMinimumHeight(30)
+        self.pop_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pop_out_btn.setToolTip(
+            "Float the Assistant over the other pages, so you can see it "
+            "while you run your apps")
+        self.pop_out_btn.clicked.connect(self.pop_out_requested.emit)
+        header.addWidget(self.pop_out_btn, 0, Qt.AlignmentFlag.AlignTop)
         outer.addLayout(header)
 
         # ── tabs ─────────────────────────────────────────────────────────────
@@ -214,6 +264,66 @@ class AssistantPage(QWidget, ThemeAware):
         self._load_history()
         self._refresh_chips()
         self._apply_reminder_prefs()
+
+    # ── popping out ──────────────────────────────────────────────────────────
+
+    def is_popped_out(self) -> bool:
+        return self._popped_out
+
+    def release_body(self) -> QWidget:
+        """Hand the body to the floating panel and leave a note in its place.
+
+        The body goes compact on the way out: no title, no subtitle, no
+        Reminders button, no word bubbles, tighter tabs and margins. In a
+        small panel those rows are what cost the transcript its space (the
+        bubbles alone wrap to four lines at 400px), and the panel's own title
+        bar already says what it is. Nothing is lost: reminders keep firing,
+        everything a bubble does can be typed, and the full page is one "Pop
+        back in" away.
+        """
+        self._popped_out = True
+        self._page_box.removeWidget(self.body)
+        self._set_compact(True)
+        self.away_note.show()
+        return self.body
+
+    def reclaim_body(self) -> None:
+        """Put the body back on the page."""
+        self._popped_out = False
+        self.away_note.hide()
+        self._set_compact(False)
+        self._page_box.insertWidget(0, self.body, 1)
+        self.body.show()
+
+    def compact_min_width(self) -> int:
+        """How wide the body must be for the tab now showing to lay out
+        without clipping anything."""
+        # Asked the instant a tab changes, the answer is still the LAST tab's:
+        # the stack only tells its parent the minimum moved by posting a
+        # LayoutRequest, and each ancestor passes that on one event-loop turn
+        # at a time. Walk the chain by hand so the answer is for NOW:
+        # updateGeometry() drops the size its parent's layout has cached for
+        # that widget, invalidate() drops what its own layout has cached.
+        widget = self.stack
+        while widget is not None:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+            widget.updateGeometry()
+            if widget is self.body:
+                break
+            widget = widget.parentWidget()
+        return self.body.minimumSizeHint().width()
+
+    def _set_compact(self, compact: bool) -> None:
+        for widget in (self.title, self.subtitle, self.reminders_btn,
+                       self.pop_out_btn, self.chips):
+            widget.setVisible(not compact)
+        self.tabs.set_compact(compact)
+        self.tabs.set_label(TAB_NOTES, "Notes" if compact else "Personal Notes")
+        self._body_box.setContentsMargins(
+            *(self._COMPACT_MARGINS if compact else self._PAGE_MARGINS))
+        self._body_box.setSpacing(6 if compact else 10)
 
     def _display_name(self) -> str:
         """Whose initials go on the avatar: the name from My Account if it's
@@ -507,6 +617,10 @@ class AssistantPage(QWidget, ThemeAware):
         elif index == TAB_TERMINAL:
             # Coming back to the terminal should leave the caret ready to type.
             QTimer.singleShot(0, self.command_line.focus)
+        # After the refresh, not before: a tab's header row changes width with
+        # what it is showing ("2 open - 1h").
+        if self._popped_out:
+            self.compact_width_changed.emit()
 
     def _show_tab(self, index: int):
         self.tabs.set_current(index)
@@ -605,7 +719,10 @@ class AssistantPage(QWidget, ThemeAware):
                 window.raise_()
                 window.activateWindow()
                 sidebar = getattr(window, "sidebar", None)
-                if sidebar is not None:
+                # Popped out, the Assistant is already on screen whatever page
+                # is showing - going to its page would show the "popped out"
+                # note instead of the schedule the reminder was about.
+                if sidebar is not None and not self._popped_out:
                     sidebar.set_current_page("assistant")
                     window._on_page_changed("assistant")
         except Exception as exc:
@@ -625,6 +742,8 @@ class AssistantPage(QWidget, ThemeAware):
         elif current == TAB_NOTES:
             self.notes_panel.refresh(keep_selection=True)
         self._refresh_chips()
+        if self._popped_out:
+            self.compact_width_changed.emit()
 
     def refresh(self):
         """Called by the shell when the page becomes visible."""
@@ -651,7 +770,7 @@ class AssistantPage(QWidget, ThemeAware):
         self.setStyleSheet(self.scope_stylesheet())
         self.subtitle.setStyleSheet(
             f"color: {palette.text_secondary}; font-size: 12px;")
-        self.reminders_btn.setStyleSheet(f"""
+        pill = f"""
             QPushButton {{
                 background: transparent;
                 color: {palette.text_secondary};
@@ -664,7 +783,11 @@ class AssistantPage(QWidget, ThemeAware):
                 border-color: {palette.accent};
                 color: {palette.accent};
             }}
-        """)
+        """
+        for button in (self.reminders_btn, self.pop_out_btn, self.away_btn):
+            button.setStyleSheet(pill)
+        self.away_label.setStyleSheet(
+            f"color: {palette.text_secondary}; font-size: 14px;")
         body = palette.console_bg
         self.panel.setStyleSheet(
             f"QFrame#assistantPanel {{ background: {body}; border: none;"

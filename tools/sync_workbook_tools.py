@@ -118,11 +118,17 @@ TOOL_SECTIONS = [
    "picked once.",
    "Active", "0.8.6.4"),
   ("922 Production Packets",
-   "Builds the tube cutting list a batch feeds into the cutting optimizer.",
+   "Builds a batch's tube cutting list and binds the shop prints and "
+   "production-run paperwork behind it.",
    "Reads every tube on the batch off the Pallet & Rod Organizer, groups them "
    "by source material across the pallets, and reads each saw cut length "
    "straight off the shop drawings. Lengths it is unsure about are filled in "
-   "and highlighted rather than left blank, and a report names them.",
+   "and highlighted rather than left blank, and a report names them. Binds "
+   "one stamped print per part made behind each order's assembly sheet, "
+   "and - once the operator's nesting is done - marks up the nest sheets "
+   "and builds a cover page per pallet for the production run. The operator "
+   "chooses which stages run, and which pallet binders are bound, from one "
+   "step-selection window.",
    "Active", "0.8.9"),
   ("922 Batch Repeater",
    "Copies repeat orders forward from prior 922 batches and maintains the "
@@ -155,9 +161,12 @@ TOOL_SECTIONS = [
    "plates sheet in the pallet organizer.",
    "Active", "0.8.5"),
   ("922 Kitting",
-   "Formats and prints the kitting paperwork for a 922 batch.",
+   "Formats and prints the kitting paperwork for a 922 batch, opening with "
+   "the batch's filled material pull list.",
    "Applies the batch colour formatting, detects formed plates from the bent "
-   "plates sheet, and merges every kit page into a single PDF for printing.",
+   "plates sheet, fills the standard pull-list form from the batch's "
+   "material plan as each kit's cover pages, and merges every kit page "
+   "into a single PDF for printing.",
    "Active", "0.8.5"),
   ("922 LST Organizer",
    "Collects and organizes the tube material listing files for a batch.",
@@ -340,6 +349,11 @@ ROADMAP_ROWS = [
      "Deliver anonymous usage counts and in-app feedback to the development "
      "team automatically, so effort is aimed at the tools actually in use.",
      "Platform", "Delivered"),
+    ("High", "Tool Library & Per-Tool Updates (Platform 1.0)",
+     "Deliver and update each automation tool individually from a library "
+     "inside the application, so a fix to one tool reaches operators without "
+     "a full release and the installer carries the platform only.",
+     "Platform", "Planned"),
     ("Medium", "Live SharePoint Data (Graph API)",
      "Read forecast and batch data directly from SharePoint rather than the "
      "locally synced copy, removing the dependency on a machine's sync state.",

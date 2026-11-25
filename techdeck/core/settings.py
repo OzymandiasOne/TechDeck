@@ -779,6 +779,20 @@ class SettingsManager:
         self.data["settings"]["assistant_theme"] = str(theme_name or "")
         self.save()
 
+    def get_assistant_popout(self) -> dict:
+        """Where the popped-out Assistant panel was last left: its size, its
+        position, and the edge it was docked to. {} until it has been used.
+        The panel validates and clamps whatever comes back, so a hand-edited
+        or older value can never put it off screen."""
+        value = self.data.get("settings", {}).get("assistant_popout", {})
+        return dict(value) if isinstance(value, dict) else {}
+
+    def set_assistant_popout(self, state: dict) -> None:
+        if "settings" not in self.data:
+            self.data["settings"] = {}
+        self.data["settings"]["assistant_popout"] = dict(state or {})
+        self.save()
+
     def is_professional(self) -> bool:
         """Did the user CHOOSE professional — the light look with the
         playful features (Ticket Counter, My Stuff, My House, games,

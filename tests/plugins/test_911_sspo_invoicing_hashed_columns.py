@@ -208,3 +208,45 @@ def test_a_sheet_that_will_not_answer_is_survived(mod):
     assert mod._SupplementPdfExporter._widen_hashed_columns(
         _Broken(), said.append) == 0
     assert any("couldn't measure" in m for m in said), said
+
+
+# ---------------------------------------------------------------------------------
+# The sibling defect: the WORKBOOK, not the PDF (A.T. 2026-11-16, on 0.8.10)
+# ---------------------------------------------------------------------------------
+# "Invoice date is still displaying as ######." The print-time pass above fixed
+# the PDF and closes the workbook with SaveChanges=False, so the .xlsx she opens
+# kept its widths - and column G, where the Invoice Date lives, had no entry in
+# INV_COL_WIDTHS at all. At Excel's default 8.43 the date does not fit, so Excel
+# hash-fills it. Verified in live Excel on her V111 504265 workbook: G3 read
+# '######' at the default width and '11/13/2026' at the new one, with no print
+# pass. The gate is the general rule, not the one column: every column the sheet
+# writes has to declare a width.
+
+def _written_columns(mod):
+    """1-based indexes of every column `_build_supplement` puts a value in."""
+    from openpyxl.utils import coordinate_to_tuple
+    cols = set(range(1, len(mod.INV_HEADERS) + 1))      # the header band + data
+    for cell in (mod.INV_NUMBER_CELL, mod.INV_DATE_CELL, "F2", "F3"):
+        cols.add(coordinate_to_tuple(cell)[1])          # the title block
+    return cols
+
+
+def test_every_written_column_declares_a_width(mod):
+    """A column with no width sits at Excel's 8.43 and hash-fills dates/numbers."""
+    from openpyxl.utils import get_column_letter
+    missing = sorted(get_column_letter(c) for c in _written_columns(mod)
+                     if get_column_letter(c) not in mod.INV_COL_WIDTHS)
+    assert not missing, (
+        f"columns {missing} are written but have no INV_COL_WIDTHS entry; Excel "
+        f"leaves them at 8.43 and hash-fills any date or number in them")
+
+
+def test_the_invoice_date_column_is_wide_enough_for_a_date(mod):
+    """mm-dd-yy renders as a 10-char short date here, so 8.43 is not enough."""
+    from openpyxl.utils import coordinate_to_tuple, get_column_letter
+    letter = get_column_letter(coordinate_to_tuple(mod.INV_DATE_CELL)[1])
+    width = mod.INV_COL_WIDTHS.get(letter)
+    assert width is not None, f"{letter} holds {mod.INV_DATE_CELL}, the Invoice Date"
+    assert width >= 10.5, (
+        f"{letter} is {width}; a 10-character date needs ~10.5 in openpyxl terms "
+        f"(Excel shows ~0.7 less) or Excel hash-fills {mod.INV_DATE_CELL}")

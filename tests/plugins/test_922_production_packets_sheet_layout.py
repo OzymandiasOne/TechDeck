@@ -59,9 +59,20 @@ def test_each_row_carries_its_own_order_number(book):
         ["R7212587-H14-4A", None, 2, "BL416616"]
 
 
+def test_e1_totals_length_times_quantity(book, mod):
+    """Carrie, 2026-11-17: E1 shows the total length the sheet needs - every
+    length times its quantity, added up. A live formula over the same 5:100
+    rows the X watches, so a length she fills in by hand (a tube with no
+    drawing leaves Length blank) rolls into the total the moment she types
+    it."""
+    ws = book["SAW.1"]
+    assert ws["E1"].value == mod.TOTAL_FORMULA
+    assert mod.TOTAL_FORMULA == "=SUMPRODUCT(C5:C100,D5:D100)"
+    assert ws["E1"].number_format == "0.0"
+
+
 def test_the_x_moved_to_f_and_still_watches_column_a(book, mod):
     ws = book["SAW.1"]
-    assert ws["E1"].value is None, "E1 is part of the header band, not the X"
     assert ws["F1"].value == mod.X_FORMULA
     assert "A5:A100" in mod.X_FORMULA, "the arrow column is still A"
     assert ws["F1"].font.name == "Aharoni"
@@ -94,6 +105,80 @@ def test_the_table_is_still_open_on_both_edges(book):
     for col in ("B", "C", "D"):
         assert sides(ws[f"{col}4"]) == {"left", "right"}
         assert sides(ws[f"{col}5"]) == {"left", "right"}
+
+
+# ─────────────────────────────────────────────── the tabs are in order
+
+def test_the_tabs_sort_saw_first_then_each_pallet_in_number_order(mod):
+    """Carrie, 2026-11-18, batch 513: the tabs read SAW.1, SAW.2, 1.1, 1.4,
+    1.5, 1.2, 1.6, 1.7, 1.3, 2.1, 3.1 - the tracker's row order. "instead,
+    I WOULD LIKE this order, i'd like SAW.1 , SAW.2 , 1.1, 1.2, 1.3, 1.4,
+    1.5, 1.6, 1.7, 2.1, 3.1"."""
+    batch_513 = ["SAW.1", "SAW.2", "1.1", "1.4", "1.5", "1.2", "1.6", "1.7",
+                 "1.3", "2.1", "3.1"]
+    assert sorted(batch_513, key=mod._packet_sort_key) == [
+        "SAW.1", "SAW.2", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7",
+        "2.1", "3.1"]
+    # double digits sort as numbers, and an UNKNOWN pallet's sheet lands last
+    assert sorted(["1.10", "1.2", "SAW.10", "SAW.9", "UNKNOWN.1", "1.9"],
+                  key=mod._packet_sort_key) == [
+        "SAW.9", "SAW.10", "1.2", "1.9", "1.10", "UNKNOWN.1"]
+
+
+def test_a_jumbled_tracker_no_longer_reorders_the_sheets(mod, tmp_path):
+    """The Material Use Tracker's row order used to BE the sheet order,
+    which is exactly what jumbled batch 513's tabs. It is a cross-check
+    now; the packets keep their numbered order whatever the tracker says."""
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    assert ws is not None
+    ws.title = "Pallet Organizer"
+    ws["B3"] = "PALLET 1"
+    ws["B5"] = "AA100"
+    ws["B24"] = "MATERIAL REQUIRED: 3"
+    for j, text in enumerate(["HSS 5.0 X 5.0 X 0.50 NOM (SAW CUT)",
+                              "HSS 2.5 X 2.5 X 0.25 NOM",
+                              "HSS 2.0 X 2.0 X 0.188 NOM"]):
+        ws.cell(25 + j, 2, j + 1)
+        ws.cell(25 + j, 3, text)
+    info = wb.create_sheet("PO Info Drop")
+    for c, head in enumerate(("ORDER", "DYPN", "SOURCE MATERIAL", "QTY",
+                              "Base Material"), start=1):
+        info.cell(1, c, head)
+    for r, row in enumerate([
+            ("AA100", "H900000-H1-4", "218002101", 1, "5.0 X 5.0 X 0.50 NOM"),
+            ("AA100", "H900000-H2-4", "218003092", 1, "2.5 X 2.5 X 0.25 NOM"),
+            ("AA100", "H900000-H3-4", "218019941", 1,
+             "2.0 X 2.0 X 0.188 NOM")], start=2):
+        for c, value in enumerate(row, start=1):
+            info.cell(r, c, value)
+    org = tmp_path / "PO H900 Pallet & Rod Organizer.xlsx"
+    wb.save(org)
+
+    # the tracker lists them BACKWARDS: 1.2's material, then SAW.1's, then 1.1's
+    tr = Workbook()
+    ts = tr.active
+    assert ts is not None
+    ts.title = "900"
+    ts["A1"], ts["B1"] = "PALLET", "ITEM"
+    for r, (pallet, item) in enumerate(
+            [(1, 218019941), (1, 218002101), (1, 218003092)], start=2):
+        ts.cell(r, 1, pallet)
+        ts.cell(r, 2, item)
+    planning = tmp_path / "2 - Planning"
+    planning.mkdir()
+    tr.save(planning / "EB 922 Material Use Tracker.xlsx")
+
+    tubes, _sk, _all = mod._read_tubes(org, lambda *_a: None)
+    pallet_map, orders = mod._read_pallets(org, lambda *_a: None)
+    for t in tubes:
+        t["length"], t["review"] = 10.0, False
+        t["pallet"] = mod._pallet_of(t["serial"], t["desc"], pallet_map,
+                                     orders, t["order"])
+    materials = mod._group_materials(tubes, pallet_map, tmp_path, "900",
+                                     lambda *_a: None)
+    assert [e[1][0]["packet"] for e in materials] == ["SAW.1", "1.1", "1.2"]
 
 
 # ──────────────────────────────────────────── no padding in the title cells

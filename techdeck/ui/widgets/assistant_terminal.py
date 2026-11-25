@@ -235,6 +235,7 @@ class TabStrip(QWidget, ThemeAware):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._buttons: dict = {}
+        self._compact = False
 
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
@@ -281,8 +282,25 @@ class TabStrip(QWidget, ThemeAware):
                 return index
         return 0
 
+    def set_label(self, index: int, label: str):
+        button = self._buttons.get(index)
+        if button is not None:
+            button.setText(label)
+
+    def set_compact(self, compact: bool):
+        """Tighter tabs for the popped-out panel: at full padding five tabs
+        need about 450px and the panel is 400, so Qt squeezes the first four
+        until their labels are clipped to a letter."""
+        if compact != self._compact:
+            self._compact = compact
+            self.apply_theme()
+
     def apply_theme(self):
         palette = self.get_current_palette()
+        padding = "5px 8px" if self._compact else "7px 16px"
+        size = "font-size: 12px;" if self._compact else ""
+        for button in self._buttons.values():
+            button.setMinimumHeight(26 if self._compact else 32)
         # The selected tab fills with the panel colour so it flows into the
         # content below, exactly like the plugin console's tab bar.
         sheet = f"""
@@ -290,7 +308,8 @@ class TabStrip(QWidget, ThemeAware):
                 background-color: {palette.surface};
                 color: {palette.card_text or palette.text_secondary};
                 font-weight: bold;
-                padding: 7px 16px;
+                {size}
+                padding: {padding};
                 border: none;
                 border-top-left-radius: 8px;
                 border-top-right-radius: 8px;

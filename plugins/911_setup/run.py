@@ -1655,6 +1655,76 @@ def _get_dypn_rows(nest_ws) -> list:
     return result
 
 
+SOURCE_MATERIAL_SHEET = "SOURCE MATERIAL INFO"
+
+
+def _material_key(value) -> str:
+    """A source-material code as text. A code typed as a number comes back as
+    218100081 or 218100081.0 depending on who reads it; both mean '218100081'."""
+    text = str(value if value is not None else "").strip()
+    if text.endswith(".0") and text[:-2].isdigit():
+        text = text[:-2]
+    return text.upper()
+
+
+def _part_descriptions(wb, nest_ws, log, plate: bool = False) -> list:
+    """(material code, size) per NEST part row - parallel to _get_dypn_rows.
+
+    This is the BACKUP for the inspection sheet's Part Description. The
+    template tab fills that cell itself with two formulas (D16 looks the
+    material up by PO LINE, D17 looks its size up in SOURCE MATERIAL INFO), and
+    while they are there the app leaves them alone. The templates saved
+    2026-10-23 had lost both, so the cell came out blank on every sheet for four
+    weeks and no run said so (F.T. 2026-11-19: "this hasn't been filling out
+    ... I put it in there"). The formulas were put back the same day; this is
+    what runs if they go missing again, together with a popup saying so.
+
+    Each part gets its own row's material (NEST col H).
+    The second line comes from the workbook's own SOURCE MATERIAL INFO table,
+    columns found by header NAME - and it is the column each template's own
+    formula shows: both read the table's third column, which is SIZE in the
+    shape template and DESCRIPTION in the plate one (the two tables carry those
+    columns in opposite order). A material that is not in the table gets its
+    code alone and one log line - nothing is guessed.
+    """
+    shown = "DESCRIPTION" if plate else "SIZE"
+    sizes = {}
+    if SOURCE_MATERIAL_SHEET in wb.sheetnames:
+        src = wb[SOURCE_MATERIAL_SHEET]
+        hdr_row, hdr = sdk.find_header_row(src, ["SOURCE", shown])
+        if hdr_row:
+            for r in range(hdr_row + 1, src.max_row + 1):
+                key = _material_key(src.cell(r, hdr["SOURCE"]).value)
+                size = str(src.cell(r, hdr[shown]).value or "").strip()
+                if key and size:
+                    sizes.setdefault(key, size)
+        else:
+            log(f"  NOTE: '{SOURCE_MATERIAL_SHEET}' has no SOURCE / {shown} headers - "
+                f"Part Description gets the material code only.")
+    else:
+        log(f"  NOTE: no '{SOURCE_MATERIAL_SHEET}' tab in this workbook - "
+            f"Part Description gets the material code only.")
+
+    result, unknown = [], []
+    for row in range(4, nest_ws.max_row + 1):
+        dypn = nest_ws.cell(row, 7).value                    # Column G = DYPN
+        if not (dypn and str(dypn).strip()):
+            continue
+        raw = nest_ws.cell(row, 8).value                     # Column H = MATERIAL
+        code = str(raw if raw is not None else "").strip()
+        if code.endswith(".0") and code[:-2].isdigit():
+            code = code[:-2]
+        size = sizes.get(_material_key(code), "")
+        if code and not size and code not in unknown:
+            unknown.append(code)
+        result.append((code, size))
+    if unknown and sizes:
+        log(f"  NOTE: material {', '.join(unknown)} is not in "
+            f"'{SOURCE_MATERIAL_SHEET}' - its Part Description shows the code only. "
+            f"Type the rest on the sheet, or add the material to the template's table.")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Inspection sheet copy step uses Excel COM, not openpyxl.
 #
@@ -1669,10 +1739,24 @@ def _get_dypn_rows(nest_ws) -> list:
 # the openpyxl load/save round-trip intact.
 # ---------------------------------------------------------------------------
 
-def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
+def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log,
+                                       descriptions=None):
     """
     Copy the INSPECTION SHEET tab once per NEST part row. parts is the
-    list of (full_dypn, work_order, qty) triples from _get_dypn_rows.
+    list of (full_dypn, work_order, qty) triples from _get_dypn_rows;
+    descriptions is the parallel (material code, size) list from
+    _part_descriptions.
+
+    v2.6.0 (F.T. 2026-11-19): slot 1's Part Description has a BACKUP. The
+    template's own formulas fill it (D16 code, D17 size) and are left alone
+    while they are there. When a copied tab has NO formula in that cell - the
+    templates saved 2026-10-23 had made D16:G17 one merged, empty cell - the app
+    writes the description itself from `descriptions`. Both shapes are handled:
+    a single merged cell gets "code / size" on two lines, the two-cell layout
+    gets the code in D16 and the size in D17, and duplicate slots mirror slot 1.
+
+    Returns the names of the sheets the backup had to fill, so run() can tell
+    the user ONCE that the template needs its formulas back.
 
     v1.6.0 (QA feedback, C.D. 2026-07): each copy now fills one
     Part Number slot PER PIECE — qty 3 writes the part into the first 3
@@ -1769,7 +1853,9 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
         # A18:C19, ... A34:C35.
         SLOT_ROWS = list(range(16, 36, 2))
 
-        for (full_dypn, sheet_name), (_, work_order, qty) in zip(plan, parts):
+        backup_sheets = []   # tabs whose template formulas were missing
+        for part_no, ((full_dypn, sheet_name), (_, work_order, qty)) in enumerate(
+                zip(plan, parts)):
             count_before = wb.Sheets.Count
             last_sheet = wb.Sheets(count_before)
 
@@ -1822,6 +1908,33 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
             hull = work_order[:2].upper() if work_order else ""
             slot_text = f"{full_dypn}\n{hull}" if hull else full_dypn
 
+            # -- Part Description, slot 1 (v2.6.0) ---------------------------
+            # The template's formulas fill it: code in D16, size in D17. If
+            # they are gone the template was edited, and the app fills the cell
+            # itself so the sheet is still right - the BACKUP. `single_cell` is
+            # the shape the 2026-10-23 edit left behind (D16:G17 merged).
+            desc_cell = new_sheet.Range("D16")
+            try:
+                single_cell = desc_cell.MergeArea.Rows.Count >= 2
+            except Exception:
+                single_cell = False
+            try:
+                template_fills = bool(desc_cell.HasFormula) and (
+                    single_cell or bool(new_sheet.Range("D17").HasFormula))
+            except Exception:
+                template_fills = False
+            if not template_fills:
+                backup_sheets.append(sheet_name)
+                code, size = (descriptions[part_no]
+                              if descriptions and part_no < len(descriptions)
+                              else ("", ""))
+                if code and single_cell:
+                    desc_cell.Value = f"{code}\n{size}" if size else code
+                    desc_cell.WrapText = True
+                elif code:
+                    desc_cell.Value = code
+                    new_sheet.Range("D17").Value = size or None
+
             n_slots = min(qty, len(SLOT_ROWS))
             if qty > len(SLOT_ROWS):
                 log(f"  WARNING: {full_dypn} qty {qty} exceeds the form's "
@@ -1851,6 +1964,17 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
                     # formula, so duplicates showed only the code on one line.
                     # Rebuild slot 1's two-row layout and mirror it (every
                     # slot on the sheet is the same part).
+                    #
+                    # Rev C (2026-10-23) made slot 1 a single merged cell too,
+                    # so there the duplicate already has the right shape: it
+                    # only needs to point at slot 1. Running the rebuild below
+                    # on it would aim "=D$17" at the inside of a merge, which
+                    # COM drops without a word.
+                    if single_cell:
+                        mirror = new_sheet.Range(f"D{r}")
+                        mirror.Formula = '=IF(D$16="","",D$16)'
+                        mirror.WrapText = True
+                        continue
                     xlPasteFormats = -4122
                     try:
                         new_sheet.Range(f"D{r}:G{r+1}").UnMerge()
@@ -1902,6 +2026,7 @@ def _build_inspection_sheets_via_excel(workbook_path: Path, parts: list, log):
         # Windows when source and target are on the same volume.
         os.replace(str(local_copy), str(workbook_path))
         log(f"  Wrote final workbook -> {workbook_path}")
+        return backup_sheets
     finally:
         if wb is not None:
             try:
@@ -2458,6 +2583,7 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
     qty_mismatches = []   # (nest, dypn, wo, batch qty, packet qty)
     qty_unverified = []   # (nest, dypn, wo, batch qty) -- not in packet summary
     missing_forecast = []  # nests with no forecast row (cols A-C left blank)
+    template_backup = []   # nests whose inspection tab had lost its formulas
     total_nests = len(nest_numbers)
 
     # -- Difficulty ratings: read the schedule ONCE for the whole batch -----
@@ -2610,6 +2736,11 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         # -- Step 8a: Collect part rows (WO / DYPN / qty) from NEST ------
         log(f"  [Step 8] Reading DYPN values from NEST col G...")
         part_rows = _get_dypn_rows(nest_ws)
+        # Worked out now (the workbook is open), used only if the template's
+        # own formulas turn out to be missing - so its notes wait until then.
+        backup_notes = []
+        part_descs = (_part_descriptions(wb, nest_ws, backup_notes.append, plate)
+                      if part_rows else [])
         if not part_rows:
             log(f"  WARNING: No DYPN values found in NEST col G.")
         else:
@@ -2627,7 +2758,14 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
         if part_rows and do_inspection:
             log(f"  Building {len(part_rows)} inspection sheet(s) via Excel...")
             try:
-                _build_inspection_sheets_via_excel(nest_excel, part_rows, log)
+                if _build_inspection_sheets_via_excel(nest_excel, part_rows,
+                                                      log, part_descs):
+                    template_backup.append(nest)
+                    log("  NOTE: this workbook's INSPECTION SHEET tab has no Part "
+                        "Description formulas (the template was changed) - 911 "
+                        "Setup filled Part Description in itself.")
+                    for note in backup_notes:
+                        log(note)
             except Exception as e:
                 log(f"  ERROR: Excel COM inspection sheet build failed: {e}")
                 raise
@@ -2710,6 +2848,26 @@ def run(params: dict, progress_callback, cancel_event: threading.Event):
             f"{total_nests} nest(s) ({', '.join(missing_forecast[:5])}"
             + (" ..." if len(missing_forecast) > 5 else "")
             + ") - those nests are not in the Working Forecast List yet.")
+
+    # ------------------------------------------------------------------ #
+    # The template lost its Part Description formulas (v2.6.0). The sheets
+    # are right - the backup filled them - but every run stays on the backup
+    # until someone puts the formulas back, so this one pops (the
+    # maintainer's call, 2026-11-19). ONE item for the whole run.
+    # ------------------------------------------------------------------ #
+    if template_backup:
+        template_name = "911 PLATE BATCH _.xlsx" if plate else "911 BATCH _.xlsx"
+        sdk.flag_action(
+            params,
+            f"The template '{template_name}' has been modified and needs to be "
+            f"fixed for 911 Setup to work properly - tell a TechDeck admin",
+            "Its INSPECTION SHEET tab is missing the formulas that fill in Part "
+            "Description.\n"
+            "911 Setup filled Part Description in itself this time, so check it "
+            "on the inspection sheets for: "
+            + ", ".join(template_backup[:8])
+            + (" ..." if len(template_backup) > 8 else "") + "\n"
+            "(A nest workbook made before the template was fixed says this too.)")
 
     # ------------------------------------------------------------------ #
     # QTY verification summary -- repeated at the end so warnings that
